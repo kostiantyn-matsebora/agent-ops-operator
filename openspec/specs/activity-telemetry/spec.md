@@ -39,8 +39,8 @@ structured `data` map of facts that exist nowhere else.
 `from` and `to` SHALL name nodes as the topology graph names them, so an event
 is renderable as motion along an existing edge without further inference.
 
-Content that has a durable home, an input's text, a run's result, an op's
-message, SHALL NOT be copied onto the event.
+Content that has a durable home (e.g. an input's text, a run's result, an
+op's message) SHALL NOT be copied onto the event.
 
 #### Scenario: A conversation's lifecycle emits a complete hop sequence
 - **WHEN** a signal is accepted, claimed, a Conversation is created, a runtime pod is started, a run is dispatched with two turns and completed, and a result is sent to a channel
