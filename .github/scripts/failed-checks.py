@@ -52,6 +52,7 @@ import conveyor  # noqa: E402  -- the state machine: which red job is work is it
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 DISPUTED_ITEM = "<!-- conveyor:disputed-item {} -->"   # what land-dispatch.py writes inside a check's dispute comment
+DISPUTED_ITEM_RE = re.compile(re.escape(DISPUTED_ITEM).replace(re.escape("{}"), r"(check:[^ ]+(?: \([^)]*\))?)"))
 
 # The aggregate, excluded by NAME because that is what a check run carries.
 # `ci-green` fails BECAUSE one of its needs did, so reporting both hands the
@@ -162,7 +163,7 @@ def disputed_checks(repo: str, pr: int, marker: str) -> set[str]:
     for c in comments[last_person + 1:]:
         body = c.get("body") or ""
         if conveyor.carries_marker(body, marker):
-            ids.update(m.group(1) for m in re.finditer(r"<!-- conveyor:disputed-item (check:[^ ]+(?: \([^)]*\))?) -->", body))
+            ids.update(m.group(1) for m in DISPUTED_ITEM_RE.finditer(body))
     return ids
 
 

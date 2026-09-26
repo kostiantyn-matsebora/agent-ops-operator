@@ -467,7 +467,7 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
     ceiling, or while `conveyor:keep-going` stands to extend it.
     """
     fix, keep = vocab["approve_label"], vocab["keep_going_label"]
-    waiting = vocab.get("loop_labels", {}).get("waiting", "loop:waiting")
+    waiting = vocab["loop_labels"]["waiting"]
     if pr.fork:
         return Decision("refuse", "the pull request comes from a fork, and a dispatch only lands on a branch "
                         "of this repository")

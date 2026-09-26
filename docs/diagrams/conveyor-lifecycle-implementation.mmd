@@ -54,7 +54,7 @@ flowchart TD
   ANSWER(["person answers a dispute in its thread"]):::person
   RESOLVE(["person resolves the disputed thread"]):::person
   SWEEP["conveyor-sweep.yml · every 15 minutes<br/>a waiting PR with no unanswered dispute<br/>gets a round: a resolution fires no event"]:::workflow
-  WAITING --> ANSWER -->|issue_comment / review comment<br/>by a person| GATE
+  WAITING --> ANSWER -->|issue_comment / review comment<br/>by a person with write access| GATE
   WAITING --> RESOLVE --> SWEEP --> GATE
   RESOLVE -->|resolving a thread is answered live| THREAD
 
