@@ -48,6 +48,64 @@ func TestCoordinatorWithInlineCapabilityIsReady(t *testing.T) {
 	}
 }
 
+// 2.1/2.4 — a Coordinator naming its OWN capability through capabilityRef
+// (never inlining it) is Ready once the referenced AgentCapability itself is.
+func TestCoordinatorWithCapabilityRefIsReady(t *testing.T) {
+	mkProfile(t, "co-capref-prof")
+	mkCapability(t, "co-capref-cap", "co-capref-prof")
+	if c := reconcileCapability(t, "co-capref-cap"); !apimeta.IsStatusConditionTrue(c.Status.Conditions, "Ready") {
+		t.Fatalf("capability must be Ready: %+v", c.Status.Conditions)
+	}
+
+	co := &agentopsv1alpha1.Coordinator{}
+	co.Name, co.Namespace = "co-capref-ok", ns
+	co.Spec.AgentRef = &agentopsv1alpha1.ObjectRef{Name: "co-capref-cap"}
+	if err := k8sClient.Create(context.Background(), co); err != nil {
+		t.Fatal(err)
+	}
+	if got := reconcileCoordinator(t, "co-capref-ok"); !apimeta.IsStatusConditionTrue(got.Status.Conditions, "Ready") {
+		t.Fatalf("valid capabilityRef, no agents: %+v", got.Status.Conditions)
+	}
+}
+
+// 2.1/2.4 — a Coordinator's own capabilityRef naming a capability that does
+// not exist fails Ready naming it, distinctly from the not-ready case below.
+func TestCoordinatorCapabilityRefDanglingFailsReady(t *testing.T) {
+	co := &agentopsv1alpha1.Coordinator{}
+	co.Name, co.Namespace = "co-capref-dangling", ns
+	co.Spec.AgentRef = &agentopsv1alpha1.ObjectRef{Name: "no-such-capability"}
+	if err := k8sClient.Create(context.Background(), co); err != nil {
+		t.Fatal(err)
+	}
+	got := reconcileCoordinator(t, "co-capref-dangling")
+	ready := apimeta.FindStatusCondition(got.Status.Conditions, "Ready")
+	if ready == nil || ready.Status != "False" ||
+		!strings.Contains(ready.Message, "agentcapability/no-such-capability") ||
+		strings.Contains(ready.Message, "not ready") {
+		t.Fatalf("dangling capabilityRef not surfaced: %+v", got.Status.Conditions)
+	}
+}
+
+// 2.1/2.4 — a Coordinator's own capabilityRef naming a capability that
+// exists but is not itself Ready fails Ready too, naming the capability as
+// not ready rather than missing.
+func TestCoordinatorCapabilityRefNotReadyFailsReady(t *testing.T) {
+	mkCapability(t, "co-capref-not-ready-cap", "no-such-profile")
+
+	co := &agentopsv1alpha1.Coordinator{}
+	co.Name, co.Namespace = "co-capref-not-ready", ns
+	co.Spec.AgentRef = &agentopsv1alpha1.ObjectRef{Name: "co-capref-not-ready-cap"}
+	if err := k8sClient.Create(context.Background(), co); err != nil {
+		t.Fatal(err)
+	}
+	got := reconcileCoordinator(t, "co-capref-not-ready")
+	ready := apimeta.FindStatusCondition(got.Status.Conditions, "Ready")
+	if ready == nil || ready.Status != "False" ||
+		!strings.Contains(ready.Message, "agentcapability/co-capref-not-ready-cap not ready") {
+		t.Fatalf("not-ready capabilityRef not surfaced: %+v", got.Status.Conditions)
+	}
+}
+
 // 2.1/2.4 — neither capabilityRef nor profileRef fails Ready, never
 // admission, the same shape a Pipeline already takes.
 func TestCoordinatorNeitherCapabilityRefNorProfileRefFailsReady(t *testing.T) {
