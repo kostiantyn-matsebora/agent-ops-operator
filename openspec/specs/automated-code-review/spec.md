@@ -1172,7 +1172,7 @@ fix, and it is generous for that reason.
 #### Scenario: No finding remains
 
 - **WHEN** a round's review posts no finding, the analysis reports no open
-  issue and no required check is red
+  issue, and every required check run on the head has completed and passed
 - **THEN** the loop ends and the summary says the pull request is clean
 
 #### Scenario: Only disputes remain

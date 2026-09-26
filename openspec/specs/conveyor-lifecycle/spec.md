@@ -549,11 +549,12 @@ eligible ends the loop.
 
 An item is eligible while it is neither fixed nor disputed by the fixing
 step. A dispute is what the fixing step says about an item, never what the
-landing step infers from a patch.
+program that lands its patch infers from that patch.
 
 **Measured on #259.** The loop's own guard turned `docs-task` red over a
-dispute the landing step had manufactured, the exemption kept the red off the
-work list, and the loop ended with the pull request blocked.
+dispute the program landing the patch had manufactured from a fix that landed
+nothing, the exemption kept the red off the work list, and the loop ended with
+the pull request blocked.
 
 #### Scenario: A required check is red on the head
 
