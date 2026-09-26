@@ -60,8 +60,9 @@ assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_
 # a round only once BOTH the head's runs have concluded, so the CI completion
 # must reach it on green too: a green CI with review threads open is a round
 # over those threads, and one with nothing open ends mergeable.
-it "a ci run reaches the gate on success AND failure, never on a cancelled or skipped run"
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.path == '.github/workflows/ci.yml' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')"
+it "a ci run reaches the gate on ANY conclusion: the gate defers while the current head's runs are in progress"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "(github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml')"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "ci.yml' && github.event.workflow_run.conclusion"
 
 # EVERY PERSON'S COMMENT REACHES THE GATE, since a comment is how a WAITING loop
 # is answered; a bot's never does, or the loop's own replies would start rounds.

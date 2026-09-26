@@ -94,7 +94,7 @@ lists it with the reason.
 | `LOOP_STATES` | `none, running, waiting, stalled, capped, mergeable` |
 | `LOOP_EVENTS` | `end:waiting` added |
 | transitions | `running → waiting` on `end:waiting`. From `waiting`: `round:started → running`, `ci:green_clean → mergeable`, `thread:opened` SKIP |
-| `ending()` | `clean` with a thread open or disputes remaining → `end:waiting`. `disputed` (every remaining item disputed, nothing fixed) → `end:waiting`. `stalled` keeps `no report`, `failed`, `timed out`, `stale patch`, `could not start` |
+| `ending()` | `clean` with a thread open or disputes remaining → `end:waiting`. `disputed` (every remaining item disputed, nothing fixed) → `end:waiting`. `unaddressed` and `stale patch` → `end:continue` with `dispatch_round` (decision 5). `stalled` keeps `no report`, `failed`, `timed out`, `could not start` |
 | `refresh()` | `mergeable` with a thread opened → `waiting`, not `stalled` |
 | `recover()` | a superseded `running` with a thread open → `waiting` |
 
@@ -120,9 +120,14 @@ posting the summary. The round counts, as every round that ran a model does.
 ### 6. A person's comment on a waiting pull request starts a round
 
 The gate's `issue_comment` and `pull_request_review_comment` branches accept
-a non-bot comment on a pull request that carries `conveyor:fix` and
-`loop:waiting` as a `mode=all` start, re-checking the grant as every start
-does. `/fix-accepted` keeps its meaning on every pull request.
+a comment from a person WITH WRITE ACCESS on a pull request that carries
+`conveyor:fix` and `loop:waiting` as a `mode=all` start, re-checking the
+grant as every start does.
+
+A bot's comment, or one from someone who cannot push here, starts nothing: a
+comment that starts a model run is an action on a branch, and carries the
+bound a dispatch and an acceptance already carry. `/fix-accepted` keeps its
+meaning on every pull request.
 
 `accepted-findings.py`'s `classify_all` treats a disputed thread as awaiting
 only while no person commented after the marker. The `unanswered_after_marker`

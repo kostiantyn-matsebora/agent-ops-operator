@@ -32,12 +32,12 @@ a dispute the fixing step actually made.
   round itself**, within the bound. Today it ends the loop.
 - **`loop:waiting` is a state of its own.** Entered when every remaining item
   is a dispute awaiting a person. `loop:stalled` narrows to the machine
-  stopping: no report, fixer failed or timed out, stale patch, next round
-  could not start.
-- **A waiting loop is left two ways.** A person's comment on the pull request
-  starts a round. A scheduled sweep re-reads waiting pull requests and starts
-  a round once no dispute is unanswered, because a thread resolution fires no
-  workflow event.
+  stopping: no report, fixer failed or timed out, next round could not start.
+  A stale patch is a retry, not a stop.
+- **A waiting loop is left two ways.** A comment from a person with write
+  access on the pull request starts a round. A scheduled sweep re-reads
+  waiting pull requests and starts a round once no dispute is unanswered,
+  because a thread resolution fires no workflow event.
 - **A round starts on a head only once its CI run and its review run have
   both concluded.** The checks are "consulted" when every required check run
   has completed, not when it merely exists. On #259 a round declared "0

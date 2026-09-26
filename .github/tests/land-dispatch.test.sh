@@ -518,8 +518,8 @@ out=$(CHECKS="$tmp/checks-awaiting.json" WORK="$tmp/none.json" land_all); rc=$?
 assert_status 0 "$rc"
 assert_equals "waiting" "$(loop_label)"
 assert_not_contains "$(loop_label)" "mergeable"
-assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED"
-assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "\`operator\`) was disputed by an earlier round and waits for your answer"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED: 1 failed check (\`operator\`) was disputed by an earlier round and waits for your answer."
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "0 required checks failed"
 # no model ran: a clean round spends nothing
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
 
@@ -838,7 +838,7 @@ assert_contains "$(cat "$GH_CALLS")" "the runner could not reach the registry"
 # just above, and the clean ending below.
 it "an ending's summary names the check by its job and says how many failed"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "the \`operator\` check"
-assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED: 1 required check failed"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED: 1 required check failed on the head commit"
 
 it "with no check concluded the summary says the head is not yet judged, never that it is green"
 fresh_repo

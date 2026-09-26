@@ -59,6 +59,20 @@ def dispatch_form(vocab: dict, body: str) -> bool:
     return cleaned in {d.lower() for d in vocab["dispatch"]}
 
 
+def tried_dispatch_form(vocab: dict, body: str) -> bool:
+    """A comment whose FIRST WORD is one of the vocabulary's dispatch forms, or the
+    start of one, and that is not the form itself: `/fix-accepted please`, or
+    `/fix`. Such a comment tried to dispatch and missed, and earns a refusal
+    naming the form. Any other comment is an ordinary remark and earns nothing."""
+    tail = vocab.get("trailing_punctuation", ".!,")
+    words = (body or "").strip().lower().split()
+    if not words:
+        return False
+    first = words[0].rstrip(tail)
+    forms = [d.lower() for d in vocab["dispatch"]]
+    return any(first == f or (len(first) > 1 and f.startswith(first)) for f in forms)
+
+
 def resolve_pr(repo: str) -> str:
     """The pull request a run concerns. A comment, a label or a hand run carries its number. A
     completion carries it in its run's TITLE (`review-dispatch after Review of #<n>`), or its
@@ -199,7 +213,7 @@ def main() -> int:
         # EVERY PERSON'S COMMENT REACHES THIS GATE NOW (a comment on a waiting pull request starts a
         # round), so only a comment that TRIED the dispatch form and missed gets a refusal; an
         # ordinary remark starts nothing and is told nothing.
-        if env("BODY").strip().lower().startswith("/fix"):
+        if tried_dispatch_form(vocab, env("BODY")):
             return refuse(repo, pr, sender_login, "not a dispatch. The form is one of: " + ", ".join(vocab["dispatch"]))
         print(f"comment on #{pr} by {sender_login}: {d.reason}; nothing starts")
         out("mode", "none")

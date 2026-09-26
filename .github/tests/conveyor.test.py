@@ -427,8 +427,8 @@ class TheGate(unittest.TestCase):
         comment = lambda who: c.Trigger("comment", who, comment_is_dispatch=False)
         d = c.gate(V, comment(WRITER), on_waiting, c.Line(), None)
         self.assertEqual(("round", "round:start"), (d.action, d.loop_event))
-        # any person: the answer is theirs to give in their own words, and the round re-reads the threads
-        self.assertEqual("round", c.gate(V, comment(READER), on_waiting, c.Line(), None).action)
+        # a WRITER's answer, in their own words: the same bound a dispatch and an acceptance carry
+        self.assertEqual("none", c.gate(V, comment(READER), on_waiting, c.Line(), None).action)
         # never a bot's comment, never a loop that is not waiting, never without the fix label
         self.assertEqual("none", c.gate(V, comment(BOT), on_waiting, c.Line(), None).action)
         for labels in (frozenset({FIX}), frozenset({FIX, V["loop_labels"]["running"]}),

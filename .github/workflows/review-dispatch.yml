@@ -169,18 +169,22 @@ jobs:
     # waiting. A bot's comment -- the loop's own replies and summaries arrive on
     # this event too -- never passes.
     #
-    # A CI RUN STARTS A ROUND WHETHER IT SUCCEEDED OR FAILED. The gate starts a
-    # round only once BOTH the head's CI run and its review run have concluded,
-    # so whichever concludes second is the one that starts it: a green CI with
-    # review threads open is a round over those threads, and a green CI with
-    # nothing open ends mergeable (which is what `open` records too).
+    # A CI RUN THAT CONCLUDED STARTS A ROUND, WHATEVER IT CONCLUDED. The gate
+    # starts a round only once BOTH the head's CI run and its review run have
+    # concluded, so whichever concludes second is the one that starts it: a
+    # green CI with review threads open is a round over those threads, and a
+    # green CI with nothing open ends mergeable (which is what `open` records
+    # too). A cancelled run -- superseded by a push -- reaches the gate too, and
+    # the gate defers because the NEW head's runs are still in progress; the
+    # conclusion is not filtered here so a timed-out run cannot leave a head
+    # with no start at all.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot') ||
       (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type != 'Bot') ||
       (github.event_name == 'pull_request' && (github.event.label.name == 'conveyor:fix' || github.event.label.name == 'conveyor:keep-going')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'))
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml')
     runs-on: ubuntu-latest
     permissions:
       contents: read

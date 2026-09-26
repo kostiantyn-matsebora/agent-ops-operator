@@ -76,8 +76,12 @@ spoken. Measured on #259: 38 seconds into a ten-minute run.
 ### Requirement: A waiting loop is resumed by a person's comment or by a sweep
 
 A pull request whose loop is waiting SHALL have a round started by a comment
-from a person on it, and by a scheduled sweep once no dispute on it is
-unanswered.
+from a person with write access on it, and by a scheduled sweep once no
+dispute on it is unanswered.
+
+A comment from anyone else, or from a bot, SHALL start nothing. A comment that
+starts a model run is an action on a branch, and carries the bound a dispatch
+and an acceptance carry.
 
 A dispute is answered by a person's comment after it, or by the thread being
 resolved.
@@ -90,9 +94,15 @@ round repeated the check's stale step name instead of reading the thread.
 
 #### Scenario: A person answers a dispute in its thread
 
-- **WHEN** a person comments on a pull request whose loop is waiting
+- **WHEN** a person with write access comments on a pull request whose loop
+  is waiting
 - **THEN** a round starts, and a disputed thread carrying the person's answer
   is back on the work list
+
+#### Scenario: Someone without write access comments
+
+- **WHEN** a person who cannot push here comments on a waiting pull request
+- **THEN** nothing starts and nothing is posted, and the loop stays waiting
 
 #### Scenario: A person resolves the disputed thread
 
@@ -123,8 +133,11 @@ vocabulary file, and SHALL grant nothing:
 
 `waiting` SHALL mean a person's answer is owed: every remaining item is a
 dispute the fixing step made. `stalled` SHALL mean the machine stopped: no
-report, the fixing step failed or timed out, a stale patch, or the next round
-could not start.
+report, the fixing step failed or timed out, or the next round could not be
+started.
+
+A stale patch is neither. Nothing landed and every item is still eligible, so
+that round starts the next one itself.
 
 Each SHALL be moved by the workflow performing the transition. At most one
 value of each SHALL be present at a time. State labels are read by nobody but

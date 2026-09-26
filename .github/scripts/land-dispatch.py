@@ -527,11 +527,14 @@ class Round:
                              "required checks were not consulted this round.")
             elif failed or awaiting:
                 names = ", ".join(f"`{c.get('job')}`" for c in awaiting)
-                lines.append(f"\nThe head is RED: {plural(failed, 'required check')} failed on the head commit"
-                             + (f", and {plural(len(awaiting), 'failed check')} ({names}) was disputed by an earlier "
-                                "round and waits for your answer" if awaiting else "")
-                             + (". Each failure was fixed or disputed above, and the next run is the verdict."
-                                if failed else "."))
+                parts = []
+                if failed:
+                    parts.append(f"{plural(failed, 'required check')} failed on the head commit, each fixed or "
+                                 "disputed above, and the next run is the verdict")
+                if awaiting:
+                    parts.append(f"{plural(len(awaiting), 'failed check')} ({names}) was disputed by an earlier round "
+                                 "and waits for your answer")
+                lines.append("\nThe head is RED: " + ", and ".join(parts) + ".")
             else:
                 lines.append("\nThe head is GREEN: every required check passed on the head commit.")
         if a.run_url:

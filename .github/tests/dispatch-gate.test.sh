@@ -119,14 +119,19 @@ assert_equals "none" "$(output mode)"
 # reads the answer any more; the answer is a comment, and the comment starts a round that
 # re-reads the threads and finds the ones a person answered.
 
-it "a person's comment on a WAITING pull request starts a round, approved by whoever placed the label"
+it "a writer's comment on a WAITING pull request starts a round, approved by whoever placed the label"
 reset; pr OPEN "$FIX" loop:waiting; timeline 220 "$FIX" maintainer
-export EVENT=pull_request_review_comment PR=220 SENDER=reviewer ASSOCIATION=NONE BODY="it is real, the bound was removed upstream"
+export EVENT=pull_request_review_comment PR=220 SENDER=reviewer ASSOCIATION=COLLABORATOR BODY="it is real, the bound was removed upstream"
 out=$(gate); rc=$?
 assert_status 0 "$rc"
 assert_equals "all" "$(output mode)"
 assert_equals "maintainer" "$(output approver)"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 220 --repo o/r --add-label loop:running"
+
+it "a comment from someone who cannot push here starts nothing and is told nothing: the same bound a dispatch carries"
+reset; pr OPEN "$FIX" loop:waiting; timeline 220 "$FIX" maintainer
+export EVENT=issue_comment PR=220 SENDER=stranger ASSOCIATION=NONE BODY="I think it is fine"
+gate >/dev/null; assert_equals "none" "$(output mode)"; assert_equals "0" "$(refused)"
 
 it "a BOT's comment on a waiting pull request starts nothing: the loop's own replies arrive on this event"
 reset; pr OPEN "$FIX" loop:waiting; timeline 220 "$FIX" maintainer

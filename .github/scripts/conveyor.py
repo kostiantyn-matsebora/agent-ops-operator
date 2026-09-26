@@ -479,12 +479,15 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
                 return Decision("refuse", f"write access is required to dispatch a fix, and "
                                 f"@{trigger.sender.login} has `{trigger.sender.permission}`")
             return Decision("threads", f"dispatch by @{trigger.sender.login}")
-        # A PERSON'S COMMENT ON A WAITING PULL REQUEST IS THE ANSWER THE LOOP WAITED FOR.
+        # A WRITER'S COMMENT ON A WAITING PULL REQUEST IS THE ANSWER THE LOOP WAITED FOR.
         # It starts a round, in the person's own words, with no token to type: the round
         # re-reads the disputed threads and finds the ones a person answered. Only while
         # the loop is WAITING, so a conversation on a running or capped pull request spends
-        # nothing. No check reads the answer any more (#259): the round does.
-        if trigger.sender.bot or waiting not in pr.labels or fix not in pr.labels:
+        # nothing, and only from someone who may push here -- the same bound a dispatch and
+        # an acceptance carry, since a comment that starts a model run on a public
+        # repository is an action on a branch. No check reads the answer any more (#259):
+        # the round does.
+        if trigger.sender.bot or not trigger.sender.may_push or waiting not in pr.labels or fix not in pr.labels:
             return Decision("none", "not a dispatch")
         answered = True
 

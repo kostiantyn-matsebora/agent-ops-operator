@@ -652,7 +652,7 @@ Two labels say why a loop is not running:
 | `loop:stalled` | the machine stopped: no report, the fixer failed or timed out, the next round could not start | read the summary, then push or re-place the label |
 
 Your comment on a waiting pull request starts the next round, in your own
-words. A resolved thread fires no event, so `conveyor-sweep.yml` re-reads
+words, if you can push here. A resolved thread fires no event, so `conveyor-sweep.yml` re-reads
 waiting pull requests every fifteen minutes and starts the round for you.
 
 An open thread blocks the merge through branch protection alone, evaluated
