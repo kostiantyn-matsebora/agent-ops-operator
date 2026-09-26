@@ -163,15 +163,16 @@ The graph SHALL be built from the bindings the Conversation itself recorded, not
 
 ### Requirement: Graph elements are toggleable by class
 
+**"Each view" here is the three topology views — Model, Components,
+Infrastructure — never the per-conversation graph**, which has no class
+toggle and reads only the shared time window.
+
 Each view SHALL offer its own element classes in the display control, listing
 only the classes that view can draw, and SHALL remember its own hiding.
 
 The one class a view cannot do without SHALL be listed and not hideable:
 pipelines on Model, the manager on Components, the manager's pod on
 Infrastructure.
-
-A conversation's graph is one of these views, scoped to that conversation's
-own events, and SHALL offer the same display control.
 
 A **detail** control SHALL fold the Model view only, from routes only, one
 node per pipeline with its profile, runtime and capabilities inside it, to the
@@ -229,6 +230,10 @@ When a metrics backend is configured, longer windows SHALL be served from it as 
 
 ### Requirement: Clicking an element scopes the graph to what it is connected to
 
+**This is the three topology views again**, exactly as above. The
+per-conversation graph is not scoped by any of these means — it is already
+one conversation's own elements, with nothing to narrow it further to.
+
 Scope SHALL be offered three ways: a **pipeline selector** showing the
 selected routes only, a **scope to route** through any element with a depth
 control, and **find** and **hide** expressions over the view's facts.
@@ -248,9 +253,6 @@ The depth control SHALL default to all and offer only the levels the route
 has. Returning to the whole picture SHALL need no reload. A scope SHALL NOT
 persist across navigation. While scoped, the view SHALL name what it is scoped
 to.
-
-A conversation's graph is one of these views, scoped to that conversation's
-own events, and SHALL offer the same three ways to scope further.
 
 #### Scenario: Selecting a pipeline removes the others
 - **WHEN** one of three pipelines is selected
