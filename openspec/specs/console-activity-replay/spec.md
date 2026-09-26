@@ -32,7 +32,7 @@ Leaving the replay SHALL return to live without a reload.
 - **THEN** frames advance once a second until the end, and pausing keeps the current frame
 
 #### Scenario: The buffer's edge is admitted
-- **WHEN** a thirty minute interval is chosen and the buffer holds twelve
+- **WHEN** a thirty minute interval is chosen and the buffer holds twelve minutes
 - **THEN** the view says the first eighteen minutes are not held, rather than showing them as silent
 
 ### Requirement: One conversation replays hop by hop

@@ -24,7 +24,7 @@ The console SHALL build its configuration state exclusively from list/watch of `
 - **WHEN** the API server returns 410 Gone for a stale watch
 - **THEN** the console relists that kind, replaces its cache, and resumes watching without serving an error to browsers
 
-### Requirement: Pipeline topology graph
+### Requirement: The topology is three views of one activity feed
 
 The topology SHALL be offered as three views of one activity feed, each a
 layer of the architecture with its own node identity. A hop SHALL be mapped
@@ -44,6 +44,10 @@ channel adapter, the gateway, the manager, each runtime image, context-sync,
 egress-proxy and housekeeping, plus the systems outside: each model, each MCP
 server, each repository, the senders an adapter declares, and the Kubernetes
 API.
+
+**A Deployment or CronJob the console recognises as none of the above SHALL
+still draw, as a `workload` node**, rather than being silently absent from a
+namespace it actually runs in.
 
 A runtime image running in several pods SHALL be one node carrying the count.
 
