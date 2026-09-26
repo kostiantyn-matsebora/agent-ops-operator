@@ -101,6 +101,10 @@ placeholder nodes rather than being omitted.
 - **WHEN** a Channel names `spec.adapter: slak` and no such ChannelAdapter exists
 - **THEN** the channel node shows `Served=False` with the condition reason, and no edge to an adapter node is drawn
 
+#### Scenario: A conversation is opened and its runtime is wired
+- **WHEN** a Pipeline resolves to an AgentRuntime and opens a Conversation
+- **THEN** the Model view draws an `opened` edge from the pipeline to the conversation node and a `runs-on` edge from the pipeline to the runtime
+
 ### Requirement: CR inventory views
 The console SHALL provide per-kind inventory views listing each agentops CR with its key spec fields, conditions, and age, and a detail view showing the full object (spec and status). Opaque `config` blocks SHALL be displayed verbatim without interpretation.
 

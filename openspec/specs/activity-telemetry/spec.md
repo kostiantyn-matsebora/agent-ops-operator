@@ -36,8 +36,9 @@ Where they apply, it SHALL also carry `conversation`, `pipeline`, `runId`,
 `opId`, `inputId`, `latencyMs`, a human-readable `detail` and a bounded
 structured `data` map of facts that exist nowhere else.
 
-`from` and `to` SHALL name nodes as the topology graph names them, so an event
-is renderable as motion along an existing edge without further inference.
+`from` and `to` SHALL each be `{kind, name}`, naming nodes exactly as the
+topology graph names them, so an event is renderable as motion along an
+existing edge without further inference.
 
 Content that has a durable home (e.g. an input's text, a run's result, an
 op's message) SHALL NOT be copied onto the event.
