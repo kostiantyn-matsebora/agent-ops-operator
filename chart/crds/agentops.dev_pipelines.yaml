@@ -71,7 +71,7 @@ spec:
             properties:
               capabilityRef:
                 description: |-
-                  AgentRef names an AgentCapability holding this pipeline's capability
+                  capabilityRef names an AgentCapability holding this pipeline's capability
                   INSTEAD of inlining it above — mutually exclusive with the inline fields
                   by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`,
                   not admission: CEL cannot express "one of" across an embedded struct.

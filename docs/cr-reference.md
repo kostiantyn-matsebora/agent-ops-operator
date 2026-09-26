@@ -143,7 +143,7 @@ PipelineSpec declares the wiring between the pipeline elements: every referenced
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `capabilityRef` | `object` |  | AgentRef names an AgentCapability holding this pipeline's capability INSTEAD of inlining it above — mutually exclusive with the inline fields by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`, not admission: CEL cannot express "one of" across an embedded struct. |
+| `capabilityRef` | `object` |  | capabilityRef names an AgentCapability holding this pipeline's capability INSTEAD of inlining it above — mutually exclusive with the inline fields by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`, not admission: CEL cannot express "one of" across an embedded struct. |
 | `capabilityRef.name` | `string` | **yes** | Name of the referenced object. |
 | `channelRefs` | `[]object` |  | ChannelRefs: every conversation of this pipeline is mirrored on all of these surfaces. Channels may appear in several pipelines. |
 | `channelRefs[].name` | `string` | **yes** | Name of the referenced object. |

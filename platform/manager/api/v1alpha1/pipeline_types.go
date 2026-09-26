@@ -70,10 +70,10 @@ type PipelineSpec struct {
 	// AgentCapabilitySpec is the CAPABILITY, inline — today's shape, and every
 	// existing Pipeline's shape, unchanged: `json:",inline"` keeps the six
 	// fields' JSON names exactly as they were before this struct existed.
-	// Mutually exclusive with AgentRef below.
+	// Mutually exclusive with capabilityRef below.
 	// +optional
 	AgentCapabilitySpec `json:",inline"`
-	// AgentRef names an AgentCapability holding this pipeline's capability
+	// capabilityRef names an AgentCapability holding this pipeline's capability
 	// INSTEAD of inlining it above — mutually exclusive with the inline fields
 	// by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`,
 	// not admission: CEL cannot express "one of" across an embedded struct.
