@@ -175,7 +175,7 @@ class Line:
 @dataclass(frozen=True)
 class PullRequest:
     """A pull request of the line, as far as the line cares."""
-    same_repo_change_branch: bool = True
+    same_repo_change_branch: bool = True   # the carries act only on a same-repository change/* branch
     state: str = "OPEN"                 # OPEN | MERGED | CLOSED
     labels: frozenset = frozenset()
     refs: int | None = None             # `Refs #<n>`
@@ -186,6 +186,7 @@ class PullRequest:
     rounds_used: int = 0                # round markers since the fix label was placed
     grants: int = 0                     # grant markers since then: one per consumed keep-going
     max_rounds: int = 5
+    fork: bool = False                  # the gate refuses a fork, and accepts any same-repository branch
 
 
 @dataclass(frozen=True)
@@ -393,27 +394,34 @@ class Trigger:
     sender: Placer = Placer(WORKFLOW_BOT, bot=True)
     label: str = ""                 # for `labeled`
     comment_is_dispatch: bool = False
+    mode: str = ""                  # for `dispatch`: `threads` (the accepted findings) or `all`
+    label_carried: bool = False     # the pull request's fix label was placed by the workflow, not a person
 
 
 def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_placer: Placer | None) -> Decision:
     """Something asked for a round. Does one start.
 
     Actions: `round` (over everything open), `threads` (the accepted findings
-    alone, from a person's dispatch), `none`, `refuse` (with `remove_label`
-    where a label was the ask).
+    alone), `none`, `refuse` (with `remove_label` where a label was the ask or
+    was carried).
 
-    A BOT'S START IS RE-CHECKED AGAINST THE SAME RULE THE CARRY USED, on every
-    path that a bot can start a round by. The gate held three copies of this
-    check, each grepping for `conveyor:run` alone, and the review-completion
-    path held none (#254).
+    A CARRIED GRANT IS RE-CHECKED ON EVERY START, not only the first. A bot may
+    start a round by a label or a dispatch, and a review or CI completion may
+    start one on a pull request whose fix label the WORKFLOW placed. In each case
+    the person's instruction behind it must still stand, by the same rule the
+    carry used. The gate held three copies of that check, each grepping for
+    `conveyor:run` alone, and the completion path held none (#254), which also
+    meant removing `conveyor:run` from the issue did not stop a loop already
+    running. Now it does: the next start finds the grant gone, removes the
+    carried label and says why.
 
-    THE BOUND IS ENFORCED HERE, BEFORE THE ROUND. It used to be counted after
-    the fact, so the commit a capped round pushed started the next round through
-    its review's completion. A round starts only while rounds used are below
-    the ceiling, or while `conveyor:keep-going` stands to extend it.
+    THE BOUND IS ENFORCED HERE, BEFORE THE ROUND. It used to be counted after the
+    fact, so the commit a capped round pushed started the next round through its
+    review's completion. A round starts only while rounds used are below the
+    ceiling, or while `conveyor:keep-going` stands to extend it.
     """
     fix, keep = vocab["approve_label"], vocab["keep_going_label"]
-    if not pr.same_repo_change_branch:
+    if pr.fork:
         return Decision("refuse", "the pull request comes from a fork, and a dispatch only lands on a branch "
                         "of this repository")
 
@@ -425,17 +433,25 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
                             f"@{trigger.sender.login} has `{trigger.sender.permission}`")
         return Decision("threads", f"dispatch by @{trigger.sender.login}")
 
-    if trigger.sender.bot:
-        # A carried start: every path a bot can start a round by is re-checked.
+    completion = trigger.event in ("review_completed", "ci_failed")
+    carried = (trigger.sender.bot and trigger.event in ("labeled", "dispatch")) or (completion and trigger.label_carried)
+    if trigger.event == "labeled" and trigger.sender.bot and trigger.label != fix:
+        return Decision("refuse", f"the workflow carries `{fix}` and nothing else, and it placed `{trigger.label}`",
+                        remove_label=trigger.label)
+    if carried:
         issue = pr.refs or pr.closes
         grant = standing_grant(vocab, line.issue_labels, "fix", pr_closes=pr.closes is not None) if issue else None
-        if trigger.event in ("labeled", "dispatch") and (grant is None or not _carried_by_a_person_or_a_bot(grant_placer)):
-            return Decision("refuse", "the workflow started this round carrying a grant, and re-checking the "
+        if grant is None or not _carried_by_a_person_or_a_bot(grant_placer):
+            return Decision("refuse", "a round was to start on a grant the workflow carried, and re-checking the "
                             "issue found none standing for this pull request's fix station",
-                            remove_label=trigger.label if trigger.event == "labeled" else "")
+                            remove_label=trigger.label if trigger.event == "labeled" else fix,
+                            loop_event="end:stalled" if completion else "")
     elif trigger.event == "labeled" and not trigger.sender.may_push:
         return Decision("refuse", f"write access is required to place `{trigger.label}`, and "
                         f"@{trigger.sender.login} cannot push here", remove_label=trigger.label)
+
+    if trigger.event == "dispatch" and trigger.mode == "threads":
+        return Decision("threads", "a hand run over the accepted findings")
 
     if pr.state != "OPEN" or fix not in pr.labels:
         return Decision("none", f"the pull request is {pr.state.lower()} or does not carry `{fix}`")

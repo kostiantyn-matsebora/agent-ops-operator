@@ -75,57 +75,36 @@ assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.name 
 it "the gate reads the vocabulary from the default branch on every event but a hand run"
 assert_contains "$(py 'print(d["jobs"]["gate"]["steps"][0]["with"]["ref"])')" "github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch"
 
-it "a non-writer's label is removed, visibly, in the gate"
+# THE GATE IS ONE PROGRAM. Every decision it makes is `conveyor.gate`'s, tested over every
+# combination of its facts in conveyor.test.py, and its I/O is tested in dispatch-gate.test.sh.
+# What only THIS file can pin is that the workflow still calls it, with every input it reads.
+it "the gate step runs dispatch-gate.py and nothing else: no decision is left in the workflow's shell"
 gate=$(py 'print(d["jobs"]["gate"]["steps"][1]["run"])')
-assert_contains "$gate" "collaborators/\$1/permission"
-assert_contains "$gate" "--remove-label"
+assert_equals "python3 .github/scripts/dispatch-gate.py" "$gate"
 
-it "the label is read at every round, so removing it stops the loop at the next boundary"
-assert_contains "$gate" "grep -qx \"\$LABEL\""
+it "the gate is handed every input it reads, from the event and never from a string in the shell"
+genv=$(py 'print(d["jobs"]["gate"]["steps"][1]["env"])')
+for v in EVENT BODY ASSOCIATION SENDER PR REVIEW_TITLE WORKFLOW_RUN_PATH REVIEW_PR RUN_HEAD INPUT_MODE EVENT_LABEL GH_TOKEN; do
+  assert_contains "$genv" "'$v'"
+done
+assert_contains "$genv" "workflow_run.path"
+assert_not_contains "$genv" "workflow_run.name"
 
-# label_placement() ALWAYS RESOLVES conveyor:fix'S PLACEMENT, DELIBERATELY --
-# never conveyor:keep-going's, even on a round a keep-going event triggered.
-# keep-going only EXTENDS an already-authorised fixing effort, so the
-# approver every landing comment names is always who placed conveyor:fix.
-it "label_placement is hardcoded to the fix station, never the firing event's own label"
-assert_contains "$gate" 'label.name == \"$LABEL\"'
-assert_contains "$gate" "carry-grant:fix"
-assert_not_contains "$gate" 'label.name == \"$THIS_LABEL\"'
-assert_not_contains "$gate" 'label.name == \"$EVENT_LABEL\"'
+it "the gate's step id stays `who`, since the other jobs read their inputs from its outputs"
+assert_equals "who" "$(py 'print(d["jobs"]["gate"]["steps"][1]["id"])')"
 
-# A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.
-# A label placed by github-actions[bot] (carry-grant.py's own actor) is
-# RE-CHECKED against the issue it claims to carry from — never trusted
-# because a workflow placed it.
-it "a label carried by github-actions[bot] is re-checked against the originating issue's standing instruction"
-assert_contains "$gate" 'SENDER" = "github-actions[bot]"'
-assert_contains "$gate" "Refs #"
-assert_contains "$gate" "RUN_LABEL"
-assert_contains "$gate" "STANDING"
+it "the gate declares every output the later jobs read, and the program writes each of them"
+outs=$(py 'print(sorted(d["jobs"]["gate"]["outputs"]))')
+for o in approver branch dispatcher head max_rounds mode pr since; do
+  assert_contains "$outs" "'$o'"
+  assert_contains "$(cat "$ROOT/.github/scripts/dispatch-gate.py")" "\"$o\""
+done
 
-it "a carried label whose originating instruction is gone is refused exactly as a non-writer's is"
-assert_contains "$gate" "no longer there"
-assert_contains "$gate" "--remove-label \"\$THIS_LABEL\""
-
-it "the pull_request trigger's label event is checked against ITSELF, not hardcoded to the fix label — a keep-going event is never refused for not being conveyor:fix"
-assert_contains "$gate" 'THIS_LABEL="$EVENT_LABEL"'
-
-# A CARRIED LABEL'S TIMELINE ACTOR IS THE BOT, NEVER THE APPROVER -- measured
-# live: carry-grant.py places the label under this workflow's own token, so
-# the timeline records github-actions[bot] as the actor. label_placement()
-# must fall back to the real approver carry-grant.py's own marker comment
-# already names, or every carried round reports "approved by
-# github-actions[bot]" instead of the person whose grant it actually was.
-it "label_placement falls back to the carry-grant marker comment's named approver when the timeline actor is the bot"
-assert_contains "$gate" 'actor" = "github-actions[bot]"'
-assert_contains "$gate" "carry-grant:fix"
-
-# ANCHORED TO THE SENTENCE, NOT "the first @ anywhere in the comment" -- a
-# bare @-mention grep would silently pick a DIFFERENT login if the comment
-# template carry-grant.py posts ever grew a second mention.
-it "the fallback is anchored to the 'carrying @<login>'s standing instruction' phrase, not a bare first @-mention"
-assert_contains "$gate" "carrying @[A-Za-z0-9_.-]+'s standing instruction"
-assert_not_contains "$gate" "grep -oE '@[A-Za-z0-9_.-]+' | head -1"
+it "the gate program never trusts a grant it did not re-check: it asks the machine's gate, on every path"
+prog=$(cat "$ROOT/.github/scripts/dispatch-gate.py")
+assert_contains "$prog" "conveyor.gate("
+assert_not_contains "$prog" "run_label"
+assert_not_contains "$prog" "conveyor:run"
 
 it "the collect job holds the analysis token and the model job holds none — no secret reaches the fixing step but its own credential"
 assert_contains "$(py 'print(d["jobs"]["collect"]["steps"][1]["env"])')" "SONAR_TOKEN"
@@ -180,7 +159,7 @@ assert_contains "$fixstep" "Bash(go:*)"
 # .github/review-triage.json and passes it down as an output.
 it "the bound is read from the vocabulary file's max_rounds, not a workflow constant"
 assert_not_contains "$(py 'print(list(d.keys()))')" "'env'"
-assert_contains "$gate" 'json.load(open(".github/review-triage.json"))["max_rounds"]'
+assert_contains "$(cat "$ROOT/.github/scripts/dispatch-gate.py")" 'vocab["max_rounds"]'
 assert_contains "$(py 'print(d["jobs"]["gate"]["outputs"])')" "max_rounds"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--max-rounds "${{ needs.gate.outputs.max_rounds }}"'
 max_rounds=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["max_rounds"])')
@@ -330,8 +309,9 @@ assert_equals "conveyor:archive" "$archive_label"
 assert_equals "conveyor:implement" "$implement_label"
 assert_equals "conveyor:run" "$run_label"
 
-it "the open job hands ci's conclusion to carry-from-pr.sh: only a green ci may mark a head mergeable"
-assert_contains "$(rpy 'print(d["jobs"]["open"])')" 'CI_CONCLUSION="${{ github.event.workflow_run.conclusion }}"'
+it "the open job hands ci's conclusion to carry.py: only a green ci may mark a head mergeable"
+assert_contains "$(rpy 'print([s for s in d["jobs"]["open"]["steps"] if s.get("id") == "carry"][0]["env"])')" "CI_CONCLUSION': '\${{ github.event.workflow_run.conclusion }}"
+assert_contains "$(rpy 'print([s for s in d["jobs"]["open"]["steps"] if s.get("id") == "carry"][0]["run"])')" '--ci-conclusion "$CI_CONCLUSION"'
 
 it "the fire endpoint and its token are not in the tree"
 job=$(rpy 'print(d["jobs"]["fire"])')
@@ -362,13 +342,13 @@ assert_contains "$open_if" "github.event.workflow_run.conclusion == 'success'"
 assert_contains "$open_if" "github.event.workflow_run.conclusion == 'failure'"
 
 it "the open job resolves the pull request from the workflow_run's head sha, not from a pull_request event payload"
-open_run=$(rpy 'print(d["jobs"]["open"]["steps"][-1]["run"])')
-assert_contains "$open_run" 'head_sha="${{ github.event.workflow_run.head_sha }}"'
-assert_contains "$open_run" "commits/\$head_sha/pulls"
+open_run=$(rpy 'print([s for s in d["jobs"]["open"]["steps"] if s.get("id") == "carry"][0]["run"])')
+assert_contains "$(rpy 'print([s for s in d["jobs"]["open"]["steps"] if s.get("id") == "carry"][0]["env"])')" "HEAD_SHA': '\${{ github.event.workflow_run.head_sha }}"
+assert_contains "$open_run" "commits/\$HEAD_SHA/pulls"
 assert_contains "$open_run" "select(.state == \"open\")"
 
 it "the open job's own no-pull-request message names the workflow_run's head sha, never \$GITHUB_SHA (that names the trusted checkout's commit, not this run's)"
-assert_contains "$open_run" '${head_sha:0:7}'
+assert_contains "$open_run" '${HEAD_SHA:0:7}'
 assert_not_contains "$open_run" '${GITHUB_SHA:0:7}'
 
 # A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS.
@@ -384,12 +364,13 @@ assert_not_contains "$open_run" '.number.*| head -1 || true'
 # THE change/* GUARD AND Refs #<n> EXTRACTION LIVE IN ONE SHARED SCRIPT,
 # carry-from-pr.sh, called by BOTH open and archive with the resolved pull
 # request number and the station -- not duplicated in the workflow YAML.
-it "the open job hands the resolved pull request off to carry-from-pr.sh, station fix"
-assert_contains "$open_run" ".github/scripts/carry-from-pr.sh \"\$pr\" fix"
+it "the open job hands the resolved pull request off to carry.py, station fix"
+assert_contains "$open_run" ".github/scripts/carry.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$pr\" --station fix"
 assert_not_contains "$open_run" "headRepositoryOwner"
 assert_not_contains "$open_run" "carry-grant.py"
+assert_not_contains "$open_run" "carry-from-pr.sh"
 
-it "the open job is granted issues: write for the marker comment, pull-requests: write since carry-grant.py labels a PULL REQUEST here and issues: write alone 403s on that mutation, and actions: write to re-dispatch review-dispatch.yml after a real carry"
+it "the open job is granted issues: write for the marker comment, pull-requests: write since carry.py labels a PULL REQUEST here and issues: write alone 403s on that mutation, and actions: write to re-dispatch review-dispatch.yml after a real carry"
 assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'write', 'actions': 'write'}" "$(rpy 'print(d["jobs"]["open"]["permissions"])')"
 
 # THE TRUSTED COPY, NOT THE PULL REQUEST'S OR THE MERGE COMMIT'S. A
@@ -415,10 +396,10 @@ it "the archive job also checks the push landed on the default branch, not just 
 assert_contains "$archive_if" "github.event.workflow_run.head_branch == github.event.repository.default_branch"
 
 it "the archive job resolves the merged pull request via a merged-pull-request search on the pushed commit"
-archive_run=$(rpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
+archive_run=$(rpy 'print([s for s in d["jobs"]["archive"]["steps"] if s.get("id") == "carry"][0]["run"])')
 assert_contains "$archive_run" "search/issues"
-assert_contains "$archive_run" "is:pr is:merged"
-assert_contains "$archive_run" "github.event.workflow_run.head_sha"
+assert_contains "$archive_run" "is:pr is:merged \$HEAD_SHA"
+assert_contains "$(rpy 'print([s for s in d["jobs"]["archive"]["steps"] if s.get("id") == "carry"][0]["env"])')" "github.event.workflow_run.head_sha"
 
 it "the archive job's merged-pull-request search also checks gh's own exit status, same reason as the open job"
 assert_contains "$archive_run" 'if ! pr=$(gh api'
@@ -426,28 +407,28 @@ assert_contains "$archive_run" "could not search for a merged pull request"
 
 # THE SAME SHARED SCRIPT, station archive -- see the open job's test above
 # for why this is not duplicated in the workflow YAML.
-it "the archive job hands the resolved pull request off to carry-from-pr.sh, station archive"
-assert_contains "$archive_run" ".github/scripts/carry-from-pr.sh \"\$pr\" archive"
+it "the archive job hands the resolved pull request off to carry.py, station archive"
+assert_contains "$archive_run" ".github/scripts/carry.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$pr\" --station archive"
 assert_not_contains "$archive_run" "headRepositoryOwner"
 assert_not_contains "$archive_run" "carry-grant.py"
+assert_not_contains "$archive_run" "carry-from-pr.sh"
 
-# carry-from-pr.sh ITSELF: the change/* guard, the Refs #<n> extraction, and
-# routing to carry-grant.py by station -- pinned once, for whichever job
-# calls it.
-it "carry-from-pr.sh refuses anything that is not a same-repo change/* branch, using isCrossRepository -- never an owner-string approximation"
-carry_from_pr=$(cat "$ROOT/.github/scripts/carry-from-pr.sh")
-assert_contains "$carry_from_pr" "isCrossRepository"
-assert_contains "$carry_from_pr" "change/*"
-assert_not_contains "$carry_from_pr" "headRepositoryOwner"
+# carry.py ITSELF: the change/* guard, the Refs and Closes extraction, and the stations it
+# accepts, pinned once for whichever job calls it. Its decisions are the machine's.
+it "carry.py refuses anything that is not a same-repo change/* branch, using isCrossRepository -- never an owner-string approximation"
+carry=$(cat "$ROOT/.github/scripts/carry.py")
+assert_contains "$carry" "isCrossRepository"
+assert_contains "$carry" 'startswith("change/")'
+assert_not_contains "$carry" "headRepositoryOwner"
 
-it "carry-from-pr.sh refuses any station other than fix or archive, rather than defaulting to archive"
-assert_contains "$carry_from_pr" 'fix|archive'
+it "carry.py accepts only the two stations, rather than defaulting to archive"
+assert_contains "$carry" 'choices=["fix", "archive"]'
 
-it "carry-from-pr.sh extracts Refs #<n> and calls carry-grant.py with --pr only for station fix"
-assert_contains "$carry_from_pr" "Refs #"
-assert_contains "$carry_from_pr" "carry-grant.py"
-assert_contains "$carry_from_pr" '--station fix --pr "$pr"'
-assert_contains "$carry_from_pr" "--station archive"
+it "carry.py reads Refs and Closes from the body, and asks the machine rather than deciding"
+assert_contains "$carry" '"Refs"'
+assert_contains "$carry" '"Closes"'
+assert_contains "$carry" "conveyor.carry_fix"
+assert_contains "$carry" "conveyor.carry_archive"
 
 it "the archive job is granted issues: write to carry the grant, plus pull-requests: read to find the merged pull request"
 assert_equals "{'contents': 'read', 'issues': 'write', 'pull-requests': 'read'}" "$(rpy 'print(d["jobs"]["archive"]["permissions"])')"
@@ -486,28 +467,25 @@ assert_contains "$(py 'print([s.get("if","") for s in d["jobs"]["land"]["steps"]
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["env"]["FIX_TIMED_OUT"])')" "needs.fix.result == 'cancelled' && '--fix-timed-out'"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '$FIX_TIMED_OUT'
 
-it "land restores conveyor-state.py AND review-not-clean.py beside the landing programs, and hands both to land-dispatch.py"
-assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py review-not-clean.py; do"
+it "land restores conveyor-state.py, conveyor.py (which both import) AND review-not-clean.py beside the landing programs, and hands them to land-dispatch.py"
+assert_contains "$(py 'print(d["jobs"]["land"])')" "for s in land-dispatch.py resolve-review-threads.py conveyor-state.py conveyor.py review-not-clean.py; do"
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--state-script "$RUNNER_TEMP/conveyor-state.py"'
 assert_contains "$(py 'print(d["jobs"]["land"]["steps"][-1]["run"])')" '--thread-check-script "$RUNNER_TEMP/review-not-clean.py"'
 
-it "the gate marks the pull request's loop label running when a round starts, and grants nothing by it"
-assert_contains "$gate" 'conveyor-state.py --repo "$GITHUB_REPOSITORY" --target "$PR" --loop running'
+it "the gate marks the loop and the station by EVENT when a round starts, through the machine's writer, and grants nothing by it"
+assert_contains "$prog" 'apply_events(repo, int(pr), loop_event=d.loop_event)'
+assert_contains "$prog" 'station_event=d.station_event'
+assert_not_contains "$prog" "--loop running"
 
-it "on mode=none from a review completion, the gate corrects a stale loop label via refresh-loop-state.py"
-assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\""
+it "on a review completion that starts no round, the gate sends the refresh, which sends the machine an event"
+assert_contains "$prog" "refresh-loop-state.py"
+assert_contains "$prog" 'trigger.event == "review_completed"'
 
-it "the refresh-loop-state.py call cannot abort the gate under set -e: it ends in || true"
-assert_contains "$gate" "refresh-loop-state.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$PR\" || true"
-assert_not_contains "$gate" "review-not-clean.py"
-
-# MEASURED LIVE ON #233, the second occurrence of the same bug: this branch's
-# own guard also compared workflow_run.name to the literal 'claude-review',
-# so even with the job's outer if: fixed, refresh-loop-state.py would still
-# never have run.
-it "the refresh-loop-state.py guard matches on WORKFLOW_RUN_PATH, never WORKFLOW_RUN_NAME"
-assert_contains "$gate" 'WORKFLOW_RUN_PATH" = ".github/workflows/claude-review.yml"'
-assert_not_contains "$gate" "WORKFLOW_RUN_NAME"
-assert_contains "$(py 'print(d["jobs"]["gate"]["steps"][1]["env"])')" "workflow_run.path"
+# MEASURED LIVE ON #233, the second occurrence of the same bug: a guard compared
+# workflow_run.name to the literal 'claude-review', so it never ran. The path carries no per-run wording.
+it "a completion is told apart by its workflow FILE's path, never its display name"
+assert_contains "$prog" 'WORKFLOW_RUN_PATH'
+assert_not_contains "$prog" "WORKFLOW_RUN_NAME"
+assert_not_contains "$prog" "workflow_run.name"
 
 summary

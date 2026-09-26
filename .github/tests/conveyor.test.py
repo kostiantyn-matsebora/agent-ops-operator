@@ -177,7 +177,7 @@ def lines():
 def pull_requests(state="OPEN", labels=frozenset({FIX})):
     for same, refs, closes, review, thread, ci in itertools.product(
             (True, False), (None, 51), (None, 51), (False, True), (False, True), ("success", "failure")):
-        yield c.PullRequest(same, state, labels, refs, closes, review, thread, ci)
+        yield c.PullRequest(same, state, labels, refs, closes, review, thread, ci, fork=not same)
 
 
 class TheFire(unittest.TestCase):
@@ -300,22 +300,75 @@ class TheCarries(unittest.TestCase):
 
 
 class TheGate(unittest.TestCase):
-    def test_a_bot_start_is_accepted_exactly_where_the_carry_carried(self):
-        """The #254 invariant: the gate and the carry read one rule, on every path a bot can start a round."""
+    def test_a_bot_start_is_accepted_exactly_where_the_grant_stands(self):
+        """The #254 invariant, on every path a bot can start a round by: the grant rule decides."""
         for pr, line, placer in itertools.product(pull_requests(), lines(), (WRITER, READER, None)):
-            carried = c.carry_fix(V, pr, line, placer)
+            issue = pr.refs or pr.closes
+            grant = c.standing_grant(V, line.issue_labels, "fix", pr.closes is not None) if issue else None
+            backed = grant is not None and placer is not None and placer.may_push
             for event in ("labeled", "dispatch"):
-                trig = c.Trigger(event, BOT, label=FIX if event == "labeled" else "")
+                trig = c.Trigger(event, BOT, label=FIX if event == "labeled" else "", mode="all")
                 d = c.gate(V, trig, pr, line, placer)
                 with self.subTest(pr=pr, line=line, event=event):
-                    if not pr.same_repo_change_branch:
+                    if pr.fork:
                         self.assertEqual("refuse", d.action)
-                    elif carried.action == "carry":
+                    elif backed:
                         self.assertEqual("round", d.action, d.reason)
                         self.assertEqual(("round:start", "round:start"), (d.loop_event, d.station_event))
                     else:
-                        self.assertEqual("refuse", d.action)
-                        self.assertEqual(FIX if event == "labeled" else "", d.remove_label)
+                        # A carried label whose grant no longer stands comes off, on every path.
+                        self.assertEqual(("refuse", FIX), (d.action, d.remove_label))
+
+    def test_whatever_the_carry_carries_the_gate_accepts(self):
+        for pr, line, placer in itertools.product(pull_requests(), lines(), (WRITER, READER, None)):
+            if c.carry_fix(V, pr, line, placer).action != "carry":
+                continue
+            for event in ("labeled", "dispatch"):
+                d = c.gate(V, c.Trigger(event, BOT, label=FIX, mode="all"), pr, line, placer)
+                self.assertEqual("round", d.action, d.reason)
+
+    def test_the_workflow_carries_the_fix_label_and_nothing_else(self):
+        pr = c.PullRequest(True, "OPEN", frozenset({FIX, KEEP}), refs=7)
+        line = c.Line(frozenset({RUN}))
+        d = c.gate(V, c.Trigger("labeled", BOT, KEEP), pr, line, WRITER)
+        self.assertEqual(("refuse", KEEP), (d.action, d.remove_label))
+
+    def test_a_completion_on_a_carried_label_re_checks_the_grant_so_removing_it_stops_the_loop(self):
+        """The stop button: take `conveyor:run` off the issue and the next start refuses, removes the carried label and stalls."""
+        pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=248)
+        for event in ("review_completed", "ci_failed"):
+            standing = c.gate(V, c.Trigger(event, label_carried=True), pr, c.Line(frozenset({RUN})), WRITER)
+            withdrawn = c.gate(V, c.Trigger(event, label_carried=True), pr, c.Line(frozenset()), None)
+            lost_write = c.gate(V, c.Trigger(event, label_carried=True), pr, c.Line(frozenset({RUN})), READER)
+            self.assertEqual("round", standing.action)
+            for d in (withdrawn, lost_write):
+                self.assertEqual(("refuse", FIX, "end:stalled"), (d.action, d.remove_label, d.loop_event))
+
+    def test_a_completion_on_a_label_a_PERSON_placed_needs_no_grant(self):
+        pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=248)
+        for event in ("review_completed", "ci_failed"):
+            self.assertEqual("round", c.gate(V, c.Trigger(event, label_carried=False), pr, c.Line(), None).action)
+
+    def test_a_hand_run_in_threads_mode_needs_no_label_and_in_all_mode_needs_the_label_and_the_bound(self):
+        unlabelled = c.PullRequest(True, "OPEN", frozenset(), refs=7)
+        labelled = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=7)
+        hand = lambda mode: c.Trigger("dispatch", WRITER, mode=mode)
+        self.assertEqual("threads", c.gate(V, hand("threads"), unlabelled, c.Line(), None).action)
+        self.assertEqual("none", c.gate(V, hand("all"), unlabelled, c.Line(), None).action)
+        self.assertEqual("round", c.gate(V, hand("all"), labelled, c.Line(), None).action)
+        capped = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=7, rounds_used=5, max_rounds=5)
+        self.assertEqual("none", c.gate(V, hand("all"), capped, c.Line(), None).action)
+
+    def test_a_fork_is_refused_on_every_path(self):
+        fork = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=7, fork=True)
+        for trig in (c.Trigger("labeled", WRITER, FIX), c.Trigger("comment", WRITER, comment_is_dispatch=True),
+                     c.Trigger("review_completed"), c.Trigger("dispatch", WRITER, mode="threads")):
+            self.assertEqual("refuse", c.gate(V, trig, fork, c.Line(), None).action)
+
+    def test_a_non_change_branch_in_this_repository_is_not_a_fork(self):
+        """A person may label any same-repository pull request; only the carries need change/*."""
+        pr = c.PullRequest(same_repo_change_branch=False, state="OPEN", labels=frozenset({FIX}), refs=None)
+        self.assertEqual("round", c.gate(V, c.Trigger("labeled", WRITER, FIX), pr, c.Line(), None).action)
 
     def test_a_review_or_ci_completion_starts_a_round_only_on_a_labelled_open_pull_request_under_the_bound(self):
         for labels, state, used in itertools.product((frozenset(), frozenset({FIX}), frozenset({FIX, KEEP})),
