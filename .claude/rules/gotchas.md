@@ -771,9 +771,10 @@ break was fixed where it showed, and the next one showed somewhere else.
 - **THE FIX IS `conveyor.py`.** A rule has one definition and every program
   asks it. A test walks every state against every event, so the next
   disagreement is a failing row and not a Saturday night.
-- **`--purpose ci` AND `--purpose archive`** are the guard's two questions. A
-  check asks only what a person can answer. The running round belongs to the
-  loop, and a check reporting it red is a red the loop made.
+- **THE GUARD HAD TWO PURPOSES, AND THE `ci` ONE IS GONE.** `--purpose ci`
+  made `docs-task` fail on an unanswered dispute. #259 showed that red was one
+  no fixer could clear (below), so the archive command is the guard's only
+  caller now and a check asks nothing about the loop's conversation.
 - **A COMPLETION IS A START.** A review or CI completion on a carried label
   re-checks the grant like a label event does. Before, a completion trusted the
   label, so removing the instruction did not stop a loop that was running.
@@ -781,3 +782,36 @@ break was fixed where it showed, and the next one showed somewhere else.
   the base branch, so a fix to them is not exercised until it merges. Do not
   give such a pull request a `Refs` or `Closes` keyword on the issue whose
   grant would put the loop on it.
+
+**THE LOOP STOPPED ON A RED IT MADE ITSELF, CALLED IT CLEAN, AND COULD NOT HEAR
+THE ANSWER — MEASURED ON #259, 2026-09-26.** Two rounds, then `loop:stalled`
+beside `docs-task` and `ci-green` red and a summary reading "clean". A
+`conveyor:keep-going` round an hour later posted the same words.
+
+- **THE DISPUTE WAS MANUFACTURED.** The fixer claimed a CRD finding fixed, the
+  patch did not touch the file, and the landing step posted "reported fixed,
+  but the patch does not touch" as a dispute for the person to answer. A failed
+  fix is not a statement about the finding. It is UNADDRESSED now, eligible
+  again, and a round that lands nothing starts the next round itself.
+- **THE GUARD MADE THE RED, AND AN EXEMPTION HID IT.** `autofix-guard.py
+  --purpose ci` failed `docs-task` on the unanswered dispute, and
+  `check_is_work` classed a check that failed only on that step as "waiting",
+  off the work list. The red was the loop's own, the open thread already held
+  the merge through branch protection, and the check added nothing but the red.
+  The guard is the archive hook's alone now, `dispute-answered.yml` and
+  `rerun-ci-job.py` are deleted, and every failed required check is work.
+- **THE ANSWER WAS NEVER HEARD.** The person resolved the thread. A thread
+  resolution is not an Actions trigger, and the keep-going round read the stale
+  check's failed step name instead of the live threads. A person's comment now
+  starts a round on a `loop:waiting` pull request, and `conveyor-sweep.yml`
+  re-reads waiting pull requests every fifteen minutes for the resolution
+  nothing else can hear.
+- **"0 FAILURES" 38 SECONDS INTO A TEN-MINUTE CI RUN.** A check run exists
+  queued from the moment its run starts, so "every required job has a check
+  run" was true at once. `failed-checks.py` counts the checks consulted only
+  when every one has COMPLETED, and the gate starts a round only once the
+  head's CI run and review run have both concluded.
+- **THE STATE MACHINE WAS RIGHT ABOUT THE FACT IT WAS GIVEN.** `conveyor.py`'s
+  table was exhaustively tested and behaved as specified. The adapter fed it a
+  stale fact. A table test covers the table, and the scenario "dispute already
+  dismissed, guard check still red from an earlier run" had no test anywhere.

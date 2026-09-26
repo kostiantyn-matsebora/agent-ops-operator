@@ -51,9 +51,11 @@
 # `collect` also reads the head's failed required checks (`failed-checks.py`,
 # under `actions: read` — that job only, where no model runs), each carrying its
 # job name, its run and a bounded tail of the failed steps' log, and a `ci` run
-# completing with `failure` starts a round beside the review's completion. The
-# `concurrency` group serialises the two, so one head can produce two rounds in
-# sequence, each collecting the live state; `max_rounds` bounds both. A check is
+# completing -- `success` or `failure` -- starts a round beside the review's
+# completion. A ROUND STARTS ONLY ONCE BOTH RUNS HAVE CONCLUDED ON THE HEAD
+# (`conveyor.round_may_start`), so whichever concludes second starts it, and one
+# head produces one round over the whole picture (#259: a round read the checks
+# 38 seconds into a ten-minute CI run and said "0 failures"). A check is
 # FIXED only after the fixer reproduced it with the job's own command, or
 # DISPUTED with the log's reason — a runner outage and a rate limit are not
 # things the tree can fix.
@@ -91,9 +93,10 @@ on:
   # trigger runs the DEFAULT branch's copy of this file, whatever the pull
   # request holds — the same property the review has — and it keeps the
   # review's own jobs free of any write.
-  # A CI RUN THAT FAILED is the other start, on a labelled pull request: the
-  # merge is blocked by something the loop can act on. `claude-review`
-  # completing is unchanged.
+  # A CI RUN CONCLUDING is the other start, on a labelled pull request --
+  # red, the merge is blocked by something the loop can act on; green with
+  # review threads open, the threads are the work. `claude-review` completing
+  # is unchanged, and the gate waits for whichever of the two is still running.
   workflow_run:
     workflows: [claude-review, ci]
     types: [completed]
@@ -159,18 +162,33 @@ jobs:
     # with three fresh findings sitting unanswered and no further round ever
     # starting. `.path` is the workflow FILE's path and carries no per-run
     # wording, so a `run-name` change elsewhere can never repeat this.
+    #
+    # A PERSON'S COMMENT PASSES, WHATEVER IT SAYS. It is the dispatch form, or it
+    # is the answer a WAITING loop was owed (#259): the gate program tells the
+    # two apart and starts a round only on a pull request whose loop label says
+    # waiting. A bot's comment -- the loop's own replies and summaries arrive on
+    # this event too -- never passes.
+    #
+    # A CI RUN STARTS A ROUND WHETHER IT SUCCEEDED OR FAILED. The gate starts a
+    # round only once BOTH the head's CI run and its review run have concluded,
+    # so whichever concludes second is the one that starts it: a green CI with
+    # review threads open is a round over those threads, and a green CI with
+    # nothing open ends mergeable (which is what `open` records too).
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/fix-accepted')) ||
-      (github.event_name == 'pull_request_review_comment' && startsWith(github.event.comment.body, '/fix-accepted')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot') ||
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type != 'Bot') ||
       (github.event_name == 'pull_request' && (github.event.label.name == 'conveyor:fix' || github.event.label.name == 'conveyor:keep-going')) ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.conclusion == 'failure')
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      # READ, for `gh run list` on the head: a round starts only once the head's
+      # CI and review runs have concluded (`conveyor.round_may_start`).
+      actions: read
     outputs:
       pr: ${{ steps.who.outputs.pr }}
       branch: ${{ steps.who.outputs.branch }}
@@ -200,6 +218,7 @@ jobs:
           BODY: ${{ github.event.comment.body }}
           ASSOCIATION: ${{ github.event.comment.author_association }}
           SENDER: ${{ github.event.comment.user.login || github.event.sender.login || github.actor }}
+          SENDER_TYPE: ${{ github.event.comment.user.type }}
           PR: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr }}
           REVIEW_TITLE: ${{ github.event.workflow_run.display_title }}
           WORKFLOW_RUN_PATH: ${{ github.event.workflow_run.path }}
@@ -556,6 +575,12 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # WRITE, for ONE dispatch: a round that landed nothing while items are
+      # still eligible starts the next round itself (`review-dispatch.yml`,
+      # mode=all), since no push will. Never `ci.yml`: a dispatched run's
+      # checks never reach the merge box (#131). The machine says when
+      # (`conveyor.ending`, `dispatch_round`), and the bound still holds.
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:

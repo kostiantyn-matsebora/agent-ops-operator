@@ -115,11 +115,11 @@ resolve_line=$(grep -n resolveReviewThread "$GH_CALLS" | cut -d: -f1)
 
 # A REPORTED FIX THE PATCH DOES NOT CONTAIN is a claim, and the file is the
 # check: the model said b.go was fixed, and nothing in the patch touches b.go.
-it "does not trust a fix the patch does not contain"
+it "does not trust a fix the patch does not contain: it is UNADDRESSED, a failed fix and not a dispute"
 fresh_repo
 printf '{"fixed":["PRRT_a","PRRT_b"],"unfixed":[]}' > "$tmp/report2.json"
 out=$(REPORT="$tmp/report2.json" land)
-assert_contains "$out" "unfixed  PRRT_b (b.go): reported fixed, but the patch does not touch \`b.go\`"
+assert_contains "$out" "unaddressed PRRT_b (b.go): reported fixed, but the patch does not touch \`b.go\`"
 assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
 
 it "drops a reported thread the work list does not carry"
@@ -437,10 +437,13 @@ printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.g
 git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
 before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
 out=$(PATH="$tmp/bin5:$PATH" land_all); rc=$?
-assert_status 1 "$rc"
+assert_status 0 "$rc"
 assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
 assert_not_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
 assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+# at the bound a stale patch does not start the next round either: the cap holds
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_equals "capped" "$(loop_label)"
 printf '[]' > "$GH_COMMENTS"
 
 it "labelled: conveyor:keep-going present but NOT past the cap is left untouched"
@@ -504,19 +507,27 @@ out=$(THREAD_CHECK_EXIT=1 WORK="$tmp/none.json" land_all); rc=$?
 assert_status 0 "$rc"
 assert_contains "$out" "a review thread opened since collect ran"
 assert_not_contains "$(loop_label)" "mergeable"
-# STALLED, never left `running`: refresh-loop-state.py skips a label that says a round is in
-# progress, so a clean round held by a thread used to lie until the next round.
-assert_equals "stalled" "$(loop_label)"
+# WAITING, never left `running` and never `stalled`: a thread is a person's question (#259), and
+# refresh-loop-state.py skips a label that says a round is in progress.
+assert_equals "waiting" "$(loop_label)"
 
-it "labelled: a clean round whose only red check is the loop's own guard is stalled and says it waits for a person"
+it "labelled: a clean round while a check an earlier round DISPUTED awaits the person is waiting, and says the head is red"
 fresh_repo
-printf '{"consulted":true,"checks":[],"items":[],"waiting":[{"job":"docs-task","reason":"failed only on the loop guard step"}]}' > "$tmp/checks-waiting.json"
-out=$(CHECKS="$tmp/checks-waiting.json" WORK="$tmp/none.json" land_all); rc=$?
+printf '{"consulted":true,"checks":[{"job":"operator","conclusion":"failure","status":"completed"}],"items":[],"awaiting":[{"id":"check:operator","job":"operator","reason":"disputed by an earlier round, awaiting the person"}]}' > "$tmp/checks-awaiting.json"
+out=$(CHECKS="$tmp/checks-awaiting.json" WORK="$tmp/none.json" land_all); rc=$?
 assert_status 0 "$rc"
-assert_equals "stalled" "$(loop_label)"
+assert_equals "waiting" "$(loop_label)"
 assert_not_contains "$(loop_label)" "mergeable"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "\`operator\`) was disputed by an earlier round and waits for your answer"
 # no model ran: a clean round spends nothing
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+
+it "labelled: a clean round on a green head says so and marks mergeable"
+fresh_repo
+out=$(WORK="$tmp/none.json" land_all); rc=$?
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is GREEN: every required check passed"
+assert_equals "mergeable" "$(loop_label)"
 
 it "labelled: a clean ending, but the thread check CRASHES (not exit 1), withholds mergeable with an accurate reason -- never claims a thread opened it never saw"
 fresh_repo
@@ -534,19 +545,33 @@ assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "(stale for manager)"
 printf '{"consulted":true,"stale":[],"projects":[],"issues":[]}' > "$tmp/sonar.json"
 
 # ENDING: stale patch.
-it "labelled: a stale patch lands nothing, resolves nothing, and ends the loop with ONE summary"
+it "labelled: a stale patch lands nothing, resolves nothing, posts ONE summary and starts the next round itself"
 fresh_repo
 printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.go"
 git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
 before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
 out=$(land_all); rc=$?
-assert_status 1 "$rc"
+assert_status 0 "$rc"
 assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "stale patch** — @an-approver"
 assert_not_contains "$(cat "$GH_CALLS")" "/replies"
-assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+# NOTHING LANDED AND EVERY ITEM IS STILL ELIGIBLE, so no push will start the next round: this one does (#259)
+assert_equals "1" "$(grep -c '^workflow run review-dispatch.yml --repo o/r -f pr=7 -f mode=all' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Round 2 starts now over what is still eligible"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
+# the loop label is the gate's to move when that round starts: this round says continue, never stalled
+assert_not_contains "$(loop_label)" "stalled"
+
+it "labelled: when the next round cannot be started, the ending says so and the loop is stalled -- the machine stopped"
+fresh_repo
+printf 'package a\n\n// moved again\nfunc A() string { return "x" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved again" && git -C "$tmp/work" push -q origin "$BRANCH"
+out=$(GH_DISPATCH_FAILS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "could not start the next round** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "HTTP 422"
+assert_equals "stalled" "$(loop_label | awk '{print $NF}')"
 
 # SILENCE AND REFUSAL ARE DIFFERENT FACTS. An item a REAL report simply never
 # names is UNADDRESSED -- worded as such, never folded into "disputed" (which
@@ -671,10 +696,43 @@ assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report**"
 
 # THE LOOP LABEL FOLLOWS THE ENDING: disputes -> stalled, the cap -> capped, a
 # round that goes on sets nothing here (the gate set `running` when it started).
-it "labelled: every ending moves the loop label -- disputes only stalls it"
+it "labelled: every ending moves the loop label -- disputes only is WAITING, a person is owed an answer"
 fresh_repo
 out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-disp.json" land_all); rc=$?
-assert_equals "stalled" "$(loop_label)"
+assert_equals "waiting" "$(loop_label)"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The loop waits for your answer"
+
+# A ROUND THAT FIXED NOTHING WHILE ITEMS ARE STILL ELIGIBLE IS NOT AN ENDING OF THE LOOP.
+# It counts, its summary names the items, and it starts the next round itself (#259).
+it "labelled: nothing addressed, items eligible: the round counts, posts its summary, and starts the next round"
+fresh_repo
+printf '{"items":[]}' > "$tmp/report-none.json"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "nothing addressed** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (3)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_equals "1" "$(grep -c '^workflow run review-dispatch.yml' "$GH_CALLS")"
+assert_not_contains "$(loop_label)" "stalled"
+assert_not_contains "$(loop_label)" "waiting"
+
+it "labelled: a claimed fix the patch does not evidence is UNADDRESSED: no dispute marker, and the round retries"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""},{"id":"PRRT_b","action":"fixed","reason":""},{"id":"sonar:AZ1","action":"fixed","reason":""}]}' > "$tmp/report-claims.json"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-claims.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "unaddressed PRRT_a (a.go): reported fixed, but the patch does not touch"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:disputed"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (3)"
+assert_equals "1" "$(grep -c '^workflow run review-dispatch.yml' "$GH_CALLS")"
+
+it "labelled: at the bound, nothing addressed ends the loop capped and starts nothing"
+fresh_repo
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-none.json" MAX_ROUNDS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_equals "capped" "$(loop_label)"
 
 it "labelled: a round that lands and goes on leaves the loop label to the gate"
 fresh_repo
@@ -689,7 +747,7 @@ out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work
         --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
         --checks "$tmp/checks-none.json" --state-script "$tmp/not-there.py" --push-starts-workflows 2>&1); rc=$?
 assert_status 0 "$rc"
-assert_contains "$out" "::notice::loop event \`end:stalled\` not recorded"
+assert_contains "$out" "::notice::loop event \`end:waiting\` not recorded"
 assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
 
 # MEASURED LIVE ON #233. `land`'s job restores conveyor-state.py to a FLAT
@@ -714,7 +772,7 @@ out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work
         --vocabulary "$ROOT/.github/review-triage.json" --push-starts-workflows 2>&1); rc=$?
 assert_status 0 "$rc"
 assert_not_contains "$out" "not recorded"
-assert_equals "stalled" "$(loop_label)"
+assert_equals "waiting" "$(loop_label)"
 
 # THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
 # --push-starts-workflows, and a landed round cannot be followed by another.
@@ -728,8 +786,10 @@ assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "could not start the ne
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "AUTOFIX_DEPLOY_KEY"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Push again"
 
-it "never dispatches a workflow: a dispatched run's checks never reach the merge box"
-assert_not_contains "$(cat "$S")" "workflow run"
+it "never dispatches ci: a dispatched run's checks never reach the merge box, so the only workflow it may start is the next round"
+assert_equals "1" "$(grep -c '"workflow", "run"' "$S")"
+assert_equals "1" "$(grep -c '"workflow", "run", self.args.next_round_workflow' "$S")"
+assert_not_contains "$(cat "$S")" 'run", "ci.yml'
 
 it "contains no model invocation of its own"
 assert_not_contains "$(cat "$S")" "claude"
@@ -778,14 +838,14 @@ assert_contains "$(cat "$GH_CALLS")" "the runner could not reach the registry"
 # just above, and the clean ending below.
 it "an ending's summary names the check by its job and says how many failed"
 assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "the \`operator\` check"
-assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks reported 1 failure"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED: 1 required check failed"
 
-it "with no check collected the summary says the checks had not reported, never that they were green"
+it "with no check concluded the summary says the head is not yet judged, never that it is green"
 fresh_repo
 printf '{"consulted":false,"checks":[],"items":[]}' > "$tmp/checks-absent.json"
 out=$(WORK="$tmp/none.json" CHECKS="$tmp/checks-absent.json" land_all)
-assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks were NOT consulted"
-assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The required checks reported"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is NOT YET JUDGED"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is GREEN"
 
 # ---------------------------------------------------------------------------
 # WHAT THE FIXER LEFT BEHIND AND DID NOT DECLARE IS NAMED, NEVER SILENT.

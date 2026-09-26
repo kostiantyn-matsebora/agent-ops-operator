@@ -152,6 +152,11 @@ cat > "$GH_FIXTURE.all" <<'JSON'
      "comments":{"nodes":[
        {"databaseId":401,"body":"Missing nil check.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
        {"databaseId":402,"body":"<!-- conveyor:disputed -->\nDisputed by the fixing step: the pointer cannot be nil here.","authorAssociation":"NONE","author":{"login":"github-actions","__typename":"Bot"}}]}},
+    {"id":"PRRT_answered","isResolved":false,"isOutdated":false,"path":"g.go","line":2,
+     "comments":{"nodes":[
+       {"databaseId":701,"body":"Unbounded read.","authorAssociation":"NONE","author":{"login":"claude","__typename":"Bot"}},
+       {"databaseId":702,"body":"<!-- conveyor:disputed -->\nDisputed by the fixing step: the reader is bounded upstream.","authorAssociation":"NONE","author":{"login":"github-actions","__typename":"Bot"}},
+       {"databaseId":703,"body":"It is not: the upstream bound was removed last week. Fix it.","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},
     {"id":"PRRT_human","isResolved":false,"isOutdated":false,"path":"e.go","line":9,
      "comments":{"nodes":[
        {"databaseId":501,"body":"I would rename this.","authorAssociation":"OWNER","author":{"login":"a-maintainer","__typename":"User"}}]}},
@@ -164,7 +169,7 @@ JSON
 GH_FIXTURE="$GH_FIXTURE.all" out=$(run --mode all --approver an-approver)
 
 it "in --mode all, lists every open finding of the review's — unanswered and argued alike — on the strength of the label"
-assert_equals "PRRT_unanswered PRRT_argued" "$(ids)"
+assert_equals "PRRT_unanswered PRRT_argued PRRT_answered" "$(ids)"
 assert_contains "$out" "mode: all — every open finding is accepted by the label (placed by an-approver)"
 
 it "in --mode all, each item carries id, source: review and the approver, with no reply"
@@ -175,6 +180,10 @@ assert_contains "$(cat "$tmp/out.json")" '"reply": ""'
 
 it "in --mode all, skips a thread a previous round disputed, counting it as awaiting the person"
 assert_contains "$out" "PRRT_disputed (d.go:7): disputed by a previous round, awaiting the person"
+
+it "in --mode all, a disputed thread a PERSON answered is back on the list, their words with it (#259)"
+assert_contains "$out" "ACCEPTED PRRT_answered (g.go:2)"
+assert_contains "$(cat "$tmp/out.json")" '"reply": "It is not: the upstream bound was removed last week. Fix it."'
 
 it "in --mode all, still ignores a person's thread and a resolved one"
 assert_contains "$out" "PRRT_human (e.go:9): first comment by 'a-maintainer', not the review"

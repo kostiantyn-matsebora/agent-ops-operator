@@ -9,8 +9,9 @@
 #   too narrow a required list copied into the program, stale the first time
 #              somebody adds a gate — which in this project is one line in
 #              `ci-green`'s `needs:`, so the list is READ from there.
-#   too eager  reporting the checks clean before CI has run on the head. Same
-#              rule the analysis collector states: not reported is a FLAG.
+#   too eager  reporting the checks clean before CI has run on the head, or
+#              while it is still running. Same rule the analysis collector
+#              states: not reported is a FLAG, and not CONCLUDED is too.
 #
 # NO NETWORK: `gh` is a stub answering from fixtures.
 . "$(dirname "$0")/lib.sh"
@@ -51,12 +52,12 @@ STUB
 }
 
 runs_file() { RUNS="$DIR/runs.jsonl"; : > "$RUNS"; }
-add_run() {  # add_run <name> <conclusion>
-  python3 - "$RUNS" "$1" "$2" <<'PY'
+add_run() {  # add_run <name> <conclusion> [status]   (a concluded run unless told otherwise)
+  python3 - "$RUNS" "$1" "$2" "${3:-completed}" <<'PY'
 import json, sys
 with open(sys.argv[1], "a") as f:
     f.write(json.dumps({
-        "name": sys.argv[2], "conclusion": sys.argv[3],
+        "name": sys.argv[2], "conclusion": None if sys.argv[4] != "completed" else sys.argv[3], "status": sys.argv[4],
         "details_url": "https://github.com/o/r/actions/runs/555/job/1",
         "html_url": "https://github.com/o/r/actions/runs/555/job/1",
     }) + "\n")
@@ -189,107 +190,102 @@ run_it >/dev/null
 # `operator` is no longer required, so its failure is not the loop's.
 assert_equals "[]" "$(read_out items)"
 
-# --- the loop's own guard is not work ----------------------------------------
+# --- a check run that has not concluded is not a verdict ---------------------
 #
-# A `docs-task` that failed ONLY on the guard step is a dispute waiting for a
-# person. Handing it to a fixer started rounds that could not answer it, and each
-# round's red started the next (#248). It is reported as WAITING instead, read from
-# the job's own failed steps -- and the step's name is read from ci.yml, never restated.
+# A check run EXISTS from the moment its run starts, queued. On #259 every required
+# job had one 38 seconds into a ten-minute CI run, the checks read as consulted, and
+# the round said "0 failures" over jobs that had not spoken. Consulted means every
+# required check run has COMPLETED.
 
-GUARD_STEP="No dispute the fixing loop posted waits unanswered"
-guard_ci() {
-  cat > "$DIR/ci.yml" <<YML
-name: ci
-on: [pull_request]
-jobs:
-  operator: {runs-on: ubuntu-latest, steps: []}
-  docs-task:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Every change this pull request finishes ends in finished tasks
-        run: python3 .github/scripts/docs-task-guard.py --range "\$RANGE"
-      - name: $GUARD_STEP
-        run: python3 .github/scripts/autofix-guard.py --repo "\$R" --pr "\$N" --purpose ci
-  ci-green:
-    needs: [operator, docs-task]
-    runs-on: ubuntu-latest
-    steps: []
-YML
-}
-# `gh` answering check-runs from a fixture AND the jobs route with a step list per job id.
-stub_checks_and_steps() {  # stub_checks_and_steps <runs-file> <steps-json-or-FAIL>
+it "a queued or in-progress required check run is NOT consulted, whatever the others say"
+setup; runs_file
+add_run operator success; add_run chart success; add_run images "" in_progress
+stub_checks "$RUNS"
+run_it >/dev/null
+assert_equals "False" "$(read_out consulted)"
+assert_equals "[]" "$(read_out items)"
+
+it "a queued run beside a FAILED one is still not consulted: the red is reported, the verdict is not claimed"
+setup; runs_file
+add_run operator failure; add_run chart "" queued; add_run images success
+stub_checks "$RUNS"
+run_it >/dev/null
+assert_equals "False" "$(read_out consulted)"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+
+it "every required run completed IS consulted, and each entry carries its status"
+setup; runs_file
+add_run operator success; add_run chart success; add_run images success
+stub_checks "$RUNS"
+run_it >/dev/null
+assert_equals "True" "$(read_out consulted)"
+assert_contains "$(read_out checks)" "'status': 'completed'"
+
+# --- the loop's own guard is no longer a check, so no red is exempt -----------
+#
+# A `docs-task` that failed only on the dispute guard used to be reported as WAITING,
+# apart from the work. The guard left CI (#259): a red no fixer could clear stopped the
+# loop on its own refusal. Every failed required check is work now, whatever step failed.
+
+it "a failed docs-task is WORK whatever step failed: there is no waiting list and no jobs-route read"
+setup; runs_file
+python3 - "$DIR/ci.yml" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("needs: [operator, chart, images]", "needs: [operator, docs-task]"))
+PY
+add_run operator success; add_run docs-task failure
+stub_checks "$RUNS"
+out=$(run_it); assert_status 0 "$?"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+assert_equals "['consulted', 'checks', 'items', 'awaiting']" "$(python3 -c 'import json,sys;print(list(json.load(open(sys.argv[1])).keys()))' "$OUT")"
+assert_not_contains "$(cat "$DIR/calls")" "actions/jobs/"
+assert_not_contains "$(cat "$S")" "guard_step"
+
+# --- a check an earlier round disputed waits for the person ------------------
+#
+# A disputed check has no thread: its dispute is a pull request comment under the
+# marker, naming each item in a hidden line. Red again on the next head, it is not
+# disputed twice and not handed to the fixer; it is AWAITING, and the round's
+# ending says so. A person's later comment answers it, and it is work again.
+
+stub_checks_and_comments() {  # stub_checks_and_comments <runs-file> <comments-json>
   cat > "$BIN/gh" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$DIR/calls"
 case "\$*" in
   *"check-runs"*) cat "$1" ;;
-  *"actions/jobs/"*) [ "$2" = FAIL ] && { echo "HTTP 502" >&2; exit 1; }; printf '%s' '$2' ;;
-  *"--log-failed"*) printf 'docs-task\tstep\tboom\n' ;;
+  *"issues/5/comments"*) printf '%s' '$2' ;;
+  *"--log-failed"*) printf 'operator\tRun tests\tFAIL TestThing\n' ;;
   *) : ;;
 esac
 STUB
   chmod +x "$BIN/gh"
 }
-add_run_id() {  # add_run_id <name> <conclusion> <id>
-  python3 - "$RUNS" "$1" "$2" "$3" <<'PY'
-import json, sys
-with open(sys.argv[1], "a") as f:
-    f.write(json.dumps({"id": int(sys.argv[4]), "name": sys.argv[2], "conclusion": sys.argv[3],
-        "details_url": "https://github.com/o/r/actions/runs/555/job/" + sys.argv[4],
-        "html_url": "https://github.com/o/r/actions/runs/555/job/" + sys.argv[4]}) + "\n")
-PY
-}
+DISPUTE='<!-- conveyor:disputed -->\nThe fixing step disputes 1 failed check, for @x.\n\n- the operator check: a rate limit\n<!-- conveyor:disputed-item check:operator -->'
 
-it "a docs-task that failed ONLY on the loop's own guard is WAITING, not work"
-setup; guard_ci; runs_file
-add_run_id operator success 1; add_run_id docs-task failure 2
-stub_checks_and_steps "$RUNS" "[\"$GUARD_STEP\"]"
-out=$(run_it); assert_status 0 "$?"
-assert_equals "[]" "$(read_out items)"
-waiting=$(read_out waiting)
-assert_contains "$waiting" "docs-task"
-assert_contains "$out" "waiting  docs-task"
-
-it "a docs-task that failed on the TASKS step is work, as before"
-setup; guard_ci; runs_file
-add_run_id docs-task failure 2
-stub_checks_and_steps "$RUNS" '["Every change this pull request finishes ends in finished tasks"]'
-out=$(run_it); assert_status 0 "$?"
-assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
-assert_equals "[]" "$(read_out waiting)"
-
-it "a docs-task that failed on BOTH steps is work: the tasks step is the fixer's to answer"
-setup; guard_ci; runs_file
-add_run_id docs-task failure 2
-stub_checks_and_steps "$RUNS" "[\"Every change this pull request finishes ends in finished tasks\",\"$GUARD_STEP\"]"
-out=$(run_it); assert_status 0 "$?"
-assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
-
-it "the jobs route failing is not a licence to wave the job through: it stays work"
-setup; guard_ci; runs_file
-add_run_id docs-task failure 2
-stub_checks_and_steps "$RUNS" FAIL
-out=$(run_it); assert_status 0 "$?"
-assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
-assert_equals "[]" "$(read_out waiting)"
-
-it "the guard step's name is READ from ci.yml: a reworded step is still recognised"
-setup; guard_ci; runs_file
-python3 - "$DIR/ci.yml" "$GUARD_STEP" <<'PY'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace(sys.argv[2], "A dispute the loop posted has no answer"))
-PY
-add_run_id docs-task failure 2
-stub_checks_and_steps "$RUNS" '["A dispute the loop posted has no answer"]'
-out=$(run_it); assert_status 0 "$?"
-assert_equals "[]" "$(read_out items)"
-assert_contains "$(read_out waiting)" "docs-task"
-
-it "ci.yml with no guard step means nothing is ever waiting"
+it "a red check an earlier round disputed, with no person's answer since, is AWAITING and not work"
 setup; runs_file
-add_run_id operator failure 1
-stub_checks_and_steps "$RUNS" '["anything"]'
+add_run operator failure; add_run chart success; add_run images success
+stub_checks_and_comments "$RUNS" "[{\"body\":\"$DISPUTE\",\"author\":{\"login\":\"github-actions\",\"__typename\":\"Bot\"}}]"
 out=$(run_it); assert_status 0 "$?"
-assert_equals "[]" "$(read_out waiting)"
+assert_equals "[]" "$(read_out items)"
+assert_contains "$(read_out awaiting)" "'id': 'check:operator'"
+assert_contains "$out" "awaiting operator: disputed by an earlier round, awaiting the person"
+
+it "once a PERSON has commented after the dispute, the same red check is work again"
+setup; runs_file
+add_run operator failure; add_run chart success; add_run images success
+stub_checks_and_comments "$RUNS" "[{\"body\":\"$DISPUTE\",\"author\":{\"login\":\"github-actions\",\"__typename\":\"Bot\"}},{\"body\":\"not a rate limit, the test is broken\",\"author\":{\"login\":\"maintainer\",\"__typename\":\"User\"}}]"
+out=$(run_it); assert_status 0 "$?"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+assert_equals "[]" "$(read_out awaiting)"
+
+it "a dispute naming ANOTHER check leaves this one work"
+setup; runs_file
+add_run images failure; add_run chart success; add_run operator success
+stub_checks_and_comments "$RUNS" "[{\"body\":\"$DISPUTE\",\"author\":{\"login\":\"github-actions\",\"__typename\":\"Bot\"}}]"
+run_it >/dev/null
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+assert_equals "[]" "$(read_out awaiting)"
 
 summary

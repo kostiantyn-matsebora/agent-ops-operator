@@ -31,10 +31,12 @@ when a person accepted four is a bug only if someone can see the fourth.
 TWO MODES, ONE PROGRAM. `--mode threads` (the default) is the above. `--mode
 all` is the labelled pull request: the label is change-level consent, so every
 open thread the review authored is on the list with no reply at all -- except
-one already carrying the DISPUTE MARKER, which a previous round answered and a
-person has not; that one is counted as awaiting the person and never disputed
-twice. The label itself is checked by the workflow's gate, not here: this
-program is told the mode and derives the list.
+one already carrying the DISPUTE MARKER with no PERSON's comment after it, which
+a previous round answered and a person has not; that one is counted as awaiting
+the person and never disputed twice. A disputed thread a person DID answer is
+back on the list, the person's words with it (#259: the answer used to re-run a
+check; now it feeds the round). The label itself is checked by the workflow's
+gate, not here: this program is told the mode and derives the list.
 """
 from __future__ import annotations
 
@@ -44,6 +46,9 @@ import os
 import pathlib
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the one reading of "is this dispute answered"
 
 THREADS_QUERY = """
 query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
@@ -176,8 +181,13 @@ def classify_all(thread: dict, allowed: set[str], vocabulary: dict, approver: st
     if first is None:
         return reason, None
     marker = vocabulary["dispute_marker"]
-    if any(marker in (c.get("body") or "") for c in thread["comments"]["nodes"][1:]):
+    replies = thread["comments"]["nodes"][1:]
+    if conveyor.unanswered_after_marker(replies, marker):
         return "disputed by a previous round, awaiting the person", None
+    if any(conveyor.carries_marker(c.get("body") or "", marker) for c in replies):
+        # A PERSON ANSWERED THE DISPUTE: their latest words ride with the item.
+        answer = next((c.get("body", "") for c in reversed(replies) if conveyor.is_person(c.get("author"))), "")
+        return "accepted, a person answered the dispute", item_for(thread, first, approver, answer)
     return "accepted", item_for(thread, first, approver, "")
 
 

@@ -226,7 +226,7 @@ comment acts on everything accepted:
 | the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
 | the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. It STARTS A SESSION (`remote-implement.yml`, the same fire as implement, `archive-change.md`) that archives on the branch and opens the archive pull request with `Closes #<n>`, unlabelled; the loop drives that pull request to mergeable and a person merges it. Only the OPSX LANE has this station, bound to an openspec change (`remote-session.md`) — the PLAIN LANE, implemented straight from the issue, ends its line at the merge |
 | a `station:<x>` LABEL | the ISSUE | STATE, NOT A GRANT — which station the line is at: `implement`, `fix`, `merge`, `stalled`, `archive`, `done`. Moved by the workflow performing the transition (`conveyor-state.py`), one value at a time, read by nobody but people. Removing one changes nothing. `stalled` is set by `carry.py` itself when a merge lands with nothing to carry the line onward — the ordinary `station:merge` label would otherwise describe a precondition ("mergeable, waits for a person") that the merge has already made false |
-| a `loop:<x>` LABEL | a pull request | STATE, NOT A GRANT — what the fixing loop is doing: `running` (a round started), `stalled` (it stopped for you: a dispute, no report, or a fixer that could not run), `capped`, `mergeable` (`ci` green on the head). Same rules |
+| a `loop:<x>` LABEL | a pull request | STATE, NOT A GRANT — what the fixing loop is doing: `running` (a round started), `waiting` (a person is owed an answer: every item left is a dispute, or a thread is open), `stalled` (the machine stopped on its own: no report, a fixer that failed or timed out, a stale patch, no next round), `capped`, `mergeable` (`ci` green on the head). Same rules. `waiting` and `stalled` were one label until #259, where `stalled` beside a red pull request and a "clean" summary told nobody whether the loop had given up or was waiting on them |
 | the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
 | a reply under `<!-- conveyor:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
 
@@ -281,13 +281,24 @@ every start, never trusting that a workflow placed it before.
   - **The prompt names the work list, the report and a scratch directory by
     their REAL PATHS**, under `$RUNNER_TEMP/dispatch/`. The helpers existed
     because it said `$WORK_LIST`, which a model with no shell cannot expand.
-- **A RED `ci-green` STARTS A ROUND TOO, AND A FAILED CHECK IS A WORK ITEM.**
-  Under the label, `review-dispatch.yml` also runs on a `ci` run that COMPLETED
-  WITH `failure`, and `collect` reads the head's failed required checks
-  (`failed-checks.py`, under `actions: read` — that job alone, where no model
+- **A RED PULL REQUEST IS THE LOOP'S TO FIX, AND EVERY FAILED CHECK IS A WORK
+  ITEM.** Under the label, `review-dispatch.yml` also runs on a `ci` run that
+  COMPLETED — `success` or `failure` — and `collect` reads the head's failed
+  required checks (`failed-checks.py`, under `actions: read`, where no model
   runs). Which checks count is read from `ci-green`'s own `needs:`, never
   restated; the review's jobs and `ci-green` itself are excluded, the one being
-  another reviewer and the other the aggregate.
+  another reviewer and the other the aggregate. NO OTHER CHECK IS EXEMPT: the
+  loop's own dispute guard used to make `docs-task` red and be exempted as
+  "waiting", and on #259 that red was one no fixer could clear, so the loop
+  ended beside a blocked pull request. The guard left CI (below).
+  - **A ROUND STARTS ONLY ON A HEAD WHOSE CI RUN AND REVIEW RUN HAVE BOTH
+    CONCLUDED** (`conveyor.round_may_start`, asked by `dispatch-gate.py`
+    through `gh run list --commit`). Whichever concludes second starts it. A
+    label or a hand run placed mid-run is deferred with one notice per head,
+    and `failed-checks.py` reports the checks consulted only once every
+    required check run has COMPLETED — a check run exists queued from the
+    moment its run starts, so on #259 "every job has a check run" was true 38
+    seconds into a ten-minute run and the summary said "0 failures".
   - **The fixer REPRODUCES a check before fixing it**, with the job's own
     command, and re-runs it before the patch is cut. A failure the tree does
     not explain — an outage, a rate limit, a flake — is DISPUTED with the log's
@@ -303,10 +314,13 @@ every start, never trusting that a workflow placed it before.
   - **A fixed check gets no reply.** There is no thread to reply in, and the
     check's next run on the landed commit is its verdict; the round's summary
     is where it is accounted for.
-  - **Two starts for one head run in SEQUENCE**, serialised by the existing
-    `concurrency` group — the review's completion and CI's failure — each
-    collecting the live state, both counting toward `max_rounds`
-    (`.github/review-triage.json`).
+  - **One start per head**, by whichever run concludes second. Two starts for
+    one head used to run in sequence, each counting toward `max_rounds`, and
+    the first read a CI run that had not spoken.
+  - **A CHECK AN EARLIER ROUND DISPUTED IS NOT DISPUTED TWICE.** Its dispute
+    comment names it in a hidden line (`<!-- conveyor:disputed-item check:<job> -->`),
+    `failed-checks.py` reports it as AWAITING the person rather than as work,
+    and a person's later comment makes it work again.
 - **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
   is the feature: a finding nobody accepted and nobody dismissed is a decision
   still owed.
@@ -354,17 +368,34 @@ every start, never trusting that a workflow placed it before.
     label to `stalled` if it lied.
   - This is STATE, never a check's verdict — the same distinction that
     keeps `review-not-clean.py` out of `ci-green`.
-- **A PERSON'S REPLY RE-RUNS THE CHECK THAT READS IT.** `docs-task` fails
-  while a dispute the loop posted has no answer from a person
-  (`autofix-guard.py`), and a reply is that answer — but a comment starts no
-  `ci`. `dispute-answered.yml` listens on `issue_comment` and
-  `pull_request_review_comment`, and on a non-bot comment on a pull request
-  carrying `conveyor:fix` re-runs the FAILED `docs-task` job of the head's
-  own `ci` run (`rerun-ci-job.py`), so `ci-green` re-evaluates in the merge
-  box with no push and no hand re-run. On green, `open` marks the head
-  mergeable, and on red the loop's `ci failure` trigger starts the next
-  round. This is the manual step #220 still needed after everything else
-  was fixed.
+- **NO CHECK READS A PERSON'S ANSWER. A PERSON'S COMMENT STARTS A ROUND.**
+  `docs-task` used to fail while a dispute the loop posted had no answer
+  (`autofix-guard.py --purpose ci`), and `dispute-answered.yml` re-ran it on
+  the person's comment (`rerun-ci-job.py`). Both are RETIRED (#259): the
+  check was a red no fixer could clear, so the loop stopped on its own
+  refusal while the open thread already held the merge, live, through branch
+  protection. Now `review-dispatch.yml` runs on every PERSON's comment (never
+  a bot's — the loop's own replies arrive on the same event), and the gate
+  starts a round when the pull request carries `conveyor:fix` and
+  `loop:waiting`. The round re-reads the threads (`accepted-findings.py`): a
+  disputed thread a person answered is back on the work list, their words
+  with it, and one nobody answered stays awaiting.
+  - **A RESOLVED THREAD FIRES NO EVENT**, so `conveyor-sweep.yml` reads every
+    `loop:waiting` pull request every fifteen minutes (`conveyor-sweep.py`,
+    no model, `actions: write` for the one dispatch) and starts a round once
+    no dispute is unanswered. That is the dismissal the triage table
+    advertises, and nothing else could hear it.
+- **A FAILED FIX IS NOT A DISPUTE, AND A ROUND THAT LANDS NOTHING STARTS THE
+  NEXT ONE.** An item the report claims fixed while the patch touches nothing
+  that could fix it is UNADDRESSED, with that reason in the summary, no thread
+  reply, and eligible again. On #259 the landing step posted it as a dispute,
+  and the loop then waited for a person to answer a question the fixing step
+  never asked. A round that fixed nothing while items remain eligible
+  (`unaddressed`, `stale patch`) counts, posts its summary, and dispatches
+  the next round itself (`land`, `actions: write`, `review-dispatch.yml`
+  only — never `ci.yml`, whose dispatched checks never reach the merge box).
+  A dispatch that fails is the ending `could not start the next round`,
+  `stalled`. The bound is the only brake, and that is the ceiling's job.
 - **A DEAD FIXING JOB IS A ROUND TOO.** `land` runs when `fix` FAILED, and
   posts the ending `fixing step failed` with the run linked, counting no
   round and disputing nothing; the loop label says `stalled`. It was skipped,
@@ -385,9 +416,9 @@ every start, never trusting that a workflow placed it before.
 - **`/opsx:archive` IS REFUSED WHILE THE LOOP IS OPEN** — a round running, or
   a dispute no person has answered. `autofix-guard.py` (the script keeps its
   original filename. It reads `approve_label` — `conveyor:fix` — from the
-  vocabulary file rather than a hardcoded name), in the same hook as
-  the documentation gate and the same CI job. It fails open on anything it
-  cannot read.
+  vocabulary file rather than a hardcoded name), in the same hook as the
+  documentation gate. IT IS THE HOOK'S ALONE: no CI job asks it, since #259.
+  It fails open on anything it cannot read.
 
 ### THE LINE IS ONE STATE MACHINE, AND EVERY PROGRAM ASKS IT
 
@@ -402,9 +433,10 @@ changed one copy of a rule and left the others.
 |---|---|
 | `standing_grant`, `carry_fix`, `carry_archive` | `carry.py`, from `remote-implement.yml`'s `open` and `archive` jobs |
 | `fire` | `remote-implement.py` |
-| `gate` | `dispatch-gate.py`, the whole gate of `review-dispatch.yml` |
+| `gate`, `round_may_start` | `dispatch-gate.py`, the whole gate of `review-dispatch.yml` |
 | `ending`, `check_is_work`, `cap_for` | `land-dispatch.py`, `failed-checks.py` |
-| `guard` | `autofix-guard.py`, with `--purpose ci` or `--purpose archive` |
+| `guard` | `autofix-guard.py`, the archive hook alone |
+| `unanswered_after_marker` | `autofix-guard.py`, `accepted-findings.py`, `failed-checks.py`, `conveyor-sweep.py` — one reading of "is this dispute answered" |
 | `recover`, `refresh` | `recover-loop-state.py`, `refresh-loop-state.py` |
 
 - **A PROGRAM IS AN ADAPTER.** It gathers facts, asks, and does what the answer

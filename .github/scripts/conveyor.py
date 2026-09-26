@@ -35,6 +35,13 @@ below was one copy patched while its twin was not:
         station on an issue whose change had already merged.
   also  nothing enforced the cap BEFORE a round started: after "round cap
         reached" the pushed commit's review completion started round cap+1.
+  #259  the loop's own dispute guard made `docs-task` red, a check no fixer can
+        clear, and `check_is_work` exempted that red as "waiting"; the dispute
+        itself was one the landing step had inferred from a fix that claimed
+        to land and did not; the loop ended "clean" beside a red pull request
+        under `loop:stalled`, and once the person resolved the thread nothing
+        re-read it. The guard left CI, every red is work, a failed fix stays
+        eligible, and `waiting` is a state of its own.
 
 `conveyor.test.py` enumerates every state and event of both machines and every
 combination of facts each decision reads.
@@ -96,16 +103,17 @@ def _station_table() -> dict:
 
 STATION_TABLE = _station_table()
 
-LOOP_STATES = ("none", "running", "stalled", "capped", "mergeable")
+LOOP_STATES = ("none", "running", "waiting", "stalled", "capped", "mergeable")
 LOOP_EVENTS = (
     "round:start",       # a round begins
-    "end:continue",      # a round landed a commit: CI and the review run again
+    "end:continue",      # a round landed a commit, or started the next round itself: the loop goes on
     "end:mergeable",     # a round found nothing left and the head is green
-    "end:stalled",       # a round ended for a person: disputes, no report, failure, timeout, a thread
+    "end:waiting",       # a round ended with a person's answer owed: every item left is a dispute, or a thread is open
+    "end:stalled",       # a round ended on its own: no report, the fixer failed or timed out, a stale patch, no next round
     "end:capped",        # the round counted and reached the ceiling
     "ci:green_clean",    # CI succeeded and no review thread is open
     "thread:opened",     # a review-authored thread is unresolved
-    "recover:stalled",   # a superseded round left `running` behind and a thread is open
+    "recover:waiting",   # a superseded round left `running` behind and a thread is open
     "recover:capped",    # ...and the rounds used exceed the ceiling
 )
 
@@ -116,17 +124,22 @@ def _loop_table() -> dict:
         t[(s, "round:start")] = "running"
         t[(s, "end:continue")] = "running"
         t[(s, "end:mergeable")] = "mergeable"
+        t[(s, "end:waiting")] = "waiting"
         t[(s, "end:stalled")] = "stalled"
         t[(s, "end:capped")] = "capped"
-    for s in ("none", "stalled", "capped", "mergeable"):
+    for s in ("none", "waiting", "stalled", "capped", "mergeable"):
         # A ROUND OWNS THE LABEL WHILE IT RUNS. `running` skips these two: CI
         # succeeding on an earlier head, or a thread opening, must not overwrite
         # a label whose ending is still to come (measured on #225: the label
         # stuck at `running` on a green PR; and on #226: `mergeable` for an hour
         # after new findings -- each the other side of this one rule).
         t[(s, "ci:green_clean")] = "mergeable"
-    t[("mergeable", "thread:opened")] = "stalled"
-    t[("running", "recover:stalled")] = "stalled"
+    # A THREAD OPENING ON A MERGEABLE HEAD IS A PERSON'S QUESTION, so the label
+    # says `waiting`, never `stalled`: nothing stopped, somebody is owed a look
+    # (#259 measured `stalled` beside a red pull request and a "clean" summary,
+    # and a reader could not tell whether the loop had given up or was waiting).
+    t[("mergeable", "thread:opened")] = "waiting"
+    t[("running", "recover:waiting")] = "waiting"
     t[("running", "recover:capped")] = "capped"
     return t
 
@@ -213,6 +226,36 @@ def count_marked(comments, marker: str, since: str = "") -> int:
     THE ONE COUNTER: the gate, the landing and the recovery all count rounds and grants with it."""
     return sum(1 for c in comments
                if marker in (c.get("body") or "") and (not since or (c.get("created_at") or "") >= since))
+
+
+def is_person(author: dict | None) -> bool:
+    """A comment author as the API reports it: anything but a Bot."""
+    return bool(author) and author.get("__typename") != "Bot"
+
+
+def carries_marker(body: str, marker: str) -> bool:
+    """True when `marker` appears as its OWN LINE, never merely somewhere in the
+    text. Every dispute comment the landing step posts writes the marker as the
+    first line -- a bare substring test also matches a comment that only
+    MENTIONS the marker in prose. Measured live on #220, 2026-09-19: a
+    maintainer's own reply QUOTED an earlier comment that named the marker inside
+    backticks, and the substring test read that quoted mention as a fresh,
+    unanswered dispute the reply had itself just filed."""
+    return any(line.strip() == marker for line in (body or "").splitlines())
+
+
+def unanswered_after_marker(comments, marker: str) -> bool:
+    """True when a comment carries the marker (as its own line) and no PERSON
+    commented after it. THE ONE READING OF "IS THIS DISPUTE ANSWERED": the
+    archive guard, the thread collector and the sweep all ask it here, so a
+    dispute cannot be answered for one of them and open for another."""
+    disputed_at = None
+    for i, c in enumerate(comments):
+        if carries_marker(c.get("body") or "", marker):
+            disputed_at = i
+    if disputed_at is None:
+        return False
+    return not any(is_person(c.get("author")) for c in comments[disputed_at + 1:])
 
 
 def is_finished(tasks_text: str) -> bool:
@@ -393,7 +436,7 @@ def carry_archive(vocab: dict, pr: PullRequest, line: Line, placer: Placer | Non
 
 @dataclass(frozen=True)
 class Trigger:
-    event: str                      # labeled | comment | review_completed | ci_failed | dispatch
+    event: str                      # labeled | comment | review_completed | ci_completed | dispatch
     sender: Placer = Placer(WORKFLOW_BOT, bot=True)
     label: str = ""                 # for `labeled`
     comment_is_dispatch: bool = False
@@ -424,20 +467,30 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
     ceiling, or while `conveyor:keep-going` stands to extend it.
     """
     fix, keep = vocab["approve_label"], vocab["keep_going_label"]
+    waiting = vocab.get("loop_labels", {}).get("waiting", "loop:waiting")
     if pr.fork:
         return Decision("refuse", "the pull request comes from a fork, and a dispatch only lands on a branch "
                         "of this repository")
 
+    answered = False
     if trigger.event == "comment":
-        if not trigger.comment_is_dispatch:
+        if trigger.comment_is_dispatch:
+            if not trigger.sender.may_push:
+                return Decision("refuse", f"write access is required to dispatch a fix, and "
+                                f"@{trigger.sender.login} has `{trigger.sender.permission}`")
+            return Decision("threads", f"dispatch by @{trigger.sender.login}")
+        # A PERSON'S COMMENT ON A WAITING PULL REQUEST IS THE ANSWER THE LOOP WAITED FOR.
+        # It starts a round, in the person's own words, with no token to type: the round
+        # re-reads the disputed threads and finds the ones a person answered. Only while
+        # the loop is WAITING, so a conversation on a running or capped pull request spends
+        # nothing. No check reads the answer any more (#259): the round does.
+        if trigger.sender.bot or waiting not in pr.labels or fix not in pr.labels:
             return Decision("none", "not a dispatch")
-        if not trigger.sender.may_push:
-            return Decision("refuse", f"write access is required to dispatch a fix, and "
-                            f"@{trigger.sender.login} has `{trigger.sender.permission}`")
-        return Decision("threads", f"dispatch by @{trigger.sender.login}")
+        answered = True
 
-    completion = trigger.event in ("review_completed", "ci_failed")
-    carried = (trigger.sender.bot and trigger.event in ("labeled", "dispatch")) or (completion and trigger.label_carried)
+    completion = trigger.event in ("review_completed", "ci_completed")
+    carried = ((trigger.sender.bot and trigger.event in ("labeled", "dispatch"))
+               or ((completion or answered) and trigger.label_carried))
     if trigger.event == "labeled" and trigger.sender.bot and trigger.label != fix:
         return Decision("refuse", f"the workflow carries `{fix}` and nothing else, and it placed `{trigger.label}`",
                         remove_label=trigger.label)
@@ -448,7 +501,7 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
             return Decision("refuse", "a round was to start on a grant the workflow carried, and re-checking the "
                             "issue found none standing for this pull request's fix station",
                             remove_label=trigger.label if trigger.event == "labeled" else fix,
-                            loop_event="end:stalled" if completion else "")
+                            loop_event="end:stalled" if (completion or answered) else "")
     elif trigger.event == "labeled" and not trigger.sender.may_push:
         return Decision("refuse", f"write access is required to place `{trigger.label}`, and "
                         f"@{trigger.sender.login} cannot push here", remove_label=trigger.label)
@@ -463,47 +516,78 @@ def gate(vocab: dict, trigger: Trigger, pr: PullRequest, line: Line, grant_place
     if pr.rounds_used >= cap and keep not in pr.labels:
         return Decision("none", f"the loop reached its bound: {pr.rounds_used} of {cap} rounds used. "
                         f"`{keep}` grants another {pr.max_rounds}", loop_event="end:capped")
-    return Decision("round", "a round starts over everything open", loop_event="round:start",
-                    station_event="round:start")
+    return Decision("round", "a person answered on a waiting pull request, so a round starts over everything open"
+                    if answered else "a round starts over everything open",
+                    loop_event="round:start", station_event="round:start")
+
+
+def round_may_start(ci: str, review: str) -> Decision:
+    """A round was asked for on a head. May it start NOW, or does it wait for a run.
+
+    `ci` and `review` are what the head's CI run and review run are doing:
+    `running` (queued or in progress), `done` (concluded, whatever the
+    conclusion) or `none` (no such run exists for the head). Actions: `start`,
+    `defer` (with the reason).
+
+    A ROUND READS THE WHOLE HEAD OR IT READS A LIE. On #259 a round collected 38
+    seconds into a ten-minute CI run: every required job had a check run
+    (created queued at run start), so the checks read as consulted and the
+    summary said "0 failures" over jobs that had not spoken. A run that does
+    not exist is not waited for -- a head the review skips would otherwise
+    never start a round at all.
+    """
+    for what, state in (("CI", ci), ("the review", review)):
+        if state not in ("running", "done", "none"):
+            raise ValueError(f"{what}: unknown run state {state!r}")
+    running = [what for what, state in (("CI", ci), ("the review", review)) if state == "running"]
+    if running:
+        return Decision("defer", f"{' and '.join(running)} {'is' if len(running) == 1 else 'are'} still running on "
+                        "the head; the completion starts the round")
+    return Decision("start", "the head's runs have concluded")
 
 
 # ---- the guard -------------------------------------------------------------------------------
 
-def guard(vocab: dict, purpose: str, pr: PullRequest, running_rounds: int, unanswered_disputes: int) -> Decision:
-    """`ci`: the documentation check's question. `archive`: the archive command's.
+def guard(vocab: dict, pr: PullRequest, running_rounds: int, unanswered_disputes: int) -> Decision:
+    """The archive command's question: may this change be archived now.
 
     Actions: `allow`, `refuse`.
 
-    A CHECK NEVER CARRIES THE LOOP'S OWN STATE. Whether a round is running is
-    moved by the loop, and a check reporting it red is a red the loop made,
-    which starts the next round (#248). The check asks one thing: is a dispute
-    the loop posted waiting for a person. The archive command asks both, since
-    it acts on the branch a round may push to.
+    NO CHECK CARRIES THE LOOP'S OWN STATE, AND THIS IS NOT A CHECK. Whether a
+    round is running and whether a dispute is answered are both the loop's own
+    conversation. A check reporting the first red started the next round (#248).
+    A check reporting the second red was a red no fixer could clear, so the loop
+    stopped on its own refusal with the pull request blocked (#259) -- while the
+    open thread already held the merge, live, through branch protection. The
+    `ci` purpose this function used to have is gone with that check. The archive
+    command still asks both questions, since it acts on the branch a round may
+    push to and folds disputed work into the published contract.
     """
-    if purpose not in ("ci", "archive"):
-        raise ValueError(f"guard purpose {purpose!r}")
     if pr.state != "OPEN":
         return Decision("allow", f"the pull request is {pr.state.lower()}; no loop can run on it")
     if vocab["approve_label"] not in pr.labels:
         return Decision("allow", f"the pull request does not carry `{vocab['approve_label']}`; nothing to wait for")
     reasons = []
-    if purpose == "archive" and running_rounds:
+    if running_rounds:
         reasons.append("a fixing round is still running")
     if unanswered_disputes:
         reasons.append("the fixing step disputed a finding and no person has answered")
     if reasons:
         return Decision("refuse", "; ".join(reasons))
-    return Decision("allow", "no dispute is waiting" + ("" if purpose == "ci" else " and no round is running"))
+    return Decision("allow", "no dispute is waiting and no round is running")
 
 
 # ---- the endings -----------------------------------------------------------------------------
 
-ENDINGS = ("landed", "clean", "timed out", "failed", "no report", "disputed", "stale patch", "waiting")
+ENDINGS = ("landed", "clean", "timed out", "failed", "no report", "disputed", "unaddressed", "stale patch",
+           "no next round")
 NO_MODEL_RAN = ("clean", "failed")   # the two endings that spent no model: nothing was accepted / the job never started
+RETRIES = ("unaddressed", "stale patch")   # nothing landed and items are still eligible: the round starts the next itself
 
 
 def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_on_person: bool = False) -> Decision:
-    """A round ended. The loop event, and whether the round counted.
+    """A round ended. The loop event, whether the round counted, and whether it
+    starts the next round itself.
 
     `number` is this round's number and `cap` the current ceiling.
 
@@ -514,6 +598,17 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
     no model ran spends nothing: a clean one (nothing was accepted, so the
     fixing job was skipped) and a fixing job that failed before starting. A
     counted round that reaches the ceiling ends the loop.
+
+    THREE WAYS TO END BELOW THE CEILING, AND THE LABEL NAMES WHICH:
+      continue   something landed, or nothing landed while items are still
+                 eligible (`unaddressed`, `stale patch`): the loop goes on, and
+                 in the second case the round starts the next one itself
+                 (`dispatch_round`), since no push will. A failed fix is not a
+                 decision (#259: one became a dispute a person had to answer).
+      waiting    nothing is left but disputes the fixing step made, or a thread
+                 is open: a person is owed an answer, and the label says so.
+      stalled    the machine stopped on its own: no report, the fixer failed or
+                 timed out, or the next round could not be started.
     """
     if kind not in ENDINGS:
         raise ValueError(f"unknown ending {kind!r}")
@@ -522,24 +617,31 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
         return Decision("capped", f"{cap} rounds have run", loop_event="end:capped", counted=True)
     if kind == "landed":
         return Decision("continue", "the push starts CI and the review", loop_event="end:continue", counted=True)
+    if kind in RETRIES:
+        return Decision("continue", f"the round ended: {kind}, and items are still eligible, so the next round "
+                        "starts now", loop_event="end:continue", counted=True, dispatch_round=True)
     if kind == "clean":
         if thread_open or waiting_on_person:
-            return Decision("stalled", "nothing to fix, but a person's answer is waited on", loop_event="end:stalled")
+            return Decision("waiting", "nothing to fix, but a person's answer is waited on", loop_event="end:waiting")
         return Decision("mergeable", "nothing left and the head is green", loop_event="end:mergeable")
+    if kind == "disputed":
+        return Decision("waiting", "every item left is a dispute, and a person is owed an answer",
+                        loop_event="end:waiting", counted=True)
     return Decision("stalled", f"the round ended: {kind}", loop_event="end:stalled", counted=counted)
 
 
 # ---- failed checks ---------------------------------------------------------------------------
 
-def check_is_work(job: str, conclusion: str, failed_steps, guard_step: str, required) -> Decision:
+def check_is_work(job: str, conclusion: str, required) -> Decision:
     """A check run on the head. Is it something a fixer may act on.
 
-    Actions: `skip` (with the reason), `waiting`, `work`.
+    Actions: `skip` (with the reason), `work`.
 
-    A RED MADE ONLY OF THE LOOP'S OWN GUARD IS NOT WORK. The documentation check
-    failing on an unanswered dispute waits for the person it names, and no
-    fixer can answer for them; it is `waiting`, so the round's ending says what
-    it waits on rather than calling the head clean.
+    EVERY FAILED REQUIRED CHECK IS WORK, WITH NO EXEMPTION. There used to be a
+    third answer, `waiting`, for a documentation check that failed only on the
+    loop's own dispute guard. That guard is no longer a check (#259: it made a
+    red no fixer could clear, and the exemption hid a failed fix behind it), so
+    the answer went with it. A red pull request is the loop's to fix.
     """
     name = job.split(" (", 1)[0].strip()
     if name == "ci-green":
@@ -548,9 +650,6 @@ def check_is_work(job: str, conclusion: str, failed_steps, guard_step: str, requ
         return Decision("skip", "not a required check")
     if conclusion != "failure":
         return Decision("skip", f"concluded {conclusion or 'nothing'}")
-    steps = [s for s in failed_steps if s]
-    if guard_step and steps and all(s == guard_step for s in steps):
-        return Decision("waiting", "failed only on the loop's own guard: a dispute waits for a person")
     return Decision("work", "a failed required check")
 
 
@@ -563,7 +662,7 @@ def recover(current: str, rounds_used: int, cap: int, thread_open: bool) -> str:
     if rounds_used >= cap:
         return "recover:capped"
     if thread_open:
-        return "recover:stalled"
+        return "recover:waiting"
     return ""
 
 
@@ -600,9 +699,11 @@ def _decide(vocab: dict, name: str, facts: dict) -> dict:
         t = dict(facts["trigger"]); t["sender"] = _placer(t.get("sender", {"login": WORKFLOW_BOT, "bot": True}))
         d = gate(vocab, Trigger(**t), _build(PullRequest, facts.get("pr")), _build(Line, facts.get("line")), _placer(facts.get("grant_placer")))
     elif name == "guard":
-        d = guard(vocab, facts["purpose"], _build(PullRequest, facts.get("pr")), facts.get("running_rounds", 0), facts.get("unanswered_disputes", 0))
+        d = guard(vocab, _build(PullRequest, facts.get("pr")), facts.get("running_rounds", 0), facts.get("unanswered_disputes", 0))
     elif name == "ending":
         d = ending(facts["kind"], facts["number"], facts["cap"], facts.get("thread_open", False), facts.get("waiting_on_person", False))
+    elif name == "round_may_start":
+        d = round_may_start(facts.get("ci", "none"), facts.get("review", "none"))
     else:
         raise ValueError(f"no decision {name!r}")
     return asdict(d)
@@ -614,7 +715,7 @@ def main(argv=None) -> int:
                     default=pathlib.Path(__file__).resolve().parents[1] / "review-triage.json")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("decide", help="read facts as JSON on stdin, print the Decision as JSON")
-    d.add_argument("decision", choices=["fire", "carry_fix", "carry_archive", "gate", "guard", "ending"])
+    d.add_argument("decision", choices=["fire", "carry_fix", "carry_archive", "gate", "guard", "ending", "round_may_start"])
     n = sub.add_parser("next", help="print the state after an event, or the state unchanged when the event skips")
     n.add_argument("machine", choices=["station", "loop"])
     n.add_argument("state")

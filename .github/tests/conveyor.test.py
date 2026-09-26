@@ -101,25 +101,35 @@ class TheLoopMachine(unittest.TestCase):
     def test_an_ending_sets_its_state_from_anywhere(self):
         for s in c.LOOP_STATES:
             self.assertEqual("mergeable", c.loop_next(s, "end:mergeable"))
+            self.assertEqual("waiting", c.loop_next(s, "end:waiting"))
             self.assertEqual("stalled", c.loop_next(s, "end:stalled"))
             self.assertEqual("capped", c.loop_next(s, "end:capped"))
             self.assertEqual("running", c.loop_next(s, "end:continue"))
             self.assertEqual("running", c.loop_next(s, "round:start"))
 
-    def test_226_a_new_thread_demotes_only_a_mergeable_label(self):
-        self.assertEqual("stalled", c.loop_next("mergeable", "thread:opened"))
-        for s in ("none", "stalled", "capped"):
+    def test_226_a_new_thread_demotes_only_a_mergeable_label_and_to_waiting(self):
+        # #259: a thread on a mergeable head is a person's question, so the label says waiting, not stalled
+        self.assertEqual("waiting", c.loop_next("mergeable", "thread:opened"))
+        for s in ("none", "waiting", "stalled", "capped"):
             self.assertIsNone(c.loop_next(s, "thread:opened"))
 
     def test_225_a_green_clean_ci_cannot_leave_running_stuck_and_cannot_overwrite_it(self):
-        for s in ("none", "stalled", "capped", "mergeable"):
+        for s in ("none", "waiting", "stalled", "capped", "mergeable"):
             self.assertEqual("mergeable", c.loop_next(s, "ci:green_clean"))
         self.assertIsNone(c.loop_next("running", "ci:green_clean"))
 
     def test_recovery_only_corrects_a_running_label(self):
         for s in c.LOOP_STATES:
-            for e, want in (("recover:stalled", "stalled"), ("recover:capped", "capped")):
+            for e, want in (("recover:waiting", "waiting"), ("recover:capped", "capped")):
                 self.assertEqual(want if s == "running" else None, c.loop_next(s, e))
+
+    def test_259_waiting_and_stalled_are_told_apart_by_what_ended_the_round(self):
+        # waiting: a person is owed an answer. stalled: the machine stopped on its own.
+        self.assertEqual("waiting", c.loop_next("running", "end:waiting"))
+        self.assertEqual("stalled", c.loop_next("running", "end:stalled"))
+        # a waiting loop is left by a round starting (a comment, the sweep) or a green clean head
+        leaving = {e for e in c.LOOP_EVENTS if c.loop_next("waiting", e) not in (None, "waiting")}
+        self.assertEqual({"round:start", "end:continue", "end:mergeable", "end:stalled", "end:capped", "ci:green_clean"}, leaving)
 
     def test_every_state_is_reachable(self):
         seen, frontier = {"none"}, ["none"]
@@ -133,11 +143,12 @@ class TheLoopMachine(unittest.TestCase):
 
     def test_capped_is_left_only_by_a_new_round_or_a_green_clean_head(self):
         leaving = {e for e in c.LOOP_EVENTS if c.loop_next("capped", e) not in (None, "capped")}
-        self.assertEqual({"round:start", "end:continue", "end:mergeable", "end:stalled", "ci:green_clean"}, leaving)
+        self.assertEqual({"round:start", "end:continue", "end:mergeable", "end:waiting", "end:stalled", "ci:green_clean"}, leaving)
 
     def test_a_full_fixing_loop_walk(self):
-        walk = [("none", "ci:green_clean", "mergeable"), ("mergeable", "thread:opened", "stalled"),
-                ("stalled", "round:start", "running"), ("running", "end:continue", "running"),
+        walk = [("none", "ci:green_clean", "mergeable"), ("mergeable", "thread:opened", "waiting"),
+                ("waiting", "round:start", "running"), ("running", "end:continue", "running"),
+                ("running", "end:waiting", "waiting"), ("waiting", "round:start", "running"),
                 ("running", "end:stalled", "stalled"), ("stalled", "round:start", "running"),
                 ("running", "end:capped", "capped"), ("capped", "round:start", "running"),
                 ("running", "end:mergeable", "mergeable")]
@@ -336,7 +347,7 @@ class TheGate(unittest.TestCase):
     def test_a_completion_on_a_carried_label_re_checks_the_grant_so_removing_it_stops_the_loop(self):
         """The stop button: take `conveyor:run` off the issue and the next start refuses, removes the carried label and stalls."""
         pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=248)
-        for event in ("review_completed", "ci_failed"):
+        for event in ("review_completed", "ci_completed"):
             standing = c.gate(V, c.Trigger(event, label_carried=True), pr, c.Line(frozenset({RUN})), WRITER)
             withdrawn = c.gate(V, c.Trigger(event, label_carried=True), pr, c.Line(frozenset()), None)
             lost_write = c.gate(V, c.Trigger(event, label_carried=True), pr, c.Line(frozenset({RUN})), READER)
@@ -346,7 +357,7 @@ class TheGate(unittest.TestCase):
 
     def test_a_completion_on_a_label_a_PERSON_placed_needs_no_grant(self):
         pr = c.PullRequest(True, "OPEN", frozenset({FIX}), refs=248)
-        for event in ("review_completed", "ci_failed"):
+        for event in ("review_completed", "ci_completed"):
             self.assertEqual("round", c.gate(V, c.Trigger(event, label_carried=False), pr, c.Line(), None).action)
 
     def test_a_hand_run_in_threads_mode_needs_no_label_and_in_all_mode_needs_the_label_and_the_bound(self):
@@ -374,7 +385,7 @@ class TheGate(unittest.TestCase):
         for labels, state, used in itertools.product((frozenset(), frozenset({FIX}), frozenset({FIX, KEEP})),
                                                      ("OPEN", "MERGED", "CLOSED"), (0, 4, 5, 6)):
             pr = c.PullRequest(True, state, labels, refs=7, rounds_used=used, max_rounds=5)
-            for event in ("review_completed", "ci_failed"):
+            for event in ("review_completed", "ci_completed"):
                 d = c.gate(V, c.Trigger(event), pr, c.Line(), None)
                 with self.subTest(labels=sorted(labels), state=state, used=used, event=event):
                     if state != "OPEN" or FIX not in labels:
@@ -410,6 +421,29 @@ class TheGate(unittest.TestCase):
         self.assertEqual("threads", c.gate(V, c.Trigger("comment", WRITER, comment_is_dispatch=True), pr, c.Line(), None).action)
         self.assertEqual("refuse", c.gate(V, c.Trigger("comment", READER, comment_is_dispatch=True), pr, c.Line(), None).action)
 
+    def test_259_a_persons_comment_on_a_WAITING_pull_request_starts_a_round(self):
+        waiting = V["loop_labels"]["waiting"]
+        on_waiting = c.PullRequest(True, "OPEN", frozenset({FIX, waiting}), refs=7)
+        comment = lambda who: c.Trigger("comment", who, comment_is_dispatch=False)
+        d = c.gate(V, comment(WRITER), on_waiting, c.Line(), None)
+        self.assertEqual(("round", "round:start"), (d.action, d.loop_event))
+        # any person: the answer is theirs to give in their own words, and the round re-reads the threads
+        self.assertEqual("round", c.gate(V, comment(READER), on_waiting, c.Line(), None).action)
+        # never a bot's comment, never a loop that is not waiting, never without the fix label
+        self.assertEqual("none", c.gate(V, comment(BOT), on_waiting, c.Line(), None).action)
+        for labels in (frozenset({FIX}), frozenset({FIX, V["loop_labels"]["running"]}),
+                       frozenset({FIX, V["loop_labels"]["capped"]}), frozenset({waiting})):
+            pr = c.PullRequest(True, "OPEN", labels, refs=7)
+            self.assertEqual("none", c.gate(V, comment(WRITER), pr, c.Line(), None).action, sorted(labels))
+        # a carried label is re-checked on this path as on every other
+        carried = c.Trigger("comment", WRITER, comment_is_dispatch=False, label_carried=True)
+        self.assertEqual("round", c.gate(V, carried, on_waiting, c.Line(frozenset({RUN})), WRITER).action)
+        gone = c.gate(V, carried, on_waiting, c.Line(frozenset()), None)
+        self.assertEqual(("refuse", FIX, "end:stalled"), (gone.action, gone.remove_label, gone.loop_event))
+        # the bound still holds
+        capped = c.PullRequest(True, "OPEN", frozenset({FIX, waiting}), refs=7, rounds_used=5, max_rounds=5)
+        self.assertEqual("none", c.gate(V, comment(WRITER), capped, c.Line(), None).action)
+
     def test_254_the_archive_pull_request_under_the_archive_grant_alone(self):
         pr = c.PullRequest(True, "OPEN", frozenset({FIX}), closes=245)
         line = c.Line(frozenset({ARCH, "opsx:archived"}), "opsx", change_finished=True)
@@ -424,27 +458,34 @@ class TheGate(unittest.TestCase):
 
 
 class TheGuard(unittest.TestCase):
-    def test_the_check_never_reads_a_running_round_and_the_archive_command_always_does(self):
+    def test_the_archive_command_refuses_on_a_running_round_or_an_unanswered_dispute(self):
         for labels, state, running, disputes in itertools.product(
                 (frozenset(), frozenset({FIX})), ("OPEN", "MERGED"), (0, 1, 3), (0, 1)):
             pr = c.PullRequest(True, state, labels)
-            ci = c.guard(V, "ci", pr, running, disputes)
-            archive = c.guard(V, "archive", pr, running, disputes)
+            archive = c.guard(V, pr, running, disputes)
             with self.subTest(labels=sorted(labels), state=state, running=running, disputes=disputes):
                 if state != "OPEN" or not labels:
-                    self.assertEqual(("allow", "allow"), (ci.action, archive.action))
+                    self.assertEqual("allow", archive.action)
                     continue
-                self.assertEqual("refuse" if disputes else "allow", ci.action)
                 self.assertEqual("refuse" if (disputes or running) else "allow", archive.action)
-                self.assertNotIn("round", ci.reason)
 
-    def test_248_a_running_round_never_turns_the_check_red(self):
-        pr = c.PullRequest(True, "OPEN", frozenset({FIX}))
-        self.assertEqual("allow", c.guard(V, "ci", pr, running_rounds=3, unanswered_disputes=0).action)
+    def test_259_the_guard_has_no_ci_purpose_any_more(self):
+        # the dispute guard left CI: a check never carries the loop's own conversation
+        with self.assertRaises(TypeError):
+            c.guard(V, "ci", c.PullRequest(), 0, 0)  # noqa: the old four-argument form
 
-    def test_an_unknown_purpose_is_an_error(self):
-        with self.assertRaises(ValueError):
-            c.guard(V, "sometimes", c.PullRequest(), 0, 0)
+    def test_the_dispute_reading_is_one_function_every_reader_shares(self):
+        marker = V["dispute_marker"]
+        bot = {"login": "github-actions", "__typename": "Bot"}
+        person = {"login": "maintainer", "__typename": "User"}
+        disputed = {"body": f"{marker}\nDisputed by the fixing step: no.", "author": bot}
+        self.assertTrue(c.unanswered_after_marker([{"body": "finding", "author": bot}, disputed], marker))
+        self.assertFalse(c.unanswered_after_marker([disputed, {"body": "it is real, fix it", "author": person}], marker))
+        # a bot's later comment is not an answer
+        self.assertTrue(c.unanswered_after_marker([disputed, {"body": "landed", "author": bot}], marker))
+        # a mention of the marker in prose is not a dispute (#220)
+        self.assertFalse(c.unanswered_after_marker([{"body": f"the `{marker}` marker means...", "author": person}], marker))
+        self.assertFalse(c.unanswered_after_marker([], marker))
 
 
 class TheEndings(unittest.TestCase):
@@ -452,16 +493,32 @@ class TheEndings(unittest.TestCase):
         for kind, number, cap, thread, waiting in itertools.product(c.ENDINGS, (1, 3, 5, 6), (5,), (False, True), (False, True)):
             d = c.ending(kind, number, cap, thread, waiting)
             with self.subTest(kind=kind, number=number, thread=thread, waiting=waiting):
-                self.assertIn(d.loop_event, ("end:continue", "end:mergeable", "end:stalled", "end:capped"))
+                self.assertIn(d.loop_event, ("end:continue", "end:mergeable", "end:waiting", "end:stalled", "end:capped"))
                 self.assertEqual(kind not in c.NO_MODEL_RAN, d.counted)
+                # only a retry starts the next round itself, and never at the cap
+                self.assertEqual(kind in c.RETRIES and number < cap, d.dispatch_round)
                 if d.counted and number >= cap:
                     self.assertEqual("end:capped", d.loop_event)
-                elif kind == "landed":
+                elif kind == "landed" or kind in c.RETRIES:
                     self.assertEqual("end:continue", d.loop_event)
                 elif kind == "clean":
-                    self.assertEqual("end:stalled" if (thread or waiting) else "end:mergeable", d.loop_event)
+                    self.assertEqual("end:waiting" if (thread or waiting) else "end:mergeable", d.loop_event)
+                elif kind == "disputed":
+                    self.assertEqual("end:waiting", d.loop_event)
                 else:
                     self.assertEqual("end:stalled", d.loop_event)
+
+    def test_259_a_failed_fix_stays_eligible_and_the_round_starts_the_next_itself(self):
+        for kind in c.RETRIES:
+            d = c.ending(kind, 2, 5)
+            self.assertEqual(("continue", "end:continue", True, True), (d.action, d.loop_event, d.counted, d.dispatch_round), kind)
+        # at the cap the retry ends the loop like every counted round
+        self.assertEqual(("capped", False), (c.ending("unaddressed", 5, 5).action, c.ending("unaddressed", 5, 5).dispatch_round))
+
+    def test_259_only_disputes_left_is_waiting_and_a_machine_stop_is_stalled(self):
+        self.assertEqual(("waiting", "end:waiting"), (c.ending("disputed", 1, 5).action, c.ending("disputed", 1, 5).loop_event))
+        for kind in ("no report", "failed", "timed out", "no next round"):
+            self.assertEqual("end:stalled", c.ending(kind, 1, 5).loop_event, kind)
 
     def test_248_five_timeouts_reach_the_cap(self):
         for n in range(1, 5):
@@ -474,22 +531,22 @@ class TheEndings(unittest.TestCase):
             self.assertFalse(c.ending(kind, 5, 5).counted, kind)
 
     def test_every_round_that_ran_a_model_counts_and_can_reach_the_cap(self):
-        for kind in ("landed", "timed out", "no report", "disputed", "stale patch", "waiting"):
+        for kind in ("landed", "timed out", "no report", "disputed", "unaddressed", "stale patch", "no next round"):
             self.assertTrue(c.ending(kind, 1, 5).counted, kind)
             self.assertEqual("end:capped", c.ending(kind, 5, 5).loop_event, kind)
 
     def test_a_loop_that_only_disputes_is_bounded_too(self):
         # a person's answer restarts the loop each time, and the fifth still ends it
         used = [c.ending("disputed", n, 5) for n in range(1, 6)]
-        self.assertEqual(["end:stalled"] * 4 + ["end:capped"], [d.loop_event for d in used])
+        self.assertEqual(["end:waiting"] * 4 + ["end:capped"], [d.loop_event for d in used])
 
     def test_an_unknown_ending_is_an_error_not_a_state(self):
         with self.assertRaises(ValueError):
             c.ending("vanished", 1, 5)
 
-    def test_226_a_clean_round_with_a_thread_open_is_stalled_never_left_running(self):
+    def test_226_a_clean_round_with_a_thread_open_is_waiting_never_left_running(self):
         d = c.ending("clean", 2, 5, thread_open=True)
-        self.assertEqual("stalled", c.loop_next("running", d.loop_event))
+        self.assertEqual("waiting", c.loop_next("running", d.loop_event))
 
 
 class TheCounters(unittest.TestCase):
@@ -514,24 +571,39 @@ class TheChecks(unittest.TestCase):
     REQUIRED = {"operator", "docs-task", "images"}
 
     def test_which_red_job_is_work(self):
-        guard = "No change is archived while a dispute is unanswered"
         cases = [
-            ("ci-green", "failure", [], "skip"),
-            ("review-clean", "failure", [], "skip"),
-            ("images (manager)", "failure", ["Build"], "work"),
-            ("operator", "success", [], "skip"),
-            ("operator", "cancelled", [], "skip"),
-            ("docs-task", "failure", [guard], "waiting"),
-            ("docs-task", "failure", ["Every change ends in finished tasks"], "work"),
-            ("docs-task", "failure", ["Every change ends in finished tasks", guard], "work"),
-            ("docs-task", "failure", [], "work"),
+            ("ci-green", "failure", "skip"),
+            ("review-clean", "failure", "skip"),
+            ("images (manager)", "failure", "work"),
+            ("operator", "success", "skip"),
+            ("operator", "cancelled", "skip"),
+            ("docs-task", "failure", "work"),
         ]
-        for job, conclusion, steps, want in cases:
-            with self.subTest(job=job, steps=steps):
-                self.assertEqual(want, c.check_is_work(job, conclusion, steps, guard, self.REQUIRED).action)
+        for job, conclusion, want in cases:
+            with self.subTest(job=job, conclusion=conclusion):
+                self.assertEqual(want, c.check_is_work(job, conclusion, self.REQUIRED).action)
 
-    def test_without_a_named_guard_step_nothing_is_waiting(self):
-        self.assertEqual("work", c.check_is_work("docs-task", "failure", ["anything"], "", self.REQUIRED).action)
+    def test_259_a_failed_docs_task_is_work_whatever_step_failed(self):
+        # there is no `waiting` answer any more: the guard that earned it is not a check
+        self.assertEqual("work", c.check_is_work("docs-task", "failure", self.REQUIRED).action)
+        self.assertNotIn("waiting", {c.check_is_work(j, "failure", self.REQUIRED).action for j in self.REQUIRED})
+
+
+class TheStart(unittest.TestCase):
+    def test_259_a_round_starts_only_on_a_head_whose_runs_have_concluded(self):
+        for ci, review in itertools.product(("running", "done", "none"), repeat=2):
+            d = c.round_may_start(ci, review)
+            with self.subTest(ci=ci, review=review):
+                self.assertEqual("defer" if "running" in (ci, review) else "start", d.action)
+        self.assertIn("CI and the review", c.round_may_start("running", "running").reason)
+        self.assertIn("the review is still running", c.round_may_start("done", "running").reason)
+
+    def test_a_run_that_does_not_exist_is_not_waited_for(self):
+        self.assertEqual("start", c.round_may_start("none", "none").action)
+
+    def test_an_unknown_run_state_is_an_error(self):
+        with self.assertRaises(ValueError):
+            c.round_may_start("maybe", "done")
 
 
 class TheCorrections(unittest.TestCase):
@@ -543,7 +615,7 @@ class TheCorrections(unittest.TestCase):
             elif used >= cap:
                 self.assertEqual("recover:capped", event)
             else:
-                self.assertEqual("recover:stalled" if thread else "", event)
+                self.assertEqual("recover:waiting" if thread else "", event)
             if event:
                 self.assertIn(event, c.LOOP_EVENTS)
         for current, thread in itertools.product(c.LOOP_STATES, (False, True)):

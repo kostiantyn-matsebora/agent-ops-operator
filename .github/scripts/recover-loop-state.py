@@ -24,7 +24,7 @@ does -- round and grant COMMENTS since the label was placed, against
 thread is currently open. Three outcomes, decided in this order:
 
   1. Rounds used > cap                    -> `capped`
-  2. A review thread is open               -> `stalled`
+  2. A review thread is open               -> `waiting`
   3. Neither                               -> left alone
 
 Case 3 is deliberate, not a gap. `loop:running` with rounds still available

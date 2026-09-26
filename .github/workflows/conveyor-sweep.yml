@@ -1,0 +1,50 @@
+# THE ONE ANSWER NO EVENT CARRIES. A fixing loop that ended WAITING is resumed by
+# a person's comment (an event `review-dispatch.yml` hears) or by the disputed
+# thread being RESOLVED -- which fires no Actions event at all:
+# `pull_request_review_thread` is a webhook event, and a workflow naming it is
+# refused by the platform (.claude/rules/gotchas.md). Measured on #259: the
+# person resolved the thread and nothing re-read it.
+#
+# So this workflow reads, on a schedule, every open pull request whose loop
+# label says waiting, and starts a round on each whose disputes are all
+# answered or resolved. It decides nothing else: the gate re-reads the grant
+# and the head's runs as for every start. Most runs list nothing and end.
+#
+# NO MODEL, NO SECRET, ONE PERMISSION THAT WRITES: `actions: write` for the
+# dispatch, `pull-requests: read` for the listing and the threads.
+name: conveyor-sweep
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: say what would start, start nothing
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: conveyor-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    steps:
+      # THE TRUSTED COPY: the default branch, never a pull request's tree.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Resume every waiting loop whose disputes are answered
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: python3 .github/scripts/conveyor-sweep.py --repo "$GITHUB_REPOSITORY" $DRY_RUN

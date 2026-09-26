@@ -163,50 +163,33 @@ out=$(run --vocabulary "$tmp/vocab.json")
 assert_contains "$out" "does not carry \`other-label\`"
 
 
-# THE CI CHECK NEVER CARRIES THE LOOP'S OWN STATE. `--purpose ci` asks whether a
-# dispute waits for a person and nothing else: a running round is moved by the loop,
-# and a check reporting it red turns `ci-green` red, which starts the next round.
-# Measured on #248, where that cycle ran for hours and ended only by removing the grant.
-labelled; none_running; quiet_threads
-printf '[{"databaseId":1,"displayTitle":"review-dispatch #7","headBranch":"change/thing","url":"https://example.com/runs/1"}]' > "$FX/runs-in_progress.json"
-out=$(run --purpose ci); rc=$?
-it "--purpose ci ALLOWS while a dispatch run is in progress: a running round is not a check's verdict"
-assert_status 0 "$rc"
-assert_not_contains "$out" "a fixing round"
+# THE GUARD IS THE ARCHIVE COMMAND'S ALONE. It used to have a `--purpose ci` that made
+# the documentation check ask the dispute question too. That check was a red no fixer
+# could clear (#259): the loop stopped on its own refusal, while the open thread already
+# held the merge. No check asks this now, and the flag is refused.
+it "there is no --purpose any more: the archive command is the only caller, and a check never asks"
+python3 "$S" --repo o/r --pr 7 --purpose ci >/dev/null 2>&1; assert_status 2 "$?"
+assert_not_contains "$(cat "$S")" '"ci"'
 
-it "--purpose ci does not even ask the run list, so it needs no actions permission and cannot see a queued run"
-assert_not_contains "$(cat "$GH_CALLS")" "run list"
+it "the dispute reading is the machine's one copy, not a second one here"
+assert_not_contains "$(cat "$S")" "def unanswered_after_marker"
+assert_contains "$(cat "$S")" "conveyor.unanswered_after_marker"
 
-it "the SAME state under the default purpose (the archive command) still REFUSES"
-out=$(run); rc=$?
-assert_status 1 "$rc"
-assert_contains "$out" "a fixing round is still running on #7"
-none_running
-
+labelled; none_running
 threads <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
   {"id":"PRRT_disputed","isResolved":false,"path":"a.go","line":12,"comments":{"nodes":[
     {"body":"A finding.","author":{"login":"claude","__typename":"Bot"}},
     {"body":"<!-- conveyor:disputed -->\nDisputed by the fixing step: fine.","author":{"login":"github-actions","__typename":"Bot"}}]}}]}}}}}
 JSON
-out=$(run --purpose ci); rc=$?
-it "--purpose ci still REFUSES an unanswered dispute: that is the question a person's reply re-runs"
+out=$(run); rc=$?
+it "the archive command still REFUSES an unanswered dispute"
 assert_status 1 "$rc"
 assert_contains "$out" "thread PRRT_disputed (a.go:12)"
 
-printf '[{"databaseId":1,"displayTitle":"review-dispatch #7","headBranch":"change/thing","url":"u"}]' > "$FX/runs-queued.json"
-out=$(run --purpose ci); rc=$?
-it "--purpose ci names only the dispute when a round is ALSO running"
-assert_status 1 "$rc"
-assert_not_contains "$out" "a fixing round"
-none_running
-
-it "an unknown purpose is refused by the parser, never guessed"
-python3 "$S" --repo o/r --pr 7 --purpose sometimes >/dev/null 2>&1; assert_status 2 "$?"
-
-it "the guard's decision is the machine's: a merged pull request is allowed for both purposes"
+it "the guard's decision is the machine's: a merged pull request is allowed"
 printf '{"number":7,"headRefName":"change/thing","state":"MERGED","labels":[{"name":"conveyor:fix"}]}' > "$FX/pr.json"
-for purpose in ci archive; do out=$(run --purpose $purpose); assert_status 0 "$?"; done
+out=$(run); assert_status 0 "$?"
 rm -rf "$tmp"
 
 summary

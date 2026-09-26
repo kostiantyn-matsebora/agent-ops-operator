@@ -26,32 +26,37 @@ flowchart TD
   subgraph S2["Station 2 — fix, round after round"]
     CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
     THREAD["GitHub branch protection<br/>an open review thread blocks the merge, live —<br/>no workflow and no check carries it"]:::platform
-    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry.py asks conveyor.py, labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
+    CARRY["remote-implement.yml · open (ci concluded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry.py asks conveyor.py, labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
     FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
     GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state
-    GATE["review-dispatch.yml · gate (dispatch-gate.py)<br/>conveyor.gate: who started this, is the grant still standing,<br/>rounds used below the cap — re-checked on every start"]:::workflow
+    GATE["review-dispatch.yml · gate (dispatch-gate.py)<br/>conveyor.gate: who started this, is the grant still standing,<br/>rounds used below the cap — re-checked on every start;<br/>conveyor.round_may_start: CI and review both concluded on the head?"]:::workflow
     ST2["PR state: loop:running<br/>ISSUE state: station:fix"]:::state
     COLLECT["collect<br/>open findings + Sonar issues + failed required checks"]:::workflow
     MODEL["fix<br/>Claude fixes or disputes every item<br/>allowed_bots: github-actions"]:::workflow
-    LAND["land (also when fix FAILED)<br/>apply, push via deploy key, reply Fixed in sha,<br/>resolve threads, post summary + round marker"]:::workflow
+    LAND["land (also when fix FAILED)<br/>apply, push via deploy key, reply Fixed in sha,<br/>resolve threads, post summary + round marker;<br/>a claimed fix the patch does not evidence is UNADDRESSED"]:::workflow
     MERGEABLE(["nothing left — ci green"]):::stop
-    STALLED(["stopped for a person:<br/>disputes only · no report · fixing step failed<br/>PR state: loop:stalled"]):::stop
+    RETRY["nothing landed, items still eligible<br/>(unaddressed · stale patch): land dispatches<br/>review-dispatch.yml itself, within the bound"]:::workflow
+    WAITING(["waiting for a person:<br/>every item left is a dispute, or a thread is open<br/>PR state: loop:waiting"]):::stop
+    STALLED(["the machine stopped:<br/>no report · fixing step failed or timed out · no next round<br/>PR state: loop:stalled"]):::stop
     CAP(["round cap 5 — stop<br/>PR state: loop:capped<br/>conveyor:keep-going grants 5 more, consumed on use"]):::stop
 
-    CI -->|workflow_run: ci success| CARRY --> FIX --> GATE --> ST2 --> COLLECT --> MODEL --> LAND
+    CI -->|workflow_run: ci success or failure| CARRY --> FIX --> GATE --> ST2 --> COLLECT --> MODEL --> LAND
     CARRY -->|no review thread open| GREEN
-    CI -->|workflow_run: ci failure, review success| GATE
+    CI -->|workflow_run: ci or review concluded second| GATE
     LAND -->|push starts ci + review again| CI
+    LAND --> RETRY --> GATE
     LAND --> MERGEABLE
+    LAND --> WAITING
     LAND --> STALLED
     LAND --> CAP
   end
   OPEN -->|pull_request| CI
-  ANSWER(["person answers a dispute or resolves the thread"]):::person
-  ANSWERED["dispute-answered.yml<br/>a person's comment re-runs the failed<br/>docs-task job of the head's own ci run"]:::workflow
-  STALLED --> ANSWER
-  ANSWER --> ANSWERED --> CI
-  ANSWER -->|resolving a thread is answered live,<br/>no re-run needed| THREAD
+  ANSWER(["person answers a dispute in its thread"]):::person
+  RESOLVE(["person resolves the disputed thread"]):::person
+  SWEEP["conveyor-sweep.yml · every 15 minutes<br/>a waiting PR with no unanswered dispute<br/>gets a round: a resolution fires no event"]:::workflow
+  WAITING --> ANSWER -->|issue_comment / review comment<br/>by a person| GATE
+  WAITING --> RESOLVE --> SWEEP --> GATE
+  RESOLVE -->|resolving a thread is answered live| THREAD
 
   %% THREAD GATES EVERY MERGE, NOT ONLY THE STALLED->ANSWER PATH. Branch
   %% protection re-checks it live at merge time regardless of what the loop

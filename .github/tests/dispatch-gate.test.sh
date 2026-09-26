@@ -25,6 +25,8 @@ case "$*" in
   "api repos/o/r/collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed 's#.*collaborators/\([^/]*\)/.*#\1#'); cat "$FX/perm-$l" 2>/dev/null || echo none ;;
   "api repos/o/r/issues/"*"/comments"*) jq_of "$FX/comments-$(num "$@").json" "$@" 2>/dev/null || echo '[]' ;;
   "api --method GET repos/o/r/commits/"*"/pulls"*) cat "$FX/head-prs" 2>/dev/null ;;
+  "run list "*"--workflow ci.yml"*) cat "$FX/runs-ci" 2>/dev/null || echo '[]' ;;
+  "run list "*"--workflow claude-review.yml"*) cat "$FX/runs-review" 2>/dev/null || echo '[]' ;;
 esac
 exit 0
 STUB
@@ -72,7 +74,7 @@ rounds() {  # rounds <n>: n round markers after the placement
 }
 reset() {
   rm -f "${FX:?}"/*; : > "$GH_CALLS"; : > "$GITHUB_OUTPUT"; unset BODY CROSS
-  for v in EVENT BODY ASSOCIATION SENDER PR REVIEW_TITLE REVIEW_PR RUN_HEAD WORKFLOW_RUN_PATH INPUT_MODE EVENT_LABEL; do unset "$v"; done
+  for v in EVENT BODY ASSOCIATION SENDER SENDER_TYPE PR REVIEW_TITLE REVIEW_PR RUN_HEAD WORKFLOW_RUN_PATH INPUT_MODE EVENT_LABEL; do unset "$v"; done
   issue_has 51 "conveyor:run opsx:review"; timeline 51 conveyor:run maintainer; perm maintainer write
   echo '[]' > "$FX/comments-220.json"; echo '[]' > "$FX/comments-51.json"
 }
@@ -97,12 +99,89 @@ it "the form is the whole comment, trimmed, trailing punctuation dropped, any ca
 reset; pr OPEN; export EVENT=issue_comment PR=220 SENDER=maintainer ASSOCIATION=OWNER BODY="  /FIX-ACCEPTED!  "
 gate >/dev/null; assert_equals "threads" "$(output mode)"
 
-it "any other comment is refused as not a dispatch, and starts nothing"
-reset; pr OPEN; export EVENT=issue_comment PR=220 SENDER=maintainer ASSOCIATION=MEMBER BODY="please /fix-accepted soon"
+it "a comment that TRIED the dispatch form and missed is refused, naming the form"
+reset; pr OPEN; export EVENT=issue_comment PR=220 SENDER=maintainer ASSOCIATION=MEMBER BODY="/fix-accepted please"
 out=$(gate); rc=$?
 assert_status 1 "$rc"
 assert_equals "1" "$(refused)"
 assert_not_contains "$(cat "$GITHUB_OUTPUT")" "mode=threads"
+
+it "an ordinary comment on a pull request the loop is not waiting on starts nothing and is told nothing (#259: every person's comment reaches the gate now)"
+reset; pr OPEN "$FIX"; export EVENT=issue_comment PR=220 SENDER=maintainer ASSOCIATION=MEMBER BODY="looks good, thanks"
+out=$(gate); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(refused)"
+assert_equals "none" "$(output mode)"
+
+# ==== a person answers a waiting loop ==========================================================
+#
+# The loop ended WAITING: every item left was a dispute, or a thread was open. No check
+# reads the answer any more; the answer is a comment, and the comment starts a round that
+# re-reads the threads and finds the ones a person answered.
+
+it "a person's comment on a WAITING pull request starts a round, approved by whoever placed the label"
+reset; pr OPEN "$FIX" loop:waiting; timeline 220 "$FIX" maintainer
+export EVENT=pull_request_review_comment PR=220 SENDER=reviewer ASSOCIATION=NONE BODY="it is real, the bound was removed upstream"
+out=$(gate); rc=$?
+assert_status 0 "$rc"
+assert_equals "all" "$(output mode)"
+assert_equals "maintainer" "$(output approver)"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 220 --repo o/r --add-label loop:running"
+
+it "a BOT's comment on a waiting pull request starts nothing: the loop's own replies arrive on this event"
+reset; pr OPEN "$FIX" loop:waiting; timeline 220 "$FIX" maintainer
+export EVENT=issue_comment PR=220 SENDER='github-actions[bot]' SENDER_TYPE=Bot ASSOCIATION=NONE BODY="Conveyor fix on #220: disputes only"
+gate >/dev/null; assert_equals "none" "$(output mode)"; assert_equals "0" "$(refused)"
+
+it "a person's comment on a waiting pull request whose CARRIED grant is gone refuses and strips the label, like every other start"
+reset; pr OPEN "$FIX" loop:waiting; timeline 220 "$FIX" 'github-actions[bot]'
+comments 220 "<!-- carry-grant:fix -->\nplaced by the workflow, carrying @maintainer's standing instruction@2026-09-25T10:00:01Z"
+issue_has 51 "opsx:review"
+export EVENT=issue_comment PR=220 SENDER=maintainer ASSOCIATION=OWNER BODY="answered"
+out=$(gate); rc=$?
+assert_status 1 "$rc"
+assert_equals "1" "$(called 'pr edit 220 --repo o/r --remove-label conveyor:fix')"
+
+# ==== a round starts only on a concluded head ==================================================
+#
+# Measured on #259: a round collected 38 seconds into a ten-minute CI run, every required
+# job had a (queued) check run, and the summary said "0 failures" over jobs that had not
+# spoken. Whichever of the head's two runs concludes second starts the round.
+
+runs() { printf '[{"status":"%s","event":"pull_request"}]' "$2" > "$FX/runs-$1"; }
+
+it "a review completion while the head's CI is still running starts NO round, and says the completion will"
+reset; by_hand; runs ci in_progress; runs review completed
+export EVENT=workflow_run WORKFLOW_RUN_PATH=.github/workflows/claude-review.yml REVIEW_TITLE="Review of #220"
+out=$(gate); rc=$?
+assert_status 0 "$rc"
+assert_equals "none" "$(output mode)"
+assert_contains "$out" "deferred: CI is still running on the head"
+# a completion is not a person: no comment is posted for it
+assert_equals "0" "$(grep -c '^issue comment 220' "$GH_CALLS")"
+
+it "a CI completion (green or red) with the review concluded starts the round: the second completion is the one that starts it"
+reset; by_hand; runs ci completed; runs review completed
+export EVENT=workflow_run WORKFLOW_RUN_PATH=.github/workflows/ci.yml RUN_HEAD=abc1234def; echo 220 > "$FX/head-prs"
+gate >/dev/null; assert_equals "all" "$(output mode)"
+
+it "a CI completion while the review is still running defers too"
+reset; by_hand; runs ci completed; runs review queued
+export EVENT=workflow_run WORKFLOW_RUN_PATH=.github/workflows/ci.yml RUN_HEAD=abc1234def; echo 220 > "$FX/head-prs"
+out=$(gate); assert_equals "none" "$(output mode)"; assert_contains "$out" "the review is still running"
+
+it "a grant placed by a person mid-run is deferred WITH a notice on the pull request, once per head"
+reset; by_hand; runs ci in_progress
+export EVENT=pull_request PR=220 SENDER=maintainer EVENT_LABEL="$FIX"
+out=$(gate); assert_equals "none" "$(output mode)"
+assert_equals "1" "$(grep -c '^issue comment 220 .*deferred' "$GH_CALLS")"
+comments 220 "<!-- conveyor:deferred abc1234def -->\nThe round is deferred@2026-09-25T10:00:02Z"
+out=$(gate); assert_equals "0" "$(grep -c '^issue comment 220 .*deferred' "$GH_CALLS")"
+
+it "a head with NO run of a workflow at all is not waited for: the review may skip a head"
+reset; by_hand; runs ci completed; rm -f "$FX/runs-review"
+export EVENT=workflow_run WORKFLOW_RUN_PATH=.github/workflows/ci.yml RUN_HEAD=abc1234def; echo 220 > "$FX/head-prs"
+gate >/dev/null; assert_equals "all" "$(output mode)"
 
 it "a dispatch from a person without write access is refused, naming what they have"
 reset; pr OPEN; export EVENT=issue_comment PR=220 SENDER=stranger ASSOCIATION=NONE BODY="/fix-accepted"
