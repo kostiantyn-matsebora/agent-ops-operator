@@ -535,7 +535,7 @@ func TestPipelineResolvedMatchesDispatch(t *testing.T) {
 
 	p := &agentopsv1alpha1.Pipeline{}
 	p.Name, p.Namespace = "resolved-pipe", ns
-	p.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-resolved"}
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: "prof-resolved"}
 	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{
 		Mode: agentopsv1alpha1.ToolsModeOverwrite,
 		Refs: []agentopsv1alpha1.ObjectRef{{Name: "ts-resolved-a"}, {Name: "ts-resolved-b"}},
@@ -560,7 +560,7 @@ func TestPipelineResolvedMatchesDispatch(t *testing.T) {
 	// disagree, the console is rendering something the system does not do.
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = "resolved-conv", ns
-	conv.Spec.ProfileRef = p.Spec.ProfileRef
+	conv.Spec.ProfileRef = *p.Spec.ProfileRef
 	conv.Spec.Toolsets = p.Spec.Toolsets.DeepCopy()
 	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"}}
 	if err := k8sClient.Create(ctx, conv); err != nil {

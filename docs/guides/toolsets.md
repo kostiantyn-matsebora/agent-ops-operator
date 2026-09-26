@@ -128,8 +128,6 @@ kind: Pipeline
 metadata:
   name: my-route
 spec:
-  profileRef:
-    name: <name>
   toolsets:
     refs:
     - name: <name>

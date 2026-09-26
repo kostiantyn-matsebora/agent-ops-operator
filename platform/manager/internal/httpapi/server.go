@@ -452,14 +452,14 @@ func (s *Server) runtimeName(ctx context.Context, conv *agentopsv1alpha1.Convers
 	return s.defaultRuntimeName(ctx)
 }
 
-// pipelineRuntimeName answers what a PIPELINE would run on, for the resolved
+// pipelineRuntimeName answers what a capability would run on, for the resolved
 // endpoint the console reads before any conversation exists. Same chain, minus
 // the snapshot there is nothing to snapshot from yet.
-func (s *Server) pipelineRuntimeName(ctx context.Context, p *agentopsv1alpha1.Pipeline,
+func (s *Server) pipelineRuntimeName(ctx context.Context, capability agentopsv1alpha1.AgentCapabilitySpec,
 	profile *agentopsv1alpha1.AgentProfile) string {
 
-	if p != nil && p.Spec.RuntimeRef != nil && p.Spec.RuntimeRef.Name != "" {
-		return p.Spec.RuntimeRef.Name
+	if capability.RuntimeRef != nil && capability.RuntimeRef.Name != "" {
+		return capability.RuntimeRef.Name
 	}
 	if profile != nil && profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
 		return profile.Spec.RuntimeRef.Name // DEPRECATED, one release

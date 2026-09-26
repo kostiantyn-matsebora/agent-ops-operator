@@ -308,6 +308,7 @@ BUNDLES = {
 # one teaches them to fight the reconciler.
 AUTHORED_KINDS = [
     "AgentProfile",
+    "AgentCapability",
     "Pipeline",
     "MCPToolset",
     "MCPConfig",

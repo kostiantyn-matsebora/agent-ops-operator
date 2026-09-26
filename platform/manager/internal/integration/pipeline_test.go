@@ -34,7 +34,7 @@ func mkPipeline(t *testing.T, name string, sources, channels []string, profile s
 	for _, c := range channels {
 		p.Spec.ChannelRefs = append(p.Spec.ChannelRefs, agentopsv1alpha1.ObjectRef{Name: c})
 	}
-	p.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile}
 	if err := k8sClient.Create(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}

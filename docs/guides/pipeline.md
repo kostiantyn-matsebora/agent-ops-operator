@@ -218,8 +218,6 @@ kind: Pipeline
 metadata:
   name: my-route
 spec:
-  profileRef:
-    name: <name>
   signalSourceRefs:
   - name: <name>
   channelRefs:

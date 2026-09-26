@@ -26,22 +26,28 @@ type Snapshot struct {
 	WorkspaceClaimName string
 }
 
-// SnapshotFor resolves a Pipeline's execution wiring into what a new
+// SnapshotFor resolves a capability's execution wiring into what a new
 // Conversation freezes: the RUNTIME NAME, the SERVICE ACCOUNT, and the CLAIM
 // each of its two volumes resolved to.
 //
 // ONE function for every origination path — the signal lane and the chat
-// command both call it — because two paths reading the same Pipeline for the
-// same fields is two chances to drift, and the thing they would drift on is
-// which identity an agent runs as.
+// command both call it — because two paths reading the same capability for
+// the same fields is two chances to drift, and the thing they would drift on
+// is which identity an agent runs as.
+//
+// The caller resolves the capability FIRST, through
+// `dispatch.ResolveCapability` — whether it came from a Pipeline's inline
+// fields or from an AgentCapability it references makes no difference here;
+// `pipelineName` is carried separately only because persistence claims are
+// named after the ROUTE, never the capability.
 //
 // THE SPLIT BETWEEN THEM IS THE REF/CONTENT RULE, AND IT IS NOT SYMMETRIC:
 //
 //   - The RUNTIME is a REF, so its resolution is frozen here. A conversation
-//     created while its Pipeline named no runtime keeps the one it actually ran
-//     on, and a later edit to that Pipeline — or to the deprecated profile ref
-//     below it — moves only conversations created afterwards.
-//   - The SERVICE ACCOUNT is frozen ONLY when the PIPELINE named one. Absent,
+//     created while its capability named no runtime keeps the one it actually
+//     ran on, and a later edit to that capability — or to the deprecated
+//     profile ref below it — moves only conversations created afterwards.
+//   - The SERVICE ACCOUNT is frozen ONLY when the CAPABILITY named one. Absent,
 //     it stays empty and resolution falls through to the runtime's own account
 //     at every pod build — because that account is the AgentRuntime's CONTENT,
 //     and correcting it must heal running conversations exactly as correcting
@@ -55,35 +61,32 @@ type Snapshot struct {
 //     sharpest case on this object — a privilege change is applied to work in
 //     progress, a storage change is applied to work that is already on disk.
 //
-// Neither is read from the Pipeline again after this point. That is the whole
-// guarantee: editing a Pipeline cannot change what identity an INFLIGHT
-// conversation's next pod runs as.
+// Neither is read from the capability again after this point. That is the
+// whole guarantee: editing a Pipeline or an AgentCapability cannot change
+// what identity an INFLIGHT conversation's next pod runs as.
 //
 // `defaults` is the manager's bootstrap configuration, which is where the
 // chart's release-wide claims arrive. It is read for the volumes only — nothing
 // else here falls back to it.
 func SnapshotFor(ctx context.Context, r client.Reader, namespace string,
-	pipeline *agentopsv1alpha1.Pipeline, defaults Config) Snapshot {
+	pipelineName string, capability agentopsv1alpha1.AgentCapabilitySpec, defaults Config) Snapshot {
 
-	ctxClaim, wsClaim := ResolvePersistence(pipeline, defaults)
+	ctxClaim, wsClaim := ResolvePersistence(pipelineName, capability.Persistence, defaults)
 	snap := Snapshot{ContextClaimName: ctxClaim, WorkspaceClaimName: wsClaim}
-	if pipeline == nil {
-		return snap
-	}
-	snap.ServiceAccountName = pipeline.Spec.ServiceAccountName
+	snap.ServiceAccountName = capability.ServiceAccountName
 
-	if pipeline.Spec.RuntimeRef != nil && pipeline.Spec.RuntimeRef.Name != "" {
-		snap.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: pipeline.Spec.RuntimeRef.Name}
+	if capability.RuntimeRef != nil && capability.RuntimeRef.Name != "" {
+		snap.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: capability.RuntimeRef.Name}
 		return snap
 	}
 	// DEPRECATED, one release: a profile applied before the upgrade named the
 	// runtime, and freezing that name here is what stops a later profile edit
 	// moving a conversation already running. Delete with
 	// AgentProfileSpec.RuntimeRef.
-	if pipeline.Spec.ProfileRef.Name != "" {
+	if profileName := capability.ProfileName(); profileName != "" {
 		var profile agentopsv1alpha1.AgentProfile
 		if err := r.Get(ctx, types.NamespacedName{
-			Namespace: namespace, Name: pipeline.Spec.ProfileRef.Name}, &profile); err == nil {
+			Namespace: namespace, Name: profileName}, &profile); err == nil {
 			if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
 				snap.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: profile.Spec.RuntimeRef.Name}
 				return snap

@@ -535,16 +535,22 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		r.Ops.EnqueueMessage(ctx, ch, nil, ask)
 		return nil
 	}
-	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Rest, sender, &pipe)
+	capability, err := dispatch.ResolveCapability(ctx, r.Reader, &pipe)
+	if err != nil {
+		return fmt.Errorf("pipeline %s: resolve capability: %w", pipe.Name, err)
+	}
+	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, &pipe, capability)
 	return err
 }
 
 // CreateTaskConversation starts a task conversation originating on a channel,
 // bound to the origin Pipeline's channel set. The origin also snapshots its
 // tooling bindings onto the conversation — capabilities come from the wiring
-// that originated it, never from the profile.
+// that originated it, never from the profile. capability is the origin's ALREADY
+// RESOLVED capability (see dispatch.ResolveCapability), ignored when origin is
+// nil.
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender string,
-	origin *agentopsv1alpha1.Pipeline) (*agentopsv1alpha1.Conversation, error) {
+	origin *agentopsv1alpha1.Pipeline, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if profile != "" {
 		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
@@ -571,12 +577,13 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		}},
 	}
 	if origin != nil {
-		conv.Spec.Toolsets = origin.Spec.Toolsets.DeepCopy()
-		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
-		// Same helper the signal lane calls, over the same Pipeline. An
-		// addressed command grants the pipeline's wiring, and the execution
-		// identity and the storage are part of that wiring, not half of it.
-		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin, r.Runtime)
+		conv.Spec.Toolsets = capability.Toolsets.DeepCopy()
+		conv.Spec.MCPConfigs = capability.MCPConfigs.DeepCopy()
+		// Same helper the signal lane calls, over the same Pipeline's already
+		// resolved capability. An addressed command grants the pipeline's
+		// wiring, and the execution identity and the storage are part of that
+		// wiring, not half of it.
+		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin.Name, capability, r.Runtime)
 		conv.Spec.RuntimeRef = snap.RuntimeRef
 		conv.Spec.ServiceAccountName = snap.ServiceAccountName
 		conv.Spec.ContextClaimName = snap.ContextClaimName

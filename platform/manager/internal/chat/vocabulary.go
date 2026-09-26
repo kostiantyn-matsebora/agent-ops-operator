@@ -129,7 +129,7 @@ func (r *Router) readyPipelines(ctx context.Context) []Entry {
 		if !apimeta.IsStatusConditionTrue(p.Status.Conditions, "Ready") {
 			continue
 		}
-		profile := p.Spec.ProfileRef.Name
+		profile := p.InlineCapability().ProfileName()
 		out = append(out, Entry{
 			Kind: KindPipeline, Name: p.Name, Position: PositionGeneral,
 			Description: profile, Profile: profile, Icon: p.Spec.Icon,
