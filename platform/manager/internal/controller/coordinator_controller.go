@@ -14,6 +14,13 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
+// notReadySuffix and coordinatorRefLabel are the recurring fragments of a
+// problem string, named once so they read the same everywhere they appear.
+const (
+	notReadySuffix      = " not ready"
+	coordinatorRefLabel = ": coordinator/"
+)
+
 // CoordinatorReconciler validates one Coordinator's wiring: its own
 // capability, the sources and channels it names, and every `agents[]` entry —
 // through the SAME `validateCapabilitySpecRefs` a Pipeline and an
@@ -76,7 +83,7 @@ func coordinatorProblems(ctx context.Context, c client.Reader, co *agentopsv1alp
 		if err := c.Get(ctx, types.NamespacedName{Namespace: co.Namespace, Name: co.Spec.AgentRef.Name}, &capability); err != nil {
 			missing = append(missing, "agentcapability/"+co.Spec.AgentRef.Name)
 		} else if !apimeta.IsStatusConditionTrue(capability.Status.Conditions, "Ready") {
-			missing = append(missing, "agentcapability/"+co.Spec.AgentRef.Name+" not ready")
+			missing = append(missing, "agentcapability/"+co.Spec.AgentRef.Name+notReadySuffix)
 		}
 	} else if co.Spec.ProfileRef == nil {
 		missing = append(missing, "profileRef or capabilityRef")
@@ -117,17 +124,17 @@ func coordinatorEntryProblems(ctx context.Context, c client.Reader, namespace st
 			return []string{label + ": agentcapability/" + entry.CapabilityRef.Name}
 		}
 		if !apimeta.IsStatusConditionTrue(capability.Status.Conditions, "Ready") {
-			return []string{label + ": agentcapability/" + entry.CapabilityRef.Name + " not ready"}
+			return []string{label + ": agentcapability/" + entry.CapabilityRef.Name + notReadySuffix}
 		}
 		return nil
 	case entry.CoordinatorRef != nil:
 		name := entry.CoordinatorRef.Name
 		if visited[name] {
-			return []string{label + ": coordinator/" + name + " cycle"}
+			return []string{label + coordinatorRefLabel + name + " cycle"}
 		}
 		var nested agentopsv1alpha1.Coordinator
 		if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &nested); err != nil {
-			return []string{label + ": coordinator/" + name}
+			return []string{label + coordinatorRefLabel + name}
 		}
 		nestedVisited := make(map[string]bool, len(visited)+1)
 		for k := range visited {
@@ -135,7 +142,7 @@ func coordinatorEntryProblems(ctx context.Context, c client.Reader, namespace st
 		}
 		nestedVisited[name] = true
 		if nestedProblems := coordinatorProblems(ctx, c, &nested, nestedVisited); len(nestedProblems) > 0 {
-			return []string{label + ": coordinator/" + name + " not ready"}
+			return []string{label + coordinatorRefLabel + name + notReadySuffix}
 		}
 		return nil
 	default:
