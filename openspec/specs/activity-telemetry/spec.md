@@ -210,4 +210,4 @@ the browser.
 
 #### Scenario: A model is a node
 - **WHEN** a `model.call` hop is emitted
-- **THEN** its `to` names the model as the topology names it, and the Components view moves the edge from egress-proxy to that model
+- **THEN** its `to` names the model as the topology names it, and the Components view draws the recorded edge to that model plus the static egress-proxy edge alongside it

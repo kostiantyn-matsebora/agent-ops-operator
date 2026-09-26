@@ -170,6 +170,9 @@ The one class a view cannot do without SHALL be listed and not hideable:
 pipelines on Model, the manager on Components, the manager's pod on
 Infrastructure.
 
+A conversation's graph is one of these views, scoped to that conversation's
+own events, and SHALL offer the same display control.
+
 A **detail** control SHALL fold the Model view only, from routes only, one
 node per pipeline with its profile, runtime and capabilities inside it, to the
 full model. It SHALL be absent on the other views.
@@ -245,6 +248,9 @@ The depth control SHALL default to all and offer only the levels the route
 has. Returning to the whole picture SHALL need no reload. A scope SHALL NOT
 persist across navigation. While scoped, the view SHALL name what it is scoped
 to.
+
+A conversation's graph is one of these views, scoped to that conversation's
+own events, and SHALL offer the same three ways to scope further.
 
 #### Scenario: Selecting a pipeline removes the others
 - **WHEN** one of three pipelines is selected
