@@ -152,7 +152,7 @@ check:
 |---|---|
 | did the review run for the head, and finish | `review-clean`, a job in `ci.yml`, through `ci-green` |
 | is a review thread still open | branch protection's required conversation resolution, live at merge time |
-| has a person answered a dispute the loop posted | `docs-task`, re-run by `dispute-answered.yml` on the person's comment |
+| has a person answered a dispute the loop posted | no check. The loop's `loop:waiting` label and its summary say so, and the person's comment, or the sweep once the thread is resolved, starts the next round |
 
 Resolving a thread unblocks the merge at once, and nothing needs re-running.
 

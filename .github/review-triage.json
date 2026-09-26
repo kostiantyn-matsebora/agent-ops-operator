@@ -110,7 +110,7 @@
     "a merge already happened (that is the archive job's own trigger) and the",
     "issue carries no `run_label` to carry it onward. Left as `station:merge`,",
     "that label's own description (\"the pull request is mergeable and waits",
-    "for a person\") is false the moment the merge lands — measured live on #222,",
+    "for a person\") is false the moment the merge lands \u2014 measured live on #222,",
     "stuck there for two days, indistinguishable from a line still working."
   ],
   "accept": [
@@ -142,6 +142,7 @@
   },
   "loop_labels": {
     "running": "loop:running",
+    "waiting": "loop:waiting",
     "stalled": "loop:stalled",
     "capped": "loop:capped",
     "mergeable": "loop:mergeable"

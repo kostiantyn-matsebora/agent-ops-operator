@@ -37,12 +37,12 @@ assert_not_contains "$call" "--remove-label station:fix"
 assert_not_contains "$call" "loop:"
 assert_contains "$out" "was implement, round:start"
 
-it "the same for a loop event on a pull request: one label added, its three siblings removed"
-has "conveyor:fix loop:stalled"
+it "the same for a loop event on a pull request: one label added, its four siblings removed"
+has "conveyor:fix loop:waiting"
 run --target 220 --loop-event round:start >/dev/null
 call=$(grep '^issue edit' "$GH_CALLS")
 assert_contains "$call" "issue edit 220 --repo o/r --add-label loop:running"
-for other in stalled capped mergeable; do assert_contains "$call" "--remove-label loop:$other"; done
+for other in waiting stalled capped mergeable; do assert_contains "$call" "--remove-label loop:$other"; done
 assert_not_contains "$call" "station:"
 
 it "a target with no state label starts from none"
@@ -76,7 +76,7 @@ assert_contains "$(grep '^issue edit' "$GH_CALLS")" "--add-label station:archive
 
 it "reads the names from the vocabulary, never from its own text"
 names=$(python3 -c 'import json;v=json.load(open("'"$ROOT"'/.github/review-triage.json"));print(" ".join(sorted(v["station_labels"].values())+sorted(v["loop_labels"].values())))')
-assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled loop:capped loop:mergeable loop:running loop:stalled" "$names"
+assert_equals "station:archive station:done station:fix station:implement station:merge station:stalled loop:capped loop:mergeable loop:running loop:stalled loop:waiting" "$names"
 
 it "an unknown event is a notice and exit 0, and nothing is edited"
 has "station:fix"

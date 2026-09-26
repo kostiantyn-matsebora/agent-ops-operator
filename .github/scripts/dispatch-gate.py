@@ -59,6 +59,20 @@ def dispatch_form(vocab: dict, body: str) -> bool:
     return cleaned in {d.lower() for d in vocab["dispatch"]}
 
 
+def tried_dispatch_form(vocab: dict, body: str) -> bool:
+    """A comment whose FIRST WORD is one of the vocabulary's dispatch forms, or the
+    start of one, and that is not the form itself: `/fix-accepted please`, or
+    `/fix`. Such a comment tried to dispatch and missed, and earns a refusal
+    naming the form. Any other comment is an ordinary remark and earns nothing."""
+    tail = vocab.get("trailing_punctuation", ".!,")
+    words = (body or "").strip().lower().split()
+    if not words:
+        return False
+    first = words[0].rstrip(tail)
+    forms = [d.lower() for d in vocab["dispatch"]]
+    return any(first == f or (len(first) > 1 and f.startswith(first)) for f in forms)
+
+
 def resolve_pr(repo: str) -> str:
     """The pull request a run concerns. A comment, a label or a hand run carries its number. A
     completion carries it in its run's TITLE (`review-dispatch after Review of #<n>`), or its
@@ -81,6 +95,25 @@ def resolve_pr(repo: str) -> str:
         print(f"::notice::{env('RUN_HEAD')[:7]} is the head of {len(found)} open pull requests ({' '.join(found)}); "
               "this run names none, so nothing starts")
     return ""
+
+
+def run_state(repo: str, sha: str, workflow: str) -> str:
+    """What `workflow`'s run on `sha` is doing: `running`, `done` or `none`. A run
+    that does not exist is `none` (nothing to wait for), and a listing that
+    cannot be read is `none` too -- deferring on a rate limit would hold a round
+    for a reason nobody can see, while starting one reads at worst a head whose
+    checks the collector reports as not consulted."""
+    if not sha:
+        return "none"
+    try:
+        raw = io.gh("run", "list", "--repo", repo, "--workflow", workflow, "--commit", sha, "--limit", "20",
+                    "--json", "status,event")
+        runs = json.loads(raw or "[]")
+    except (RuntimeError, json.JSONDecodeError):
+        return "none"
+    if not runs:
+        return "none"
+    return "running" if any(r.get("status") != "completed" for r in runs) else "done"
 
 
 def placement(repo: str, pr: str, fix: str) -> tuple[str, str, bool]:
@@ -117,13 +150,16 @@ def main() -> int:
         trigger = conveyor.Trigger("dispatch", who, mode=env("INPUT_MODE") or "threads")
     elif event in ("issue_comment", "pull_request_review_comment"):
         # AUTHORISED BY WHO SENT IT: `author_association` is GitHub's own statement about the author.
+        # A BOT'S COMMENT IS NOT A PERSON'S ANSWER: the loop's own dispute replies and summaries
+        # arrive on this event too, and none of them may start a round.
         assoc = env("ASSOCIATION")
-        who = conveyor.Placer(sender_login, "write" if assoc in ("OWNER", "MEMBER", "COLLABORATOR") else assoc.lower() or "none")
+        who = conveyor.Placer(sender_login, "write" if assoc in ("OWNER", "MEMBER", "COLLABORATOR") else assoc.lower() or "none",
+                              bot=env("SENDER_TYPE") == "Bot" or sender_login == conveyor.WORKFLOW_BOT)
         trigger = conveyor.Trigger("comment", who, comment_is_dispatch=dispatch_form(vocab, env("BODY")))
     elif event == "pull_request":
         trigger = conveyor.Trigger("labeled", io.placer(repo, sender_login), label=env("EVENT_LABEL"))
     elif event == "workflow_run":
-        kind = "review_completed" if env("WORKFLOW_RUN_PATH").endswith("claude-review.yml") else "ci_failed"
+        kind = "review_completed" if env("WORKFLOW_RUN_PATH").endswith("claude-review.yml") else "ci_completed"
         trigger = conveyor.Trigger(kind)
     else:
         print(f"::notice::event {event!r} starts nothing here")
@@ -174,7 +210,14 @@ def main() -> int:
     print(f"gate for #{pr} ({event}): {d.action}: {d.reason}")
 
     if event in ("issue_comment", "pull_request_review_comment") and d.action == "none" and not trigger.comment_is_dispatch:
-        return refuse(repo, pr, sender_login, "not a dispatch. The form is one of: " + ", ".join(vocab["dispatch"]))
+        # EVERY PERSON'S COMMENT REACHES THIS GATE NOW (a comment on a waiting pull request starts a
+        # round), so only a comment that TRIED the dispatch form and missed gets a refusal; an
+        # ordinary remark starts nothing and is told nothing.
+        if tried_dispatch_form(vocab, env("BODY")):
+            return refuse(repo, pr, sender_login, "not a dispatch. The form is one of: " + ", ".join(vocab["dispatch"]))
+        print(f"comment on #{pr} by {sender_login}: {d.reason}; nothing starts")
+        out("mode", "none")
+        return 0
     if d.action == "refuse":
         if d.remove_label:
             subprocess.run(["gh", "pr", "edit", pr, "--repo", repo, "--remove-label", d.remove_label], check=False)
@@ -195,9 +238,22 @@ def main() -> int:
         out("mode", "threads")
         return 0
 
-    # ---- a round starts
+    # ---- a round starts, once the head's runs have concluded
     if not approver:
         print(f"::notice::#{pr} carries `{fix}` but the timeline shows nobody placing it; no round starts")
+        out("mode", "none")
+        return 0
+    head = view.get("headRefOid") or ""
+    may = conveyor.round_may_start(run_state(repo, head, "ci.yml"), run_state(repo, head, "claude-review.yml"))
+    if may.action == "defer":
+        # THE COMPLETION STARTS IT: both runs fire this workflow when they conclude. A person who
+        # asked (a label, a hand run, a comment) is told once per head; a completion is not a
+        # person and gets a log line. Measured on #259: a round read the checks 38 seconds into a
+        # ten-minute CI run and posted "0 failures" over jobs that had not spoken.
+        print(f"round on #{pr} deferred: {may.reason}")
+        marker = f"<!-- conveyor:deferred {head} -->"
+        if trigger.event in ("labeled", "dispatch", "comment") and not io.already_marked(repo, int(pr), marker):
+            io.comment(repo, int(pr), f"{marker}\nThe round on `{head[:7]}` is deferred: {may.reason}.")
         out("mode", "none")
         return 0
     out("approver", approver)

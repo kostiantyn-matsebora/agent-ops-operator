@@ -31,7 +31,7 @@ PY
 cp "$ROOT/.github/scripts/conveyor-state.py" "$ROOT/.github/scripts/conveyor.py" "$tmp/repo/.github/scripts/"
 cat > "$tmp/repo/.github/review-triage.json" <<'JSON'
 {"round_marker": "<!-- conveyor:round", "grant_marker": "<!-- conveyor:grant -->", "max_rounds": 3,
- "loop_labels": {"running": "loop:running", "stalled": "loop:stalled", "capped": "loop:capped", "mergeable": "loop:mergeable"}}
+ "loop_labels": {"running": "loop:running", "waiting": "loop:waiting", "stalled": "loop:stalled", "capped": "loop:capped", "mergeable": "loop:mergeable"}}
 JSON
 
 round_comment() { printf '{"created_at":"%s","body":"<!-- conveyor:round %s -->x"}' "$1" "$2"; }
@@ -77,11 +77,11 @@ assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:capped"
 assert_contains "$out" "sent recover:capped to the loop machine"
 
-it "rounds within the cap, a thread is open: corrects to stalled"
+it "rounds within the cap, a thread is open: corrects to waiting (a person is owed a look, #259)"
 ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1)]" out=$(CLEAN_EXIT=1 run); rc=$?
 assert_status 0 "$rc"
-assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:stalled"
-assert_contains "$out" "sent recover:stalled to the loop machine"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:waiting"
+assert_contains "$out" "sent recover:waiting to the loop machine"
 
 it "rounds within the cap, no thread open: leaves running -- a round may genuinely be in flight"
 ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1)]" out=$(CLEAN_EXIT=0 run); rc=$?

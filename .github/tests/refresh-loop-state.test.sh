@@ -3,7 +3,7 @@
 # `thread:opened` when a review thread is open (measured on #226: `mergeable`
 # for an hour after three findings landed), and it must never fail the gate that
 # calls it. WHAT THAT EVENT DOES TO A LABEL IS THE MACHINE'S TABLE, not this
-# program's: it moves `mergeable` to `stalled`, and leaves `running` and the rest.
+# program's: it moves `mergeable` to `waiting`, and leaves `running` and the rest.
 . "$(dirname "$0")/lib.sh"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 S="$ROOT/.github/scripts/refresh-loop-state.py"
@@ -33,10 +33,10 @@ cp "$ROOT/.github/review-triage.json" "$tmp/repo/.github/"
 run() { : > "$GH_CALLS"; (cd "$tmp/repo" && python3 "$S" --repo o/r --pr 226 2>&1); }
 edits() { grep -c '^issue edit' "$GH_CALLS"; }
 
-it "a thread open on a MERGEABLE pull request stalls the label"
+it "a thread open on a MERGEABLE pull request moves the label to waiting"
 out=$(CURRENT_LABELS="conveyor:fix loop:mergeable" CLEAN_EXIT=1 run); rc=$?
 assert_status 0 "$rc"
-assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:stalled"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:waiting"
 assert_contains "$out" "sent thread:opened to the loop machine"
 
 it "a round is running: the machine leaves the label to that round's own ending"
@@ -46,7 +46,7 @@ assert_equals "0" "$(edits)"
 assert_contains "$out" "does not move it"
 
 it "every other loop state is left as it is, since only a mergeable label can have gone stale"
-for state in loop:stalled loop:capped ""; do
+for state in loop:waiting loop:stalled loop:capped ""; do
   out=$(CURRENT_LABELS="conveyor:fix $state" CLEAN_EXIT=1 run)
   assert_equals "0" "$(edits)"
 done

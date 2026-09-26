@@ -41,7 +41,7 @@ second session archives the change and opens the archive pull request.
 
 **Where the line is** is on the issue and the pull request, as labels that
 grant nothing: `station:<implement|fix|merge|archive|done>` on the issue, and
-`loop:<running|stalled|capped|mergeable>` on the pull request.
+`loop:<running|waiting|stalled|capped|mergeable>` on the pull request.
 
 What it does not change is who decides. The proposal, the pull request and
 the review are read by a person, a dispute waits for one, and a person
@@ -627,28 +627,39 @@ A failed check is reproduced with the job's own command before it is fixed,
 and a failure the tree does not explain is disputed rather than guessed at.
 A fixed check gets no reply, because its next run is the verdict.
 
-The landed commit is pushed through a write deploy key, so CI and the review
-run on it. The next round starts either when the review completes or when CI
-fails, up to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
+A fix the report claims but the patch does not evidence is UNADDRESSED too,
+never a dispute: a failed fix is not a statement about the finding.
 
-A round that changes nothing ends the loop early, and every ending is one
-summary comment — a fixing step that could not run included, as `fixing step
-failed`. At the cap, `conveyor:keep-going` grants another set of rounds and is
+The landed commit is pushed through a write deploy key, so CI and the review
+run on it. The next round starts once BOTH have concluded on the new head, up
+to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
+
+A round that landed nothing while items are still eligible starts the next
+round itself.
+
+Every ending is one summary comment, saying whether the head is red or green.
+At the cap, `conveyor:keep-going` grants another set of rounds and is
 consumed the moment one runs under it.
 
-A stalled loop (`loop:stalled`) is waiting for you. Answer a dispute in its
-thread, or resolve the thread to dismiss it: an open thread blocks the merge
-through branch protection alone, evaluated live, so resolving it unblocks the
-merge box at once. No check reports the threads.
+**A red pull request is the loop's to fix.** Every failed required check on
+the head is on the work list, and no check reads the loop's own conversation.
 
-`docs-task` is the ONE check that ALSO reads your reply — beside judging your
-change's own tests and documentation, its `autofix-guard.py` step fails while
-a dispute the loop posted has no answer from you. It is re-run the moment you
-comment, so nothing is re-run by hand.
+Two labels say why a loop is not running:
+
+| Label | Means | You |
+|---|---|---|
+| `loop:waiting` | every item left is a dispute, or a thread is open | answer the dispute in its thread, or resolve the thread to dismiss it |
+| `loop:stalled` | the machine stopped: no report, the fixer failed or timed out, the next round could not start | read the summary, then push or re-place the label |
+
+Your comment on a waiting pull request starts the next round, in your own
+words, if you can push here. A resolved thread fires no event, so `conveyor-sweep.yml` re-reads
+waiting pull requests every fifteen minutes and starts the round for you.
+
+An open thread blocks the merge through branch protection alone, evaluated
+live.
 
 The loop never marks anything in SonarCloud, and it cannot merge. Removing the
-label stops it at the next round. An unanswered dispute holds both the merge
-and `/opsx:archive`.
+label stops it at the next round. An unanswered dispute holds `/opsx:archive`.
 
 **One label runs the whole line.** `conveyor:run` on an issue is the standing
 instruction: implement, drive the pull request to `conveyor:fix`-mergeable,

@@ -83,34 +83,10 @@ def load_vocabulary(path: pathlib.Path) -> dict:
     return {"label": doc["approve_label"], "marker": doc["dispute_marker"], "raw": doc}
 
 
-def is_person(author: dict | None) -> bool:
-    return bool(author) and author.get("__typename") != "Bot"
-
-
-def carries_marker(body: str, marker: str) -> bool:
-    """True when `marker` appears as its OWN LINE, never merely somewhere in
-    the text. Every dispute comment this program's own callers post writes
-    the marker as the first line (`land-dispatch.py`'s `thread_reply`:
-    marker, then a newline) -- a bare substring test also matches a comment
-    that only MENTIONS the marker in prose, in a code span, explaining what
-    it is. Measured live on #220, 2026-09-19: a maintainer's own reply
-    QUOTED an earlier comment that named the marker inside backticks while
-    describing the mechanism, and the substring test read that quoted
-    mention as a fresh, unanswered dispute the reply had itself just filed."""
-    return any(line.strip() == marker for line in (body or "").splitlines())
-
-
-def unanswered_after_marker(comments: list[dict], marker: str) -> bool:
-    """True when a comment carries the marker (as its own line) and no
-    PERSON commented after it. Pure, so the suite exercises it without a
-    network."""
-    disputed_at = None
-    for i, c in enumerate(comments):
-        if carries_marker(c.get("body") or "", marker):
-            disputed_at = i
-    if disputed_at is None:
-        return False
-    return not any(is_person(c.get("author")) for c in comments[disputed_at + 1:])
+# THE DISPUTE READING IS THE MACHINE'S. `conveyor.unanswered_after_marker` is the one
+# copy every reader of a dispute shares -- this guard, the thread collector and the
+# sweep -- so a dispute cannot read as answered to one of them and open to another.
+unanswered_after_marker = conveyor.unanswered_after_marker
 
 
 def running_rounds(repo: str, pr: int, branch: str) -> list[str]:
@@ -163,15 +139,15 @@ def unanswered_disputes(repo: str, pr: int, marker: str) -> list[str]:
     return found
 
 
-def judge(repo: str, pr: int | None, vocabulary: dict, purpose: str = "archive") -> tuple[bool, str]:
+def judge(repo: str, pr: int | None, vocabulary: dict) -> tuple[bool, str]:
     """(allowed, message). Raises Unreadable for anything that fails open.
 
     THE VERDICT IS THE MACHINE'S (`conveyor.guard`). This gathers the facts: the
-    pull request's state and labels, how many fixing rounds are queued or running
-    (only when the purpose asks, so a CI check makes no such call), and how many
-    disputes nobody answered. `purpose` is `ci` for the documentation check, which
-    asks the dispute question alone, and `archive` for the archive command, which
-    asks both.
+    pull request's state and labels, how many fixing rounds are queued or running,
+    and how many disputes nobody answered. THE ARCHIVE COMMAND IS THE ONLY CALLER.
+    A `ci` purpose used to make this the documentation check's question too, and
+    that check was a red no fixer could clear (#259): the open thread already held
+    the merge, and the check added nothing but the red. No check asks this now.
     """
     view_args = ["pr", "view"] + ([str(pr)] if pr else []) + \
         ["--repo", repo, "--json", "number,headRefName,labels,state"]
@@ -183,15 +159,15 @@ def judge(repo: str, pr: int | None, vocabulary: dict, purpose: str = "archive")
     facts = conveyor.PullRequest(state=(view.get("state") or "OPEN"), labels=labels)
     vocab = vocabulary["raw"]
     if facts.state != "OPEN" or vocab["approve_label"] not in labels:
-        return _verdict(vocab, purpose, facts, [], [])
+        return _verdict(vocab, facts, [], [])
 
-    running = running_rounds(repo, pr, view.get("headRefName") or "") if purpose == "archive" else []
+    running = running_rounds(repo, pr, view.get("headRefName") or "")
     disputes = unanswered_disputes(repo, pr, vocabulary["marker"])
-    return _verdict(vocab, purpose, facts, running, disputes, pr)
+    return _verdict(vocab, facts, running, disputes, pr)
 
 
-def _verdict(vocab: dict, purpose: str, facts, running: list, disputes: list, pr: int = 0) -> tuple[bool, str]:
-    d = conveyor.guard(vocab, purpose, facts, len(running), len(disputes))
+def _verdict(vocab: dict, facts, running: list, disputes: list, pr: int = 0) -> tuple[bool, str]:
+    d = conveyor.guard(vocab, facts, len(running), len(disputes))
     if d.action == "allow":
         return True, (f"#{pr} carries `{vocab['approve_label']}`, {d.reason}" if pr else d.reason)
     detail = []
@@ -209,11 +185,6 @@ def main() -> int:
     ap.add_argument("--repo", help="owner/name; default: the checkout's")
     ap.add_argument("--pr", type=int, help="the pull request; default: the current branch's")
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
-    ap.add_argument("--purpose", choices=["ci", "archive"], default="archive",
-                    help="`ci`: the documentation check, which asks only whether a dispute is waiting for a "
-                         "person, since whether a round is running is the loop's own state and a check "
-                         "reporting it red starts the next round (#248). `archive`: the archive command, "
-                         "which asks both, since it acts on the branch a round may push to")
     args = ap.parse_args()
 
     def allow(why: str) -> int:
@@ -228,7 +199,7 @@ def main() -> int:
         return allow(f"no vocabulary to read ({exc}); fail-open")
     try:
         repo = args.repo or gh_json("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
-        ok, message = judge(repo, args.pr, vocabulary, args.purpose)
+        ok, message = judge(repo, args.pr, vocabulary)
     except Unreadable as exc:
         return allow(f"{exc} (fail-open)")
     except (KeyError, TypeError, ValueError) as exc:

@@ -62,6 +62,27 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **A red pull request is the fixing loop's to fix, and a person is owed
+  nothing until it is green or only genuine disputes remain.** Measured on
+  #259, where the loop ended "clean" beside a red pull request over a dispute
+  it had manufactured, and could not hear the thread being resolved.
+  - The dispute guard leaves CI: `docs-task` no longer fails on an unanswered
+    dispute, since the open thread already holds the merge. The archive hook
+    keeps the refusal. `dispute-answered.yml` and `rerun-ci-job.py` are
+    deleted, and a person's comment on a waiting pull request starts a round
+    instead.
+  - Every failed required check is work, with no exemption. A fix the report
+    claims but the patch does not evidence is unaddressed, never a dispute,
+    and a round that lands nothing while items remain eligible starts the next
+    round itself, within the bound.
+  - `loop:waiting` is a state of its own (a person is owed an answer) beside
+    `loop:stalled` (the machine stopped). A new `conveyor-sweep.yml` re-reads
+    waiting pull requests every fifteen minutes and resumes one whose disputes
+    are answered or resolved.
+  - A round starts only once the head's CI run and review run have both
+    concluded, and the checks count as consulted only when every required
+    check run has completed.
+
 - **The conveyor is one state machine.** The label-driven line (implement, fix,
   archive) decided its rules in five workflows and eleven programs, and ten of
   them disagreed. `conveyor.py` now holds the station and loop tables and every
@@ -202,6 +223,7 @@ below, each image carries what landed on it since its last tag:
 
 ### Changed
 
+
 - **The `kubernetes` bundle's events `ClusterRole` gains `nodes`
   `list`/`watch`** (cluster-wide RBAC only; a namespaced install has no
   equivalent, since nodes are cluster-scoped — drain awareness is simply off
@@ -296,6 +318,7 @@ catch-all fired, each concluding "self-resolved, no action needed".
 
 ### Changed
 
+
 - `signal-k8s-events` 0.4.4, `signal-ha` 0.2.4: the second verification rung
   asks whether the event was **still recurring as the window closed** — its
   last third, floored at thirty seconds, derived from the window actually
@@ -328,6 +351,7 @@ had already moved past all of them (Go 1.25, the manager's `x/*` bumped). The
 published images had not.
 
 ### Changed
+
 
 Twelve components moved to versions built from that tree:
 `channel-telegram` 0.24.4, `console` 0.38.2, `context-sync` 0.2.3,
@@ -381,6 +405,7 @@ rendered manifest is identical.
 
 ### Changed
 
+
 Ten components moved to versions the release workflow built and pushed:
 `channel-telegram` 0.24.3, `console` 0.38.1, `context-sync` 0.2.2,
 `egress-proxy` 0.2.3, `gateway-telegram` 0.5.2, `housekeeping` 0.2.2,
@@ -401,6 +426,7 @@ Release: the chart version is the one an adopter types.
 **The one-flag demo works on a laptop cluster, with its memory intact.**
 
 ### Changed
+
 
 **`persistence.context.accessModes` and `.workspace.accessModes` ship EMPTY, and
 the chart answers them.** `ReadWriteMany` for an ordinary install, exactly as
@@ -454,6 +480,7 @@ helm upgrade ... --set 'persistence.context.accessModes={ReadWriteMany}'
 pod it cannot serve.
 
 ### Changed
+
 
 **The reference runtime declares its context paths, so a default install runs
 synchronised.** `chart/charts/claude/values.yaml` ships
@@ -593,6 +620,7 @@ upgrade AND for a fresh install.** Helm installs CRDs from `crds/` only when
 absent and never upgrades one. The API server prunes an unknown field silently.
 
 ### Changed
+
 
 **The reference runtime's image and model credential moved to the `claude:`
 bundle.** The render FAILS on either key left in `global.agentops.runtimeDefaults`.

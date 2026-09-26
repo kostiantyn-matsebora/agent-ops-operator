@@ -56,12 +56,21 @@ assert_equals "conveyor:keep-going" "$keep_going"
 it "a review that did not complete successfully starts no round"
 assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.conclusion == 'success'"
 
-# THE TWO RUNS START A ROUND FOR OPPOSITE REASONS, so the prefilter names each
-# workflow with the conclusion that matters for it. A green CI run starting a
-# round would be a round over nothing, every push.
-it "a ci run starts a round only when it FAILED"
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event.workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.conclusion == 'failure'"
-assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.conclusion == 'success'"
+# A CI RUN STARTS A ROUND WHETHER IT SUCCEEDED OR FAILED (#259). The gate starts
+# a round only once BOTH the head's runs have concluded, so the CI completion
+# must reach it on green too: a green CI with review threads open is a round
+# over those threads, and one with nothing open ends mergeable.
+it "a ci run reaches the gate on ANY conclusion: the gate defers while the current head's runs are in progress"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "(github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml')"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "ci.yml' && github.event.workflow_run.conclusion"
+
+# EVERY PERSON'S COMMENT REACHES THE GATE, since a comment is how a WAITING loop
+# is answered; a bot's never does, or the loop's own replies would start rounds.
+it "a comment reaches the gate when a PERSON wrote it, whatever it says, and never when a bot did"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot'"
+assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "github.event_name == 'pull_request_review_comment' && github.event.comment.user.type != 'Bot'"
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "startsWith(github.event.comment.body"
+assert_contains "$(py 'print(d["jobs"]["gate"]["steps"][-1]["env"]["SENDER_TYPE"])')" "github.event.comment.user.type"
 
 # MEASURED LIVE ON #233: `claude-review.yml` sets `run-name: "Review of #<n>"`,
 # and a workflow_run event's own `.name` field reflects THAT per-run display
@@ -118,11 +127,12 @@ assert_contains "$fixjob" "secrets.CLAUDE_CODE_OAUTH_TOKEN"
 # nothing here may START a workflow. Reading a failed run's log is what makes a
 # red check a work item, and it is granted to `collect` — the job with no model
 # in it — and to no other.
-it "no job may dispatch a workflow: only collect may read runs, and none may write them"
-assert_equals "collect" "$(py 'print(" ".join(j for j,v in d["jobs"].items() if v["permissions"].get("actions")))')"
+it "the gate and collect may READ runs, the model's job may not touch them, and only land may WRITE -- to start the next round"
+assert_equals "read" "$(py 'print(d["jobs"]["gate"]["permissions"]["actions"])')"
 assert_equals "read" "$(py 'print(d["jobs"]["collect"]["permissions"]["actions"])')"
-assert_not_contains "$(py 'print(d["jobs"]["land"])')" "workflow run"
 assert_equals "" "$(py 'print(d["jobs"]["fix"]["permissions"].get("actions",""))')"
+assert_equals "write" "$(py 'print(d["jobs"]["land"]["permissions"]["actions"])')"
+assert_not_contains "$(py 'print(d["jobs"]["land"])')" "ci.yml"
 
 it "the push credential is read by the landing job alone, on a labelled pull request only, and the model's job cannot name it"
 assert_equals "land" "$(py 'print(" ".join(j for j,v in d["jobs"].items() if "AUTOFIX_DEPLOY_KEY" in str(v)))')"
@@ -214,9 +224,9 @@ assert_contains "$up" "'if-no-files-found': 'error'"
 it "gates the fixing job on something having been accepted"
 assert_contains "$(py 'print(d["jobs"]["fix"]["if"])')" "needs.collect.outputs.accepted != '0'"
 
-it "prefilters on the same dispatch form the vocabulary file states"
-form=$(python3 -c 'import json;print(json.load(open("'"$ROOT"'/.github/review-triage.json"))["dispatch"][0])')
-assert_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "startsWith(github.event.comment.body, '$form')"
+it "the dispatch form is matched by the gate program from the vocabulary file, never by the workflow's prefilter (#259: every person's comment passes it)"
+assert_contains "$(cat "$ROOT/.github/scripts/dispatch-gate.py")" 'vocab["dispatch"]'
+assert_not_contains "$(py 'print(d["jobs"]["gate"]["if"])')" "/fix-accepted"
 
 it "does not cancel a dispatch in progress"
 assert_not_contains "$(py 'print(d["concurrency"])')" "cancel-in-progress"
