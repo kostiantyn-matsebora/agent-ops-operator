@@ -109,20 +109,27 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha
 		return nil
 	}
 	var match *agentopsv1alpha1.Pipeline
-	for _, p := range candidates {
-		if p.Spec.ProfileRef.Name != conv.Spec.ProfileRef.Name {
+	for i := range candidates {
+		p := &candidates[i]
+		// Inference over an INLINE capability only: a candidate reached through
+		// capabilityRef resolves to nothing here on purpose. This is a
+		// best-effort fallback for conversations predating spec.pipelineRef —
+		// nothing routes on it, and the honest answer for a candidate this
+		// cannot see into is "does not match", never a guess.
+		cap := p.InlineCapability()
+		if cap.ProfileName() != conv.Spec.ProfileRef.Name {
 			continue
 		}
 		if !sameRefs(p.Spec.ChannelRefs, conv.Spec.ChannelRefs) {
 			continue
 		}
-		if !sameToolsets(p.Spec.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(p.Spec.MCPConfigs, conv.Spec.MCPConfigs) {
+		if !sameToolsets(cap.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(cap.MCPConfigs, conv.Spec.MCPConfigs) {
 			continue
 		}
 		if match != nil {
 			return nil // ambiguous: two pipelines wire identically
 		}
-		cp := p
+		cp := *p
 		match = &cp
 	}
 	return match

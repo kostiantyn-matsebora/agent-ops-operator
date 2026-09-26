@@ -12,7 +12,7 @@ import (
 func pipeline(name, profile string, ready bool) *agentopsv1alpha1.Pipeline {
 	p := &agentopsv1alpha1.Pipeline{}
 	p.Namespace, p.Name = testNS, name
-	p.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile}
 	status := metav1.ConditionFalse
 	if ready {
 		status = metav1.ConditionTrue

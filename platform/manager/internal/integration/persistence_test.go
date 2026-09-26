@@ -60,7 +60,7 @@ func TestABindingCannotNameBothAClaimAndAVolume(t *testing.T) {
 	mkProfile(t, "pv-prof-xor")
 	p := &agentopsv1alpha1.Pipeline{}
 	p.Name, p.Namespace = "pv-xor-pipe", ns
-	p.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "pv-prof-xor"}
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: "pv-prof-xor"}
 	p.Spec.Persistence = &agentopsv1alpha1.PipelinePersistence{
 		Context: &agentopsv1alpha1.PersistenceBinding{
 			ClaimName: "a-claim", VolumeName: "a-volume",

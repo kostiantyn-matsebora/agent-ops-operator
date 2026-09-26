@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-  name: pipelines.agentops.dev
+  name: agentcapabilities.agentops.dev
 spec:
   group: agentops.dev
   names:
-    kind: Pipeline
-    listKind: PipelineList
-    plural: pipelines
-    singular: pipeline
+    kind: AgentCapability
+    listKind: AgentCapabilityList
+    plural: agentcapabilities
+    singular: agentcapability
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -28,8 +28,14 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Pipeline binds signal sources, channels, and an agent profile into one
-          declared flow: N sources fan into conversations mirrored across M channels.
+          AgentCapability is a NAMED CAPABILITY — a profile, a runtime, an identity,
+          tools and MCP servers, and where its conversations persist — declared once
+          and REFERENCED from a Pipeline's or a Coordinator's `capabilityRef`, as an
+          alternative to inlining the same six fields on each.
+
+          It carries no wiring of its own: no signal sources, no channels. An
+          AgentCapability nothing references is inert, exactly as an unwired Channel
+          or SignalSource is — that is the ordinary state of one meant to be shared.
         properties:
           apiVersion:
             description: |-
@@ -50,77 +56,15 @@ spec:
             type: object
           spec:
             description: |-
-              PipelineSpec declares the wiring between the pipeline elements: every
-              referenced signal source's signals become conversations bound to ALL
-              referenced channels with the pipeline's profile, and conversations started
-              from any referenced channel are bound to all of them (full mirroring).
+              AgentCapabilitySpec is WHAT AN AGENT MAY DO AND UNDER WHOSE IDENTITY — the six
+              fields `PipelineSpec` used to carry alone, extracted so a Pipeline and a
+              Coordinator can share ONE capability rather than each restating it.
 
-              It also selects WHAT EXECUTES those conversations and UNDER WHOSE IDENTITY —
-              `runtimeRef` and `serviceAccountName`. Capabilities and execution identity
-              are the same decision: one says which tools may be called, the other with
-              whose credentials, and split across two objects no single object states an
-              agent's power. The Pipeline still carries no credentials and no server or
-              tool definitions.
-
-              THE CAPABILITY — the six fields `AgentCapabilitySpec` holds — is either
-              INLINE here (today's shape, unchanged) or a `capabilityRef` naming an
-              `AgentCapability` object, mutually exclusive by CEL. Nothing here resolves
-              which: `dispatch.ResolveCapability` is the one place that reads either form,
-              and every consumer of a Pipeline's capability calls it rather than this
-              struct's embedded fields directly.
+              It carries no subscription (no signal sources, no channels) and no
+              coordination fields (no `agents[]`, no limits): those are what a Pipeline or
+              a Coordinator adds around it. An AgentCapability nothing wires is inert —
+              unwired is the ordinary state of one that exists only to be REFERENCED.
             properties:
-              capabilityRef:
-                description: |-
-                  AgentRef names an AgentCapability holding this pipeline's capability
-                  INSTEAD of inlining it above — mutually exclusive with the inline fields
-                  by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`,
-                  not admission: CEL cannot express "one of" across an embedded struct.
-                properties:
-                  name:
-                    description: Name of the referenced object.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
-              channelRefs:
-                description: |-
-                  ChannelRefs: every conversation of this pipeline is mirrored on all of
-                  these surfaces. Channels may appear in several pipelines.
-                items:
-                  description: ObjectRef references another object by name (same namespace).
-                  properties:
-                    name:
-                      description: Name of the referenced object.
-                      minLength: 1
-                      type: string
-                  required:
-                  - name
-                  type: object
-                type: array
-              icon:
-                description: "Icon is how this Pipeline is RECOGNISED in a list of
-                  them. Optional, and\npurely how the name is presented.\n\nA REFERENCE,
-                  not an image. Four forms, and the manager tells them apart\nnot
-                  at all — it publishes the string and interprets it no further:\n\n\taops:kubernetes
-                  \           the built-in set, shipped inside each surface\n\tmdi:kubernetes
-                  \            a named icon from a public set\n\thttps://example/logo.svg
-                  \  your own, by URL\n\t\U0001F50E                         an emoji,
-                  drawable by anything\n\nWHAT A SURFACE CAN DRAW IS THE SURFACE'S
-                  BUSINESS. `aops:` and an emoji\nwork everywhere, because every adapter
-                  ships the first and every\ntransport can print the second. Telegram
-                  can draw neither a URL nor a\nnamed set — a command menu takes no
-                  image — so it renders what it can and\nomits the rest. Nothing fails
-                  over an icon.\n\nPrefer `aops:` for anything shipped: it needs no
-                  network, survives an\nair-gapped install, and is the only form guaranteed
-                  on every surface.\n\nIt is INTERFACE METADATA, not wiring, and it
-                  does not weaken the rule\nthat this CR carries the wiring exclusively:
-                  nothing routes on it, no\ncondition reads it, and removing it changes
-                  where not one signal goes.\nSame category as `ChannelAdapter.spec.configSchema`.\n\nIt
-                  lives HERE rather than on the profile because a Pipeline is what
-                  a\nmessage addresses, so a Pipeline is what appears in a menu."
-                maxLength: 256
-                type: string
               mcpConfigs:
                 description: |-
                   MCPConfigs binds MCPConfig CRs supplying this capability's MCP servers,
@@ -318,24 +262,6 @@ spec:
                   fails at pod admission, naming the account.
                 maxLength: 253
                 type: string
-              signalSourceRefs:
-                description: |-
-                  SignalSourceRefs: the sources feeding this pipeline. A source is
-                  SHAREABLE exactly as a channel is — any number of pipelines may list
-                  one, and a signal admitted there opens a conversation on EVERY Ready
-                  pipeline listing it, each with its own profile and capabilities. Listing
-                  a source means "I watch this", not "I own this".
-                items:
-                  description: ObjectRef references another object by name (same namespace).
-                  properties:
-                    name:
-                      description: Name of the referenced object.
-                      minLength: 1
-                      type: string
-                  required:
-                  - name
-                  type: object
-                type: array
               toolsets:
                 description: |-
                   Toolsets binds MCPToolset CRs contributing to the allowlist of this
@@ -374,21 +300,13 @@ spec:
                 - refs
                 type: object
             type: object
-            x-kubernetes-validations:
-            - message: capabilityRef and the inline capability fields (profileRef,
-                runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence)
-                are mutually exclusive
-              rule: '!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef)
-                || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs)
-                || has(self.persistence)))'
           status:
-            description: PipelineStatus reports wiring validity.
+            description: |-
+              AgentCapabilityStatus reports whether every reference this capability names
+              resolves.
             properties:
               conditions:
-                description: |-
-                  Conditions: Ready (all references resolve). There is no SourceConflict
-                  condition — sources are shareable, so listing one another pipeline also
-                  lists is a valid configuration, not a conflict.
+                description: 'Conditions: Ready (every named reference resolves).'
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

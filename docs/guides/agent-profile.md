@@ -125,8 +125,6 @@ kind: Pipeline
 metadata:
   name: my-route
 spec:
-  profileRef:
-    name: <name>
   channelRefs:
   - name: <name>
 ```

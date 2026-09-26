@@ -125,7 +125,7 @@ func TestHandlePipelineResolvedUnknownPipeline(t *testing.T) {
 func TestHandlePipelineResolvedMissingProfileIsUnresolvedNotAnError(t *testing.T) {
 	p := &agentopsv1alpha1.Pipeline{}
 	p.Name, p.Namespace = "p1", "agent-ops"
-	p.Spec.ProfileRef.Name = "ghost"
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: "ghost"}
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(p).Build()
 	s := &Server{Reader: c, Client: c, Namespace: "agent-ops"}
 
@@ -160,7 +160,7 @@ func TestHandlePipelineResolvedComposesToolsetsAndMCPConfigs(t *testing.T) {
 
 	p := &agentopsv1alpha1.Pipeline{}
 	p.Name, p.Namespace = "p1", "agent-ops"
-	p.Spec.ProfileRef.Name = "prof"
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: "prof"}
 	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{
 		Mode: "merge",
 		Refs: []agentopsv1alpha1.ObjectRef{{Name: "ts1"}, {Name: "missing-ts"}},

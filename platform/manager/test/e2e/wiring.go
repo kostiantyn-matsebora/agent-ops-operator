@@ -54,7 +54,7 @@ func raw(v any) *runtime.RawExtension {
 
 func pipeline(name, profile string, sources, channels []string) *agentopsv1alpha1.Pipeline {
 	p := &agentopsv1alpha1.Pipeline{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	p.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile}
 	for _, s := range sources {
 		p.Spec.SignalSourceRefs = append(p.Spec.SignalSourceRefs, agentopsv1alpha1.ObjectRef{Name: s})
 	}

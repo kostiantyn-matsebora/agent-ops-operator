@@ -16,6 +16,15 @@ import (
 // whose credentials, and split across two objects no single object states an
 // agent's power. The Pipeline still carries no credentials and no server or
 // tool definitions.
+//
+// THE CAPABILITY — the six fields `AgentCapabilitySpec` holds — is either
+// INLINE here (today's shape, unchanged) or a `capabilityRef` naming an
+// `AgentCapability` object, mutually exclusive by CEL. Nothing here resolves
+// which: `dispatch.ResolveCapability` is the one place that reads either form,
+// and every consumer of a Pipeline's capability calls it rather than this
+// struct's embedded fields directly.
+//
+// +kubebuilder:validation:XValidation:rule="!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef) || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs) || has(self.persistence)))",message="capabilityRef and the inline capability fields (profileRef, runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence) are mutually exclusive"
 type PipelineSpec struct {
 	// Icon is how this Pipeline is RECOGNISED in a list of them. Optional, and
 	// purely how the name is presented.
@@ -58,69 +67,18 @@ type PipelineSpec struct {
 	// these surfaces. Channels may appear in several pipelines.
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
-	// ProfileRef: the agent answering the conversations this pipeline
-	// originates — those from the signal sources it WATCHES, and those a chat
-	// command addresses to it by name. Channels supply no default.
-	ProfileRef ObjectRef `json:"profileRef"`
-	// RuntimeRef selects the AgentRuntime executing this wiring's
-	// conversations. Absent, the AgentRuntime named "default" — the one the
-	// parent chart renders — then the manager's bootstrap configuration.
-	//
-	// IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An
-	// AgentRuntime carries the ServiceAccount an agent runs as, so selecting
-	// one is selecting the agent's power in the cluster — and that is a wiring
-	// decision, made beside the tools and servers the same route grants, not an
-	// attribute of the prompts an agent is written with.
-	//
-	// The CONVERSATION snapshots the resolved name at creation, so editing this
-	// field re-wires only conversations created afterwards. The referenced CR's
-	// CONTENT — image, idle TTL, volumes — is re-read at every pod build, so
-	// fixing a runtime heals conversations already running.
+	// AgentCapabilitySpec is the CAPABILITY, inline — today's shape, and every
+	// existing Pipeline's shape, unchanged: `json:",inline"` keeps the six
+	// fields' JSON names exactly as they were before this struct existed.
+	// Mutually exclusive with AgentRef below.
 	// +optional
-	RuntimeRef *ObjectRef `json:"runtimeRef,omitempty"`
-	// ServiceAccountName is the identity the runtime executes under,
-	// OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the
-	// runtime's — which the chart still defaults to `agentops-runtime`.
-	//
-	// This is what makes one runtime image serve several trust levels: an
-	// observing route and an acting route differ in their account, not in their
-	// image, so the second no longer needs a cloned AgentRuntime to carry it.
-	//
-	// NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and
-	// nothing here validates that one exists or that its RBAC is sufficient:
-	// who may create an account and what it is bound to stays an EXTERNAL
-	// grant, the same posture adapters already have. A name nothing backs fails
-	// at pod admission, naming the account.
+	AgentCapabilitySpec `json:",inline"`
+	// AgentRef names an AgentCapability holding this pipeline's capability
+	// INSTEAD of inlining it above — mutually exclusive with the inline fields
+	// by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`,
+	// not admission: CEL cannot express "one of" across an embedded struct.
 	// +optional
-	// +kubebuilder:validation:MaxLength=253
-	ServiceAccountName string `json:"serviceAccountName,omitempty"`
-	// Toolsets binds MCPToolset CRs contributing to the allowlist of this
-	// wiring's conversations, plus the mode composing them with what the
-	// AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces).
-	// +optional
-	Toolsets *ToolsetBinding `json:"toolsets,omitempty"`
-	// MCPConfigs binds MCPConfig CRs supplying this wiring's MCP servers,
-	// overlaid per server key in ref order (later wins). No mode: an agent
-	// definition declares no servers, so there is nothing to compose against.
-	// +optional
-	MCPConfigs *ToolingBinding `json:"mcpConfigs,omitempty"`
-	// Persistence declares WHERE this route's conversations keep their state —
-	// the CONTEXT volume and the WORKSPACE volume, independently.
-	//
-	// It sits here for the reason `runtimeRef` and `serviceAccountName` do: a
-	// runtime is an engine, and where a route persists is the route's decision.
-	// An AgentRuntime declares neither volume, so two Pipelines sharing one
-	// runtime keep their conversations on different volumes without cloning it.
-	//
-	// PRECEDENCE, and no other order:
-	//
-	//	pipeline.spec.persistence.<volume> -> the chart's release default -> ephemeral
-	//
-	// The CONVERSATION snapshots the RESOLVED claim at creation, so editing
-	// this field re-wires only conversations created afterwards. Nothing reads
-	// a Pipeline at pod-build time.
-	// +optional
-	Persistence *PipelinePersistence `json:"persistence,omitempty"`
+	AgentRef *ObjectRef `json:"capabilityRef,omitempty"`
 }
 
 // PersistenceBinding says where ONE of a route's two volumes comes from, and
@@ -246,3 +204,13 @@ type PipelineList struct {
 func init() {
 	SchemeBuilder.Register(&Pipeline{}, &PipelineList{})
 }
+
+// CapabilityRef names the AgentCapability this Pipeline references INSTEAD of
+// inlining a capability, or nil when it inlines one. Satisfies
+// dispatch.CapabilityHolder.
+func (p *Pipeline) CapabilityRef() *ObjectRef { return p.Spec.AgentRef }
+
+// InlineCapability returns this Pipeline's own embedded capability fields.
+// Meaningless when CapabilityRef is non-nil. Satisfies
+// dispatch.CapabilityHolder.
+func (p *Pipeline) InlineCapability() AgentCapabilitySpec { return p.Spec.AgentCapabilitySpec }

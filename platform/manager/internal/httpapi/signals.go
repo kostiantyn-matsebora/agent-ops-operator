@@ -28,6 +28,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
@@ -461,7 +462,7 @@ func ambiguousChatMessage(servers []agentopsv1alpha1.Pipeline) chat.Message {
 	b.WriteString("Address one of them:\n")
 	choices := make([]chat.Choice, 0, len(servers))
 	for i := range servers {
-		fmt.Fprintf(&b, "• `/%s <task>` — %s\n", servers[i].Name, servers[i].Spec.ProfileRef.Name)
+		fmt.Fprintf(&b, "• `/%s <task>` — %s\n", servers[i].Name, servers[i].InlineCapability().ProfileName())
 		choices = append(choices, chat.Choice{
 			Label:   servers[i].Name,
 			Command: "/" + servers[i].Name,
@@ -636,16 +637,22 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			conv.GenerateName = "task-"
 		}
 		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
+		// THE CAPABILITY, resolved ONCE — whether this Pipeline inlines it or
+		// names it through capabilityRef makes no difference from here on.
+		capability, err := dispatch.ResolveCapability(ctx, s.Reader, pipeline)
+		if err != nil {
+			return "", false, fmt.Errorf("pipeline %s: resolve capability: %w", pipeline.Name, err)
+		}
 		// The execution wiring is materialized beside the tooling, through the
 		// ONE helper both origination paths call. Freezing it is what stops a
 		// later Pipeline edit changing the identity an inflight conversation's
 		// next pod runs as.
-		snap := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, pipeline, s.Runtime)
+		snap := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, pipeline.Name, capability, s.Runtime)
 		conv.Spec = agentopsv1alpha1.ConversationSpec{
-			ProfileRef:         pipeline.Spec.ProfileRef,
+			ProfileRef:         agentopsv1alpha1.ObjectRef{Name: capability.ProfileName()},
 			ChannelRefs:        append([]agentopsv1alpha1.ObjectRef{}, pipeline.Spec.ChannelRefs...),
-			Toolsets:           pipeline.Spec.Toolsets.DeepCopy(),
-			MCPConfigs:         pipeline.Spec.MCPConfigs.DeepCopy(),
+			Toolsets:           capability.Toolsets.DeepCopy(),
+			MCPConfigs:         capability.MCPConfigs.DeepCopy(),
 			RuntimeRef:         snap.RuntimeRef,
 			ServiceAccountName: snap.ServiceAccountName,
 			// WHERE this conversation's two volumes are, resolved ONCE. A later
