@@ -548,9 +548,11 @@ round itself, counting toward the bound. Only a round that leaves nothing
 eligible ends the loop.
 
 An item is eligible while it is neither fixed nor disputed by the fixing
-step. A dispute is what the fixing step says about an item, never what the
-landing step (the model-free job that applies the patch and posts the
-results) infers from that patch.
+step.
+
+A dispute is what the fixing step says about an item. It is never what the
+landing step, the model-free job that applies the patch and posts the results,
+infers from that patch.
 
 **Measured on #259.** The loop's own guard turned `docs-task` red over a
 dispute the landing step had manufactured from a fix that landed nothing, the
