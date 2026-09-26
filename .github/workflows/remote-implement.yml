@@ -21,7 +21,7 @@
 #            the session, which opens its pull request UNLABELLED.
 #   open     `workflow_run` after `ci` completes on a `pull_request` event —
 #            reads the pull request's `Refs #<n>` and carries `conveyor:run`
-#            forward as `conveyor:fix` on THIS pull request, via carry-grant.py.
+#            forward as `conveyor:fix` on THIS pull request, via carry.py.
 #   archive  `workflow_run` after `ci` completes on a `push` to the default
 #            branch — reads the merged pull request's SAME `Refs #<n>` and
 #            carries `conveyor:run` forward as `conveyor:archive` on the ISSUE
@@ -47,7 +47,7 @@
 # dedicated workflow of this file's own.
 #
 # A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.
-# `carry-grant.py` re-reads the issue's CURRENT labels and re-checks the
+# `carry.py` re-reads the issue's CURRENT labels and re-checks the
 # placer's write access every time it is called — it never trusts that a
 # label exists because a workflow called it before, and it is also what
 # makes `ci` running MORE THAN ONCE per pull request (opened, then every
@@ -133,7 +133,7 @@ jobs:
   #
   # Fires on `ci` completing FOR a `pull_request` event -- `ci` runs on every
   # `opened` AND every `synchronize`, so this job runs more than once per pull
-  # request. Harmless: carry-grant.py's marker comment dedupes every carry
+  # request. Harmless: carry.py's marker comment dedupes every carry
   # after the first, and re-adding an already-present label is a no-op.
   #
   # CONCLUSION IS 'success' OR 'failure', NEVER 'success' ALONE -- THAT WAS THE
@@ -146,7 +146,7 @@ jobs:
   # waited on the very green state the fixing loop exists to produce (#51).
   # `review-dispatch.yml`'s own header already treats a red `ci-green` as a
   # work item ("a `ci` run completing with `failure` starts a round"), so
-  # accepting `failure` here only lets the carry happen -- carry-grant.py
+  # accepting `failure` here only lets the carry happen -- carry.py
   # still re-checks the writer's `conveyor:run` and the `change/*` branch
   # guard before anything lands, and the loop itself still reproduces or
   # disputes each failing check rather than blindly patching.
@@ -164,7 +164,7 @@ jobs:
     # (`addLabelsToLabelable`), confirmed live. Read is what resolving WHICH
     # pull request a workflow_run concerns needs (`commits/<sha>/pulls`);
     # write is what LABELLING it needs. ISSUES: write stays for the marker
-    # comment carry-grant.py posts, through `gh issue comment`.
+    # comment carry.py posts, through `gh issue comment`.
     #
     # ACTIONS: write IS FOR THE RE-DISPATCH BELOW, AND NOTHING ELSE. Adding a
     # label through the API, under a workflow token, fires no `pull_request:
@@ -186,7 +186,7 @@ jobs:
       # THE TRUSTED COPY, NOT THE PULL REQUEST'S. See the header comment --
       # this ALSO buys the trusted checkout, exactly as review-dispatch.yml's
       # own workflow_run jobs already rely on it for. Even on a same-repo,
-      # non-fork pull request, `carry-grant.py` deciding what a grant means
+      # non-fork pull request, `carry.py` deciding what a grant means
       # must run the version this repository's own default branch ships.
       - uses: actions/checkout@v4
         with:
@@ -245,7 +245,7 @@ jobs:
        github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # ISSUES: write TO CARRY -- carry-grant.py --station archive labels and
+    # ISSUES: write TO CARRY -- carry.py --station archive labels and
     # comments the ISSUE alone through gh issue edit / gh issue comment.
     # PULL-REQUESTS: read TO FIND -- resolving the merged pull request from
     # the pushed commit uses the search API, which needs the same scope as

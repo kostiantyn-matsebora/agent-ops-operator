@@ -1,37 +1,34 @@
-## 1. A timed-out round counts
+## 1. The machine
 
-- [ ] 1.1 `land-dispatch.py`: the `--fix-timed-out` ending posts the round marker, reports the rounds used, and at the cap names `conveyor:keep-going`. `--fix-failed` stays uncounted. Verify: `.github/tests/land-dispatch.test.sh` gains a case where five timed-out rounds reach the cap and the sixth is refused, and one where a failed fix still counts nothing
+- [x] 1.1 `.github/scripts/conveyor.py`: the station table, the loop table, and `standing_grant`, `fire`, `carry_fix`, `carry_archive`, `gate`, `guard`, `ending`, `check_is_work`, `recover`, `refresh`, `cap_for`, `count_marked`, `is_finished`. Verify: `.github/tests/conveyor.test.py` walks every state against every event and every fact combination of each decision
+- [x] 1.2 `conveyor_io.py`: the shared fact gathering, failing closed on unreadable fire records and pull request lists. Verify: the adapter suites below read through it
 
-## 2. The running-round question leaves CI
+## 2. The adapters
 
-- [ ] 2.1 `autofix-guard.py`: a `--disputes-only` flag that asks the dispute question alone. The hook keeps the default. Verify: `.github/tests/autofix-guard.test.sh` gains a case where a queued dispatch run refuses the default and passes disputes-only, and one where an unanswered dispute refuses both
-- [ ] 2.2 `ci.yml`, job `docs-task`: the guard step passes `--disputes-only`, and its step name says what it asks. Verify: `.github/tests/review-dispatch.test.sh` (or the workflow suite that parses `ci.yml`) asserts the flag is present
+- [x] 2.1 `conveyor-state.py` takes events and writes one edit or none. Verify: `conveyor-state.test.sh`
+- [x] 2.2 `carry.py` replaces `carry-grant.py` and `carry-from-pr.sh`, and `remote-implement.yml` calls it from `open` and `archive`. Verify: `carry.test.sh`, `review-dispatch.test.sh`
+- [x] 2.3 `remote-implement.py` fires through the machine. Verify: `remote-implement.test.sh`
+- [x] 2.4 `dispatch-gate.py` replaces the gate's shell in `review-dispatch.yml`. Verify: `dispatch-gate.test.sh`
+- [x] 2.5 `land-dispatch.py` counts every round that ran, through one counter, and caps. Verify: `land-dispatch.test.sh`
+- [x] 2.6 `autofix-guard.py --purpose ci|archive`, `failed-checks.py` reading failed steps, and `ci.yml` passing `--purpose ci`. Verify: `autofix-guard.test.sh`, `failed-checks.test.sh`, `dispute-answered.test.sh`
+- [x] 2.7 `refresh-loop-state.py` and `recover-loop-state.py` send events. Verify: their suites
 
-## 3. The loop's own bookkeeping starts no round
+## 3. Unit tests
 
-- [ ] 3.1 `failed-checks.py`: read the failed job's steps and exclude a `docs-task` job whose only failed step is the guard step, with a stated reason in its output. Verify: `.github/tests/failed-checks.test.sh` gains a case with a stubbed jobs listing, one where `docs-task` failed on the guard step (excluded) and one where it failed on the tasks-file step (kept)
-- [ ] 3.2 `land-dispatch.py`: a round whose work list is empty because every failed check was excluded ends as "nothing to do" and names the unanswered dispute. Verify: the land test's empty-work-list case names the dispute
+- [x] 3.1 `.github/tests/run.sh` passes, with `conveyor.test.py` and a suite per adapter
 
-## 4. The gate accepts what the carry carried
+## 4. E2E tests
 
-- [ ] 4.1 `review-dispatch.yml`, job `gate`: both bot re-checks ask the standing-grant rule `carry-grant.py` states, accepting `conveyor:run`, or `conveyor:archive` where the pull request says `Closes #<n>`. Verify: `.github/tests/review-dispatch.test.sh` gains a case where a bot start on an archive pull request whose issue carries `conveyor:archive` alone is accepted, and one where a plain pull request under the same issue is refused
+- [x] 4.1 Nothing here is decided by a cluster: every program runs on the runner against the platform's API, and the script suite stands `gh` in. Not applicable
 
-## 5. Unit tests
+## 5. Documentation
 
-- [ ] 5.1 `.github/tests/run.sh` passes, the four suites above included: land-dispatch, autofix-guard, review-dispatch and failed-checks
+### 5.1 Reference docs
 
-## 6. E2E tests
+- [x] 5.1.1 `.claude/rules/worktree-delivery.md`, `remote-session.md` and `.github/routines/implement-issue.md`: the programs are named as they are now, and the rules say the machine owns the decisions
+- [x] 5.1.2 `.claude/rules/gotchas.md`: the measurements on #248, #254 and #255 and why each earlier fix failed
+- [x] 5.1.3 `docs/CHANGELOG.md` and `docs/diagrams/conveyor-lifecycle-implementation.mmd`: the behaviours, unreleased, and the drawn process
 
-- [x] 6.1 Nothing here is decided by a cluster: every program runs on the runner against the platform's API, and the script suite stands `gh` in. Not applicable
+### 5.2 Adopter site
 
-## 7. Documentation
-
-### 7.1 Reference docs
-
-- [ ] 7.1.1 `.claude/rules/worktree-delivery.md`: the loop bullets say a timed-out round counts, that `docs-task` asks the dispute question alone, that a red made only of the guard starts no round, and that the gate accepts the archive grant the carry accepts
-- [ ] 7.1.2 `.claude/rules/gotchas.md`: the measurement on #248 — the cycle, the six replies, and why removing the grant by hand was the wrong fix
-- [ ] 7.1.3 `docs/CHANGELOG.md`: the three behaviours, unreleased
-
-### 7.2 Adopter site
-
-- [ ] 7.2.1 Nothing on the adopter site describes the conveyor's rounds. Checked: `docs/index.md`, `docs/getting-started.md`, `docs/installation.md` and the integration pages name no fixing loop
+- [x] 5.2.1 Nothing on the adopter site describes the conveyor's rounds. Checked: `docs/index.md`, `docs/getting-started.md`, `docs/installation.md` and the integration pages name no fixing loop

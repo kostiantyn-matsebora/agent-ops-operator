@@ -12,7 +12,7 @@ follow a resolution. An open thread blocks the merge through branch
 protection's required conversation resolution, evaluated LIVE at merge time,
 and that is the one place the content question belongs.
 
-WHAT THIS PROGRAM IS FOR NOW: the conveyor's STATE. `carry-from-pr.sh` asks
+WHAT THIS PROGRAM IS FOR NOW: the conveyor's STATE. `carry.py` asks
 it before marking a pull request `loop:mergeable` on a green ci, so the label
 is honest at that moment. Carried-over findings, already-open before the
 latest review run, count exactly the same as one posted moments ago. A finding folded into a carried thread rather than re-posted

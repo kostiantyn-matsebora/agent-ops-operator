@@ -152,7 +152,7 @@ written to a branch is not a judgement call anywhere else in this project.
    gate that checks who labelled — measured live on #201: the session labelled
    its own pull request, the gate refused, and the pull request sat green,
    reviewed and unlabelled with no session left to act. A WORKFLOW —
-   `.github/workflows/remote-implement.yml`, `carry-grant.py` — reads this
+   `.github/workflows/remote-implement.yml`, `carry.py` — reads this
    issue's labels again once the pull request opens and carries the standing
    instruction forward if it is still there and still a writer's. THAT is
    what labels this pull request, not this step.
@@ -166,7 +166,7 @@ written to a branch is not a judgement call anywhere else in this project.
        change it merely proposes, and it is right to: the issue has to follow
        the change through review and archiving. The archiving pull request is
        where `Closes #<n>` belongs, and the guard refuses THAT one without it.
-     - **On the plain lane**, `Refs #<n>` is what tells `carry-grant.py` which
+     - **On the plain lane**, `Refs #<n>` is what tells `carry.py` which
        issue's grant to carry forward — without it nothing is carried and a
        person labels this pull request by hand.
    - **THE SMOKE RUN YOU DISPATCHED IN STEP 6, BY LINK.** You did not wait for
@@ -193,7 +193,7 @@ of every CI run, and still not own the later rounds.
 The review's findings, the analysis service's issues and every failed
 required check are its work list, round after round, under `conveyor:fix`.
 
-`carry-grant.py` places that label on THIS pull request once it reads
+`carry.py` places that label on THIS pull request once it reads
 `conveyor:run` still standing on the issue it opened from — the tracking
 issue on the opsx lane, the plain issue itself on the plain lane. The session
 itself placed no label at all.

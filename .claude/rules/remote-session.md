@@ -104,8 +104,8 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
 
   | Job | Fires after `ci` completes for | Does |
   |---|---|---|
-  | `open` | a `pull_request` event, from `change/*` | resolves the pull request from the run's head sha, reads its `Refs #<n>`, and — if that issue still carries `conveyor:run` from a writer — `.github/scripts/carry-grant.py` places `conveyor:fix` on the pull request, naming whose instruction it carried |
-  | `archive` | a `push` to the default branch | resolves the just-merged pull request from the pushed commit and does the same for `conveyor:archive`, ON THE ISSUE — the pull request is closed by then, and a label there drives nothing — only on the opsx lane, since the plain lane has no archive station |
+  | `open` | a `pull_request` event, from `change/*` | resolves the pull request from the run's head sha, reads its `Refs #<n>`, and — if that issue still carries `conveyor:run` from a writer — `.github/scripts/carry.py` places `conveyor:fix` on the pull request, naming whose instruction it carried |
+  | `archive` | a `push` to the default branch | resolves the just-merged pull request from the pushed commit and does the same for `conveyor:archive`, ON THE ISSUE — the pull request is closed by then, and a label there drives nothing — only on the opsx lane, and only when the change's tasks are all ticked, since a proposal merge or an applying merge has nothing to archive |
 
   **`archive` ALSO STARTS THE SESSION ITSELF, IN THE SAME STEP.** Placing a
   label through this job's own token fires no `issues: labeled` webhook — the
@@ -117,6 +117,11 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   event would carry. That script re-checks the grant from `sender` exactly
   as it does for a bot-carried `conveyor:fix` event, so this is the same
   program reading the same facts, not a second, weaker path.
+- **A FIRE STARTS THE STATION THE CHANGE IS AT, AND ONE SESSION AT A TIME.**
+  `conveyor:run` on a finished change fires the archive station, not the
+  implement one. A pull request open from the change's branch means a session
+  is at work, so nothing fires. If the fire records or the pull request list
+  cannot be read, nothing fires either.
 - **THE PAYLOAD IS A NUMBER AND NOTHING ELSE.** The platform wraps fire text as
   untrusted; a number is something the prompt can validate before it is used,
   and the session then reads the issue itself.
@@ -126,7 +131,7 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
   issue closes at ARCHIVE rather than at merge; `pr-closes-guard.py` refuses a
   pull request that would close one whose change it merely proposes. `Closes`
   is owed by the ARCHIVING pull request, and that guard refuses that one
-  without it. On the plain lane, `Refs #<n>` is what `carry-grant.py` reads to
+  without it. On the plain lane, `Refs #<n>` is what `carry.py` reads to
   find the issue whose grant to carry — without it nothing is carried and a
   person labels the pull request by hand.
 - **THE SESSION OPENS THE PULL REQUEST AND STOPS.** It does not wait for CI or

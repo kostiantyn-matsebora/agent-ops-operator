@@ -162,7 +162,7 @@ assert_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixin
 assert_not_contains "$(cat "$GH_CALLS")" "a workflow reads"
 
 # conveyor:implement CAN FIRE WHILE conveyor:run ALREADY STANDS -- the later
-# carry (carry-grant.py, at the `open` job) reads the ISSUE'S CURRENT labels,
+# carry (carry.py, at the `open` job) reads the ISSUE'S CURRENT labels,
 # never which one fired this session, so the standing instruction still gets
 # carried forward even though conveyor:implement, not conveyor:run, is what
 # triggered this particular run. The comment must say so.
@@ -178,7 +178,7 @@ assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
 assert_not_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
 # THE TEXT MUST NAME conveyor:run, THE LABEL THAT ACTUALLY GETS CARRIED --
 # never conveyor:implement, the one that happened to fire this session.
-# carry-grant.py reads run_label off the issue's live labels regardless of
+# carry.py reads run_label off the issue's live labels regardless of
 # which label fired remote-implement.py, so naming the firing label here
 # would describe a carry that is not the one that actually happens.
 assert_contains "$(cat "$GH_CALLS")" "reads \`conveyor:run\` again and carries it forward as \`conveyor:fix\`"
@@ -313,7 +313,7 @@ assert_equals "" "$(cat "$GH_CALLS")"
 
 # --- the archive station, and a label the WORKFLOW carried ---------------------
 #
-# `conveyor:archive` reaches the tracking issue from carry-grant.py, so its
+# `conveyor:archive` reaches the tracking issue from carry.py, so its
 # sender is `github-actions[bot]` -- unknown to the collaborators API. It is
 # accepted exactly when the standing instruction it relays still stands on
 # the issue and was placed by a writer, re-read here; otherwise removed with

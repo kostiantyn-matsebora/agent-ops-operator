@@ -11,7 +11,7 @@
 # OR THE WHOLE PULL REQUEST IS APPROVED AT ONCE. The `conveyor:fix` label
 # (`.github/review-triage.json`, `approve_label`, renamed from `autofix`) is
 # change-level consent, placed by a person with write access — directly, or
-# CARRIED forward by `.github/scripts/carry-grant.py` relaying a person's
+# CARRIED forward by `.github/scripts/carry.py` relaying a person's
 # standing instruction on the tracking issue (`conveyor:run`); a program may
 # only carry or consume a grant, never mint one, and a carried label is
 # re-checked against the grant it claims rather than trusted: every open

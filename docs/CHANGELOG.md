@@ -62,6 +62,19 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **The conveyor is one state machine.** The label-driven line (implement, fix,
+  archive) decided its rules in five workflows and eleven programs, and ten of
+  them disagreed. `conveyor.py` now holds the station and loop tables and every
+  decision, and each program gathers facts, asks it and acts.
+  - A round that ran a model counts toward `max_rounds`, a timed-out one
+    included, and the cap is enforced before a round starts.
+  - `docs-task` no longer reports a running round, so a round cannot start the
+    next one through its own refusal. The `/opsx:archive` hook still does.
+  - The gate accepts the grant the carry accepts, and re-checks it on review
+    and CI completions too, so removing `conveyor:run` stops a running loop.
+  - The archive station starts only from a finished change.
+  - `carry-grant.py` and `carry-from-pr.sh` are replaced by `carry.py`.
+
 - The kubernetes bundle's `k8s-engineer` profile now states the install's
   pod-execution posture to the agent. While
   `global.agentops.runtimeDefaults.allowPodExecution` is off, its role ends

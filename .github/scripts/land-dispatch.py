@@ -401,7 +401,7 @@ class Round:
         at the start of this round; a `clean` ending is decided minutes
         later, and a thread could have opened in between (a human reviewer's
         own comment, a re-triggered review). `review-not-clean.py`, exit 1,
-        is the same live read `carry-from-pr.sh` trusts before ever calling a
+        is the same live read `carry.py` trusts before ever calling a
         pull request mergeable -- this round must not claim less carefully.
 
         THREE OUTCOMES, NOT TWO. Exit 0 is clean, exit 1 is an open thread --

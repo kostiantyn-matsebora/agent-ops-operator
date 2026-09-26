@@ -1,48 +1,68 @@
-# The fixing loop counts every round and never feeds on its own refusal
+# The conveyor is one state machine, and the loop cannot cycle on its own refusal
 
 ## Why
 
-**The fixing loop fed on its own refusal, and its bound never applied.**
-Under a standing `conveyor:run`, the loop on #248 could neither end nor let
-the pull request merge. The cycle, measured on 2026-09-25:
+**The conveyor broke on every use, and each fix was another copy of a rule.**
+The label-driven line (implement, fix, archive) is decided in five workflows
+and eleven programs.
 
-1. A review completion starts a round.
-2. The round runs to the fixing job's time limit against 100+ open analysis
-   issues and is landed as "no round counted".
-3. While it runs, the `docs-task` check refuses on "a round is still
-   running", so `ci-green` is red.
-4. A red `ci-green` starts the next round.
+Each holds its own idea of what a grant is, when a round
+starts and what state comes next. Drawing every label, station, loop and
+transition from the published diagram found ten places where two of them
+disagree:
 
-The loop fed on its own refusal, and the bound never applied because a
-timed-out round counts for nothing. Getting the pull request merged took
-removing the grant from the tracking issue by hand, which also cost the
-archive station its actor.
+1. The gate re-checks a bot start against `conveyor:run` alone, while the carry
+   accepts `conveyor:archive` for the archive pull request. Every round on #254
+   was refused.
+2. A round that hit its time limit counted for nothing, so `max_rounds` never
+   bound it (#248).
+3. `docs-task` refuses while a round runs, and a red `ci-green` starts the
+   next round. The loop fed on its own refusal (#248).
+4. Every pull request comment starts a dispatch run, and a queued run failed
+   `docs-task` in its first ten seconds (#248).
+5. The archive carry fires on any `change/*` merge, a proposal merge included
+   (#255).
+6. The label fire and the archive carry can each start a session for one issue
+   at once (#255).
+7. `conveyor:run` always fires the implement station, and its fire record is
+   permanent, so a finished change is never archived by it (#255).
+8. A round that ended clean with a thread open left `loop:running`, which the
+   corrector skips.
+9. `open` dispatches a round while the review's completion starts another for
+   the same head.
+10. Nothing enforced the cap before a round started, so the commit a capped
+    round pushed started the next one.
+
+**Fixing ten copies one at a time is what kept failing.** The rule has to
+exist once, and every program has to ask it.
 
 ## What Changes
 
-- **A timed-out round counts.** A fixing job that hits its time limit ends the
-  round as "timed out", and that round counts toward `max_rounds` exactly as a
-  landed one does. Five timeouts in a row reach the cap and stop, with the
-  summary naming them.
-- **A CI check never carries the running-round question.** `docs-task` keeps
-  asking whether a dispute the loop posted has no answer from a person, and
-  stops asking whether a round is running. Whether a round is running is the
-  loop's own transient state, and a check that reports it red starts the
-  next round from its own red. The `/opsx:archive` hook keeps both questions.
-- **The loop's own bookkeeping never starts a round.** The failed-checks
-  reader excludes a `docs-task` failure whose failing step is the loop guard,
-  so a red `ci-green` made only of an unanswered dispute waits for the person
-  it is waiting for instead of dispatching a fixer that can do nothing about it.
-- **A queued dispatch run that the concurrency group cancels never refused a
-  check** — it follows from the second item, and the case is written down:
-  six thread replies right after a push queued six runs and failed `docs-task`
-  in its first ten seconds, three pushes in a row.
-- **The gate accepts the grant the carry accepted.** #238 made
-  `conveyor:archive` on the tracking issue its own grant for the archive pull
-  request's fix station, and `carry-grant.py` places `conveyor:fix` on it.
-  The gate in `review-dispatch.yml` still re-checks a bot-started round
-  against `conveyor:run` alone, so it refused the round on #254 that the
-  carry had just authorised. The gate reads the same rule as the carry.
+- **One state machine, `.github/scripts/conveyor.py`.** Pure functions, no I/O.
+  It holds the station table, the loop table and every decision the workflows
+  make: the standing grant, the fire, the two carries, the gate, the guard, the
+  ending of a round, whether a failed check is work, the recovery of an
+  orphaned `loop:running` and the refresh of a stale label.
+- **The programs become adapters.** Each gathers facts, asks the machine, and
+  does what it answers. `carry.py` replaces `carry-grant.py` and
+  `carry-from-pr.sh`. `dispatch-gate.py` replaces the gate's shell.
+  `conveyor-state.py` takes events, never values, and is the only writer of a
+  state label.
+- **Stations and loops are covered, not only the grant.** Every state and every
+  event of both tables, every combination of each decision's facts, and each
+  measured failure as a named case.
+- **A round that ran a model counts, whatever ended it.** Timed out, disputed,
+  no report and stale patch count. A clean round and a fixing job that never
+  started do not.
+- **The cap is enforced before a round starts.** A round begins while rounds
+  used are below the ceiling or `conveyor:keep-going` stands.
+- **A carried grant is re-checked on every start**, completions included.
+  Removing `conveyor:run` from the issue stops a loop already running.
+- **No required check reports whether a round runs.** `docs-task` asks the
+  dispute question alone. The archive hook keeps both. A red made only of the
+  loop's own guard starts no round.
+- **The archive carry needs a finished change**, and a fire follows the
+  change's stage and starts one session per line at a time.
 
 ## Capabilities
 
@@ -52,28 +72,23 @@ _None._
 
 ### Modified Capabilities
 
-- `conveyor-lifecycle`: the bound counts every round that ran, timed out
-  included, and the line's own state is never a check's verdict — a running
-  round is not a failed check, and a failed check that is only the loop's own
-  guard starts no round. Every program that re-checks a carried grant reads
-  the same rule for what a standing grant is.
+- `conveyor-lifecycle`: the line's decisions are one machine that every program
+  asks. The bound counts every round that ran and is enforced before the round.
+  A running round is not a check's verdict. Every re-check of a carried grant
+  reads one rule, and the archive station needs a finished change.
 
 ## Impact
 
-- `.github/scripts/land-dispatch.py`: the `--fix-timed-out` ending posts the
-  round marker and reports the rounds used. `--fix-failed` stays uncounted,
-  since no model ran at all, which is distinct from a model that ran out of
-  time.
-- `.github/scripts/autofix-guard.py`: a `--disputes-only` mode for CI. The
-  hook keeps the default.
-- `.github/workflows/ci.yml` (`docs-task`): calls the guard in disputes-only
-  mode.
-- `.github/scripts/failed-checks.py`: reads the failed job's steps and
-  excludes `docs-task` failed by the guard step.
-- `.github/workflows/review-dispatch.yml` (`gate`): a bot-started round is
-  accepted when the named issue carries `conveyor:run`, or `conveyor:archive`
-  where the pull request is the archive one, in both places it re-checks.
-- `.github/tests/land-dispatch.test.sh`, `autofix-guard.test.sh`,
-  `failed-checks.test.sh`: one case each.
-- `.claude/rules/worktree-delivery.md`, `.claude/rules/gotchas.md`,
-  `docs/CHANGELOG.md`: the rule and the measurement.
+- `.github/scripts/conveyor.py` and `conveyor_io.py`: the machine and the shared
+  fact gathering. New.
+- `.github/scripts/carry.py`, `dispatch-gate.py`: new adapters.
+  `carry-grant.py` and `carry-from-pr.sh` are deleted with their tests.
+- `.github/scripts/conveyor-state.py`, `remote-implement.py`,
+  `land-dispatch.py`, `autofix-guard.py`, `failed-checks.py`,
+  `refresh-loop-state.py`, `recover-loop-state.py`: rewritten over the machine.
+- `.github/workflows/review-dispatch.yml`, `remote-implement.yml`, `ci.yml`: the
+  gate step, the `open` and `archive` jobs and the `docs-task` guard call.
+- `.github/tests/`: `conveyor.test.py` and one suite per adapter.
+- `.claude/rules/worktree-delivery.md`, `remote-session.md`, `gotchas.md`,
+  `.github/routines/implement-issue.md`, `docs/CHANGELOG.md` and the published
+  lifecycle diagram.

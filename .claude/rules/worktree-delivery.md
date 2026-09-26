@@ -188,7 +188,7 @@ tree edit could fix it), the owner resolved the thread, and nothing re-ran
 anything for days. The repair of re-running the check on the thread event
 DOES NOT EXIST: `pull_request_review_thread` is a webhook event and not an
 Actions trigger, and a workflow naming it is refused (`gotchas.md`).
-`review-not-clean.py` survives for the conveyor's STATE: `carry-from-pr.sh`
+`review-not-clean.py` survives for the conveyor's STATE: `carry.py`
 asks it before marking a green pull request `loop:mergeable`. It runs by hand too: `gh workflow run claude-review.yml -f
 number=<pr>` (`-f dry_run=true` posts nothing; `-f full=true` ignores the
 coverage record and reads every changed path from the base — the same
@@ -225,7 +225,7 @@ comment acts on everything accepted:
 | the `conveyor:implement` LABEL | an ISSUE | APPROVED TO BE BUILT, ONE STATION — a remote session proposes, implements and opens the pull request, UNLABELLED. Placed by a person with WRITE access. Anyone else's is removed with a comment |
 | the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
 | the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. It STARTS A SESSION (`remote-implement.yml`, the same fire as implement, `archive-change.md`) that archives on the branch and opens the archive pull request with `Closes #<n>`, unlabelled; the loop drives that pull request to mergeable and a person merges it. Only the OPSX LANE has this station, bound to an openspec change (`remote-session.md`) — the PLAIN LANE, implemented straight from the issue, ends its line at the merge |
-| a `station:<x>` LABEL | the ISSUE | STATE, NOT A GRANT — which station the line is at: `implement`, `fix`, `merge`, `stalled`, `archive`, `done`. Moved by the workflow performing the transition (`conveyor-state.py`), one value at a time, read by nobody but people. Removing one changes nothing. `stalled` is set by `carry-grant.py` itself when a merge lands with nothing to carry the line onward — the ordinary `station:merge` label would otherwise describe a precondition ("mergeable, waits for a person") that the merge has already made false |
+| a `station:<x>` LABEL | the ISSUE | STATE, NOT A GRANT — which station the line is at: `implement`, `fix`, `merge`, `stalled`, `archive`, `done`. Moved by the workflow performing the transition (`conveyor-state.py`), one value at a time, read by nobody but people. Removing one changes nothing. `stalled` is set by `carry.py` itself when a merge lands with nothing to carry the line onward — the ordinary `station:merge` label would otherwise describe a precondition ("mergeable, waits for a person") that the merge has already made false |
 | a `loop:<x>` LABEL | a pull request | STATE, NOT A GRANT — what the fixing loop is doing: `running` (a round started), `stalled` (it stopped for you: a dispute, no report, or a fixer that could not run), `capped`, `mergeable` (`ci` green on the head). Same rules |
 | the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
 | a reply under `<!-- conveyor:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
@@ -234,9 +234,9 @@ comment acts on everything accepted:
 Every label above that authorises unattended work is placed by a person whose
 write access the platform confirms.
 
-It is placed directly, or CARRIED forward by `.github/scripts/carry-grant.py`.
-That program records whose instruction it relayed and RE-CHECKS it at the
-point it is acted on, never trusting that a workflow placed it before.
+It is placed directly, or CARRIED forward by `.github/scripts/carry.py`.
+That program records whose instruction it relayed. The gate RE-CHECKS it at
+every start, never trusting that a workflow placed it before.
 
 - **THIS IS THE WHOLE FIX FOR #201.** A remote session opened its pull request
   carrying `autofix` because its own instructions said to. It acts as an
@@ -388,6 +388,54 @@ point it is acted on, never trusting that a workflow placed it before.
   vocabulary file rather than a hardcoded name), in the same hook as
   the documentation gate and the same CI job. It fails open on anything it
   cannot read.
+
+### THE LINE IS ONE STATE MACHINE, AND EVERY PROGRAM ASKS IT
+
+**`.github/scripts/conveyor.py` DECIDES. NOTHING ELSE DOES.** It holds the
+station table, the loop table and every decision the workflows make. It is pure:
+facts in, a `Decision` out, no `gh` and no clock.
+
+Ten places disagreed before it existed (#248, #254, #255). Each fix had
+changed one copy of a rule and left the others.
+
+| Decision | Asked by |
+|---|---|
+| `standing_grant`, `carry_fix`, `carry_archive` | `carry.py`, from `remote-implement.yml`'s `open` and `archive` jobs |
+| `fire` | `remote-implement.py` |
+| `gate` | `dispatch-gate.py`, the whole gate of `review-dispatch.yml` |
+| `ending`, `check_is_work`, `cap_for` | `land-dispatch.py`, `failed-checks.py` |
+| `guard` | `autofix-guard.py`, with `--purpose ci` or `--purpose archive` |
+| `recover`, `refresh` | `recover-loop-state.py`, `refresh-loop-state.py` |
+
+- **A PROGRAM IS AN ADAPTER.** It gathers facts, asks, and does what the answer
+  says. A rule appearing in a workflow's shell or in a second script is the
+  defect this section exists to prevent.
+- **A STATE LABEL IS WRITTEN BY AN EVENT.** `conveyor-state.py` takes
+  `--station-event` or `--loop-event`, reads the live label and writes what the
+  table gives. It accepts no value, so no caller can put the line in a state
+  the machine has no path to.
+- **THE TABLES ARE WALKED.** `conveyor.test.py` runs every state against every
+  event and every combination of each decision's facts. A new state or event
+  that is not wired fails there.
+- **ONE GRANT RULE.** `conveyor:run` stands for every station.
+  `conveyor:archive` stands for the archive station and for the fix station of
+  a pull request that says `Closes #<n>`. The carry, the gate and the fire
+  all read it from `standing_grant`.
+- **THE GATE RE-CHECKS EVERY START**, a review or CI completion included, when
+  the fix label was placed by the workflow. Removing `conveyor:run` from the
+  issue stops a loop already running, and the carried label is removed.
+- **EVERY ROUND THAT RAN A MODEL COUNTS**, a timed-out one too. A clean round
+  and a fixing job that never started do not.
+- **THE CAP IS ENFORCED BEFORE THE ROUND.** A round starts while rounds used
+  are below `max_rounds`, or while `conveyor:keep-going` stands.
+- **NO CHECK CARRIES THE RUNNING-ROUND QUESTION.** `docs-task` runs the guard
+  with `--purpose ci` and asks about an unanswered dispute alone. Only the
+  `/opsx:archive` hook asks whether a round runs. A red made of the guard
+  alone is `waiting`, and starts no round.
+- **THE ARCHIVE CARRY NEEDS A FINISHED CHANGE.** A proposal merge and an
+  applying merge carry nothing.
+- **UNREADABLE FACTS FAIL CLOSED.** If the fire records or the open pull
+  requests cannot be read, the machine is told a session is at work.
 
 ### WHAT THE MAIN CHECKOUT IS STILL FOR
 

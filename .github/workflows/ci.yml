@@ -1041,7 +1041,7 @@ jobs:
           fi
           # POST WHAT THE GUARD ALREADY SAID, WHERE A PERSON WILL SEE IT — a
           # comment on the pull request, never only the job log. MARKER-DEDUPED
-          # the same way carry-grant.py's own comments are: a re-run after an
+          # the same way carry.py's own comments are: a re-run after an
           # unrelated push must not repeat the same paragraph every time.
           [ -n "${PR_NUMBER:-}" ] || { echo "::error::no pull request to comment on"; exit 1; }
           marker="<!-- pr-closes-guard -->"

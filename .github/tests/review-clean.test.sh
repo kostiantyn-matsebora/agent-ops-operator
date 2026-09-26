@@ -35,7 +35,7 @@ it "review-not-clean.py is RUN by NO REQUIRED CHECK: a check must never carry th
 # `discover` and `trivy-db` are required through `operator`/`images`/etc.
 # without `ci-green` naming them itself, and a job outside this closure
 # (review-dispatch.yml's `land`, say) may still call this script for STATE,
-# exactly as `carry-from-pr.sh` already does: nothing required reads that
+# exactly as `carry.py` already does: nothing required reads that
 # value, and it is re-asserted at the next transition. Only ci.yml's own
 # jobs can be in the closure at all -- `needs:` cannot cross workflow files
 # -- but the closure is still computed rather than assumed flat, since a

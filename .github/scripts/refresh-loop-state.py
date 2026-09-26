@@ -27,7 +27,7 @@ import pathlib
 import subprocess
 import sys
 
-# CWD-RELATIVE, LIKE `carry-from-pr.sh`'s OWN CALLS TO THESE TWO SCRIPTS --
+# CWD-RELATIVE, LIKE `carry.py`'s OWN CALLS TO THESE TWO SCRIPTS --
 # not `__file__`-relative. CI checks this repository out at the working
 # directory and runs every script from there, and a `__file__`-relative path
 # would resolve to THIS repository's checkout even when a test substitutes a
