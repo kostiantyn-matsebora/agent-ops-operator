@@ -317,6 +317,21 @@ every start, never trusting that a workflow placed it before.
   - **One start per head**, by whichever run concludes second. Two starts for
     one head used to run in sequence, each counting toward `max_rounds`, and
     the first read a CI run that had not spoken.
+  - **A RED CHECK THE FIXER CANNOT EXPLAIN GETS ONE FRESH RUN BEFORE ANYONE IS
+    ASKED.** The first time the fixing step disputes a check as "not the
+    tree", `land` pushes an EMPTY commit and posts `<!-- conveyor:refreshed -->`
+    instead of the dispute, so CI judges the head again under the merged
+    workflows. Red again, the check is disputed and the loop waits. Measured
+    on #259: the red was a check step deleted from `ci.yml` since the head
+    last ran, and the loop asked a person to re-run it.
+  - **THE FIXING STEP RUNS THE DEFAULT BRANCH'S COPY OF ITS OWN WORKFLOW
+    FILE.** `claude-code-action` validates the CHECKED-OUT
+    `review-dispatch.yml` against the default branch's and refuses any
+    difference, so a branch cut before that file last changed on master was
+    refused without editing it — every fixing round on #259 died there the
+    night the loop's own change merged. The `fix` job checks out the default
+    branch's copy for the action and puts the branch's own back before the
+    patch is cut.
   - **A CHECK AN EARLIER ROUND DISPUTED IS NOT DISPUTED TWICE.** Its dispute
     comment names it in a hidden line (`<!-- conveyor:disputed-item check:<job> -->`),
     `failed-checks.py` reports it as AWAITING the person rather than as work,

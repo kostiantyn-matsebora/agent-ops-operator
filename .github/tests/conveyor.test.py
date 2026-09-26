@@ -499,7 +499,7 @@ class TheEndings(unittest.TestCase):
                 self.assertEqual(kind in c.RETRIES and number < cap, d.dispatch_round)
                 if d.counted and number >= cap:
                     self.assertEqual("end:capped", d.loop_event)
-                elif kind == "landed" or kind in c.RETRIES:
+                elif kind in ("landed", "checks re-run") or kind in c.RETRIES:
                     self.assertEqual("end:continue", d.loop_event)
                 elif kind == "clean":
                     self.assertEqual("end:waiting" if (thread or waiting) else "end:mergeable", d.loop_event)
@@ -531,7 +531,7 @@ class TheEndings(unittest.TestCase):
             self.assertFalse(c.ending(kind, 5, 5).counted, kind)
 
     def test_every_round_that_ran_a_model_counts_and_can_reach_the_cap(self):
-        for kind in ("landed", "timed out", "no report", "disputed", "unaddressed", "stale patch", "no next round"):
+        for kind in ("landed", "timed out", "no report", "disputed", "unaddressed", "stale patch", "no next round", "checks re-run"):
             self.assertTrue(c.ending(kind, 1, 5).counted, kind)
             self.assertEqual("end:capped", c.ending(kind, 5, 5).loop_event, kind)
 

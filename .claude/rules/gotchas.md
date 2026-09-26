@@ -815,3 +815,23 @@ beside `docs-task` and `ci-green` red and a summary reading "clean". A
   table was exhaustively tested and behaved as specified. The adapter fed it a
   stale fact. A table test covers the table, and the scenario "dispute already
   dismissed, guard check still red from an earlier run" had no test anywhere.
+
+**`claude-code-action` VALIDATES THE CHECKED-OUT WORKFLOW FILE, NOT THE ONE
+RUNNING — MEASURED ON #259, 2026-09-26.** The message is "The workflow file
+must exist and have identical content to the version on the repository's
+default branch".
+
+A `workflow_dispatch` round runs master's `review-dispatch.yml`, but the `fix`
+job checks out the PULL REQUEST'S branch, and the action reads the copy there.
+
+- **So every branch cut BEFORE the file last changed on master is refused**,
+  without editing the file. The night the loop's own change merged, the one
+  labelled pull request went from "waiting" to "disputed" with the reason "this
+  branch edits review-dispatch.yml", which was false.
+- **The fix is a checkout of the default branch's copy before the action** and
+  the branch's own copy back before the patch is cut. The fallback that read
+  the difference as an edit now says only that the copies differ.
+- **The rule in `gotchas.md` above about a spike on a branch is the same
+  fact from the other side**: a branch cannot run its own edit of the
+  workflow, and a branch that lags cannot run the merged one until its
+  checkout carries it.

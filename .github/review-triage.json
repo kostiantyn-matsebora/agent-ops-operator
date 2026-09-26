@@ -146,5 +146,6 @@
     "stalled": "loop:stalled",
     "capped": "loop:capped",
     "mergeable": "loop:mergeable"
-  }
+  },
+  "refresh_marker": "<!-- conveyor:refreshed -->"
 }

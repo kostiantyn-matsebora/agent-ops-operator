@@ -583,7 +583,7 @@ def guard(vocab: dict, pr: PullRequest, running_rounds: int, unanswered_disputes
 # ---- the endings -----------------------------------------------------------------------------
 
 ENDINGS = ("landed", "clean", "timed out", "failed", "no report", "disputed", "unaddressed", "stale patch",
-           "no next round")
+           "no next round", "checks re-run")
 NO_MODEL_RAN = ("clean", "failed")   # the two endings that spent no model: nothing was accepted / the job never started
 RETRIES = ("unaddressed", "stale patch")   # nothing landed and items are still eligible: the round starts the next itself
 
@@ -620,6 +620,12 @@ def ending(kind: str, number: int, cap: int, thread_open: bool = False, waiting_
         return Decision("capped", f"{cap} rounds have run", loop_event="end:capped", counted=True)
     if kind == "landed":
         return Decision("continue", "the push starts CI and the review", loop_event="end:continue", counted=True)
+    if kind == "checks re-run":
+        # A RED THE FIXER COULD NOT EXPLAIN GETS ONE FRESH RUN. The empty commit
+        # pushed for it starts CI and the review like a landed fix does; only a
+        # red that survives is a dispute for a person (#259: the red was a
+        # check step deleted from ci.yml since the head last ran).
+        return Decision("continue", "the checks run again on a fresh commit", loop_event="end:continue", counted=True)
     if kind in RETRIES:
         return Decision("continue", f"the round ended: {kind}, and items are still eligible, so the next round "
                         "starts now", loop_event="end:continue", counted=True, dispatch_round=True)

@@ -62,6 +62,12 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **The fixing loop re-runs an unexplained red check once before asking, and
+  its fixing step runs on branches that lag master.** A check the fixer finds
+  nothing in the tree for gets one empty commit pushed, so CI judges the head
+  under the merged workflows. Red again, it is disputed. The `fix` job checks
+  out the default branch's copy of `review-dispatch.yml` for the action's
+  validation, which refused every branch cut before that file last changed.
 - **A red pull request is the fixing loop's to fix, and a person is owed
   nothing until it is green or only genuine disputes remain.** Measured on
   #259, where the loop ended "clean" beside a red pull request over a dispute
