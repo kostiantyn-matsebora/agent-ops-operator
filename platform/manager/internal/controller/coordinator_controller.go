@@ -153,32 +153,46 @@ func coordinatorEntryProblems(ctx context.Context, c client.Reader, namespace st
 	}
 }
 
+// coordinatorReferencedKinds are the kinds a Coordinator's wiring can name.
+// An event on any of them may change some Coordinator's Ready, so each is
+// watched with the same requeue-all mapping. Table-driven rather than one
+// fluent `.Watches()` call per kind, so registering one more referenced kind
+// is a slice entry, not a repeated builder line.
+var coordinatorReferencedKinds = []client.Object{
+	&agentopsv1alpha1.SignalSource{},
+	&agentopsv1alpha1.Channel{},
+	&agentopsv1alpha1.AgentProfile{},
+	&agentopsv1alpha1.AgentRuntime{},
+	&agentopsv1alpha1.MCPToolset{},
+	&agentopsv1alpha1.MCPConfig{},
+	&agentopsv1alpha1.AgentCapability{},
+	&agentopsv1alpha1.Pipeline{},
+}
+
+// allCoordinatorRequests lists every Coordinator in a namespace as reconcile
+// requests. Standalone rather than a closure so it is testable against a
+// fake client with no manager and no envtest.
+func allCoordinatorRequests(ctx context.Context, c client.Reader, namespace string) []ctrl.Request {
+	var list agentopsv1alpha1.CoordinatorList
+	if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		return nil
+	}
+	var reqs []ctrl.Request
+	for i := range list.Items {
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+	}
+	return reqs
+}
+
 // SetupWithManager wires the controller: coordinators, plus referenced-kind
 // events mapped back to the coordinators naming them.
 func (r *CoordinatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	allCoordinators := func(ctx context.Context, namespace string) []ctrl.Request {
-		var list agentopsv1alpha1.CoordinatorList
-		if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-			return nil
-		}
-		var reqs []ctrl.Request
-		for i := range list.Items {
-			reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
-		}
-		return reqs
+	mapAny := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+		return allCoordinatorRequests(ctx, r.Client, obj.GetNamespace())
+	})
+	b := ctrl.NewControllerManagedBy(mgr).For(&agentopsv1alpha1.Coordinator{})
+	for _, kind := range coordinatorReferencedKinds {
+		b = b.Watches(kind, mapAny)
 	}
-	mapAny := func(ctx context.Context, obj client.Object) []ctrl.Request {
-		return allCoordinators(ctx, obj.GetNamespace())
-	}
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&agentopsv1alpha1.Coordinator{}).
-		Watches(&agentopsv1alpha1.SignalSource{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.Channel{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.AgentProfile{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.AgentRuntime{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.MCPToolset{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.MCPConfig{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.AgentCapability{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Watches(&agentopsv1alpha1.Pipeline{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
-		Complete(r)
+	return b.Complete(r)
 }
