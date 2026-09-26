@@ -71,8 +71,11 @@ When the serving adapter CR (the CR named by `spec.adapter`) declares a compilab
 
 A `SignalAdapter` or `ChannelAdapter` MAY declare, as interface metadata beside
 `configSchema` and `credentialKeys`, the external systems its implementation
-talks to: for each, a name and a kind, such as a sender, a transport API or
-the Kubernetes API.
+talks to: `spec.externals: [{name, kind}]`.
+
+`name` is the system as a reader knows it ("Alertmanager", "Telegram Bot
+API"). `kind` is one of `sender` (pushes to the adapter), `api` (called by
+the adapter) or `kubernetes` (the cluster's own API).
 
 The declaration SHALL be metadata only. The manager SHALL read no config to
 verify it and SHALL grant nothing from it.

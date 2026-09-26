@@ -49,6 +49,10 @@ message, SHALL NOT be copied onto the event.
 - **WHEN** a signal arrives for a SignalSource no Pipeline claims
 - **THEN** a `signal.dropped` event is emitted carrying the source as `from`, no `to`, `status: error`, and the `Wired=False` reason in `detail`
 
+#### Scenario: A runtime pod being created is its own hop
+- **WHEN** the manager creates a runtime pod for an admitted conversation
+- **THEN** a `runtime.starting` event is emitted with the conversation as `from` and the runtime as `to`, before the pod becomes ready
+
 #### Scenario: Failure is recorded, not omitted
 - **WHEN** a run completes with a non-zero exit code, or a channel op is completed with an error
 - **THEN** the corresponding event is emitted with `status: error` and the reported reason in `detail`
