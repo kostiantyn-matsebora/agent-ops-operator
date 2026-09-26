@@ -252,6 +252,14 @@ signal source, since that is the adapter's second role. A shared runtime
 image's calls SHALL be credited along the route's MCP config, not along the
 image.
 
+**Which pipeline a node belongs to is computed over the WHOLE view.** Hiding
+a class SHALL NEVER disconnect a node from its route, since hiding is
+presentation only.
+
+Scoping to a route or an element, by contrast, walks only what is currently
+DRAWN. A hidden class between the scoped element and something it reaches
+SHALL cut the walk there.
+
 The depth control SHALL default to all and offer only the levels the route
 has. Returning to the whole picture SHALL need no reload. A scope SHALL NOT
 persist across navigation. While scoped, the view SHALL name what it is scoped

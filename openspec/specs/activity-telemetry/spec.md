@@ -30,10 +30,11 @@ or is told of.
 - The runtime's model calls and tool calls.
 
 Each event SHALL carry a monotonic `cursor`, an RFC3339 `ts`, a `kind`,
-`from` and `to` node references, a `status` of `ok` or `error`, and, where
-they apply, `conversation`, `pipeline`, `runId`, `opId`, `inputId`,
-`latencyMs`, a human-readable `detail` and a bounded structured `data` map
-of facts that exist nowhere else.
+`from` and `to` node references, and a `status` of `ok` or `error`.
+
+Where they apply, it SHALL also carry `conversation`, `pipeline`, `runId`,
+`opId`, `inputId`, `latencyMs`, a human-readable `detail` and a bounded
+structured `data` map of facts that exist nowhere else.
 
 `from` and `to` SHALL name nodes as the topology graph names them, so an event
 is renderable as motion along an existing edge without further inference.

@@ -92,6 +92,10 @@ bundles SHALL declare the externals of the adapters they ship.
 - **WHEN** an adapter CR declares no externals
 - **THEN** the adapter draws with no external node, and nothing else about it changes
 
+#### Scenario: Model states it, Components and Infrastructure draw it
+- **WHEN** a SignalAdapter with a declared external is viewed on Model
+- **THEN** the external is a fact in the adapter's panel ("Faces: name (kind)"), never a node — the Components and Infrastructure views are where it becomes one
+
 #### Scenario: The declaration grants nothing
 - **WHEN** an adapter declares the Kubernetes API as an external
 - **THEN** no RBAC, no network policy and no credential follows from the declaration
