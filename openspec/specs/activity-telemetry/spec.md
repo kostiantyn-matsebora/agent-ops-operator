@@ -43,8 +43,8 @@ Content that has a durable home, an input's text, a run's result, an op's
 message, SHALL NOT be copied onto the event.
 
 #### Scenario: A conversation's lifecycle emits a complete hop sequence
-- **WHEN** a signal is accepted, claimed, a Conversation is created, a run is dispatched with two turns and completed, and a result is sent to a channel
-- **THEN** the log holds `signal.received`, `signal.claimed`, `conversation.created`, `run.dispatched`, two `model.call`, `run.completed` and `channel.op.enqueued` events in that order, sharing the conversation, the run events sharing the run's id
+- **WHEN** a signal is accepted, claimed, a Conversation is created, a runtime pod is started, a run is dispatched with two turns and completed, and a result is sent to a channel
+- **THEN** the log holds `signal.received`, `signal.claimed`, `conversation.created`, `runtime.starting`, `run.dispatched`, two `model.call`, `run.completed` and `channel.op.enqueued` events in that order, sharing the conversation, the run events sharing the run's id
 
 #### Scenario: A dropped signal is recorded with its reason
 - **WHEN** a signal arrives for a SignalSource no Pipeline claims
