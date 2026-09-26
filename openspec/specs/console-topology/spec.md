@@ -14,7 +14,7 @@ letting an old event look current.
 ## Requirements
 
 ### Requirement: Configuration state from read-only Kubernetes watches
-The console SHALL build its configuration state exclusively from list/watch of `agentops.dev/v1alpha1` resources (AgentProfile, AgentRuntime, Channel, ChannelAdapter, Conversation, Pipeline, SignalAdapter, SignalSource) in its own namespace using its own ServiceAccount, with no writes to any of them and no reads of Secrets or any non-agentops resource. Watches SHALL resume by resourceVersion and relist on 410 Gone so the cache converges after disconnects.
+The console SHALL build its configuration state exclusively from list/watch of `agentops.dev/v1alpha1` resources (AgentProfile, AgentRuntime, Channel, ChannelAdapter, Conversation, MCPConfig, MCPToolset, Pipeline, SignalAdapter, SignalSource) in its own namespace using its own ServiceAccount, with no writes to any of them and no reads of Secrets or any non-agentops resource. Watches SHALL resume by resourceVersion and relist on 410 Gone so the cache converges after disconnects.
 
 #### Scenario: State reflects a CR change without polling
 - **WHEN** a Pipeline's `channels[]` is edited with kubectl
@@ -246,6 +246,13 @@ one conversation's own elements, with nothing to narrow it further to.
 Scope SHALL be offered three ways: a **pipeline selector** showing the
 selected routes only, a **scope to route** through any element with a depth
 control, and **find** and **hide** expressions over the view's facts.
+
+**A component has no pipeline attribute of its own**, unlike a pod.
+
+On Components and Infrastructure, a route's members SHALL be the components
+(or pods) that IMPLEMENT what the route reaches on Model. That membership is
+walked from the Model reach itself, never from a `pipeline` field neither
+view's nodes carry.
 
 All three SHALL count what they put out of view and name the classes of any
 failing element hidden.
