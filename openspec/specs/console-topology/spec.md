@@ -170,9 +170,14 @@ The graph SHALL be built from the bindings the Conversation itself recorded, not
 Infrastructure — never the per-conversation graph**, which has no class
 toggle and reads only the shared time window.
 
-Each view SHALL offer one element class per node kind named for it under
-Pipeline topology graph — never a class the view cannot draw — and SHALL
-remember its own hiding.
+Each view SHALL offer its own element classes in the display control, listing
+only the classes that view can draw, and SHALL remember its own hiding.
+
+| View | Offered classes |
+|---|---|
+| Model | signal sources, signal adapters, pipelines, agent profiles, agent runtimes, MCP toolsets, MCP configs, channels, channel adapters, conversations |
+| Components | signal adapters, channel adapters, the manager, the gateway, runtime images, sidecars, housekeeping, workloads, models, MCP servers, repositories, externals |
+| Infrastructure | pods, containers, models, MCP servers, repositories, externals |
 
 The one class a view cannot do without SHALL be listed and not hideable:
 pipelines on Model, the manager on Components, the manager's pod on
