@@ -321,7 +321,7 @@ jobs:
         with:
           node-version: 22
       - if: steps.recipe.outputs.helm == 'true'
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       # THE BUILD GATE. NO CREDENTIAL IN THIS STEP'S ENV — it runs the pull
       # request's own code under `contents: read` alone. A failed build
