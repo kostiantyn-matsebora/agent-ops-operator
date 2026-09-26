@@ -7,6 +7,7 @@ package integration
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -193,52 +194,63 @@ func TestInlineAndReferencedPipelinesResolveIdenticalCapabilities(t *testing.T) 
 	}
 
 	h := apiServer().Handler()
-	postAndFind := func(source, fingerprint string) *agentopsv1alpha1.Conversation {
-		rec := postSignal(t, h, testMasterToken, source, []map[string]any{{
-			"fingerprint": fingerprint, "labels": map[string]string{"alertname": "ParityAlert"}, "payload": "boom",
-		}})
-		if rec.Code != 200 {
-			t.Fatalf("signal to %s: %d %s", source, rec.Code, rec.Body.String())
-		}
-		var conv *agentopsv1alpha1.Conversation
-		var list agentopsv1alpha1.ConversationList
-		if err := k8sClient.List(ctx, &list); err != nil {
-			t.Fatal(err)
-		}
-		for i := range list.Items {
-			if list.Items[i].Spec.Signal != nil && list.Items[i].Spec.Signal.SourceRef != nil &&
-				list.Items[i].Spec.Signal.SourceRef.Name == source {
-				conv = &list.Items[i]
-			}
-		}
-		if conv == nil {
-			t.Fatalf("no conversation created from %s", source)
-		}
-		t.Cleanup(func() { cleanupConversation(t, conv.Name) })
-		return conv
-	}
+	fromInline := postSignalAndFindConversation(t, ctx, h, "cap-parity-src-inline", "cap-parity-inline-1")
+	fromRef := postSignalAndFindConversation(t, ctx, h, "cap-parity-src-ref", "cap-parity-ref-1")
 
-	fromInline := postAndFind("cap-parity-src-inline", "cap-parity-inline-1")
-	fromRef := postAndFind("cap-parity-src-ref", "cap-parity-ref-1")
+	assertCapabilitiesResolvedIdentically(t, fromInline, fromRef)
+}
 
-	if fromInline.Spec.ProfileRef.Name != fromRef.Spec.ProfileRef.Name {
-		t.Fatalf("profile diverged: inline=%q ref=%q", fromInline.Spec.ProfileRef.Name, fromRef.Spec.ProfileRef.Name)
+// postSignalAndFindConversation posts one signal through h and returns the
+// Conversation it opened, with cleanup scheduled.
+func postSignalAndFindConversation(t *testing.T, ctx context.Context, h http.Handler, source, fingerprint string) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	rec := postSignal(t, h, testMasterToken, source, []map[string]any{{
+		"fingerprint": fingerprint, "labels": map[string]string{"alertname": "ParityAlert"}, "payload": "boom",
+	}})
+	if rec.Code != 200 {
+		t.Fatalf("signal to %s: %d %s", source, rec.Code, rec.Body.String())
 	}
-	if fromInline.Spec.ServiceAccountName != fromRef.Spec.ServiceAccountName {
-		t.Fatalf("service account diverged: inline=%q ref=%q", fromInline.Spec.ServiceAccountName, fromRef.Spec.ServiceAccountName)
+	var conv *agentopsv1alpha1.Conversation
+	var list agentopsv1alpha1.ConversationList
+	if err := k8sClient.List(ctx, &list); err != nil {
+		t.Fatal(err)
 	}
-	if fromInline.Spec.RuntimeRef == nil || fromRef.Spec.RuntimeRef == nil ||
-		fromInline.Spec.RuntimeRef.Name != fromRef.Spec.RuntimeRef.Name {
-		t.Fatalf("runtime diverged: inline=%+v ref=%+v", fromInline.Spec.RuntimeRef, fromRef.Spec.RuntimeRef)
+	for i := range list.Items {
+		if list.Items[i].Spec.Signal != nil && list.Items[i].Spec.Signal.SourceRef != nil &&
+			list.Items[i].Spec.Signal.SourceRef.Name == source {
+			conv = &list.Items[i]
+		}
 	}
-	if fromInline.Spec.Toolsets == nil || fromRef.Spec.Toolsets == nil ||
-		len(fromInline.Spec.Toolsets.Refs) != 1 || len(fromRef.Spec.Toolsets.Refs) != 1 ||
-		fromInline.Spec.Toolsets.Refs[0].Name != fromRef.Spec.Toolsets.Refs[0].Name {
-		t.Fatalf("toolsets diverged: inline=%+v ref=%+v", fromInline.Spec.Toolsets, fromRef.Spec.Toolsets)
+	if conv == nil {
+		t.Fatalf("no conversation created from %s", source)
 	}
-	if fromInline.Spec.MCPConfigs == nil || fromRef.Spec.MCPConfigs == nil ||
-		len(fromInline.Spec.MCPConfigs.Refs) != 1 || len(fromRef.Spec.MCPConfigs.Refs) != 1 ||
-		fromInline.Spec.MCPConfigs.Refs[0].Name != fromRef.Spec.MCPConfigs.Refs[0].Name {
-		t.Fatalf("mcpConfigs diverged: inline=%+v ref=%+v", fromInline.Spec.MCPConfigs, fromRef.Spec.MCPConfigs)
+	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
+	return conv
+}
+
+// assertCapabilitiesResolvedIdentically is 1.3/1.7's own claim: an inline
+// capability and one reached through capabilityRef must resolve to
+// byte-identical conversations across every capability field.
+func assertCapabilitiesResolvedIdentically(t *testing.T, inline, ref *agentopsv1alpha1.Conversation) {
+	t.Helper()
+	if inline.Spec.ProfileRef.Name != ref.Spec.ProfileRef.Name {
+		t.Fatalf("profile diverged: inline=%q ref=%q", inline.Spec.ProfileRef.Name, ref.Spec.ProfileRef.Name)
+	}
+	if inline.Spec.ServiceAccountName != ref.Spec.ServiceAccountName {
+		t.Fatalf("service account diverged: inline=%q ref=%q", inline.Spec.ServiceAccountName, ref.Spec.ServiceAccountName)
+	}
+	if inline.Spec.RuntimeRef == nil || ref.Spec.RuntimeRef == nil ||
+		inline.Spec.RuntimeRef.Name != ref.Spec.RuntimeRef.Name {
+		t.Fatalf("runtime diverged: inline=%+v ref=%+v", inline.Spec.RuntimeRef, ref.Spec.RuntimeRef)
+	}
+	if inline.Spec.Toolsets == nil || ref.Spec.Toolsets == nil ||
+		len(inline.Spec.Toolsets.Refs) != 1 || len(ref.Spec.Toolsets.Refs) != 1 ||
+		inline.Spec.Toolsets.Refs[0].Name != ref.Spec.Toolsets.Refs[0].Name {
+		t.Fatalf("toolsets diverged: inline=%+v ref=%+v", inline.Spec.Toolsets, ref.Spec.Toolsets)
+	}
+	if inline.Spec.MCPConfigs == nil || ref.Spec.MCPConfigs == nil ||
+		len(inline.Spec.MCPConfigs.Refs) != 1 || len(ref.Spec.MCPConfigs.Refs) != 1 ||
+		inline.Spec.MCPConfigs.Refs[0].Name != ref.Spec.MCPConfigs.Refs[0].Name {
+		t.Fatalf("mcpConfigs diverged: inline=%+v ref=%+v", inline.Spec.MCPConfigs, ref.Spec.MCPConfigs)
 	}
 }

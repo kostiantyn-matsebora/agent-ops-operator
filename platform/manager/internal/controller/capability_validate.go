@@ -25,38 +25,64 @@ func validateCapabilitySpecRefs(ctx context.Context, c client.Reader, namespace 
 	spec agentopsv1alpha1.AgentCapabilitySpec) []string {
 
 	var missing []string
-	if spec.ProfileRef != nil {
-		var profile agentopsv1alpha1.AgentProfile
-		if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: spec.ProfileRef.Name}, &profile); err != nil {
-			missing = append(missing, "agentprofile/"+spec.ProfileRef.Name)
+	missing = append(missing, checkProfileRef(ctx, c, namespace, spec.ProfileRef)...)
+	missing = append(missing, checkRuntimeRef(ctx, c, namespace, spec.RuntimeRef)...)
+	missing = append(missing, checkToolsetRefs(ctx, c, namespace, spec.Toolsets)...)
+	missing = append(missing, checkMCPConfigRefs(ctx, c, namespace, spec.MCPConfigs)...)
+	return missing
+}
+
+func checkProfileRef(ctx context.Context, c client.Reader, namespace string, ref *agentopsv1alpha1.ObjectRef) []string {
+	if ref == nil {
+		return nil
+	}
+	var profile agentopsv1alpha1.AgentProfile
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &profile); err != nil {
+		return []string{"agentprofile/" + ref.Name}
+	}
+	return nil
+}
+
+// checkRuntimeRef is checked only when NAMED. Absent, it resolves to the
+// AgentRuntime called "default" through runtimepod's own precedence chain —
+// that is not a miss, and probing for "default" here would validate a name
+// this capability never wrote.
+func checkRuntimeRef(ctx context.Context, c client.Reader, namespace string, ref *agentopsv1alpha1.ObjectRef) []string {
+	if ref == nil {
+		return nil
+	}
+	var rt agentopsv1alpha1.AgentRuntime
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &rt); err != nil {
+		return []string{"agentruntime/" + ref.Name}
+	}
+	return nil
+}
+
+// checkToolsetRefs and checkMCPConfigRefs check refs only — the CRs' content
+// is resolved at use time, so Ready checks existence, nothing else.
+func checkToolsetRefs(ctx context.Context, c client.Reader, namespace string, toolsets *agentopsv1alpha1.ToolsetBinding) []string {
+	if toolsets == nil {
+		return nil
+	}
+	var missing []string
+	for _, ref := range toolsets.Refs {
+		var ts agentopsv1alpha1.MCPToolset
+		if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &ts); err != nil {
+			missing = append(missing, "mcptoolset/"+ref.Name)
 		}
 	}
-	// RuntimeRef is checked only when NAMED. Absent, it resolves to the
-	// AgentRuntime called "default" through runtimepod's own precedence
-	// chain — that is not a miss, and probing for "default" here would
-	// validate a name this capability never wrote.
-	if spec.RuntimeRef != nil {
-		var rt agentopsv1alpha1.AgentRuntime
-		if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: spec.RuntimeRef.Name}, &rt); err != nil {
-			missing = append(missing, "agentruntime/"+spec.RuntimeRef.Name)
-		}
+	return missing
+}
+
+func checkMCPConfigRefs(ctx context.Context, c client.Reader, namespace string, mcpConfigs *agentopsv1alpha1.ToolingBinding) []string {
+	if mcpConfigs == nil {
+		return nil
 	}
-	// Tooling bindings: refs only — the CRs' content is resolved at use time,
-	// so Ready checks existence, nothing else.
-	if spec.Toolsets != nil {
-		for _, ref := range spec.Toolsets.Refs {
-			var ts agentopsv1alpha1.MCPToolset
-			if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &ts); err != nil {
-				missing = append(missing, "mcptoolset/"+ref.Name)
-			}
-		}
-	}
-	if spec.MCPConfigs != nil {
-		for _, ref := range spec.MCPConfigs.Refs {
-			var mc agentopsv1alpha1.MCPConfig
-			if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &mc); err != nil {
-				missing = append(missing, "mcpconfig/"+ref.Name)
-			}
+	var missing []string
+	for _, ref := range mcpConfigs.Refs {
+		var mc agentopsv1alpha1.MCPConfig
+		if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &mc); err != nil {
+			missing = append(missing, "mcpconfig/"+ref.Name)
 		}
 	}
 	return missing

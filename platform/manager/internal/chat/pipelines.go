@@ -116,14 +116,14 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha
 		// best-effort fallback for conversations predating spec.pipelineRef —
 		// nothing routes on it, and the honest answer for a candidate this
 		// cannot see into is "does not match", never a guess.
-		cap := p.InlineCapability()
-		if cap.ProfileName() != conv.Spec.ProfileRef.Name {
+		capability := p.InlineCapability()
+		if capability.ProfileName() != conv.Spec.ProfileRef.Name {
 			continue
 		}
 		if !sameRefs(p.Spec.ChannelRefs, conv.Spec.ChannelRefs) {
 			continue
 		}
-		if !sameToolsets(cap.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(cap.MCPConfigs, conv.Spec.MCPConfigs) {
+		if !sameToolsets(capability.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(capability.MCPConfigs, conv.Spec.MCPConfigs) {
 			continue
 		}
 		if match != nil {

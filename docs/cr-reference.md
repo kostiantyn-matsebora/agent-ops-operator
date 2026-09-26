@@ -11,6 +11,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | Kind | You write it | Fields |
 |---|---|---|
 | [AgentProfile](#agentprofile) | yes | 40 |
+| [AgentCapability](#agentcapability) | yes | 25 |
 | [Pipeline](#pipeline) | yes | 32 |
 | [MCPToolset](#mcptoolset) | yes | 1 |
 | [MCPConfig](#mcpconfig) | yes | 5 |
@@ -85,6 +86,54 @@ Written by the operator. Read it, never set it.
 | `conditions[].status` | `string` | **yes** | status of the condition, one of True, False, Unknown. |
 | `conditions[].type` | `string` | **yes** | type of condition in CamelCase or in foo.example.com/CamelCase. |
 | `observedGeneration` | `integer` |  | ObservedGeneration of the last processed spec. |
+
+## AgentCapability
+
+AgentCapabilitySpec is WHAT AN AGENT MAY DO AND UNDER WHOSE IDENTITY — the six fields `PipelineSpec` used to carry alone, extracted so a Pipeline and a Coordinator can share ONE capability rather than each restating it. It carries no subscription (no signal sources, no channels) and no coordination fields (no `agents[]`, no limits): those are what a Pipeline or a Coordinator adds around it. An AgentCapability nothing wires is inert — unwired is the ordinary state of one that exists only to be REFERENCED.
+
+### spec
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mcpConfigs` | `object` |  | MCPConfigs binds MCPConfig CRs supplying this capability's MCP servers, overlaid per server key in ref order (later wins). No mode: an agent definition declares no servers, so there is nothing to compose against. |
+| `mcpConfigs.refs` | `[]object` | **yes** | Refs are applied in order: MCP server keys are overlaid with the later ref winning a collision. |
+| `mcpConfigs.refs[].name` | `string` | **yes** | Name of the referenced object. |
+| `persistence` | `object` |  | Persistence declares WHERE this capability's conversations keep their state — the CONTEXT volume and the WORKSPACE volume, independently. PRECEDENCE, and no other order: <embedding kind>.persistence.<volume> -> the chart's release default -> ephemeral The CONVERSATION snapshots the RESOLVED claim at creation, so editing this field re-wires only conversations created afterwards. Nothing reads a Pipeline or Coordinator at pod-build time. |
+| `persistence.context` | `object` |  | Context: a conversation's accumulated context, the thing `runtimeContextId` is a handle into. Absent takes the release default. |
+| `persistence.context.accessModes` | `[]string` |  | AccessModes for that claim. Empty is ReadWriteMany, which is what concurrent conversations on one volume need. |
+| `persistence.context.claimName` | `string` |  | ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is created; conversations this route originates mount it. |
+| `persistence.context.size` | `string` |  | Size requested by the claim the manager renders for VolumeName. Ignored with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim binding to a pre-created volume gets that volume's capacity whatever it asks for, so this is a floor rather than a size. |
+| `persistence.context.storageClassName` | `string` |  | StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING, which is the only value that binds to a pre-created volume — and it is the default here rather than in the chart because this field only ever accompanies VolumeName, where anything else is a mistake. An absent field is filled in by admission with the cluster's default StorageClass, which provisions a second volume beside the one that was named. Set it only for a class whose volumes are pre-created and selected by name, which some CSI drivers require. |
+| `persistence.context.volumeName` | `string` |  | VolumeName is a PersistentVolume the manager renders a claim on, bound to that volume by name with an EXPLICIT empty storage class — which is what disables dynamic provisioning. An absent storage class is filled in by the cluster's default StorageClass, which provisions a second volume and leaves the operator's untouched. |
+| `persistence.workspace` | `object` |  | Workspace: the repository checkout, one subdirectory per conversation. Absent takes the release default, which is ephemeral unless the install turned workspace persistence on. |
+| `persistence.workspace.accessModes` | `[]string` |  | AccessModes for that claim. Empty is ReadWriteMany, which is what concurrent conversations on one volume need. |
+| `persistence.workspace.claimName` | `string` |  | ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is created; conversations this route originates mount it. |
+| `persistence.workspace.size` | `string` |  | Size requested by the claim the manager renders for VolumeName. Ignored with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim binding to a pre-created volume gets that volume's capacity whatever it asks for, so this is a floor rather than a size. |
+| `persistence.workspace.storageClassName` | `string` |  | StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING, which is the only value that binds to a pre-created volume — and it is the default here rather than in the chart because this field only ever accompanies VolumeName, where anything else is a mistake. An absent field is filled in by admission with the cluster's default StorageClass, which provisions a second volume beside the one that was named. Set it only for a class whose volumes are pre-created and selected by name, which some CSI drivers require. |
+| `persistence.workspace.volumeName` | `string` |  | VolumeName is a PersistentVolume the manager renders a claim on, bound to that volume by name with an EXPLICIT empty storage class — which is what disables dynamic provisioning. An absent storage class is filled in by the cluster's default StorageClass, which provisions a second volume and leaves the operator's untouched. |
+| `profileRef` | `object` |  | ProfileRef: the agent this capability answers as. Optional on the struct because a Pipeline embedding this inline may instead name a `capabilityRef` for the whole capability — CEL cannot express "one of" across an embedded struct, so the two-refs-or-neither check is a Ready condition on the EMBEDDING kind, not admission here. |
+| `profileRef.name` | `string` | **yes** | Name of the referenced object. |
+| `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime executing this capability's conversations. Absent, the AgentRuntime named "default" — the one the parent chart renders — then the manager's bootstrap configuration. IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An AgentRuntime carries the ServiceAccount an agent runs as, so selecting one is selecting the agent's power in the cluster — and that is a capability decision, made beside the tools and servers the same capability grants, not an attribute of the prompts an agent is written with. The CONVERSATION snapshots the resolved name at creation, so editing this field re-wires only conversations created afterwards. The referenced CR's CONTENT — image, idle TTL, volumes — is re-read at every pod build, so fixing a runtime heals conversations already running. |
+| `runtimeRef.name` | `string` | **yes** | Name of the referenced object. |
+| `serviceAccountName` | `string` |  | ServiceAccountName is the identity the runtime executes under, OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the runtime's — which the chart still defaults to `agentops-runtime`. NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and nothing here validates that one exists or that its RBAC is sufficient: who may create an account and what it is bound to stays an EXTERNAL grant, the same posture adapters already have. A name nothing backs fails at pod admission, naming the account. |
+| `toolsets` | `object` |  | Toolsets binds MCPToolset CRs contributing to the allowlist of this capability's conversations, plus the mode composing them with what the AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces). |
+| `toolsets.mode` | `string` |  | Mode composes this binding's tools with the agent definition's: merge unions them (the agent keeps what it declared, the wiring adds), overwrite passes the wiring's alone (the agent's declaration does not apply to this route). Built-ins included — name them in the toolset. |
+| `toolsets.refs` | `[]object` | **yes** | Refs are applied in order: tool lists concatenate with dedup, the first occurrence keeping its position. |
+| `toolsets.refs[].name` | `string` | **yes** | Name of the referenced object. |
+
+### status
+
+Written by the operator. Read it, never set it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `conditions` | `[]object` |  | Conditions: Ready (every named reference resolves). |
+| `conditions[].lastTransitionTime` | `string` | **yes** | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
+| `conditions[].message` | `string` | **yes** | message is a human readable message indicating details about the transition. This may be an empty string. |
+| `conditions[].observedGeneration` | `integer` |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
+| `conditions[].reason` | `string` | **yes** | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
+| `conditions[].status` | `string` | **yes** | status of the condition, one of True, False, Unknown. |
+| `conditions[].type` | `string` | **yes** | type of condition in CamelCase or in foo.example.com/CamelCase. |
 
 ## Pipeline
 
