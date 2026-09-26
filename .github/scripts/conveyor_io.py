@@ -49,15 +49,26 @@ def write_output(name: str, value: str) -> None:
 def parse_paginated(raw: str) -> list:
     """`gh api --paginate` without `--jq` concatenates each page's JSON array back
     to back rather than merging them, so a bare `json.loads` raises on any target
-    whose timeline spans more than one page."""
-    try:
-        return json.loads(raw or "[]")
-    except json.JSONDecodeError:
-        events: list = []
-        for chunk in raw.replace("][", "]\n[").splitlines():
-            if chunk.strip():
-                events.extend(json.loads(chunk))
-        return events
+    whose timeline spans more than one page.
+
+    A STREAMING DECODE, NOT A STRING SPLIT. Splitting on the literal `"]["`
+    breaks the moment a value inside a page -- a log URL, a comment body --
+    contains that substring. `raw_decode` reads exactly one JSON value at a
+    time and reports where it stopped, so the next page starts there whatever
+    its own bytes contain."""
+    text = (raw or "[]").strip()
+    if not text:
+        return []
+    decoder = json.JSONDecoder()
+    events: list = []
+    i = 0
+    while i < len(text):
+        page, end = decoder.raw_decode(text, i)
+        events.extend(page)
+        i = end
+        while i < len(text) and text[i].isspace():
+            i += 1
+    return events
 
 
 def issue_labels(repo: str, issue: int) -> frozenset:

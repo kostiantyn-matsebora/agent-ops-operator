@@ -54,12 +54,6 @@ BETA = "experimental-cc-routine-2026-04-01"
 API_VERSION = "2023-06-01"
 
 
-def gh(*args: str, check: bool = True) -> str:
-    out = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if check and out.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args)}: {out.stderr.strip()}")
-    return out.stdout.strip()
-
 
 def vocabulary(path: pathlib.Path) -> dict:
     return json.loads(path.read_text())

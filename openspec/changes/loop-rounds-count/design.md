@@ -41,9 +41,11 @@ Each fix of one copy left the others, and the ten contradictions in the proposal
   the table and writes one edit or none. A caller cannot name a value, so it
   cannot put the line in a state the machine has no path to.
 - **One grant rule.** `conveyor:run` stands for every station.
-  `conveyor:archive` stands for the archive station and for the fix station of a
-  pull request that says `Closes #<n>`. The carry, the gate and the fire all
-  call `standing_grant`.
+  `conveyor:archive` stands for the archive station, and for the fix station of
+  THE ARCHIVE PULL REQUEST specifically -- the one that says `Closes #<n>`,
+  never any other pull request that happens to say it. The carry and the gate
+  call `standing_grant`. `fire` reads the same two labels directly, since it
+  must also tell which label is carrying which station.
 - **A completion is re-checked like a start.** A review or CI completion on a
   pull request whose fix label the workflow placed re-reads the grant and its
   placer. A refusal removes the label and ends the loop as stalled.

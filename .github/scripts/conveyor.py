@@ -237,8 +237,11 @@ def standing_grant(vocab: dict, issue_labels, station: str, pr_closes: bool = Fa
     else: a pull request that merely proposes or applies a change is not the
     archive's to fix.
 
-    EVERY re-check of a carried grant calls this: the fire, the carries and the
-    gate. That is the whole of the #254 fix.
+    EVERY re-check of a carried grant calls this: the carries and the gate.
+    `fire` reads the same two labels directly rather than through this function,
+    since it must also tell which LABEL is carrying which station -- a question
+    this function, asked only "is there a grant", does not answer. That is the
+    whole of the #254 fix.
     """
     labels = set(issue_labels)
     if vocab["run_label"] in labels:

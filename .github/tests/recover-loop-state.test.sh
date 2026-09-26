@@ -73,7 +73,9 @@ assert_contains "$out" "sent recover:capped to the loop machine"
 it "rounds used EXCEED the cap: corrects to capped too"
 ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1),$(round_comment 2026-01-02T00:01:00Z 2),$(round_comment 2026-01-02T00:02:00Z 3),$(round_comment 2026-01-02T00:03:00Z 4)]" \
   out=$(run); rc=$?
+assert_status 0 "$rc"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 226 --repo o/r --add-label loop:capped"
+assert_contains "$out" "sent recover:capped to the loop machine"
 
 it "rounds within the cap, a thread is open: corrects to stalled"
 ROUND_COMMENTS="[$(round_comment 2026-01-02T00:00:00Z 1)]" out=$(CLEAN_EXIT=1 run); rc=$?
