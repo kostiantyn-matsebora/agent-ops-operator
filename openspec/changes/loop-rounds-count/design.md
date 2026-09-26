@@ -1,82 +1,84 @@
 ## Context
 
-The loop is four programs:
+The line was decided in the workflows' shell and in eleven scripts.
 
-| Program | Holds |
-|---|---|
-| `review-dispatch.yml` | gate, collect, fix, land |
-| `land-dispatch.py` | the endings and the round count |
-| `autofix-guard.py` | the `docs-task` step and the `/opsx:archive` hook |
-| `failed-checks.py` | the third reviewer's work items |
+A rule such as "what stands for the archive station" existed as a grep in the
+gate, a condition in the carry and a check in the fire.
 
-#244 bounded the fixing job at 30 minutes and taught `land` to read
-`cancelled` as timed out, with the ending saying "no round was counted".
-
-#248 then showed the cycle that leaves open. A timed-out round spends nothing
-against the cap, and the guard's running-round refusal turns `ci-green` red,
-which the gate reads as a reason for the next round.
+Each fix of one copy left the others, and the ten contradictions in the proposal are the copies drifting.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- A loop that times out every round stops at `max_rounds` like any other.
-- `ci-green` is never red for a reason the loop itself made.
-- A red made only of an unanswered dispute waits for a person and starts
-  nothing.
-- The archive hook keeps refusing while a round runs.
+- Every decision of the line is made in one place, testable without a network.
+- Every state and event of the stations and the loops is a table row, and a
+  test walks the whole table.
+- An adapter can only get I/O wrong, and each adapter has a suite for that.
+- The loop cannot cycle on its own refusal, and the bound holds.
 
 **Non-Goals:**
 
-- Making a round finish faster, or bounding the work list a round takes. A
-  round against 107 analysis issues will still time out. It will count.
-- Changing what a person's reply re-runs (`dispute-answered.yml`).
-- Any change to grants, carries or the label vocabulary.
+- Making a round finish faster. A round against 107 analysis issues still times
+  out. It now counts.
+- Any new label, marker or vocabulary entry.
+- Replacing the platform's own gates (branch protection, conversation
+  resolution).
 
 ## Decisions
 
-- **The timed-out ending posts the round marker.** `land-dispatch.py` treats
-  `--fix-timed-out` as a counted round: it posts the summary with the round
-  marker, reports "rounds used N of M", and at the cap says so and names
-  `conveyor:keep-going`. `--fix-failed` stays uncounted: no model ran, nothing
-  was spent, and the two endings were kept distinct on purpose in #244.
-  Alternative rejected: counting both. A crash before the model starts is
-  the workflow's fault, and charging the person's budget for it hides that.
-- **The guard grows a `--disputes-only` flag, and CI passes it.** The hook
-  keeps the default, both questions. This is the same split the repository
-  already made for review threads: a property the platform or a person
-  resolves live is not a check's question. The running round is the loop's
-  transient state, moved by `land`. Alternative rejected: dropping the guard
-  step from `docs-task` entirely. The dispute question has no other check
-  behind it, since a disputed analysis issue has no thread for conversation
-  resolution to hold.
-- **`failed-checks.py` reads the failed job's steps.** The jobs API lists a
-  job's steps with their conclusions. A `docs-task` job whose only failed
-  step is the guard step is dropped from the work list with a stated reason,
-  so `collect` hands the fixer nothing and `land` ends the round as "nothing
-  to do" with the dispute named. The step is matched by its name, read from
-  `ci.yml` as the check names already are, never restated.
-- **The gate reads the grant rule from one place.** `carry-grant.py` already
-  states it: `conveyor:run` stands for every station, and `conveyor:archive`
-  stands for the archive pull request's fix station. The gate's two bot
-  re-checks call that same rule instead of grepping for `run_label`, so the
-  carry and the gate cannot disagree again. Alternative rejected: a second
-  grep for the archive label in the workflow. Two copies of the rule is how
-  #238 shipped half.
-- **The cancelled-queued case needs no code.** Once the running-round
-  question leaves CI, a run queued by a thread reply and cancelled by the
-  concurrency group refuses nothing. It is written down in `gotchas.md` as
-  the measurement that found the cycle, and covered by the guard test's
-  disputes-only case.
+- **`conveyor.py` is pure.** Facts arrive as frozen dataclasses (`Placer`,
+  `Line`, `PullRequest`, `Trigger`) and a `Decision` leaves. No `gh`, no
+  clock, no environment. Alternative rejected: keeping the decisions in each
+  script and testing them there. That is the state the ten contradictions came
+  from.
+- **The tables are data.** `STATION_TABLE` and `LOOP_TABLE` map (state, event)
+  to the next state, with `None` meaning the event does not move it. An event
+  outside the table raises. `done` is terminal. `recover:*` is legal only from
+  `running`. A test iterates every state against every event, so a new state
+  cannot ship half wired.
+- **The writer takes events.** `conveyor-state.py` reads the live label, asks
+  the table and writes one edit or none. A caller cannot name a value, so it
+  cannot put the line in a state the machine has no path to.
+- **One grant rule.** `conveyor:run` stands for every station.
+  `conveyor:archive` stands for the archive station, and for the fix station of
+  THE ARCHIVE PULL REQUEST specifically -- the one that says `Closes #<n>`,
+  never any other pull request that happens to say it. The carry and the gate
+  call `standing_grant`. `fire` reads the same two labels directly, since it
+  must also tell which label is carrying which station.
+- **A completion is re-checked like a start.** A review or CI completion on a
+  pull request whose fix label the workflow placed re-reads the grant and its
+  placer. A refusal removes the label and ends the loop as stalled.
+- **Rounds count by kind, in one function.** `ending` counts every round that
+  ran a model and does not count `clean` or `failed`. A counted round at the
+  cap ends the loop. `count_marked` is the one counter that the gate, the
+  landing and the recovery all use.
+- **The cap is a gate rule.** `gate` refuses to start a round at the ceiling
+  unless `conveyor:keep-going` stands, and sends `end:capped`.
+- **The guard splits by purpose.** `--purpose ci` asks the dispute question.
+  `--purpose archive` also asks whether a round runs. The split follows the
+  review-thread rule: a state the loop moves is never a check's question.
+- **A failed check is work or it is not.** `check_is_work` reads the failed
+  steps. A `docs-task` failed only by the guard step is `waiting`, and the
+  round's ending names what is waited on.
+- **Fail closed on unreadable facts.** An unreadable fire record or pull
+  request list reads as "a session is at work", as one fact, so a rate limit
+  never starts a second session.
+- **The archive carry needs a finished change.** `is_finished` reads the bound
+  change's tasks. A merge of a proposal or an applying pull request carries
+  nothing.
+- **A fire follows the stage.** `fire` picks the station from the change and
+  the issue's labels, records once per station, and starts nothing while a pull
+  request from the change is open.
 
 ## Risks / Trade-offs
 
-- A timed-out round now spends the budget, so a loop against a large work
-  list stops after five timeouts with nothing landed. That is the bound
-  doing its job. The summary names the timeouts, and `conveyor:keep-going`
-  grants more.
-- With the running-round question gone from CI, `ci-green` can be green while
-  a round is mid-push. Branch protection still requires the head to be
-  up to date and every thread resolved, and the merge is a person's click.
-- Reading job steps is one more `gh api` call in `collect`, under the
-  `actions: read` it already holds.
+- **A large rewrite of running automation.** Mitigated by the table walk, the
+  combination tests for each decision and a suite per adapter, and by driving
+  this pull request by hand, since it edits the loop that would drive it.
+- **A timed-out round now spends the budget**, so a loop against a large work
+  list stops after five with nothing landed. That is the bound working, and
+  `conveyor:keep-going` grants more.
+- **With the running-round question gone from CI**, `ci-green` can be green
+  while a round is mid-push. Branch protection still requires the head to be up
+  to date and every thread resolved, and the merge is a person's click.

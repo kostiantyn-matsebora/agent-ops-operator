@@ -41,98 +41,22 @@ import sys
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the state machine: which station a label starts is its rule
+import conveyor_io as io  # noqa: E402  -- the facts, gathered once for every adapter
+
 MARKER = "<!-- remote-implement:fired -->"
 # PER STATION. The implement marker keeps its original text so every issue
 # already carrying it still reads as fired; the archive station records its
 # own, or the archive would never fire on an issue the implement did.
 STATION_MARKER = {"implement": MARKER, "archive": "<!-- remote-implement:fired:archive -->"}
-WORKFLOW_BOT = "github-actions[bot]"
-STATE_SCRIPT = pathlib.Path(__file__).with_name("conveyor-state.py")
 BETA = "experimental-cc-routine-2026-04-01"
 API_VERSION = "2023-06-01"
-MAY_PUSH = {"admin", "maintain", "write"}
 
-
-def gh(*args: str, check: bool = True) -> str:
-    out = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if check and out.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args)}: {out.stderr.strip()}")
-    return out.stdout.strip()
 
 
 def vocabulary(path: pathlib.Path) -> dict:
     return json.loads(path.read_text())
-
-
-def permission(repo: str, login: str) -> str:
-    """What the platform says this person may do here. Unreadable is `none`:
-    a gate that fails OPEN would be no gate."""
-    try:
-        return gh("api", f"repos/{repo}/collaborators/{login}/permission", "--jq", ".permission")
-    except RuntimeError:
-        return "none"
-
-
-def already_fired(repo: str, number: int, marker: str = MARKER) -> bool:
-    """The marker is what makes the record ONCE. Re-labelling fires again by
-    design -- the session finds the change already bound to the issue and
-    continues it -- but a second comment on the same issue would read as two
-    sessions racing."""
-    try:
-        raw = gh("api", f"repos/{repo}/issues/{number}/comments", "--paginate",
-                 "--jq", ".[].body")
-    except RuntimeError as exc:
-        # UNREADABLE IS "ALREADY FIRED", not "fire again". Answering False on a
-        # rate limit or a dropped connection starts a SECOND session on the same
-        # issue — two sessions on one branch, which is the case the marker
-        # exists to prevent. Refusing to fire is recoverable by re-labelling;
-        # a duplicate run is not.
-        print(f"::warning::could not read #{number}'s comments ({exc}); "
-              "treating it as already fired rather than risking a second session")
-        return True
-    return marker in raw
-
-
-def carried_grant_stands(repo: str, number: int, run_label: str) -> tuple[bool, str]:
-    """A LABEL THE WORKFLOW BOT PLACED IS A CARRIED GRANT, RE-CHECKED HERE.
-    `carry-grant.py` places `conveyor:archive` on the tracking issue after a
-    merge; the sender of that event is `github-actions[bot]`, which the
-    collaborators API knows nothing about. Trusting the bot would let any
-    workflow start a session; refusing it would leave the archive station
-    with no actor (measured: nothing ever fired on `conveyor:archive`). So
-    the bot's label is accepted exactly when the standing instruction it
-    claims to carry is STILL on the issue and was placed by a writer -- the
-    same two facts carry-grant.py checked, read again at the moment they
-    matter. Returns (stands, why-not)."""
-    labels = {l.get("name") for l in json.loads(gh("issue", "view", str(number), "--repo", repo,
-                                                     "--json", "labels") or "{}").get("labels") or []}
-    if run_label not in labels:
-        return False, f"`{run_label}` no longer stands on #{number}"
-    raw = gh("api", f"repos/{repo}/issues/{number}/timeline", "--paginate")
-    try:
-        events = json.loads(raw or "[]")
-    except json.JSONDecodeError:
-        events = []
-        for chunk in raw.replace("][", "]\n[").splitlines():
-            if chunk.strip():
-                events.extend(json.loads(chunk))
-    placements = [e for e in events
-                  if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == run_label]
-    placer = ((placements[-1].get("actor") or {}).get("login") or "") if placements else ""
-    if not placer:
-        return False, f"the timeline shows nobody placing `{run_label}` on #{number}"
-    perm = permission(repo, placer)
-    if perm not in MAY_PUSH:
-        return False, f"`{run_label}` was placed by @{placer}, who now has `{perm}` here"
-    return True, placer
-
-
-def set_station(repo: str, number: int, station: str) -> None:
-    """STATE, NOT A GRANT, and never a failed fire: conveyor-state.py exits 0
-    on anything it cannot do, and a missing script is skipped."""
-    if STATE_SCRIPT.is_file():
-        subprocess.run([sys.executable, str(STATE_SCRIPT), "--repo", repo, "--target", str(number),
-                        "--station", station], check=False)
 
 
 def comment(repo: str, number: int, body: str) -> None:
@@ -189,91 +113,57 @@ def main() -> int:
     ap.add_argument("--fire-url", default=os.environ.get("ROUTINE_FIRE_URL", ""),
                     help="the routine's fire endpoint; the suite points this at a local stub")
     args = ap.parse_args()
-
     if not args.event or not args.event.is_file():
         print("no event payload; nothing to do", file=sys.stderr)
         return 0
     event = json.loads(args.event.read_text())
-
     label = (event.get("label") or {}).get("name") or ""
-    vocab = vocabulary(args.vocabulary)
-    # EITHER LABEL FIRES THE SAME SESSION. `conveyor:implement` drives one
-    # station by hand; `conveyor:run` is the standing instruction that carries
-    # the change through every later station too — but starting the session is
-    # the same act either way, and which one is on the issue is what the later
-    # stations read to decide whether to carry themselves forward.
-    # AND THE ARCHIVE LABEL FIRES THE SAME ROUTINE FOR THE ARCHIVE STATION.
-    # The saved prompt points at implement-issue.md, whose first section reads
-    # the issue's labels and hands an archive to archive-change.md. Nothing
-    # acted on `conveyor:archive` before this, so the last station of the
-    # opsx lane had no actor.
-    stations = {vocab["implement_label"]: "implement", vocab["run_label"]: "implement",
-                vocab["archive_label"]: "archive"}
-    want = set(stations)
-    if label not in want:
-        # ANOTHER LABEL. Not an error: this workflow sees every label event.
-        print(f"label {label!r} is not in {sorted(want)!r}; nothing to do")
-        return 0
-    station = stations[label]
-
+    vocab = io.vocabulary(args.vocabulary)
     issue = event.get("issue") or {}
     number = issue.get("number")
+    known = {vocab["implement_label"], vocab["run_label"], vocab["archive_label"]}
+    if label not in known:
+        print(f"label {label!r} is not in {sorted(known)!r}; nothing to do")
+        return 0
     if not isinstance(number, int):
         print(f"::error::the event names no issue number ({number!r})")
         return 1
     if issue.get("pull_request"):
-        # A PULL REQUEST IS AN ISSUE TO THIS API. The implement label belongs on
-        # an issue; on a pull request it would fire a session to implement a
-        # change that already has one.
         print(f"::notice::#{number} is a pull request, not an issue; nothing fires")
         return 0
-
     sender = (event.get("sender") or {}).get("login") or ""
-    carried_by = ""
-    if sender == WORKFLOW_BOT:
-        # A CARRIED LABEL: the workflow relayed a person's standing instruction.
-        # Re-read that instruction rather than trusting the bot.
-        stands, detail = carried_grant_stands(args.repo, number, vocab["run_label"])
-        if not stands:
+
+    # THE FACTS, then the MACHINE'S verdict. Which station a label starts, whether a
+    # carried placement is still backed by a person who can push, whether a station
+    # already fired and whether a session is still at work are all `conveyor.fire`'s
+    # rule. This program used to hold them, and held them slightly differently from
+    # the carry and the gate.
+    who = io.placer(args.repo, sender)
+    behind = io.grant_placer(args.repo, number, vocab["run_label"]) if who.bot else None
+    line = io.line(args.repo, number)
+    d = conveyor.fire(vocab, label, line, who, behind)
+
+    if d.action == "refuse":
+        if d.remove_label:
             subprocess.run(["gh", "issue", "edit", str(number), "--repo", args.repo,
-                            "--remove-label", label], check=False)
-            comment(args.repo, number,
-                    f"`{label}` was placed by the workflow, carrying a standing instruction -- but "
-                    f"{detail}. Nothing started, and the label was removed. Someone with write access "
-                    f"can place `{label}` directly, or re-place `{vocab['run_label']}`.")
-            print(f"::error::{WORKFLOW_BOT} placed {label} but {detail}; the label was removed")
-            return 1
-        carried_by = detail
-        perm = "carried"
-    else:
-        perm = permission(args.repo, sender)
-    if perm not in MAY_PUSH and perm != "carried":
-        # REFUSED, VISIBLY, AND THE LABEL COMES OFF.
-        subprocess.run(["gh", "issue", "edit", str(number), "--repo", args.repo,
-                        "--remove-label", label], check=False)
+                            "--remove-label", d.remove_label], check=False)
         comment(args.repo, number,
-                f"@{sender} placed `{label}`, which starts a session that writes to this "
-                f"repository — that needs write access, and `{sender}` has `{perm}`. "
-                f"The label was removed.")
-        print(f"::error::{sender} has {perm}; the label was removed")
+                f"`{label}` was placed {'by the workflow' if who.bot else f'by @{sender}'}, and it starts nothing: "
+                f"{d.reason}. "
+                + (f"The label was removed. Someone with write access can place `{label}` directly, "
+                   f"or re-place `{vocab['run_label']}`." if d.remove_label else
+                   "The label stays, and the line waits for the change to be finished."))
+        print(f"::error::{sender or 'the workflow'} placed {label}: {d.reason}"
+              + ("; the label was removed" if d.remove_label else ""))
         return 1
-
-    if already_fired(args.repo, number, STATION_MARKER[station]):
-        print(f"::notice::#{number} already carries a fire record for the {station} station; not firing again")
+    if d.action == "skip":
+        print(f"::notice::#{number}: {d.reason}; not firing again")
         return 0
+    station = d.station
+    carried_by = behind.login if who.bot and behind else ""
 
-    # STRIPPED, BECAUSE A COPIED URL CARRIES A NEWLINE. `gh variable set` stores
-    # whatever it is handed, a wrapped terminal display invites copying the line
-    # break with it, and `urllib` then raises InvalidURL deep in http.client —
-    # a stack trace on the runner and NOTHING on the issue, which is the one
-    # place a person would look. Measured on the first live fire, 2026-09-09.
     fire_url = (args.fire_url or "").strip()
     token = os.environ.get("ROUTINE_FIRE_TOKEN", "").strip()
-    # A BREAK INSIDE THE VALUE, not only at its ends. The stored variable held
-    # `trig_01UBwPZ\nb9cN68hvcKxZTx2WH` — copied out of a wrapped display — and
-    # `.strip()` cannot reach that. http.client refuses control characters four
-    # frames down, so without this the run dies in a traceback and the issue,
-    # the one place a person looks, says nothing at all.
     if fire_url and (any(c in fire_url for c in "\r\n\t ")
                      or not fire_url.lower().startswith(("http://", "https://"))):
         comment(args.repo, number,
@@ -281,11 +171,6 @@ def main() -> int:
                 "is not a URL. Nothing started; check the variable and place the label again.")
         print(f"::error::ROUTINE_FIRE_URL is not a URL: {fire_url[:60]!r}")
         return 1
-    # THE TOKEN IS COPIED FROM THE SAME DIALOG AND BREAKS THE SAME WAY, and its
-    # failure is worse to read: a header carrying a newline is refused by
-    # http.client exactly as the url is, and one that merely lost characters
-    # comes back 401 — indistinguishable from a revoked credential. NEVER print
-    # or comment the value; the name is enough to fix it by.
     if any(c in token for c in "\r\n\t "):
         comment(args.repo, number,
                 f"`{label}` was placed by @{sender}, but this repository's "
@@ -300,7 +185,6 @@ def main() -> int:
                 "configured (`ROUTINE_FIRE_URL` / `ROUTINE_FIRE_TOKEN`). Nothing started.")
         print("::error::ROUTINE_FIRE_URL or ROUTINE_FIRE_TOKEN is not set")
         return 1
-
     try:
         payload = fire(fire_url, token, number)
     except urllib.error.HTTPError as exc:
@@ -316,12 +200,12 @@ def main() -> int:
                 f"be reached (`{exc}`). Nothing started.")
         print(f"::error::fire failed: {exc}")
         return 1
-
     url = session_url(payload)
     where = f"[session]({url})" if url else "the session"
     approver = f"@{carried_by}'s standing instruction, carried by the workflow" if carried_by else f"@{sender}"
+    # THE STATION'S EVENT, through the one writer of a state label.
+    io.apply_events(args.repo, number, station_event=d.station_event, vocabulary_path=args.vocabulary)
     if station == "archive":
-        set_station(args.repo, number, "archive")
         comment(args.repo, number,
                 f"{STATION_MARKER['archive']}\n"
                 f"Archiving this change: {where} started, approved by {approver}.\n\n"
@@ -331,38 +215,11 @@ def main() -> int:
                 f"request, and a person merges it. Nothing merges without a person.")
         print(f"fired the archive station for #{number}" + (f": {url}" if url else ""))
         return 0
-    set_station(args.repo, number, "implement")
-    # THE SESSION OPENS ITS PULL REQUEST WITH NO LABEL. It acts as an
-    # application with no write access, so a label it placed on its own work
-    # would be removed by the gate that checks who labelled (#201). Where
-    # `run_label` authorised this, a workflow reads the issue again once the
-    # pull request opens and carries that instruction forward as
-    # `approve_label` — recording whose it was — never the session itself.
-    #
-    # READ FROM THE ISSUE'S LABELS, NOT FROM WHICH LABEL FIRED THIS EVENT.
-    # The later carry (`carry-grant.py`, at the `open` job) reads the issue's
-    # CURRENT labels too, never which one triggered this session — so an
-    # issue that already carries `run_label` when `implement_label` is the
-    # one placed (the standing instruction pre-dating this particular
-    # session) still gets it carried forward, and this comment must say so
-    # rather than the "a person places a label" text that fits only when no
-    # standing instruction exists at all.
     carries = vocab["run_label"] in {l.get("name") for l in issue.get("labels") or [] if l.get("name")}
-    # NAME run_label HERE, NEVER THE FIRING label. What actually gets carried
-    # is always `run_label` (carry-grant.py reads exactly that, off the
-    # issue's live labels, regardless of which label fired this session) --
-    # so when `implement_label` is what fired this while `run_label` already
-    # stood on the issue, the text must still name the one that carries.
     what = (f"a workflow reads `{vocab['run_label']}` again and carries it forward as "
             f"`{vocab['approve_label']}`, so the review's findings are fixed without a reply in each thread"
             if carries else
             "a person places a label to start the fixing loop")
-    # NOTHING MERGES WITHOUT A PERSON, EVER -- but archiving CAN be a
-    # workflow's own unattended step once conveyor:run stands, on whichever
-    # issue this session's change is bound to (see remote-session.md). This
-    # job runs before the session has read the issue, so it does not yet
-    # know which lane the session will choose -- the plain lane has no
-    # archive station at all, and "always" here would misdescribe that case.
     ends = (f"a workflow carries `{vocab['run_label']}` forward again to archive, once the "
             f"pull request merges — if this change is bound to an openspec change"
             if carries else

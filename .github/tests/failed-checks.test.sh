@@ -189,4 +189,107 @@ run_it >/dev/null
 # `operator` is no longer required, so its failure is not the loop's.
 assert_equals "[]" "$(read_out items)"
 
+# --- the loop's own guard is not work ----------------------------------------
+#
+# A `docs-task` that failed ONLY on the guard step is a dispute waiting for a
+# person. Handing it to a fixer started rounds that could not answer it, and each
+# round's red started the next (#248). It is reported as WAITING instead, read from
+# the job's own failed steps -- and the step's name is read from ci.yml, never restated.
+
+GUARD_STEP="No dispute the fixing loop posted waits unanswered"
+guard_ci() {
+  cat > "$DIR/ci.yml" <<YML
+name: ci
+on: [pull_request]
+jobs:
+  operator: {runs-on: ubuntu-latest, steps: []}
+  docs-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every change this pull request finishes ends in finished tasks
+        run: python3 .github/scripts/docs-task-guard.py --range "\$RANGE"
+      - name: $GUARD_STEP
+        run: python3 .github/scripts/autofix-guard.py --repo "\$R" --pr "\$N" --purpose ci
+  ci-green:
+    needs: [operator, docs-task]
+    runs-on: ubuntu-latest
+    steps: []
+YML
+}
+# `gh` answering check-runs from a fixture AND the jobs route with a step list per job id.
+stub_checks_and_steps() {  # stub_checks_and_steps <runs-file> <steps-json-or-FAIL>
+  cat > "$BIN/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$DIR/calls"
+case "\$*" in
+  *"check-runs"*) cat "$1" ;;
+  *"actions/jobs/"*) [ "$2" = FAIL ] && { echo "HTTP 502" >&2; exit 1; }; printf '%s' '$2' ;;
+  *"--log-failed"*) printf 'docs-task\tstep\tboom\n' ;;
+  *) : ;;
+esac
+STUB
+  chmod +x "$BIN/gh"
+}
+add_run_id() {  # add_run_id <name> <conclusion> <id>
+  python3 - "$RUNS" "$1" "$2" "$3" <<'PY'
+import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"id": int(sys.argv[4]), "name": sys.argv[2], "conclusion": sys.argv[3],
+        "details_url": "https://github.com/o/r/actions/runs/555/job/" + sys.argv[4],
+        "html_url": "https://github.com/o/r/actions/runs/555/job/" + sys.argv[4]}) + "\n")
+PY
+}
+
+it "a docs-task that failed ONLY on the loop's own guard is WAITING, not work"
+setup; guard_ci; runs_file
+add_run_id operator success 1; add_run_id docs-task failure 2
+stub_checks_and_steps "$RUNS" "[\"$GUARD_STEP\"]"
+out=$(run_it); assert_status 0 "$?"
+assert_equals "[]" "$(read_out items)"
+waiting=$(read_out waiting)
+assert_contains "$waiting" "docs-task"
+assert_contains "$out" "waiting  docs-task"
+
+it "a docs-task that failed on the TASKS step is work, as before"
+setup; guard_ci; runs_file
+add_run_id docs-task failure 2
+stub_checks_and_steps "$RUNS" '["Every change this pull request finishes ends in finished tasks"]'
+out=$(run_it); assert_status 0 "$?"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+assert_equals "[]" "$(read_out waiting)"
+
+it "a docs-task that failed on BOTH steps is work: the tasks step is the fixer's to answer"
+setup; guard_ci; runs_file
+add_run_id docs-task failure 2
+stub_checks_and_steps "$RUNS" "[\"Every change this pull request finishes ends in finished tasks\",\"$GUARD_STEP\"]"
+out=$(run_it); assert_status 0 "$?"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+
+it "the jobs route failing is not a licence to wave the job through: it stays work"
+setup; guard_ci; runs_file
+add_run_id docs-task failure 2
+stub_checks_and_steps "$RUNS" FAIL
+out=$(run_it); assert_status 0 "$?"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+assert_equals "[]" "$(read_out waiting)"
+
+it "the guard step's name is READ from ci.yml: a reworded step is still recognised"
+setup; guard_ci; runs_file
+python3 - "$DIR/ci.yml" "$GUARD_STEP" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace(sys.argv[2], "A dispute the loop posted has no answer"))
+PY
+add_run_id docs-task failure 2
+stub_checks_and_steps "$RUNS" '["A dispute the loop posted has no answer"]'
+out=$(run_it); assert_status 0 "$?"
+assert_equals "[]" "$(read_out items)"
+assert_contains "$(read_out waiting)" "docs-task"
+
+it "ci.yml with no guard step means nothing is ever waiting"
+setup; runs_file
+add_run_id operator failure 1
+stub_checks_and_steps "$RUNS" '["anything"]'
+out=$(run_it); assert_status 0 "$?"
+assert_equals "[]" "$(read_out waiting)"
+
 summary

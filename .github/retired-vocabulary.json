@@ -818,6 +818,19 @@
         "is not",
         "never"
       ]
+    },
+    {
+      "id": "carry-scripts-split",
+      "pattern": "carry-grant\\.py|carry-from-pr\\.sh",
+      "says": "`.github/scripts/carry.py` is the one carry and it asks `conveyor.py`: the two programs it replaced held the grant rule in two copies, and the gate held a third \u2014 see .claude/rules/worktree-delivery.md",
+      "allow": [
+        "replaced",
+        "replaces",
+        "removed",
+        "retired",
+        "deleted",
+        "held"
+      ]
     }
   ]
 }

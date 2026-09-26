@@ -6,12 +6,12 @@
 # proves by running the identical issue body through both fixtures and getting
 # different lanes purely from the binding.
 #
-# NO NETWORK: `gh` is stubbed for the one call `is_opsx_lane` makes (the
+# NO NETWORK: `gh` is stubbed for the one call the lane read makes (the
 # issue's labels), and the sidecar glob is a real file under a throwaway
-# working directory `carry-grant.py` is imported from.
+# working directory. The lane is read by `conveyor_io.lane`, the ONE reading
+# the fire, the carries and the gate all share.
 . "$(dirname "$0")/lib.sh"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-S="$ROOT/.github/scripts/carry-grant.py"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -38,11 +38,8 @@ lane() {  # lane <issue-number> <labels-json-array> -- run from $tmp/cwd
   PATH="$tmp/bin:$PATH" python3 -c "
 import sys
 sys.path.insert(0, '$ROOT/.github/scripts')
-import importlib.util
-spec = importlib.util.spec_from_file_location('carry_grant', '$S')
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-print('opsx' if m.is_opsx_lane('o/r', $1) else 'plain')
+import conveyor_io as io
+print(io.lane('o/r', $1, io.issue_labels('o/r', $1)))
 "
 }
 

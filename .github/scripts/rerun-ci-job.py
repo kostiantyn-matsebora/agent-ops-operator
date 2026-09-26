@@ -52,7 +52,7 @@ def latest_run(repo: str, sha: str) -> dict | None:
 def parse_paginated(raw: str) -> list[dict]:
     """`gh api --paginate` without `--jq` concatenates each page's JSON object
     back to back, with no separator between them at all -- not even a
-    newline. A STRING-SPLIT ON THE LITERAL `"}{"` (what `carry-grant.py`'s
+    newline. A STRING-SPLIT ON THE LITERAL `"}{"` (what `carry.py`'s
     sibling does for arrays, `"]["`) BREAKS ON ANY VALUE CONTAINING THAT
     SUBSTRING: a job's own name, a log URL, a commit message a job carries
     in its payload. `json.JSONDecoder.raw_decode` is a REAL streaming

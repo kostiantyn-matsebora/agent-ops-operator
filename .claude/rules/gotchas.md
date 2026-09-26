@@ -558,7 +558,7 @@ unlabelled, with no session left to do anything about it.
   ever.
   - Where a person's standing instruction (`conveyor:run`, placed on the
     tracking issue) authorises the next station, a WORKFLOW —
-    `.github/scripts/carry-grant.py` — reads that instruction again at the
+    `.github/scripts/carry.py` — reads that instruction again at the
     moment it matters.
   - It re-checks the placer still has write access, then places the
     station's label itself, recording whose grant it carried.
@@ -588,7 +588,7 @@ something. `conveyor:fix` never landed, because `remote-implement.yml`'s
   findings to fix — the one case the whole mechanism is for.
 - **THE FIX IS ONE BOOLEAN, NOT A REDESIGN.** `open`'s `if:` now accepts
   `conclusion == 'success' || conclusion == 'failure'`.
-  `carry-from-pr.sh` and `carry-grant.py` read no CI status at all. They
+  `carry.py` reads no CI status at all. They
   already re-check the writer's `conveyor:run`, the `change/*` branch shape
   and `Refs #<n>`, independent of why `ci` concluded — so widening the
   trigger costs nothing the re-check does not already guard.
@@ -746,3 +746,38 @@ The names say what happened: `.tmp_getenv.py`, `.tmp_hello.sh`,
 - **A ROOT DOTFILE THAT IS EMPTY IS THE TELL.** `git show --stat` on a
   conveyor commit listing a `| 0` file at the root is this bug, whatever its
   name.
+
+**TEN COPIES OF ONE RULE DRIFTED, AND THE FIX WAS THE MACHINE, NOT THE
+COPIES — MEASURED ON #248, #254 AND #255, 2026-09-25 TO 2026-09-26.** Each
+break was fixed where it showed, and the next one showed somewhere else.
+
+- **#248: THE LOOP FED ON ITS OWN REFUSAL.** A round against more than a
+  hundred open analysis issues hit the fixing job's thirty-minute limit and
+  counted for nothing. While it ran, `docs-task` refused on "a round is still
+  running", so `ci-green` was red, and the red started the next round. Six
+  replies on review threads queued six dispatch runs, and each failed
+  `docs-task` in its first ten seconds. The pull request merged only after
+  `conveyor:run` was removed by hand.
+- **REMOVING THE GRANT WAS THE WRONG FIX.** It stopped the cycle by taking the
+  instruction away, which also removed the archive station's actor. The cycle
+  was two rules disagreeing, and taking a person's instruction away never
+  answered which of them was right.
+- **#254: THE GATE AND THE CARRY READ DIFFERENT GRANTS.** The carry accepted
+  `conveyor:archive` for the archive pull request. The gate grepped for
+  `conveyor:run` alone, so it refused every round the carry had authorised.
+- **#255: THE ARCHIVE CARRY FIRED ON A PROPOSAL MERGE**, and the fire record
+  was permanent, so `conveyor:run` on a finished change started the implement
+  station again. Two paths could also start two sessions for one issue.
+- **THE FIX IS `conveyor.py`.** A rule has one definition and every program
+  asks it. A test walks every state against every event, so the next
+  disagreement is a failing row and not a Saturday night.
+- **`--purpose ci` AND `--purpose archive`** are the guard's two questions. A
+  check asks only what a person can answer. The running round belongs to the
+  loop, and a check reporting it red is a red the loop made.
+- **A COMPLETION IS A START.** A review or CI completion on a carried label
+  re-checks the grant like a label event does. Before, a completion trusted the
+  label, so removing the instruction did not stop a loop that was running.
+- **A PR THAT EDITS THE LOOP IS DRIVEN BY HAND.** The loop's workflows run from
+  the base branch, so a fix to them is not exercised until it merges. Do not
+  give such a pull request a `Refs` or `Closes` keyword on the issue whose
+  grant would put the loop on it.

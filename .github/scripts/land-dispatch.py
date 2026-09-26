@@ -76,8 +76,27 @@ import pathlib
 import subprocess
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the state machine, restored beside this program by the workflow
+
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 SUMMARY_MARKER = "<!-- conveyor:summary -->"
+
+# WHAT EACH ENDING IS, TO THE MACHINE. The words on the pull request stay as
+# they were; the machine's own kinds decide the loop label and whether the
+# round spent the budget, so there is one rule and this is only the mapping.
+ENDING_KIND = {
+    "clean": "clean",
+    "no report": "no report",
+    "fixing step failed": "failed",
+    "fixing step timed out": "timed out",
+    "stale patch": "stale patch",
+    "round cap reached": "landed",
+    "could not start the next round": "waiting",
+    "disputes only": "disputed",
+    "disputed and unaddressed": "disputed",
+    "nothing addressed": "disputed",
+}
 
 
 def sh(*cmd: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
@@ -243,7 +262,7 @@ class Round:
         # 2 * max_rounds, extended twice at 3 * max_rounds -- "another SET of
         # rounds", not one extra round.
         self.grants = self.count_grants()
-        self.cap = self.args.max_rounds * (1 + self.grants)
+        self.cap = conveyor.cap_for(self.args.max_rounds, self.grants)
         # NOT CALLED HERE. Consuming the grant is deferred to the caller,
         # once a commit has actually landed -- see consume_keep_going's own
         # docstring for why a round that turns out to be a no-op (no report,
@@ -303,7 +322,7 @@ class Round:
             print(f"::warning::grant marker comment failed to post for round {self.number}; "
                   f"`{label}` was already removed and the cap is extended anyway", file=sys.stderr)
         self.grants += 1
-        self.cap = self.args.max_rounds * (1 + self.grants)
+        self.cap = conveyor.cap_for(self.args.max_rounds, self.grants)
         print(f"consumed `{label}`: round {self.number} extends the cap to {self.cap}")
 
     @staticmethod
@@ -316,38 +335,37 @@ class Round:
         return {}
 
 
-    def _comments_since(self) -> list[dict]:
+    def _comments(self) -> list[dict]:
         # CACHED ON THE INSTANCE -- count_rounds() and count_grants() both
         # call this from __init__, and the pull request's comments do not
-        # change between those two calls. Fetching them twice was a real,
-        # avoidable network round trip on every landing-step run.
+        # change between those two calls.
         if self._comments_cache is None:
             try:
                 raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
             except subprocess.CalledProcessError:
                 raw = "[]"
-            self._comments_cache = [c for c in parse_comments(raw)
-                                     if not self.args.since or (c.get("created_at") or "") >= self.args.since]
+            self._comments_cache = parse_comments(raw)
         return self._comments_cache
 
     def count_rounds(self) -> int:
-        """Landing comments carrying the round marker, since the label was
-        placed. The label's timestamp is what makes re-labelling a fresh count."""
-        return sum(1 for c in self._comments_since() if self.markers["round"] in (c.get("body") or ""))
+        """Comments carrying the round marker since the label was placed, counted
+        by the machine's one counter, which the gate and the recovery use too.
+        The label's timestamp is what makes re-labelling a fresh count."""
+        return conveyor.count_marked(self._comments(), self.markers["round"], self.args.since)
 
     def count_grants(self) -> int:
-        """Comments carrying the grant marker, since the label was placed --
-        one per `conveyor:keep-going` this program has already consumed, so
-        the effective cap grows by a full `max_rounds` for each."""
-        return sum(1 for c in self._comments_since() if self.markers["grant"] in (c.get("body") or ""))
+        """One per `conveyor:keep-going` this program has already consumed, so the
+        effective cap grows by a full `max_rounds` for each."""
+        return conveyor.count_marked(self._comments(), self.markers["grant"], self.args.since)
 
     def marker(self) -> str:
         return f"{self.markers['round']} {self.number} -->"
 
-    def set_loop(self, state: str) -> None:
-        """STATE, NOT A GRANT. The pull request's loop label is what a person
-        reads; nothing reads it back. So this never fails a round: the script
-        exits 0 on anything it cannot do, and a missing script is a notice.
+    def apply_loop(self, event: str) -> None:
+        """Apply a loop EVENT through conveyor-state.py, which reads the live label
+        and asks the machine's table what follows. STATE, NOT A GRANT: this never
+        fails a round. The script exits 0 on anything it cannot do, and a missing
+        script is a notice.
 
         `--vocabulary` IS PASSED EXPLICITLY, AND THAT IS NOT OPTIONAL HERE.
         `conveyor-state.py`'s own default resolves its vocabulary file
@@ -364,18 +382,26 @@ class Round:
         #233: `land` posted "no report... every item is still open", and
         `loop:running` never moved, with no error anywhere in the run."""
         script = self.args.state_script
+        if not event:
+            return
         if not script or not pathlib.Path(script).is_file():
-            print(f"::notice::loop state `{state}` not recorded: {script} is not there", file=sys.stderr)
+            print(f"::notice::loop event `{event}` not recorded: {script} is not there", file=sys.stderr)
             return
         sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.args.pr),
-           "--loop", state, "--vocabulary", str(self.args.vocabulary), check=False)
+           "--loop-event", event, "--vocabulary", str(self.args.vocabulary), check=False)
+
+    def waiting_on_person(self) -> bool:
+        """A failed required check that is only the loop's own guard: a dispute
+        waits for a person, and no fixer can answer for them (failed-checks.py
+        reports it apart from the work it hands the fixer)."""
+        return bool((self.checks or {}).get("waiting"))
 
     def threads_still_open(self) -> tuple[bool, str]:
         """LIVE, NOT THE COLLECTED SNAPSHOT. `collect` read the threads once
         at the start of this round; a `clean` ending is decided minutes
         later, and a thread could have opened in between (a human reviewer's
         own comment, a re-triggered review). `review-not-clean.py`, exit 1,
-        is the same live read `carry-from-pr.sh` trusts before ever calling a
+        is the same live read `carry.py` trusts before ever calling a
         pull request mergeable -- this round must not claim less carefully.
 
         THREE OUTCOMES, NOT TWO. Exit 0 is clean, exit 1 is an open thread --
@@ -401,38 +427,32 @@ class Round:
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
                 note: str = "", unaddressed: dict[str, str] | None = None) -> None:
         """ONE comment per ending: what was fixed, what was disputed, what was
-        unaddressed, rounds used, what remains, and the approver mentioned."""
+        unaddressed, rounds used, what remains, and the approver mentioned.
+
+        THE MACHINE DECIDES THE LABEL AND THE COUNT. `conveyor.ending` maps the
+        ending's kind to the loop event and says whether the round spent the
+        budget. Every round that ran a model counts and leaves its round marker,
+        either in the landing comment (a commit landed) or in this summary (none
+        did), so the gate can enforce the bound from the same comments."""
         a = self.args
         unaddressed = unaddressed or {}
-        # EVERY ENDING MOVES THE LOOP LABEL. The cap is `capped`; every other
-        # ending that stopped for a person is `stalled`. A CLEAN ending is
-        # `mergeable` -- a SECOND setter of that same value, not a duplicate
-        # of `carry-from-pr.sh`'s: that one marks mergeable when `open` reacts
-        # to `ci` succeeding, BEFORE this round ever started, and this round's
-        # own gate then set `running` on top of it (measured on #225: the
-        # label stuck at `running` on a clean, green pull request, because
-        # nothing moved it off `running` again). Two setters writing the same
-        # value from two different TRANSITIONS is not the state living in two
-        # places -- there is still one label, moved at every transition that
-        # can change it.
-        if ending == "round cap reached":
-            self.set_loop("capped")
-        elif ending == "clean":
-            withhold, why = self.threads_still_open()
-            if not withhold:
-                self.set_loop("mergeable")
-            else:
-                # NOT STALLED EITHER -- nothing was disputed and nothing
-                # failed, so a fresh round would find the same empty work
-                # list. Left as running is honest: the round is over, but
-                # the pull request is not confirmed mergeable, and the
-                # review's own next completion (or the thread being
-                # answered) is what moves it from here.
-                print(f"clean ending, but {why}; loop label left as it is")
-        else:
-            self.set_loop("stalled")
-        used = self.number if sha else self.number - 1
-        lines = [SUMMARY_MARKER, f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}"]
+        kind = ENDING_KIND.get(ending, "disputed")
+        thread_open = False
+        if kind == "clean":
+            thread_open, why = self.threads_still_open()
+            if thread_open:
+                print(f"clean ending, but {why}; loop label set to stalled")
+        decision = conveyor.ending(kind, self.number, self.cap, thread_open=thread_open,
+                                   waiting_on_person=kind == "clean" and self.waiting_on_person())
+        self.apply_loop(decision.loop_event)
+        used = self.number if (sha or decision.counted) else self.number - 1
+        lines = [SUMMARY_MARKER]
+        if decision.counted and not sha:
+            # THE ROUND'S MARKER RIDES ON ITS SUMMARY where no landing comment
+            # carries it, so a round that ran a model and pushed nothing is still
+            # counted, and the gate's count of the bound sees it.
+            lines.append(self.marker())
+        lines.append(f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}")
         if note:
             lines.append(note)
         lines.append(f"Rounds used: {used} of {self.cap}.")
@@ -530,9 +550,9 @@ def main() -> int:
                     help="the fixing JOB hit its `timeout-minutes` bound, so GitHub marked it `cancelled` "
                          "rather than `failure` -- a distinct fact worth telling apart from a crash, since "
                          "it usually means the round's own work (or the model) stalled, not that it errored. "
-                         "Same handling as --fix-failed otherwise: nothing was fixed, nothing is disputed, "
-                         "no round is counted. Measured on #243, where the fixing step's model action sat "
-                         "`in_progress` for 15+ hours with no bound on the job at all")
+                         "Nothing was fixed and nothing is disputed, but the round COUNTS, unlike "
+                         "--fix-failed: a model ran for the whole bound. Measured on #243 (a step that sat "
+                         "`in_progress` for 15+ hours) and #248 (three thirty-minute rounds, none counted)")
     ap.add_argument("--state-script", type=pathlib.Path,
                     default=pathlib.Path(__file__).with_name("conveyor-state.py"),
                     help="conveyor-state.py, restored beside this program by the workflow; moves the "
@@ -567,8 +587,12 @@ def main() -> int:
     if not work:
         print("nothing accepted: the work list is empty, so there is nothing to land")
         if rnd:
+            waiting = rnd.waiting_on_person()
             rnd.summary("clean", [], {},
-                        note="The review has no open finding and the analysis reports no open issue.")
+                        note=("A required check is red only on the loop's own guard: a dispute the loop "
+                              "posted waits for a person's answer, and no round can give it. Answer it, "
+                              "or resolve it, and the check re-runs." if waiting else
+                              "The review has no open finding and the analysis reports no open issue."))
             return 0
         pr_comment(args.repo, args.pr,
                    f"Dispatch by @{args.dispatched_by}: no finding is accepted, so nothing was "
@@ -595,27 +619,38 @@ def main() -> int:
         return 0
 
     if args.fix_failed or args.fix_timed_out:
-        # SILENCE IS NOT A DECISION, AND NEITHER IS A DEAD JOB. No model ran
-        # to completion, so nothing was fixed, nothing is disputed and no
-        # round is counted; the ending says exactly that, links the run, and
-        # names what starts another round. Without this the pull request
-        # shows nothing at all.
+        # SILENCE IS NOT A DECISION, AND NEITHER IS A DEAD JOB. Nothing was
+        # fixed and nothing is disputed; the ending says exactly that, links
+        # the run, and names what starts another round. Without this the pull
+        # request shows nothing at all.
         #
-        # THE TWO SHAPES OF DEAD ARE NAMED SEPARATELY, because a maintainer
-        # reading "failed" investigates a crash and one reading "timed out"
-        # investigates something else -- a hang, a stall, a fixing round that
-        # genuinely needed longer than the bound. Both stop the round exactly
-        # the same way; only the words differ.
+        # THE TWO SHAPES OF DEAD ARE NAMED SEPARATELY, and they are counted
+        # differently. A job that FAILED never started a model, so it spent
+        # nothing. A job that TIMED OUT ran a model for the whole of its bound,
+        # so it spent the budget as much as a landed round did: counted, and at
+        # the ceiling it ends the loop. It used to count for nothing, so a loop
+        # whose every round timed out sat at "0 of 5" for ever (#248).
         ending = "fixing step timed out" if args.fix_timed_out else "fixing step failed"
         cause = ("the fixing job ran past its time limit before finishing its work" if args.fix_timed_out
                  else "the fixing job failed before or while doing its work")
         print(f"{ending}: no model finished, so nothing was landed and nothing is disputed")
         if rnd:
-            rnd.summary(ending, [], {},
-                        note=f"The {cause}, so no model looked at any item: nothing was fixed and nothing "
-                             "is disputed. The run linked below says why. Every item stays open. A push, "
-                             "or removing and re-adding the label, starts another round; "
-                             f"`{markers['keep_going']}` is not needed, since no round was counted.")
+            if args.fix_timed_out:
+                if rnd.number >= rnd.cap:
+                    after = (f"Round {rnd.number} reaches the bound of {rnd.cap}, so no further round starts. "
+                             f"Place `{markers['keep_going']}` to grant another {args.max_rounds}, or shrink "
+                             "what a round has to do.")
+                else:
+                    after = f"The next push or review completion starts round {rnd.number + 1}."
+                note = (f"The {cause}, so nothing was fixed and nothing is disputed. The run linked below says "
+                        f"how far it got. The round is counted, since it spent its time. Every item stays "
+                        f"open. {after}")
+            else:
+                note = (f"The {cause}, so no model looked at any item: nothing was fixed and nothing is "
+                        "disputed. The run linked below says why. Every item stays open. A push, or removing "
+                        f"and re-adding the label, starts another round; `{markers['keep_going']}` is not "
+                        "needed, since no round was counted.")
+            rnd.summary(ending, [], {}, note=note)
             return 0
         pr_comment(args.repo, args.pr,
                    f"Dispatch by @{args.dispatched_by}: {cause}, so nothing was landed. Every accepted "

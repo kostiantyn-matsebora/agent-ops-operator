@@ -18,21 +18,37 @@
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 S="$ROOT/.github/scripts/remote-implement.py"
 
-# A `gh` that answers a permission question and records every call.
-stub_gh_perm() {  # stub_gh_perm <bindir> <permission>
-  local bin="$1"; mkdir -p "$bin"
-  cat > "$bin/gh" <<STUB
+# A `gh` answering every read the adapter makes from FIXTURES under $FX: permissions per
+# login, the issue's labels and label timeline, its comments (the fire records), and the
+# open pull requests' branches. It records every call, a multi-line body flattened.
+stub_gh_perm() {  # stub_gh_perm <bindir> <permission>: every login has that permission
+  local bin="$1"; mkdir -p "$bin" "$FX"
+  echo "$2" > "$FX/perm-default"
+  cat > "$bin/gh" <<'STUB'
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "\$GH_CALLS"
-case "\$*" in
-  *"collaborators/"*"/permission"*) echo "$2" ;;
-  *"issues/"*"/comments"*)          cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || true ;;
-  *) : ;;
+call="${*//$'\n'/ }"; printf '%s\n' "$call" >> "$GH_CALLS"
+case "$*" in
+  *"collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed 's#.*collaborators/\([^/]*\)/.*#\1#'); cat "$FX/perm-$l" 2>/dev/null || cat "$FX/perm-default" ;;
+  "issue view "*"--json labels --jq"*) tr ' ' '\n' < "$FX/labels" 2>/dev/null ;;
+  "issue view "*"--json labels"*) python3 -c 'import json,sys;print(json.dumps({"labels":[{"name":x} for x in open(sys.argv[1]).read().split()]}))' "$FX/labels" 2>/dev/null ;;
+  "api repos/"*"/timeline"*) cat "$FX/timeline.json" 2>/dev/null ;;
+  *"issues/"*"/comments"*) [ -z "${GH_COMMENTS_FAIL:-}" ] || { echo "the comments API is unavailable" >&2; exit 1; }; cat "${GH_COMMENTS:-/dev/null}" 2>/dev/null || true ;;
+  "pr list "*) cat "$FX/heads" 2>/dev/null || true ;;
 esac
 exit 0
 STUB
   chmod +x "$bin/gh"
 }
+
+# A bound change in the working directory: `finished_change` has every task ticked, so it is
+# at the archive station; `pending_change` has one open, so its next station is implement.
+bind_change() {  # bind_change <issue> <tasks text>
+  rm -rf "$DIR/work/openspec"; mkdir -p "$DIR/work/openspec/changes/thing"
+  printf '%s\n' "$1" > "$DIR/work/openspec/changes/thing/.github-issue"
+  printf '%b' "$2" > "$DIR/work/openspec/changes/thing/tasks.md"
+}
+finished_change() { bind_change "$1" '## 1. x\n- [x] a\n- [x] b\n'; }
+pending_change() { bind_change "$1" '## 1. x\n- [x] a\n- [ ] b\n'; }
 
 # The fire endpoint, as a file the program POSTs to over http. `python3 -m
 # http.server` cannot answer a POST, so this is a 20-line handler.
@@ -82,14 +98,15 @@ JSON
 }
 
 setup() {
-  DIR=$(mktemp -d); BIN="$DIR/bin"; export GH_CALLS="$DIR/calls"; : > "$GH_CALLS"
+  DIR=$(mktemp -d); BIN="$DIR/bin"; export GH_CALLS="$DIR/calls" FX="$DIR/fx"; : > "$GH_CALLS"
+  mkdir -p "$DIR/work" "$FX"
   EVENT="$DIR/event.json"; RECORD="$DIR/fired.json"; BODY="$DIR/reply.json"
   echo '{"session_url": "https://claude.ai/code/session_abc"}' > "$BODY"
 }
 
-run_it() {  # run_it [extra args]
-  PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r ROUTINE_FIRE_TOKEN="${TOKEN-tok}" \
-    python3 "$S" --event "$EVENT" --repo o/r "$@" 2>&1
+run_it() {  # run_it [extra args] -- from the working directory a bound change lives in
+  (cd "$DIR/work" && PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r ROUTINE_FIRE_TOKEN="${TOKEN-tok}" \
+    python3 "$S" --event "$EVENT" --repo o/r "$@" 2>&1)
 }
 
 # --- the wrong label ---------------------------------------------------------
@@ -145,7 +162,7 @@ assert_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixin
 assert_not_contains "$(cat "$GH_CALLS")" "a workflow reads"
 
 # conveyor:implement CAN FIRE WHILE conveyor:run ALREADY STANDS -- the later
-# carry (carry-grant.py, at the `open` job) reads the ISSUE'S CURRENT labels,
+# carry (carry.py, at the `open` job) reads the ISSUE'S CURRENT labels,
 # never which one fired this session, so the standing instruction still gets
 # carried forward even though conveyor:implement, not conveyor:run, is what
 # triggered this particular run. The comment must say so.
@@ -161,7 +178,7 @@ assert_contains "$(cat "$GH_CALLS")" "carries it forward as"
 assert_not_contains "$(cat "$GH_CALLS")" "a person places a label to start the fixing loop"
 # THE TEXT MUST NAME conveyor:run, THE LABEL THAT ACTUALLY GETS CARRIED --
 # never conveyor:implement, the one that happened to fire this session.
-# carry-grant.py reads run_label off the issue's live labels regardless of
+# carry.py reads run_label off the issue's live labels regardless of
 # which label fired remote-implement.py, so naming the firing label here
 # would describe a carry that is not the one that actually happens.
 assert_contains "$(cat "$GH_CALLS")" "reads \`conveyor:run\` again and carries it forward as \`conveyor:fix\`"
@@ -190,10 +207,11 @@ out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 0 "$status"
 assert_equals "" "$(cat "$GH_CALLS")"
 
-it "the comment carries the marker, so a second run does not post a second one"
+it "the comment carries the marker, so with the session's pull request OPEN a second run posts nothing"
 setup; stub_gh_perm "$BIN" write
 event "$EVENT" conveyor:implement 42 maintainer
 echo '<!-- remote-implement:fired -->' > "$DIR/comments"
+echo "change/42-thing" > "$FX/heads"
 GH_COMMENTS="$DIR/comments"; export GH_COMMENTS
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 unset GH_COMMENTS
@@ -295,32 +313,21 @@ assert_equals "" "$(cat "$GH_CALLS")"
 
 # --- the archive station, and a label the WORKFLOW carried ---------------------
 #
-# `conveyor:archive` reaches the tracking issue from carry-grant.py, so its
+# `conveyor:archive` reaches the tracking issue from carry.py, so its
 # sender is `github-actions[bot]` -- unknown to the collaborators API. It is
 # accepted exactly when the standing instruction it relays still stands on
 # the issue and was placed by a writer, re-read here; otherwise removed with
 # a comment, like anybody else's label. Nothing fired on it before this.
 stub_gh_carried() {  # stub_gh_carried <bindir> <labels-json> <timeline-json> <placer-permission>
-  local bin="$1"; mkdir -p "$bin"
-  cat > "$bin/gh" <<STUB
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "\$GH_CALLS"
-case "\$*" in
-  "issue view "*"--json labels")          printf '%s' '$2' ;;
-  "api repos/"*"/timeline --paginate")    printf '%s' '$3' ;;
-  *"collaborators/"*"/permission"*)       echo "$4" ;;
-  *"issues/"*"/comments"*)                cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || true ;;
-  *) : ;;
-esac
-exit 0
-STUB
-  chmod +x "$bin/gh"
+  stub_gh_perm "$1" "$4"
+  python3 -c 'import json,sys;print(" ".join(l["name"] for l in json.loads(sys.argv[1])["labels"]))' "$2" > "$FX/labels"
+  printf '%s' "$3" > "$FX/timeline.json"
 }
 STANDING='{"labels":[{"name":"conveyor:run"},{"name":"conveyor:archive"},{"name":"opsx:review"}]}'
 PLACED='[{"event":"labeled","label":{"name":"conveyor:run"},"actor":{"login":"maintainer"},"created_at":"2026-09-13T09:25:16Z"}]'
 
 it "the archive label, carried by the workflow bot while a writer's conveyor:run stands, fires the archive station and records it under its OWN marker"
-setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write; finished_change 51
 event "$EVENT" conveyor:archive 51 "github-actions[bot]"
 start_endpoint 200 "$BODY" "$RECORD"
 out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
@@ -337,7 +344,7 @@ it "the archive fire marks the issue's station archive, state not grant"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:archive"
 
 it "the implement station's own marker already on the issue does NOT stop the archive station firing"
-setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write; finished_change 51
 printf '<!-- remote-implement:fired -->\nImplementing this issue: started.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
 event "$EVENT" conveyor:archive 51 "github-actions[bot]"
 start_endpoint 200 "$BODY" "$RECORD"
@@ -348,12 +355,12 @@ assert_contains "$out" "fired the archive station for #51"
 unset GH_COMMENTS
 
 it "the archive station's own marker stops a second archive fire"
-setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write; finished_change 51
 printf '<!-- remote-implement:fired:archive -->\nArchiving this change.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
 event "$EVENT" conveyor:archive 51 "github-actions[bot]"
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 0 "$status"
-assert_contains "$out" "already carries a fire record for the archive station"
+assert_contains "$out" "the archive station already carries a fire record"
 unset GH_COMMENTS
 
 it "the bot's label with conveyor:run GONE from the issue: refused, label removed, comment says what was missing"
@@ -362,19 +369,19 @@ event "$EVENT" conveyor:archive 51 "github-actions[bot]"
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --remove-label conveyor:archive"
-assert_contains "$(cat "$GH_CALLS")" "no longer stands on #51"
+assert_contains "$(cat "$GH_CALLS")" "no \`conveyor:run\` stands on the issue to carry"
 assert_not_contains "$out" "fired"
 
 it "the bot's label whose conveyor:run placer lost write access: refused the same way"
-setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" read
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" read; finished_change 51
 event "$EVENT" conveyor:archive 51 "github-actions[bot]"
 out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:archive"
-assert_contains "$(cat "$GH_CALLS")" "who now has \`read\` here"
+assert_contains "$(cat "$GH_CALLS")" "cannot push here now"
 
 it "a person with write access placing conveyor:archive by hand fires the archive station too"
-setup; stub_gh_perm "$BIN" write
+setup; stub_gh_perm "$BIN" write; finished_change 51
 event "$EVENT" conveyor:archive 51 maintainer
 start_endpoint 200 "$BODY" "$RECORD"
 out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
@@ -399,60 +406,134 @@ out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
 assert_status 1 "$status"
 assert_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:archive"
 
-# --- the ARCHIVE JOB'S own step, which places the label AND must start the ---
-# --- session, since a label an API call places fires no webhook at all -----
+# --- THE STATION FOLLOWS THE CHANGE (measured on #255) ---------------------------------------
+#
+# conveyor:run used to fire the implement station whatever the line was at, so placing it
+# after the PROPOSAL merged started a session, and the archive carry fired on that same merge
+# and started a SECOND one. The machine decides the station from the change's own state.
+
+it "conveyor:run on an issue whose change is FINISHED fires the ARCHIVE station, not implement"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:run"},{"name":"opsx:review"}]}' "$PLACED" write; finished_change 51
+event "$EVENT" conveyor:run 51 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired the archive station for #51"
+assert_contains "$(cat "$GH_CALLS")" "<!-- remote-implement:fired:archive -->"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:archive"
+
+it "conveyor:run on an issue whose change is NOT finished fires the IMPLEMENT station"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:run"},{"name":"opsx:proposed"}]}' "$PLACED" write; pending_change 255
+event "$EVENT" conveyor:run 255 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired for #255"
+assert_not_contains "$out" "archive"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 255 --repo o/r --add-label station:implement"
+
+it "conveyor:archive on a change that is NOT finished is refused, the label removed, and the reason says why"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:archive"},{"name":"opsx:proposed"}]}' "$PLACED" write; pending_change 255
+event "$EVENT" conveyor:archive 255 maintainer
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 255 --repo o/r --remove-label conveyor:archive"
+assert_contains "$(cat "$GH_CALLS")" "the change is not finished"
+assert_not_contains "$out" "fired"
+
+it "conveyor:archive on the PLAIN lane is refused: it has no archive station"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:archive"}]}' "$PLACED" write
+event "$EVENT" conveyor:archive 61 maintainer
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 1 "$status"
+assert_contains "$(cat "$GH_CALLS")" "the plain lane has no archive station"
+
+# --- A SESSION THAT DIED IS RESTARTED BY A PERSON, NEVER BY A CARRY (measured on #255) ---------
+
+it "a person re-placing conveyor:run after a session DIED (record present, no pull request open) fires again"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:run"},{"name":"opsx:proposed"}]}' "$PLACED" write; pending_change 255
+printf '<!-- remote-implement:fired -->\nImplementing this issue.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+event "$EVENT" conveyor:run 255 maintainer
+start_endpoint 200 "$BODY" "$RECORD"
+out=$(run_it --fire-url "http://127.0.0.1:$ENDPOINT_PORT/fire"); status=$?
+stop_endpoint
+assert_status 0 "$status"
+assert_contains "$out" "fired for #255"
+unset GH_COMMENTS
+
+it "the same with a pull request OPEN from the change's branch: a session is at work, so nothing fires"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:run"},{"name":"opsx:proposed"}]}' "$PLACED" write; pending_change 255
+printf '<!-- remote-implement:fired -->\nImplementing this issue.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+echo "change/thing" > "$FX/heads"
+event "$EVENT" conveyor:run 255 maintainer
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_contains "$out" "a session is still at work"
+assert_not_contains "$out" "fired for"
+unset GH_COMMENTS
+
+it "a carry never fires twice: the workflow's own placement over an existing record is skipped"
+setup; stub_gh_carried "$BIN" "$STANDING" "$PLACED" write; finished_change 51
+printf '<!-- remote-implement:fired:archive -->\nArchiving.\n' > "$DIR/comments"; export GH_COMMENTS="$DIR/comments"
+event "$EVENT" conveyor:archive 51 "github-actions[bot]"
+out=$(run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_contains "$out" "a carry never fires twice"
+unset GH_COMMENTS
+
+it "an unreadable comment list fails CLOSED even for a person: a rate limit never starts a second session"
+setup; stub_gh_carried "$BIN" '{"labels":[{"name":"conveyor:run"}]}' "$PLACED" write
+event "$EVENT" conveyor:implement 42 maintainer
+out=$(GH_COMMENTS_FAIL=1 run_it --fire-url "http://127.0.0.1:1/never"); status=$?
+assert_status 0 "$status"
+assert_not_contains "$out" "fired for"
+
+# --- THE WORKFLOW'S TWO CARRY JOBS, over the machine ------------------------------------------
+#
+# They gather nothing and decide nothing: carry.py does both, and reports through step OUTPUTS,
+# which a later step's `if:` reads. They used to scrape a program's stdout with grep.
 W="$ROOT/.github/workflows/remote-implement.yml"
 wpy() { python3 -c "
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
 $1
 " "$W"; }
+step_named() { wpy "print([s for s in d['jobs']['$1']['steps'] if s.get('id') == '$2'][0]['$3'])"; }
 
-it "the archive job re-invokes remote-implement.py directly after a real carry, since its own label placement fires no webhook"
-step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
-assert_contains "$step" "carry-from-pr.sh \"\$pr\" archive"
-assert_contains "$step" "remote-implement.py --event \"\$payload\" --repo \"\$GITHUB_REPOSITORY\""
+it "the open job carries through carry.py --station fix and starts a round only from the step's OUTPUT"
+run=$(step_named open carry run)
+assert_contains "$run" "carry.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$pr\" --station fix"
+assert_contains "$run" '--ci-conclusion'
+assert_not_contains "$run" "carry-from-pr.sh"
+assert_not_contains "$run" "carry-grant.py"
+cond=$(wpy 'print([s for s in d["jobs"]["open"]["steps"] if "dispatch" in s.get("name","").lower() or "round" in s.get("name","").lower()][0]["if"])')
+assert_contains "$cond" "steps.carry.outputs.dispatch_round == 'true'"
 
-it "the archive job only re-invokes on an ACTUAL carry, read from the shared script's own success line, never unconditionally"
-step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
-assert_contains "$step" "grep -oE '^carried .* on issue #[0-9]+"
-assert_contains "$step" 'already carries the `archive` grant'
-assert_contains "$step" 'if [ -n "$carried_issue" ]; then'
+it "the round is dispatched with the pull request the carry step named, as mode=all"
+run=$(wpy 'print([s for s in d["jobs"]["open"]["steps"] if "if" in s][0]["run"])')
+assert_contains "$run" "gh workflow run review-dispatch.yml"
+assert_contains "$run" "steps.carry.outputs.pr"
+assert_contains "$run" "mode=all"
 
-# MEASURED LIVE ON A #230 REPLAY: dispatching pr=220 for #51 printed
-# "#51 already carries the `archive` grant; label re-asserted, not commenting
-# again" -- the shared script's OWN dedup on its comment marker, since the
-# label was placed and that marker posted the first time this ran, before
-# this recovery path existed. The grep only matched a FRESH "carried ..."
-# line, so carried_issue came back empty and remote-implement.py never fired
-# -- the recovery path failed to recover the one case it exists for.
-#
-# THE EXTRACTION LOGIC IS RUN FROM THE STEP ITSELF, NEVER RETYPED. A second
-# copy of the pattern here would drift from the workflow silently -- the
-# assignment line is pulled out of $step with sed and eval'd against a fixed
-# $out, so this test exercises the exact bytes that ship.
-it "the carry-line grep ALSO matches the shared script's own already-carries dedup line, not only a fresh carry"
-step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
-extraction=$(printf '%s\n' "$step" | sed -n '/^carried_issue=/,/|| true)$/p')
-extract() { out="$1"; eval "$extraction"; printf '%s' "$carried_issue"; }
-assert_equals "51" "$(extract 'carried `conveyor:run` (from maintainer) to `conveyor:archive` on issue #51')"
-assert_equals "51" "$(extract '#51 already carries the `archive` grant; label re-asserted, not commenting again')"
-assert_equals "" "$(extract '#222 does not carry `conveyor:run`; nothing to carry, and that is the ordinary case')"
+it "the archive job carries through carry.py --station archive, and starts the session only from the step's OUTPUT"
+run=$(step_named archive carry run)
+assert_contains "$run" "carry.py --repo \"\$GITHUB_REPOSITORY\" --pr \"\$pr\" --station archive"
+assert_not_contains "$run" "carry-from-pr.sh"
+cond=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["if"])')
+assert_contains "$cond" "steps.carry.outputs.fire_issue != ''"
 
-it "the synthesized payload names the archive label from the vocabulary file, never restating it"
-step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
-assert_contains "$step" '["archive_label"]'
+it "the archive session's synthesized payload names the archive label from the vocabulary file, never restating it"
+start=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["run"])')
+assert_contains "$start" '["archive_label"]'
+assert_contains "$start" 'remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"'
 
-it "the archive job's own step sets ROUTINE_FIRE_URL and ROUTINE_FIRE_TOKEN, the same two fire's own step needs"
-env=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["env"])')
+it "the step that starts the archive session sets ROUTINE_FIRE_URL and ROUTINE_FIRE_TOKEN, the same two the fire job needs"
+env=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["env"])')
 assert_contains "$env" "vars.ROUTINE_FIRE_URL"
 assert_contains "$env" "secrets.ROUTINE_FIRE_TOKEN"
 
-# --- MANUAL REPLAY: a merge whose commit is no longer the one master's most --
-# --- recent push carries has no later ci run to re-trigger the archive job. --
-# --- workflow_dispatch names the pull request directly, for exactly that ----
-# --- recovery -- #51 and #222 stuck at station:archive / station:merge -----
-# --- because the fix landed after their own merges had already scrolled off -
 it "workflow_dispatch declares a required pr input, for replaying a merge the archive job never saw"
 inputs=$(wpy 'print(d[True]["workflow_dispatch"]["inputs"])')
 assert_contains "$inputs" "'pr':"
@@ -462,13 +543,11 @@ it "the archive job also runs on a manual workflow_dispatch, beside its ordinary
 cond=$(wpy 'print(d["jobs"]["archive"]["if"])')
 assert_contains "$cond" "workflow_dispatch"
 
-it "a manual dispatch's pr input is used DIRECTLY, skipping the commit search entirely"
-step=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["run"])')
-assert_contains "$step" 'DISPATCH_PR:-'
-assert_contains "$step" 'pr="$DISPATCH_PR"'
-
-it "the dispatch input reaches the step as DISPATCH_PR, from inputs.pr"
-env=$(wpy 'print(d["jobs"]["archive"]["steps"][-1]["env"])')
+it "a manual dispatch's pr input is used DIRECTLY, skipping the commit search entirely, and reaches the step as DISPATCH_PR"
+run=$(step_named archive carry run)
+assert_contains "$run" 'DISPATCH_PR:-'
+assert_contains "$run" 'pr="$DISPATCH_PR"'
+env=$(step_named archive carry env)
 assert_contains "$env" "inputs.pr"
 
 summary

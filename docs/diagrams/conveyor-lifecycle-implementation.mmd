@@ -26,10 +26,10 @@ flowchart TD
   subgraph S2["Station 2 — fix, round after round"]
     CI["ci.yml + claude-review.yml run on the PR<br/>review-clean asks only: did the review run"]:::workflow
     THREAD["GitHub branch protection<br/>an open review thread blocks the merge, live —<br/>no workflow and no check carries it"]:::platform
-    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry-grant.py labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
+    CARRY["remote-implement.yml · open (ci succeeded)<br/>read Refs #n or Closes #n, re-read conveyor:run<br/>(or conveyor:archive on the issue), placer still a writer?<br/>carry.py asks conveyor.py, labels the PR conveyor:fix<br/>and dispatches review-dispatch.yml;<br/>no review thread open → mergeable"]:::workflow
     FIX["PR grant: conveyor:fix<br/>placed by the bot, records whose grant"]:::label
     GREEN["PR state: loop:mergeable<br/>ISSUE state: station:merge"]:::state
-    GATE["review-dispatch.yml · gate<br/>who started this, is the grant still standing<br/>(a bot start is re-checked against the issue)"]:::workflow
+    GATE["review-dispatch.yml · gate (dispatch-gate.py)<br/>conveyor.gate: who started this, is the grant still standing,<br/>rounds used below the cap — re-checked on every start"]:::workflow
     ST2["PR state: loop:running<br/>ISSUE state: station:fix"]:::state
     COLLECT["collect<br/>open findings + Sonar issues + failed required checks"]:::workflow
     MODEL["fix<br/>Claude fixes or disputes every item<br/>allowed_bots: github-actions"]:::workflow
@@ -63,7 +63,7 @@ flowchart TD
   THREAD --> P2
 
   subgraph S3["Station 3 — archive (opsx lane only)"]
-    ARCH["remote-implement.yml · archive<br/>find the merged PR, its Refs #n,<br/>conveyor:run still on the issue?<br/>carry-grant.py labels the ISSUE conveyor:archive"]:::workflow
+    ARCH["remote-implement.yml · archive<br/>find the merged PR, its Refs #n,<br/>conveyor:run still on the issue?<br/>carry.py labels the ISSUE conveyor:archive<br/>only when the change's tasks are all ticked"]:::workflow
     ALBL["ISSUE grant: conveyor:archive"]:::label
     ST3["ISSUE state: station:archive"]:::state
     AFIRE["remote-implement.yml · fire<br/>a bot-placed label is re-checked<br/>against the standing instruction"]:::workflow

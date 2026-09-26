@@ -31,6 +31,9 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the state machine: the verdict is its, this program gathers the facts
+
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 WORKFLOW = "review-dispatch.yml"
 
@@ -77,7 +80,7 @@ def gh_json(*args: str):
 
 def load_vocabulary(path: pathlib.Path) -> dict:
     doc = json.loads(path.read_text())
-    return {"label": doc["approve_label"], "marker": doc["dispute_marker"]}
+    return {"label": doc["approve_label"], "marker": doc["dispute_marker"], "raw": doc}
 
 
 def is_person(author: dict | None) -> bool:
@@ -160,32 +163,45 @@ def unanswered_disputes(repo: str, pr: int, marker: str) -> list[str]:
     return found
 
 
-def judge(repo: str, pr: int | None, vocabulary: dict) -> tuple[bool, str]:
-    """(allowed, message). Raises Unreadable for anything that fails open."""
+def judge(repo: str, pr: int | None, vocabulary: dict, purpose: str = "archive") -> tuple[bool, str]:
+    """(allowed, message). Raises Unreadable for anything that fails open.
+
+    THE VERDICT IS THE MACHINE'S (`conveyor.guard`). This gathers the facts: the
+    pull request's state and labels, how many fixing rounds are queued or running
+    (only when the purpose asks, so a CI check makes no such call), and how many
+    disputes nobody answered. `purpose` is `ci` for the documentation check, which
+    asks the dispute question alone, and `archive` for the archive command, which
+    asks both.
+    """
     view_args = ["pr", "view"] + ([str(pr)] if pr else []) + \
         ["--repo", repo, "--json", "number,headRefName,labels,state"]
     view = gh_json(*view_args)
     if not view or not view.get("number"):
         raise Unreadable("no pull request to read")
     pr = int(view["number"])
-    if view.get("state") and view["state"] != "OPEN":
-        return True, f"#{pr} is {view['state'].lower()}; no loop can run on it"
-    labels = {l.get("name") for l in view.get("labels") or []}
-    if vocabulary["label"] not in labels:
-        return True, f"#{pr} does not carry `{vocabulary['label']}`; nothing to wait for"
+    labels = frozenset(l.get("name") for l in view.get("labels") or [] if l.get("name"))
+    facts = conveyor.PullRequest(state=(view.get("state") or "OPEN"), labels=labels)
+    vocab = vocabulary["raw"]
+    if facts.state != "OPEN" or vocab["approve_label"] not in labels:
+        return _verdict(vocab, purpose, facts, [], [])
 
-    reasons = []
-    running = running_rounds(repo, pr, view.get("headRefName") or "")
-    if running:
-        reasons.append("a fixing round is still running on #%d:\n%s"
-                       % (pr, "\n".join(f"  - {r}" for r in running)))
+    running = running_rounds(repo, pr, view.get("headRefName") or "") if purpose == "archive" else []
     disputes = unanswered_disputes(repo, pr, vocabulary["marker"])
+    return _verdict(vocab, purpose, facts, running, disputes, pr)
+
+
+def _verdict(vocab: dict, purpose: str, facts, running: list, disputes: list, pr: int = 0) -> tuple[bool, str]:
+    d = conveyor.guard(vocab, purpose, facts, len(running), len(disputes))
+    if d.action == "allow":
+        return True, (f"#{pr} carries `{vocab['approve_label']}`, {d.reason}" if pr else d.reason)
+    detail = []
+    if running:
+        detail.append("a fixing round is still running on #%d:\n%s"
+                      % (pr, "\n".join(f"  - {r}" for r in running)))
     if disputes:
-        reasons.append("the fixing step disputed a finding and no person has answered:\n%s"
-                       % "\n".join(f"  - {d}" for d in disputes))
-    if reasons:
-        return False, "\n".join(reasons)
-    return True, f"#{pr} carries `{vocabulary['label']}`, no round is running and every dispute is answered"
+        detail.append("the fixing step disputed a finding and no person has answered:\n%s"
+                      % "\n".join(f"  - {x}" for x in disputes))
+    return False, "\n".join(detail)
 
 
 def main() -> int:
@@ -193,6 +209,11 @@ def main() -> int:
     ap.add_argument("--repo", help="owner/name; default: the checkout's")
     ap.add_argument("--pr", type=int, help="the pull request; default: the current branch's")
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
+    ap.add_argument("--purpose", choices=["ci", "archive"], default="archive",
+                    help="`ci`: the documentation check, which asks only whether a dispute is waiting for a "
+                         "person, since whether a round is running is the loop's own state and a check "
+                         "reporting it red starts the next round (#248). `archive`: the archive command, "
+                         "which asks both, since it acts on the branch a round may push to")
     args = ap.parse_args()
 
     def allow(why: str) -> int:
@@ -207,7 +228,7 @@ def main() -> int:
         return allow(f"no vocabulary to read ({exc}); fail-open")
     try:
         repo = args.repo or gh_json("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
-        ok, message = judge(repo, args.pr, vocabulary)
+        ok, message = judge(repo, args.pr, vocabulary, args.purpose)
     except Unreadable as exc:
         return allow(f"{exc} (fail-open)")
     except (KeyError, TypeError, ValueError) as exc:
