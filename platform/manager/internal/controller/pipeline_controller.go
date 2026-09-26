@@ -67,37 +67,23 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			missing = append(missing, "channel/"+ref.Name)
 		}
 	}
-	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.ProfileRef.Name}, &profile); err != nil {
-		missing = append(missing, "agentprofile/"+p.Spec.ProfileRef.Name)
-	}
-	// RuntimeRef is checked only when NAMED. Absent, it resolves to the
-	// AgentRuntime called "default" through runtimepod's own precedence chain
-	// — that is not a miss, and probing for "default" here would validate a
-	// name this Pipeline never wrote.
-	if p.Spec.RuntimeRef != nil {
-		var rt agentopsv1alpha1.AgentRuntime
-		if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.RuntimeRef.Name}, &rt); err != nil {
-			missing = append(missing, "agentruntime/"+p.Spec.RuntimeRef.Name)
+	// THE CAPABILITY: either a dangling capabilityRef, or neither a
+	// capabilityRef nor a profileRef, or — inline — the same refs an
+	// AgentCapability validates on itself, through the SAME function so the
+	// two can never check different things.
+	var resolvedCapability agentopsv1alpha1.AgentCapabilitySpec
+	if p.Spec.AgentRef != nil {
+		var capability agentopsv1alpha1.AgentCapability
+		if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.AgentRef.Name}, &capability); err != nil {
+			missing = append(missing, "agentcapability/"+p.Spec.AgentRef.Name)
+		} else {
+			resolvedCapability = capability.Spec
 		}
-	}
-	// tooling bindings: refs only — the CRs' content is resolved at use time,
-	// so Ready checks existence, nothing else.
-	if p.Spec.Toolsets != nil {
-		for _, ref := range p.Spec.Toolsets.Refs {
-			var ts agentopsv1alpha1.MCPToolset
-			if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &ts); err != nil {
-				missing = append(missing, "mcptoolset/"+ref.Name)
-			}
-		}
-	}
-	if p.Spec.MCPConfigs != nil {
-		for _, ref := range p.Spec.MCPConfigs.Refs {
-			var mc agentopsv1alpha1.MCPConfig
-			if err := r.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &mc); err != nil {
-				missing = append(missing, "mcpconfig/"+ref.Name)
-			}
-		}
+	} else if p.Spec.ProfileRef == nil {
+		missing = append(missing, "profileRef or capabilityRef")
+	} else {
+		resolvedCapability = p.Spec.AgentCapabilitySpec
+		missing = append(missing, validateCapabilitySpecRefs(ctx, r.Client, p.Namespace, resolvedCapability)...)
 	}
 
 	// STORAGE: the one place naming a resource creates it. A pod cannot mount a
@@ -109,7 +95,7 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// wanted before the first conversation, not before the wiring is valid, and
 	// an unwritable claim reported as invalid wiring sends the operator looking
 	// at their refs.
-	if err := r.ensureBoundClaims(ctx, &p); err != nil {
+	if err := r.ensureBoundClaims(ctx, &p, resolvedCapability.Persistence); err != nil {
 		missing = append(missing, err.Error())
 	}
 
@@ -147,16 +133,17 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 // immutable in the parts that matter, so re-reconciling an existing one has
 // nothing to apply — and an operator who resized or relabelled it by hand keeps
 // their edit.
-func (r *PipelineReconciler) ensureBoundClaims(ctx context.Context, p *agentopsv1alpha1.Pipeline) error {
-	if p.Spec.Persistence == nil {
+func (r *PipelineReconciler) ensureBoundClaims(ctx context.Context, p *agentopsv1alpha1.Pipeline,
+	persistence *agentopsv1alpha1.PipelinePersistence) error {
+	if persistence == nil {
 		return nil
 	}
 	for _, b := range []struct {
 		vol     runtimepod.Volume
 		binding *agentopsv1alpha1.PersistenceBinding
 	}{
-		{runtimepod.VolumeContext, p.Spec.Persistence.Context},
-		{runtimepod.VolumeWorkspace, p.Spec.Persistence.Workspace},
+		{runtimepod.VolumeContext, persistence.Context},
+		{runtimepod.VolumeWorkspace, persistence.Workspace},
 	} {
 		if b.binding == nil || b.binding.VolumeName == "" {
 			continue
@@ -260,5 +247,6 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&agentopsv1alpha1.AgentRuntime{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.MCPToolset{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Watches(&agentopsv1alpha1.MCPConfig{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
+		Watches(&agentopsv1alpha1.AgentCapability{}, handler.EnqueueRequestsFromMapFunc(mapAny)).
 		Complete(r)
 }

@@ -5,21 +5,21 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 1. Phase 1 — `AgentCapability` and the shared capability (design D-A)
 
-- [ ] 1.1 `api/v1alpha1/agentcapability_types.go`: `AgentCapabilitySpec` with the six capability
+- [x] 1.1 `api/v1alpha1/agentcapability_types.go`: `AgentCapabilitySpec` with the six capability
       fields moved out of `PipelineSpec`; `AgentCapability` kind + list; `AgentStatus`
       with `Ready`. Doc comments say it is the CAPABILITY and wires nothing.
-- [ ] 1.2 `PipelineSpec` embeds `AgentCapabilitySpec` inline (JSON names unchanged) and
+- [x] 1.2 `PipelineSpec` embeds `AgentCapabilitySpec` inline (JSON names unchanged) and
       gains `AgentRef *ObjectRef`; CEL rule for exclusivity per D-A;
       `profileRef` becomes optional.
-- [ ] 1.3 `dispatch.ResolveCapability` — the one resolver. Every read of a
+- [x] 1.3 `dispatch.ResolveCapability` — the one resolver. Every read of a
       Pipeline's capability fields moves to it (signals.go creation, router
       origination, pipeline reconciler validation, runtimepod resolution).
-- [ ] 1.4 AgentCapability reconciler: `Ready` validates the same refs the Pipeline
+- [x] 1.4 AgentCapability reconciler: `Ready` validates the same refs the Pipeline
       reconciler validates today, through shared code — no second validator.
-- [ ] 1.5 Pipeline `Ready` False naming a dangling `capabilityRef`; neither
+- [x] 1.5 Pipeline `Ready` False naming a dangling `capabilityRef`; neither
       `capabilityRef` nor `profileRef` → `Ready` False, not admission.
-- [ ] 1.6 Regenerate deepcopy and CRDs; `chart/crds/agentcapabilities.agentops.dev.yaml`.
-- [ ] 1.7 Tests: envtest — inline and referenced Pipelines produce identical
+- [x] 1.6 Regenerate deepcopy and CRDs; `chart/crds/agentcapabilities.agentops.dev.yaml`.
+- [x] 1.7 Tests: envtest — inline and referenced Pipelines produce identical
       conversation snapshots; CEL rejects both forms; every existing Pipeline
       fixture passes unchanged.
 

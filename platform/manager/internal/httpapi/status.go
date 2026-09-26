@@ -276,10 +276,15 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 404, map[string]string{"error": "unknown pipeline " + name})
 		return
 	}
+	capability, err := dispatch.ResolveCapability(ctx, s.Reader, &p)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "pipeline " + name + ": capability does not resolve"})
+		return
+	}
 	out := resolvedResponse{
 		Pipeline:     p.Name,
-		Profile:      p.Spec.ProfileRef.Name,
-		ToolsMode:    dispatch.ToolsModeOf(p.Spec.Toolsets),
+		Profile:      capability.ProfileName(),
+		ToolsMode:    dispatch.ToolsModeOf(capability.Toolsets),
 		AllowedTools: []string{},
 		Toolsets:     []string{},
 		MCPConfigs:   []string{},
@@ -287,10 +292,10 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var profile agentopsv1alpha1.AgentProfile
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: p.Spec.ProfileRef.Name}, &profile); err != nil {
-		out.Unresolved = append(out.Unresolved, "AgentProfile/"+p.Spec.ProfileRef.Name)
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: capability.ProfileName()}, &profile); err != nil {
+		out.Unresolved = append(out.Unresolved, "AgentProfile/"+capability.ProfileName())
 	} else {
-		out.Runtime = s.pipelineRuntimeName(ctx, &p, &profile)
+		out.Runtime = s.pipelineRuntimeName(ctx, capability, &profile)
 	}
 
 	// Composed through the SAME function dispatch uses, over the same inputs.
@@ -298,8 +303,8 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	// prevent — the console asks precisely so a second implementation cannot
 	// drift from the one that runs.
 	var byRef [][]string
-	if p.Spec.Toolsets != nil {
-		for _, ref := range p.Spec.Toolsets.Refs {
+	if capability.Toolsets != nil {
+		for _, ref := range capability.Toolsets.Refs {
 			out.Toolsets = append(out.Toolsets, ref.Name)
 			var ts agentopsv1alpha1.MCPToolset
 			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ts); err != nil {
@@ -316,9 +321,9 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 		out.AllowedTools = strings.Split(tools, ",")
 	}
 
-	if p.Spec.MCPConfigs != nil {
+	if capability.MCPConfigs != nil {
 		seen := map[string]bool{}
-		for _, ref := range p.Spec.MCPConfigs.Refs {
+		for _, ref := range capability.MCPConfigs.Refs {
 			out.MCPConfigs = append(out.MCPConfigs, ref.Name)
 			var cfg agentopsv1alpha1.MCPConfig
 			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &cfg); err != nil {

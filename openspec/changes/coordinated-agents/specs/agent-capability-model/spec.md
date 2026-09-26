@@ -15,9 +15,10 @@ and no other field that reaches a signal or a surface.
 - **WHEN** an AgentCapability names a `runtimeRef` no `AgentRuntime` backs
 - **THEN** its `Ready` condition is False naming the ref, exactly as a Pipeline's would be
 
-#### Scenario: Wiring fields are refused
+#### Scenario: Wiring fields are pruned
 - **WHEN** an AgentCapability manifest carries `signalSourceRefs` or `channelRefs`
-- **THEN** the API server rejects it as an unknown field
+- **THEN** the API server silently PRUNES the unknown field rather than rejecting it — structural CRDs with no `additionalProperties: false` prune, they do not error
+- **AND** the stored object therefore carries no wiring whatever the manifest wrote
 
 ### Requirement: An unwired AgentCapability is inert
 

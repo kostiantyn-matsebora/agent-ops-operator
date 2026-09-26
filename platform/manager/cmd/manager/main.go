@@ -208,6 +208,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// AgentCapability: validation-only, exactly like Pipeline's own inline
+	// capability. Unwired by construction — it carries no sources, no
+	// channels, nothing to route.
+	if err := (&controller.AgentCapabilityReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "agentcapability controller")
+		os.Exit(1)
+	}
+
 	maxActive, deprecatedCap := maxActiveConversations()
 	if deprecatedCap {
 		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+
