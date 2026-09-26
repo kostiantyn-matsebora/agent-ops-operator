@@ -267,7 +267,15 @@ vocabulary file, and SHALL grant nothing:
 | On | Says | Values |
 |---|---|---|
 | the issue | which station the line is at | implement, fix, merge, stalled, archive, done |
-| the pull request | what the fixing loop is doing | running, stalled, capped, mergeable |
+| the pull request | what the fixing loop is doing | running, waiting, stalled, capped, mergeable |
+
+`waiting` SHALL mean a person's answer is owed: every remaining item is a
+dispute the fixing step made. `stalled` SHALL mean the machine stopped: no
+report, the fixing step failed or timed out, or the next round could not be
+started.
+
+A stale patch is neither. Nothing landed and every item is still eligible, so
+that round starts the next one itself.
 
 Each SHALL be moved by the workflow performing the transition. At most one
 value of each SHALL be present at a time. State labels are read by nobody but
@@ -278,11 +286,15 @@ does next.
 what the gates read, what a person sees without leaving the page, and what a
 person can change to move or stop the line.
 
+**One label for two facts was measured misleading on #259.** `loop:stalled`
+beside a red pull request and a "clean" summary could not tell a reader
+whether the loop had given up or was waiting on them.
+
 #### Scenario: A person asks where a change is
 
 - **WHEN** somebody reads the tracking issue and its pull request
 - **THEN** the standing instruction, the station reached, and whether the loop
-  stalled are all visible there
+  is waiting on them or stopped on its own are all visible there
 
 #### Scenario: A merge station label outlives its own condition
 
@@ -300,11 +312,11 @@ person can change to move or stop the line.
 
 #### Scenario: The loop label follows the round
 
-- **WHEN** a round starts, when a round ends with every item disputed or with
-  its fixer failed, when the round cap is reached, and when the head's checks
-  are all green
-- **THEN** the pull request's loop label reads running, stalled, capped and
-  mergeable in turn, and never two at once
+- **WHEN** a round starts, when a round ends with only disputes left, when a
+  round ends with its fixer failed, when the round cap is reached, and when
+  the head's checks are all green
+- **THEN** the pull request's loop label reads running, waiting, stalled,
+  capped and mergeable in turn, and never two at once
 
 ### Requirement: No required check reports the state of the review's threads
 
@@ -348,58 +360,45 @@ could be re-run.
 - **THEN** its run concludes success whatever it found, and the required
   check reads that as "the review ran"
 
-### Requirement: A required check that reads a person's answer is re-run on that answer
-
-A required check whose verdict depends on whether a person has answered
-something the loop posted — a dispute, never the review's own threads —
-SHALL be re-run when that person comments, so its verdict never depends on a
-push or a hand re-run.
-
-#### Scenario: A person answers a dispute
-
-- **WHEN** a person comments on a pull request the loop drives, while such a
-  check is red on its head
-- **THEN** that check re-runs on the same head without a push or a hand
-  re-run, and the line continues from its verdict
-
 ### Requirement: No required check reports whether a round is running
 
 Whether a fixing round is queued or running for a pull request SHALL NOT be a
-required check's verdict. It is the loop's own transient state, moved by the
-loop.
+required check's verdict. Whether a dispute the loop posted has been answered
+SHALL NOT be one either.
 
-A check reporting it red is a red the loop produced itself, and that red
-starts the next round.
+Both are the loop's own conversation, moved by the loop and read by people.
 
-The questions a person owes an answer to, such as a dispute the loop posted
-that nobody answered, MAY hold a check, since a person's reply re-runs it.
+A check reporting either red is a red the loop produced itself. A running
+round's red starts the next round. An unanswered dispute's red is one no
+fixer can clear, so the loop stops on its own refusal.
 
-The archive command SHALL still refuse while a round runs, since it acts on
-the branch a round may push to.
-
-**A failed check that is only the loop's own guard SHALL start no round.** It
-waits for the person it names, and no fixer can answer for them.
+The archive command SHALL still refuse while a round runs or a dispute is
+unanswered, since it acts on the branch a round may push to and folds
+disputed work into the published contract.
 
 **Measured on #248.** Every review completion started a round, and every
 round ran to its time limit. While it ran, the documentation gate refused on
-"a round is still running".
+"a round is still running", and that red started the next round, five pushes
+in a row.
 
-That red started the next round, five pushes in a row. The pull request
-merged only after the grant was removed by hand.
+**Measured on #259.** The same gate refused on an unanswered dispute, and the
+loop ended with the pull request red on a check only a person could clear.
+The merge was already held by the open thread. The check added nothing but
+the red.
 
 #### Scenario: A round is running while CI evaluates the head
 
 - **WHEN** a fixing round is queued or running for a pull request and its CI
   run evaluates the documentation gate
-- **THEN** the gate reports on the tasks file and the unanswered disputes
-  alone, and the running round does not turn it red
+- **THEN** the gate reports on the tasks file alone, and the running round
+  does not turn it red
 
 #### Scenario: CI is red only on an unanswered dispute
 
-- **WHEN** the head's only failed required check is the documentation gate,
-  failed because a dispute the loop posted has no answer
-- **THEN** no round starts from that failure, and the summary names the
-  dispute as what is waited on
+- **WHEN** a dispute the loop posted has no answer, and nothing else on the
+  head would fail a required check
+- **THEN** no required check is red, the merge is held by the open thread
+  alone, and the loop is waiting rather than stopped on a red of its own
 
 #### Scenario: A queued run is cancelled before it starts
 
@@ -519,14 +518,136 @@ a pull request from the change's branch is open.
 
 ### Requirement: A round that ends with a person's answer awaited is not running
 
-A round that ends because nothing is left to fix while a thread or a dispute
-waits for a person SHALL mark the loop stalled, never mergeable and never
-running.
+A round that ends because nothing is left but disputes awaiting a person, or
+because a thread the loop did not author is open, SHALL mark the loop
+waiting, never mergeable, never stalled and never running.
 
 A review that opens a thread on a pull request marked mergeable SHALL move it
-to stalled.
+to waiting.
 
 #### Scenario: A clean round with an open thread
 
 - **WHEN** a round finds nothing accepted to fix and a thread is open
-- **THEN** the loop is marked stalled
+- **THEN** the loop is marked waiting
+
+#### Scenario: A round ends with only disputes left
+
+- **WHEN** a round fixes nothing and every remaining item carries a dispute
+  the fixing step made
+- **THEN** the loop is marked waiting, and the summary names each dispute and
+  whether the head is red or green
+
+### Requirement: Every red on the head of an approved pull request is the loop's work
+
+On a pull request approved for fixing as a whole, every failed required check
+on the head SHALL be an item on the round's work list. No check SHALL be
+exempt for being the loop's own.
+
+A round that lands nothing while items remain eligible SHALL start the next
+round itself, counting toward the bound. Only a round that leaves nothing
+eligible ends the loop.
+
+An item is eligible while it is neither fixed nor disputed by the fixing
+step. A dispute is what the fixing step says about an item, never what the
+landing step infers from a patch.
+
+**Measured on #259.** The loop's own guard turned `docs-task` red over a
+dispute the landing step had manufactured, the exemption kept the red off the
+work list, and the loop ended with the pull request blocked.
+
+#### Scenario: A required check is red on the head
+
+- **WHEN** a round collects on an approved pull request whose head has a
+  failed required check
+- **THEN** that check is on the work list, whatever its failing step
+
+#### Scenario: A round landed nothing and items remain eligible
+
+- **WHEN** a round's report fixed nothing, and at least one item is neither
+  fixed nor disputed by the fixing step
+- **THEN** the round counts, its summary names the eligible items, and the
+  next round starts without a push or a person
+
+#### Scenario: A round landed nothing and only disputes remain
+
+- **WHEN** a round's report fixed nothing and every remaining item is a
+  dispute the fixing step made
+- **THEN** the loop is marked waiting, and no round starts on its own
+
+### Requirement: A round starts only on a head whose checks and review have concluded
+
+A round SHALL start on a head only once the head's CI run and its review run
+have both concluded. Whichever concludes second SHALL start the round.
+
+A grant placed, or a dispatch asked for, while either is in progress SHALL be
+deferred with a notice on the pull request, and the completion SHALL start
+the round.
+
+The checks SHALL be reported consulted only when every required check run on
+the head has completed. A check run that exists but has not concluded is not
+a verdict.
+
+A round reading a half-run CI declares "0 failures" over jobs that have not
+spoken. Measured on #259: 38 seconds into a ten-minute run.
+
+#### Scenario: The review completes while CI is running
+
+- **WHEN** the review run on a head concludes while the head's CI run is in
+  progress
+- **THEN** no round starts, and the CI run's completion starts it
+
+#### Scenario: A grant is placed mid-run
+
+- **WHEN** a person places the fix label while the head's CI or review is in
+  progress
+- **THEN** the pull request says the round is deferred to the completion, and
+  the completion starts it
+
+#### Scenario: A check run exists but has not concluded
+
+- **WHEN** a round collects while any required check run on the head is still
+  in progress
+- **THEN** the checks are reported as not consulted, and the round claims
+  nothing about them
+
+### Requirement: A waiting loop is resumed by a person's comment or by a sweep
+
+A pull request whose loop is waiting SHALL have a round started by a comment
+from a person with write access on it, and by a scheduled sweep once no
+dispute on it is unanswered.
+
+A comment from anyone else, or from a bot, SHALL start nothing. A comment that
+starts a model run is an action on a branch, and carries the bound a dispatch
+and an acceptance carry.
+
+A dispute is answered by a person's comment after it, or by the thread being
+resolved.
+
+A thread resolution fires no workflow event, so a sweep is the only way a
+dismissal by resolving ever reaches the loop.
+
+**Measured on #259.** The person resolved the disputed thread, and the next
+round repeated the check's stale step name instead of reading the thread.
+
+#### Scenario: A person answers a dispute in its thread
+
+- **WHEN** a person with write access comments on a pull request whose loop
+  is waiting
+- **THEN** a round starts, and a disputed thread carrying the person's answer
+  is back on the work list
+
+#### Scenario: Someone without write access comments
+
+- **WHEN** a person who cannot push here comments on a waiting pull request
+- **THEN** nothing starts and nothing is posted, and the loop stays waiting
+
+#### Scenario: A person resolves the disputed thread
+
+- **WHEN** the only unanswered dispute is resolved and nobody comments
+- **THEN** the next sweep finds no unanswered dispute and starts a round
+
+#### Scenario: A dispute is still unanswered at the sweep
+
+- **WHEN** the sweep reads a waiting pull request whose dispute has neither a
+  person's reply nor a resolution
+- **THEN** nothing starts, and the loop stays waiting
