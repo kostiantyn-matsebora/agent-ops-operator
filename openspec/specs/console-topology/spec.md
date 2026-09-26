@@ -14,7 +14,7 @@ letting an old event look current.
 ## Requirements
 
 ### Requirement: Configuration state from read-only Kubernetes watches
-The console SHALL build its configuration state exclusively from list/watch of `agentops.dev/v1alpha1` resources (AgentProfile, AgentRuntime, Channel, ChannelAdapter, Conversation, Pipeline, SignalAdapter, SignalSource) in its own namespace using its own ServiceAccount, with no writes to any of them and no reads of Secrets or any non-agentops resource. Watches SHALL resume by resourceVersion and relist on 410 Gone so the cache converges after disconnects.
+The console SHALL build its configuration state exclusively from list/watch of `agentops.dev/v1alpha1` resources (AgentProfile, AgentRuntime, Channel, ChannelAdapter, Conversation, MCPConfig, MCPToolset, Pipeline, SignalAdapter, SignalSource) in its own namespace using its own ServiceAccount, with no writes to any of them and no reads of Secrets or any non-agentops resource. Watches SHALL resume by resourceVersion and relist on 410 Gone so the cache converges after disconnects.
 
 #### Scenario: State reflects a CR change without polling
 - **WHEN** a Pipeline's `channels[]` is edited with kubectl
@@ -24,34 +24,86 @@ The console SHALL build its configuration state exclusively from list/watch of `
 - **WHEN** the API server returns 410 Gone for a stale watch
 - **THEN** the console relists that kind, replaces its cache, and resumes watching without serving an error to browsers
 
-### Requirement: Pipeline topology graph
-Nodes SHALL cover every CRD kind a Pipeline involves — SignalSources, SignalAdapters, Pipelines, AgentProfiles, AgentRuntimes, Channels, ChannelAdapters, MCPToolsets and MCPConfigs — not only the wiring spine. Edges SHALL cover `feeds`, `answers`, `posts`, `served-by` and `uses`.
+### Requirement: The topology is three views of one activity feed
 
-Node health SHALL be computed exclusively from conditions reconcilers already write (`Ready`, `Served`, `Wired`). The console SHALL compute no health of its own, so the graph cannot disagree with `kubectl`. Kinds that report no health SHALL render as such, distinctly from kinds whose health is not yet known. Unclaimed sources and unwired channels SHALL render detached with their condition reason; references resolving to nothing SHALL render as broken edges to placeholder nodes rather than being omitted.
+The topology SHALL be offered as three views of one activity feed, each a
+layer of the architecture with its own node identity. A hop SHALL be mapped
+onto every view's nodes, so the same event animates each view.
 
-#### Scenario: The graph agrees with kubectl
-- **WHEN** a reconciler reports a failing condition
-- **THEN** the node shows that condition's reason verbatim, and no node is colored by a judgement the cluster did not make
+**Model.** The declared objects and what references what: SignalSources,
+SignalAdapters, Pipelines, AgentProfiles, AgentRuntimes, Channels,
+ChannelAdapters, MCPToolsets, MCPConfigs and Conversations.
 
-#### Scenario: Tooling is on the graph
-- **WHEN** a Pipeline binds toolsets and MCP configs
-- **THEN** they appear as nodes joined by `uses` edges
+Edges SHALL cover `feeds`, `answers`, `runs-on`, `posts`, `served-by`, `uses`
+and `opened`. The runtime edge SHALL run from the Pipeline, never from the
+profile. A runtime's image, harness and vendor SHALL be facts in its panel,
+not nodes.
+
+**Components.** One node per component the repository builds: each signal and
+channel adapter, the gateway, the manager, each runtime image, context-sync,
+egress-proxy and housekeeping, plus the systems outside: each model, each MCP
+server, each repository, the senders an adapter declares, and the Kubernetes
+API.
+
+**A Deployment or CronJob the console recognises as none of the above SHALL
+still draw, as a `workload` node**, rather than being silently absent from a
+namespace it actually runs in.
+
+A runtime image running in several pods SHALL be one node carrying the count.
+
+**Infrastructure.** Every pod, and the externals. Nothing from the model is a
+node. A pod's pipeline and conversation SHALL be attributes in its panel. A
+conversation pod SHALL be one node until expanded into its containers, and
+SHALL collapse again.
+
+Node health SHALL be computed exclusively from conditions reconcilers already
+write, and from pod phase for pods. The console SHALL compute no health of its
+own. References resolving to nothing SHALL render as broken edges to
+placeholder nodes rather than being omitted.
+
+#### Scenario: One hop, three pictures
+- **WHEN** a run is dispatched
+- **THEN** the Model view moves the pipeline's runtime edge, the Components view moves manager to context-sync to the runtime image, and the Infrastructure view moves the manager's pod to the conversation's pod
+
+#### Scenario: The runtime is wired from the pipeline
+- **WHEN** a Pipeline names a runtime
+- **THEN** the Model view draws the edge from the Pipeline to the runtime, and no edge from the profile to a runtime
+
+#### Scenario: A component appears once
+- **WHEN** three conversation pods run the same runtime image
+- **THEN** the Components view shows one runtime image node with a count of three
+
+#### Scenario: A pod opens into its containers
+- **WHEN** a conversation pod is expanded on the Infrastructure view
+- **THEN** it becomes a box holding context-sync, agent and egress-proxy, the work hop reaches the agent through context-sync, every model and tool call leaves through egress-proxy, and collapsing restores the one node
 
 #### Scenario: A typo is visible
 - **WHEN** `spec.adapter` names an adapter that does not exist
 - **THEN** a broken edge to a placeholder node is drawn, and the Channel's `Served=False` reason is shown
 
-#### Scenario: Healthy pipeline renders connected
-- **WHEN** a Ready Pipeline wires a Served SignalSource to a profile and two Served channels
-- **THEN** the graph shows the source, pipeline, profile, and both channels connected, with healthy status coloring
-
 #### Scenario: Unclaimed source is visibly dropped
 - **WHEN** a SignalSource is claimed by no Pipeline (`Wired=False`)
-- **THEN** it renders as a disconnected node carrying the Wired condition's reason, making the signal-dropping state visible
+- **THEN** it renders as a disconnected node carrying the Wired condition's reason
+
+#### Scenario: The graph agrees with kubectl
+- **WHEN** a reconciler reports a failing condition
+- **THEN** the node shows that condition's reason verbatim on every view that draws it, and no node is colored by a judgement the cluster did not make
+
+#### Scenario: Tooling is on the graph
+- **WHEN** a Pipeline binds toolsets and MCP configs
+- **THEN** the Model view shows them as nodes joined by `uses` edges, and the Components view shows the MCP servers those configs point at
+
+#### Scenario: Healthy pipeline renders connected
+- **WHEN** a Ready Pipeline wires a Served SignalSource to a profile, a runtime and two Served channels
+- **THEN** the Model view shows the source, pipeline, profile, runtime and both channels connected, with healthy status coloring
 
 #### Scenario: Unserved adapter reference is diagnosable
 - **WHEN** a Channel names `spec.adapter: slak` and no such ChannelAdapter exists
 - **THEN** the channel node shows `Served=False` with the condition reason, and no edge to an adapter node is drawn
+
+#### Scenario: A conversation is opened and its runtime is wired
+- **WHEN** a Pipeline resolves to an AgentRuntime and opens a Conversation
+- **THEN** the Model view draws an `opened` edge from the pipeline to the conversation node and a `runs-on` edge from the pipeline to the runtime
 
 ### Requirement: CR inventory views
 The console SHALL provide per-kind inventory views listing each agentops CR with its key spec fields, conditions, and age, and a detail view showing the full object (spec and status). Opaque `config` blocks SHALL be displayed verbatim without interpretation.
@@ -61,21 +113,36 @@ The console SHALL provide per-kind inventory views listing each agentops CR with
 - **THEN** the detail view shows the condition's reason and message as reported by the serving adapter
 
 ### Requirement: Traffic animates from recorded events, never from inference
-Edges SHALL animate only from activity events the system recorded, with animation speed reflecting observed event rate and error events marking the edge with the reported reason. The console SHALL NOT animate an edge because a status field changed, and SHALL NOT synthesize traffic it did not observe.
 
-An edge whose op was enqueued but not confirmed by an adapter SHALL be rendered as sent-but-unconfirmed, distinctly from confirmed delivery.
+Every edge with recorded events in the window SHALL carry a continuous stream
+of marks whose density follows the edge's event rate, with error marks in the
+edge's own proportion of errors, and unconfirmed delivery marked distinctly.
 
-#### Scenario: A hop moves the edge it names
-- **WHEN** an activity event with `from` and `to` naming two graph nodes arrives
-- **THEN** that edge, and only that edge, shows traffic within one second
+An edge with no events in the window SHALL render idle.
+
+Every recorded hop SHALL additionally be drawn as a pulse travelling the
+direction the hop travelled, distinct from the stream, within one second of
+its arrival. A hop with no destination SHALL pulse on its node.
+
+The console SHALL NOT animate an edge because a status field changed, and
+SHALL NOT synthesize traffic it did not observe. The stream's density is a
+rendering of the recorded rate, not an event.
+
+#### Scenario: A quiet edge still reads as alive
+- **WHEN** an edge has four events a minute in the window
+- **THEN** it carries a steady stream of marks, and each of the four hops also crosses it as a pulse when it arrives
 
 #### Scenario: Silence is visible
 - **WHEN** no events reference an edge in the selected window
 - **THEN** the edge renders idle rather than being hidden or animated
 
 #### Scenario: Errors surface on the edge
-- **WHEN** an event carries `status: error`
-- **THEN** the edge is marked as failing and carries the reported reason
+- **WHEN** a fifth of an edge's events carry `status: error`
+- **THEN** a fifth of its stream marks are error marks, and the edge is toned as failing
+
+#### Scenario: A hop moves the edge it names
+- **WHEN** an activity event with `from` and `to` naming two graph nodes arrives
+- **THEN** that edge, and only that edge, shows a pulse within one second, in the direction the hop travelled
 
 ### Requirement: The console's own SignalSource is a graph node
 The console's origination SignalSource SHALL appear as a node beside other signal sources, wired to the Pipeline that claimed it, so origination is visible as configuration before use and as traffic after. An unclaimed console source SHALL render detached with its `Wired=False` reason.
@@ -106,19 +173,52 @@ The graph SHALL be built from the bindings the Conversation itself recorded, not
 - **THEN** each hop shows its duration, so a slow run is attributable to a specific hop
 
 ### Requirement: Graph elements are toggleable by class
-Both the wiring graph and the conversation graph SHALL offer a display control that shows or hides element classes independently, at minimum: signal sources, channels, adapters (channel and signal), agent profiles, agent runtimes, MCP toolsets, MCP configs, and runtime pods. Toggling a class SHALL hide its nodes and the edges that terminate on them without disturbing the rest of the layout, and SHALL never alter reported health or hide a failing element without saying so.
 
-The control SHALL additionally offer: traffic animation on or off, idle nodes and idle edges shown or hidden, and edge labels selectable between none, event rate and latency. Selections SHALL persist across navigation and reload.
+**"Each view" here is the three topology views — Model, Components,
+Infrastructure — never the per-conversation graph**, which has no class
+toggle and reads only the shared time window.
 
-Hiding a class SHALL be presentation only — the underlying graph, its health, and the problem rollup SHALL be unaffected.
+Each view SHALL offer its own element classes in the display control, listing
+only the classes that view can draw, and SHALL remember its own hiding.
 
-#### Scenario: Tooling can be collapsed away
-- **WHEN** the operator hides MCP toolsets and MCP configs
-- **THEN** those nodes and their `uses` edges disappear, the remaining wiring keeps its layout and health, and the selection survives a reload
+| View | Offered classes |
+|---|---|
+| Model | signal sources, signal adapters, pipelines, agent profiles, agent runtimes, MCP toolsets, MCP configs, channels, channel adapters, conversations |
+| Components | signal adapters, channel adapters, the manager, the gateway, runtime images, sidecars, housekeeping, workloads, models, MCP servers, repositories, externals |
+| Infrastructure | pods, containers, models, MCP servers, repositories, externals |
+
+The one class a view cannot do without SHALL be listed and not hideable:
+pipelines on Model, the manager on Components, the manager's pod on
+Infrastructure.
+
+A **detail** control SHALL fold the Model view only, from routes only, one
+node per pipeline with its profile, runtime and capabilities inside it, to the
+full model. It SHALL be absent on the other views.
+
+The control SHALL additionally offer: traffic animation on or off, idle nodes
+and idle edges shown or hidden, and edge labels selectable between none, event
+rate and latency, defaulting to none. Selections SHALL persist across
+navigation and reload, per view.
+
+Hiding a class SHALL be presentation only. Health totals and the problem
+rollup SHALL be unaffected, and the control SHALL say when hidden elements
+include failures.
+
+#### Scenario: Classes belong to the view
+- **WHEN** the operator hides channel adapters on the Components view and switches to Model
+- **THEN** the Model view's classes are untouched, and switching back finds channel adapters still hidden
+
+#### Scenario: Routes only
+- **WHEN** detail is set to routes only
+- **THEN** each pipeline is one node with its profile, runtime, toolsets and MCP configs folded in, and only sources, channels and adapters remain around it
 
 #### Scenario: A hidden failure is still reported
 - **WHEN** a class containing a failing element is hidden
-- **THEN** the element is still counted in the graph's health summary and the overview problem rollup, and the display control indicates that hidden elements include failures
+- **THEN** the element is still counted in the health summary and the overview problem rollup, and the display control indicates that hidden elements include failures
+
+#### Scenario: Tooling can be collapsed away
+- **WHEN** the operator hides MCP toolsets and MCP configs on the Model view
+- **THEN** those nodes and their `uses` edges disappear, the remaining wiring keeps its health, and the selection survives a reload
 
 #### Scenario: Edge labels are selectable
 - **WHEN** the operator selects latency as the edge label
@@ -147,89 +247,106 @@ When a metrics backend is configured, longer windows SHALL be served from it as 
 
 ### Requirement: Clicking an element scopes the graph to what it is connected to
 
-Both the wiring graph and the conversation graph SHALL support a **scoped view**.
-Selecting an element SHALL narrow the graph to that element and everything
-connected to it, and SHALL leave the details panel behaving as it does unscoped.
+**This is the three topology views again**, exactly as above. The
+per-conversation graph is not scoped by any of these means — it is already
+one conversation's own elements, with nothing to narrow it further to.
 
-The scope SHALL be the **route through** the element: everything upstream of it
-and everything downstream of it. Both directions, so a scope answers "what is
-this part of" as well as "what does this reach".
+Scope SHALL be offered three ways: a **pipeline selector** showing the
+selected routes only, a **scope to route** through any element with a depth
+control, and **find** and **hide** expressions over the view's facts.
 
-A route SHALL NOT TURN AROUND. Walking the wiring as if it were undirected makes
-every SHARED element a shortcut, and this system shares elements on purpose — one
-AgentRuntime serves every profile, one Channel receives from every pipeline. A
-hop count is only a proxy for "related" in a graph without hubs, and this graph
-is mostly hubs, so an undirected walk reports almost the whole install as
-connected to almost anything.
+**A component has no pipeline attribute of its own**, unlike a pod.
 
-Reachability SHALL be evaluated over the elements currently VISIBLE, so a class
-hidden by the display control is not a stepping stone between two elements the
-operator cannot see.
+On Components and Infrastructure, a route's members SHALL be the components
+(or pods) that IMPLEMENT what the route reaches on Model. That membership is
+walked from the Model reach itself, never from a `pipeline` field neither
+view's nodes carry.
 
-A **depth control** SHALL bound the scope in hops and SHALL default to **all**.
-Scoping a heavily shared element at `all` may legitimately return most of the
-graph — that is the true answer for that element, not a failure of the control,
-and the view SHALL NOT special-case it.
+All three SHALL count what they put out of view and name the classes of any
+failing element hidden.
 
-Returning to the whole picture SHALL be possible **without reloading or
-re-navigating**: an explicit reset, and selecting the focused element a second
-time.
+A route SHALL be the pipeline and everything it reaches along the wiring, down
+and up, never turning around through a shared element.
 
-The scope SHALL NOT persist across navigation or reload. The display control's
-selections persist deliberately, because they express a standing preference. A
-scope expresses a question being asked right now, and a page that reopened
-already narrowed would present a filtered graph as the whole one.
+A route walk SHALL NOT pass through a channel adapter's served-by edge into a
+signal source, since that is the adapter's second role. A shared runtime
+image's calls SHALL be credited along the route's MCP config, not along the
+image.
 
-While a scope is in force the view SHALL name the element it is scoped to, so a
-narrowed graph is never mistaken for a small installation.
+**Which pipeline a node belongs to is computed over the WHOLE view.** Hiding
+a class SHALL NEVER disconnect a node from its route, since hiding is
+presentation only.
+
+Scoping to a route or an element, by contrast, walks only what is currently
+DRAWN. A hidden class between the scoped element and something it reaches
+SHALL cut the walk there.
+
+The depth control SHALL default to all and offer only the levels the route
+has. Returning to the whole picture SHALL need no reload. A scope SHALL NOT
+persist across navigation. While scoped, the view SHALL name what it is scoped
+to.
+
+#### Scenario: Selecting a pipeline removes the others
+- **WHEN** one of three pipelines is selected
+- **THEN** the other two and everything only they reach are hidden and counted, and their routes' MCP servers are not drawn
+
+#### Scenario: A shared adapter is not a shortcut
+- **WHEN** a channel adapter also serves a chat source and one pipeline posting to that channel is scoped
+- **THEN** no other pipeline is reached through the adapter and the source it serves
+
+#### Scenario: Depth is meaningful on a real installation
+- **WHEN** a pipeline is scoped on an install where one runtime serves every profile
+- **THEN** narrowing the depth narrows what is shown, rather than every depth showing substantially the whole graph
+
+#### Scenario: A new visit is not still filtered
+- **WHEN** the operator scopes a graph, navigates away and returns, or reloads
+- **THEN** the graph opens unscoped, while the display control's selections are restored
+
+### Requirement: Find and hide are one grammar, over the view's own facts
+
+A find or hide expression SHALL be terms joined by `and`, each testing one
+fact of the view's own nodes: health (`healthy`, `!healthy`), activity
+(`idle`, `!idle`), attachment (`detached`), or an equality/match on `kind`,
+`name` (`=` exact, `~` substring), `bundle`, `node` or `pipeline`.
+
+A term the grammar does not recognise SHALL match nothing and SHALL be named
+to the operator, never silently dropped.
+
+**Find** SHALL narrow the view to matching nodes and what reaches them.
+**Hide** SHALL remove matching nodes from the view. Both SHALL count what
+they put out of view exactly as the other scoping mechanisms do.
+
+#### Scenario: An unknown term matches nothing and says so
+- **WHEN** an expression contains a term the grammar has no rule for
+- **THEN** it hides or finds nothing on that term's account, and the term is named as unknown
+
+#### Scenario: Terms combine with `and`
+- **WHEN** the expression is `kind=pipeline and !healthy`
+- **THEN** only unhealthy pipelines match
 
 #### Scenario: An operator asks what one element is wired to
-
-- **WHEN** an element on the graph is selected
-- **THEN** the graph shows that element and everything connected to it, and
-  names the element it is scoped to
+- **WHEN** an element on the graph is selected and scoped
+- **THEN** the graph shows that element and everything on its route, and names the element it is scoped to
 
 #### Scenario: Connection runs both ways
-
 - **WHEN** a channel several pipelines post to is scoped
 - **THEN** every pipeline that reaches it is shown, not only what it reaches
 
 #### Scenario: A shared element is not a shortcut
-
 - **WHEN** two pipelines post to one channel and one of them is scoped
-- **THEN** the other pipeline and its own capabilities are NOT shown, because
-  reaching them means arriving at the shared channel and setting off again
-
-#### Scenario: Depth is meaningful on a real installation
-
-- **WHEN** a pipeline is scoped on an install where one runtime serves every
-  profile and one channel receives from every pipeline
-- **THEN** narrowing the depth narrows what is shown, rather than every depth
-  showing substantially the whole graph
+- **THEN** the other pipeline and its own capabilities are NOT shown, because reaching them means arriving at the shared channel and setting off again
 
 #### Scenario: The scope is narrowed
-
 - **WHEN** the depth control is reduced from all to one hop
-- **THEN** only the element's immediate neighbours remain, and the count of
-  connected elements beyond that depth is reported
+- **THEN** only the element's immediate neighbours remain, and the count of connected elements beyond that depth is reported
 
 #### Scenario: A hub element is scoped
-
 - **WHEN** an element that nearly everything connects to is scoped at all depths
-- **THEN** nearly the whole graph is shown, and it is still reported as a scope
-  rather than silently behaving as a reset
+- **THEN** nearly the whole graph is shown, and it is still reported as a scope rather than silently behaving as a reset
 
 #### Scenario: Returning to the whole picture
-
 - **WHEN** the operator resets the scope, or selects the focused element again
-- **THEN** the whole graph returns, with the display control's own selections
-  untouched
-
-#### Scenario: A new visit is not still filtered
-
-- **WHEN** the operator scopes a graph, navigates away and returns, or reloads
-- **THEN** the graph opens unscoped, while the display control's selections are
-  restored as before
+- **THEN** the whole graph returns, with the display control's own selections untouched
 
 ### Requirement: A scope reports what it put out of view
 
@@ -283,3 +400,86 @@ it to fitting.
   resized
 - **THEN** the graph keeps the operator's view, and the fit control restores
   fitting on demand
+
+### Requirement: Layouts are a hub's, a network's and a flow's
+
+Each view SHALL offer three layouts and remember its own: **concentric**, the
+view's hub at the centre and rings by distance, each node placed near its
+inner neighbour, **cola**, a constraint layout with groups kept together, and
+**dagre**, ranks along the flow.
+
+After a concentric or cola layout the picture SHALL be compacted: members
+settled inside their groups, each group packed as one rectangle under a
+gravity shaped to the canvas, and positions separated until no two boxes or
+marks intersect.
+
+The canvas SHALL take the picture's aspect, so the fit is bound by width.
+
+Defaults SHALL be cola for Model and Infrastructure and concentric for
+Components. A dragged node SHALL keep its new place until the next layout.
+
+#### Scenario: A hub is drawn as a hub
+- **WHEN** the Components view is laid out concentrically
+- **THEN** the manager is at the centre, its adapters and sidecars on the first ring, and the externals on the rim, with no two marks or boxes intersecting
+
+#### Scenario: The canvas is used
+- **WHEN** a view is laid out with cola on a wide canvas
+- **THEN** the picture fills the canvas with no empty region larger than a node, and no box overlaps another
+
+### Requirement: Boxes are ownership, never kind
+
+A box SHALL group elements by who owns them.
+
+**On Model, boxing is an operator CHOICE between two criteria, never both at
+once**: bundle (the bundle that installs an object, read from its Helm
+labels) or route (computed as what only one pipeline reaches). A third
+choice, none, draws no boxes.
+
+On Infrastructure, the cluster node a pod runs on. On Components, no box.
+Shared substrate SHALL stay unboxed under either Model criterion.
+
+No rule SHALL position a box. A box SHALL sit where its members' edges put
+it, and an element that belongs to no box SHALL never sit inside one.
+
+#### Scenario: A bundle is a box
+- **WHEN** the Model view is boxed by bundle
+- **THEN** the objects one bundle installs share one box, the runtime two bundles use is unboxed, and the boxes lie wherever their edges place them
+
+#### Scenario: A route is a box
+- **WHEN** the Model view is boxed by route instead
+- **THEN** each pipeline's own box holds only what no other pipeline also reaches, and an element two pipelines reach sits in neither
+
+#### Scenario: An external is not on a node
+- **WHEN** the Infrastructure view is boxed by cluster node
+- **THEN** every pod sits in its node's box and no external system sits inside any node's box
+
+### Requirement: What crossed is one click away
+
+The view SHALL keep a feed of recent hops, and each edge's panel SHALL list
+the hops that crossed it in the window.
+
+A hop's pulse, a feed row and a history row SHALL each open the hop: its kind,
+path, status, latency, and what it carried.
+
+What a hop carried SHALL be shown from the hop's own bounded facts and from
+the conversation's durable status, joined by conversation, run, op and input
+id.
+
+- A signal's title and labels.
+- An input's text.
+- A work unit's tools and context handle.
+- A run's exit and result.
+- An op's message type and body.
+- An adapter's delivery report.
+- A model call's model, tokens and stop reason.
+- A tool call's tool and target.
+
+The feed SHALL be identical on every view.
+
+#### Scenario: A pulse opens its hop
+- **WHEN** a pulse is clicked while it travels
+- **THEN** the panel shows that hop's content, the same on any view
+
+#### Scenario: Content comes from its durable home
+- **WHEN** a run's completion hop is opened
+- **THEN** the result shown is the one recorded on the conversation, not an excerpt carried by the event
