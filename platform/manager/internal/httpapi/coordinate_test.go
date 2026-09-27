@@ -209,6 +209,41 @@ func TestHandleCoordinateReadRefusesOutOfScope(t *testing.T) {
 	}
 }
 
+// descendsFrom walks UP the causedBy chain, so a target more than one hop
+// below the caller must still resolve — the loop's "fetch the parent and
+// keep walking" branch, which a direct member or an unrelated conversation
+// (both one comparison away from an answer) never exercises.
+func TestHandleCoordinateReadReachesADescendantAtAnyDepth(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	grandchild := &agentopsv1alpha1.Conversation{}
+	grandchild.Name, grandchild.Namespace = "grandchild-1", "agent-ops"
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "member-1", Entry: "helper"}
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, member, grandchild)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "member-1"})
+	if rec.Code != 200 {
+		t.Fatalf("a direct member is in scope, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec2 := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "grandchild-1"})
+	if rec2.Code != 200 {
+		t.Fatalf("the caller's own subtree reaches any depth, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var out conversationProjection
+	if err := json.Unmarshal(rec2.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "grandchild-1" {
+		t.Fatalf("want the grandchild's own projection, got %+v", out)
+	}
+}
+
 func TestHandleCoordinateInvokeRefusesAChannelReaderToken(t *testing.T) {
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace = "voice-desk", "agent-ops"

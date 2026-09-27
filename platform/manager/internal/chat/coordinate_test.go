@@ -177,6 +177,44 @@ func TestInvokeMemberRefusesADirectCycle(t *testing.T) {
 	}
 }
 
+// createMember's `entry.CoordinatorRef != nil` branch — a genuine invoke of a
+// NESTED Coordinator, as opposed to the cycle tests above, which all refuse
+// before reaching it, or TestNestedCoordinatorBudgetIsIndependentOfItsAncestor
+// below, which pre-creates its nested conversation by hand.
+func TestInvokeMemberCreatesANestedCoordinatorMember(t *testing.T) {
+	coB := testCoordinator("co-b")
+	coB.Spec.Limits = &agentopsv1alpha1.CoordinatorLimits{MaxAgents: 3}
+	coB.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "esc-b"}}
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "nested", Description: "delegates to another coordinator",
+		CoordinatorRef: &agentopsv1alpha1.ObjectRef{Name: "co-b"},
+	}
+	coA := testCoordinator("co-a", entry)
+	root := coordinatorRoot("root-1", "co-a")
+	r, c := coordFixture(t, coA, coB, root)
+
+	out, err := r.InvokeMember(context.Background(), root, "nested", "delegate this")
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if !out.Created {
+		t.Fatalf("want a newly created member")
+	}
+	var member agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: out.Member}, &member); err != nil {
+		t.Fatal(err)
+	}
+	if member.Spec.CoordinatorRef == nil || member.Spec.CoordinatorRef.Name != "co-b" {
+		t.Fatalf("a nested member must carry the invoked Coordinator's own ref, got %+v", member.Spec.CoordinatorRef)
+	}
+	if len(member.Spec.EscalationChannelRefs) != 1 || member.Spec.EscalationChannelRefs[0].Name != "esc-b" {
+		t.Fatalf("a nested member must snapshot its own Coordinator's escalation channels, got %v", member.Spec.EscalationChannelRefs)
+	}
+	if member.Status.Budget == nil || member.Status.Budget.MaxAgents != 3 {
+		t.Fatalf("a nested member must snapshot its own Coordinator's limits as its budget, got %+v", member.Status.Budget)
+	}
+}
+
 // Nesting never pools a budget across levels (design D-E): a NESTED
 // Coordinator's own conversation enforces only ITS OWN snapshotted limits,
 // independent of its ancestor's — spending the nested one's budget must not

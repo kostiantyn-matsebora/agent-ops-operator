@@ -132,6 +132,59 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 	}
 }
 
+// TestCoordinateReconcileBackstopRoutesAMissedMemberResult exercises
+// deliverMemberResults directly, rather than through /work/done's fast path:
+// a run recorded with no RoutedToParent marker (a manager restart between the
+// two, or a conflict the fast path gave up retrying) must still reach its
+// parent on the next ordinary reconcile.
+func TestCoordinateReconcileBackstopRoutesAMissedMemberResult(t *testing.T) {
+	mkProfile(t, "prof-backstop-co")
+	mkCoordinator(t, "co-backstop", nil, nil, "prof-backstop-co", nil)
+	reconcileCoordinator(t, "co-backstop")
+
+	root := &agentopsv1alpha1.Conversation{}
+	root.Name, root.Namespace = "co-backstop-root", ns
+	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-backstop-co"}
+	root.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-backstop"}
+	if err := k8sClient.Create(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "co-backstop-member", ns
+	member.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-backstop-co"}
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	if err := k8sClient.Create(context.Background(), member); err != nil {
+		t.Fatal(err)
+	}
+	member.Status.Runs = []agentopsv1alpha1.RunStatus{{
+		RunID: "r1", Status: "succeeded", Result: "backstop delivered this",
+	}}
+	if err := k8sClient.Status().Update(context.Background(), member); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := apiServer()
+	reconcileConversation(t, srv, member.Name)
+
+	gotRoot := getConv(t, root.Name)
+	if len(gotRoot.Spec.Inputs) != 1 || gotRoot.Spec.Inputs[0].Payload != "backstop delivered this" {
+		t.Fatalf("the backstop must append the missed result to the parent, got %+v", gotRoot.Spec.Inputs)
+	}
+	gotMember := getConv(t, member.Name)
+	if len(gotMember.Status.Runs) != 1 || !gotMember.Status.Runs[0].RoutedToParent {
+		t.Fatalf("the backstop must mark the run routed once the append lands: %+v", gotMember.Status.Runs)
+	}
+
+	// A second reconcile must be a no-op: the run is already marked routed, so
+	// appendInputIdempotent's own id check must never fire again.
+	reconcileConversation(t, srv, member.Name)
+	gotRootAgain := getConv(t, root.Name)
+	if len(gotRootAgain.Spec.Inputs) != 1 {
+		t.Fatalf("a routed run must not be re-appended, got %+v", gotRootAgain.Spec.Inputs)
+	}
+}
+
 func TestCoordinateCloseCascadesThroughTheRealAPI(t *testing.T) {
 	mkProfile(t, "prof-close-co")
 	mkCoordinator(t, "co-close", nil, nil, "prof-close-co", nil)
@@ -264,6 +317,39 @@ func TestCoordinateDeadlineClosesOnReconcile(t *testing.T) {
 	}
 	if !strings.Contains(got.Status.EscalationMessage, "deadline") {
 		t.Fatalf("the digest must say why, got %q", got.Status.EscalationMessage)
+	}
+}
+
+// A deadline still AHEAD must not return early (unlike the passed one above):
+// the rest of the pass runs, and capRequeue only bounds whichever requeue it
+// picked so the reconciler is guaranteed to revisit no later than the
+// deadline itself.
+func TestCoordinateFutureDeadlineCapsTheReconcileRequeue(t *testing.T) {
+	mkProfile(t, "prof-dl-cap")
+	root := &agentopsv1alpha1.Conversation{}
+	root.Name, root.Namespace = "dl-cap-root", ns
+	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-dl-cap"}
+	if err := k8sClient.Create(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	future := metav1.NewTime(metav1.Now().Add(5 * time.Second))
+	root.Status.Budget = &agentopsv1alpha1.ConversationBudget{MaxAgents: 5, Deadline: &future}
+	if err := k8sClient.Status().Update(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := apiServer()
+	rc := &controller.ConversationReconciler{
+		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100,
+		Ops: srv.Ops, Router: srv.Router, Runtime: srv.Runtime,
+	}
+	res, err := rc.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: root.Name}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequeueAfter <= 0 || res.RequeueAfter > 5*time.Second {
+		t.Fatalf("the requeue must be capped to the still-ahead deadline, got %v", res.RequeueAfter)
 	}
 }
 
