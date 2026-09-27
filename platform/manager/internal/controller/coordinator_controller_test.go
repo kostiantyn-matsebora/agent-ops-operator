@@ -6,6 +6,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -39,5 +41,41 @@ func TestAllCoordinatorRequestsEmptyNamespace(t *testing.T) {
 	c := fakeCoordinatorClient(t).Build()
 	if reqs := allCoordinatorRequests(context.Background(), c, "ns-empty"); len(reqs) != 0 {
 		t.Fatalf("expected no requests, got %+v", reqs)
+	}
+}
+
+// A List that cannot resolve the CoordinatorList kind fails quietly: no
+// panic, no requests, so a mapping event that hits it drops the reconcile
+// rather than crashing the manager.
+func TestAllCoordinatorRequestsListErrorReturnsNil(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build()
+	if reqs := allCoordinatorRequests(context.Background(), c, "ns-a"); reqs != nil {
+		t.Fatalf("expected nil requests when List fails, got %+v", reqs)
+	}
+}
+
+// Reconcile on a Coordinator already gone (deleted between the event and the
+// reconcile) returns no error — the same client.IgnoreNotFound shape every
+// reconciler in this package takes.
+func TestCoordinatorReconcileMissingObjectReturnsNilError(t *testing.T) {
+	c := fakeCoordinatorClient(t).Build()
+	rc := &CoordinatorReconciler{Client: c}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "ns-a", Name: "missing"}}
+	if _, err := rc.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("Reconcile(missing) = %v, want nil", err)
+	}
+}
+
+// An agents[] entry naming neither ref is refused at admission by CEL
+// (integration test), so the default case in coordinatorEntryProblems is
+// reachable only through a client that skips that validation — exactly what
+// a fake client is.
+func TestCoordinatorEntryProblemsNeitherRefIsUnreachableBranch(t *testing.T) {
+	c := fakeCoordinatorClient(t).Build()
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{Name: "neither", Description: "names nothing"}
+	got := coordinatorEntryProblems(context.Background(), c, "ns-a", entry, map[string]bool{})
+	want := "agents[neither]: capabilityRef or coordinatorRef"
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("coordinatorEntryProblems(neither ref) = %v, want [%q]", got, want)
 	}
 }
