@@ -22,9 +22,12 @@ label itself.
                      the step output `dispatch_round`) whether to start a round now
   --station archive  after a change's pull request merged: label the ISSUE
                      `conveyor:archive` and say (through `fire_issue`) which issue's
-                     archive session to start. Only a FINISHED change reaches this
-                     station: a proposal or apply merge carries nothing and moves the
-                     line to implement.
+                     archive session to start. A FINISHED change reaches this station;
+                     an UNFINISHED one (a proposal or an apply merge) instead RESTARTS
+                     the implement station through the same `fire_issue` output, when
+                     nothing is open from the change's branch -- the same discipline
+                     `fire` uses for a person re-placing a label, since an apply merge
+                     is exactly that case: a session finished a phase and stopped.
 
 ONE COMMENT, ONCE, under a marker naming whose instruction was carried, so a reader
 sees whose decision it was on the object the label reached.
@@ -102,10 +105,18 @@ def main() -> int:
     # the line and there is nothing left to carry, so no grant is looked up for it.
     issue = refs or closes
     carrying = issue is not None and not (args.station == "archive" and refs is None)
-    line = io.line(args.repo, issue, sessions=False) if issue and same else conveyor.Line()
+    # THE ARCHIVE STATION MAY RESTART IMPLEMENT ON AN UNFINISHED CHANGE, which
+    # needs the fuller `Line` -- fired stations and whether a pull request from
+    # the change's branch is still open -- that `sessions=False` skips reading
+    # for the finished-change path, which never looks at either.
+    line = io.line(args.repo, issue, sessions=args.station == "archive") if issue and same else conveyor.Line()
 
     # THE PERSON BEHIND THE GRANT that stands for THIS pull request and station.
-    grant = conveyor.standing_grant(vocab, line.issue_labels, args.station, pr_closes=closes is not None) if carrying else None
+    # `standing_grant` ALREADY RETURNS `conveyor:run` FOR AN UNFINISHED CHANGE'S
+    # ARCHIVE STATION (see its own docstring), which is the same grant a
+    # restart is carried on -- no second lookup is needed here for that case.
+    grant = conveyor.standing_grant(vocab, line.issue_labels, args.station, pr_closes=closes is not None) \
+        if carrying else None
     placer = io.grant_placer(args.repo, issue, grant) if grant else None
 
     decide = conveyor.carry_fix if args.station == "fix" else conveyor.carry_archive
@@ -141,6 +152,21 @@ def main() -> int:
             io.write_output("dispatch_round", "true" if d.dispatch_round else "false")
         else:
             io.write_output("fire_issue", str(issue))
+            io.write_output("fire_label", label)
+    elif d.action == "restart":
+        # NO LABEL TO PLACE: `conveyor:run` already stands, and this is a restart
+        # of the station it already authorised, not a new grant reaching a new
+        # target. One marker comment per restart, so a reader sees why a phase
+        # kept going with nobody touching a label.
+        marker = f"<!-- carry-grant:{args.station}:restart -->:{issue}"
+        if not io.already_marked(args.repo, issue, marker):
+            io.comment(args.repo, issue,
+                       f"{marker}\nThis change is not finished, and nothing is open from its branch: "
+                       f"carrying @{placer.login}'s standing instruction (`{d.grant}`) restarts the "
+                       f"{d.station} station for the next phase.")
+        print(f"restarted `{d.station}` on issue #{issue} (from {placer.login})")
+        io.write_output("fire_issue", str(issue))
+        io.write_output("fire_label", vocab["implement_label"])
     elif args.station == "fix":
         io.write_output("dispatch_round", "false")
 

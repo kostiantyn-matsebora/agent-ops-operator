@@ -24,6 +24,7 @@ case "$*" in
   "api repos/o/r/issues/"*"/timeline"*) cat "$FX/timeline.json" ;;
   "api repos/o/r/collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed 's#.*collaborators/\([^/]*\)/.*#\1#'); cat "$FX/perm-$l" 2>/dev/null || echo none ;;
   "api repos/o/r/issues/"*"/comments"*) cat "$FX/comments" 2>/dev/null ;;
+  "pr list "*) cat "$FX/open-prs" 2>/dev/null ;;  # --jq ".[].headRefName" yields lines, never JSON: absent means none open
   "run list "*) cat "$FX/review-runs" 2>/dev/null || echo 0 ;;
 esac
 exit 0
@@ -58,13 +59,22 @@ change() {                                                        # change <issu
   printf '%b' "$2" > "$tmp/repo/openspec/changes/thing/tasks.md"
 }
 no_change() { rm -rf "$tmp/repo/openspec"; }
+implement_fired() { printf '[{"body":"<!-- remote-implement:fired -->"}]' > "$FX/fired-comments"; }  # seeds $FX/comments via run()
+open_pr_from_change() { printf 'change/thing\n' > "$FX/open-prs"; }                             # pr list --json headRefName --jq ".[].headRefName"
+no_open_pr_from_change() { : > "$FX/open-prs"; }
 FINISHED='## 1. x\n- [x] a\n- [x] b\n'
 PENDING='## 1. x\n- [x] a\n- [ ] b\n'
-run() { : > "$GH_CALLS"; : > "$GITHUB_OUTPUT"; rm -f "$FX/comments"; (cd "$tmp/repo" && python3 .github/scripts/carry.py --repo o/r "$@" 2>&1); }
+# FIRED_COMMENTS, SET BY implement_fired, SURVIVES run()'s comments RESET -- unlike the
+# marker-dedup fixture ($FX/comments, cleared here so a second `run` in one test sees
+# no marker yet), a fire record is not something a single carry call posts and checks
+# back within its own run, so it belongs in the seed rather than the transcript.
+run() { : > "$GH_CALLS"; : > "$GITHUB_OUTPUT"
+        if [ -f "$FX/fired-comments" ]; then cp "$FX/fired-comments" "$FX/comments"; else rm -f "$FX/comments"; fi
+        (cd "$tmp/repo" && python3 .github/scripts/carry.py --repo o/r "$@" 2>&1); }
 edited() { grep -c "^issue edit $1 .*--add-label $2" "$GH_CALLS"; }
 commented() { grep -c "^issue comment $1 " "$GH_CALLS"; }
 output() { grep "^$1=" "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-; }
-reset() { : > "$FX/comments"; }
+reset() { : > "$FX/comments"; rm -f "$FX/fired-comments" "$FX/open-prs"; }
 
 # ==== the fix station ==========================================================================
 
@@ -189,6 +199,45 @@ out=$(run --pr 220 --station archive)
 assert_equals "0" "$(edited 51 conveyor:archive)"
 assert_equals "1" "$(commented 51)"
 assert_contains "$(grep '^issue comment 51' "$GH_CALLS")" "access-lost"
+
+# #53: A PHASE'S PULL REQUEST MERGED, THE CHANGE IS STILL PENDING, AND NOTHING WAS OPEN --
+# carry_archive RESTARTS the implement station through the same discipline `fire` uses for
+# a person's re-placement: fired before, nothing open, is a fresh instruction to relay.
+it "archive: MEASURED ON #53, a phase's merge with the change still pending RESTARTS implement when nothing is open from its branch"
+reset; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"
+implement_fired; no_open_pr_from_change
+out=$(run --pr 264 --station archive)
+assert_equals "51" "$(output fire_issue)"
+assert_equals "conveyor:implement" "$(output fire_label)"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:implement"
+assert_contains "$out" "restarts the implement station"
+assert_equals "0" "$(edited 51 conveyor:run)"
+assert_equals "1" "$(commented 51)"
+assert_contains "$(grep '^issue comment 51' "$GH_CALLS")" "restart"
+
+it "archive: a phase's merge with the change pending does NOT restart while a pull request is still open from the change's branch: a session is still at work"
+reset; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"
+implement_fired; open_pr_from_change
+out=$(run --pr 264 --station archive)
+assert_equals "" "$(output fire_issue)"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:implement"
+assert_equals "0" "$(commented 51)"
+assert_contains "$out" "session is still at work"
+
+it "archive: a phase's merge before implement ever fired does not restart: that is the ordinary first start's job, not this one's"
+reset; issue_has 51 "conveyor:run opsx:review"; placed maintainer write; change 51 "$PENDING"
+no_open_pr_from_change
+out=$(run --pr 264 --station archive)
+assert_equals "" "$(output fire_issue)"
+assert_contains "$(cat "$GH_CALLS")" "issue edit 51 --repo o/r --add-label station:implement"
+assert_contains "$out" "not finished"
+
+it "archive: a phase's merge with the change pending and no conveyor:run standing does not restart"
+reset; issue_has 51 "opsx:review"; change 51 "$PENDING"
+implement_fired; no_open_pr_from_change
+out=$(run --pr 264 --station archive)
+assert_equals "" "$(output fire_issue)"
+assert_not_contains "$(cat "$GH_CALLS")" "issue edit 51"
 
 it "archive: a pull request with no Refs carries nothing"
 reset; pr "Nothing here" "change/thing" false MERGED

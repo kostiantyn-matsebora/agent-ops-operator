@@ -221,6 +221,33 @@ class TheFire(unittest.TestCase):
                 else:
                     self.assertEqual("", d.station_event)
 
+    def test_default_never_restarts_a_fired_station_from_a_bot(self):
+        """`restart_ok` defaults False, so every ordinary bot-carried path (a label event,
+        `carry_fix`'s fix station) is unaffected: still skip, never fire, once fired."""
+        line = c.Line(frozenset({RUN}), "opsx", False, frozenset({"implement"}), False)
+        self.assertEqual("skip", c.fire(V, RUN, line, BOT, WRITER).action)
+
+    def test_259_restart_ok_is_the_one_exception_carry_archive_asks_for(self):
+        """#53: an apply merge is proof the previous implement session finished its phase,
+        not a bot independently deciding a session died -- carry_archive already re-checked
+        open_pr_from_change before asking for this, so restart_ok lets it through where the
+        ordinary bot wall (above) still refuses everything else."""
+        fired_not_open = c.Line(frozenset({RUN}), "opsx", False, frozenset({"implement"}), False)
+        d = c.fire(V, RUN, fired_not_open, BOT, WRITER, restart_ok=True)
+        self.assertEqual(("fire", "implement", "fire:implement"), (d.action, d.station, d.station_event))
+        # STILL A SESSION AT WORK: restart_ok never overrides the open-pull-request check
+        fired_open = c.Line(frozenset({RUN}), "opsx", False, frozenset({"implement"}), True)
+        self.assertEqual("skip", c.fire(V, RUN, fired_open, BOT, WRITER, restart_ok=True).action)
+        # `restart_ok` RELAXES THE WALL FOR WHATEVER STATION `fire` WAS ASKED ABOUT --
+        # it is `carry_archive`'s ONLY caller that ever passes it true, and it only ever
+        # asks about `implement`, so the archive station never sees it in practice, not
+        # because `fire` singles the station out.
+        finished_fired = c.Line(frozenset({RUN}), "opsx", True, frozenset({"archive"}), False)
+        self.assertEqual("fire", c.fire(V, RUN, finished_fired, BOT, WRITER, restart_ok=True).action)
+        # NEVER WITHOUT THE STANDING GRANT: the wall one level up still applies first
+        no_run = c.Line(frozenset(), "opsx", False, frozenset({"implement"}), False)
+        self.assertEqual("refuse", c.fire(V, RUN, no_run, BOT, WRITER, restart_ok=True).action)
+
     def test_an_unfinished_change_never_reaches_the_archive_station(self):
         for label, line, placer in itertools.product((RUN, IMPL, ARCH), lines(), (WRITER, BOT)):
             d = c.fire(V, label, line, placer, WRITER)
@@ -279,7 +306,22 @@ class TheCarries(unittest.TestCase):
                 elif line.lane != "opsx":
                     self.assertEqual(("done", "merge:plain"), (d.action, d.station_event))
                 elif not line.change_finished:
-                    self.assertEqual(("nothing", "merge:proposal_or_apply"), (d.action, d.station_event))
+                    # #53: AN APPLY MERGE RESTARTS IMPLEMENT, the same discipline `fire`
+                    # already uses for a person re-placing a label -- fired before and
+                    # nothing open is a fresh instruction, fired before and something
+                    # still open is a session at work, never fired at all is the
+                    # ordinary first start and this function does nothing with it.
+                    if RUN not in line.issue_labels:
+                        self.assertEqual("nothing", d.action)
+                    elif placer is None or not placer.may_push:
+                        self.assertEqual("nothing", d.action)
+                    elif "implement" not in line.fired:
+                        self.assertEqual(("nothing", "merge:proposal_or_apply"), (d.action, d.station_event))
+                    elif line.open_pr_from_change:
+                        self.assertEqual(("nothing", "merge:proposal_or_apply"), (d.action, d.station_event))
+                    else:
+                        self.assertEqual(("restart", "implement", RUN, "merge:proposal_or_apply"),
+                                         (d.action, d.station, d.grant, d.station_event))
                 elif RUN not in line.issue_labels:
                     if ARCH in line.issue_labels:
                         self.assertEqual(("nothing", ""), (d.action, d.station_event))

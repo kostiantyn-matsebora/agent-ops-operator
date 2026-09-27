@@ -524,10 +524,26 @@ assert_not_contains "$run" "carry-from-pr.sh"
 cond=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["if"])')
 assert_contains "$cond" "steps.carry.outputs.fire_issue != ''"
 
-it "the archive session's synthesized payload names the archive label from the vocabulary file, never restating it"
-start=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["run"])')
-assert_contains "$start" '["archive_label"]'
-assert_contains "$start" 'remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"'
+# #53: THE LABEL COMES FROM carry.py's OWN `fire_label` OUTPUT, never restated here --
+# archive for a finished change's merge, implement for a restart of an unfinished one's,
+# and the workflow derives which by comparing LABEL against implement_label rather than
+# assuming carry_archive fires archive_label alone.
+it "the synthesized payload's label is carry.py's own fire_label output, never a hardcoded one"
+start=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["env"])')
+assert_contains "$start" "steps.carry.outputs.fire_label"
+run_step=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["run"])')
+assert_contains "$run_step" '"label":{"name":"%s"}'
+assert_contains "$run_step" 'remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"'
+
+it "the payload marks a restart ONLY when the fired label is implement_label, so fire() may restart an already-fired station"
+run_step=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["run"])')
+assert_contains "$run_step" '"restart":%s'
+assert_contains "$run_step" 'IMPLEMENT_LABEL=$(python3 -c'
+# THE CONDITION USES if/fi, NEVER `[ cond ] && VAR=true`: not a `set -e` exit risk here
+# (the chain is not the step's last command, so `errexit` never fires on it), but the
+# conventional form does not depend on that being true forever as the step grows.
+assert_not_contains "$run_step" '] && RESTART=true'
+assert_contains "$run_step" 'if [ "$LABEL" = "$IMPLEMENT_LABEL" ]; then RESTART=true; fi'
 
 it "the step that starts the archive session sets ROUTINE_FIRE_URL and ROUTINE_FIRE_TOKEN, the same two the fire job needs"
 env=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["env"])')

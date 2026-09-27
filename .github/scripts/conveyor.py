@@ -300,7 +300,8 @@ def _carried_by_a_person_or_a_bot(placer: Placer | None) -> bool:
 
 # ---- the fire: a label on the issue ----------------------------------------------------------
 
-def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Placer | None = None) -> Decision:
+def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Placer | None = None,
+         restart_ok: bool = False) -> Decision:
     """A label landed on the issue. Which station starts, if any.
 
     Actions: `ignore` (not a label this line acts on), `refuse` (strip the label
@@ -314,7 +315,16 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
 
     A CARRIED PLACEMENT NEEDS `conveyor:run` STANDING, since only the standing
     instruction can be carried, placed by someone who can still push (that is
-    `grant_placer`, the person behind the bot), and it never fires twice.
+    `grant_placer`, the person behind the bot), and it never fires twice --
+    UNLESS `restart_ok`, the one exception `carry_archive`'s own `restart`
+    action asks for: an apply merge is proof the previous implement session
+    finished its phase and stopped, which is not "a carry independently
+    decided a session died" but the same fact a person re-placing a label
+    would be reacting to, arriving through the merge instead of through them
+    noticing it. `carry_archive` already re-checked `open_pr_from_change`
+    before deciding to restart; this flag lets that decision reach `fire`
+    rather than being silently overruled by the wall that protects every
+    OTHER bot path, which still applies untouched.
 
     A PERSON'S PLACEMENT IS A FRESH INSTRUCTION. The fire record used to be
     permanent, so a session that died left an issue nobody could restart. A
@@ -352,14 +362,16 @@ def fire(vocab: dict, label: str, line: Line, placer: Placer, grant_placer: Plac
                             "is implement, not archive", remove_label=keep)
 
     if station in line.fired:
-        if placer.bot:
+        if placer.bot and not restart_ok:
             return Decision("skip", f"the {station} station already carries a fire record and a carry never "
                             "fires twice", station=station)
         if line.open_pr_from_change:
             return Decision("skip", f"the {station} station already fired and a pull request is open from the "
                             "change's branch: a session is still at work", station=station)
+        why = (f"@{placer.login}'s placement is a fresh instruction" if not placer.bot else
+              "the merge that just landed is proof the previous session finished its phase")
         return Decision("fire", f"the {station} station fired before but nothing is open from the change's "
-                        f"branch, so @{placer.login}'s placement is a fresh instruction",
+                        f"branch, so {why}",
                         station=station, station_event=f"fire:{station}")
     return Decision("fire", f"the {station} station starts", station=station, station_event=f"fire:{station}")
 
@@ -396,12 +408,27 @@ def carry_archive(vocab: dict, pr: PullRequest, line: Line, placer: Placer | Non
     """A pull request from change/* merged. Carry the instruction onward.
 
     Actions: `nothing`, `done` (the line is over), `stalled` (the merge left
-    nothing to carry), `carry` (label the issue and fire the archive station).
+    nothing to carry), `restart` (fire the implement station again: an apply
+    merge, change unfinished, nothing left open from its branch), `carry`
+    (label the issue and fire the archive station).
 
-    ONLY A FINISHED CHANGE REACHES THE ARCHIVE STATION. A proposal or an apply
-    merge comes from the same branch under the same `Refs #<n>`, and the carry
-    used to read every one of them as the implementation merge (#255). An
-    unfinished merge moves the line to implement instead.
+    A PROPOSAL OR AN APPLY MERGE COMES FROM THE SAME BRANCH under the same
+    `Refs #<n>`, and the carry used to read every one of them as the
+    implementation merge (#255) -- fixed by routing every unfinished merge
+    to `nothing` instead of the archive station. THAT LEFT A SECOND GAP: an
+    apply merge is exactly the "session finished a phase and stopped" case
+    `fire`'s own restart already exists for, and this function had no path
+    to it at all. A change merged in phases and left `nothing` after every
+    one but the first (measured on #53, `conveyor:run` standing the whole
+    time, two phases in a row needing a person to remove and re-place it).
+
+    THE RESTART USES THE SAME DISCIPLINE `fire` DOES, never this function's
+    own copy: fired before and a pull request is still open from the
+    change's branch is a session still at work, and skipped; fired before
+    and nothing is open is a fresh instruction, and restarted; not fired at
+    all is the ordinary first start, left to the `issues: labeled` event
+    that already handles it (`fire`), so this function only ever restarts,
+    never starts.
 
     ONLY `conveyor:run` IS CARRIED. `conveyor:archive` standing alone was placed
     by a person for this station directly and has already fired.
@@ -417,8 +444,21 @@ def carry_archive(vocab: dict, pr: PullRequest, line: Line, placer: Placer | Non
         return Decision("done", f"#{pr.refs} is on the plain lane, which has no archive station",
                         station_event="merge:plain")
     if not line.change_finished:
-        return Decision("nothing", f"#{pr.refs}'s change is not finished, so this merge is a proposal or an "
-                        "apply and its next station is implement", station_event="merge:proposal_or_apply")
+        if vocab["run_label"] not in line.issue_labels:
+            return Decision("nothing", f"#{pr.refs}'s change is not finished and carries no "
+                            f"`{vocab['run_label']}`; nothing restarts it")
+        if not _carried_by_a_person_or_a_bot(placer):
+            return Decision("nothing", f"`{vocab['run_label']}` on #{pr.refs} was placed by someone who "
+                            "cannot push here now")
+        if "implement" not in line.fired:
+            return Decision("nothing", f"#{pr.refs}'s change is not finished, so this merge is a proposal or "
+                            "an apply and its next station is implement", station_event="merge:proposal_or_apply")
+        if line.open_pr_from_change:
+            return Decision("nothing", f"#{pr.refs}'s change is not finished, but a pull request is still open "
+                            "from its branch: a session is still at work", station_event="merge:proposal_or_apply")
+        return Decision("restart", f"#{pr.refs}'s change is not finished, and nothing is open from its branch: "
+                        f"@{placer.login}'s standing instruction restarts the implement station",
+                        station="implement", grant=vocab["run_label"], station_event="merge:proposal_or_apply")
     if vocab["run_label"] not in line.issue_labels:
         if vocab["archive_label"] in line.issue_labels:
             return Decision("nothing", f"#{pr.refs} carries `{vocab['archive_label']}` placed directly; the "
