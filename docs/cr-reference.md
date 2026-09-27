@@ -20,7 +20,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 19 |
 | [AgentRuntime](#agentruntime) | yes | 46 |
-| [Conversation](#conversation) | no — the operator does | 47 |
+| [Conversation](#conversation) | no — the operator does | 48 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
 
 ## AgentProfile
@@ -470,8 +470,9 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 | `inputs[].agent` | `string` |  | Agent is DEPRECATED and no longer written. It carried the per-message agent override of the retired `/<pipeline>:<agent>` addressing form, which let whoever typed it select an agent definition the WIRING never declared. A Pipeline names one profile and a profile names one agent, so the agent is already fully determined by the wiring. Dispatch still READS it for one release, so inputs already queued when the manager restarts dispatch to the agent they were parsed with. Same posture as the retired `sessionId` dual-read; removing the field is a later change. Deprecated: nothing sets this. Do not add a writer. |
 | `inputs[].id` | `string` | **yes** |  |
 | `inputs[].origin` | `object` |  | Origin is where this input came from. Absent on inputs created before provenance existed — and an absent origin means NOT POSTED to bound channels, so upgrading cannot fill open threads with history. |
-| `inputs[].origin.kind` | `string` | **yes** | OriginKind says HOW an input reached the manager. Two values, and there are only two doors: a signal through a claimed SignalSource, or a channel the user is already looking at. (`POST /task` was a third once; it is gone.) |
-| `inputs[].origin.name` | `string` |  | Name is the SignalSource or Channel the input came from. |
+| `inputs[].origin.entry` | `string` |  | Entry is the parent Coordinator's `agents[]` entry name the edge was invoked through. Set only for OriginMember, on both directions of the edge: the task `invoke` handed down, and the result routed back up. |
+| `inputs[].origin.kind` | `string` | **yes** | OriginKind says HOW an input reached the manager. There are three doors: a signal through a claimed SignalSource, a channel the user is already looking at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task` was a fourth once; it is gone.) |
+| `inputs[].origin.name` | `string` |  | Name is the SignalSource or Channel the input came from, or — for OriginMember — the conversation on the other side of the `causedBy` edge this input crossed. |
 | `inputs[].origin.sender` | `string` |  | Sender is the transport-side identity that typed this input, when the serving adapter supplied one. Attribution, never authority: nothing is resolved through it and no permission reads it. It is recorded because a person's message is now delivered to every OTHER bound surface, and reconciliation composes that delivery from the conversation alone. An in-memory sender would leave the same message attributed on the fast path and anonymous when re-derived after a restart — the same class of bug the delivery markers on runs fixed. A chat signal carries the same fact in its labels (LabelChatSender); this is where the CHANNEL lane keeps it. |
 | `inputs[].origin.signalKind` | `string` |  | SignalKind is the originating signal's lane (alert \| job \| task \| chat) for `signal` origins, empty otherwise. It says whether a PERSON typed this input — which decides how it is rendered on the surfaces that did not show it (somebody's words, or the event that opened the conversation). It does NOT decide whether it is delivered: that is per destination, read off the origin SURFACE. |
 | `inputs[].payload` | `string` |  |  |
@@ -532,6 +533,7 @@ Written by the operator. Read it, never set it.
 | `contextCheckpoint.generation` | `string` |  | Generation names the copy on the volume, so an operator recovering by hand knows which directory to look in and a restore can fall back to an earlier one. |
 | `contextCheckpoint.quiesced` | `boolean` | **yes** | Quiesced reports whether this copy was taken at a WORK BOUNDARY, with nothing inflight, or during a run. A mid-run copy is still worth taking — a long run is exactly what a crash would otherwise lose in full — but it may contain a partially written file. Labelling it is what lets a restore, and a person, tell a known-consistent copy from a best-effort one instead of guessing. |
 | `escalatedAt` | `string` |  | EscalatedAt stamps the moment the `escalate` verb opened this conversation's human thread — an UNCAUSED root only; a caused member escalates by closing instead (see CloseReason) and never sets this. DeliverInputs fences on it: nothing with an earlier arrival is (re)delivered to the channels escalation just bound, so opening the thread late does not replay everything that happened before it existed. |
+| `escalationMessage` | `string` |  | EscalationMessage is the digest the escalating agent supplied, snapshotted at the same moment as EscalatedAt so the reconciler can post it as the newly-bound threads' opening message once each topic exists — the ensure-topic enqueue and the topic actually being created by the adapter are two separate moments, so the message has to sit somewhere between them. |
 | `inflight` | `object` |  | InflightRun tracks the unit currently dispatched to the runtime pod. |
 | `inflight.dispatchedAt` | `string` |  |  |
 | `inflight.inputIds` | `[]string` |  |  |
@@ -559,6 +561,7 @@ Written by the operator. Read it, never set it.
 | `runs[].inputs[].type` | `string` |  | InputType classifies a work unit. |
 | `runs[].jobKind` | `string` |  |  |
 | `runs[].result` | `string` |  |  |
+| `runs[].routedToParent` | `boolean` |  | RoutedToParent marks a run on a conversation carrying `spec.causedBy` whose result has already been appended as an input on its PARENT (coordination-loop). The same derivability shape as DeliveryTracked: the fast path in `/work/done` sets it once the append succeeds, and the reconciler backstop re-derives a missing append from `causedBy ∧ !RoutedToParent` rather than from scanning the parent's own queue, which pruning empties. Absent on a conversation with no `causedBy` — there is no parent to route to, so the zero value already means "nothing owed". |
 | `runs[].runId` | `string` | **yes** |  |
 | `runs[].startedAt` | `string` |  |  |
 | `runs[].status` | `string` | **yes** |  |

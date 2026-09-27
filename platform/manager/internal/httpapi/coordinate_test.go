@@ -1,0 +1,224 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+)
+
+const coordTestMasterKey = "master-key"
+
+// coordServer builds a Server wired for /coordinate/*: a fake client seeded
+// with the given objects, a Router sharing the same client, and the master
+// key every derived token in these tests is checked against.
+func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
+	t.Helper()
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(objs...).Build()
+	q := &chat.OpQueue{Client: c, Namespace: "agent-ops", Registry: chat.NewRegistry()}
+	router := &chat.Router{Client: c, Reader: c, Namespace: "agent-ops", Ops: q}
+	return &Server{Reader: c, Client: c, Namespace: "agent-ops", AdapterToken: coordTestMasterKey, Router: router}, c
+}
+
+func postCoordinate(s *Server, path, token string, body map[string]any) *httptest.ResponseRecorder {
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", path, strings.NewReader(string(raw)))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func coordCoordinator(name string, agents ...agentopsv1alpha1.CoordinatorAgentEntry) *agentopsv1alpha1.Coordinator {
+	co := &agentopsv1alpha1.Coordinator{}
+	co.Name, co.Namespace = name, "agent-ops"
+	co.Spec.Agents = agents
+	return co
+}
+
+func coordRoot(name, coordinator string) *agentopsv1alpha1.Conversation {
+	c := &agentopsv1alpha1.Conversation{}
+	c.Name, c.Namespace = name, "agent-ops"
+	c.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: coordinator}
+	return c
+}
+
+func TestHandleCoordinateInvokeRefusesTheWrongToken(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	rec := postCoordinate(s, "/coordinate/invoke", "not-the-right-token",
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateInvokeSucceedsWithTheDerivedToken(t *testing.T) {
+	cap := &agentopsv1alpha1.AgentCapability{}
+	cap.Name, cap.Namespace = "cap-worker", "agent-ops"
+	profile := &agentopsv1alpha1.AgentProfile{}
+	profile.Name, profile.Namespace = "profile-worker", "agent-ops"
+	cap.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile.Name}
+	co := coordCoordinator("co-a", agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does it", CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	})
+	root := coordRoot("root-1", "co-a")
+	s, c := coordServer(t, co, root, cap, profile)
+
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["status"] != "created" || out["member"] == "" {
+		t.Fatalf("want a created member, got %+v", out)
+	}
+	var member agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: out["member"]}, &member); err != nil {
+		t.Fatal(err)
+	}
+	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != "root-1" {
+		t.Fatalf("the created member must be caused by the caller, got %+v", member.Spec.CausedBy)
+	}
+}
+
+func TestHandleCoordinateCloseEnforcesOneHopReach(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", "agent-ops"
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	grandchild := &agentopsv1alpha1.Conversation{}
+	grandchild.Name, grandchild.Namespace = "grandchild-1", "agent-ops"
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "member-1", Entry: "helper"}
+	s, c := coordServer(t, coordCoordinator("co-a"), root, member, grandchild)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	// The direct member: allowed.
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "root-1", "target": "member-1", "reason": "done"})
+	if rec.Code != 200 {
+		t.Fatalf("closing a direct member must succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var gotMember agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "member-1"}, &gotMember)
+	if gotMember.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatal("the direct member must be closed")
+	}
+
+	// The grandchild, reached directly from the root: refused.
+	root2 := coordRoot("root-2", "co-a")
+	memberOf2 := &agentopsv1alpha1.Conversation{}
+	memberOf2.Name, memberOf2.Namespace = "member-2", "agent-ops"
+	memberOf2.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-2", Entry: "worker"}
+	grandOf2 := &agentopsv1alpha1.Conversation{}
+	grandOf2.Name, grandOf2.Namespace = "grandchild-2", "agent-ops"
+	grandOf2.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "member-2", Entry: "helper"}
+	s2, c2 := coordServer(t, coordCoordinator("co-a"), root2, memberOf2, grandOf2)
+	token2 := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-2")
+	rec2 := postCoordinate(s2, "/coordinate/close", token2,
+		map[string]any{"conversation": "root-2", "target": "grandchild-2", "reason": "trying to reach too far"})
+	if rec2.Code != 403 {
+		t.Fatalf("closing a grandchild directly must be refused, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var gotGrand agentopsv1alpha1.Conversation
+	c2.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "grandchild-2"}, &gotGrand)
+	if gotGrand.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("an out-of-scope close must change nothing")
+	}
+}
+
+func TestHandleCoordinateEscalateOpensAHumanThreadOnTheUncausedRoot(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
+	ch := &agentopsv1alpha1.Channel{}
+	ch.Name, ch.Namespace = "ops-desk", "agent-ops"
+	ch.Spec.Adapter = "telegram"
+	s, c := coordServer(t, coordCoordinator("co-a"), root, ch)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/escalate", token,
+		map[string]any{"conversation": "root-1", "message": "3 members failed"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
+	if got.Status.EscalatedAt == nil || got.Status.EscalationMessage != "3 members failed" {
+		t.Fatalf("escalate must stamp the digest, got %+v", got.Status)
+	}
+	if len(got.Spec.ChannelRefs) != 1 || got.Spec.ChannelRefs[0].Name != "ops-desk" {
+		t.Fatalf("escalate must bind the snapshotted channels, got %v", got.Spec.ChannelRefs)
+	}
+}
+
+func TestHandleCoordinateReadChannelReaderProjection(t *testing.T) {
+	ch := &agentopsv1alpha1.Channel{}
+	ch.Name, ch.Namespace = "voice-desk", "agent-ops"
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Name, conv.Namespace = "conv-1", "agent-ops"
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "voice-desk"}}
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "voice-desk", ThreadID: "t1"}}
+	conv.Status.Brief = "discussing the outage"
+	other := &agentopsv1alpha1.Conversation{}
+	other.Name, other.Namespace = "conv-2", "agent-ops"
+	s, _ := coordServer(t, ch, conv, other)
+
+	token := chat.DeriveChannelReaderToken(coordTestMasterKey, "voice-desk")
+	rec := postCoordinate(s, "/coordinate/read", token, map[string]any{"channel": "voice-desk"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Conversations []conversationProjection `json:"conversations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Conversations) != 1 || out.Conversations[0].Name != "conv-1" || out.Conversations[0].Brief != "discussing the outage" {
+		t.Fatalf("must list only conversations with a thread on this channel, got %+v", out.Conversations)
+	}
+}
+
+func TestHandleCoordinateReadRefusesOutOfScope(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	unrelated := &agentopsv1alpha1.Conversation{}
+	unrelated.Name, unrelated.Namespace = "unrelated-1", "agent-ops"
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, unrelated)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "unrelated-1"})
+	if rec.Code != 403 {
+		t.Fatalf("reading outside the caller's own subtree must be refused, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateInvokeRefusesAChannelReaderToken(t *testing.T) {
+	ch := &agentopsv1alpha1.Channel{}
+	ch.Name, ch.Namespace = "voice-desk", "agent-ops"
+	root := coordRoot("root-1", "co-a")
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, ch)
+
+	token := chat.DeriveChannelReaderToken(coordTestMasterKey, "voice-desk")
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"})
+	if rec.Code != 401 {
+		t.Fatalf("a channel-reader token must be refused for invoke, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

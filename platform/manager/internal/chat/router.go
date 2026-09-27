@@ -88,6 +88,12 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if conv == nil {
 		return nil // no conversation in this thread — nothing to continue
 	}
+	// A conversation must never receive its own output as an input
+	// (coordination-loop): an origin channel named identically to its own
+	// target conversation is the shape a self-feeding loop takes.
+	if ch.Name == conv.Name {
+		return ErrSelfInput
+	}
 	// /close ends the conversation. Intercepted BEFORE the text becomes a reply
 	// input: handing it to the agent would both dispatch a work unit for a
 	// command and leave the conversation open.

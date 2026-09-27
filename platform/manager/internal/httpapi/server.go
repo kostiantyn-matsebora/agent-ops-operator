@@ -36,6 +36,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,6 +50,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
@@ -161,6 +163,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /activity", s.anyAdapterAuth(s.handleActivityReport))
 	mux.HandleFunc("GET /status", s.anyAdapterAuth(s.handleStatus))
 	mux.HandleFunc("GET /pipelines/{name}/resolved", s.anyAdapterAuth(s.handlePipelineResolved))
+	s.RegisterCoordinateRoutes(mux)
 	return mux
 }
 
@@ -641,6 +644,17 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if len(conv.Status.Runs) > 10 {
 		conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-10:]
 	}
+	// Turns count on the conversation WHOSE OWN status this is, when ITS OWN
+	// run is recorded — never when a member's result arrives as an input, so N
+	// members finishing at once is one turn (design D-C, D-E). Absent Budget
+	// means this conversation is not itself a Coordinator's root: nothing to
+	// count.
+	var maxTurnsExceeded bool
+	if conv.Status.Budget != nil {
+		conv.Status.Budget.Turns++
+		b := conv.Status.Budget
+		maxTurnsExceeded = b.MaxTurns > 0 && b.Turns >= b.MaxTurns
+	}
 	if len(dispatch.PendingInputs(&conv)) > 0 {
 		conv.Status.Phase = agentopsv1alpha1.ConversationQueued
 	} else {
@@ -680,6 +694,34 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if len(conv.Spec.ChannelRefs) > 0 && s.Router != nil {
 		if run := runByID(&conv, d.RunID); run != nil {
 			s.Router.FanOutRunReply(ctx, &conv, d.RunID, chat.RunReplyMessage(run))
+		}
+	}
+	// A member's result becomes an input on its PARENT, one hop
+	// (coordination-loop) — the FAST PATH; a conversation with no causedBy has
+	// nothing to route. The reconciler backstop re-derives a missed append from
+	// `causedBy ∧ !RoutedToParent`.
+	if conv.Spec.CausedBy != nil && s.Router != nil {
+		dedup := "member:" + conv.Name + ":" + d.RunID
+		if err := s.Router.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name, dedup, result); err != nil {
+			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
+				"conversation", conv.Name, "parent", conv.Spec.CausedBy.Parent, "error", err.Error())
+		} else if run := runByID(&conv, d.RunID); run != nil {
+			markPatch := client.MergeFrom(conv.DeepCopy())
+			run.RoutedToParent = true
+			if err := s.Client.Status().Patch(ctx, &conv, markPatch); err != nil {
+				log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
+					"conversation", conv.Name, "runId", d.RunID, "error", err.Error())
+			}
+		}
+	}
+	// Budget edges are evaluated PER COORDINATOR LEVEL (design D-E): only a
+	// conversation that is itself a Coordinator's root carries a Budget, and
+	// only ITS OWN maxTurns bounds ITS OWN turns.
+	if maxTurnsExceeded && s.Router != nil {
+		digest := fmt.Sprintf("budget-exceeded: maxTurns (%d) reached", conv.Status.Budget.MaxTurns)
+		if err := s.Router.CloseBudgetExceeded(ctx, &conv, digest); err != nil {
+			log.FromContext(ctx).Info("closing conversation on maxTurns",
+				"conversation", conv.Name, "error", err.Error())
 		}
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -1040,6 +1082,10 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text, Sender: in.Sender}); err != nil {
+		if errors.Is(err, chat.ErrSelfInput) {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}

@@ -301,6 +301,21 @@ func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.
 	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
 }
 
+// EnqueueEscalationMessage posts the digest an `escalate` call supplied as the
+// opening message of a newly-bound escalation thread (design D-D).
+//
+// The ensure-topic enqueue and the topic actually existing (an adapter
+// completing it with a thread id) are two different moments, so this is a
+// SEPARATE op rather than data riding on ensure-topic — the reconciler calls
+// it once a bound channel has a thread, exactly as it does for the reopen
+// notice. Stable per conversation×channel×reopen count, so re-deriving it on
+// every reconcile pass posts the digest once.
+func (q *OpQueue) EnqueueEscalationMessage(ctx context.Context, ch *agentopsv1alpha1.Channel,
+	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
+	id := fmt.Sprintf("escalate:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
+	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+}
+
 // EnqueueInputDelivery queues ONE input's delivery to ONE channel — the event
 // card for something that woke the agent, or somebody's words relayed from the
 // surface they were typed on. One queue call for both, because they are one
