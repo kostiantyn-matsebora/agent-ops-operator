@@ -148,6 +148,30 @@ spec:
                 required:
                 - name
                 type: object
+              escalationChannelRefs:
+                description: |-
+                  EscalationChannelRefs is the SNAPSHOT of the originating Coordinator's
+                  own `channelRefs`, taken at creation — set only alongside CoordinatorRef,
+                  and only for an UNCAUSED root (a member never binds it).
+
+                  It names where an `escalate` verb on THIS conversation opens its human
+                  thread (design D-D). Nothing binds these channels at creation: they sit
+                  here, unused, until escalation reaches for them — which is what keeps a
+                  Coordinator claiming a chat surface from opening a thread on a bare
+                  message. Editing the Coordinator's `channelRefs` after creation changes
+                  nothing here, exactly as editing its `limits` cannot reach the budget
+                  already snapshotted into status.
+                items:
+                  description: ObjectRef references another object by name (same namespace).
+                  properties:
+                    name:
+                      description: Name of the referenced object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               inputs:
                 items:
                   description: |-

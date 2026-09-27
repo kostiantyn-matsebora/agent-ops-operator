@@ -429,14 +429,20 @@ func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.
 	})
 }
 
-// boundChannels resolves the channel set a new conversation binds to: the
-// originating Pipeline's channels, with the originating channel guaranteed
-// included (it is where the user is looking).
-func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
+// boundChannels resolves the channel set a new conversation binds to, with the
+// originating channel guaranteed included (it is where the user is looking).
+//
+// A Pipeline's BoundChannelRefs is its own `spec.channelRefs`, so an addressed
+// Pipeline conversation binds its WHOLE channel set — full mirroring, as
+// before this kind existed. A Coordinator's is always empty (design D-D): its
+// `channelRefs` are escalation targets, never bound at creation, so an
+// addressed Coordinator conversation binds EXACTLY the one surface it was
+// addressed from (chat-addressing-discovery, chat-signal-origination).
+func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
 	if origin == nil {
 		return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
 	}
-	refs := append([]agentopsv1alpha1.ObjectRef{}, origin.Spec.ChannelRefs...)
+	refs := append([]agentopsv1alpha1.ObjectRef{}, origin.BoundChannelRefs()...)
 	for _, ref := range refs {
 		if ref.Name == ch.Name {
 			return refs
@@ -503,17 +509,33 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 			"inside that conversation's own thread. Nothing was released."))
 		return nil
 	}
-	// A command addresses a PIPELINE: it originates the conversation, so it
-	// supplies the profile AND the capabilities. Addressing a profile would
-	// name something with no wiring, and therefore nothing to grant.
+	// A command addresses a PIPELINE OR A COORDINATOR: it originates the
+	// conversation, so it supplies the profile AND the capabilities.
+	// Addressing a profile would name something with no wiring, and therefore
+	// nothing to grant.
+	//
+	// ONE Get per kind, Pipeline first (design D-B): a name held by both is
+	// reported on the Coordinator's own Ready, never resolved here — this is a
+	// plain lookup by name, no claim check, no Ready check, exactly as it was
+	// before a second kind existed.
+	var claimant Claimant
 	var pipe agentopsv1alpha1.Pipeline
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &pipe); err != nil {
-		if apierrors.IsNotFound(err) {
-			r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf(
-				"⚠️ Unknown pipeline **%s** — see `/%s`.", cmd.Pipeline, ListCommand)))
-			return nil
-		}
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &pipe); err == nil {
+		claimant = pipelineClaimant{&pipe}
+	} else if !apierrors.IsNotFound(err) {
 		return err
+	} else {
+		var co agentopsv1alpha1.Coordinator
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &co); err == nil {
+			claimant = coordinatorClaimant{&co}
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	if claimant == nil {
+		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf(
+			"⚠️ Unknown pipeline or coordinator **%s** — see `/%s`.", cmd.Pipeline, ListCommand)))
+		return nil
 	}
 	if cmd.Rest == "" {
 		// ASK, rather than refuse. A command menu SENDS on tap, so a bare
@@ -535,22 +557,23 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		r.Ops.EnqueueMessage(ctx, ch, nil, ask)
 		return nil
 	}
-	capability, err := dispatch.ResolveCapability(ctx, r.Reader, &pipe)
+	capability, err := dispatch.ResolveCapability(ctx, r.Reader, claimant)
 	if err != nil {
-		return fmt.Errorf("pipeline %s: resolve capability: %w", pipe.Name, err)
+		return fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
 	}
-	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, &pipe, capability)
+	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, claimant, capability)
 	return err
 }
 
 // CreateTaskConversation starts a task conversation originating on a channel,
-// bound to the origin Pipeline's channel set. The origin also snapshots its
-// tooling bindings onto the conversation — capabilities come from the wiring
-// that originated it, never from the profile. capability is the origin's ALREADY
-// RESOLVED capability (see dispatch.ResolveCapability), ignored when origin is
-// nil.
+// bound to the origin claimant's channel set — a Pipeline's whole
+// `channelRefs`, or (design D-D) just the addressing channel for a
+// Coordinator. The origin also snapshots its tooling bindings onto the
+// conversation — capabilities come from the wiring that originated it, never
+// from the profile. capability is the origin's ALREADY RESOLVED capability
+// (see dispatch.ResolveCapability), ignored when origin is nil.
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender string,
-	origin *agentopsv1alpha1.Pipeline, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
+	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if profile != "" {
 		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
@@ -576,14 +599,15 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 			},
 		}},
 	}
+	nodeKind := activity.NodePipeline
 	if origin != nil {
 		conv.Spec.Toolsets = capability.Toolsets.DeepCopy()
 		conv.Spec.MCPConfigs = capability.MCPConfigs.DeepCopy()
-		// Same helper the signal lane calls, over the same Pipeline's already
-		// resolved capability. An addressed command grants the pipeline's
-		// wiring, and the execution identity and the storage are part of that
-		// wiring, not half of it.
-		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin.Name, capability, r.Runtime)
+		// Same helper the signal lane calls, over the same claimant's already
+		// resolved capability. An addressed command grants its wiring, and the
+		// execution identity and the storage are part of that wiring, not half
+		// of it.
+		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin.GetName(), capability, r.Runtime)
 		conv.Spec.RuntimeRef = snap.RuntimeRef
 		conv.Spec.ServiceAccountName = snap.ServiceAccountName
 		conv.Spec.ContextClaimName = snap.ContextClaimName
@@ -591,17 +615,36 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// Provenance, written once at creation like the bindings above it and
 		// read for the same reasons they are not: attribution and reuse
 		// scoping, never to resolve wiring. An addressed command is the one
-		// origination that names its pipeline outright, so this ref is exact
-		// rather than inferred.
-		conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.Name}
+		// origination that names its claimant outright, so this ref is exact
+		// rather than inferred. Exactly one of the two is ever set (design
+		// D-B): a Coordinator also snapshots its OWN escalation channels,
+		// never bound at creation.
+		if origin.ClaimantKind() == ClaimantCoordinator {
+			nodeKind = activity.NodeCoordinator
+			conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
+			conv.Spec.EscalationChannelRefs = origin.EscalationChannelRefs()
+		} else {
+			conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
+		}
 	}
 	if err := r.Client.Create(ctx, conv); err != nil {
 		return conv, err
 	}
+	// A Coordinator-rooted conversation's own resource ceiling (design D-E) is
+	// STATUS, so it needs its own write after Create.
+	if origin != nil {
+		if budget := origin.SnapshotBudget(); budget != nil {
+			patch := client.MergeFrom(conv.DeepCopy())
+			conv.Status.Budget = budget
+			if err := r.Client.Status().Patch(ctx, conv, patch); err != nil {
+				return conv, err
+			}
+		}
+	}
 	originName, originKind := ch.Name, activity.NodeChannel
 	pipeline := ""
 	if origin != nil {
-		originName, originKind, pipeline = origin.Name, activity.NodePipeline, origin.Name
+		originName, originKind, pipeline = origin.GetName(), nodeKind, origin.GetName()
 	}
 	r.Activity.Emit(activity.Event{
 		Kind:         activity.KindConversationCreated,

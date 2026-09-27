@@ -35,10 +35,10 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       hop, never the tree's ultimate root — `spec.coordinatorRef`;
       `ConversationStatus.budget{maxAgents, maxTurns, deadline, agentsInvoked,
       turns}`, `escalatedAt`, `closeReason`, `brief` (MaxLength=512, D-I).
-- [ ] 2.3 `PipelinesForSource` → claimants of both kinds (D-B); every call site
+- [x] 2.3 `PipelinesForSource` → claimants of both kinds (D-B); every call site
       iterates claimants; `Wired` counts both; bare-chat choice list names
       both.
-- [ ] 2.3b `internal/addressing` + `HandleCommand` resolve `/<name>` across
+- [x] 2.3b `internal/addressing` + `HandleCommand` resolve `/<name>` across
       Pipeline and Coordinator; `/pipelines` and the choice list carry both
       kinds' addressed forms; an addressed conversation binds the origin
       surface only.
@@ -50,7 +50,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       a visited-set guard reporting a STATIC cycle by name rather than
       recursing into it again. `invoke`-time claiming and the live cycle
       guard (D-E2) are a later commit.
-- [ ] 2.5 Conversation creation from a Coordinator: no `channelRefs`; its OWN
+- [x] 2.5 Conversation creation from a Coordinator: no `channelRefs`; its OWN
       limits snapshotted into `status.budget`; the Coordinator's `channelRefs`
       snapshotted into `spec.escalationChannelRefs` on an UNCAUSED root only —
       a member never binds it.

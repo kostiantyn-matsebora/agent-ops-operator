@@ -27,9 +27,12 @@ import (
 // event is renderable as motion along an edge the graph already draws — no
 // frontend inference, no second naming scheme to keep in sync.
 const (
-	NodeSignalAdapter  = "signal-adapter"
-	NodeSignalSource   = "signal-source"
-	NodePipeline       = "pipeline"
+	NodeSignalAdapter = "signal-adapter"
+	NodeSignalSource  = "signal-source"
+	NodePipeline      = "pipeline"
+	// NodeCoordinator is a Coordinator claiming a source or opening a root
+	// conversation — the coordinated-agents sibling of NodePipeline.
+	NodeCoordinator    = "coordinator"
 	NodeConversation   = "conversation"
 	NodeProfile        = "profile"
 	NodeRuntime        = "runtime"

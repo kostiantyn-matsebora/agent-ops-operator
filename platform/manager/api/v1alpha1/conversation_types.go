@@ -250,6 +250,19 @@ type ConversationSpec struct {
 	// nested cycle guard can name the Coordinator repeated.
 	// +optional
 	CoordinatorRef *ObjectRef `json:"coordinatorRef,omitempty"`
+	// EscalationChannelRefs is the SNAPSHOT of the originating Coordinator's
+	// own `channelRefs`, taken at creation — set only alongside CoordinatorRef,
+	// and only for an UNCAUSED root (a member never binds it).
+	//
+	// It names where an `escalate` verb on THIS conversation opens its human
+	// thread (design D-D). Nothing binds these channels at creation: they sit
+	// here, unused, until escalation reaches for them — which is what keeps a
+	// Coordinator claiming a chat surface from opening a thread on a bare
+	// message. Editing the Coordinator's `channelRefs` after creation changes
+	// nothing here, exactly as editing its `limits` cannot reach the budget
+	// already snapshotted into status.
+	// +optional
+	EscalationChannelRefs []ObjectRef `json:"escalationChannelRefs,omitempty"`
 	// ChannelRefs — every listed channel mirrors the whole conversation (own
 	// thread per channel, replies and acks fanned out). Empty = chat-less
 	// (HTTP-only / shadow).
