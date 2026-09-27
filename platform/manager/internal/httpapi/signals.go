@@ -566,7 +566,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
 	}
 
-	return s.appendInputToConversation(ctx, source, claimant, conv, group, combine, inputType, kind)
+	return s.appendInputToConversation(ctx, source, claimant, conv, group, combine, inputType)
 }
 
 // findReusableConversation returns the open conversation this claimant may
@@ -765,7 +765,8 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 // appendInputToConversation records the group as a ConversationInput and
 // queues it on the conversation's own input list, retrying the optimistic
 // patch on conflict.
-func (s *Server) appendInputToConversation(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, conv *agentopsv1alpha1.Conversation, group []NormalizedSignal, combine combineFunc, inputType agentopsv1alpha1.InputType, kind string) (string, bool, error) {
+func (s *Server) appendInputToConversation(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, conv *agentopsv1alpha1.Conversation, group []NormalizedSignal, combine combineFunc, inputType agentopsv1alpha1.InputType) (string, bool, error) {
+	kind := group[0].Kind
 	ci := &agentopsv1alpha1.ConversationInput{}
 	ci.Namespace = s.Namespace
 	ci.GenerateName = conv.Name + "-in-"
