@@ -450,6 +450,21 @@ assert_equals "\${{ github.event.repository.default_branch }}" "$(rpy 'print(d["
 # `conveyor:fix` round is dispatched by `github-actions[bot]`, which the
 # action refused by default before any model ran; and with `fix` failed,
 # `land` was skipped and nothing reached the pull request for three days.
+# THE ACTION VALIDATES THE CHECKED-OUT WORKFLOW FILE against the default branch's copy
+# and refuses any difference. A branch cut before the file last changed differs without
+# editing it (measured on #259), so the fix job puts the default branch's copy in place
+# for the action and the branch's own back before the patch is cut.
+it "the fix job puts the default branch's copy of this workflow in place BEFORE the action, and the branch's own back BEFORE the patch is cut"
+names=$(py 'print([s.get("name") or s.get("id") or s.get("uses") or s.get("run","")[:40] for s in d["jobs"]["fix"]["steps"]])')
+restore=$(py 'print([i for i,s in enumerate(d["jobs"]["fix"]["steps"]) if "default branch" in (s.get("name") or "") and "review-dispatch.yml" in s.get("run","")][0])')
+model=$(py 'print([i for i,s in enumerate(d["jobs"]["fix"]["steps"]) if s.get("id")=="model"][0])')
+putback=$(py 'print([i for i,s in enumerate(d["jobs"]["fix"]["steps"]) if "back before the patch" in (s.get("name") or "")][0])')
+cut=$(py 'print([i for i,s in enumerate(d["jobs"]["fix"]["steps"]) if "dispatch-patch.py" in s.get("run","")][0])')
+[ "$restore" -lt "$model" ] && pass || fail "restore step $restore is not before the model step $model"
+[ "$model" -lt "$putback" ] && [ "$putback" -lt "$cut" ] && pass || fail "put-back step $putback is not between the model $model and the cut $cut"
+assert_contains "$(py 'print(d["jobs"]["fix"]["steps"]['"$restore"']["run"])')" 'git checkout -q "origin/$DEFAULT" -- .github/workflows/review-dispatch.yml'
+assert_contains "$(py 'print(d["jobs"]["fix"]["steps"]['"$putback"']["run"])')" "git checkout -q HEAD -- .github/workflows/review-dispatch.yml"
+
 it "the fixing step names github-actions as the ONE bot that may start it -- never '*', never empty"
 model=$(py 'print([s for s in d["jobs"]["fix"]["steps"] if s.get("id")=="model"][0]["with"]["allowed_bots"])')
 assert_equals "github-actions" "$model"

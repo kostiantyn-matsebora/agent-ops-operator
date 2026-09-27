@@ -824,14 +824,44 @@ fresh_repo
 out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check.json" CHECKS="$tmp/checks-one.json" PATCH="$tmp/empty.patch" land_all)
 assert_contains "$out" "reported fixed, but the patch is empty"
 
-it "a disputed check is ONE pull request comment under the marker, and the code is untouched"
+# A RED CHECK THE FIXER COULD NOT EXPLAIN GETS ONE FRESH RUN BEFORE ANYONE IS
+# ASKED. On #259 the red was a check step deleted from ci.yml since the head last
+# ran: nothing in the tree explained it, and a fresh run would have been green.
+# The first such dispute pushes an EMPTY commit and posts the refresh marker; the
+# check's dispute is posted only when it is red again after that.
+it "the FIRST dispute of a red check pushes an empty commit, posts the refresh marker, disputes nothing, and the round goes on"
 fresh_repo
 printf '{"items":[{"id":"check:operator","action":"disputed","reason":"the runner could not reach the registry"}]}' > "$tmp/report-check-d.json"
 before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
-out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count "$before".."$BRANCH")"
+assert_equals "" "$(git -C "$ORIGIN" diff --stat "$before" "$BRANCH")"
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "re-run the checks (conveyor round 1)"
+assert_equals "1" "$(grep -c '<!-- conveyor:refreshed -->' "$GH_CALLS")"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:disputed"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "checks re-run** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Re-run (1)"
+assert_equals "running" "$(loop_label)"
+
+it "without the push credential the check is disputed at once: no re-run can be pushed"
+fresh_repo
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(STARTS="" WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
 assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
 assert_contains "$(cat "$GH_CALLS")" "disputes 1 failed check"
+
+it "red AGAIN after its re-run, a disputed check is ONE pull request comment under the marker, and the code is untouched"
+fresh_repo
+printf '[{"body":"<!-- conveyor:refreshed --> Round 1 re-runs the checks","created_at":"2026-08-29T11:00:00Z"}]' > "$GH_COMMENTS"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "1" "$(grep -c '<!-- conveyor:disputed -->' "$GH_CALLS")"
+assert_contains "$(cat "$GH_CALLS")" "disputes 1 failed check"
 assert_contains "$(cat "$GH_CALLS")" "the runner could not reach the registry"
+assert_equals "waiting" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
 
 # THE SUMMARY IS AN ENDING'S, never a round that goes on — so the check
 # paragraph is asserted where one actually exists: the disputes-only ending

@@ -339,6 +339,24 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.branch }}
           fetch-depth: 0
+      # THE ACTION VALIDATES THE CHECKED-OUT COPY OF THIS WORKFLOW against the
+      # default branch's, and refuses to run on any difference ("The workflow
+      # file must exist and have identical content to the version on the
+      # repository's default branch"). A branch cut BEFORE this file last
+      # changed on master differs without editing it, so every fixing round on
+      # such a branch was refused -- measured on #259 the night the loop's own
+      # change merged: the fallback below then called the head's one red check
+      # "disputed", with a reason blaming a branch that edited nothing. The
+      # default branch's copy is put in place for the action, and the branch's
+      # own copy is put back before the patch is cut, so a fix carries no
+      # workflow edit it did not make.
+      - name: The loop's own workflow, from the default branch, for the action's validation
+        env:
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$DEFAULT"
+          git checkout -q "origin/$DEFAULT" -- .github/workflows/review-dispatch.yml
       - uses: actions/download-artifact@v4
         with:
           name: dispatch-work-list
@@ -478,11 +496,14 @@ jobs:
           [ -z "$EXECUTION_FILE" ] || { echo "the fixing step ran"; exit 0; }
           git fetch -q origin "$DEFAULT"
           if ! git diff --quiet "origin/$DEFAULT" -- .github/workflows/review-dispatch.yml; then
-            echo "::notice::This branch edits .github/workflows/review-dispatch.yml, so the action refuses to run it — a pull request may not rewrite what acts on its findings. Dispatch works once this is merged."
+            # The restore step above should have made this impossible; if the copy still
+            # differs, the action refused it, and the round says so rather than blaming
+            # the branch for an edit it may never have made.
+            echo "::notice::The checked-out .github/workflows/review-dispatch.yml still differs from the default branch's copy, so the action refused to run. Nothing was fixed this round."
             python3 -c '
           import json, sys
           work = json.load(open(sys.argv[1]))
-          json.dump({"items": [{"id": i.get("id") or i["threadId"], "action": "disputed", "reason": "the fixing step did not run: this branch edits review-dispatch.yml, which the action refuses to run until it is merged"} for i in work]}, open(sys.argv[2], "w"))
+          json.dump({"items": [{"id": i.get("id") or i["threadId"], "action": "disputed", "reason": "the fixing step did not run: the action refused this checkout, whose copy of review-dispatch.yml differs from the default branch's"} for i in work]}, open(sys.argv[2], "w"))
           ' "$WORK_LIST" "$REPORT"
             exit 0
           fi
@@ -507,6 +528,10 @@ jobs:
       # while this very change was under review: three findings on a
       # proposal-only pull request came back "disputed... not addressed",
       # and no model had spoken).
+      # THE BRANCH'S OWN COPY GOES BACK before the cut, so the patch never carries
+      # the workflow file the restore step put in place for the action.
+      - name: The branch's own workflow, back before the patch is cut
+        run: git checkout -q HEAD -- .github/workflows/review-dispatch.yml
       - name: The patch program, from the branch the workflow came from
         env:
           SOURCE: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}

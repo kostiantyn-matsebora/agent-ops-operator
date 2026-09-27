@@ -623,8 +623,10 @@ An item the fixing step's report never names is UNADDRESSED rather than
 disputed, because silence is not a decision. A round whose fixing step wrote
 no report at all ends as its own outcome, disputing nothing.
 
-A failed check is reproduced with the job's own command before it is fixed,
-and a failure the tree does not explain is disputed rather than guessed at.
+A failed check is reproduced with the job's own command before it is fixed.
+A failure the tree does not explain gets one fresh run first, an empty commit
+the loop pushes, and is disputed only if it is red again.
+
 A fixed check gets no reply, because its next run is the verdict.
 
 A fix the report claims but the patch does not evidence is UNADDRESSED too,

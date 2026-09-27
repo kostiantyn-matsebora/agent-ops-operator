@@ -98,6 +98,10 @@ ENDING_KIND = {
     # starts the next one itself (#259: a failed fix is not a decision).
     "disputed and unaddressed": "unaddressed",
     "nothing addressed": "unaddressed",
+    # A RED CHECK THE FIXER COULD NOT EXPLAIN GETS ONE FRESH RUN before anyone
+    # is asked: an empty commit, so CI judges the head again under the merged
+    # workflows. On #259 the red was a check step that no longer existed.
+    "checks re-run": "checks re-run",
 }
 DISPUTED_ITEM = "<!-- conveyor:disputed-item {} -->"   # per item, inside a dispute comment, so a later round finds it
 
@@ -167,6 +171,7 @@ def load_markers(path: pathlib.Path) -> dict:
     return {"dispute": doc.get("dispute_marker", "<!-- conveyor:disputed -->"),
             "round": doc.get("round_marker", "<!-- conveyor:round"),
             "grant": doc.get("grant_marker", "<!-- conveyor:grant -->"),
+            "refresh": doc.get("refresh_marker", "<!-- conveyor:refreshed -->"),
             "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
 
 
@@ -356,6 +361,11 @@ class Round:
         The label's timestamp is what makes re-labelling a fresh count."""
         return conveyor.count_marked(self._comments(), self.markers["round"], self.args.since)
 
+    def already_refreshed(self) -> bool:
+        """One fresh run per label placement. A check red again after its
+        re-run is a dispute a person must answer, not a second re-run."""
+        return conveyor.count_marked(self._comments(), self.markers["refresh"], self.args.since) > 0
+
     def count_grants(self) -> int:
         """One per `conveyor:keep-going` this program has already consumed, so the
         effective cap grows by a full `max_rounds` for each."""
@@ -439,7 +449,8 @@ class Round:
         return True, f"review-not-clean.py could not be read (exit {rc})"
 
     def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
-                note: str = "", unaddressed: dict[str, str] | None = None) -> None:
+                note: str = "", unaddressed: dict[str, str] | None = None,
+                refreshed: dict[str, str] | None = None) -> None:
         """ONE comment per ending: what was fixed, what was disputed, what was
         unaddressed, rounds used, what remains, and the approver mentioned.
 
@@ -488,6 +499,10 @@ class Round:
         if disputed:
             lines.append(f"\nDisputed ({len(disputed)}) — each stays open until you answer it:")
             lines += [f"- {describe(self.work[t])}: {why}" for t, why in disputed.items()]
+        if refreshed:
+            lines.append(f"\nRe-run ({len(refreshed)}) — the fixing step found nothing in the tree behind these, "
+                         "so the checks run again on a fresh commit. Red again, they wait for you:")
+            lines += [f"- {describe(self.work[t])}: {why}" for t, why in refreshed.items()]
         if unaddressed:
             # NEVER WORDED AS A DISPUTE. Nobody looked at these; they are
             # eligible for the next round rather than settled.
@@ -777,10 +792,44 @@ def main() -> int:
                        f"for @{args.approver}. The tree was not changed for them — re-run the check if you "
                        f"agree it was not the code, or answer here.\n\n{lines}{run}\n{tags}")
 
+    def refresh_checks(items: dict[str, str]) -> str:
+        """An EMPTY commit pushed to the branch, so CI judges the head again.
+        The fixer found nothing in the tree behind these red checks, and on
+        #259 that was true: the red was a check step deleted from ci.yml since
+        the head last ran. A fresh run is the verdict, and only a red that
+        survives it is a dispute for a person. Returns the sha, or "" when the
+        push failed and the items stay disputed."""
+        names = ", ".join(f"`{work[t].get('job')}`" for t in items)
+        sh("git", "commit", "-q", "--allow-empty", "-m",
+           f"chore(ci): re-run the checks (conveyor round {rnd.number})", "-m",
+           f"The fixing step found nothing in the tree behind {names}. A fresh run is the verdict.")
+        new_sha = sh("git", "rev-parse", "HEAD").stdout.strip()
+        push = sh("git", "push", "origin", f"HEAD:refs/heads/{args.branch}", check=False)
+        if push.returncode != 0:
+            print(f"the re-run commit could not be pushed:\n{push.stderr}", file=sys.stderr)
+            sh("git", "reset", "-q", "--hard", "HEAD~1", check=False)
+            return ""
+        pr_comment(args.repo, args.pr,
+                   f"{markers['refresh']}\nRound {rnd.number} re-runs the checks on {new_sha[:7]}: the fixing step "
+                   f"found nothing in the tree behind {names}. If they are red again, they wait for "
+                   f"@{args.approver}.{run}")
+        return new_sha
+
     if not fixed:
         print("no finding was fixed, so nothing is committed and nothing is resolved")
         if rnd:
+            refreshed: dict[str, str] = {}
+            red_checks = {t: why for t, why in disputed.items() if work[t]["source"] == "check"}
+            if red_checks and args.push_starts_workflows and not rnd.already_refreshed():
+                if refresh_checks(red_checks):
+                    for t in red_checks:
+                        refreshed[t] = disputed.pop(t)
             post_disputes()
+            if refreshed:
+                rnd.summary("checks re-run", [], disputed, unaddressed=unaddressed, refreshed=refreshed,
+                            note="Nothing in the tree explained the red checks, so they run again on a fresh "
+                                 "commit; CI and the review run on it, and their completion starts the next round.")
+                return 0
             # THREE DISTINCT ENDINGS, NOT TWO. "nothing addressed" is true
             # only when NEITHER a dispute nor an unaddressed item exists --
             # a round with some of each is a genuinely MIXED outcome, and
