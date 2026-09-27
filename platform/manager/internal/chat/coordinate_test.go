@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 )
 
 func coordFixture(t *testing.T, objs ...client.Object) (*Router, client.Client) {
@@ -490,6 +491,283 @@ func TestHandleMessageRefusesAnOriginNamedForItsOwnConversation(t *testing.T) {
 		InboundMessage{ThreadID: &thread, Text: "hello"})
 	if err != ErrSelfInput {
 		t.Fatalf("want ErrSelfInput, got %v", err)
+	}
+}
+
+func TestInvokeMemberFailsWhenTheCallersOwnCoordinatorIsMissing(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-missing")
+	r, _ := coordFixture(t, caller) // no Coordinator object exists for "co-missing"
+
+	if _, err := r.InvokeMember(context.Background(), caller, "worker", "task"); err == nil {
+		t.Fatal("want an error when the caller's own Coordinator does not exist")
+	}
+}
+
+// The cycle guard walks coordinatorChain, which itself walks causedBy — a
+// parent that no longer exists must surface as an error rather than a
+// (wrong) empty chain.
+func TestInvokeMemberPropagatesABrokenAncestryChain(t *testing.T) {
+	coA := testCoordinator("co-a", agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "nested", Description: "delegates", CoordinatorRef: &agentopsv1alpha1.ObjectRef{Name: "co-b"},
+	})
+	coB := testCoordinator("co-b")
+	caller := &agentopsv1alpha1.Conversation{}
+	caller.Name, caller.Namespace = "member-1", testNS
+	caller.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-a"}
+	caller.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "missing-parent", Entry: "x"}
+	r, _ := coordFixture(t, coA, coB, caller)
+
+	if _, err := r.InvokeMember(context.Background(), caller, "nested", "task"); err == nil {
+		t.Fatal("want an error when the caller's ancestry chain is broken")
+	}
+}
+
+// findReusableMember's reuse rule excludes a Closed conversation even when its
+// signature and (parent, entry) match — a stale closed member must never be
+// reattached to.
+func TestInvokeMemberIgnoresAClosedMemberWithTheSameSignature(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does the work",
+		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	closedMember := &agentopsv1alpha1.Conversation{}
+	closedMember.Name, closedMember.Namespace = "old-member", testNS
+	closedMember.Labels = map[string]string{labelSignatureHash: ingest.SignatureHash("invoke:worker")}
+	closedMember.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: caller.Name, Entry: "worker"}
+	closedMember.Status.Phase = agentopsv1alpha1.ConversationClosed
+
+	r, _ := coordFixture(t, co, caller, closedMember, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
+
+	result, err := r.InvokeMember(context.Background(), caller, "worker", "new task")
+	if err != nil {
+		t.Fatalf("InvokeMember: %v", err)
+	}
+	if !result.Created || result.Member == closedMember.Name {
+		t.Fatalf("a closed member with the same signature must not be reused, got %+v", result)
+	}
+}
+
+func TestInvokeMemberFailsWhenTheCapabilityIsMissing(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does the work",
+		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "does-not-exist"},
+	}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, co, caller)
+
+	if _, err := r.InvokeMember(context.Background(), caller, "worker", "task"); err == nil {
+		t.Fatal("want an error when the entry's capabilityRef does not exist")
+	}
+}
+
+func TestInvokeMemberFailsWhenTheNestedCoordinatorIsMissing(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "nested", Description: "delegates", CoordinatorRef: &agentopsv1alpha1.ObjectRef{Name: "does-not-exist"},
+	}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, co, caller)
+
+	if _, err := r.InvokeMember(context.Background(), caller, "nested", "task"); err == nil {
+		t.Fatal("want an error when the entry's coordinatorRef does not exist")
+	}
+}
+
+func TestInvokeMemberFailsWhenTheNestedCoordinatorsOwnCapabilityIsMissing(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "nested", Description: "delegates", CoordinatorRef: &agentopsv1alpha1.ObjectRef{Name: "co-b"},
+	}
+	coA := testCoordinator("co-a", entry)
+	coB := testCoordinator("co-b")
+	coB.Spec.AgentRef = &agentopsv1alpha1.ObjectRef{Name: "does-not-exist"}
+	caller := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, coA, coB, caller)
+
+	if _, err := r.InvokeMember(context.Background(), caller, "nested", "task"); err == nil {
+		t.Fatal("want an error when the nested coordinator's own capability cannot be resolved")
+	}
+}
+
+func TestInvokeMemberFailsWhenTheEntryNamesNeitherRef(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{Name: "bare", Description: "names nothing"}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, co, caller)
+
+	if _, err := r.InvokeMember(context.Background(), caller, "bare", "task"); err == nil {
+		t.Fatal("want an error when the entry names neither a capabilityRef nor a coordinatorRef")
+	}
+}
+
+// memberTitle: a blank task titles the member from its entry alone.
+func TestInvokeMemberTitlesAMemberFromItsEntryWhenTaskIsBlank(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does the work",
+		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
+
+	result, err := r.InvokeMember(context.Background(), caller, "worker", "   ")
+	if err != nil {
+		t.Fatalf("InvokeMember: %v", err)
+	}
+	var member agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: result.Member}, &member); err != nil {
+		t.Fatal(err)
+	}
+	if member.Spec.Title != "🤝 worker" {
+		t.Fatalf("a blank task must title the member from its entry alone, got %q", member.Spec.Title)
+	}
+}
+
+// memberTitle: a title over 60 runes is truncated.
+func TestInvokeMemberTruncatesALongTitle(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does the work",
+		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
+
+	longTask := strings.Repeat("word ", 30)
+	result, err := r.InvokeMember(context.Background(), caller, "worker", longTask)
+	if err != nil {
+		t.Fatalf("InvokeMember: %v", err)
+	}
+	var member agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: result.Member}, &member); err != nil {
+		t.Fatal(err)
+	}
+	if runes := []rune(member.Spec.Title); len(runes) != 60 {
+		t.Fatalf("a long title must be truncated to 60 runes, got %d: %q", len(runes), member.Spec.Title)
+	}
+}
+
+func TestAppendMemberResultSkipsNilOrSelfReferencingProvenance(t *testing.T) {
+	r, _ := coordFixture(t)
+
+	if err := r.AppendMemberResult(context.Background(), nil, "member-1", "id-1", "result"); err != nil {
+		t.Fatalf("a nil provenance must be a no-op, got %v", err)
+	}
+	self := &agentopsv1alpha1.Provenance{Parent: "member-1", Entry: "worker"}
+	if err := r.AppendMemberResult(context.Background(), self, "member-1", "id-2", "result"); err != nil {
+		t.Fatalf("a self-referencing provenance must be a no-op, got %v", err)
+	}
+}
+
+func TestAppendMemberResultIgnoresAMissingParent(t *testing.T) {
+	r, _ := coordFixture(t)
+
+	err := r.AppendMemberResult(context.Background(),
+		&agentopsv1alpha1.Provenance{Parent: "does-not-exist", Entry: "worker"}, "member-1", "id-1", "result")
+	if err != nil {
+		t.Fatalf("a missing parent must be ignored, not error, got %v", err)
+	}
+}
+
+func TestCloseCoordinatedIgnoresAMissingTarget(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller)
+
+	if err := r.CloseCoordinated(context.Background(), caller, "does-not-exist", "reason"); err != nil {
+		t.Fatalf("a missing target must be ignored, not error, got %v", err)
+	}
+}
+
+// cascadeCloseMembers must skip a member already Closed, and a member whose
+// causedBy LABEL names the parent while its own SPEC disagrees — the label is
+// a hint, the field is the fact.
+func TestCloseCoordinatedCascadeSkipsClosedAndStaleLabelMembers(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	alreadyClosed := &agentopsv1alpha1.Conversation{}
+	alreadyClosed.Name, alreadyClosed.Namespace = "closed-member", testNS
+	alreadyClosed.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	alreadyClosed.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
+	alreadyClosed.Status.Phase = agentopsv1alpha1.ConversationClosed
+
+	staleLabel := &agentopsv1alpha1.Conversation{}
+	staleLabel.Name, staleLabel.Namespace = "stale-member", testNS
+	staleLabel.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	staleLabel.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "someone-else", Entry: "worker"}
+
+	r, c := coordFixture(t, testCoordinator("co-a"), root, alreadyClosed, staleLabel)
+
+	if err := r.CloseCoordinated(context.Background(), root, root.Name, "wrapping up"); err != nil {
+		t.Fatal(err)
+	}
+	var gotStale agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: staleLabel.Name}, &gotStale)
+	if gotStale.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("a member whose causedBy field disagrees with its label must not be closed")
+	}
+}
+
+func TestCloseCoordinatedSelfIsANoOpWhenAlreadyClosed(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	caller.Status.Phase = agentopsv1alpha1.ConversationClosed
+	caller.Status.CloseReason = "already done"
+	r, c := coordFixture(t, testCoordinator("co-a"), caller)
+
+	if err := r.CloseCoordinated(context.Background(), caller, "root-1", "a new reason"); err != nil {
+		t.Fatal(err)
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "root-1"}, &got)
+	if got.Status.CloseReason != "already done" {
+		t.Fatalf("closing an already-closed conversation must not overwrite its reason, got %q", got.Status.CloseReason)
+	}
+}
+
+func TestCloseCoordinatedEnqueuesAFarewellOnEveryBoundThread(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-1"}}
+	root.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "chan-1", ThreadID: "t1"}}
+	r, _ := coordFixture(t, testCoordinator("co-a"), root, nsChannel("chan-1", "telegram"))
+
+	if err := r.CloseCoordinated(context.Background(), root, root.Name, "wrapping up"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseCoordinatedTruncatesALongReason(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	r, c := coordFixture(t, testCoordinator("co-a"), caller)
+	long := strings.Repeat("x", agentopsv1alpha1.MaxCloseReason+50)
+
+	if err := r.CloseCoordinated(context.Background(), caller, "root-1", long); err != nil {
+		t.Fatal(err)
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "root-1"}, &got)
+	if len(got.Status.CloseReason) != agentopsv1alpha1.MaxCloseReason {
+		t.Fatalf("a close reason over the bound must be truncated, got length %d", len(got.Status.CloseReason))
+	}
+}
+
+func TestEscalateUncausedRootIsANoOpWhenAlreadyEscalated(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
+	r, c := coordFixture(t, testCoordinator("co-a"), root, nsChannel("ops-desk", "telegram"))
+
+	if err := r.Escalate(context.Background(), root, "first digest"); err != nil {
+		t.Fatal(err)
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: root.Name}, &got)
+
+	if err := r.Escalate(context.Background(), &got, "second digest"); err != nil {
+		t.Fatal(err)
+	}
+	var second agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: root.Name}, &second)
+	if second.Status.EscalationMessage != "first digest" {
+		t.Fatalf("escalating an already-escalated conversation must not replay the digest, got %q", second.Status.EscalationMessage)
 	}
 }
 

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -14,6 +15,13 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 )
+
+// erroringReader always fails to read, for exercising readJSON's error path —
+// an httptest body backed by a string or bytes.Reader never errors, so this is
+// the only way to reach it.
+type erroringReader struct{}
+
+func (erroringReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
 
 const coordTestMasterKey = "master-key"
 
@@ -241,6 +249,266 @@ func TestHandleCoordinateReadReachesADescendantAtAnyDepth(t *testing.T) {
 	}
 	if out.Name != "grandchild-1" {
 		t.Fatalf("want the grandchild's own projection, got %+v", out)
+	}
+}
+
+func TestReadJSONPropagatesAReadError(t *testing.T) {
+	req := httptest.NewRequest("POST", "/coordinate/invoke", erroringReader{})
+	var v map[string]any
+	if err := readJSON(req, &v); err == nil {
+		t.Fatal("want an error when the body cannot be read")
+	}
+}
+
+func TestStatusForDefaultsTo500ForAnUnrecognizedError(t *testing.T) {
+	if got := statusFor(errors.New("something unexpected")); got != 500 {
+		t.Fatalf("want 500 for an unrecognized error, got %d", got)
+	}
+}
+
+func TestCallerConversationRefusesEmptyInputs(t *testing.T) {
+	s, _ := coordServer(t)
+	if _, err := s.callerConversation(context.Background(), "", "sometoken"); err != errWrongToken {
+		t.Fatalf("want errWrongToken for an empty name, got %v", err)
+	}
+	if _, err := s.callerConversation(context.Background(), "root-1", ""); err != errWrongToken {
+		t.Fatalf("want errWrongToken for an empty token, got %v", err)
+	}
+}
+
+func TestCallerConversationRefusesAnUnknownConversation(t *testing.T) {
+	s, _ := coordServer(t)
+	if _, err := s.callerConversation(context.Background(), "does-not-exist", "sometoken"); err != errWrongToken {
+		t.Fatalf("want errWrongToken for an unknown conversation, got %v", err)
+	}
+}
+
+func TestCallerConversationRefusesANonCoordinatorConversation(t *testing.T) {
+	plain := &agentopsv1alpha1.Conversation{}
+	plain.Name, plain.Namespace = "plain-1", "agent-ops"
+	s, _ := coordServer(t, plain)
+	if _, err := s.callerConversation(context.Background(), "plain-1", "sometoken"); err != errWrongToken {
+		t.Fatalf("want errWrongToken for a conversation with no coordinatorRef, got %v", err)
+	}
+}
+
+func TestCallerChannelRefusesEmptyInputs(t *testing.T) {
+	s, _ := coordServer(t)
+	if _, err := s.callerChannel(context.Background(), "", "sometoken"); err != errWrongToken {
+		t.Fatalf("want errWrongToken for an empty name, got %v", err)
+	}
+}
+
+func TestCallerChannelRefusesAnUnknownChannel(t *testing.T) {
+	s, _ := coordServer(t)
+	if _, err := s.callerChannel(context.Background(), "does-not-exist", "sometoken"); err != errWrongToken {
+		t.Fatalf("want errWrongToken for an unknown channel, got %v", err)
+	}
+}
+
+func TestCallerChannelRefusesAWrongToken(t *testing.T) {
+	ch := &agentopsv1alpha1.Channel{}
+	ch.Name, ch.Namespace = "voice-desk", "agent-ops"
+	s, _ := coordServer(t, ch)
+	if _, err := s.callerChannel(context.Background(), "voice-desk", "wrong"); err != errWrongToken {
+		t.Fatalf("want errWrongToken for a wrong token, got %v", err)
+	}
+}
+
+func TestHandleCoordinateInvokeRejectsMissingFields(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker"})
+	if rec.Code != 400 {
+		t.Fatalf("want 400 for a missing task, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateInvokePropagatesAnUnknownAgentRefusal(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "nope", "task": "do it"})
+	if rec.Code != 403 {
+		t.Fatalf("want 403 for an unknown agents[] entry, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateInvokeReports500ForAnUnrecognizedRouterError(t *testing.T) {
+	root := coordRoot("root-1", "co-missing") // names a Coordinator that does not exist
+	s, _ := coordServer(t, root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-missing", "root-1")
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"})
+	if rec.Code != 500 {
+		t.Fatalf("want 500 for an unrecognized router error, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateInvokeReportsAttachedOnReuse(t *testing.T) {
+	capability := &agentopsv1alpha1.AgentCapability{}
+	capability.Name, capability.Namespace = "cap-worker", "agent-ops"
+	profile := &agentopsv1alpha1.AgentProfile{}
+	profile.Name, profile.Namespace = "profile-worker", "agent-ops"
+	capability.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile.Name}
+	co := coordCoordinator("co-a", agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does it", CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	})
+	root := coordRoot("root-1", "co-a")
+	s, _ := coordServer(t, co, root, capability, profile)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	first := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "first"})
+	if first.Code != 200 {
+		t.Fatalf("first invoke: want 200, got %d: %s", first.Code, first.Body.String())
+	}
+	second := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "second"})
+	if second.Code != 200 {
+		t.Fatalf("second invoke: want 200, got %d: %s", second.Code, second.Body.String())
+	}
+	var out map[string]string
+	if err := json.Unmarshal(second.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["status"] != "attached" {
+		t.Fatalf("a second invoke of the same entry must attach, got %+v", out)
+	}
+}
+
+func TestHandleCoordinateCloseRejectsMissingReason(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	rec := postCoordinate(s, "/coordinate/close", token, map[string]any{"conversation": "root-1"})
+	if rec.Code != 400 {
+		t.Fatalf("want 400 for a missing reason, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateCloseRefusesAWrongToken(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	rec := postCoordinate(s, "/coordinate/close", "wrong-token",
+		map[string]any{"conversation": "root-1", "reason": "done"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateCloseDefaultsTargetToTheCaller(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	s, c := coordServer(t, coordCoordinator("co-a"), root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/close", token, map[string]any{"conversation": "root-1", "reason": "done"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatal("omitting target must close the caller itself")
+	}
+}
+
+func TestHandleCoordinateEscalateRejectsMissingMessage(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	rec := postCoordinate(s, "/coordinate/escalate", token, map[string]any{"conversation": "root-1"})
+	if rec.Code != 400 {
+		t.Fatalf("want 400 for a missing message, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateEscalateRefusesAWrongToken(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	rec := postCoordinate(s, "/coordinate/escalate", "wrong-token",
+		map[string]any{"conversation": "root-1", "message": "help"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProjectConversationNamesThePipelineWhenNotCoordinated(t *testing.T) {
+	c := &agentopsv1alpha1.Conversation{}
+	c.Name = "conv-1"
+	c.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: "pipeline-a"}
+	p := projectConversation(c)
+	if p.Pipeline != "pipeline-a" {
+		t.Fatalf("want the pipelineRef's name when there is no coordinatorRef, got %q", p.Pipeline)
+	}
+}
+
+func TestHandleCoordinateReadRejectsBadJSON(t *testing.T) {
+	s, _ := coordServer(t)
+	req := httptest.NewRequest("POST", "/coordinate/read", strings.NewReader("not json"))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Fatalf("want 400 for malformed JSON, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateReadChannelRefusesAWrongToken(t *testing.T) {
+	ch := &agentopsv1alpha1.Channel{}
+	ch.Name, ch.Namespace = "voice-desk", "agent-ops"
+	s, _ := coordServer(t, ch)
+	rec := postCoordinate(s, "/coordinate/read", "wrong-token", map[string]any{"channel": "voice-desk"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong channel token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateReadConversationRefusesAWrongToken(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	rec := postCoordinate(s, "/coordinate/read", "wrong-token", map[string]any{"conversation": "root-1"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong conversation token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateReadDefaultsTargetToTheCallerItself(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	root.Spec.Title = "the root"
+	s, _ := coordServer(t, coordCoordinator("co-a"), root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/read", token, map[string]any{"conversation": "root-1"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out conversationProjection
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "root-1" {
+		t.Fatalf("omitting target must project the caller itself, got %+v", out)
+	}
+}
+
+func TestHandleCoordinateReadRefusesAMissingTarget(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "does-not-exist"})
+	if rec.Code != 404 {
+		t.Fatalf("want 404 for a missing target, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateReadRefusesADanglingAncestryChain(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	target := &agentopsv1alpha1.Conversation{}
+	target.Name, target.Namespace = "target-1", "agent-ops"
+	target.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "does-not-exist", Entry: "worker"}
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, target)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/read", token,
+		map[string]any{"conversation": "root-1", "target": "target-1"})
+	if rec.Code != 403 {
+		t.Fatalf("a target whose ancestry chain breaks before reaching the caller must be refused, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
