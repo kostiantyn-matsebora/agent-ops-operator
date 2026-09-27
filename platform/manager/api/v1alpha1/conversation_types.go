@@ -204,10 +204,52 @@ func (i *InputItem) DeliverTo(channel, originSurface string, originEchoes bool) 
 	return !(channel == originSurface && originEchoes)
 }
 
+// Provenance names the conversation that invoked this one as a coordinated
+// MEMBER, and the entry it was invoked through.
+//
+// Parent is the IMMEDIATE parent — one hop, never the tree's ultimate root.
+// A member may itself be a Coordinator's root for its own members, so
+// walking to the uncaused root means following Parent one link at a time,
+// never reading it as already resolved.
+type Provenance struct {
+	// Parent is the parent conversation's name (same namespace).
+	// +kubebuilder:validation:MinLength=1
+	Parent string `json:"parent"`
+	// Entry is the name of the parent Coordinator's `agents[]` entry this
+	// conversation was invoked through.
+	// +kubebuilder:validation:MinLength=1
+	Entry string `json:"entry"`
+}
+
 // ConversationSpec pins a conversation to its chat surfaces and an agent
 // profile, and carries its queue of work units (append-only; pruned once
 // processed).
 type ConversationSpec struct {
+	// CausedBy is set when this conversation was created by the `invoke`
+	// verb on another conversation, rather than by a signal or a chat
+	// command. MATERIALIZED at creation, never set by hand.
+	//
+	// Independent of CoordinatorRef: a conversation may carry both when a
+	// Coordinator was invoked from inside another coordination — it is then
+	// simultaneously a MEMBER of its own parent and the ROOT of its own
+	// members.
+	// +optional
+	CausedBy *Provenance `json:"causedBy,omitempty"`
+	// CoordinatorRef names the Coordinator this conversation is itself the
+	// ROOT of — set only for a conversation the `invoke` verb (or an
+	// addressed/claimed signal) originated FROM a Coordinator, exactly as
+	// PipelineRef is set for one originated from a Pipeline. The two refs
+	// are mutually exclusive: a conversation has exactly one originating
+	// wiring object.
+	//
+	// PROVENANCE, never wiring — nothing resolves the Coordinator's
+	// agents[], sources or channels through this ref at dispatch time; those
+	// were already snapshotted at creation (ChannelRefs stay empty here,
+	// status.budget carries the limits). It exists so `invoke` knows which
+	// Coordinator's `agents[]` this conversation may invoke from, and so a
+	// nested cycle guard can name the Coordinator repeated.
+	// +optional
+	CoordinatorRef *ObjectRef `json:"coordinatorRef,omitempty"`
 	// ChannelRefs — every listed channel mirrors the whole conversation (own
 	// thread per channel, replies and acks fanned out). Empty = chat-less
 	// (HTTP-only / shadow).
@@ -626,6 +668,48 @@ func (t *ThreadBinding) Unread(lastActivity *metav1.Time, reader string) bool {
 	return lastActivity.Time.After(at.Time)
 }
 
+// ConversationBudget is a Coordinator-rooted conversation's own resource
+// ceiling, snapshotted at creation from its originating Coordinator's
+// `limits` — and the running counts against it.
+//
+// PER-LEVEL, ON PURPOSE: nesting never pools a budget across levels. A
+// conversation that is itself a Coordinator's root enforces only its OWN
+// budget, independent of any ancestor's — a nested Coordinator's parent
+// increments its own turns separately, on its own run.
+type ConversationBudget struct {
+	// MaxAgents ceilings AgentsInvoked over this conversation's lifetime.
+	// Zero means unset, not zero — enforcement supplies its own default.
+	// +optional
+	MaxAgents int32 `json:"maxAgents,omitempty"`
+	// MaxTurns ceilings Turns.
+	// +optional
+	MaxTurns int32 `json:"maxTurns,omitempty"`
+	// Deadline is the ABSOLUTE instant after which this conversation is
+	// closed `budget-exceeded` — the Coordinator's relative `limits.deadline`
+	// resolved against this conversation's own creation time, once, at
+	// snapshot: re-resolving against a later clock would let the same
+	// duration mean a different moment depending on when it was read.
+	// +optional
+	Deadline *metav1.Time `json:"deadline,omitempty"`
+	// AgentsInvoked counts agents invoked over this conversation's lifetime,
+	// incremented by the manager under optimistic concurrency as each
+	// `invoke` succeeds.
+	// +optional
+	AgentsInvoked int32 `json:"agentsInvoked,omitempty"`
+	// Turns counts completed runs on THIS conversation's own status,
+	// incremented when its OWN run is recorded — not when a member's result
+	// arrives as an input — so several members finishing at once is one
+	// turn.
+	// +optional
+	Turns int32 `json:"turns,omitempty"`
+}
+
+// MaxCloseReason bounds ConversationStatus.CloseReason.
+const MaxCloseReason = 256
+
+// MaxBrief bounds ConversationStatus.Brief.
+const MaxBrief = 512
+
 // ConversationStatus is the observed state.
 type ConversationStatus struct {
 	// +optional
@@ -683,6 +767,43 @@ type ConversationStatus struct {
 	// and CLEARED by a reopen — which is what stops the delete clock.
 	// +optional
 	ClosedAt *metav1.Time `json:"closedAt,omitempty"`
+	// Budget is set only on a conversation that is itself a Coordinator's
+	// root (spec.coordinatorRef non-nil) — the snapshot of that
+	// Coordinator's limits, plus the running counts against them. Absent
+	// on any other conversation: there is nothing to enforce.
+	// +optional
+	Budget *ConversationBudget `json:"budget,omitempty"`
+	// EscalatedAt stamps the moment the `escalate` verb opened this
+	// conversation's human thread — an UNCAUSED root only; a caused member
+	// escalates by closing instead (see CloseReason) and never sets this.
+	//
+	// DeliverInputs fences on it: nothing with an earlier arrival is
+	// (re)delivered to the channels escalation just bound, so opening the
+	// thread late does not replay everything that happened before it existed.
+	// +optional
+	EscalatedAt *metav1.Time `json:"escalatedAt,omitempty"`
+	// CloseReason is why the MCP `close` verb (or an internal
+	// `budget-exceeded` close) ended this conversation. Required by that
+	// verb; absent when `/close` ended it from a surface, or when nothing
+	// has closed it — a reader must not infer a reason from silence.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	CloseReason string `json:"closeReason,omitempty"`
+	// Brief is what this conversation is ABOUT — one or two sentences
+	// somebody could recognise it by, reported by the runtime in
+	// `/work/done` beside its result. LATEST-WINS, the same rule as
+	// RuntimeContextID: a report omitting it leaves the stored one
+	// untouched, and a runtime that never sends it leaves Title as the only
+	// description.
+	//
+	// It reports what the conversation CONCERNS, never where it stands —
+	// status already carries that, and Brief is never derived by re-reading
+	// status.runs[].result: that reach is exactly what a projection built on
+	// this field (a Coordinator's listing, the channel-reader token) exists
+	// to withhold.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	Brief string `json:"brief,omitempty"`
 	// ThreadsArchived names the bound channels whose thread has already been
 	// archived by a completed close-topic op.
 	//

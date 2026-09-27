@@ -20,7 +20,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 19 |
 | [AgentRuntime](#agentruntime) | yes | 46 |
-| [Conversation](#conversation) | no — the operator does | 40 |
+| [Conversation](#conversation) | no — the operator does | 45 |
 | [ConversationInput](#conversationinput) | no — the operator does | 5 |
 
 ## AgentProfile
@@ -456,9 +456,14 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `causedBy` | `object` |  | CausedBy is set when this conversation was created by the `invoke` verb on another conversation, rather than by a signal or a chat command. MATERIALIZED at creation, never set by hand. Independent of CoordinatorRef: a conversation may carry both when a Coordinator was invoked from inside another coordination — it is then simultaneously a MEMBER of its own parent and the ROOT of its own members. |
+| `causedBy.entry` | `string` | **yes** | Entry is the name of the parent Coordinator's `agents[]` entry this conversation was invoked through. |
+| `causedBy.parent` | `string` | **yes** | Parent is the parent conversation's name (same namespace). |
 | `channelRefs` | `[]object` |  | ChannelRefs — every listed channel mirrors the whole conversation (own thread per channel, replies and acks fanned out). Empty = chat-less (HTTP-only / shadow). |
 | `channelRefs[].name` | `string` | **yes** | Name of the referenced object. |
 | `contextClaimName` | `string` |  | ContextClaimName / WorkspaceClaimName are the RESOLVED claims this conversation's runtime pods mount, snapshotted at creation exactly as RuntimeRef and ServiceAccountName are. MATERIALIZED state, never hand-set. They are the answer to `pipeline.spec.persistence.<volume> -> the release default -> ephemeral`, computed ONCE, so that editing a Pipeline's persistence moves only conversations created afterwards. THAT IS SHARPER HERE THAN ANYWHERE ELSE ON THIS OBJECT. Re-resolving would change which volume an INFLIGHT conversation's next pod mounts — work that has already written to the old one, coming back to a different disk and reporting success. Empty means ephemeral OR a conversation predating these fields, and the two behave identically: resolution falls through to the manager's bootstrap default, exactly as it did before. |
+| `coordinatorRef` | `object` |  | CoordinatorRef names the Coordinator this conversation is itself the ROOT of — set only for a conversation the `invoke` verb (or an addressed/claimed signal) originated FROM a Coordinator, exactly as PipelineRef is set for one originated from a Pipeline. The two refs are mutually exclusive: a conversation has exactly one originating wiring object. PROVENANCE, never wiring — nothing resolves the Coordinator's agents[], sources or channels through this ref at dispatch time; those were already snapshotted at creation (ChannelRefs stay empty here, status.budget carries the limits). It exists so `invoke` knows which Coordinator's `agents[]` this conversation may invoke from, and so a nested cycle guard can name the Coordinator repeated. |
+| `coordinatorRef.name` | `string` | **yes** | Name of the referenced object. |
 | `inputs` | `[]object` |  |  |
 | `inputs[].agent` | `string` |  | Agent is DEPRECATED and no longer written. It carried the per-message agent override of the retired `/<pipeline>:<agent>` addressing form, which let whoever typed it select an agent definition the WIRING never declared. A Pipeline names one profile and a profile names one agent, so the agent is already fully determined by the wiring. Dispatch still READS it for one release, so inputs already queued when the manager restarts dispatch to the agent they were parsed with. Same posture as the retired `sessionId` dual-read; removing the field is a later change. Deprecated: nothing sets this. Do not add a writer. |
 | `inputs[].id` | `string` | **yes** |  |
@@ -503,6 +508,14 @@ Written by the operator. Read it, never set it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `brief` | `string` |  | Brief is what this conversation is ABOUT — one or two sentences somebody could recognise it by, reported by the runtime in `/work/done` beside its result. LATEST-WINS, the same rule as RuntimeContextID: a report omitting it leaves the stored one untouched, and a runtime that never sends it leaves Title as the only description. It reports what the conversation CONCERNS, never where it stands — status already carries that, and Brief is never derived by re-reading status.runs[].result: that reach is exactly what a projection built on this field (a Coordinator's listing, the channel-reader token) exists to withhold. |
+| `budget` | `object` |  | Budget is set only on a conversation that is itself a Coordinator's root (spec.coordinatorRef non-nil) — the snapshot of that Coordinator's limits, plus the running counts against them. Absent on any other conversation: there is nothing to enforce. |
+| `budget.agentsInvoked` | `integer` |  | AgentsInvoked counts agents invoked over this conversation's lifetime, incremented by the manager under optimistic concurrency as each `invoke` succeeds. |
+| `budget.deadline` | `string` |  | Deadline is the ABSOLUTE instant after which this conversation is closed `budget-exceeded` — the Coordinator's relative `limits.deadline` resolved against this conversation's own creation time, once, at snapshot: re-resolving against a later clock would let the same duration mean a different moment depending on when it was read. |
+| `budget.maxAgents` | `integer` |  | MaxAgents ceilings AgentsInvoked over this conversation's lifetime. Zero means unset, not zero — enforcement supplies its own default. |
+| `budget.maxTurns` | `integer` |  | MaxTurns ceilings Turns. |
+| `budget.turns` | `integer` |  | Turns counts completed runs on THIS conversation's own status, incremented when its OWN run is recorded — not when a member's result arrives as an input — so several members finishing at once is one turn. |
+| `closeReason` | `string` |  | CloseReason is why the MCP `close` verb (or an internal `budget-exceeded` close) ended this conversation. Required by that verb; absent when `/close` ended it from a surface, or when nothing has closed it — a reader must not infer a reason from silence. |
 | `closedAt` | `string` |  | ClosedAt stamps the transition into phase Closed, and is the ORIGIN of the delete clock — the only thing that reads it. A dedicated timestamp rather than the Closed condition's lastTransitionTime: a condition's transition time is rewritten by any reason change on the same condition, so a clock built on it can be reset by an unrelated status update. This is written once, at the transition, and CLEARED by a reopen — which is what stops the delete clock. |
 | `conditions` | `[]object` |  |  |
 | `conditions[].lastTransitionTime` | `string` | **yes** | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
@@ -516,6 +529,7 @@ Written by the operator. Read it, never set it.
 | `contextCheckpoint.bytes` | `integer` |  | Bytes transferred by this checkpoint. Zero is meaningful: it means the copy ran and found nothing changed. |
 | `contextCheckpoint.generation` | `string` |  | Generation names the copy on the volume, so an operator recovering by hand knows which directory to look in and a restore can fall back to an earlier one. |
 | `contextCheckpoint.quiesced` | `boolean` | **yes** | Quiesced reports whether this copy was taken at a WORK BOUNDARY, with nothing inflight, or during a run. A mid-run copy is still worth taking — a long run is exactly what a crash would otherwise lose in full — but it may contain a partially written file. Labelling it is what lets a restore, and a person, tell a known-consistent copy from a best-effort one instead of guessing. |
+| `escalatedAt` | `string` |  | EscalatedAt stamps the moment the `escalate` verb opened this conversation's human thread — an UNCAUSED root only; a caused member escalates by closing instead (see CloseReason) and never sets this. DeliverInputs fences on it: nothing with an earlier arrival is (re)delivered to the channels escalation just bound, so opening the thread late does not replay everything that happened before it existed. |
 | `inflight` | `object` |  | InflightRun tracks the unit currently dispatched to the runtime pod. |
 | `inflight.dispatchedAt` | `string` |  |  |
 | `inflight.inputIds` | `[]string` |  |  |
