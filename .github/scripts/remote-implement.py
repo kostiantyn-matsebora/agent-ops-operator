@@ -118,6 +118,12 @@ def main() -> int:
         return 0
     event = json.loads(args.event.read_text())
     label = (event.get("label") or {}).get("name") or ""
+    # SET ONLY BY carry.py's OWN `restart` ACTION (the `archive` job's payload),
+    # never by a real `issues: labeled` webhook, which carries no such field.
+    # It is what lets THIS ONE CALLER ask `fire` to restart an already-fired
+    # station -- carry_archive already re-checked open_pr_from_change itself,
+    # so this is not a bot independently deciding a session died.
+    restart_ok = bool(event.get("restart"))
     vocab = io.vocabulary(args.vocabulary)
     issue = event.get("issue") or {}
     number = issue.get("number")
@@ -141,7 +147,7 @@ def main() -> int:
     who = io.placer(args.repo, sender)
     behind = io.grant_placer(args.repo, number, vocab["run_label"]) if who.bot else None
     line = io.line(args.repo, number)
-    d = conveyor.fire(vocab, label, line, who, behind)
+    d = conveyor.fire(vocab, label, line, who, behind, restart_ok=restart_ok)
 
     if d.action == "refuse":
         if d.remove_label:

@@ -283,24 +283,34 @@ jobs:
               exit 0
             fi
           fi
-          # carry.py asks the machine: only a FINISHED change reaches the archive station, so a
-          # proposal or apply merge carries nothing and moves the line to implement instead.
+          # carry.py asks the machine: a FINISHED change reaches the archive station; an
+          # UNFINISHED one restarts implement instead, when nothing is open from its branch
+          # (a phase merged, the next has not started -- #53, measured across two phases).
           python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$pr" --station archive
       # Placing a label through this job's own token fires no `issues: labeled` webhook, so the
-      # session is started HERE, from the carry's own answer (`fire_issue`), with the same payload
-      # shape a real event carries. remote-implement.py re-checks the grant exactly as it does for
-      # any bot-carried label, so this is the same program reading the same facts.
-      - name: Start the archive session
+      # session is started HERE, from the carry's own answer (`fire_issue` + `fire_label`), with
+      # the same payload shape a real event carries. remote-implement.py re-checks the grant
+      # exactly as it does for any bot-carried label, so this is the same program reading the
+      # same facts. THE LABEL IS THE CARRY'S OWN OUTPUT, never restated: archive for a finished
+      # change, implement for a restart.
+      - name: Start the next session (archive, or implement restarted for the next phase)
         if: steps.carry.outputs.fire_issue != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
           ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
           ISSUE: ${{ steps.carry.outputs.fire_issue }}
+          LABEL: ${{ steps.carry.outputs.fire_label }}
         run: |
           set -euo pipefail
-          LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["archive_label"])')
+          # `"restart":true` ONLY WHEN THE LABEL IS implement_label: carry.py's
+          # `restart` action is the only source of this payload shape, and it
+          # is what lets `fire` restart a station that already fired once --
+          # never set for the ordinary archive-session start below it.
+          RESTART=false
+          IMPLEMENT_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["implement_label"])')
+          [ "$LABEL" = "$IMPLEMENT_LABEL" ] && RESTART=true
           payload=$(mktemp)
-          printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"}}' \
-            "$LABEL" "$ISSUE" > "$payload"
+          printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
+            "$LABEL" "$ISSUE" "$RESTART" > "$payload"
           python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"

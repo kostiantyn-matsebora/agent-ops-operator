@@ -835,3 +835,39 @@ job checks out the PULL REQUEST'S branch, and the action reads the copy there.
   fact from the other side**: a branch cannot run its own edit of the
   workflow, and a branch that lags cannot run the merged one until its
   checkout carries it.
+
+**A CHANGE MERGED IN PHASES STOPPED AFTER EACH ONE, AND CONVEYOR:RUN STOOD THE
+WHOLE TIME — MEASURED ON #53, 2026-09-27.**
+
+`carry_archive`'s own docstring named the fix for #255: an unfinished merge (a
+proposal or an apply) moves the line to `implement` instead of firing the
+archive station. It stopped there.
+
+Moving the station's LABEL is not the same as RESTARTING the session, and
+nothing else ever restarted it. Two phases in a row needed a person to remove
+and re-place `conveyor:run` before the next implement session would start.
+
+- **`fire`'s OWN RESTART LOGIC ALREADY EXISTED, AND `carry_archive` NEVER
+  REACHED IT.** A person re-placing a label restarts a station that fired
+  before, when nothing is open from the change's branch — exactly the case an
+  apply merge is, arriving through the merge instead of through a person
+  noticing it. `carry_archive` returned `nothing` before that logic could ever
+  run.
+- **THE FIX IS NOT A SECOND RESTART RULE.** `carry_archive` now asks for the
+  SAME check `fire` already does — fired before, nothing open, restart — and
+  `fire` gained one flag, `restart_ok`, to let a BOT-CARRIED placement through
+  that specific wall. Every other bot-carried path is unaffected: `restart_ok`
+  defaults `False`, and the wall it opens is a station `carry_archive` already
+  re-verified is safe to restart, never a general licence for a carry to
+  restart anything.
+- **THE PAYLOAD SAYS SO EXPLICITLY**, never inferred: `carry.py`'s `restart`
+  action emits `fire_label` (`archive` for a finished change, `implement` for
+  a restart) and the workflow sets `"restart":true` in the synthesized payload
+  only when that label is `implement_label`. `remote-implement.py` reads it
+  and passes it straight to `fire` as `restart_ok`.
+- **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT
+  ONE — AND THIS DOES NOT MINT ONE EITHER.** The grant restarting the station
+  is still `conveyor:run`, still re-checked against whoever placed it, still
+  the same standing instruction a person gave once. What changed is which
+  EVENTS get to ask `fire` for a restart, not who may authorise one.
+
