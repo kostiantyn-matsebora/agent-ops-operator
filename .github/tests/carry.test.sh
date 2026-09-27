@@ -24,7 +24,7 @@ case "$*" in
   "api repos/o/r/issues/"*"/timeline"*) cat "$FX/timeline.json" ;;
   "api repos/o/r/collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed 's#.*collaborators/\([^/]*\)/.*#\1#'); cat "$FX/perm-$l" 2>/dev/null || echo none ;;
   "api repos/o/r/issues/"*"/comments"*) cat "$FX/comments" 2>/dev/null ;;
-  "pr list "*) cat "$FX/open-prs" 2>/dev/null || echo '[]' ;;
+  "pr list "*) cat "$FX/open-prs" 2>/dev/null ;;  # --jq ".[].headRefName" yields lines, never JSON: absent means none open
   "run list "*) cat "$FX/review-runs" 2>/dev/null || echo 0 ;;
 esac
 exit 0
