@@ -31,7 +31,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       deadline}`; status with `Ready`. Also carries `coordinatorRef` per entry
       (mutually exclusive with `capabilityRef` by CEL) — nesting per D-B, which
       2.4's Ready check already needs to walk.
-- [ ] 2.2 `ConversationSpec.CausedBy *Provenance{parent, entry}` — PARENT, one
+- [x] 2.2 `ConversationSpec.CausedBy *Provenance{parent, entry}` — PARENT, one
       hop, never the tree's ultimate root — `spec.coordinatorRef`;
       `ConversationStatus.budget{maxAgents, maxTurns, deadline, agentsInvoked,
       turns}`, `escalatedAt`, `closeReason`, `brief` (MaxLength=512, D-I).

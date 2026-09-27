@@ -63,6 +63,31 @@ spec:
               profile, and carries its queue of work units (append-only; pruned once
               processed).
             properties:
+              causedBy:
+                description: |-
+                  CausedBy is set when this conversation was created by the `invoke`
+                  verb on another conversation, rather than by a signal or a chat
+                  command. MATERIALIZED at creation, never set by hand.
+
+                  Independent of CoordinatorRef: a conversation may carry both when a
+                  Coordinator was invoked from inside another coordination — it is then
+                  simultaneously a MEMBER of its own parent and the ROOT of its own
+                  members.
+                properties:
+                  entry:
+                    description: |-
+                      Entry is the name of the parent Coordinator's `agents[]` entry this
+                      conversation was invoked through.
+                    minLength: 1
+                    type: string
+                  parent:
+                    description: Parent is the parent conversation's name (same namespace).
+                    minLength: 1
+                    type: string
+                required:
+                - entry
+                - parent
+                type: object
               channelRefs:
                 description: |-
                   ChannelRefs — every listed channel mirrors the whole conversation (own
@@ -100,6 +125,29 @@ spec:
                   bootstrap default, exactly as it did before.
                 maxLength: 253
                 type: string
+              coordinatorRef:
+                description: |-
+                  CoordinatorRef names the Coordinator this conversation is itself the
+                  ROOT of — set only for a conversation the `invoke` verb (or an
+                  addressed/claimed signal) originated FROM a Coordinator, exactly as
+                  PipelineRef is set for one originated from a Pipeline. The two refs
+                  are mutually exclusive: a conversation has exactly one originating
+                  wiring object.
+
+                  PROVENANCE, never wiring — nothing resolves the Coordinator's
+                  agents[], sources or channels through this ref at dispatch time; those
+                  were already snapshotted at creation (ChannelRefs stay empty here,
+                  status.budget carries the limits). It exists so `invoke` knows which
+                  Coordinator's `agents[]` this conversation may invoke from, and so a
+                  nested cycle guard can name the Coordinator repeated.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               inputs:
                 items:
                   description: |-
@@ -435,6 +483,72 @@ spec:
           status:
             description: ConversationStatus is the observed state.
             properties:
+              brief:
+                description: |-
+                  Brief is what this conversation is ABOUT — one or two sentences
+                  somebody could recognise it by, reported by the runtime in
+                  `/work/done` beside its result. LATEST-WINS, the same rule as
+                  RuntimeContextID: a report omitting it leaves the stored one
+                  untouched, and a runtime that never sends it leaves Title as the only
+                  description.
+
+                  It reports what the conversation CONCERNS, never where it stands —
+                  status already carries that, and Brief is never derived by re-reading
+                  status.runs[].result: that reach is exactly what a projection built on
+                  this field (a Coordinator's listing, the channel-reader token) exists
+                  to withhold.
+                maxLength: 512
+                type: string
+              budget:
+                description: |-
+                  Budget is set only on a conversation that is itself a Coordinator's
+                  root (spec.coordinatorRef non-nil) — the snapshot of that
+                  Coordinator's limits, plus the running counts against them. Absent
+                  on any other conversation: there is nothing to enforce.
+                properties:
+                  agentsInvoked:
+                    description: |-
+                      AgentsInvoked counts agents invoked over this conversation's lifetime,
+                      incremented by the manager under optimistic concurrency as each
+                      `invoke` succeeds.
+                    format: int32
+                    type: integer
+                  deadline:
+                    description: |-
+                      Deadline is the ABSOLUTE instant after which this conversation is
+                      closed `budget-exceeded` — the Coordinator's relative `limits.deadline`
+                      resolved against this conversation's own creation time, once, at
+                      snapshot: re-resolving against a later clock would let the same
+                      duration mean a different moment depending on when it was read.
+                    format: date-time
+                    type: string
+                  maxAgents:
+                    description: |-
+                      MaxAgents ceilings AgentsInvoked over this conversation's lifetime.
+                      Zero means unset, not zero — enforcement supplies its own default.
+                    format: int32
+                    type: integer
+                  maxTurns:
+                    description: MaxTurns ceilings Turns.
+                    format: int32
+                    type: integer
+                  turns:
+                    description: |-
+                      Turns counts completed runs on THIS conversation's own status,
+                      incremented when its OWN run is recorded — not when a member's result
+                      arrives as an input — so several members finishing at once is one
+                      turn.
+                    format: int32
+                    type: integer
+                type: object
+              closeReason:
+                description: |-
+                  CloseReason is why the MCP `close` verb (or an internal
+                  `budget-exceeded` close) ended this conversation. Required by that
+                  verb; absent when `/close` ended it from a surface, or when nothing
+                  has closed it — a reader must not infer a reason from silence.
+                maxLength: 256
+                type: string
               closedAt:
                 description: |-
                   ClosedAt stamps the transition into phase Closed, and is the ORIGIN of the
@@ -562,6 +676,17 @@ spec:
                 - at
                 - quiesced
                 type: object
+              escalatedAt:
+                description: |-
+                  EscalatedAt stamps the moment the `escalate` verb opened this
+                  conversation's human thread — an UNCAUSED root only; a caused member
+                  escalates by closing instead (see CloseReason) and never sets this.
+
+                  DeliverInputs fences on it: nothing with an earlier arrival is
+                  (re)delivered to the channels escalation just bound, so opening the
+                  thread late does not replay everything that happened before it existed.
+                format: date-time
+                type: string
               inflight:
                 description: InflightRun tracks the unit currently dispatched to the
                   runtime pod.
