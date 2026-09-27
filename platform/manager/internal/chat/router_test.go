@@ -380,3 +380,119 @@ func TestPipelineNamedAfterACommandIsUnreachable(t *testing.T) {
 		}
 	}
 }
+
+// A Coordinator is addressable exactly as a Pipeline is (design D-B), and
+// shares its choice list.
+func TestListingOffersEachCoordinatorAsAChoiceToo(t *testing.T) {
+	r, q, _ := closeFixture(t,
+		pipeline("k8s-observe", "k8s-engineer", true),
+		coordinator("incident-coordinator", "responder", true),
+	)
+	cmd, _ := addressing.Parse("/" + ListCommand)
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	ops := drain(q, "slack")
+	got := map[string]string{}
+	for _, c := range ops[0].Message.Choices {
+		got[c.Label] = c.Command
+	}
+	if len(got) != 2 || got["incident-coordinator"] != "/incident-coordinator" {
+		t.Fatalf("want a choice for the Coordinator too, got %v", got)
+	}
+}
+
+// Addressing a Coordinator opens a root bound to ONLY the origin surface,
+// with its limits and escalation channels snapshotted (design D-B, D-D, D-E).
+func TestAddressingACoordinatorBindsOriginSurfaceOnly(t *testing.T) {
+	co := coordinator("incident-coordinator", "responder", true)
+	co.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "escalation-channel"}}
+	co.Spec.Limits = &agentopsv1alpha1.CoordinatorLimits{MaxAgents: 4}
+	r, _, c := closeFixture(t, co)
+	cmd, _ := addressing.Parse("/incident-coordinator investigate api latency")
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "someone", ""); err != nil {
+		t.Fatal(err)
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("want 1 conversation, got %d", len(list.Items))
+	}
+	conv := list.Items[0]
+	if conv.Spec.CoordinatorRef == nil || conv.Spec.CoordinatorRef.Name != "incident-coordinator" {
+		t.Fatalf("coordinatorRef must name the addressed Coordinator: %+v", conv.Spec.CoordinatorRef)
+	}
+	if conv.Spec.PipelineRef != nil {
+		t.Fatalf("only one of the two refs may be set: %+v", conv.Spec.PipelineRef)
+	}
+	if len(conv.Spec.ChannelRefs) != 1 || conv.Spec.ChannelRefs[0].Name != "c1" {
+		t.Fatalf("an addressed Coordinator conversation binds ONLY the origin surface: %+v", conv.Spec.ChannelRefs)
+	}
+	if len(conv.Spec.EscalationChannelRefs) != 1 || conv.Spec.EscalationChannelRefs[0].Name != "escalation-channel" {
+		t.Fatalf("escalationChannelRefs must snapshot the Coordinator's own channelRefs: %+v",
+			conv.Spec.EscalationChannelRefs)
+	}
+	if conv.Status.Budget == nil || conv.Status.Budget.MaxAgents != 4 {
+		t.Fatalf("status.budget must snapshot the Coordinator's limits: %+v", conv.Status.Budget)
+	}
+}
+
+// One Get per kind, Pipeline first (design D-B): a name held by both resolves
+// to the Pipeline, and the collision is reported on the Coordinator's own
+// Ready — never resolved here.
+func TestPipelineResolvesBeforeCoordinatorOnASharedName(t *testing.T) {
+	r, _, c := closeFixture(t,
+		pipeline("shared-name", "pipe-profile", true),
+		coordinator("shared-name", "co-profile", true),
+	)
+	cmd, _ := addressing.Parse("/shared-name do a thing")
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("want 1 conversation, got %d", len(list.Items))
+	}
+	conv := list.Items[0]
+	if conv.Spec.PipelineRef == nil || conv.Spec.PipelineRef.Name != "shared-name" {
+		t.Fatalf("Pipeline must resolve first on a shared name: %+v", conv.Spec)
+	}
+	if conv.Spec.CoordinatorRef != nil {
+		t.Fatalf("only one of the two refs may be set: %+v", conv.Spec.CoordinatorRef)
+	}
+}
+
+// Interception precedes the lookup for EITHER kind, exactly as it does for a
+// Pipeline — so a Coordinator named after a manager command is unreachable by
+// it too (chat-signal-origination).
+func TestCoordinatorNamedAfterACommandIsUnreachable(t *testing.T) {
+	r, q, c := closeFixture(t, coordinator(ListCommand, "shadow", true))
+	body := listingBody(t, r, q, "/"+ListCommand+" do a thing")
+	if !strings.Contains(body, "Pipelines") {
+		t.Fatalf("command was shadowed by a coordinator of the same name: %q", body)
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 0 {
+		t.Fatalf("shadowing coordinator started %d conversation(s)", len(list.Items))
+	}
+}
+
+// Neither kind resolves → the refusal names both, never "agent".
+func TestUnknownAddressRefusalNamesBothKinds(t *testing.T) {
+	r, q, _ := closeFixture(t)
+	body := listingBody(t, r, q, "/nope do a thing")
+	if strings.Contains(body, "agent") {
+		t.Fatalf("refusal calls a claimant an agent: %q", body)
+	}
+	if !strings.Contains(body, "pipeline") || !strings.Contains(body, "coordinator") {
+		t.Fatalf("refusal must name both kinds: %q", body)
+	}
+}

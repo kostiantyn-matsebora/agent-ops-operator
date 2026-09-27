@@ -55,22 +55,23 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		cond.Message = "an adapter reported this source Ready through the contract"
 	}
 
-	// Wired: pipeline-only wiring — a source routes signals only while a Ready
-	// Pipeline lists it. The message names ALL of them, never just the first:
-	// a source several pipelines watch fans each signal out to every one, so
-	// the COUNT is what an operator needs to predict behaviour — how many
-	// conversations one signal opens, and (on a chat source) whether a bare
-	// message is unambiguous or gets refused with the choices.
+	// Wired: claimant-only wiring — a source routes signals only while a Ready
+	// Pipeline OR Coordinator lists it (design D-B: a Coordinator claims a
+	// source exactly as a Pipeline does). The message names ALL of them, never
+	// just the first: a source several claimants watch fans each signal out to
+	// every one, so the COUNT is what an operator needs to predict behaviour —
+	// how many conversations one signal opens, and (on a chat source) whether a
+	// bare message is unambiguous or gets refused with the choices.
 	wired := metav1.Condition{Type: ConditionWired, Status: metav1.ConditionFalse, Reason: "NoPipelineClaim",
-		Message: "no Ready Pipeline references this source — signals are dropped until one does"}
+		Message: "no Ready Pipeline or Coordinator references this source — signals are dropped until one does"}
 	if servers := chat.PipelinesForSource(ctx, r.Client, src.Namespace, src.Name); len(servers) > 0 {
 		names := make([]string, 0, len(servers))
 		for i := range servers {
-			names = append(names, strconv.Quote(servers[i].Name))
+			names = append(names, strconv.Quote(servers[i].GetName()))
 		}
 		wired.Status = metav1.ConditionTrue
 		wired.Reason = "PipelineClaim"
-		wired.Message = fmt.Sprintf("wired by %d Pipeline(s): %s — each opens its own conversation per signal",
+		wired.Message = fmt.Sprintf("wired by %d claimant(s): %s — each opens its own conversation per signal",
 			len(names), strings.Join(names, ", "))
 	}
 
@@ -111,8 +112,9 @@ func (r *SignalSourceReconciler) adapter(ctx context.Context, src *agentopsv1alp
 }
 
 // SetupWithManager wires the controller: SignalSources, SignalAdapter events
-// mapped onto the sources naming that adapter, and Pipeline events mapped
-// onto all sources (claim changes flip Wired).
+// mapped onto the sources naming that adapter, and Pipeline/Coordinator events
+// mapped onto all sources (claim changes flip Wired — a Coordinator claims a
+// source exactly as a Pipeline does, design D-B).
 func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapAdapter := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		a, ok := obj.(*agentopsv1alpha1.SignalAdapter)
@@ -131,7 +133,11 @@ func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return reqs
 	}
-	mapPipeline := func(ctx context.Context, obj client.Object) []ctrl.Request {
+	// mapClaimant requeues every source on any Pipeline or Coordinator event —
+	// either kind's claim can flip Wired, and a targeted diff of WHICH claim
+	// changed buys nothing a reconcile of every source doesn't already do
+	// cheaply.
+	mapClaimant := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		var list agentopsv1alpha1.SignalSourceList
 		if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
 			return nil
@@ -145,6 +151,7 @@ func (r *SignalSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.SignalSource{}).
 		Watches(&agentopsv1alpha1.SignalAdapter{}, handler.EnqueueRequestsFromMapFunc(mapAdapter)).
-		Watches(&agentopsv1alpha1.Pipeline{}, handler.EnqueueRequestsFromMapFunc(mapPipeline)).
+		Watches(&agentopsv1alpha1.Pipeline{}, handler.EnqueueRequestsFromMapFunc(mapClaimant)).
+		Watches(&agentopsv1alpha1.Coordinator{}, handler.EnqueueRequestsFromMapFunc(mapClaimant)).
 		Complete(r)
 }

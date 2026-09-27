@@ -25,9 +25,9 @@ import (
 // 4096-character limit does. Nothing in this file may grow a rule that exists to
 // suit one transport.
 
-// EntryKind distinguishes a manager command from an addressable Pipeline. An
-// adapter filters on properties, not on which array a thing arrived in, so both
-// travel in ONE list.
+// EntryKind distinguishes a manager command from an addressable Pipeline or
+// Coordinator. An adapter filters on properties, not on which array a thing
+// arrived in, so all three travel in ONE list.
 type EntryKind string
 
 const (
@@ -35,6 +35,9 @@ const (
 	KindBuiltin EntryKind = "builtin"
 	// KindPipeline is an addressable Pipeline.
 	KindPipeline EntryKind = "pipeline"
+	// KindCoordinator is an addressable Coordinator (design D-B). An
+	// AgentCapability never appears here — see chat-addressing-discovery.
+	KindCoordinator EntryKind = "coordinator"
 )
 
 // Position is WHERE an entry is valid. The two positions take disjoint sets:
@@ -66,7 +69,8 @@ type Entry struct {
 	// Published as declared and interpreted no further: whether a surface can
 	// draw one, and where it puts it, is that adapter's business.
 	Icon string `json:"icon,omitempty"`
-	// Profile is the profile answering for a Pipeline entry, empty on a builtin.
+	// Profile is the profile answering for a Pipeline or Coordinator entry,
+	// empty on a builtin.
 	// It is DERIVED from what the Pipeline already declares — no CRD field was
 	// added to carry prose here, because a second place to write a name is a
 	// second place for it to be wrong.
@@ -110,14 +114,18 @@ func ReservedCommands() []string {
 	return []string{ListCommand, RetiredListCommand, "help", "start", ExitCommand, CloseCommand}
 }
 
-// readyPipelines returns the addressable Pipelines as vocabulary entries,
-// sorted by name. Returns nil on a list error so a caller can tell it apart
-// from a namespace with none.
+// readyPipelines returns the addressable Pipelines and Coordinators as
+// vocabulary entries, sorted by name. Returns nil on a list error so a caller
+// can tell it apart from a namespace with none.
 //
-// READY ONLY: an unready Pipeline names wiring that does not resolve, and
+// READY ONLY: an unready claimant names wiring that does not resolve, and
 // offering it invites a request nothing can serve. The listing command and the
 // vocabulary must never disagree about this, which is why both come through
 // here.
+//
+// A Coordinator is addressable exactly as a Pipeline is (chat-addressing-discovery,
+// chat-signal-origination) — the two kinds share one name space, and this is
+// the ONE place either is turned into a vocabulary Entry.
 func (r *Router) readyPipelines(ctx context.Context) []Entry {
 	var list agentopsv1alpha1.PipelineList
 	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace)); err != nil {
@@ -133,6 +141,22 @@ func (r *Router) readyPipelines(ctx context.Context) []Entry {
 		out = append(out, Entry{
 			Kind: KindPipeline, Name: p.Name, Position: PositionGeneral,
 			Description: profile, Profile: profile, Icon: p.Spec.Icon,
+		})
+	}
+	var coordinators agentopsv1alpha1.CoordinatorList
+	if err := r.Reader.List(ctx, &coordinators, client.InNamespace(r.Namespace)); err != nil {
+		return nil
+	}
+	for i := range coordinators.Items {
+		co := &coordinators.Items[i]
+		if !apimeta.IsStatusConditionTrue(co.Status.Conditions, "Ready") {
+			continue
+		}
+		profile := co.InlineCapability().ProfileName()
+		out = append(out, Entry{
+			// A Coordinator declares no Icon — see coordinator_types.go.
+			Kind: KindCoordinator, Name: co.Name, Position: PositionGeneral,
+			Description: profile, Profile: profile,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

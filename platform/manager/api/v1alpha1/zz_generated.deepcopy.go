@@ -870,6 +870,11 @@ func (in *ConversationSpec) DeepCopyInto(out *ConversationSpec) {
 		*out = new(ObjectRef)
 		**out = **in
 	}
+	if in.EscalationChannelRefs != nil {
+		in, out := &in.EscalationChannelRefs, &out.EscalationChannelRefs
+		*out = make([]ObjectRef, len(*in))
+		copy(*out, *in)
+	}
 	if in.ChannelRefs != nil {
 		in, out := &in.ChannelRefs, &out.ChannelRefs
 		*out = make([]ObjectRef, len(*in))
