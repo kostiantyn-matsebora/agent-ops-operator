@@ -46,6 +46,39 @@ func reconcileConversation(t *testing.T, srv *httpapi.Server, name string) {
 	}
 }
 
+// decodeCoordinateInvokeResponse checks a /coordinate/invoke response for a
+// created member and returns its decoded body.
+func decodeCoordinateInvokeResponse(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
+	t.Helper()
+	if rec.Code != 200 {
+		t.Fatalf("invoke: %d %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["status"] != "created" || out["member"] == "" {
+		t.Fatalf("want a created member, got %+v", out)
+	}
+	return out
+}
+
+// assertMemberCausedByInvoke checks that a member conversation created by
+// /coordinate/invoke round-trips its provenance through the real schema.
+func assertMemberCausedByInvoke(t *testing.T, member *agentopsv1alpha1.Conversation, rootName string) {
+	t.Helper()
+	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != rootName || member.Spec.CausedBy.Entry != "worker" {
+		t.Fatalf("causedBy must round-trip through the real schema: %+v", member.Spec.CausedBy)
+	}
+	if member.Labels[agentopsv1alpha1.LabelCausedBy] != rootName {
+		t.Fatalf("the caused-by label must be set for the close cascade to find it: %+v", member.Labels)
+	}
+	if len(member.Spec.Inputs) != 1 || member.Spec.Inputs[0].Origin == nil ||
+		member.Spec.Inputs[0].Origin.Kind != agentopsv1alpha1.OriginMember {
+		t.Fatalf("the invoked task's origin must be the NEW `member` kind, admitted by the real schema: %+v", member.Spec.Inputs)
+	}
+}
+
 func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 	mkProfile(t, "prof-invoke-co")
 	mkCapability(t, "cap-invoke-worker", "prof-invoke-co")
@@ -73,27 +106,9 @@ func TestCoordinateInvokeCreatesAMemberAndRoutesItsResultBack(t *testing.T) {
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-invoke", root.Name)
 	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
 		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
-	if rec.Code != 200 {
-		t.Fatalf("invoke: %d %s", rec.Code, rec.Body.String())
-	}
-	var out map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out["status"] != "created" || out["member"] == "" {
-		t.Fatalf("want a created member, got %+v", out)
-	}
+	out := decodeCoordinateInvokeResponse(t, rec)
 	member := getConv(t, out["member"])
-	if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != root.Name || member.Spec.CausedBy.Entry != "worker" {
-		t.Fatalf("causedBy must round-trip through the real schema: %+v", member.Spec.CausedBy)
-	}
-	if member.Labels[agentopsv1alpha1.LabelCausedBy] != root.Name {
-		t.Fatalf("the caused-by label must be set for the close cascade to find it: %+v", member.Labels)
-	}
-	if len(member.Spec.Inputs) != 1 || member.Spec.Inputs[0].Origin == nil ||
-		member.Spec.Inputs[0].Origin.Kind != agentopsv1alpha1.OriginMember {
-		t.Fatalf("the invoked task's origin must be the NEW `member` kind, admitted by the real schema: %+v", member.Spec.Inputs)
-	}
+	assertMemberCausedByInvoke(t, member, root.Name)
 
 	// Report the member's work done, and the fast path in /work/done must route
 	// the result to the parent as an input, admitted by the real CRD schema.

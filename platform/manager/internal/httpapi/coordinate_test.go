@@ -65,16 +65,16 @@ func TestHandleCoordinateInvokeRefusesTheWrongToken(t *testing.T) {
 }
 
 func TestHandleCoordinateInvokeSucceedsWithTheDerivedToken(t *testing.T) {
-	cap := &agentopsv1alpha1.AgentCapability{}
-	cap.Name, cap.Namespace = "cap-worker", "agent-ops"
+	capability := &agentopsv1alpha1.AgentCapability{}
+	capability.Name, capability.Namespace = "cap-worker", "agent-ops"
 	profile := &agentopsv1alpha1.AgentProfile{}
 	profile.Name, profile.Namespace = "profile-worker", "agent-ops"
-	cap.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile.Name}
+	capability.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile.Name}
 	co := coordCoordinator("co-a", agentopsv1alpha1.CoordinatorAgentEntry{
 		Name: "worker", Description: "does it", CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
 	})
 	root := coordRoot("root-1", "co-a")
-	s, c := coordServer(t, co, root, cap, profile)
+	s, c := coordServer(t, co, root, capability, profile)
 
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
 	rec := postCoordinate(s, "/coordinate/invoke", token,

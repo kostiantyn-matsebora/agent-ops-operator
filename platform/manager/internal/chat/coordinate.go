@@ -461,9 +461,9 @@ func memberTitle(entryName, task string) string {
 	return title
 }
 
-func boundedString(s string, max int) string {
-	if len(s) > max {
-		return s[:max]
+func boundedString(s string, limit int) string {
+	if len(s) > limit {
+		return s[:limit]
 	}
 	return s
 }
