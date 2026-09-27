@@ -861,10 +861,11 @@ and re-place `conveyor:run` before the next implement session would start.
   re-verified is safe to restart, never a general licence for a carry to
   restart anything.
 - **THE PAYLOAD SAYS SO EXPLICITLY**, never inferred: `carry.py`'s `restart`
-  action emits `fire_label` (`archive` for a finished change, `implement` for
-  a restart) and the workflow sets `"restart":true` in the synthesized payload
-  only when that label is `implement_label`. `remote-implement.py` reads it
-  and passes it straight to `fire` as `restart_ok`.
+  action emits `fire_label` set to `archive_label` for a finished change, or
+  `implement_label` for a restart, and the workflow sets `"restart":true` in
+  the synthesized payload only when `fire_label` equals `implement_label`.
+  `remote-implement.py` reads it and passes it straight to `fire` as
+  `restart_ok`.
 - **A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT
   ONE — AND THIS DOES NOT MINT ONE EITHER.** The grant restarting the station
   is still `conveyor:run`, still re-checked against whoever placed it, still

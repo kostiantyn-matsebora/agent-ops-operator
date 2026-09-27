@@ -309,7 +309,7 @@ jobs:
           # never set for the ordinary archive-session start below it.
           RESTART=false
           IMPLEMENT_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["implement_label"])')
-          [ "$LABEL" = "$IMPLEMENT_LABEL" ] && RESTART=true
+          if [ "$LABEL" = "$IMPLEMENT_LABEL" ]; then RESTART=true; fi
           payload=$(mktemp)
           printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
             "$LABEL" "$ISSUE" "$RESTART" > "$payload"

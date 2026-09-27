@@ -112,12 +112,11 @@ def main() -> int:
     line = io.line(args.repo, issue, sessions=args.station == "archive") if issue and same else conveyor.Line()
 
     # THE PERSON BEHIND THE GRANT that stands for THIS pull request and station.
-    # A restart is carried on `conveyor:run` too, the only grant an unfinished
-    # change can stand on.
-    grant = conveyor.standing_grant(vocab, line.issue_labels, args.station, pr_closes=closes is not None)
-    if grant is None and args.station == "archive" and carrying and not line.change_finished:
-        grant = vocab["run_label"] if vocab["run_label"] in line.issue_labels else None
-    grant = grant if carrying else None
+    # `standing_grant` ALREADY RETURNS `conveyor:run` FOR AN UNFINISHED CHANGE'S
+    # ARCHIVE STATION (see its own docstring), which is the same grant a
+    # restart is carried on -- no second lookup is needed here for that case.
+    grant = conveyor.standing_grant(vocab, line.issue_labels, args.station, pr_closes=closes is not None) \
+        if carrying else None
     placer = io.grant_placer(args.repo, issue, grant) if grant else None
 
     decide = conveyor.carry_fix if args.station == "fix" else conveyor.carry_archive

@@ -536,8 +536,14 @@ assert_contains "$run_step" '"label":{"name":"%s"}'
 assert_contains "$run_step" 'remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"'
 
 it "the payload marks a restart ONLY when the fired label is implement_label, so fire() may restart an already-fired station"
+run_step=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["run"])')
 assert_contains "$run_step" '"restart":%s'
 assert_contains "$run_step" 'IMPLEMENT_LABEL=$(python3 -c'
+# THE CONDITION USES if/fi, NEVER `[ cond ] && VAR=true`: not a `set -e` exit risk here
+# (the chain is not the step's last command, so `errexit` never fires on it), but the
+# conventional form does not depend on that being true forever as the step grows.
+assert_not_contains "$run_step" '] && RESTART=true'
+assert_contains "$run_step" 'if [ "$LABEL" = "$IMPLEMENT_LABEL" ]; then RESTART=true; fi'
 
 it "the step that starts the archive session sets ROUTINE_FIRE_URL and ROUTINE_FIRE_TOKEN, the same two the fire job needs"
 env=$(wpy 'print([s for s in d["jobs"]["archive"]["steps"] if "if" in s][0]["env"])')
