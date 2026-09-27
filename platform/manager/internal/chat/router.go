@@ -451,6 +451,63 @@ func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []
 	return append(refs, agentopsv1alpha1.ObjectRef{Name: ch.Name})
 }
 
+// handleListPipelines answers `/pipelines`. They are what a message
+// addresses, and what carries the capabilities the resulting conversation
+// will have — listing profiles would name things a user cannot actually
+// address.
+func (r *Router) handleListPipelines(ctx context.Context, ch *agentopsv1alpha1.Channel) error {
+	entries := r.readyPipelines(ctx)
+	if entries == nil {
+		return fmt.Errorf("list pipelines for %s listing", ListCommand)
+	}
+	// Each entry carries its answering PROFILE, matching what a surface with
+	// input assistance offers in its typeahead. Two Pipelines on one surface
+	// is now an ordinary configuration — a source is shareable — and a bare
+	// list of names is not enough to choose between them.
+	lines := make([]string, 0, len(entries))
+	choices := make([]Choice, 0, len(entries))
+	for _, e := range entries {
+		line := "• `/" + e.Name + "`"
+		if e.Profile != "" {
+			line += " — " + e.Profile
+		}
+		lines = append(lines, line)
+		choices = append(choices, Choice{Label: e.Name, Command: "/" + e.Name})
+	}
+	sort.Strings(lines)
+	// Both thread commands are named TOGETHER, with the difference spelled
+	// out. Two commands one word apart, one of which archives a thread, are
+	// exactly the pair nobody should have to guess between.
+	msg := Notice("🤖 **Pipelines**\n" + strings.Join(lines, "\n") +
+		"\n\nUsage: `/<pipeline> <task>` — each call gets its own topic.\n" +
+		"Inside a conversation's own thread: `/exit` releases its runtime and keeps " +
+		"the conversation, `/close` ends the conversation and archives the thread.")
+	msg.Choices = choices
+	r.Ops.EnqueueMessage(ctx, ch, nil, msg)
+	return nil
+}
+
+// resolveClaimant looks up an addressed name as a Pipeline, then a
+// Coordinator (design D-B): a name held by both is reported on the
+// Coordinator's own Ready, never resolved here. A plain lookup by name, no
+// claim check, no Ready check — exactly as it was before a second kind
+// existed. Returns a nil Claimant, not an error, when neither exists.
+func (r *Router) resolveClaimant(ctx context.Context, name string) (Claimant, error) {
+	var pipe agentopsv1alpha1.Pipeline
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &pipe); err == nil {
+		return pipelineClaimant{&pipe}, nil
+	} else if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	var co agentopsv1alpha1.Coordinator
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &co); err == nil {
+		return coordinatorClaimant{&co}, nil
+	} else if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	return nil, nil
+}
+
 // HandleCommand answers chat input that addresses a pipeline. Called from the
 // CHAT SIGNAL path, which is where origination lives — commands that only
 // produce a response emit a send op and create no Conversation.
@@ -461,38 +518,7 @@ func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []
 // arrives there anonymous.
 func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID string) error {
 	if isListCommand(cmd.Pipeline) {
-		// List PIPELINES: they are what a message addresses, and what carries
-		// the capabilities the resulting conversation will have. Listing
-		// profiles would name things a user cannot actually address.
-		entries := r.readyPipelines(ctx)
-		if entries == nil {
-			return fmt.Errorf("list pipelines for %s listing", ListCommand)
-		}
-		// Each entry carries its answering PROFILE, matching what a surface with
-		// input assistance offers in its typeahead. Two Pipelines on one surface
-		// is now an ordinary configuration — a source is shareable — and a bare
-		// list of names is not enough to choose between them.
-		lines := make([]string, 0, len(entries))
-		choices := make([]Choice, 0, len(entries))
-		for _, e := range entries {
-			line := "• `/" + e.Name + "`"
-			if e.Profile != "" {
-				line += " — " + e.Profile
-			}
-			lines = append(lines, line)
-			choices = append(choices, Choice{Label: e.Name, Command: "/" + e.Name})
-		}
-		sort.Strings(lines)
-		// Both thread commands are named TOGETHER, with the difference spelled
-		// out. Two commands one word apart, one of which archives a thread, are
-		// exactly the pair nobody should have to guess between.
-		msg := Notice("🤖 **Pipelines**\n" + strings.Join(lines, "\n") +
-			"\n\nUsage: `/<pipeline> <task>` — each call gets its own topic.\n" +
-			"Inside a conversation's own thread: `/exit` releases its runtime and keeps " +
-			"the conversation, `/close` ends the conversation and archives the thread.")
-		msg.Choices = choices
-		r.Ops.EnqueueMessage(ctx, ch, nil, msg)
-		return nil
+		return r.handleListPipelines(ctx, ch)
 	}
 	if cmd.Pipeline == CloseCommand {
 		// /close reaches HandleCommand only from a general surface, where there
@@ -509,28 +535,9 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 			"inside that conversation's own thread. Nothing was released."))
 		return nil
 	}
-	// A command addresses a PIPELINE OR A COORDINATOR: it originates the
-	// conversation, so it supplies the profile AND the capabilities.
-	// Addressing a profile would name something with no wiring, and therefore
-	// nothing to grant.
-	//
-	// ONE Get per kind, Pipeline first (design D-B): a name held by both is
-	// reported on the Coordinator's own Ready, never resolved here — this is a
-	// plain lookup by name, no claim check, no Ready check, exactly as it was
-	// before a second kind existed.
-	var claimant Claimant
-	var pipe agentopsv1alpha1.Pipeline
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &pipe); err == nil {
-		claimant = pipelineClaimant{&pipe}
-	} else if !apierrors.IsNotFound(err) {
+	claimant, err := r.resolveClaimant(ctx, cmd.Pipeline)
+	if err != nil {
 		return err
-	} else {
-		var co agentopsv1alpha1.Coordinator
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &co); err == nil {
-			claimant = coordinatorClaimant{&co}
-		} else if !apierrors.IsNotFound(err) {
-			return err
-		}
 	}
 	if claimant == nil {
 		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf(

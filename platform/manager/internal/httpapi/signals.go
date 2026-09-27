@@ -545,6 +545,34 @@ func (s *Server) backlogFull(ctx context.Context) (bool, error) {
 // serverCount is how many Ready pipelines serve the source; it exists only for
 // the legacy-conversation rule in reusableBy.
 func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, signature string, group []NormalizedSignal, combine combineFunc, serverCount int) (string, bool, error) {
+	conv, err := s.findReusableConversation(ctx, source, claimant, signature, serverCount)
+	if err != nil {
+		return "", false, err
+	}
+
+	// input lane: base kind for new work, recurrence once a session exists
+	kind := group[0].Kind
+	inputType := inputTypeForKind(kind)
+
+	if conv == nil {
+		conv, err = s.createConversationForGroup(ctx, source, claimant, signature, group, kind)
+		if err != nil {
+			return "", false, err
+		}
+		if conv == nil {
+			return "", false, nil // backlog full
+		}
+	} else if conv.ContextID() != "" {
+		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
+	}
+
+	return s.appendInputToConversation(ctx, source, claimant, conv, group, combine, inputType, kind)
+}
+
+// findReusableConversation returns the open conversation this claimant may
+// append a matching-signature group to under window reuse, or nil when a new
+// one must be opened.
+func (s *Server) findReusableConversation(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, signature string, serverCount int) (*agentopsv1alpha1.Conversation, error) {
 	windowDays := source.Spec.Grouping.WindowDays
 	if windowDays <= 0 {
 		windowDays = 7
@@ -552,9 +580,8 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	var list agentopsv1alpha1.ConversationList
 	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
 		client.MatchingLabels{controller.LabelSignatureHash: ingest.SignatureHash(signature)}); err != nil {
-		return "", false, err
+		return nil, err
 	}
-	var conv *agentopsv1alpha1.Conversation
 	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
 	for i := range list.Items {
 		c := &list.Items[i]
@@ -577,153 +604,168 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 			last = c.Status.LastActivity.Time
 		}
 		if last.After(cutoff) {
-			conv = c
-			break
+			return c, nil
 		}
 	}
+	return nil, nil
+}
 
-	// input lane: base kind for new work, recurrence once a session exists
-	kind := group[0].Kind
-	inputType := agentopsv1alpha1.InputAlert
+// inputTypeForKind is the input lane for a freshly admitted group — base kind
+// for new work. Recurrence is layered on top by the caller once a session
+// already exists, and is deliberately not decided here.
+func inputTypeForKind(kind string) agentopsv1alpha1.InputType {
 	switch kind {
 	case KindJob:
-		inputType = agentopsv1alpha1.InputJob
+		return agentopsv1alpha1.InputJob
 	case KindChat, KindTask:
 		// Task lane, and deliberately NOT the job lane: job carries
 		// recurrence-on-session, which would make a second question — or a
 		// second posted task — resume the first one's session as news about a
 		// standing job.
-		inputType = agentopsv1alpha1.InputTask
+		return agentopsv1alpha1.InputTask
+	default:
+		return agentopsv1alpha1.InputAlert
 	}
-	if conv == nil {
-		full, err := s.backlogFull(ctx)
-		if err != nil {
-			return "", false, err
+}
+
+// titleForGroup picks the conversation title: the first signal that named
+// one, else — for a one-shot kind, whose payload IS the request — a title
+// derived from it, else the source's own name.
+func titleForGroup(source *agentopsv1alpha1.SignalSource, group []NormalizedSignal, kind string) string {
+	for _, sig := range group {
+		if sig.Title != "" {
+			return sig.Title
 		}
-		if full {
-			return "", false, nil
+	}
+	// A one-shot signal IS the request, so the request makes the title.
+	// Falling back to the source name gave every conversation from one
+	// surface the SAME name ("🔍 console", "🔍 home-ops"), which makes a list
+	// of them unreadable and a search useless. An alert keeps the source
+	// name: its payload is a machine document, and the source is the useful
+	// label there.
+	if oneShot(kind) {
+		icon := "💬"
+		if kind == KindTask {
+			icon = "🛠"
 		}
-		title := ""
-		for _, sig := range group {
-			if sig.Title != "" {
-				title = sig.Title
-				break
-			}
+		if title := titleFromText(icon, group[0].Payload); title != "" {
+			return title
 		}
-		if title == "" {
-			// A one-shot signal IS the request, so the request makes the title.
-			// Falling back to the source name gave every conversation from one
-			// surface the SAME name ("🔍 console", "🔍 home-ops"), which makes a
-			// list of them unreadable and a search useless. An alert keeps the
-			// source name: its payload is a machine document, and the source is
-			// the useful label there.
-			if oneShot(kind) {
-				icon := "💬"
-				if kind == KindTask {
-					icon = "🛠"
-				}
-				title = titleFromText(icon, group[0].Payload)
-			}
-			if title == "" {
-				title = "🔍 " + source.Name
-			}
-		}
-		conv = &agentopsv1alpha1.Conversation{}
-		conv.Namespace = s.Namespace
-		// The name prefix follows the KIND, not the input lane: chat and task
-		// share the task lane but are told apart at a glance in `kubectl get`.
-		conv.GenerateName = "alert-"
-		switch kind {
-		case KindJob:
-			conv.GenerateName = "job-"
-		case KindChat:
-			conv.GenerateName = "chat-"
-		case KindTask:
-			conv.GenerateName = "task-"
-		}
-		conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
-		// THE CAPABILITY, resolved ONCE — whether this claimant inlines it or
-		// names it through capabilityRef makes no difference from here on.
-		capability, err := dispatch.ResolveCapability(ctx, s.Reader, claimant)
-		if err != nil {
-			return "", false, fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
-		}
-		// The execution wiring is materialized beside the tooling, through the
-		// ONE helper both origination paths call. Freezing it is what stops a
-		// later Pipeline or Coordinator edit changing the identity an inflight
-		// conversation's next pod runs as.
-		snap := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, claimant.GetName(), capability, s.Runtime)
-		conv.Spec = agentopsv1alpha1.ConversationSpec{
-			ProfileRef:         agentopsv1alpha1.ObjectRef{Name: capability.ProfileName()},
-			ChannelRefs:        append([]agentopsv1alpha1.ObjectRef{}, claimant.BoundChannelRefs()...),
-			Toolsets:           capability.Toolsets.DeepCopy(),
-			MCPConfigs:         capability.MCPConfigs.DeepCopy(),
-			RuntimeRef:         snap.RuntimeRef,
-			ServiceAccountName: snap.ServiceAccountName,
-			// WHERE this conversation's two volumes are, resolved ONCE. A later
-			// edit to the claimant's persistence moves only conversations
-			// created after it.
-			ContextClaimName:   snap.ContextClaimName,
-			WorkspaceClaimName: snap.WorkspaceClaimName,
-			// PROVENANCE, written once beside the claimant. Without it a
-			// finished conversation cannot say what STARTED it: the source's
-			// other copy is `spec.inputs[].origin`, which pruning empties, and
-			// the labels' other copy is the ConversationInput, which is deleted
-			// with the queue entry.
-			Signal: &agentopsv1alpha1.SignalProvenance{
-				SourceRef: &agentopsv1alpha1.ObjectRef{Name: source.Name},
-				// The first signal's labels represent the group: they share a
-				// signature, so they agree on everything grouping keyed off.
-				Labels: boundedLabels(group[0].Labels),
-			},
-			Title:     title,
-			Signature: signature,
-		}
-		// Provenance names EXACTLY one originating wiring object (design D-B):
-		// a Pipeline names PipelineRef, a Coordinator names CoordinatorRef and
-		// snapshots its OWN escalation channels — never bound at creation,
-		// reached only through `escalate` (design D-D).
-		nodeKind := activity.NodePipeline
-		if claimant.ClaimantKind() == chat.ClaimantCoordinator {
-			nodeKind = activity.NodeCoordinator
-			conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: claimant.GetName()}
-			conv.Spec.EscalationChannelRefs = claimant.EscalationChannelRefs()
-		} else {
-			conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: claimant.GetName()}
-		}
-		// Only for a person on a chat surface: an alert has no reader, and a
-		// machine posting a task is not owed a read mark.
-		if kind == KindChat && group[0].Reader != "" {
-			if chatChannel := group[0].Labels[LabelChatChannel]; chatChannel != "" {
-				conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{
-					Channel: chatChannel, Key: group[0].Reader,
-				}
-			}
-		}
-		if err := s.Client.Create(ctx, conv); err != nil {
-			return "", false, err
-		}
-		// A Coordinator-rooted conversation's own resource ceiling (design D-E)
-		// is STATUS, so it needs its own write after Create — a status
-		// subresource is never persisted by Create itself.
-		if budget := claimant.SnapshotBudget(); budget != nil {
-			patch := client.MergeFrom(conv.DeepCopy())
-			conv.Status.Budget = budget
-			if err := s.Client.Status().Patch(ctx, conv, patch); err != nil {
-				return "", false, err
-			}
-		}
-		s.Activity.Emit(activity.Event{
-			Kind:     activity.KindConversationCreated,
-			From:     activity.Node(nodeKind, claimant.GetName()),
-			To:       activity.Node(activity.NodeConversation, conv.Name),
-			Pipeline: claimant.GetName(), Conversation: conv.Name,
-			Detail: conv.Spec.Title,
-		})
-	} else if conv.ContextID() != "" {
-		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
+	}
+	return "🔍 " + source.Name
+}
+
+// createConversationForGroup opens a new conversation for this signature,
+// resolving the claimant's capability and execution wiring ONCE — whether
+// this claimant inlines it or names it through capabilityRef makes no
+// difference from here on. Returns nil, nil when the backlog is full: no
+// conversation, and nothing wrong.
+func (s *Server) createConversationForGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, signature string, group []NormalizedSignal, kind string) (*agentopsv1alpha1.Conversation, error) {
+	full, err := s.backlogFull(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if full {
+		return nil, nil
 	}
 
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Namespace = s.Namespace
+	// The name prefix follows the KIND, not the input lane: chat and task
+	// share the task lane but are told apart at a glance in `kubectl get`.
+	conv.GenerateName = "alert-"
+	switch kind {
+	case KindJob:
+		conv.GenerateName = "job-"
+	case KindChat:
+		conv.GenerateName = "chat-"
+	case KindTask:
+		conv.GenerateName = "task-"
+	}
+	conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
+	capability, err := dispatch.ResolveCapability(ctx, s.Reader, claimant)
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
+	}
+	// The execution wiring is materialized beside the tooling, through the
+	// ONE helper both origination paths call. Freezing it is what stops a
+	// later Pipeline or Coordinator edit changing the identity an inflight
+	// conversation's next pod runs as.
+	snap := runtimepod.SnapshotFor(ctx, s.Reader, s.Namespace, claimant.GetName(), capability, s.Runtime)
+	conv.Spec = agentopsv1alpha1.ConversationSpec{
+		ProfileRef:         agentopsv1alpha1.ObjectRef{Name: capability.ProfileName()},
+		ChannelRefs:        append([]agentopsv1alpha1.ObjectRef{}, claimant.BoundChannelRefs()...),
+		Toolsets:           capability.Toolsets.DeepCopy(),
+		MCPConfigs:         capability.MCPConfigs.DeepCopy(),
+		RuntimeRef:         snap.RuntimeRef,
+		ServiceAccountName: snap.ServiceAccountName,
+		// WHERE this conversation's two volumes are, resolved ONCE. A later
+		// edit to the claimant's persistence moves only conversations
+		// created after it.
+		ContextClaimName:   snap.ContextClaimName,
+		WorkspaceClaimName: snap.WorkspaceClaimName,
+		// PROVENANCE, written once beside the claimant. Without it a
+		// finished conversation cannot say what STARTED it: the source's
+		// other copy is `spec.inputs[].origin`, which pruning empties, and
+		// the labels' other copy is the ConversationInput, which is deleted
+		// with the queue entry.
+		Signal: &agentopsv1alpha1.SignalProvenance{
+			SourceRef: &agentopsv1alpha1.ObjectRef{Name: source.Name},
+			// The first signal's labels represent the group: they share a
+			// signature, so they agree on everything grouping keyed off.
+			Labels: boundedLabels(group[0].Labels),
+		},
+		Title:     titleForGroup(source, group, kind),
+		Signature: signature,
+	}
+	// Provenance names EXACTLY one originating wiring object (design D-B):
+	// a Pipeline names PipelineRef, a Coordinator names CoordinatorRef and
+	// snapshots its OWN escalation channels — never bound at creation,
+	// reached only through `escalate` (design D-D).
+	nodeKind := activity.NodePipeline
+	if claimant.ClaimantKind() == chat.ClaimantCoordinator {
+		nodeKind = activity.NodeCoordinator
+		conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: claimant.GetName()}
+		conv.Spec.EscalationChannelRefs = claimant.EscalationChannelRefs()
+	} else {
+		conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: claimant.GetName()}
+	}
+	// Only for a person on a chat surface: an alert has no reader, and a
+	// machine posting a task is not owed a read mark.
+	if kind == KindChat && group[0].Reader != "" {
+		if chatChannel := group[0].Labels[LabelChatChannel]; chatChannel != "" {
+			conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{
+				Channel: chatChannel, Key: group[0].Reader,
+			}
+		}
+	}
+	if err := s.Client.Create(ctx, conv); err != nil {
+		return nil, err
+	}
+	// A Coordinator-rooted conversation's own resource ceiling (design D-E)
+	// is STATUS, so it needs its own write after Create — a status
+	// subresource is never persisted by Create itself.
+	if budget := claimant.SnapshotBudget(); budget != nil {
+		patch := client.MergeFrom(conv.DeepCopy())
+		conv.Status.Budget = budget
+		if err := s.Client.Status().Patch(ctx, conv, patch); err != nil {
+			return nil, err
+		}
+	}
+	s.Activity.Emit(activity.Event{
+		Kind:     activity.KindConversationCreated,
+		From:     activity.Node(nodeKind, claimant.GetName()),
+		To:       activity.Node(activity.NodeConversation, conv.Name),
+		Pipeline: claimant.GetName(), Conversation: conv.Name,
+		Detail: conv.Spec.Title,
+	})
+	return conv, nil
+}
+
+// appendInputToConversation records the group as a ConversationInput and
+// queues it on the conversation's own input list, retrying the optimistic
+// patch on conflict.
+func (s *Server) appendInputToConversation(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, conv *agentopsv1alpha1.Conversation, group []NormalizedSignal, combine combineFunc, inputType agentopsv1alpha1.InputType, kind string) (string, bool, error) {
 	ci := &agentopsv1alpha1.ConversationInput{}
 	ci.Namespace = s.Namespace
 	ci.GenerateName = conv.Name + "-in-"
