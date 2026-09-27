@@ -1,0 +1,505 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: coordinators.agentops.dev
+spec:
+  group: agentops.dev
+  names:
+    kind: Coordinator
+    listKind: CoordinatorList
+    plural: coordinators
+    singular: coordinator
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Coordinator declares a coordinating agent: a capability, the sources it
+          claims, and a named set of agents its own conversation may invoke to fan a
+          task out and read the results back. It reconciles like a Pipeline —
+          wiring validation only, no ownerRef on anything it later causes.
+
+          A Coordinator nobody applies changes nothing: it originates no
+          conversation on its own, and deleting one cascades nothing — open roots it
+          already created keep running on their own snapshot until their own budget
+          or a person closes them.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              CoordinatorSpec declares a COORDINATING agent: its own capability, the
+              sources it claims, the channels an escalation may open, and the agents its
+              own conversation may invoke.
+
+              A conversation this Coordinator creates binds NO channel at creation —
+              `ChannelRefs` is reached only through `escalate`, which snapshots it onto
+              the UNCAUSED root as `status.escalationChannelRefs`. Listing a channel here
+              claims no thread until then.
+            properties:
+              agents:
+                description: Agents this Coordinator's own conversation may invoke.
+                items:
+                  description: |-
+                    CoordinatorAgentEntry names one agent a Coordinator's own conversation may
+                    INVOKE. It is never wiring for a conversation that already exists — the
+                    invoke is what creates one.
+
+                    Its capability comes from EXACTLY one of the two refs, mutually exclusive
+                    by CEL: `capabilityRef` for an ordinary member, `coordinatorRef` for
+                    NESTING — the invoked conversation is itself that Coordinator's root, and
+                    may in turn invoke its OWN `agents[]`. There is no separate "sub-Coordinator"
+                    kind; nesting is this same entry naming a Coordinator instead of an
+                    AgentCapability.
+                  properties:
+                    capabilityRef:
+                      description: |-
+                        CapabilityRef names the AgentCapability this entry invokes as an
+                        ordinary member — one with no `agents[]` of its own.
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    coordinatorRef:
+                      description: |-
+                        CoordinatorRef names another Coordinator this entry invokes AS A
+                        MEMBER. The invoked conversation is that Coordinator's own root, so it
+                        may invoke further — nesting, bounded only by a cycle in the
+                        Coordinator graph (refused both statically, on this object's own
+                        `Ready`, and again at `invoke` time against the live `causedBy` chain).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    description:
+                      description: |-
+                        Description tells the COORDINATING AGENT when to invoke this entry. It
+                        is read by the agent and parsed by nothing here.
+                      maxLength: 512
+                      minLength: 1
+                      type: string
+                    name:
+                      description: |-
+                        Name is how the `invoke` verb addresses this entry — unique within the
+                        Coordinator, never a Kubernetes identifier.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                  required:
+                  - description
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of capabilityRef or coordinatorRef
+                    rule: has(self.capabilityRef) != has(self.coordinatorRef)
+                type: array
+              capabilityRef:
+                description: |-
+                  AgentRef (`capabilityRef` in JSON) names an AgentCapability holding the
+                  coordinating agent's capability INSTEAD of inlining it above.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              channelRefs:
+                description: |-
+                  ChannelRefs are the surfaces an ESCALATION may open — never bound at
+                  creation. See the type doc comment.
+                items:
+                  description: ObjectRef references another object by name (same namespace).
+                  properties:
+                    name:
+                      description: Name of the referenced object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              limits:
+                description: Limits bounds this Coordinator's own conversation tree.
+                properties:
+                  deadline:
+                    description: |-
+                      Deadline: how long after creation this Coordinator's own conversation
+                      may run before it is closed `budget-exceeded`.
+                    type: string
+                  maxAgents:
+                    description: |-
+                      MaxAgents: the ceiling on how many agents this Coordinator's own
+                      conversation may invoke over its lifetime (`status.budget.agentsInvoked`).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxTurns:
+                    description: 'MaxTurns: the ceiling on `status.budget.turns`.'
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              mcpConfigs:
+                description: |-
+                  MCPConfigs binds MCPConfig CRs supplying this capability's MCP servers,
+                  overlaid per server key in ref order (later wins). No mode: an agent
+                  definition declares no servers, so there is nothing to compose against.
+                properties:
+                  refs:
+                    description: |-
+                      Refs are applied in order: MCP server keys are overlaid with the later
+                      ref winning a collision.
+                    items:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - refs
+                type: object
+              persistence:
+                description: "Persistence declares WHERE this capability's conversations
+                  keep their\nstate — the CONTEXT volume and the WORKSPACE volume,
+                  independently.\n\nPRECEDENCE, and no other order:\n\n\t<embedding
+                  kind>.persistence.<volume> -> the chart's release default -> ephemeral\n\nThe
+                  CONVERSATION snapshots the RESOLVED claim at creation, so editing\nthis
+                  field re-wires only conversations created afterwards. Nothing\nreads
+                  a Pipeline or Coordinator at pod-build time."
+                properties:
+                  context:
+                    description: |-
+                      Context: a conversation's accumulated context, the thing
+                      `runtimeContextId` is a handle into. Absent takes the release default.
+                    properties:
+                      accessModes:
+                        description: |-
+                          AccessModes for that claim. Empty is ReadWriteMany, which is what
+                          concurrent conversations on one volume need.
+                        items:
+                          type: string
+                        type: array
+                      claimName:
+                        description: |-
+                          ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is
+                          created; conversations this route originates mount it.
+                        maxLength: 253
+                        type: string
+                      size:
+                        description: |-
+                          Size requested by the claim the manager renders for VolumeName. Ignored
+                          with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim
+                          binding to a pre-created volume gets that volume's capacity whatever it
+                          asks for, so this is a floor rather than a size.
+                        type: string
+                      storageClassName:
+                        description: |-
+                          StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING,
+                          which is the only value that binds to a pre-created volume — and it is
+                          the default here rather than in the chart because this field only ever
+                          accompanies VolumeName, where anything else is a mistake. An absent field
+                          is filled in by admission with the cluster's default StorageClass, which
+                          provisions a second volume beside the one that was named.
+
+                          Set it only for a class whose volumes are pre-created and selected by
+                          name, which some CSI drivers require.
+                        maxLength: 253
+                        type: string
+                      volumeName:
+                        description: |-
+                          VolumeName is a PersistentVolume the manager renders a claim on, bound to
+                          that volume by name with an EXPLICIT empty storage class — which is what
+                          disables dynamic provisioning. An absent storage class is filled in by
+                          the cluster's default StorageClass, which provisions a second volume and
+                          leaves the operator's untouched.
+                        maxLength: 253
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'claimName and volumeName are mutually exclusive: name
+                        a claim that already exists, or a PersistentVolume for the
+                        manager to render a claim on'
+                      rule: '!(has(self.claimName) && has(self.volumeName))'
+                  workspace:
+                    description: |-
+                      Workspace: the repository checkout, one subdirectory per conversation.
+                      Absent takes the release default, which is ephemeral unless the install
+                      turned workspace persistence on.
+                    properties:
+                      accessModes:
+                        description: |-
+                          AccessModes for that claim. Empty is ReadWriteMany, which is what
+                          concurrent conversations on one volume need.
+                        items:
+                          type: string
+                        type: array
+                      claimName:
+                        description: |-
+                          ClaimName is a PersistentVolumeClaim that ALREADY EXISTS. Nothing is
+                          created; conversations this route originates mount it.
+                        maxLength: 253
+                        type: string
+                      size:
+                        description: |-
+                          Size requested by the claim the manager renders for VolumeName. Ignored
+                          with ClaimName, where nothing is rendered. Empty requests 5Gi — a claim
+                          binding to a pre-created volume gets that volume's capacity whatever it
+                          asks for, so this is a floor rather than a size.
+                        type: string
+                      storageClassName:
+                        description: |-
+                          StorageClassName on that claim. EMPTY RENDERS AN EXPLICIT EMPTY STRING,
+                          which is the only value that binds to a pre-created volume — and it is
+                          the default here rather than in the chart because this field only ever
+                          accompanies VolumeName, where anything else is a mistake. An absent field
+                          is filled in by admission with the cluster's default StorageClass, which
+                          provisions a second volume beside the one that was named.
+
+                          Set it only for a class whose volumes are pre-created and selected by
+                          name, which some CSI drivers require.
+                        maxLength: 253
+                        type: string
+                      volumeName:
+                        description: |-
+                          VolumeName is a PersistentVolume the manager renders a claim on, bound to
+                          that volume by name with an EXPLICIT empty storage class — which is what
+                          disables dynamic provisioning. An absent storage class is filled in by
+                          the cluster's default StorageClass, which provisions a second volume and
+                          leaves the operator's untouched.
+                        maxLength: 253
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'claimName and volumeName are mutually exclusive: name
+                        a claim that already exists, or a PersistentVolume for the
+                        manager to render a claim on'
+                      rule: '!(has(self.claimName) && has(self.volumeName))'
+                type: object
+              profileRef:
+                description: |-
+                  ProfileRef: the agent this capability answers as. Optional on the
+                  struct because a Pipeline embedding this inline may instead name a
+                  `capabilityRef` for the whole capability — CEL cannot express "one of"
+                  across an embedded struct, so the two-refs-or-neither check is a Ready
+                  condition on the EMBEDDING kind, not admission here.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              runtimeRef:
+                description: |-
+                  RuntimeRef selects the AgentRuntime executing this capability's
+                  conversations. Absent, the AgentRuntime named "default" — the one the
+                  parent chart renders — then the manager's bootstrap configuration.
+
+                  IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An
+                  AgentRuntime carries the ServiceAccount an agent runs as, so selecting
+                  one is selecting the agent's power in the cluster — and that is a
+                  capability decision, made beside the tools and servers the same
+                  capability grants, not an attribute of the prompts an agent is written
+                  with.
+
+                  The CONVERSATION snapshots the resolved name at creation, so editing
+                  this field re-wires only conversations created afterwards. The
+                  referenced CR's CONTENT — image, idle TTL, volumes — is re-read at
+                  every pod build, so fixing a runtime heals conversations already
+                  running.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              serviceAccountName:
+                description: |-
+                  ServiceAccountName is the identity the runtime executes under,
+                  OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the
+                  runtime's — which the chart still defaults to `agentops-runtime`.
+
+                  NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and
+                  nothing here validates that one exists or that its RBAC is sufficient:
+                  who may create an account and what it is bound to stays an EXTERNAL
+                  grant, the same posture adapters already have. A name nothing backs
+                  fails at pod admission, naming the account.
+                maxLength: 253
+                type: string
+              signalSourceRefs:
+                description: |-
+                  SignalSourceRefs: the sources this Coordinator claims, exactly as a
+                  Pipeline's own — shareable, so a Pipeline and a Coordinator may claim
+                  the same source without conflict.
+                items:
+                  description: ObjectRef references another object by name (same namespace).
+                  properties:
+                    name:
+                      description: Name of the referenced object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              toolsets:
+                description: |-
+                  Toolsets binds MCPToolset CRs contributing to the allowlist of this
+                  capability's conversations, plus the mode composing them with what the
+                  AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces).
+                properties:
+                  mode:
+                    default: merge
+                    description: |-
+                      Mode composes this binding's tools with the agent definition's:
+                      merge unions them (the agent keeps what it declared, the wiring adds),
+                      overwrite passes the wiring's alone (the agent's declaration does not
+                      apply to this route). Built-ins included — name them in the toolset.
+                    enum:
+                    - merge
+                    - overwrite
+                    type: string
+                  refs:
+                    description: |-
+                      Refs are applied in order: tool lists concatenate with dedup, the first
+                      occurrence keeping its position.
+                    items:
+                      description: ObjectRef references another object by name (same
+                        namespace).
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - refs
+                type: object
+            type: object
+            x-kubernetes-validations:
+            - message: capabilityRef and the inline capability fields (profileRef,
+                runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence)
+                are mutually exclusive
+              rule: '!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef)
+                || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs)
+                || has(self.persistence)))'
+          status:
+            description: |-
+              CoordinatorStatus reports whether this Coordinator's own capability and
+              every `agents[]` entry resolves to something itself Ready.
+            properties:
+              conditions:
+                description: |-
+                  Conditions: Ready — see CoordinatorSpec and the reconciler's own
+                  documentation for exactly what it checks.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

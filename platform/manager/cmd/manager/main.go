@@ -218,6 +218,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Coordinator: validation-only, exactly like Pipeline and AgentCapability.
+	// It originates no conversation itself — that lands with the `invoke`
+	// surface in a later phase of coordinated-agents (design D-B onward).
+	if err := (&controller.CoordinatorReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "coordinator controller")
+		os.Exit(1)
+	}
+
 	maxActive, deprecatedCap := maxActiveConversations()
 	if deprecatedCap {
 		setupLog.Info("MAX_RUNTIMES is deprecated and is removed after one release — "+

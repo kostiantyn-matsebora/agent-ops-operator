@@ -25,10 +25,12 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 2. Phase 2 — `Coordinator`, provenance, the loop (design D-B, D-C, D-E)
 
-- [ ] 2.1 `api/v1alpha1/coordinator_types.go`: embedded `AgentCapabilitySpec` or
+- [x] 2.1 `api/v1alpha1/coordinator_types.go`: embedded `AgentCapabilitySpec` or
       `capabilityRef`, `signalSourceRefs`, `channelRefs`, `agents[]{name, capabilityRef,
       description (required, MinLength=1)}`, `limits{maxAgents, maxTurns,
-      deadline}`; status with `Ready`.
+      deadline}`; status with `Ready`. Also carries `coordinatorRef` per entry
+      (mutually exclusive with `capabilityRef` by CEL) — nesting per D-B, which
+      2.4's Ready check already needs to walk.
 - [ ] 2.2 `ConversationSpec.CausedBy *Provenance{parent, entry}` — PARENT, one
       hop, never the tree's ultimate root — `spec.coordinatorRef`;
       `ConversationStatus.budget{maxAgents, maxTurns, deadline, agentsInvoked,
@@ -40,9 +42,14 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       Pipeline and Coordinator; `/pipelines` and the choice list carry both
       kinds' addressed forms; an addressed conversation binds the origin
       surface only.
-- [ ] 2.4 Coordinator reconciler: `Ready` per D-B, message lists failing entry
+- [x] 2.4 Coordinator reconciler: `Ready` per D-B, message lists failing entry
       names, and a name a Pipeline also holds; a not-Ready Coordinator claims
-      nothing.
+      nothing. The Ready check RESOLVES `coordinatorRef` nesting recursively
+      (own capability, source/channel refs, every `agents[]` entry, and —
+      through the same function — each nested Coordinator's own Ready), with
+      a visited-set guard reporting a STATIC cycle by name rather than
+      recursing into it again. `invoke`-time claiming and the live cycle
+      guard (D-E2) are a later commit.
 - [ ] 2.5 Conversation creation from a Coordinator: no `channelRefs`; its OWN
       limits snapshotted into `status.budget`; the Coordinator's `channelRefs`
       snapshotted into `spec.escalationChannelRefs` on an UNCAUSED root only —
@@ -80,7 +87,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 2.11 `closeReason` stamped by the `close` verb (required there), absent
       from `/close`; a coordinator cannot close outside conversations it
       directly caused, except closing itself, always allowed.
-- [ ] 2.12 Regenerate deepcopy and CRDs; `chart/crds/coordinators…yaml`.
+- [x] 2.12 Regenerate deepcopy and CRDs; `chart/crds/agentops.dev_coordinators.yaml`.
 - [ ] 2.13 Tests: envtest — fan-out counts a Coordinator; member result lands
       on its parent exactly once across a simulated restart; self-input
       refused; each of the three limits closes with reason and members, per
