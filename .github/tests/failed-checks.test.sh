@@ -288,4 +288,20 @@ run_it >/dev/null
 assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
 assert_equals "[]" "$(read_out awaiting)"
 
+it "a dispute posted BEFORE --since (a removed label's loop) does not hold the check awaiting"
+setup; runs_file
+add_run operator failure; add_run chart success; add_run images success
+stub_checks_and_comments "$RUNS" "[{\"body\":\"$DISPUTE\",\"created_at\":\"2026-09-28T10:00:00Z\",\"author\":{\"login\":\"github-actions\",\"__typename\":\"Bot\"}}]"
+out=$(run_it --since 2026-09-28T11:00:00Z); assert_status 0 "$?"
+assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
+assert_equals "[]" "$(read_out awaiting)"
+
+it "a dispute posted AFTER --since still holds the check awaiting"
+setup; runs_file
+add_run operator failure; add_run chart success; add_run images success
+stub_checks_and_comments "$RUNS" "[{\"body\":\"$DISPUTE\",\"created_at\":\"2026-09-28T12:00:00Z\",\"author\":{\"login\":\"github-actions\",\"__typename\":\"Bot\"}}]"
+out=$(run_it --since 2026-09-28T11:00:00Z); assert_status 0 "$?"
+assert_equals "[]" "$(read_out items)"
+assert_contains "$(read_out awaiting)" "'id': 'check:operator'"
+
 summary
