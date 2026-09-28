@@ -492,6 +492,26 @@ Pipeline](#pipeline).
 nothing writes it, and dispatch reads it for one release so an input queued
 before the upgrade still reaches the agent it was parsed with.
 
+### AgentCapability
+
+**A named capability, declared once.** A Pipeline or a Coordinator references
+it with `capabilityRef` instead of inlining the same six fields.
+
+| Field | Selects |
+|---|---|
+| `profileRef` | the agent it answers as |
+| `runtimeRef` | the `AgentRuntime` that executes it |
+| `serviceAccountName` | the identity the runtime runs under |
+| `toolsets` | `MCPToolset` refs and the `merge` or `overwrite` mode |
+| `mcpConfigs` | `MCPConfig` refs, later wins per server key |
+| `persistence` | where its conversations keep context and workspace |
+
+- **It carries no wiring.** No signal sources and no channels, so one nothing
+  references is inert.
+- **`Ready` reports whether every reference it names resolves.**
+- **Precedence and snapshots are the Pipeline's.** The conversation freezes the
+  resolved runtime, account and claims at creation.
+
 ### Coordinator
 
 **A coordinating agent.** Its own conversation reads what started it and
