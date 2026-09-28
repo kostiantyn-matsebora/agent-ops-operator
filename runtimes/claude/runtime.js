@@ -96,6 +96,24 @@ async function syncRepo() {
   }
 }
 
+// MAX_BRIEF mirrors ConversationStatus.Brief's MaxLength — bounding here means
+// a value this runtime reports never gets silently truncated by the manager
+// mid-sentence.
+const MAX_BRIEF = 512;
+
+// extractBrief pulls a standalone `<brief>...</brief>` block (format.md) out of
+// the agent's final text, mirroring the block grammar's own recognition rule —
+// the tag alone on its own line — closely enough for this one tag, without
+// pulling in the full parser channels/telegram and the console each carry for
+// the tags a reader actually sees. `brief` is a CONTRACT FIELD, never a
+// displayed section, so it is removed from what becomes `result`.
+function extractBrief(text) {
+  const m = /^<brief>[ \t]*\r?\n([\s\S]*?)\r?\n^<\/brief>[ \t]*(?:\r?\n)*/m.exec(text);
+  if (!m) return { text, brief: '' };
+  const brief = m[1].trim().replace(/\s+/g, ' ').slice(0, MAX_BRIEF);
+  return { text: (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim(), brief };
+}
+
 // Turn one stream-json event into a compact human-readable log line.
 function formatEvent(ev, rawLine) {
   try {
@@ -193,7 +211,7 @@ async function spawnClaude(args, unit, isResume) {
         env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      let buf = '', sessionId = null, result = '', stderr = '';
+      let buf = '', sessionId = null, result = '', brief = '', stderr = '';
       const calls = newCallRecorder();
       // Tool calls the model could not FORM. Nothing executes them, so a run
       // that only makes those looks busy and answers from whatever it already
@@ -210,7 +228,13 @@ async function spawnClaude(args, unit, isResume) {
           let ev;
           try { ev = JSON.parse(line); } catch { console.log(line); continue; }
           if (ev.session_id && !sessionId) sessionId = ev.session_id;
-          if (ev.type === 'result') result = (ev.result || '').slice(0, 2000);
+          if (ev.type === 'result') {
+            // Extracted BEFORE the 2000-char cap: a brief written late in a
+            // long answer must not be sliced away with the rest.
+            const extracted = extractBrief(ev.result || '');
+            result = extracted.text.slice(0, 2000);
+            brief = extracted.brief;
+          }
           calls.note(ev);
           const txt = formatEvent(ev, line);
           if (txt) process.stdout.write(txt);
@@ -245,7 +269,7 @@ async function spawnClaude(args, unit, isResume) {
           // FAILED, and said plainly. The alternative is what happened before
           // this existed: a run reported success while every tool call in it
           // had been discarded unread.
-          return resolve({ status: 'failed', exitCode: code ?? -1, sessionId, result: spinMessage(spin), stderr, ...calls.report() });
+          return resolve({ status: 'failed', exitCode: code ?? -1, sessionId, result: spinMessage(spin), stderr, ...calls.report(), ...(brief ? { brief } : {}) });
         }
         if (watch.total > 0) {
           // Recovered on its own, which is the common case — by ABANDONING the
@@ -257,7 +281,7 @@ async function spawnClaude(args, unit, isResume) {
           const notice = discardedNotice(watch);
           if (notice && result) result = `${result}\n\n${notice}`;
         }
-        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr, ...calls.report() });
+        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr, ...calls.report(), ...(brief ? { brief } : {}) });
       });
     });
 
@@ -375,7 +399,7 @@ function strip({ stderr, ...rest }) {
 // — that only happens when this file is the process entry point.
 module.exports = {
   gitEnv, repoURL, run, clearDir, syncRepo, formatEvent, runClaude, spawnClaude,
-  confirmContextMissing, sessionFileExists, contextIdOf, strip,
+  confirmContextMissing, sessionFileExists, contextIdOf, strip, extractBrief,
   SESSIONS_DIR, CLAUDE_BIN, WORKSPACE,
 };
 

@@ -509,6 +509,11 @@ type workDone struct {
 	// would be confident and sometimes wrong.
 	ContinuityReason string `json:"continuityReason,omitempty"`
 	Result           string `json:"result,omitempty"`
+	// Brief is what the runtime extracted as this conversation's one- or
+	// two-sentence description (design D-I) — a contract field, never a
+	// parsed section of Result. LATEST-WINS, the same rule as
+	// RuntimeContextID: absent leaves the stored one untouched.
+	Brief string `json:"brief,omitempty"`
 	// Turns and ToolCalls are what the runtime saw the run do, bounded in
 	// count and field size (workreport.go). Each becomes one activity hop and
 	// nothing else — they are telemetry, never written to the Conversation.
@@ -591,6 +596,16 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	if reported != "" {
 		conv.SetContextID(reported)
+	}
+	// LATEST-WINS, same rule as the context handle: the agent restates what the
+	// conversation is about having read the whole context, so a report omitting
+	// it leaves the stored one untouched rather than blanking it.
+	if d.Brief != "" {
+		brief := d.Brief
+		if len(brief) > agentopsv1alpha1.MaxBrief {
+			brief = brief[:agentopsv1alpha1.MaxBrief]
+		}
+		conv.Status.Brief = brief
 	}
 	// Context continuity, recorded where anyone can see it. This is the one
 	// failure that leaves a conversation looking entirely healthy — same phase,

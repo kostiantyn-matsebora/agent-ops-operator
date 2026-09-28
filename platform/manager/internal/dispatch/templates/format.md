@@ -22,13 +22,36 @@ Everything a reader only wants if they ask.
 </details>
 ```
 
-**Two tags are reserved. Every other tag name is yours.**
+**Three tags are reserved. Every other tag name is yours.**
 
 | Tag | Is |
 |---|---|
 | `<title>` | one line, shown FIRST wherever you wrote it. At most one |
 | `<details>` | THE FOLD — collapsed by default on every surface |
+| `<brief>` | one or two sentences of what this conversation is ABOUT — see below. Never shown to anyone |
 | anything else | a section YOU name, shown above the fold, in the order you wrote it |
+
+## `<brief>`: what this conversation concerns, not where it stands
+
+Somewhere in your answer, once per run, write:
+
+```
+<brief>
+One or two sentences someone could recognise this conversation by — the
+objects involved, the ask. Not a status update: "investigating the api
+pod" belongs here, "still waiting on logs" does not.
+</brief>
+```
+
+- **It is a CONTRACT FIELD, not a displayed section.** The runtime extracts it
+  the same way it extracts the context handle, and it never reaches a chat
+  surface or `<details>` — write it anywhere in your answer, on its own line
+  pair, and forget it is there.
+- **RESTATE it every run.** You have read the whole context by the time you
+  answer, so say what the conversation concerns NOW — latest-wins, the same
+  rule as the context handle. Leaving it out leaves the last one on record.
+- **It is not a summary of what just happened.** That is what your answer
+  itself, and `status.runs[].result`, already carry.
 
 - **Name sections for your job.** An investigation wants `<root-cause>`,
   `<evidence>`, `<fix>`. An action report wants `<changed>`, `<verification>`.
@@ -72,11 +95,12 @@ cost.
 
 **Aim for title plus all named sections under ~600 characters.**
 
-**NOTHING ENFORCES THIS. It is yours to hold.** There was a cap that moved your
-overflow into the fold, and it was removed because no length budget can do the
-job safely — it cut a table away from its header and buried a `<fix>` section
-because that one happened to be written last. Whatever you put above the fold is
-what a reader gets, in full.
+**NOTHING ENFORCES THIS. It is yours to hold.**
+
+- A length cap was tried and removed. No budget can cut a message safely.
+- One cut a table from its header, and buried a `<fix>` section for being
+  written last.
+- Whatever you put above the fold is what a reader gets, in full.
 
 If you write no tags at all, your whole answer becomes one above-the-fold block.
 That is fine for a one-line answer and wrong for anything longer.
