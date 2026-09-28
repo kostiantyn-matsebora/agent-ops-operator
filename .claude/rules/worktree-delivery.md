@@ -317,13 +317,19 @@ every start, never trusting that a workflow placed it before.
   - **One start per head**, by whichever run concludes second. Two starts for
     one head used to run in sequence, each counting toward `max_rounds`, and
     the first read a CI run that had not spoken.
-  - **A RED CHECK THE FIXER CANNOT EXPLAIN GETS ONE FRESH RUN BEFORE ANYONE IS
-    ASKED.** The first time the fixing step disputes a check as "not the
-    tree", `land` pushes an EMPTY commit and posts `<!-- conveyor:refreshed -->`
-    instead of the dispute, so CI judges the head again under the merged
-    workflows. Red again, the check is disputed and the loop waits. Measured
-    on #259: the red was a check step deleted from `ci.yml` since the head
-    last ran, and the loop asked a person to re-run it.
+  - **A RED CHECK THE FIXER CANNOT EXPLAIN IS RE-RUN EVERY ROUND THE BUDGET
+    ALLOWS, BEFORE ANYONE IS ASKED.** Each disputing round `land` pushes an
+    EMPTY commit and posts `<!-- conveyor:refreshed -->` instead of the
+    dispute, so CI judges the head again under the merged workflows. The
+    dispute is posted only by the budget's LAST round, and the loop then
+    waits. Measured on #259: the red was a check step deleted from `ci.yml`
+    since the head last ran, and a fresh run was the verdict.
+    - **The gate was once per label placement, and #269 measured the cost.**
+      An external service failed for hours, round 1 spent the one re-run,
+      and round 2 froze the loop on a dispute a person had to notice and
+      diagnose — the intervention the conveyor exists to remove. A red the
+      fixer itself judged not-the-tree is a retryable event, and the round
+      CAP is its bound.
   - **THE FIXING STEP RUNS THE DEFAULT BRANCH'S COPY OF ITS OWN WORKFLOW
     FILE.** `claude-code-action` validates the CHECKED-OUT
     `review-dispatch.yml` against the default branch's and refuses any

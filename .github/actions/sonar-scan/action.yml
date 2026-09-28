@@ -82,11 +82,32 @@ runs:
         # separated so a rejected token or an unreachable service fails here,
         # naming the lookup, rather than reading as "no project" and starting
         # a provisioning call with the same token.
+        #
+        # RETRIED, AND THE DIAGNOSTICS GO TO STDERR — both measured on #269.
+        # A single un-retried call turned one transient service error into a
+        # red required check, freezing the fixing loop for hours. And the
+        # `::error` used to go to stdout INSIDE `n=$(count)`: the command
+        # substitution captured it, `set -e` killed the step, and the log
+        # showed nothing at all — three runs were diagnosed blind because
+        # the one line naming the cause was swallowed by the capture.
         count() {
-          local out
-          out=$(curl -sf -u "$SONAR_TOKEN:" "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&projects=${SONAR_ORG}_agent-ops-operator_$NAME") \
-            || { echo "::error::the SonarCloud project lookup for $NAME failed (token, organisation or service)"; return 1; }
-          printf '%s' "$out" | jq '.components | length'
+          local out code attempt
+          for attempt in 1 2 3 4 5; do
+            if out=$(curl -s -w '\n%{http_code}' -u "$SONAR_TOKEN:" \
+                "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&projects=${SONAR_ORG}_agent-ops-operator_$NAME"); then
+              code=${out##*$'\n'}
+              case "$code" in
+                2??) printf '%s' "${out%$'\n'*}" | jq '.components | length'; return 0 ;;
+                *)   code="HTTP $code" ;;
+              esac
+            else
+              code="curl exit $?"
+            fi
+            echo "::warning::the SonarCloud project lookup for $NAME answered $code (attempt $attempt of 5)" >&2
+            [ "$attempt" = 5 ] || sleep $((attempt * 10))
+          done
+          echo "::error::the SonarCloud project lookup for $NAME failed 5 times, last answer: $code (token, organisation or service)" >&2
+          return 1
         }
         n=$(count)
         if [ "$n" != "1" ]; then

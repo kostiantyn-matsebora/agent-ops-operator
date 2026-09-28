@@ -361,11 +361,6 @@ class Round:
         The label's timestamp is what makes re-labelling a fresh count."""
         return conveyor.count_marked(self._comments(), self.markers["round"], self.args.since)
 
-    def already_refreshed(self) -> bool:
-        """One fresh run per label placement. A check red again after its
-        re-run is a dispute a person must answer, not a second re-run."""
-        return conveyor.count_marked(self._comments(), self.markers["refresh"], self.args.since) > 0
-
     def count_grants(self) -> int:
         """One per `conveyor:keep-going` this program has already consumed, so the
         effective cap grows by a full `max_rounds` for each."""
@@ -789,16 +784,28 @@ def main() -> int:
             tags = "\n".join(DISPUTED_ITEM.format(t) for t in checks)
             pr_comment(args.repo, args.pr,
                        f"{markers['dispute']}\nThe fixing step disputes {plural(len(checks), 'failed check')}, "
-                       f"for @{args.approver}. The tree was not changed for them — re-run the check if you "
-                       f"agree it was not the code, or answer here.\n\n{lines}{run}\n{tags}")
+                       f"for @{args.approver}. The tree was not changed for them. Answer here to resume "
+                       f"the loop, or place `conveyor:keep-going` to grant another set of rounds.\n\n"
+                       f"{lines}{run}\n{tags}")
 
     def refresh_checks(items: dict[str, str]) -> str:
         """An EMPTY commit pushed to the branch, so CI judges the head again.
         The fixer found nothing in the tree behind these red checks, and on
         #259 that was true: the red was a check step deleted from ci.yml since
-        the head last ran. A fresh run is the verdict, and only a red that
-        survives it is a dispute for a person. Returns the sha, or "" when the
-        push failed and the items stay disputed."""
+        the head last ran. A fresh run is the verdict. Returns the sha, or ""
+        when the push failed and the items stay disputed.
+
+        EVERY ROUND WITHIN THE BUDGET RE-RUNS, not the first alone. The gate
+        used to be one refresh per label placement, and #269 measured what
+        that costs: an external service (the SonarCloud lookup) failed for
+        hours, the one refresh was spent on round 1, and round 2 froze the
+        loop on a dispute a person had to notice, diagnose and answer -- the
+        exact intervention the conveyor exists to remove. A red the fixer
+        itself judged not-the-tree is a retryable event, not a judgment call,
+        so the round CAP is the bound on retrying it: transient failures
+        converge to green inside the budget, and a hard outage ends in the
+        designed `capped`/`waiting` states that `conveyor:keep-going` or a
+        person's answer restart."""
         names = ", ".join(f"`{work[t].get('job')}`" for t in items)
         sh("git", "commit", "-q", "--allow-empty", "-m",
            f"chore(ci): re-run the checks (conveyor round {rnd.number})", "-m",
@@ -811,8 +818,8 @@ def main() -> int:
             return ""
         pr_comment(args.repo, args.pr,
                    f"{markers['refresh']}\nRound {rnd.number} re-runs the checks on {new_sha[:7]}: the fixing step "
-                   f"found nothing in the tree behind {names}. If they are red again, they wait for "
-                   f"@{args.approver}.{run}")
+                   f"found nothing in the tree behind {names}. Red again, the next round re-runs them, "
+                   f"until the budget ({rnd.cap} rounds) is spent.{run}")
         return new_sha
 
     if not fixed:
@@ -820,7 +827,11 @@ def main() -> int:
         if rnd:
             refreshed: dict[str, str] = {}
             red_checks = {t: why for t, why in disputed.items() if work[t]["source"] == "check"}
-            if red_checks and args.push_starts_workflows and not rnd.already_refreshed():
+            # THE ROUND CAP BOUNDS THE RETRY, NOT A ONCE-PER-LABEL GATE. The
+            # last round of the budget disputes instead of refreshing, so the
+            # loop ends in a state a person can read and restart rather than
+            # burning its final round on a re-run nothing would judge.
+            if red_checks and args.push_starts_workflows and rnd.number < rnd.cap:
                 if refresh_checks(red_checks):
                     for t in red_checks:
                         refreshed[t] = disputed.pop(t)
@@ -841,7 +852,8 @@ def main() -> int:
             elif disputed:
                 ending = "disputes only"
                 note = ("Every item this round was disputed and none was fixed. The loop waits for your answer: "
-                        "reply in a disputed thread, or resolve it to dismiss the finding.")
+                        "reply in a disputed thread (or resolve it to dismiss the finding), and for a disputed "
+                        "check — which has no thread — reply on the pull request.")
             else:
                 ending = "nothing addressed"
                 note = "Nothing was fixed this round, and every item is still eligible."
