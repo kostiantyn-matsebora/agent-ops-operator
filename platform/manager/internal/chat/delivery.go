@@ -44,6 +44,13 @@ import (
 //     ChannelAdapter, the only component that knows;
 //   - a channel with no thread binding yet is skipped, and picked up on the
 //     reconcile the binding triggers — enqueuing earlier would drop the message.
+//
+// AN ESCALATION CHANNEL IS FENCED ON `EscalatedAt` (design D-D, coordinated-agents
+// task 3.2): `escalate` binds it precisely so the digest can be its thread's
+// first post, so anything still queued from BEFORE that moment — the root's
+// own triggering input, an earlier member result that had nowhere to go while
+// unescalated — must not retroactively flood the thread the instant it exists.
+// A channel bound any other way carries no such moment and is never fenced.
 func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv *agentopsv1alpha1.Conversation) {
 	if ops == nil || len(conv.Spec.ChannelRefs) == 0 {
 		return
@@ -52,11 +59,18 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 	pipeline := ""
 	resolved := false
 	echoes := map[string]bool{} // surface -> does its transport show its own?
+	escalationChannels := map[string]bool{}
+	if conv.Status.EscalatedAt != nil {
+		for _, ref := range conv.Spec.EscalationChannelRefs {
+			escalationChannels[ref.Name] = true
+		}
+	}
 	for i := range conv.Spec.Inputs {
 		item := &conv.Spec.Inputs[i]
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
 		}
+		precedesEscalation := conv.Status.EscalatedAt != nil && item.ReceivedAt.Before(conv.Status.EscalatedAt)
 		body, inputRef, labels := item.Payload, "", map[string]string(nil)
 		if ci := InputPayload(ctx, reader, ns, item); ci != nil {
 			body, inputRef, labels = ci.Spec.Payload, ci.Name, ci.Spec.Labels
@@ -85,6 +99,9 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 		}
 		for _, ref := range conv.Spec.ChannelRefs {
 			if !item.DeliverTo(ref.Name, surface, surfaceEchoes) {
+				continue
+			}
+			if precedesEscalation && escalationChannels[ref.Name] {
 				continue
 			}
 			tid := conv.ThreadFor(ref.Name)

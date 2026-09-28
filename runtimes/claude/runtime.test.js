@@ -27,7 +27,7 @@ process.env.HOME = HOME; // controls SESSIONS_DIR
 
 const {
   gitEnv, repoURL, run, clearDir, syncRepo, formatEvent,
-  confirmContextMissing, sessionFileExists, contextIdOf, strip, SESSIONS_DIR,
+  confirmContextMissing, sessionFileExists, contextIdOf, strip, extractBrief, SESSIONS_DIR,
 } = require('./runtime');
 
 // ---- gitEnv / repoURL, default (no auth configured) ---------------------------
@@ -149,6 +149,38 @@ test('strip removes only the internal stderr capture', () => {
   const out = strip({ status: 'succeeded', result: 'ok', stderr: 'internal noise' });
   assert.deepStrictEqual(out, { status: 'succeeded', result: 'ok' });
   assert.ok(!('stderr' in out));
+});
+
+// ---- extractBrief: the `<brief>` contract field (design D-I) -----------------
+
+test('extractBrief pulls a standalone brief tag out and removes it from the text', () => {
+  const { text, brief } = extractBrief('the disk is fine\n\n<brief>\nthe api pod restart loop\n</brief>\n\nnothing else to do');
+  assert.strictEqual(brief, 'the api pod restart loop');
+  assert.ok(!text.includes('<brief>'));
+  assert.strictEqual(text, 'the disk is fine\n\nnothing else to do');
+});
+
+test('extractBrief joins a multi-line brief into one line', () => {
+  const { brief } = extractBrief('<brief>\nthe api pod,\nrestarting every few minutes\n</brief>');
+  assert.strictEqual(brief, 'the api pod, restarting every few minutes');
+});
+
+test('extractBrief reports empty when no tag is present', () => {
+  const { text, brief } = extractBrief('just an ordinary answer');
+  assert.strictEqual(brief, '');
+  assert.strictEqual(text, 'just an ordinary answer');
+});
+
+test('extractBrief ignores a brief-shaped mention that is not a standalone tag', () => {
+  const { text, brief } = extractBrief('say `<brief>` on its own line to set one');
+  assert.strictEqual(brief, '');
+  assert.strictEqual(text, 'say `<brief>` on its own line to set one');
+});
+
+test('extractBrief bounds the reported brief to MaxBrief', () => {
+  const long = 'x'.repeat(600);
+  const { brief } = extractBrief(`<brief>\n${long}\n</brief>`);
+  assert.strictEqual(brief.length, 512);
 });
 
 // ---- sessionFileExists: real filesystem, recursive ---------------------------------

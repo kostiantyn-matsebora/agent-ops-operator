@@ -353,6 +353,158 @@ func TestCoordinateFutureDeadlineCapsTheReconcileRequeue(t *testing.T) {
 	}
 }
 
+// TestCoordinateEscalationFencesEarlierInputsAndDeliversLaterOnes is task
+// 3.4's fake-chat integration coverage beyond the digest itself (already
+// covered above): a member result that lands on the root AFTER escalation
+// must reach the newly opened thread, and a person's reply on that thread
+// must land as an ordinary root input — through the real API and reconciler,
+// not the fake client internal/chat's own unit tests use.
+func TestCoordinateEscalationFencesEarlierInputsAndDeliversLaterOnes(t *testing.T) {
+	mkProfile(t, "prof-esc3-co")
+	// A member's result routes onto the root as a pending input, so — unlike
+	// the escalate-only tests above — this root actually gets admitted and
+	// dispatched, and that needs a resolvable runtime image. Named for this
+	// test rather than "default": that name is a shared fixture no other test
+	// in this suite expects to exist as a real AgentRuntime CR.
+	mkRuntime(t, "esc3-rt", "example/agent:esc3", "")
+	mkCapability(t, "cap-esc3-worker", "prof-esc3-co")
+	reconcileCapability(t, "cap-esc3-worker")
+	mkChannel(t, "esc3-desk", "esc3-ta")
+	mkCoordinator(t, "co-esc3", nil, []string{"esc3-desk"}, "prof-esc3-co", nil)
+	co := reconcileCoordinator(t, "co-esc3")
+	co.Spec.Agents = []agentopsv1alpha1.CoordinatorAgentEntry{{
+		Name: "worker", Description: "does the work",
+		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-esc3-worker"},
+	}}
+	if err := k8sClient.Update(context.Background(), co); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCoordinator(t, "co-esc3")
+
+	root := &agentopsv1alpha1.Conversation{}
+	root.Name, root.Namespace = "co-esc3-root", ns
+	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-esc3-co"}
+	root.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-esc3"}
+	root.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: "esc3-rt"}
+	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "esc3-desk"}}
+	if err := k8sClient.Create(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := apiServer()
+	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-esc3", root.Name)
+
+	// Invoke and finish BEFORE escalation: this member's result lands on the
+	// root while it still has no bound channel, so it sits in the queue with
+	// nowhere to go — exactly the case the fence exists for.
+	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
+		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
+	member := decodeCoordinateInvokeResponse(t, rec)["member"]
+	memberConv := getConv(t, member)
+	memberConv.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r1", DispatchedAt: metav1.Now()}
+	if err := k8sClient.Status().Update(context.Background(), memberConv); err != nil {
+		t.Fatal(err)
+	}
+	if rec := adapterReq(srv, "POST", "/work/done", map[string]any{
+		"convo": member, "runId": "r1", "status": "succeeded", "result": "early result, must not flood the thread",
+	}, srv.AdapterToken); rec.Code != 200 {
+		t.Fatalf("work/done: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Backdate it: the real API server's second-resolution timestamps would
+	// otherwise land this and EscalatedAt in the same second, and "before" is
+	// the whole thing under test.
+	gotRoot := getConv(t, root.Name)
+	if len(gotRoot.Spec.Inputs) != 1 {
+		t.Fatalf("want the early member result queued on the root, got %+v", gotRoot.Spec.Inputs)
+	}
+	gotRoot.Spec.Inputs[0].ReceivedAt = metav1.NewTime(metav1.Now().Add(-time.Minute))
+	if err := k8sClient.Update(context.Background(), gotRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = postCoordinateReq(t, srv, "/coordinate/escalate", token,
+		map[string]any{"conversation": root.Name, "message": "three members failed, see the tree"})
+	if rec.Code != 200 {
+		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Open the thread, exactly as TestCoordinateEscalateDeliversTheDigestThroughARealReconcile does.
+	reconcileConversation(t, srv, root.Name)
+	topicRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	var topicOp chat.Op
+	if err := json.Unmarshal(topicRec.Body.Bytes(), &topicOp); err != nil || topicOp.Kind != chat.OpEnsureTopic {
+		t.Fatalf("want an ensure-topic op, got %d %s", topicRec.Code, topicRec.Body.String())
+	}
+	if rec := adapterReq(srv, "POST", "/channel/ops/"+topicOp.ID+"/done",
+		map[string]any{"threadId": "esc3-thread-1"}, srv.AdapterToken); rec.Code != 200 {
+		t.Fatalf("completing ensure-topic: %d %s", rec.Code, rec.Body.String())
+	}
+	reconcileConversation(t, srv, root.Name)
+	digestRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	var digestOp chat.Op
+	if err := json.Unmarshal(digestRec.Body.Bytes(), &digestOp); err != nil || digestOp.Kind != chat.OpSend {
+		t.Fatalf("want the digest queued as a send op, got %d %s", digestRec.Code, digestRec.Body.String())
+	}
+	if !strings.Contains(digestOp.Message.Body, "three members failed") {
+		t.Fatalf("the digest itself must carry the escalate message, got %+v", digestOp.Message)
+	}
+	if rec := adapterReq(srv, "POST", "/channel/ops/"+digestOp.ID+"/done", nil, srv.AdapterToken); rec.Code != 200 {
+		t.Fatalf("completing the digest send: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The fence: another reconcile must NOT surface the early result now that
+	// the thread finally exists — the digest must stay the thread's first post.
+	reconcileConversation(t, srv, root.Name)
+	fencedRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	if fencedRec.Code != 204 {
+		t.Fatalf("the early result must stay fenced, got %d %s", fencedRec.Code, fencedRec.Body.String())
+	}
+
+	// The member finishes a SECOND run AFTER the thread exists: this result's
+	// ReceivedAt is after EscalatedAt, so it must reach the thread.
+	memberConv = getConv(t, member)
+	memberConv.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r2", DispatchedAt: metav1.Now()}
+	if err := k8sClient.Status().Update(context.Background(), memberConv); err != nil {
+		t.Fatal(err)
+	}
+	if rec := adapterReq(srv, "POST", "/work/done", map[string]any{
+		"convo": member, "runId": "r2", "status": "succeeded", "result": "disk is at 90%, needs attention",
+	}, srv.AdapterToken); rec.Code != 200 {
+		t.Fatalf("work/done: %d %s", rec.Code, rec.Body.String())
+	}
+
+	reconcileConversation(t, srv, root.Name)
+	resultRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	var resultOp chat.Op
+	if err := json.Unmarshal(resultRec.Body.Bytes(), &resultOp); err != nil || resultOp.Kind != chat.OpSend {
+		t.Fatalf("the later member result must reach the thread, got %d %s", resultRec.Code, resultRec.Body.String())
+	}
+	if !strings.Contains(resultOp.Message.Body, "disk is at 90%") {
+		t.Fatalf("the send op must carry the member's later result, got %+v", resultOp.Message)
+	}
+	if strings.Contains(resultOp.Message.Body, "must not flood") {
+		t.Fatalf("the fenced early result must never surface, got %+v", resultOp.Message)
+	}
+
+	// A person's reply on that thread is an ordinary root input.
+	if rec := adapterReq(srv, "POST", "/channel/inbound",
+		map[string]any{"channel": "esc3-desk", "threadId": "esc3-thread-1", "text": "who is handling this?"},
+		srv.AdapterToken); rec.Code != 202 {
+		t.Fatalf("channel/inbound: %d %s", rec.Code, rec.Body.String())
+	}
+	gotRoot = getConv(t, root.Name)
+	found := false
+	for _, in := range gotRoot.Spec.Inputs {
+		if in.Payload == "who is handling this?" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the reply must land as a root input, got %+v", gotRoot.Spec.Inputs)
+	}
+}
+
 func TestCoordinateInvokeRefusesAChannelReaderTokenThroughTheRealAPI(t *testing.T) {
 	mkProfile(t, "prof-chread-co")
 	mkChannel(t, "chread-desk", "chread-ta")

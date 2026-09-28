@@ -179,7 +179,10 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 				return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: t.ID, Continuity: continuity,
 					Result: "the model returned an empty answer twice"}
 			}
-			return RunResult{Status: "succeeded", ExitCode: 0, RuntimeContextID: t.ID, Continuity: continuity, Result: result}
+			// Extracted before returning: the brief is a contract field, never
+			// a displayed section, so it must not reach Result.
+			result, brief := extractBrief(result)
+			return RunResult{Status: "succeeded", ExitCode: 0, RuntimeContextID: t.ID, Continuity: continuity, Result: result, Brief: brief}
 		}
 		for _, call := range resp.ToolCalls {
 			name := call.Function.Name

@@ -94,7 +94,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       level; reuse scope; a channel-reader token sees only its channel's
       projection and no verb; a nested Coordinator's budget is independent of
       its ancestor's; a direct and an indirect cycle are both refused.
-- [ ] 2.14 `brief` (D-I): `/work/done` accepts `brief`; `handleWorkDone`
+- [x] 2.14 `brief` (D-I): `/work/done` accepts `brief`; `handleWorkDone`
       records it latest-wins in the run's status write, leaving it alone when
       absent; `dispatch/templates/format.md` asks the agent for one sentence
       of what the conversation is about; `runtimes/claude` and
@@ -104,21 +104,21 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 3. Phase 2 — escalation (design D-D)
 
-- [ ] 3.1 `escalate` on an UNCAUSED conversation (no `causedBy`) sets
+- [x] 3.1 `escalate` on an UNCAUSED conversation (no `causedBy`) sets
       `spec.channelRefs` from its `spec.escalationChannelRefs` snapshot —
       reads no Coordinator — stamps `escalatedAt`, enqueues `ensure-topic`
       with the digest as the opening message.
-- [ ] 3.1b `escalate` on a conversation carrying `causedBy` opens NO thread:
+- [x] 3.1b `escalate` on a conversation carrying `causedBy` opens NO thread:
       closes it with the message as `closeReason` and result, landing on its
       PARENT as an ordinary member-result input (task 2.8's path) — bubbling
       one hop, exactly as an agent-initiated close does.
-- [ ] 3.2 `DeliverInputs` fences on `escalatedAt`: nothing earlier is
+- [x] 3.2 `DeliverInputs` fences on `escalatedAt`: nothing earlier is
       delivered to the escalated channels.
-- [ ] 3.3 `budget-exceeded` closes the conversation, then calls `escalate`
+- [x] 3.3 `budget-exceeded` closes the conversation, then calls `escalate`
       with a manager-written digest (limit, counts, member list) — bubbling
       per 3.1b on a nested conversation, opening a thread only on the
       uncaused root.
-- [ ] 3.4 Fake-chat integration test: escalate on the uncaused root opens
+- [x] 3.4 Fake-chat integration test: escalate on the uncaused root opens
       threads with the digest only; a later member result reaches the
       thread; a person's reply is a root input; escalate on a nested member
       closes it and lands the message on its parent with no thread anywhere.
