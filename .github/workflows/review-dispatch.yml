@@ -275,8 +275,12 @@ jobs:
               --out "$RUNNER_TEMP/dispatch/sonar.json"
             # THE THIRD SOURCE: what is red on the head. Under the label only,
             # because a per-thread dispatch acts on the threads a person named.
+            # --since: a dispute posted under a REMOVED label must not hold a
+            # check awaiting — re-placing the label is a fresh start, and the
+            # round and grant counters already read the same bound (#269).
             python3 .github/scripts/failed-checks.py \
               --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" --sha "$HEAD" \
+              --since "${{ needs.gate.outputs.since }}" \
               --out "$RUNNER_TEMP/dispatch/checks.json"
           else
             echo '{"consulted":false,"issues":[],"projects":[]}' > "$RUNNER_TEMP/dispatch/sonar.json"

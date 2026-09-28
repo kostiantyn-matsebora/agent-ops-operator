@@ -342,6 +342,11 @@ every start, never trusting that a workflow placed it before.
     comment names it in a hidden line (`<!-- conveyor:disputed-item check:<job> -->`),
     `failed-checks.py` reports it as AWAITING the person rather than as work,
     and a person's later comment makes it work again.
+    - **Only disputes since the label's placement hold a check awaiting.**
+      Re-placing `conveyor:fix` is a fresh start, and the round and grant
+      counters already read that bound. This memory did not, measured on
+      #269: a re-label with a fresh budget still reported every check as
+      awaiting, on a dispute the removed label's loop had posted.
 - **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
   is the feature: a finding nobody accepted and nobody dismissed is a decision
   still owed.

@@ -136,15 +136,22 @@ def failed_log(repo: str, run: str, job: str, tail_lines: int) -> str:
     return "\n".join(lines[-tail_lines:])
 
 
-def disputed_checks(repo: str, pr: int, marker: str) -> set[str]:
+def disputed_checks(repo: str, pr: int, marker: str, since: str = "") -> set[str]:
     """The `check:<job>` ids an earlier round disputed and no person has answered
     since. A disputed check has no thread, so its dispute is a pull request
     comment carrying the marker and one hidden line per item; a person's later
     comment answers every dispute before it, exactly as `autofix-guard.py` reads
-    it. Unreadable is an empty set: the check is then work, never waved through."""
+    it. Unreadable is an empty set: the check is then work, never waved through.
+
+    ONLY DISPUTES SINCE THE LABEL WAS PLACED COUNT. Re-placing `conveyor:fix`
+    is documented as a fresh start, and the round and grant counters already
+    read `since` — but this memory did not, measured live on #269: a re-label
+    with a fresh budget still reported every check as awaiting a person, on
+    the strength of a dispute the removed label's loop had posted."""
     try:
         raw = gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate", "--jq",
-                 '[.[] | {body: .body, author: {login: .user.login, __typename: .user.type}}]')
+                 '[.[] | {body: .body, created_at: .created_at, '
+                 'author: {login: .user.login, __typename: .user.type}}]')
     except RuntimeError:
         return set()
     comments: list[dict] = []
@@ -155,6 +162,8 @@ def disputed_checks(repo: str, pr: int, marker: str) -> set[str]:
                 comments.extend(json.loads(line))
             except json.JSONDecodeError:
                 return set()
+    if since:
+        comments = [c for c in comments if (c.get("created_at") or "") >= since]
     if not conveyor.unanswered_after_marker(comments, marker):
         return set()
     # every dispute comment AFTER the last person's comment names items still awaiting
@@ -172,6 +181,8 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--pr", type=int, required=True)
     ap.add_argument("--sha", required=True, help="the pull request's head sha")
+    ap.add_argument("--since", default="", help="the fix label's placement time — disputes before it are a "
+                    "removed label's and do not hold a check awaiting")
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY,
                     help="review-triage.json, for the dispute marker")
@@ -208,7 +219,7 @@ def main() -> int:
         marker = json.loads(args.vocabulary.read_text()).get("dispute_marker", "<!-- conveyor:disputed -->")
     except (OSError, ValueError):
         marker = "<!-- conveyor:disputed -->"
-    awaiting_ids = disputed_checks(args.repo, args.pr, marker)
+    awaiting_ids = disputed_checks(args.repo, args.pr, marker, args.since)
 
     items: list[dict] = []
     checks: list[dict] = []
