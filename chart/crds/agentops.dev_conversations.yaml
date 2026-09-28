@@ -202,18 +202,28 @@ spec:
                         provenance existed — and an absent origin means NOT POSTED to bound
                         channels, so upgrading cannot fill open threads with history.
                       properties:
+                        entry:
+                          description: |-
+                            Entry is the parent Coordinator's `agents[]` entry name the edge was
+                            invoked through. Set only for OriginMember, on both directions of the
+                            edge: the task `invoke` handed down, and the result routed back up.
+                          type: string
                         kind:
                           description: |-
-                            OriginKind says HOW an input reached the manager. Two values, and there are
-                            only two doors: a signal through a claimed SignalSource, or a channel the user
-                            is already looking at. (`POST /task` was a third once; it is gone.)
+                            OriginKind says HOW an input reached the manager. There are three doors: a
+                            signal through a claimed SignalSource, a channel the user is already looking
+                            at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
+                            was a fourth once; it is gone.)
                           enum:
                           - signal
                           - channel
+                          - member
                           type: string
                         name:
-                          description: Name is the SignalSource or Channel the input
-                            came from.
+                          description: |-
+                            Name is the SignalSource or Channel the input came from, or — for
+                            OriginMember — the conversation on the other side of the `causedBy`
+                            edge this input crossed.
                           type: string
                         sender:
                           description: |-
@@ -711,6 +721,15 @@ spec:
                   thread late does not replay everything that happened before it existed.
                 format: date-time
                 type: string
+              escalationMessage:
+                description: |-
+                  EscalationMessage is the digest the escalating agent supplied, snapshotted
+                  at the same moment as EscalatedAt so the reconciler can post it as the
+                  newly-bound threads' opening message once each topic exists — the ensure-topic
+                  enqueue and the topic actually being created by the adapter are two
+                  separate moments, so the message has to sit somewhere between them.
+                maxLength: 2000
+                type: string
               inflight:
                 description: InflightRun tracks the unit currently dispatched to the
                   runtime pod.
@@ -881,6 +900,19 @@ spec:
                       type: string
                     result:
                       type: string
+                    routedToParent:
+                      description: |-
+                        RoutedToParent marks a run on a conversation carrying `spec.causedBy`
+                        whose result has already been appended as an input on its PARENT
+                        (coordination-loop). The same derivability shape as DeliveryTracked: the
+                        fast path in `/work/done` sets it once the append succeeds, and the
+                        reconciler backstop re-derives a missing append from `causedBy ∧
+                        !RoutedToParent` rather than from scanning the parent's own queue, which
+                        pruning empties.
+
+                        Absent on a conversation with no `causedBy` — there is no parent to
+                        route to, so the zero value already means "nothing owed".
+                      type: boolean
                     runId:
                       type: string
                     startedAt:

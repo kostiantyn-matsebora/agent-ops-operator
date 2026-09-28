@@ -27,3 +27,31 @@ func DeriveSignalAdapterToken(masterKey, adapterName string) string {
 	mac.Write([]byte("signal-adapter:" + adapterName))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
+
+// DeriveCoordinatorToken derives the PER-CONVERSATION token a coordinated
+// conversation's runtime pod holds (design D-F, `aops-mcp-server`): HMAC of
+// the master key and `coordinator:<coordinatorName>:<conversationName>`.
+//
+// Per CONVERSATION rather than per Coordinator, because one Coordinator may
+// hold several open conversations at once, nested or not, and a token naming
+// only the Coordinator could not scope reach to one of them. The manager
+// validates a presented token by re-deriving it against every conversation
+// carrying `spec.coordinatorRef` — the same re-derivation pattern
+// DeriveAdapterToken already uses against the ChannelAdapter list — so
+// nothing is minted or stored anywhere.
+func DeriveCoordinatorToken(masterKey, coordinatorName, conversationName string) string {
+	mac := hmac.New(sha256.New, []byte(masterKey))
+	mac.Write([]byte("coordinator:" + coordinatorName + ":" + conversationName))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// DeriveChannelReaderToken derives the SECOND reach class `aops-mcp-server`
+// defines: a token scoped to one Channel, reaching only the
+// `{name,title,brief,phase,pipeline}` projection of conversations bound to it
+// and refused for every verb. Distinct context from DeriveCoordinatorToken so
+// a Channel and a Coordinator sharing a name never share a token.
+func DeriveChannelReaderToken(masterKey, channelName string) string {
+	mac := hmac.New(sha256.New, []byte(masterKey))
+	mac.Write([]byte("channel-reader:" + channelName))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}

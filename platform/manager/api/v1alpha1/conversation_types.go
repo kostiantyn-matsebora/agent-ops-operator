@@ -16,10 +16,11 @@ const (
 	InputJob        InputType = "job"
 )
 
-// OriginKind says HOW an input reached the manager. Two values, and there are
-// only two doors: a signal through a claimed SignalSource, or a channel the user
-// is already looking at. (`POST /task` was a third once; it is gone.)
-// +kubebuilder:validation:Enum=signal;channel
+// OriginKind says HOW an input reached the manager. There are three doors: a
+// signal through a claimed SignalSource, a channel the user is already looking
+// at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
+// was a fourth once; it is gone.)
+// +kubebuilder:validation:Enum=signal;channel;member
 type OriginKind string
 
 const (
@@ -29,6 +30,12 @@ const (
 	// OriginChannel: the input was typed into a channel — a command or a thread
 	// reply. Name is that channel.
 	OriginChannel OriginKind = "channel"
+	// OriginMember: the input crossed a `causedBy` edge between a coordinated
+	// conversation and its immediate parent (coordination-loop) — either a
+	// task an `invoke` handed down, or a member's result routed back up. Name
+	// is the CONVERSATION on the other side of that edge, and Entry is the
+	// `agents[]` entry name the edge was invoked through.
+	OriginMember OriginKind = "member"
 )
 
 // SignalProvenance is the originating signal, kept for attribution.
@@ -69,9 +76,16 @@ const MaxSignalLabels = 32
 // is only what cannot be derived afterwards.
 type InputOrigin struct {
 	Kind OriginKind `json:"kind"`
-	// Name is the SignalSource or Channel the input came from.
+	// Name is the SignalSource or Channel the input came from, or — for
+	// OriginMember — the conversation on the other side of the `causedBy`
+	// edge this input crossed.
 	// +optional
 	Name string `json:"name,omitempty"`
+	// Entry is the parent Coordinator's `agents[]` entry name the edge was
+	// invoked through. Set only for OriginMember, on both directions of the
+	// edge: the task `invoke` handed down, and the result routed back up.
+	// +optional
+	Entry string `json:"entry,omitempty"`
 	// SignalKind is the originating signal's lane (alert | job | task | chat)
 	// for `signal` origins, empty otherwise. It says whether a PERSON typed
 	// this input — which decides how it is rendered on the surfaces that did
@@ -107,6 +121,14 @@ const (
 	LabelChatChannel = "agentops.dev/channel"
 	LabelChatSender  = "agentops.dev/sender"
 )
+
+// LabelCausedBy indexes a member conversation by its immediate parent's name —
+// the same fact `spec.causedBy.parent` carries, mirrored onto a label so the
+// close cascade (coordination-loop) can list one parent's direct members with
+// `client.MatchingLabels` rather than scanning every conversation in the
+// namespace. Set once at creation, alongside `spec.causedBy`, and never
+// changed — exactly like the field it mirrors.
+const LabelCausedBy = "agentops.dev/caused-by"
 
 // InputItem is one queued work unit. Payload is inline OR referenced via
 // PayloadRef (a ConversationInput object) for large payloads.
@@ -468,6 +490,18 @@ type RunStatus struct {
 	// re-post to the delivered thread or abandon the other two.
 	// +optional
 	Delivered []string `json:"delivered,omitempty"`
+	// RoutedToParent marks a run on a conversation carrying `spec.causedBy`
+	// whose result has already been appended as an input on its PARENT
+	// (coordination-loop). The same derivability shape as DeliveryTracked: the
+	// fast path in `/work/done` sets it once the append succeeds, and the
+	// reconciler backstop re-derives a missing append from `causedBy ∧
+	// !RoutedToParent` rather than from scanning the parent's own queue, which
+	// pruning empties.
+	//
+	// Absent on a conversation with no `causedBy` — there is no parent to
+	// route to, so the zero value already means "nothing owed".
+	// +optional
+	RoutedToParent bool `json:"routedToParent,omitempty"`
 	// Inputs are the messages this run consumed, kept where the run keeps its
 	// answer — so a conversation records the questions as well as the answers
 	// and its whole timeline reads off status in order.
@@ -795,6 +829,14 @@ type ConversationStatus struct {
 	// thread late does not replay everything that happened before it existed.
 	// +optional
 	EscalatedAt *metav1.Time `json:"escalatedAt,omitempty"`
+	// EscalationMessage is the digest the escalating agent supplied, snapshotted
+	// at the same moment as EscalatedAt so the reconciler can post it as the
+	// newly-bound threads' opening message once each topic exists — the ensure-topic
+	// enqueue and the topic actually being created by the adapter are two
+	// separate moments, so the message has to sit somewhere between them.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2000
+	EscalationMessage string `json:"escalationMessage,omitempty"`
 	// CloseReason is why the MCP `close` verb (or an internal
 	// `budget-exceeded` close) ended this conversation. Required by that
 	// verb; absent when `/close` ended it from a surface, or when nothing

@@ -180,6 +180,25 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.reconcileClosed(ctx, &conv)
 	}
 
+	// The DEADLINE budget edge (design D-E): a Coordinator-rooted conversation
+	// past its own snapshotted deadline is closed budget-exceeded — its own
+	// members first, then escalated — whatever else is happening on it. This is
+	// the one edge the RECONCILER owns rather than a request handler, since
+	// nothing else calls in when a conversation simply sits idle past its time.
+	//
+	// A deadline still ahead does NOT return early: everything below still runs
+	// (dispatch, topics, delivery), and deadlineRequeue only CAPS whichever
+	// requeue this pass would otherwise choose, so the reconciler is guaranteed
+	// to revisit no later than the deadline itself.
+	var deadlineRequeue time.Duration
+	if budget := conv.Status.Budget; budget != nil && budget.Deadline != nil && r.Router != nil {
+		if !budget.Deadline.Time.After(time.Now()) {
+			digest := fmt.Sprintf("budget-exceeded: deadline (%s) passed", budget.Deadline.Time.Format(time.RFC3339))
+			return ctrl.Result{}, r.Router.CloseBudgetExceeded(ctx, &conv, digest)
+		}
+		deadlineRequeue = time.Until(budget.Deadline.Time)
+	}
+
 	// signature label for grouping lookups
 	if conv.Spec.Signature != "" {
 		want := ingest.SignatureHash(conv.Spec.Signature)
@@ -329,6 +348,12 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if conv.Status.Reopens > 0 && r.Router != nil {
 			r.Router.FanOutReopenNotice(ctx, &conv)
 		}
+		// The escalation digest (design D-D): the ensure-topic enqueue above and
+		// the topic actually existing are two different moments, so this waits
+		// for a thread before posting — same ordering reason as the reopen
+		// notice, and the op id is stable so re-deriving it every pass posts the
+		// digest once.
+		r.deliverEscalation(ctx, &conv)
 		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
 		// the human reads the event while the agent is already working, and a
 		// run that hangs or dies still leaves the thread saying what happened.
@@ -336,6 +361,17 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// The BACKSTOP that makes a reply derivable rather than queue-resident.
 		if err := r.deliverRunReplies(ctx, &conv); err != nil {
 			logger.Error(err, "re-deriving undelivered run replies")
+		}
+	}
+	// The BACKSTOP for a member's result reaching its parent
+	// (coordination-loop): the FAST PATH in `/work/done` marks a run
+	// RoutedToParent once its append succeeds, and this re-derives any it
+	// missed — a manager restart between the two, or a conflict the fast path
+	// gave up retrying. Independent of chat topics entirely: a caused
+	// conversation binds no channel, so this must not be gated on r.Ops.
+	if r.Router != nil {
+		if err := r.deliverMemberResults(ctx, &conv); err != nil {
+			logger.Error(err, "re-deriving unrouted member results")
 		}
 	}
 
@@ -361,12 +397,28 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if topicPending {
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return capRequeue(ctrl.Result{RequeueAfter: 15 * time.Second}, deadlineRequeue), nil
 	}
 	if needsWorker {
-		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+		return capRequeue(ctrl.Result{RequeueAfter: 60 * time.Second}, deadlineRequeue), nil
 	}
-	return r.autoClose(ctx, &conv, podExists)
+	result, err := r.autoClose(ctx, &conv, podExists)
+	return capRequeue(result, deadlineRequeue), err
+}
+
+// capRequeue bounds a reconcile result's requeue to at most `extra`, when
+// `extra` is set — the mechanism a Coordinator-rooted conversation's own
+// deadline uses to guarantee a revisit no later than the deadline itself,
+// without pre-empting whatever sooner requeue the rest of this pass already
+// chose.
+func capRequeue(result ctrl.Result, extra time.Duration) ctrl.Result {
+	if extra <= 0 {
+		return result
+	}
+	if result.RequeueAfter <= 0 || extra < result.RequeueAfter {
+		result.RequeueAfter = extra
+	}
+	return result
 }
 
 // autoClose closes a FINISHED conversation that has been idle for the window,
@@ -948,6 +1000,42 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 	return pending, firstErr
 }
 
+// deliverEscalation posts the digest an `escalate` call snapshotted
+// (status.escalationMessage) as the opening message of every escalation
+// channel that now has a thread. A conversation that never escalated, or
+// whose escalation channels have no thread yet, gets nothing — Ops itself is
+// what makes a second delivery a no-op.
+func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	if conv.Status.EscalatedAt == nil || r.Ops == nil {
+		return
+	}
+	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+		r.Ops.EnqueueEscalationMessage(ctx, ch, conv, tid, chat.Notice(conv.Status.EscalationMessage))
+	})
+}
+
+// eachBoundThread mirrors chat.Router's own helper of the same shape: every
+// bound channel that already has a thread, so a send to one that does not
+// exist yet is never queued.
+func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
+
+	for _, ref := range conv.Spec.ChannelRefs {
+		if ref.Name == skip {
+			continue
+		}
+		tid := conv.ThreadFor(ref.Name)
+		if tid == nil {
+			continue
+		}
+		var ch agentopsv1alpha1.Channel
+		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+			continue
+		}
+		fn(&ch, tid)
+	}
+}
+
 // topicDescriptor describes a conversation's thread for the adapter to NAME.
 // The manager supplies facts — route, source, title, labels, lane — and no
 // formatting: Telegram caps forum topics at 128 characters and takes no markup,
@@ -1034,6 +1122,36 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 		return nil
 	}
 	return r.backfillDelivered(ctx, conv, backfill)
+}
+
+// deliverMemberResults is the reconciler backstop for coordination-loop's
+// "member's result becomes an input on its parent" rule: any run on THIS
+// conversation not yet marked RoutedToParent gets appended again (idempotent
+// per its dedup id) and marked once that succeeds.
+func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Spec.CausedBy == nil {
+		return nil
+	}
+	var firstErr error
+	for i := range conv.Status.Runs {
+		run := &conv.Status.Runs[i]
+		if run.RoutedToParent {
+			continue
+		}
+		dedup := "member:" + conv.Name + ":" + run.RunID
+		if err := r.Router.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name, dedup, run.Result); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		patch := client.MergeFrom(conv.DeepCopy())
+		run.RoutedToParent = true
+		if err := r.Status().Patch(ctx, conv, patch); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // setDeliveryPendingCondition names the channels still owed an answer.
