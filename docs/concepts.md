@@ -492,6 +492,25 @@ Pipeline](#pipeline).
 nothing writes it, and dispatch reads it for one release so an input queued
 before the upgrade still reaches the agent it was parsed with.
 
+### Coordinator
+
+**A coordinating agent.** Its own conversation reads what started it and
+invokes named members from `spec.agents[]`.
+
+- **It reconciles like a Pipeline.** Wiring validation only, and `Ready`
+  reports whether its capability and every entry resolve.
+- **It claims sources with `signalSourceRefs`**, shareable exactly as a
+  Pipeline's are.
+- **Each `agents[]` entry names ONE of `capabilityRef` or `coordinatorRef`.**
+  The second nests: the member is that Coordinator's own root.
+- **`spec.limits` bounds the tree**: `maxAgents`, `maxTurns` and `deadline`,
+  enforced per level and never pooled across nesting.
+- **`channelRefs` are reached only by escalation.** A member binds no channel
+  at creation.
+- **Its conversation reaches the verbs through the aops MCP server.** The
+  Coordinator's capability must bind the `coordinate` toolset and the aops
+  `MCPConfig`, and nothing else grants them.
+
 ### MCPConfig
 
 **Reusable MCP server sets**, bound per wiring.

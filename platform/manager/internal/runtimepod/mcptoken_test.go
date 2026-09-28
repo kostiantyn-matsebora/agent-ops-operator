@@ -30,7 +30,7 @@ func TestBuildOmitsAOPSMCPTokenWhenNotCoordinatorRooted(t *testing.T) {
 		mcpcompile.Result{Endpoints: map[string]string{"aops": "http://agentops-mcp-aops:8080/mcp"}},
 		"mcp-cm", Resolved{}, "master-key")
 
-	if got := envOf(container(pod, "worker"), "AOPS_MCP_TOKEN"); got != "" {
+	if envOf(container(pod, "worker"), "AOPS_MCP_TOKEN") != "" {
 		t.Fatal("an ordinary Pipeline-rooted conversation must never get AOPS_MCP_TOKEN")
 	}
 }
@@ -40,7 +40,7 @@ func TestBuildOmitsAOPSMCPTokenWhenTheWiringNeverBoundTheAopsServer(t *testing.T
 	conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-a"}
 	pod := Build(conv, &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", Resolved{}, "master-key")
 
-	if got := envOf(container(pod, "worker"), "AOPS_MCP_TOKEN"); got != "" {
+	if envOf(container(pod, "worker"), "AOPS_MCP_TOKEN") != "" {
 		t.Fatal("a Coordinator root whose capability never lists the aops toolset must get no token")
 	}
 }

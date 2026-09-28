@@ -70,31 +70,12 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
 		return nil, err
 	}
-	var entry *agentopsv1alpha1.CoordinatorAgentEntry
-	for i := range co.Spec.Agents {
-		if co.Spec.Agents[i].Name == agentName {
-			entry = &co.Spec.Agents[i]
-			break
-		}
-	}
+	entry := findAgentEntry(&co, agentName)
 	if entry == nil {
 		return nil, ErrUnknownAgent
 	}
-	if entry.CoordinatorRef != nil {
-		chain, err := r.coordinatorChain(ctx, caller)
-		if err != nil {
-			return nil, err
-		}
-		if chain[entry.CoordinatorRef.Name] {
-			return nil, ErrCoordinatorCycle
-		}
-	}
-	if budget := caller.Status.Budget; budget != nil && budget.MaxAgents > 0 && budget.AgentsInvoked >= budget.MaxAgents {
-		digest := fmt.Sprintf("budget-exceeded: maxAgents (%d) reached", budget.MaxAgents)
-		if err := r.CloseBudgetExceeded(ctx, caller, digest); err != nil {
-			return nil, fmt.Errorf("%w, and closing on it failed: %v", ErrMaxAgents, err)
-		}
-		return nil, ErrMaxAgents
+	if err := r.refuseCycleOrSpentBudget(ctx, caller, entry); err != nil {
+		return nil, err
 	}
 
 	signature := "invoke:" + entry.Name
@@ -120,6 +101,39 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		return nil, err
 	}
 	return &InvokeResult{Member: created.Name, Created: true}, nil
+}
+
+// findAgentEntry returns the named `agents[]` entry, or nil.
+func findAgentEntry(co *agentopsv1alpha1.Coordinator, name string) *agentopsv1alpha1.CoordinatorAgentEntry {
+	for i := range co.Spec.Agents {
+		if co.Spec.Agents[i].Name == name {
+			return &co.Spec.Agents[i]
+		}
+	}
+	return nil
+}
+
+// refuseCycleOrSpentBudget is InvokeMember's two refusals: an entry naming a
+// Coordinator already in the caller's chain, and a spent maxAgents budget
+// (which also closes the caller budget-exceeded).
+func (r *Router) refuseCycleOrSpentBudget(ctx context.Context, caller *agentopsv1alpha1.Conversation, entry *agentopsv1alpha1.CoordinatorAgentEntry) error {
+	if entry.CoordinatorRef != nil {
+		chain, err := r.coordinatorChain(ctx, caller)
+		if err != nil {
+			return err
+		}
+		if chain[entry.CoordinatorRef.Name] {
+			return ErrCoordinatorCycle
+		}
+	}
+	if budget := caller.Status.Budget; budget != nil && budget.MaxAgents > 0 && budget.AgentsInvoked >= budget.MaxAgents {
+		digest := fmt.Sprintf("budget-exceeded: maxAgents (%d) reached", budget.MaxAgents)
+		if err := r.CloseBudgetExceeded(ctx, caller, digest); err != nil {
+			return fmt.Errorf("%w, and closing on it failed: %v", ErrMaxAgents, err)
+		}
+		return ErrMaxAgents
+	}
+	return nil
 }
 
 // CoordinatorAgents is the manager's half of the MCP `list_agents` tool
