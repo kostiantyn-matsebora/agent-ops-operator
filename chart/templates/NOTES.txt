@@ -212,6 +212,14 @@ Pipelines:
     -p '[{"op":"add","path":"/spec/channelRefs/-","value":{"name":"{{ $ch }}"}}]'
 Existing conversations keep their current bindings; new ones get a console thread.
 {{- end }}
+{{- if .Values.coordination.enabled }}
+
+The aops MCP server is deployed (agentops-mcp-aops). It grants nothing by
+itself: a Coordinator's own capability must bind toolset {{ .Values.global.builtinToolsets.coordinate.name }}
+and MCPConfig {{ .Values.coordination.name }} before its conversation can invoke, close, escalate
+or read anything — the same two-CR pattern every MCP toolset in this release
+uses. See docs/concepts.md for the Coordinator CRD.
+{{- end }}
 {{- $pb := index .Values "prometheus" }}
 {{- if and $pb $pb.enabled }}
 {{- /* Subchart context so the bundle's own helpers decide what this reports —

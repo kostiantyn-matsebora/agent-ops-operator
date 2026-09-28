@@ -1,0 +1,136 @@
+{{- /*
+The aops MCP server (design coordinated-agents D-F, aops-mcp-server): a THIN
+CLIENT of the manager's /coordinate/* surface. It decides no reach itself, so
+it needs no Kubernetes access at all — no ServiceAccount token, no RBAC. Every
+verb's bound is enforced by the MANAGER, from the caller's own bearer token.
+
+Renders only under coordination.enabled: an install with no Coordinator gets
+none of this.
+*/ -}}
+{{- if .Values.coordination.enabled }}
+{{- $c := .Values.coordination }}
+{{- $name := "agentops-mcp-aops" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      # It talks HTTP to the manager and nothing else — no reason to reach the
+      # Kubernetes API, and no ServiceAccount token to do it with.
+      automountServiceAccountToken: false
+      containers:
+        - name: mcp-aops
+          image: {{ printf "%s:%s" $c.image.repository (toString $c.image.tag) | quote }}
+          env:
+            - name: MANAGER_URL
+              value: {{ printf "http://agentops-manager.%s.svc:%v" .Release.Namespace .Values.service.apiPort | quote }}
+            - name: LISTEN_ADDR
+              value: {{ printf ":%v" $c.port | quote }}
+          ports:
+            - name: http
+              containerPort: {{ $c.port }}
+          # NO PROBES. The image is the shared distroless recipe
+          # (.github/docker/go-module.Dockerfile) — no shell, no curl, no
+          # wget for an exec probe to run, and an httpGet probe originates on
+          # the NODE (not a pod), which no NetworkPolicy peer here can name
+          # without opening the same port every runtime pod's traffic is
+          # meant to be the only thing reaching. Every other component built
+          # from this recipe ships the same way.
+          {{- with $c.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+      {{- with $c.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: http
+      port: {{ $c.port }}
+      targetPort: http
+---
+{{- /*
+The MCPConfig every Coordinator binds. The server KEY is FIXED at "aops" and
+deliberately has no values path — internal/runtimepod's Build() injects
+AOPS_MCP_TOKEN only for a conversation whose compiled MCP servers include
+exactly that key (runtimepod/podspec.go's aopsMCPServerKey), so a renamed key
+would silently leave a Coordinator's own conversation without its token.
+
+The two headers are how the caller declares WHO it is, never a tool argument a
+model could fill in on its own behalf (see platform/mcp-aops/main.go). Both are
+${VAR} placeholders the runtime's OWN MCP client resolves from ITS OWN pod env
+at connection time — CONVO_ID is set on every runtime pod already; AOPS_MCP_TOKEN
+is set only where the wiring actually binds this MCPConfig, which is exactly
+the condition that makes the header meaningful.
+*/ -}}
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-coordination
+spec:
+  servers:
+    aops:
+      type: http
+      url: {{ printf "http://%s.%s.svc:%v/mcp" $name .Release.Namespace $c.port | quote }}
+      headers:
+        - name: Authorization
+          value: "Bearer ${AOPS_MCP_TOKEN}"
+        - name: X-Aops-Conversation
+          value: "${CONVO_ID}"
+{{- $np := (.Values.global.agentops).networkPolicy | default dict }}
+{{- if $np.enabled }}
+---
+# Runtime pods only. The manager never calls this server — it is the other
+# side of every call this server makes, never a caller of it — and neither
+# does anything else this chart deploys.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-runtime
+        {{- with $np.probesFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $c.port }}
+{{- end }}
+{{- end }}

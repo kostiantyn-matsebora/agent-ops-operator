@@ -122,6 +122,55 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	return &InvokeResult{Member: created.Name, Created: true}, nil
 }
 
+// CoordinatorAgents is the manager's half of the MCP `list_agents` tool
+// (design D-F, aops-mcp-server): the calling conversation's own Coordinator's
+// `agents[]` entries. The caller must itself be a Coordinator's own
+// conversation, exactly as InvokeMember requires — listing agents is a
+// capability of the coordinating agent's own conversation.
+func (r *Router) CoordinatorAgents(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]agentopsv1alpha1.CoordinatorAgentEntry, error) {
+	if caller.Spec.CoordinatorRef == nil {
+		return nil, ErrNotCoordinatorRoot
+	}
+	var co agentopsv1alpha1.Coordinator
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
+		return nil, err
+	}
+	return co.Spec.Agents, nil
+}
+
+// Descendants lists every conversation in rootName's own subtree, at any
+// depth, DOWNWARD only — never rootName's ancestors or their other branches
+// (aops-mcp-server's `get_tree` bound). BFS by LabelCausedBy, each hit
+// verified against the CausedBy field itself — the label is a hint, the same
+// pattern cascadeCloseMembers already uses to close a subtree. Bounded
+// defensively against a malformed causedBy graph, exactly as descendsFrom is.
+func (r *Router) Descendants(ctx context.Context, rootName string) ([]agentopsv1alpha1.Conversation, error) {
+	var out []agentopsv1alpha1.Conversation
+	seen := map[string]bool{rootName: true}
+	frontier := []string{rootName}
+	for i := 0; i < 1000 && len(frontier) > 0; i++ {
+		var next []string
+		for _, parent := range frontier {
+			var list agentopsv1alpha1.ConversationList
+			if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
+				client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parent}); err != nil {
+				return nil, err
+			}
+			for j := range list.Items {
+				m := list.Items[j]
+				if m.Spec.CausedBy == nil || m.Spec.CausedBy.Parent != parent || seen[m.Name] {
+					continue // the label is a hint; the field is the fact
+				}
+				seen[m.Name] = true
+				out = append(out, m)
+				next = append(next, m.Name)
+			}
+		}
+		frontier = next
+	}
+	return out, nil
+}
+
 // coordinatorChain collects the calling conversation's OWN coordinatorRef,
 // then every ancestor's, walking `causedBy` to the uncaused root (design
 // D-E2). Bounded defensively: the ordinary budgets already keep a live chain

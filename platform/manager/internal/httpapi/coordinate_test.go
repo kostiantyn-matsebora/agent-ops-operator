@@ -525,3 +525,90 @@ func TestHandleCoordinateInvokeRefusesAChannelReaderToken(t *testing.T) {
 		t.Fatalf("a channel-reader token must be refused for invoke, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// coordMember builds a member conversation the way createMember does: the
+// causedBy field AND the label, since Descendants trusts only the field and
+// uses the label merely as an index.
+func coordMember(name, parent, entry string) *agentopsv1alpha1.Conversation {
+	m := &agentopsv1alpha1.Conversation{}
+	m.Name, m.Namespace = name, "agent-ops"
+	m.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	m.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: entry}
+	return m
+}
+
+func TestHandleCoordinateAgentsListsTheCallersOwnEntries(t *testing.T) {
+	co := coordCoordinator("co-a",
+		agentopsv1alpha1.CoordinatorAgentEntry{Name: "worker", Description: "does it", CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"}},
+	)
+	root := coordRoot("root-1", "co-a")
+	s, _ := coordServer(t, co, root)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/agents", token, map[string]any{"conversation": "root-1"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Agents []agentEntryView `json:"agents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Agents) != 1 || out.Agents[0].Name != "worker" || out.Agents[0].Description != "does it" {
+		t.Fatalf("want the single worker entry (name+description only), got %+v", out.Agents)
+	}
+}
+
+func TestHandleCoordinateAgentsRefusesAWrongToken(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	rec := postCoordinate(s, "/coordinate/agents", "wrong-token", map[string]any{"conversation": "root-1"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateTreeDefaultsToTheCallersOwnSubtree(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	member := coordMember("member-1", "root-1", "worker")
+	grandchild := coordMember("grandchild-1", "member-1", "helper")
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, member, grandchild)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/tree", token, map[string]any{"conversation": "root-1"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out treeNode
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "root-1" || len(out.Members) != 1 || out.Members[0].Name != "member-1" {
+		t.Fatalf("want root-1 with member-1 nested, got %+v", out)
+	}
+	if len(out.Members[0].Members) != 1 || out.Members[0].Members[0].Name != "grandchild-1" {
+		t.Fatalf("want member-1's own member grandchild-1 nested beneath it, got %+v", out.Members[0])
+	}
+}
+
+func TestHandleCoordinateTreeRefusesATargetOutsideTheCallersSubtree(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	stranger := &agentopsv1alpha1.Conversation{}
+	stranger.Name, stranger.Namespace = "stranger-1", "agent-ops"
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, stranger)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/tree", token,
+		map[string]any{"conversation": "root-1", "target": "stranger-1"})
+	if rec.Code != 403 {
+		t.Fatalf("want 403 for a target outside the caller's own subtree, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateTreeRefusesAWrongToken(t *testing.T) {
+	s, _ := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	rec := postCoordinate(s, "/coordinate/tree", "wrong-token", map[string]any{"conversation": "root-1"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

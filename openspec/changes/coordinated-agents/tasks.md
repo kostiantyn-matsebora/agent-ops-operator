@@ -125,24 +125,28 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 4. Phase 3 — `platform/mcp-aops` (design D-F)
 
-- [ ] 4.1 New module, standard library only, shared Dockerfile recipe;
-      `.github/components.sh` derives `mcp-aops`; multi-arch.
-- [ ] 4.2 MCP over streamable HTTP; tools `list_agents`, `list_conversations`,
+- [x] 4.1 New module, standard library only, shared Dockerfile recipe;
+      `.github/components.sh` derives `mcp-aops`; multi-arch (built through the
+      shared `linux/amd64,linux/arm64` recipe — not hand-verified on hardware
+      this session, per every other component built from it).
+- [x] 4.2 MCP over streamable HTTP; tools `list_agents`, `list_conversations`,
       `get_conversation`, `get_tree`, `invoke`, `close`, `escalate`, `read`;
       each forwards the caller's `AOPS_MCP_TOKEN` to `/coordinate/*`.
       `list_conversations` carries `brief`; under a channel-reader token the
       server returns whatever projection the manager answered with and adds
       nothing.
-- [ ] 4.3 Runtime pod build injects `AOPS_MCP_TOKEN` for conversations whose
+- [x] 4.3 Runtime pod build injects `AOPS_MCP_TOKEN` for conversations whose
       capability binds the aops MCPConfig; derived, never stored.
-- [ ] 4.4 Chart: Deployment, Service, NetworkPolicy under the ADR 0001 wall,
+- [x] 4.4 Chart: Deployment, Service, NetworkPolicy under the ADR 0001 wall,
       RBAC (none beyond the floor), `coordination.enabled` gate,
       `global.builtinToolsets.agentops-coordinate`, the rendered `MCPConfig`;
       NOTES.txt line.
 - [ ] 4.5 Smoke against a live install from the worktree chart: a Coordinator
       with one AgentCapability, a signal, `invoke` observed creating a member, result
       landing on the root, `escalate` opening a Telegram thread. Record the
-      verdict, not the transcript.
+      verdict, not the transcript. NOT RUN in this remote session — no local
+      cluster here (`remote-session.md`). Left for a workstation session, or
+      for the dispatched cluster-tier run to complete.
 
 ## 5. Phase 4 — console (design D-G)
 

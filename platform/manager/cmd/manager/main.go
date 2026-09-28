@@ -252,6 +252,7 @@ func main() {
 		// `kubectl describe conversation` is already looking.
 		Recorder:       mgr.GetEventRecorderFor("agentops-conversation"),
 		StorageBreaker: breaker,
+		MasterToken:    os.Getenv("ADAPTER_TOKEN"),
 		// The same log every other emission site feeds, so the runtime-start hop
 		// lands in the console's sequence beside the ones around it.
 		Activity: acts,

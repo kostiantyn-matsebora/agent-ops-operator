@@ -787,3 +787,75 @@ func TestCoordinatorChainCollectsTheCallersOwnAndEveryAncestor(t *testing.T) {
 		t.Fatalf("chain must hold the caller's own coordinator and every ancestor's, got %v", chain)
 	}
 }
+
+func TestCoordinatorAgentsReturnsTheCallersOwnEntries(t *testing.T) {
+	co := testCoordinator("co-a",
+		agentopsv1alpha1.CoordinatorAgentEntry{Name: "worker", Description: "does it", CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"}},
+	)
+	root := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, co, root)
+
+	entries, err := r.CoordinatorAgents(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name != "worker" {
+		t.Fatalf("want the single worker entry, got %+v", entries)
+	}
+}
+
+func TestCoordinatorAgentsFailsWhenTheCallerIsNotACoordinatorRoot(t *testing.T) {
+	notARoot := &agentopsv1alpha1.Conversation{}
+	notARoot.Name, notARoot.Namespace = "plain-1", testNS
+	r, _ := coordFixture(t, notARoot)
+
+	if _, err := r.CoordinatorAgents(context.Background(), notARoot); err != ErrNotCoordinatorRoot {
+		t.Fatalf("want ErrNotCoordinatorRoot, got %v", err)
+	}
+}
+
+func TestDescendantsWalksMultipleLevelsAndSkipsStaleLabels(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", testNS
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
+
+	grandchild := &agentopsv1alpha1.Conversation{}
+	grandchild.Name, grandchild.Namespace = "grandchild-1", testNS
+	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: member.Name}
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: member.Name, Entry: "helper"}
+
+	staleLabel := &agentopsv1alpha1.Conversation{}
+	staleLabel.Name, staleLabel.Namespace = "stale-1", testNS
+	staleLabel.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	staleLabel.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "someone-else", Entry: "worker"}
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), root, member, grandchild, staleLabel)
+	got, err := r.Descendants(context.Background(), root.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want member-1 and grandchild-1 only (the stale label excluded), got %d: %+v", len(got), got)
+	}
+	names := map[string]bool{}
+	for _, d := range got {
+		names[d.Name] = true
+	}
+	if !names["member-1"] || !names["grandchild-1"] {
+		t.Fatalf("want member-1 and grandchild-1, got %v", names)
+	}
+}
+
+func TestDescendantsOfALeafIsEmpty(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	r, _ := coordFixture(t, testCoordinator("co-a"), root)
+	got, err := r.Descendants(context.Background(), root.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want no descendants, got %+v", got)
+	}
+}
