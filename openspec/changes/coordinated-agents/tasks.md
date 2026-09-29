@@ -204,31 +204,36 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ### 9a. Reference docs
 
-- [ ] 9a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
+- [x] 9a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
       `causedBy`, the loop, escalation, budget, `status.brief`, the state
       matrix rows.
-- [ ] 9a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
+- [x] 9a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
       `brief`, `/channel/inbound` refusal, the aops MCP tool contract with its
       two reach classes, the five token derivation contexts.
-- [ ] 9a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
-- [ ] 9a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
+- [x] 9a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
+- [x] 9a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
       `python3 docs/diagrams/threat-model.py`.
-- [ ] 9a.5 `docs/installation.md`: `coordination.*` values, the component.
-- [ ] 9a.6 `docs/CHANGELOG.md`: two CRDs to apply by hand, the new component.
-- [ ] 9a.7 `docs/adr/0002-coordinated-agents.md`: status → Accepted, plus a
+- [x] 9a.5 `docs/installation.md`: `coordination.*` values, the component.
+- [x] 9a.6 `docs/CHANGELOG.md`: two CRDs to apply by hand, the new component.
+- [x] 9a.7 `docs/adr/0002-coordinated-agents.md`: status → Accepted, plus a
       "What implementation changed" section as 0001 carries.
-- [ ] 9a.8 Re-run `python3 .github/scripts/docs-generate.py`; commit every
+- [x] 9a.8 Re-run `python3 .github/scripts/docs-generate.py`; commit every
       regenerated block and `docs/cr-reference.md`.
 
 ### 9b. Adopter site
 
-- [ ] 9b.1 `docs/index.md`: kind count, the "what you write" tab mentions a
+- [x] 9b.1 `docs/index.md`: kind count, the "what you write" tab mentions a
       Coordinator.
-- [ ] 9b.2 `docs/introduction.md`: two wiring kinds over one capability.
-- [ ] 9b.3 `docs/installation.md`: component list.
-- [ ] 9b.4 `docs/guides/coordinate-agents.md`: new guide with generated CR
+- [x] 9b.2 `docs/introduction.md`: two wiring kinds over one capability.
+- [x] 9b.3 `docs/installation.md`: component list.
+- [x] 9b.4 `docs/guides/coordinate-agents.md`: new guide with generated CR
       blocks; `_data/nav.yml` line.
-- [ ] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
+- [x] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
 - [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
-      `npm run demo`; commit the assets.
+      `npm run demo`; commit the assets. NOT RUN in this remote session — no
+      local cluster or port-forwarded console here (`visual-check.md`,
+      `remote-session.md`). The fixture also needs extending first (design
+      D-G: a root with three members, one itself a sub-coordinator) before
+      either command would show anything coordination-related. Left for a
+      workstation session.
