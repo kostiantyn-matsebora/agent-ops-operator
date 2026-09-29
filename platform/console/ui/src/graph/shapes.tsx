@@ -86,6 +86,12 @@ const GLYPHS = {
   job: 'M0 -6 a6 6 0 1 0 0.01 0 M0 -3 v3 l2 2',
   external: 'M0 -6.5 a6.5 6.5 0 1 0 0.01 0 M-6.5 0 h13 M0 -6.5 c-3.4 3.2 -3.4 9.8 0 13 M0 -6.5 c3.4 3.2 3.4 9.8 0 13',
   repository: 'M-3 -6 a2 2 0 1 0 0.01 0 M-3 6 a2 2 0 1 0 0.01 0 M5 -2 a2 2 0 1 0 0.01 0 M-3 -4 v8 M-3 0 c0 -3 8 0 8 -2',
+  // A capability is a bundle to be REFERENCED, never wired directly — a key,
+  // never a person (agentprofiles' glyph): a small ring and a shaft with teeth.
+  agentCapability: 'M-3 -7 a2 2 0 1 0 0.01 0 M-3 -5 v9 M-3 2 h3 M-3 5 h2',
+  // A Coordinator fans one thread into several — a trunk branching into three,
+  // distinct from the pipeline glyph's single feed-through arrow.
+  coordinator: 'M-7 0 h4 M-3 0 l5 -6 M-3 0 l5 0 M-3 0 l5 6',
 } as const
 
 export interface NodeStyle {
@@ -100,7 +106,9 @@ export const NODE_STYLES: Record<string, NodeStyle> = {
   signaladapters: { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Signal adapter' },
   signalsources: { shape: 'hexagon', glyph: GLYPHS.source, label: 'Signal source' },
   pipelines: { shape: 'rect', glyph: GLYPHS.pipeline, label: 'Pipeline' },
+  coordinators: { shape: 'rect', glyph: GLYPHS.coordinator, label: 'Coordinator' },
   agentprofiles: { shape: 'circle', glyph: GLYPHS.profile, label: 'Profile' },
+  agentcapabilities: { shape: 'circle', glyph: GLYPHS.agentCapability, label: 'Agent capability' },
   agentruntimes: { shape: 'stadium', glyph: GLYPHS.runtime, label: 'Runtime' },
   mcptoolsets: { shape: 'diamond', glyph: GLYPHS.toolset, label: 'Toolset' },
   mcpconfigs: { shape: 'diamond2', glyph: GLYPHS.mcpconfig, label: 'MCP config' },

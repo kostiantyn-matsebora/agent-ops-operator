@@ -135,12 +135,37 @@ func (b *refBinding) refs() []string {
 	return out
 }
 
+// Provenance is the console's read of Conversation.spec.causedBy — the
+// immediate parent, one hop, never the tree's ultimate root. A member's own
+// causedBy may itself be set, so a client walks it one hop at a time to reach
+// the uncaused root.
+type Provenance struct {
+	Parent string `json:"parent"`
+	Entry  string `json:"entry"`
+}
+
+// ConversationBudget is the console's read of Conversation.status.budget — a
+// Coordinator-rooted conversation's own resource ceiling, PER LEVEL: nesting
+// never pools a budget across levels.
+type ConversationBudget struct {
+	MaxAgents     int32  `json:"maxAgents,omitempty"`
+	MaxTurns      int32  `json:"maxTurns,omitempty"`
+	Deadline      string `json:"deadline,omitempty"`
+	AgentsInvoked int32  `json:"agentsInvoked,omitempty"`
+	Turns         int32  `json:"turns,omitempty"`
+}
+
 // convView is the console's read of a Conversation.
 type convView struct {
 	Spec struct {
 		ChannelRefs []Ref `json:"channelRefs,omitempty"`
 		ProfileRef  Ref   `json:"profileRef"`
 		PipelineRef *Ref  `json:"pipelineRef,omitempty"`
+		// CoordinatorRef: this conversation is itself a Coordinator's ROOT.
+		// CausedBy: this conversation was itself INVOKED as a member. The two
+		// are independent — a nested Coordinator's root carries both.
+		CoordinatorRef *Ref        `json:"coordinatorRef,omitempty"`
+		CausedBy       *Provenance `json:"causedBy,omitempty"`
 		// Signal is what STARTED the conversation — the source and the labels
 		// the adapter sent. Provenance, and the first question anybody asks of
 		// an alert. Grouped on the CR because they are facts about one thing.
@@ -165,7 +190,14 @@ type convView struct {
 		Inflight         *Inflight       `json:"inflight,omitempty"`
 		Runs             []Run           `json:"runs,omitempty"`
 		LastActivity     string          `json:"lastActivity,omitempty"`
-		Conditions       []struct {
+		// Budget/EscalatedAt/CloseReason/Brief are set only on a conversation
+		// that is itself a Coordinator's root (or, for CloseReason, any closed
+		// one — an ordinary /close carries none).
+		Budget      *ConversationBudget `json:"budget,omitempty"`
+		EscalatedAt string              `json:"escalatedAt,omitempty"`
+		CloseReason string              `json:"closeReason,omitempty"`
+		Brief       string              `json:"brief,omitempty"`
+		Conditions  []struct {
 			Type    string `json:"type"`
 			Status  string `json:"status"`
 			Reason  string `json:"reason,omitempty"`
@@ -259,6 +291,31 @@ type ConversationSummary struct {
 	// ReadAt is the console thread's watermark, so the browser can report a
 	// read only when it would actually advance.
 	ReadAt string `json:"readAt,omitempty"`
+
+	// Coordinator is "" when this conversation is not a Coordinator's root
+	// (see AttributeCoordinator). Independent of Pipeline: a conversation
+	// carries exactly one originating wiring object.
+	Coordinator string `json:"coordinator,omitempty"`
+	// CausedBy is set when this conversation was itself INVOKED as a member —
+	// the immediate parent, one hop. The client walks it to the uncaused root
+	// for the incident view; there is no server-side tree endpoint (design
+	// D-G).
+	CausedBy *Provenance `json:"causedBy,omitempty"`
+	// Budget is set only on a conversation that is itself a Coordinator's
+	// root.
+	Budget *ConversationBudget `json:"budget,omitempty"`
+	// EscalatedAt stamps when `escalate` opened this conversation's own
+	// thread. Empty on a member, which bubbles instead of escalating.
+	EscalatedAt string `json:"escalatedAt,omitempty"`
+	// CloseReason is why this conversation closed. Set by an ordinary /close
+	// only when the caller gave one; always set by budget-exceeded and by a
+	// member's own close. An UN-escalated root closing with a reason is what
+	// task 5.3 marks distinctly from an escalated one that opened a thread.
+	CloseReason string `json:"closeReason,omitempty"`
+	// Brief is one or two sentences of what this conversation is about,
+	// written by the agent — shown wherever a list would otherwise show only
+	// a name (design D-I).
+	Brief string `json:"brief,omitempty"`
 }
 
 // summarize projects one Conversation for the browser. consoleChannel is the
@@ -278,19 +335,25 @@ type BlockedReason struct {
 	Storage bool `json:"storage"`
 }
 
-func summarize(obj *Object, pipelines []*Object, consoleChannel, reader string) ConversationSummary {
+func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, reader string) ConversationSummary {
 	v := conversationView(obj)
 	s := ConversationSummary{
 		Name: obj.Metadata.Name, UID: obj.Metadata.UID, Title: v.Spec.Title,
 		Profile: v.Spec.ProfileRef.Name, Pipeline: AttributePipeline(obj, pipelines),
-		Source: signalSource(v), SignalLabels: signalLabels(v),
+		Coordinator: AttributeCoordinator(obj, coordinators),
+		Source:      signalSource(v), SignalLabels: signalLabels(v),
 		Phase: v.Status.Phase, Inflight: v.Status.Inflight, Runs: v.Status.Runs,
 		Threads: v.Status.Threads, RuntimePod: v.Status.RuntimePod,
 		LastActivity: v.Status.LastActivity, Created: obj.Metadata.CreationTimestamp,
-		Queued:     len(v.Spec.Inputs),
-		Toolsets:   v.Spec.Toolsets.refs(),
-		MCPConfigs: v.Spec.MCPConfigs.refs(),
-		Deleting:   obj.Metadata.DeletionTimestamp != "",
+		Queued:      len(v.Spec.Inputs),
+		Toolsets:    v.Spec.Toolsets.refs(),
+		MCPConfigs:  v.Spec.MCPConfigs.refs(),
+		Deleting:    obj.Metadata.DeletionTimestamp != "",
+		CausedBy:    v.Spec.CausedBy,
+		Budget:      v.Status.Budget,
+		EscalatedAt: v.Status.EscalatedAt,
+		CloseReason: v.Status.CloseReason,
+		Brief:       v.Status.Brief,
 	}
 	// RunCount is set HERE, not only on the list path: the detail view carries
 	// Runs too, and a summary that reported 0 runs beside a populated list was

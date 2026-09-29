@@ -243,3 +243,99 @@ func TestTopologyPublishesThePipelineIcon(t *testing.T) {
 		t.Fatalf("icon = %q, want none", got)
 	}
 }
+
+// A Pipeline naming capabilityRef draws ONE edge to the AgentCapability, never
+// the inline profile/toolset/runtime edges — the two are mutually exclusive on
+// the CRD, and the capability itself carries the rest transitively.
+func TestTopologyPipelineCapabilityRefDrawsOneEdge(t *testing.T) {
+	c := staticCache(
+		obj("agentprofiles", "ops", "1", `{}`, cond("Ready", "True", "")),
+		obj("agentcapabilities", "shared", "1", `{"profileRef":{"name":"ops"}}`, cond("Ready", "True", "")),
+		obj("pipelines", "viaref", "1", `{"capabilityRef":{"name":"shared"}}`, cond("Ready", "True", "")),
+	)
+	topo := BuildTopology(c)
+	if e := hasEdge(topo, "pipelines/viaref", "agentcapabilities/shared"); e == nil || e.Kind != "capability" {
+		t.Fatalf("pipeline -> capability edge missing: %+v", e)
+	}
+	if e := hasEdge(topo, "pipelines/viaref", "agentprofiles/ops"); e != nil {
+		t.Fatalf("pipeline must not draw the inline profile edge when capabilityRef is set: %+v", e)
+	}
+	if e := hasEdge(topo, "agentcapabilities/shared", "agentprofiles/ops"); e == nil || e.Kind != "answers" {
+		t.Fatalf("capability -> profile edge missing: %+v", e)
+	}
+	if n := findNode(topo, "agentcapabilities", "shared"); n == nil || n.Detached {
+		t.Fatalf("a referenced capability must not be detached: %+v", n)
+	}
+}
+
+// An AgentCapability nothing references is DETACHED (the ordinary state of a
+// shareable object) but that is independent of its Health, which comes only
+// from its own Ready condition.
+func TestTopologyUnwiredCapabilityIsDistinctFromMisconfigured(t *testing.T) {
+	c := staticCache(
+		obj("agentcapabilities", "unused", "1", `{"profileRef":{"name":"ops"}}`, cond("Ready", "True", "")),
+		obj("agentcapabilities", "broken", "1", `{"profileRef":{"name":"missing"}}`, cond("Ready", "False", "MissingReference")),
+	)
+	topo := BuildTopology(c)
+	unused := findNode(topo, "agentcapabilities", "unused")
+	if unused == nil || !unused.Detached || unused.Health != HealthOK {
+		t.Fatalf("unused capability: want detached+ok, got %+v", unused)
+	}
+	broken := findNode(topo, "agentcapabilities", "broken")
+	if broken == nil || !broken.Detached || broken.Health != HealthBad {
+		t.Fatalf("broken, unreferenced capability: want detached+bad, got %+v", broken)
+	}
+}
+
+// A Coordinator claims sources, escalates to channels (never an ordinary
+// post), and invokes its agents[] entries — an AgentCapability member and a
+// nested Coordinator alike.
+func TestTopologyCoordinatorEdges(t *testing.T) {
+	c := staticCache(
+		obj("signalsources", "alerts", "1", `{"adapter":"cron"}`, cond("Served", "True", "")),
+		obj("channels", "ops-room", "1", `{"adapter":"telegram"}`, cond("Served", "True", "")),
+		obj("agentprofiles", "lead", "1", `{}`, cond("Ready", "True", "")),
+		obj("agentcapabilities", "member-cap", "1", `{"profileRef":{"name":"lead"}}`, cond("Ready", "True", "")),
+		obj("coordinators", "nested", "1", `{"profileRef":{"name":"lead"}}`, cond("Ready", "True", "")),
+		obj("coordinators", "incident", "1",
+			`{"signalSourceRefs":[{"name":"alerts"}],"channelRefs":[{"name":"ops-room"}],`+
+				`"profileRef":{"name":"lead"},"agents":[`+
+				`{"name":"triage","capabilityRef":{"name":"member-cap"},"description":"triage"},`+
+				`{"name":"escalation","coordinatorRef":{"name":"nested"},"description":"nest"}]}`,
+			cond("Ready", "True", "")),
+	)
+	topo := BuildTopology(c)
+	if e := hasEdge(topo, "signalsources/alerts", "coordinators/incident"); e == nil || e.Kind != "feeds" {
+		t.Fatalf("source -> coordinator feeds edge missing: %+v", e)
+	}
+	if e := hasEdge(topo, "coordinators/incident", "channels/ops-room"); e == nil || e.Kind != "escalates-to" {
+		t.Fatalf("coordinator -> channel escalates-to edge missing: %+v", e)
+	}
+	if e := hasEdge(topo, "coordinators/incident", "agentprofiles/lead"); e == nil || e.Kind != "answers" {
+		t.Fatalf("coordinator's own inline capability edge missing: %+v", e)
+	}
+	if e := hasEdge(topo, "coordinators/incident", "agentcapabilities/member-cap"); e == nil || e.Kind != "invokes" {
+		t.Fatalf("coordinator -> member capability invokes edge missing: %+v", e)
+	}
+	if e := hasEdge(topo, "coordinators/incident", "coordinators/nested"); e == nil || e.Kind != "invokes" {
+		t.Fatalf("coordinator -> nested coordinator invokes edge missing: %+v", e)
+	}
+	if n := findNode(topo, "coordinators", "incident"); n == nil || n.Detached {
+		t.Fatalf("a coordinator must never be treated as a detached leaf: %+v", n)
+	}
+}
+
+// A Coordinator-rooted conversation records spec.coordinatorRef directly —
+// no inference, unlike AttributePipeline's fallback for conversations that
+// predate spec.pipelineRef.
+func TestAttributeCoordinator(t *testing.T) {
+	root := obj("coordinators", "incident", "1", `{}`, "")
+	conv := obj("conversations", "c", "1", `{"coordinatorRef":{"name":"incident"}}`, "")
+	if got := AttributeCoordinator(conv, []*Object{root}); got != "incident" {
+		t.Fatalf("got %q, want incident", got)
+	}
+	plain := obj("conversations", "c2", "1", `{}`, "")
+	if got := AttributeCoordinator(plain, []*Object{root}); got != "" {
+		t.Fatalf("a conversation with no coordinatorRef must attribute to none, got %q", got)
+	}
+}

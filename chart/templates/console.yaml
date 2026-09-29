@@ -353,11 +353,13 @@ metadata:
 rules:
   - apiGroups: ["agentops.dev"]
     resources:
+      - agentcapabilities
       - agentprofiles
       - agentruntimes
       - channels
       - channeladapters
       - conversations
+      - coordinators
       - mcpconfigs
       - mcptoolsets
       - pipelines

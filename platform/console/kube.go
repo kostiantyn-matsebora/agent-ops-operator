@@ -41,11 +41,13 @@ const (
 // this list and InstallKinds is ever requested, which is what makes the chart's
 // read-only Role a complete description of the console's reach.
 var Kinds = []string{
+	"agentcapabilities",
 	"agentprofiles",
 	"agentruntimes",
 	"channels",
 	"channeladapters",
 	"conversations",
+	"coordinators",
 	"mcpconfigs",
 	"mcptoolsets",
 	"pipelines",
@@ -79,19 +81,21 @@ var groupVersion = map[string]struct{ Group, Version string }{
 
 // Singular renders a plural resource name for display.
 var Singular = map[string]string{
-	"agentprofiles":   "AgentProfile",
-	"agentruntimes":   "AgentRuntime",
-	"channels":        "Channel",
-	"channeladapters": "ChannelAdapter",
-	"conversations":   "Conversation",
-	"mcpconfigs":      "MCPConfig",
-	"mcptoolsets":     "MCPToolset",
-	"pipelines":       "Pipeline",
-	"signaladapters":  "SignalAdapter",
-	"signalsources":   "SignalSource",
-	"cronjobs":        "CronJob",
-	"deployments":     "Deployment",
-	"pods":            "Pod",
+	"agentcapabilities": "AgentCapability",
+	"agentprofiles":     "AgentProfile",
+	"agentruntimes":     "AgentRuntime",
+	"channels":          "Channel",
+	"channeladapters":   "ChannelAdapter",
+	"conversations":     "Conversation",
+	"coordinators":      "Coordinator",
+	"mcpconfigs":        "MCPConfig",
+	"mcptoolsets":       "MCPToolset",
+	"pipelines":         "Pipeline",
+	"signaladapters":    "SignalAdapter",
+	"signalsources":     "SignalSource",
+	"cronjobs":          "CronJob",
+	"deployments":       "Deployment",
+	"pods":              "Pod",
 }
 
 // AgentOpsKind reports whether a plural is one of ours — the console's own

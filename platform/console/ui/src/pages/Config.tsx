@@ -87,7 +87,14 @@ function KindGlyph({ kind, size = 18 }: { kind: string; size?: number }) {
 function columnsFor(kind: string): string[] {
   switch (kind) {
     case 'pipelines':
-      return ['profile', 'sources', 'channels', 'toolsets', 'toolsMode', 'mcpConfigs']
+      // A Pipeline using capabilityRef carries no profile/toolsets/mcpConfigs
+      // columns — see kindColumns in configapi.go — so those cells render "—"
+      // for it, and `capability` fills in instead.
+      return ['profile', 'capability', 'sources', 'channels', 'toolsets', 'toolsMode', 'mcpConfigs']
+    case 'coordinators':
+      return ['sources', 'escalatesTo', 'capability', 'profile', 'agents']
+    case 'agentcapabilities':
+      return ['profile', 'runtime', 'toolsets', 'mcpConfigs']
     case 'channels':
       return ['adapter', 'served']
     case 'signalsources':
@@ -104,7 +111,7 @@ function columnsFor(kind: string): string[] {
     case 'mcpconfigs':
       return ['servers']
     case 'conversations':
-      return ['phase', 'profile']
+      return ['phase', 'profile', 'coordinator', 'causedBy']
     default:
       return []
   }
@@ -112,7 +119,7 @@ function columnsFor(kind: string): string[] {
 
 /** Columns whose values are lists worth rendering as chips rather than prose. */
 const CHIP_COLUMNS = new Set([
-  'sources', 'channels', 'toolsets', 'mcpConfigs', 'tools', 'servers',
+  'sources', 'channels', 'toolsets', 'mcpConfigs', 'tools', 'servers', 'escalatesTo', 'agents',
 ])
 const STATUS_COLUMNS = new Set(['served', 'wired'])
 

@@ -77,6 +77,10 @@ export interface GraphNode {
 export type EdgeKind =
   | 'feeds' | 'answers' | 'posts' | 'served-by' | 'uses' | 'runs-on' | 'opened'
   | 'sends' | 'calls'
+  // capability: a Pipeline or Coordinator naming an AgentCapability instead of
+  // inlining it. escalates-to: a Coordinator's channelRefs, opened only on
+  // escalation. invokes: a Coordinator's agents[] entry.
+  | 'capability' | 'escalates-to' | 'invokes'
 
 export interface GraphEdge {
   from: string
@@ -424,6 +428,33 @@ export interface BlockedReason {
   storage: boolean
 }
 
+/**
+ * The console's read of `Conversation.spec.causedBy` — the immediate parent,
+ * one hop, never the tree's ultimate root. A member's own `causedBy` may
+ * itself be set, so the client walks it one hop at a time to reach the
+ * uncaused root (design D-G).
+ */
+export interface Provenance {
+  /** The parent conversation's name. */
+  parent: string
+  /** The parent Coordinator's `agents[]` entry this was invoked through. */
+  entry: string
+}
+
+/**
+ * The console's read of `Conversation.status.budget` — a Coordinator-rooted
+ * conversation's own resource ceiling, PER LEVEL: nesting never pools a
+ * budget across levels. Set only on a conversation that is itself a
+ * Coordinator's root.
+ */
+export interface ConversationBudget {
+  maxAgents?: number
+  maxTurns?: number
+  deadline?: string
+  agentsInvoked?: number
+  turns?: number
+}
+
 export interface ConversationSummary {
   name: string
   uid?: string
@@ -465,6 +496,27 @@ export interface ConversationSummary {
    * finalizer while its threads are archived. Named `closing` once, from when
    * /close deleted the conversation — those are two verbs now. */
   deleting: boolean
+
+  /** "" unless this conversation is a Coordinator's ROOT. Independent of
+   * `causedBy`: a nested Coordinator's root carries both. */
+  coordinator?: string
+  /** Set when this conversation was itself INVOKED as a member — the
+   * immediate parent, one hop. There is no server-side tree endpoint; the
+   * client walks this to the uncaused root (design D-G). */
+  causedBy?: Provenance
+  /** Set only on a conversation that is itself a Coordinator's root. */
+  budget?: ConversationBudget
+  /** When `escalate` opened this conversation's own thread. Empty on a
+   * member, which bubbles instead of escalating. */
+  escalatedAt?: string
+  /** Why this conversation closed. Set by an ordinary /close only when the
+   * caller gave one; always set by budget-exceeded and by a member's own
+   * close. An UN-escalated root closing with a reason is marked distinctly
+   * from an escalated one that opened a thread. */
+  closeReason?: string
+  /** One or two sentences of what this conversation is about, agent-written —
+   * shown wherever a list would otherwise show only a name. */
+  brief?: string
 }
 
 // ---- closing a batch ---------------------------------------------------------

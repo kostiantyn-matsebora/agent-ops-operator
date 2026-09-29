@@ -90,6 +90,13 @@ const VIEWS: { file: string; path: string; ready: string; pick?: string }[] = [
   { file: 'topology-infrastructure', path: '/topology', ready: 'k8s-observe', pick: 'Infrastructure' },
   { file: 'conversations', path: '/conversations', ready: 'checkout-api is restarting' },
   { file: 'conversation', path: '/conversations/cluster-events-7c1d4e', ready: 'OOM-killed' },
+  // The Incident tab, on the tree's root — one interleaved timeline, three
+  // members collapsed, one of which is itself a nested Coordinator's root
+  // (design D-G). Selected by URL, the same way every other view here is.
+  {
+    file: 'incident', path: '/conversations/incident-response-4a8f21?tab=incident',
+    ready: 'Coordinating triage and mitigation for the checkout-api 5xx spike.',
+  },
   { file: 'queues', path: '/queues', ready: 'Queues and capacity' },
   // The Pipelines inventory rather than the kind index: the tour asks "what is
   // wired to what", and a grid of object counts does not answer it.

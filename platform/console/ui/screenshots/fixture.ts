@@ -142,7 +142,9 @@ const queues: Queues = {
 
 const kinds: KindInfo[] = [
   { kind: 'pipelines', title: 'Pipelines', count: 3, synced: true },
+  { kind: 'coordinators', title: 'Coordinators', count: 2, synced: true },
   { kind: 'agentprofiles', title: 'Agent profiles', count: 3, synced: true },
+  { kind: 'agentcapabilities', title: 'Agent capabilities', count: 2, synced: true },
   { kind: 'agentruntimes', title: 'Agent runtimes', count: 2, synced: true },
   { kind: 'signalsources', title: 'Signal sources', count: 5, synced: true },
   { kind: 'signaladapters', title: 'Signal adapters', count: 3, synced: true },
@@ -150,7 +152,7 @@ const kinds: KindInfo[] = [
   { kind: 'channeladapters', title: 'Channel adapters', count: 2, synced: true },
   { kind: 'mcptoolsets', title: 'MCP toolsets', count: 4, synced: true },
   { kind: 'mcpconfigs', title: 'MCP configs', count: 2, synced: true },
-  { kind: 'conversations', title: 'Conversations', count: 6, synced: true },
+  { kind: 'conversations', title: 'Conversations', count: 12, synced: true },
 ]
 
 const inventory: Record<string, InventoryRow[]> = {
@@ -181,6 +183,45 @@ const inventory: Record<string, InventoryRow[]> = {
         channels: 'ops-chat', toolsets: 'agentops-observe',
         toolsMode: 'merge', mcpConfigs: '',
       },
+    },
+  ],
+  // A Coordinator is a route like a Pipeline, and may fan out into
+  // sub-agents — an AgentCapability by reference, or a nested Coordinator.
+  coordinators: [
+    {
+      name: 'incident-response', created: ago(30 * 86400), health: 'ok', findings: 0,
+      conditions: [{ type: 'Ready', status: 'True', reason: 'Wired' }],
+      columns: {
+        sources: 'cluster-events', escalatesTo: 'ops-chat',
+        profile: 'incident-lead', agents: 'triage, mitigate, notify',
+      },
+    },
+    {
+      name: 'node-remediation', created: ago(20 * 86400), health: 'ok', findings: 0,
+      conditions: [{ type: 'Ready', status: 'True', reason: 'Wired' }],
+      columns: {
+        sources: 'cluster-events', escalatesTo: 'ops-chat',
+        capability: 'mitigation-lead', agents: 'drain, verify',
+      },
+    },
+  ],
+  // A capability is a bundle referenced rather than wired directly — this is
+  // "unwired is the ordinary state" made concrete: `k8s-triage` is not named
+  // by any Pipeline or Coordinator here, and that is a configuration, not a
+  // defect.
+  agentcapabilities: [
+    {
+      name: 'k8s-triage', created: ago(30 * 86400), health: 'ok', findings: 0,
+      conditions: [{ type: 'Ready', status: 'True', reason: 'Resolved' }],
+      columns: {
+        profile: 'k8s-engineer', runtime: 'default',
+        toolsets: 'agentops-observe, k8s-observability', mcpConfigs: 'k8s-api',
+      },
+    },
+    {
+      name: 'mitigation-lead', created: ago(20 * 86400), health: 'ok', findings: 0,
+      conditions: [{ type: 'Ready', status: 'True', reason: 'Resolved' }],
+      columns: { profile: 'incident-lead', runtime: 'default', toolsets: 'agentops-observe' },
     },
   ],
   signalsources: [
@@ -256,15 +297,21 @@ const pipelineDetail: Detail = {
 
 // ---- conversations -----------------------------------------------------------
 
+// The one root, its three direct members and one member's own two — design
+// D-G's fixture requirement (task 5.4): "one root with three members, one of
+// which is itself a sub-coordinator with two members of its own."
+const INCIDENT_ROOT = 'incident-response-4a8f21'
+const INCIDENT_MITIGATE = `${INCIDENT_ROOT}-mitigate`
+
 const conversations: ConversationPage = {
-  total: 6,
-  unreadTotal: 2,
+  total: 12,
+  unreadTotal: 3,
   offset: 0,
   limit: 25,
   facets: {
     phase: ['Working', 'Idle', 'Pending', 'Closed'],
     pipeline: ['k8s-observe', 'alert-triage', 'nightly-report'],
-    profile: ['k8s-engineer', 'alert-investigator', 'release-scribe'],
+    profile: ['k8s-engineer', 'alert-investigator', 'release-scribe', 'incident-lead'],
   },
   items: [
     {
@@ -325,6 +372,69 @@ const conversations: ConversationPage = {
       unread: false, readAt: ago(89000), ageSeconds: 93600,
       threads: [{ channel: 'console', threadId: 'console/cluster-events-d902a3', readTracked: true, readAt: ago(89000) }],
       closing: false,
+    },
+    // The root: a Coordinator's own conversation, fanning out into agents[].
+    {
+      name: INCIDENT_ROOT, title: 'Elevated 5xx rate on checkout-api',
+      profile: 'incident-lead', coordinator: 'incident-response', phase: 'Working',
+      inflight: { runId: 'run-9', dispatchedAt: ago(20) },
+      runCount: 2, runtimePod: `agentops-conv-${INCIDENT_ROOT}`,
+      brief: 'Coordinating triage and mitigation for the checkout-api 5xx spike.',
+      budget: { maxAgents: 5, agentsInvoked: 3, maxTurns: 30, turns: 9, deadline: ago(-1200) },
+      lastActivity: ago(20), created: ago(320), queued: 0, joined: true,
+      consoleThread: `console/${INCIDENT_ROOT}`, errored: false,
+      unread: true, ageSeconds: 20,
+      threads: [{ channel: 'console', threadId: `console/${INCIDENT_ROOT}`, readTracked: true }],
+      deleting: false,
+    },
+    // Member 1: an ordinary leaf agent, invoked through the "triage" entry.
+    {
+      name: `${INCIDENT_ROOT}-triage`, title: 'Triage: checkout-api restart loop',
+      profile: 'k8s-engineer', phase: 'Idle',
+      causedBy: { parent: INCIDENT_ROOT, entry: 'triage' },
+      runCount: 1, brief: 'Confirmed OOMKilled restarts on checkout-api.',
+      lastActivity: ago(260), created: ago(300), queued: 0, joined: false,
+      errored: false, unread: false, ageSeconds: 260, threads: [], deleting: false,
+    },
+    // Member 2: itself a nested Coordinator's root — expands recursively.
+    {
+      name: INCIDENT_MITIGATE, title: 'Mitigate: roll checkout-api off node-7',
+      profile: 'incident-lead', coordinator: 'node-remediation', phase: 'Running',
+      causedBy: { parent: INCIDENT_ROOT, entry: 'mitigate' },
+      inflight: { runId: 'run-11', dispatchedAt: ago(15) },
+      runCount: 1, brief: 'Coordinating a rolling mitigation across two nodes.',
+      budget: { maxAgents: 2, agentsInvoked: 2, maxTurns: 10, turns: 3 },
+      lastActivity: ago(15), created: ago(280), queued: 0, joined: false,
+      errored: false, unread: false, ageSeconds: 15, threads: [], deleting: false,
+    },
+    // Member 3: CLOSED without escalating a thread — the closeReason chip.
+    {
+      name: `${INCIDENT_ROOT}-notify`, title: 'Notify: ops-chat summary',
+      profile: 'release-scribe', phase: 'Closed',
+      causedBy: { parent: INCIDENT_ROOT, entry: 'notify' },
+      runCount: 1, brief: 'Posted the incident summary to ops-chat.',
+      closeReason: 'handed back to the root after posting the summary',
+      lastActivity: ago(200), created: ago(260), queued: 0, joined: false,
+      errored: false, unread: false, ageSeconds: 200, threads: [], deleting: false,
+    },
+    // Sub-member A, under member-2's OWN coordination.
+    {
+      name: `${INCIDENT_MITIGATE}-drain`, title: 'Drain node-7',
+      profile: 'k8s-engineer', phase: 'Idle',
+      causedBy: { parent: INCIDENT_MITIGATE, entry: 'drain' },
+      runCount: 1, brief: 'Drained node-7 ahead of the rollout.',
+      lastActivity: ago(90), created: ago(120), queued: 0, joined: false,
+      errored: false, unread: false, ageSeconds: 90, threads: [], deleting: false,
+    },
+    // Sub-member B, under member-2's OWN coordination.
+    {
+      name: `${INCIDENT_MITIGATE}-verify`, title: 'Verify checkout-api on node-9',
+      profile: 'k8s-engineer', phase: 'Running',
+      causedBy: { parent: INCIDENT_MITIGATE, entry: 'verify' },
+      inflight: { runId: 'run-14', dispatchedAt: ago(5) },
+      runCount: 0, brief: 'Verifying checkout-api health on node-9.',
+      lastActivity: ago(5), created: ago(15), queued: 0, joined: false,
+      errored: false, unread: false, ageSeconds: 5, threads: [], deleting: false,
     },
   ],
 }
@@ -454,6 +564,83 @@ const conversationDetail: ConversationDetail = {
     { cursor: '18243', ts: ago(44), kind: 'channel.inbound', from: { kind: 'channel-adapter', name: 'telegram' }, to: { kind: 'conversation', name: 'cluster-events-7c1d4e' }, status: 'ok', conversation: 'cluster-events-7c1d4e', pipeline: 'k8s-observe' },
   ],
   runtimePodStatus: { phase: 'Running', problem: '', node: 'node-2' },
+}
+
+// ---- the incident tree's own details ------------------------------------------
+//
+// One full ConversationDetail per node of the coordination tree, keyed by
+// name — the Incident tab fetches each member's own detail lazily, by name,
+// exactly as the console does against the manager (design D-G: there is no
+// "list my members" endpoint, so the responder below is asked once per node
+// as it is expanded).
+
+const summaryOf = (name: string): ConversationDetail['conversation'] => {
+  const item = conversations.items.find((c) => c.name === name)
+  if (!item) throw new Error(`fixture: no conversation summary named ${name}`)
+  return item
+}
+
+const incidentDetail = (name: string, runs: ConversationDetail['conversation']['runs'], brief: string): ConversationDetail => ({
+  conversation: { ...summaryOf(name), runs },
+  object: {
+    kind: 'Conversation',
+    metadata: { name, namespace: 'agent-ops', creationTimestamp: summaryOf(name).created },
+  },
+  yaml: [
+    'apiVersion: agentops.dev/v1alpha1',
+    'kind: Conversation',
+    'metadata:',
+    `  name: ${name}`,
+    '  namespace: agent-ops',
+    'spec:',
+    '  profileRef:',
+    `    name: ${summaryOf(name).profile}`,
+    'status:',
+    `  phase: ${summaryOf(name).phase}`,
+    '',
+  ].join('\n'),
+  archived: false,
+  transcript: [
+    { id: `${name}-m1`, thread: `console/${name}`, kind: 'agent', text: brief, at: summaryOf(name).lastActivity ?? summaryOf(name).created ?? NOW.toISOString() },
+  ],
+  events: [],
+})
+
+const conversationDetails: Record<string, ConversationDetail> = {
+  [INCIDENT_ROOT]: incidentDetail(
+    INCIDENT_ROOT,
+    [
+      { runId: 'run-7', status: 'succeeded', startedAt: ago(300), finishedAt: ago(280) },
+      { runId: 'run-9', status: 'succeeded', startedAt: ago(20), finishedAt: ago(19) },
+    ],
+    'Opened on the 5xx spike. Claimed triage and mitigation as separate agents so the rollback and the '
+    + 'root-cause write-up happen in parallel.',
+  ),
+  [`${INCIDENT_ROOT}-triage`]: incidentDetail(
+    `${INCIDENT_ROOT}-triage`,
+    [{ runId: 'run-8', status: 'succeeded', startedAt: ago(300), finishedAt: ago(261) }],
+    'Confirmed OOMKilled restarts on checkout-api — the working set outgrew the pod\'s memory limit.',
+  ),
+  [INCIDENT_MITIGATE]: incidentDetail(
+    INCIDENT_MITIGATE,
+    [{ runId: 'run-10', status: 'succeeded', startedAt: ago(280), finishedAt: ago(200) }],
+    'Coordinating a rolling mitigation across node-7 and node-9 — draining one while the other verifies.',
+  ),
+  [`${INCIDENT_ROOT}-notify`]: incidentDetail(
+    `${INCIDENT_ROOT}-notify`,
+    [{ runId: 'run-12', status: 'succeeded', startedAt: ago(260), finishedAt: ago(201) }],
+    'Posted the incident summary to ops-chat and handed back to the root — nothing further to escalate.',
+  ),
+  [`${INCIDENT_MITIGATE}-drain`]: incidentDetail(
+    `${INCIDENT_MITIGATE}-drain`,
+    [{ runId: 'run-13', status: 'succeeded', startedAt: ago(120), finishedAt: ago(91) }],
+    'Drained node-7 ahead of the rollout — no pods left scheduled there.',
+  ),
+  [`${INCIDENT_MITIGATE}-verify`]: incidentDetail(
+    `${INCIDENT_MITIGATE}-verify`,
+    [],
+    'Verifying checkout-api health on node-9 before declaring the mitigation complete.',
+  ),
 }
 
 // ---- topology ----------------------------------------------------------------
@@ -730,6 +917,11 @@ export interface Install {
   pipelineDetail: Detail
   conversations: ConversationPage
   conversationDetail: ConversationDetail
+  // The incident tree's own details, by name — see "the incident tree's own
+  // details" above. `conversationDetail` above stays the single featured
+  // conversation the rest of this fixture (and demo/story.ts) already keys
+  // on; this is additive, for the Incident tab's own lazy fetches.
+  conversationDetails: Record<string, ConversationDetail>
   conversationGraph: ConversationGraph
   topology: TopologyResponse
   activity: ActivityResponse
@@ -739,7 +931,7 @@ export interface Install {
 
 export const install: Install = {
   session, overview, queues, kinds, findings, inventory, pipelineDetail,
-  conversations, conversationDetail, conversationGraph, topology, activity, sources,
+  conversations, conversationDetail, conversationDetails, conversationGraph, topology, activity, sources,
   vocabulary,
 }
 
@@ -779,6 +971,13 @@ export function responder(state: Install) {
     const detail = /^\/api\/conversations\/([^/]+)(\/graph)?$/.exec(path)
     if (detail && detail[1] === state.conversationDetail.conversation.name) {
       return detail[2] ? state.conversationGraph : state.conversationDetail
+    }
+    // The incident tree: fetched by name only, never by graph — the Incident
+    // tab has no graph tab of its own, and the ordinary Graph tab falls back
+    // to an empty-but-valid response for a name this fixture has no recorded
+    // topology replay for.
+    if (detail && !detail[2] && state.conversationDetails[detail[1]]) {
+      return state.conversationDetails[detail[1]]
     }
 
     const inv = /^\/api\/config\/([a-z]+)$/.exec(path)

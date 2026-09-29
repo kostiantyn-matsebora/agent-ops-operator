@@ -17,6 +17,37 @@ import { Icon, stripLeadingIcon } from '../components/Icon'
 import { CloseSelectedModal, selectableNames, workingCount } from './CloseConversations'
 import { DeleteSelectedModal, deletableNames } from './DeleteConversations'
 import { ApiError } from '../api/client'
+import type { ConversationSummary } from '../api/types'
+
+/**
+ * Client-side, CURRENT-PAGE-ONLY grouping: a row whose `causedBy.parent` is
+ * also on this page is nested directly under it, depth-first, so a
+ * grandchild sits under its own parent rather than back under the root.
+ *
+ * There is no server support for this — the server's own ordering (newest
+ * activity first) is otherwise untouched — and a member whose root is not on
+ * this page is left exactly where the server put it: the task calls for a
+ * flatten toggle, not a second fetch to always find the root.
+ */
+function groupedRows(items: ConversationSummary[]): { row: ConversationSummary; depth: number }[] {
+  const byName = new Map(items.map((c) => [c.name, c]))
+  const isNested = (c: ConversationSummary) => Boolean(c.causedBy && byName.has(c.causedBy.parent))
+  const childrenOf = new Map<string, ConversationSummary[]>()
+  for (const c of items) {
+    if (!isNested(c)) continue
+    const parent = c.causedBy!.parent
+    childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), c])
+  }
+  const out: { row: ConversationSummary; depth: number }[] = []
+  const walk = (c: ConversationSummary, depth: number) => {
+    out.push({ row: c, depth })
+    for (const child of childrenOf.get(c.name) ?? []) walk(child, depth + 1)
+  }
+  for (const c of items) {
+    if (!isNested(c)) walk(c, 0)
+  }
+  return out
+}
 
 // The list. Filtering, sorting and pagination are all SERVER-side: an event
 // storm makes thousands of conversations, and shipping them all so the browser
@@ -50,6 +81,10 @@ export function ConversationsPage() {
   // Unread is a FILTER like every other one — evaluated server-side, so a
   // narrowed list still pages correctly.
   const [unread, setUnread] = useState(false)
+  // OFF by default, matching today's behavior exactly. ON nests a row whose
+  // root is present on this page directly under it; a member whose root is
+  // not on this page is unaffected either way.
+  const [groupByRoot, setGroupByRoot] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(50)
@@ -102,6 +137,7 @@ export function ConversationsPage() {
     selected.size > 0 && [...selected].every((n) => deletable.includes(n))
   const names = data.items.map((c) => c.name).filter((n) => selected.has(n))
   const allSelected = selectable.length > 0 && selectable.every((n) => selected.has(n))
+  const rows = groupByRoot ? groupedRows(data.items) : data.items.map((row) => ({ row, depth: 0 }))
 
   function setRow(name: string, isSelected: boolean) {
     setSelected((prev) => {
@@ -248,6 +284,17 @@ export function ConversationsPage() {
                 />
               </ToolbarItem>
               <ToolbarItem>
+                {/* A visual fold, not a filter — nothing leaves the page, a
+                    member just moves under its root when that root is also
+                    on it. Off is today's behavior, byte for byte. */}
+                <Switch
+                  id="group-by-root"
+                  label="Group by root"
+                  isChecked={groupByRoot}
+                  onChange={(_e, v) => setGroupByRoot(v)}
+                />
+              </ToolbarItem>
+              <ToolbarItem>
                 <Button
                   variant="secondary"
                   isDisabled={names.length === 0 || markRead.isPending}
@@ -335,7 +382,7 @@ export function ConversationsPage() {
                 </Tr>
               </Thead>
               <Tbody>
-                {data.items.map((c, rowIndex) => (
+                {rows.map(({ row: c, depth }, rowIndex) => (
                   <Tr key={c.name}>
                     <Td
                       select={{
@@ -348,6 +395,11 @@ export function ConversationsPage() {
                       }}
                     />
                     <Td dataLabel="Title">
+                      {/* Grouped: nested directly under the root row it names,
+                          indented one step per level so a grandchild reads
+                          under its own parent rather than back under the
+                          root. */}
+                      <div style={{ paddingLeft: depth * 24 }}>
                       {/* Unread is marked twice over — weight for the scan, a
                           label for anyone who cannot see weight. Theme tokens
                           only: a literal colour here would be the one place the
@@ -369,10 +421,21 @@ export function ConversationsPage() {
                           unread
                         </Label>
                       )}
+                      {c.coordinator && (
+                        <Label isCompact color="teal" style={{ marginLeft: 6 }}>
+                          coordinator
+                        </Label>
+                      )}
+                      {depth > 0 && c.causedBy && (
+                        <Label isCompact color="purple" style={{ marginLeft: 6 }}>
+                          <PlainText>{`member via ${c.causedBy.entry}`}</PlainText>
+                        </Label>
+                      )}
                       <div>
                         <small>
                           <PlainText>{c.name}</PlainText>
                         </small>
+                      </div>
                       </div>
                     </Td>
                     <Td dataLabel="Phase">
