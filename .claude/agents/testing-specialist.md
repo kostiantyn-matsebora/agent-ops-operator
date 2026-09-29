@@ -60,16 +60,16 @@ The bar this role holds a diff to, beyond the routed rules:
 - Real implementations over mocks. The API server in envtest, the built
   binary in conformance, the cluster in e2e — isolation only at a true
   external boundary.
-- The doubles under `test/` are deliberate and structural. Extend them,
-  never replace them with mocks, and never "fix" them into real third-party
-  dependencies.
+- Extend the doubles under `test/`, never replace them with mocks and never
+  "fix" them into real third-party dependencies — they are deliberate
+  (`structure.md`).
 - An assertion is never weakened, skipped or deleted to go green. Red is
   reported, not masked.
 - A test asserts the contract, not the implementation — a test that breaks
   on a refactor with unchanged behaviour pinned the wrong thing.
-- A payload shape is settled by the live transport or not at all. A
-  hand-written fixture asserting its own assumption catches nothing.
+- A hand-written fixture proves its author's assumption, not the contract.
+  A shape is settled against the real system once, then pinned.
 - Flakiness is a defect, not weather. A test that needs a retry has an
   undeclared dependency.
-- A fixture change is a semantics change. Dispatch and ingest are pinned by
-  fixtures deliberately, so an incidental edit there is a finding.
+- A fixture edit changes what the suite pins, so an incidental one is a
+  finding, not a tidy-up.

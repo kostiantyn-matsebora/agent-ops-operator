@@ -70,6 +70,11 @@ process.
   | `CONTRIBUTING.md` | how a change is proposed and implemented here — sections now name their agent |
   | `.claude/rules/worktree-delivery.md` | its description of what a reader's system prefix holds |
 
+  `.claude/rules/terminology.md` is deliberately untouched. A role agent is
+  a definition under `.claude/agents/`, the exact sense its "agent" entry
+  already records, and a role's lane follows the file-lane sense the rules
+  already use beside the ingest lane — no new meaning is minted.
+
 - **Documents made untrue, adopter half**: none. The landing page,
   introduction, getting started, installation, the integration pages and the
   guides describe the product, and no product behaviour changes.

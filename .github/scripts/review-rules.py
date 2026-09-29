@@ -150,12 +150,17 @@ def role_criteria(root: pathlib.Path, role: str) -> str:
         end = text.find("\n---\n", 4)
         if end >= 0:
             text = text[end + 5:]
-    idx = text.find(ROLE_CRITERIA_HEADING)
-    if idx < 0:
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.strip() == ROLE_CRITERIA_HEADING), None)
+    if start is None:
         return ""
-    body = text[idx:]
-    nxt = body.find("\n## ", len(ROLE_CRITERIA_HEADING))
-    return (body[:nxt] if nxt >= 0 else body).strip() + "\n"
+    body = [lines[start]]
+    for ln in lines[start + 1:]:
+        if ln.startswith("## "):
+            break
+        body.append(ln)
+    return "\n".join(body).strip() + "\n"
 
 
 def rules_for(path: str) -> list[str]:

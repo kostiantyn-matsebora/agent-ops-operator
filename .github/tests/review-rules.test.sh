@@ -103,5 +103,50 @@ assert_status 1 "$?"
 assert_contains "$err" "frontend-developer.md"
 rm -rf "$tmp"
 
-summary
+it "role_criteria takes the heading only at line start, and only the section"
+tmp=$(mktemp -d); mkdir -p "$tmp/.claude/agents"
+cat > "$tmp/.claude/agents/probe-role.md" <<'ROLE'
+---
+name: probe-role
+---
+A mention of the \`## Review criteria\` idea in prose must not match.
 
+## Review criteria
+
+- the one real bullet
+
+## Appended later
+never routed
+ROLE
+crit=$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.spec_from_file_location('rr', '$S')
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+print(rr.role_criteria(pathlib.Path('$tmp'), 'probe-role'))")
+assert_contains "$crit" "the one real bullet"
+assert_not_contains "$crit" "Appended later"
+assert_not_contains "$crit" "in prose"
+
+it "role_criteria is empty for a file whose only heading is a prose mention"
+cat > "$tmp/.claude/agents/mention-only.md" <<'ROLE'
+Prose naming \`## Review criteria\` and nothing else.
+ROLE
+crit=$(python3 -c "
+import importlib.util, pathlib
+spec = importlib.util.spec_from_file_location('rr', '$S')
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+print(rr.role_criteria(pathlib.Path('$tmp'), 'mention-only'))")
+assert_equals "" "$crit"
+rm -rf "$tmp"
+
+it "--check fails on a role file missing its criteria section"
+tmp=$(mktemp -d); mkdir -p "$tmp/.claude/rules" "$tmp/.claude/agents" "$tmp/docs"
+cp "$ROOT"/.claude/rules/*.md "$tmp/.claude/rules/"; cp "$ROOT/docs/CLAUDE.md" "$tmp/docs/"
+cp "$ROOT"/.claude/agents/*.md "$tmp/.claude/agents/"
+grep -v "Review criteria" "$ROOT/.claude/agents/frontend-developer.md" > "$tmp/.claude/agents/frontend-developer.md"
+err=$(python3 "$S" --check --root "$tmp" 2>&1 >/dev/null)
+assert_status 1 "$?"
+assert_contains "$err" "no '## Review criteria' section"
+rm -rf "$tmp"
+
+summary

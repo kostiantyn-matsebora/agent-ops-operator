@@ -45,9 +45,11 @@ context on its own.
 ### Requirement: A tasks file names the agent that fulfils each implementation section
 
 The rules injected when a tasks file is generated SHALL require each
-implementation section to name the role agent that fulfils it. The three
-trailing sections — unit tests, e2e tests, documentation — keep their shape
-and are not required to name one.
+implementation section to name the role agent that fulfils it, or none
+where no role fits.
+
+The three trailing sections — unit tests, e2e tests, documentation — keep
+their shape and are not required to name one.
 
 #### Scenario: A tasks file is generated
 
@@ -93,8 +95,8 @@ request opens — none is silently dropped.
 #### Scenario: A cross-review finds nothing
 
 - **WHEN** the reviewing role reports no finding
-- **THEN** the pull request proceeds, and the review's happening is visible
-  in the session rather than recorded as an artifact
+- **THEN** the pull request opens with no finding recorded, and nothing is
+  added to the change
 
 ### Requirement: Contract-shaped artifacts are drafted with the contract role
 

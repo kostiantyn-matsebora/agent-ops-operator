@@ -31,11 +31,13 @@ it "the update command carries the contract role"
 assert_contains "$(cat "$CMDS/update.md")" "Contract-shaped revisions go through the contract role"
 
 it "the archive command carries its repo step"
-assert_contains "$(cat "$CMDS/archive.md")" "THIS REPOSITORY"
+assert_contains "$(cat "$CMDS/archive.md")" "Close the tracking issue"
 
-it "the dispatch names only agents that exist"
-for a in api-architect backend-developer deployment-engineer frontend-developer testing-specialist; do
-  [ -f "$ROOT/.claude/agents/$a.md" ] && pass || fail "missing .claude/agents/$a.md"
+it "every role agent the apply command names exists on disk"
+names=$(grep -oE '[a-z]+-(architect|developer|engineer|specialist)' "$CMDS/apply.md" | sort -u)
+[ -n "$names" ] && pass || fail "no role agent names parsed from apply.md"
+for a in $names; do
+  [ -f "$ROOT/.claude/agents/$a.md" ] && pass || fail "apply.md names $a but .claude/agents/$a.md is missing"
 done
 
 it "the tasks rule naming role agents is in the openspec config"

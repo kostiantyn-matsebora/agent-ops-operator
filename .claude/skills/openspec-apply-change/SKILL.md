@@ -118,8 +118,9 @@ Implement tasks from an OpenSpec change.
 
    - **Each section's diff is reviewed by a role other than the one that
      wrote it.** Picked by lane: `api-architect` for a diff touching its
-     lane, otherwise `testing-specialist` for sections it did not write,
-     otherwise `backend-developer`.
+     lane that it did not write, otherwise `testing-specialist` for
+     sections it did not write, otherwise `backend-developer`. The writer
+     is excluded at every step of that chain.
    - **Every finding is fixed on the branch, or recorded in the change with
      the reason it stands.** None is silently dropped.
    - **One round, bounded.** The CI review and its human triage remain the

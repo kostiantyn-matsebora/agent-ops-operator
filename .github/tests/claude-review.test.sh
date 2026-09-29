@@ -91,6 +91,12 @@ tooling=$(py 'print(runs("read"))')
 assert_contains "$tooling" "review-build.sh"
 assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/agents/file-reviewer.md"
 assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/agents/thread-verdict.md"
+
+it "the read job restores the five role agents whose criteria ride the prefix"
+restore=$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["restore"])')
+for a in api-architect backend-developer deployment-engineer frontend-developer testing-specialist; do
+  assert_contains "$restore" ".claude/agents/$a.md"
+done
 assert_contains "$(py 'print(step("consolidate","uses","./.github/actions/claude-cli")["with"]["restore"])')" ".claude/agents/review-coordinator.md"
 assert_contains "$(py 'print(step("read","uses","./.github/actions/claude-cli")["with"]["base-ref"])')" "needs.queue.outputs.base"
 

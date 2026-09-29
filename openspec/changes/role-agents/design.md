@@ -123,9 +123,10 @@ After the implementation sections complete, `apply.md` dispatches one review
 per section, one round, bounded. Findings are fixed on the branch or recorded
 in the change with the reason they stand.
 
-The reviewer is picked by lane: `api-architect` for any diff touching its
-lane, otherwise `testing-specialist` for sections it did not write, otherwise
-`backend-developer`.
+The reviewer is picked by lane, and the writer is excluded at every step of
+the chain: `api-architect` for a diff touching its lane that it did not
+write, otherwise `testing-specialist` for sections it did not write,
+otherwise `backend-developer`.
 
 Alternative — reuse the CI file-reviewer shape locally — rejected: the CI
 review runs on the pull request anyway, and the apply-time pass exists to

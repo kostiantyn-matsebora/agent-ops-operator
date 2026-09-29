@@ -62,12 +62,10 @@ The bar this role holds a diff to, beyond the routed rules:
   exists, and one concept wears one word.
 - A contract change without its delta spec is unfinished, whatever the code
   does.
-- A vendor's noun in a contract teaches the reader the manager knows what is
-  inside a handle it must treat as opaque.
+- No vendor's vocabulary in a contract. An opaque handle stays opaque, and
+  a neutral word outlives every implementation behind it.
 - Explicit errors. A refusal names its reason where the caller can read it.
 - Least privilege. A field that grants reach states it, and silence grants
   nothing.
 - Document by example — a shape a reader must infer from prose is a shape
   two implementers will build differently.
-- Generated output is never edited in place. A hand-edited generated block
-  is a revert waiting to run.

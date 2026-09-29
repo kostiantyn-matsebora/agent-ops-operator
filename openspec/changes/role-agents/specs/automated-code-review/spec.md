@@ -28,8 +28,7 @@ Three properties of the rules routing SHALL hold for the role too:
 #### Scenario: Two files of one component are read
 
 - **WHEN** two readers start for paths of the same component
-- **THEN** the role criteria each holds are byte-identical, and the second is
-  served from cache
+- **THEN** the role criteria each holds are byte-identical
 
 #### Scenario: A pull request edits a role agent's definition
 
