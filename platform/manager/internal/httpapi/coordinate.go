@@ -40,6 +40,8 @@ func (s *Server) RegisterCoordinateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /coordinate/close", s.handleCoordinateClose)
 	mux.HandleFunc("POST /coordinate/escalate", s.handleCoordinateEscalate)
 	mux.HandleFunc("POST /coordinate/read", s.handleCoordinateRead)
+	mux.HandleFunc("POST /coordinate/agents", s.handleCoordinateAgents)
+	mux.HandleFunc("POST /coordinate/tree", s.handleCoordinateTree)
 }
 
 // bearerToken reads the presented token, exactly as the adapter contract does.
@@ -308,6 +310,118 @@ func (s *Server) descendsFrom(ctx context.Context, target *agentopsv1alpha1.Conv
 		cur = &parent
 	}
 	return false, errors.New("causedBy chain did not terminate")
+}
+
+type agentsReq struct {
+	Conversation string `json:"conversation"`
+}
+
+// agentEntryView is `list_agents`' whole answer (aops-mcp-server: "name and
+// description, and nothing else") — never the target `capabilityRef` or
+// `coordinatorRef`, which would leak what a Coordinator wires beyond what its
+// own coordinating agent is told to decide between.
+type agentEntryView struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func (s *Server) handleCoordinateAgents(w http.ResponseWriter, r *http.Request) {
+	var in agentsReq
+	if err := readJSON(r, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": `need {"conversation"}`})
+		return
+	}
+	ctx := r.Context()
+	caller, err := s.callerConversation(ctx, in.Conversation, bearerToken(r))
+	if err != nil {
+		writeCoordinateError(w, statusFor(err), err)
+		return
+	}
+	entries, err := s.Router.CoordinatorAgents(ctx, caller)
+	if err != nil {
+		writeCoordinateError(w, statusFor(err), err)
+		return
+	}
+	out := make([]agentEntryView, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, agentEntryView{Name: e.Name, Description: e.Description})
+	}
+	writeJSON(w, 200, map[string]any{"agents": out})
+}
+
+// treeNode is `get_tree`'s answer: the same bounded projection `read` gives
+// one conversation, plus its own direct members, recursively — never a run,
+// an input or a transcript.
+type treeNode struct {
+	conversationProjection
+	Members []*treeNode `json:"members,omitempty"`
+}
+
+// buildTree nests a flat descendant list under root by CausedBy.Parent. The
+// flat list is walked once into a parent->children index rather than
+// searched per node, so the cost is linear in the subtree's size.
+func buildTree(root *agentopsv1alpha1.Conversation, descendants []agentopsv1alpha1.Conversation) *treeNode {
+	byParent := map[string][]*agentopsv1alpha1.Conversation{}
+	for i := range descendants {
+		d := &descendants[i]
+		byParent[d.Spec.CausedBy.Parent] = append(byParent[d.Spec.CausedBy.Parent], d)
+	}
+	var build func(c *agentopsv1alpha1.Conversation) *treeNode
+	build = func(c *agentopsv1alpha1.Conversation) *treeNode {
+		n := &treeNode{conversationProjection: projectConversation(c)}
+		for _, child := range byParent[c.Name] {
+			n.Members = append(n.Members, build(child))
+		}
+		return n
+	}
+	return build(root)
+}
+
+type treeReq struct {
+	Conversation string `json:"conversation"`
+	Target       string `json:"target,omitempty"`
+}
+
+// handleCoordinateTree serves `get_tree`: the caller's own subtree, at any
+// depth, rooted at `target` (default: the caller itself). `target` must be
+// the caller or one of its own descendants — never an ancestor or a sibling
+// branch, the same bound handleCoordinateRead enforces for a single read.
+func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
+	var in treeReq
+	if err := readJSON(r, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": `need {"conversation","target"}`})
+		return
+	}
+	ctx := r.Context()
+	caller, err := s.callerConversation(ctx, in.Conversation, bearerToken(r))
+	if err != nil {
+		writeCoordinateError(w, statusFor(err), err)
+		return
+	}
+	target := caller
+	if in.Target != "" && in.Target != caller.Name {
+		var t agentopsv1alpha1.Conversation
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Target}, &t); err != nil {
+			writeCoordinateError(w, 404, chat.ErrOutOfScope)
+			return
+		}
+		inScope, err := s.descendsFrom(ctx, &t, caller.Name)
+		if err != nil {
+			writeCoordinateError(w, 500, err)
+			return
+		}
+		if !inScope {
+			writeCoordinateError(w, 403, chat.ErrOutOfScope)
+			return
+		}
+		target = &t
+	}
+	descendants, err := s.Router.Descendants(ctx, target.Name)
+	if err != nil {
+		writeCoordinateError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, buildTree(target, descendants))
 }
 
 func (s *Server) readChannelProjection(w http.ResponseWriter, r *http.Request, ch *agentopsv1alpha1.Channel) {

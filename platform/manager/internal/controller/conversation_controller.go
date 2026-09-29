@@ -112,6 +112,12 @@ type ConversationReconciler struct {
 	// the cap for as long as it exists — this bounds how long that is, which is
 	// a different thing from exempting it.
 	RuntimeStartDeadline time.Duration
+	// MasterToken derives AOPS_MCP_TOKEN for a Coordinator-rooted conversation
+	// whose wiring binds the aops MCPConfig (design D-F) — the same
+	// ADAPTER_TOKEN every other derived token in this manager is HMAC'd from.
+	// Empty disables the injection (tests), same as every other optional field
+	// here.
+	MasterToken string
 	// StorageBreaker is the install-wide judgement about whether context
 	// storage is reachable. SHARED with the HTTP API, which feeds it the
 	// reporting edge; the reconciler feeds it the PROVISIONING edge — a pod
@@ -1375,7 +1381,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 			"conversation", conv.Name, "failures", conv.Status.RuntimeStartFailures)
 	}
 
-	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved)
+	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved, r.MasterToken)
 	pod.Namespace = conv.Namespace
 	if err := controllerutil.SetControllerReference(conv, pod, r.Scheme); err != nil {
 		return false, err

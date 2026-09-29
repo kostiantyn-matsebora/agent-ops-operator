@@ -70,31 +70,12 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
 		return nil, err
 	}
-	var entry *agentopsv1alpha1.CoordinatorAgentEntry
-	for i := range co.Spec.Agents {
-		if co.Spec.Agents[i].Name == agentName {
-			entry = &co.Spec.Agents[i]
-			break
-		}
-	}
+	entry := findAgentEntry(&co, agentName)
 	if entry == nil {
 		return nil, ErrUnknownAgent
 	}
-	if entry.CoordinatorRef != nil {
-		chain, err := r.coordinatorChain(ctx, caller)
-		if err != nil {
-			return nil, err
-		}
-		if chain[entry.CoordinatorRef.Name] {
-			return nil, ErrCoordinatorCycle
-		}
-	}
-	if budget := caller.Status.Budget; budget != nil && budget.MaxAgents > 0 && budget.AgentsInvoked >= budget.MaxAgents {
-		digest := fmt.Sprintf("budget-exceeded: maxAgents (%d) reached", budget.MaxAgents)
-		if err := r.CloseBudgetExceeded(ctx, caller, digest); err != nil {
-			return nil, fmt.Errorf("%w, and closing on it failed: %v", ErrMaxAgents, err)
-		}
-		return nil, ErrMaxAgents
+	if err := r.refuseCycleOrSpentBudget(ctx, caller, entry); err != nil {
+		return nil, err
 	}
 
 	signature := "invoke:" + entry.Name
@@ -120,6 +101,88 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		return nil, err
 	}
 	return &InvokeResult{Member: created.Name, Created: true}, nil
+}
+
+// findAgentEntry returns the named `agents[]` entry, or nil.
+func findAgentEntry(co *agentopsv1alpha1.Coordinator, name string) *agentopsv1alpha1.CoordinatorAgentEntry {
+	for i := range co.Spec.Agents {
+		if co.Spec.Agents[i].Name == name {
+			return &co.Spec.Agents[i]
+		}
+	}
+	return nil
+}
+
+// refuseCycleOrSpentBudget is InvokeMember's two refusals: an entry naming a
+// Coordinator already in the caller's chain, and a spent maxAgents budget
+// (which also closes the caller budget-exceeded).
+func (r *Router) refuseCycleOrSpentBudget(ctx context.Context, caller *agentopsv1alpha1.Conversation, entry *agentopsv1alpha1.CoordinatorAgentEntry) error {
+	if entry.CoordinatorRef != nil {
+		chain, err := r.coordinatorChain(ctx, caller)
+		if err != nil {
+			return err
+		}
+		if chain[entry.CoordinatorRef.Name] {
+			return ErrCoordinatorCycle
+		}
+	}
+	if budget := caller.Status.Budget; budget != nil && budget.MaxAgents > 0 && budget.AgentsInvoked >= budget.MaxAgents {
+		digest := fmt.Sprintf("budget-exceeded: maxAgents (%d) reached", budget.MaxAgents)
+		if err := r.CloseBudgetExceeded(ctx, caller, digest); err != nil {
+			return fmt.Errorf("%w, and closing on it failed: %v", ErrMaxAgents, err)
+		}
+		return ErrMaxAgents
+	}
+	return nil
+}
+
+// CoordinatorAgents is the manager's half of the MCP `list_agents` tool
+// (design D-F, aops-mcp-server): the calling conversation's own Coordinator's
+// `agents[]` entries. The caller must itself be a Coordinator's own
+// conversation, exactly as InvokeMember requires — listing agents is a
+// capability of the coordinating agent's own conversation.
+func (r *Router) CoordinatorAgents(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]agentopsv1alpha1.CoordinatorAgentEntry, error) {
+	if caller.Spec.CoordinatorRef == nil {
+		return nil, ErrNotCoordinatorRoot
+	}
+	var co agentopsv1alpha1.Coordinator
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
+		return nil, err
+	}
+	return co.Spec.Agents, nil
+}
+
+// Descendants lists every conversation in rootName's own subtree, at any
+// depth, DOWNWARD only — never rootName's ancestors or their other branches
+// (aops-mcp-server's `get_tree` bound). BFS by LabelCausedBy, each hit
+// verified against the CausedBy field itself — the label is a hint, the same
+// pattern cascadeCloseMembers already uses to close a subtree. Bounded
+// defensively against a malformed causedBy graph, exactly as descendsFrom is.
+func (r *Router) Descendants(ctx context.Context, rootName string) ([]agentopsv1alpha1.Conversation, error) {
+	var out []agentopsv1alpha1.Conversation
+	seen := map[string]bool{rootName: true}
+	frontier := []string{rootName}
+	for i := 0; i < 1000 && len(frontier) > 0; i++ {
+		var next []string
+		for _, parent := range frontier {
+			var list agentopsv1alpha1.ConversationList
+			if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
+				client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parent}); err != nil {
+				return nil, err
+			}
+			for j := range list.Items {
+				m := list.Items[j]
+				if m.Spec.CausedBy == nil || m.Spec.CausedBy.Parent != parent || seen[m.Name] {
+					continue // the label is a hint; the field is the fact
+				}
+				seen[m.Name] = true
+				out = append(out, m)
+				next = append(next, m.Name)
+			}
+		}
+		frontier = next
+	}
+	return out, nil
 }
 
 // coordinatorChain collects the calling conversation's OWN coordinatorRef,

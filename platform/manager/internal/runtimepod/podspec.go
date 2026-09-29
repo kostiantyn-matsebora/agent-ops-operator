@@ -25,6 +25,13 @@ import (
 // value and egressProxyUID must stay distinct or the boundary is not one.
 const runtimeUID int64 = 1000
 
+// aopsMCPServerKey is the server key the chart's aops MCPConfig renders under
+// (design D-F). AOPS_MCP_TOKEN is injected only when a conversation's bound
+// MCPConfigs actually compiled this key — a Coordinator-rooted conversation
+// whose capability never lists that toolset gets no token, since nothing
+// would ever present it.
+const aopsMCPServerKey = "aops"
+
 const (
 	LabelApp          = "app.kubernetes.io/name"
 	LabelAppValue     = "agentops-runtime"
@@ -276,7 +283,7 @@ func (r Resolved) ContinuityPossible() bool {
 // profile-keyed one, or the conversation's own when its wiring binds MCPConfigs
 // (raw refs in mcp override it).
 func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
-	mcp mcpcompile.Result, mcpCM string, resolved Resolved) *corev1.Pod {
+	mcp mcpcompile.Result, mcpCM string, resolved Resolved, masterToken string) *corev1.Pod {
 
 	cfg := resolved.Config
 	// SIDECAR MODE moves the live context onto pod-local storage and leaves the
@@ -320,6 +327,20 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
 		}},
+	}
+
+	// AOPS_MCP_TOKEN (design D-F): derived here, never stored — the manager
+	// validates any presented token by re-derivation, exactly as every other
+	// adapter token in this manager is. Only a Coordinator-rooted conversation
+	// whose wiring actually bound the aops MCPConfig gets one; every other
+	// pod is unchanged.
+	if conv.Spec.CoordinatorRef != nil {
+		if _, bound := mcp.Endpoints[aopsMCPServerKey]; bound {
+			env = append(env, corev1.EnvVar{
+				Name:  "AOPS_MCP_TOKEN",
+				Value: DeriveCoordinatorToken(masterToken, conv.Spec.CoordinatorRef.Name, conv.Name),
+			})
+		}
 	}
 
 	// workspace: the repository checkout, on a claim or ephemeral.

@@ -578,6 +578,17 @@ global:
     websearch:
       name: agentops-websearch
       tools: [WebSearch]
+    # The whole MCP tool namespace the aops server registers (design
+    # coordinated-agents D-F) — invoke, close, escalate, read and the four
+    # list/get tools. A WILDCARD, unlike the risk-split bundle toolsets,
+    # because reach is bounded by the MANAGER per verb from the caller's own
+    # token (wiring.md), not by which tool NAMES a Pipeline happens to grant.
+    # Rendered whether or not coordination.enabled is set — inert, same as
+    # every builtin toolset naming a server this release does not deploy,
+    # until a Coordinator binds it AND the server is on.
+    coordinate:
+      name: agentops-coordinate
+      tools: ["mcp__aops__*"]
 
 # Wiring — the ONLY place Pipelines are declared. No bundle ships one: a
 # Pipeline names a profile, sources and channels that routinely come from
@@ -1183,6 +1194,28 @@ housekeeping:
   sessionGrace: 168h
   # Its OWN identity, never the runtime SA — setting them equal fails the render.
   serviceAccountName: agentops-housekeeping
+  resources: {}
+  nodeSelector: {}
+
+# The aops MCP server (design coordinated-agents D-F): the verb surface a
+# Coordinator's own conversation reaches through global.builtinToolsets.coordinate (name: agentops-coordinate).
+# OFF by default — it renders nothing until a Coordinator is actually in use.
+#
+# A THIN CLIENT of the manager, so it needs NO Kubernetes access at all: no
+# ServiceAccount token, no RBAC. Every reach decision is the manager's, from
+# the bearer token each caller presents.
+coordination:
+  enabled: false
+  # MCPConfig CR name (what a Coordinator's toolsets/mcpConfigs name). The
+  # server KEY inside it is FIXED at "aops" — the manager derives
+  # AOPS_MCP_TOKEN only for a conversation whose bound MCP servers include
+  # that exact key, so a values-driven key could silently strip a
+  # Coordinator's own tooling.
+  name: aops-coordinate
+  image:
+    repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-aops
+    tag: 0.1.0
+  port: 8080
   resources: {}
   nodeSelector: {}
 
