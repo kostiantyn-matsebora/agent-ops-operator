@@ -150,14 +150,14 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 5. Phase 4 — console (design D-G)
 
-- [ ] 5.1 Adapter watches `agentcapabilities` and `coordinators`; chart Role grants
+- [x] 5.1 Adapter watches `agentcapabilities` and `coordinators`; chart Role grants
       list/watch on both.
-- [ ] 5.2 Inventory rows and topology nodes for both kinds; `capabilityRef` and
+- [x] 5.2 Inventory rows and topology nodes for both kinds; `capabilityRef` and
       `agents[]` edges; unwired AgentCapability rendered distinct from misconfigured.
-- [ ] 5.3 Incident view on a root: one timeline, members interleaved,
+- [x] 5.3 Incident view on a root: one timeline, members interleaved,
       expandable; member transcript links to its root; list groups by root
       with a flatten toggle; un-escalated closures marked with `closeReason`.
-- [ ] 5.4 Fixture gains one root with three members; screenshot the view per
+- [x] 5.4 Fixture gains one root with three members; screenshot the view per
       `visual-check.md` and READ the PNG before ticking.
 
 ## 6. Rules and vocabulary
