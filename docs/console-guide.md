@@ -74,8 +74,8 @@ Six views, one question each.
   Filter by phase, pipeline or profile. Unread is **per identity**, so clearing
   it in Telegram never clears it here.
 
-  **Group by root** nests each descendant directly under the coordination it
-  belongs to, on the current page. A root closed without ever escalating
+  **Group by root** nests each member directly under its immediate parent
+  in the coordination it belongs to, on the current page. A root closed without ever escalating
   still lists, marked with its `closeReason` — "why was I not told" always
   has an answer.
 

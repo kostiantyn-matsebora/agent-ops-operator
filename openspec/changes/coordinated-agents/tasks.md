@@ -238,7 +238,6 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 - [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
       `npm run demo`; commit the assets. NOT RUN in this remote session — no
       local cluster or port-forwarded console here (`visual-check.md`,
-      `remote-session.md`). The fixture also needs extending first (design
-      D-G: a root with three members, one itself a sub-coordinator) before
-      either command would show anything coordination-related. Left for a
+      `remote-session.md`). The fixture already carries the root with three
+      members (task 5.4), so only the two commands remain. Left for a
       workstation session.

@@ -16,8 +16,8 @@ next:
 ---
 
 A `Coordinator` is **the second wiring kind, for a composition of agents
-instead of one**. It claims sources and channels exactly as a `Pipeline`
-does, but names a LIST of agents its own conversation may invoke, instead of
+instead of one**. It claims sources as a `Pipeline` does and names
+channels for escalation only. It also names a LIST of agents its own conversation may invoke, instead of
 answering everything itself.
 
 {: .ao-callout}

@@ -1005,7 +1005,7 @@ Role is the chart's grant.
 
 | Group | Resources | Verbs |
 |---|---|---|
-| `agentops.dev` | all thirteen kinds, `AgentCapability` and `Coordinator` included | get, list, watch |
+| `agentops.dev` | all twelve kinds, `AgentCapability` and `Coordinator` included | get, list, watch |
 | `apps` | deployments | get, list, watch |
 | (core) | pods | get, list, watch |
 | `batch` | cronjobs | get, list, watch |
