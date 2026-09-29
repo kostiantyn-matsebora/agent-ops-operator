@@ -657,20 +657,7 @@ func objectYAML(o *Object) string {
 func summaryLine(o *Object) string {
 	switch o.Kind {
 	case "pipelines":
-		spec := decodeSpec[pipelineSpec](o.Spec)
-		var parts []string
-		if spec.CapabilityRef != nil {
-			parts = []string{"capability " + spec.CapabilityRef.Name}
-		} else {
-			parts = []string{"profile " + spec.ProfileRef.Name}
-		}
-		if n := len(spec.SignalSourceRefs); n > 0 {
-			parts = append(parts, plural(n, "source"))
-		}
-		if n := len(spec.ChannelRefs); n > 0 {
-			parts = append(parts, plural(n, "channel"))
-		}
-		return strings.Join(parts, ", ")
+		return pipelineSummary(decodeSpec[pipelineSpec](o.Spec))
 	case "channels", "signalsources":
 		if adapter := decodeSpec[servedSpec](o.Spec).Adapter; adapter != "" {
 			return "adapter " + adapter
@@ -698,6 +685,20 @@ func summaryLine(o *Object) string {
 		return plural(len(spec.Agents), "agent")
 	}
 	return ""
+}
+
+func pipelineSummary(spec pipelineSpec) string {
+	parts := []string{"profile " + spec.ProfileRef.Name}
+	if spec.CapabilityRef != nil {
+		parts = []string{"capability " + spec.CapabilityRef.Name}
+	}
+	if n := len(spec.SignalSourceRefs); n > 0 {
+		parts = append(parts, plural(n, "source"))
+	}
+	if n := len(spec.ChannelRefs); n > 0 {
+		parts = append(parts, plural(n, "channel"))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func knownKind(kind string) bool {

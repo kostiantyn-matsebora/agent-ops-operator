@@ -163,7 +163,7 @@ describe('the Incident tab', () => {
     mount('root-1', '?tab=incident')
     await screen.findByText('Checked node-7 for disk pressure.')
     await userEvent.click(screen.getByText('Checked node-7 for disk pressure.'))
-    await screen.findByText('r-m1')
+    expect(await screen.findByText('r-m1')).toBeInTheDocument()
   })
 
   it('recurses into a member that is itself a nested Coordinator\'s root', async () => {

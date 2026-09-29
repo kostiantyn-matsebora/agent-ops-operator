@@ -27,10 +27,11 @@ import { PipelineName } from '../components/PipelineName'
 import { ComposerHint } from '../components/ComposerHint'
 import { Icon, stripLeadingIcon } from '../components/Icon'
 import { matchEntries } from './NewConversation'
-import type { VocabularyEntry } from '../api/types'
 import { Yaml } from '../components/Yaml'
 import { MetadataCard, age } from '../components/Metadata'
-import type { ActivityEvent, ConversationDetail, ConversationSummary, Run } from '../api/types'
+import type {
+  ActivityEvent, ConversationDetail, ConversationSummary, Run, VocabularyEntry,
+} from '../api/types'
 
 // speaker names who said something, for a message carrying no sender. The
 // transcript kinds are plumbing vocabulary: `local` means "typed on this
@@ -826,7 +827,7 @@ function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConv
  * timeline in place, and this is that same rule applied to the page it is
  * reached from directly rather than through an ancestor's accordion.
  */
-function IncidentTab({ conversation }: { conversation: ConversationSummary }) {
+function IncidentTab({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
   if (conversation.coordinator) {
     return <CoordinatorIncident rootName={conversation.name} />
   }
@@ -859,7 +860,7 @@ function IncidentTab({ conversation }: { conversation: ConversationSummary }) {
  * one page shows only the ones that do, which is the pragmatic reading of "no
  * depth limit, but also no new endpoint".
  */
-function CoordinatorIncident({ rootName }: { rootName: string }) {
+function CoordinatorIncident({ rootName }: Readonly<{ rootName: string }>) {
   const root = useConversation(rootName)
   const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
   const members = useConversations(membersParams)
@@ -895,18 +896,26 @@ function buildTimeline(rootDetail: ConversationDetail, allConversations: Convers
   return entries
 }
 
+/** "2 of 5" when a ceiling is set, else just the count. */
+function counted(used: number | undefined, max: number | undefined): string {
+  const count = used ?? 0
+  return max ? `${count} of ${max}` : String(count)
+}
+
 /** The one timeline, root runs and member accordions interleaved by time. */
 function CoordinatorTimeline({
   rootDetail,
   allConversations,
   depth,
-}: {
+}: Readonly<{
   rootDetail: ConversationDetail
   allConversations: ConversationSummary[]
   depth: number
-}) {
+}>) {
   const entries = useMemo(() => buildTimeline(rootDetail, allConversations), [rootDetail, allConversations])
   const budget = rootDetail.conversation.budget
+  const agentsText = budget ? counted(budget.agentsInvoked, budget.maxAgents) : ''
+  const turnsText = budget ? counted(budget.turns, budget.maxTurns) : ''
   return (
     <Stack hasGutter>
       {budget && (
@@ -915,13 +924,13 @@ function CoordinatorTimeline({
             <DescriptionListGroup>
               <DescriptionListTerm>Agents invoked</DescriptionListTerm>
               <DescriptionListDescription>
-                {`${budget.agentsInvoked ?? 0}${budget.maxAgents ? ` of ${budget.maxAgents}` : ''}`}
+                {agentsText}
               </DescriptionListDescription>
             </DescriptionListGroup>
             <DescriptionListGroup>
               <DescriptionListTerm>Turns</DescriptionListTerm>
               <DescriptionListDescription>
-                {`${budget.turns ?? 0}${budget.maxTurns ? ` of ${budget.maxTurns}` : ''}`}
+                {turnsText}
               </DescriptionListDescription>
             </DescriptionListGroup>
             {budget.deadline && (
@@ -938,17 +947,23 @@ function CoordinatorTimeline({
           <Empty title="Nothing has happened on this incident yet" />
         ) : (
           <Stack>
-            {entries.map((e) =>
-              e.run ? (
-                <StackItem key={`run-${e.run.runId}`}>
-                  <RunEntry run={e.run} />
-                </StackItem>
-              ) : e.member ? (
-                <StackItem key={`member-${e.member.name}`}>
-                  <MemberEntry member={e.member} allConversations={allConversations} depth={depth} />
-                </StackItem>
-              ) : null,
-            )}
+            {entries.map((e) => {
+              if (e.run) {
+                return (
+                  <StackItem key={`run-${e.run.runId}`}>
+                    <RunEntry run={e.run} />
+                  </StackItem>
+                )
+              }
+              if (e.member) {
+                return (
+                  <StackItem key={`member-${e.member.name}`}>
+                    <MemberEntry member={e.member} allConversations={allConversations} depth={depth} />
+                  </StackItem>
+                )
+              }
+              return null
+            })}
           </Stack>
         )}
       </StackItem>
@@ -957,7 +972,8 @@ function CoordinatorTimeline({
 }
 
 /** One of the root's own runs, on the timeline. */
-function RunEntry({ run }: { run: Run }) {
+function RunEntry({ run }: Readonly<{ run: Run }>) {
+  const when = run.finishedAt || run.startedAt
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5em', padding: '0.35em 0' }}>
       <Label isCompact color="grey" icon={<Icon icon="aops:observe" />}>
@@ -968,9 +984,45 @@ function RunEntry({ run }: { run: Run }) {
         <PlainText>{run.status}</PlainText>
       </Label>
       <small style={{ color: 'var(--ao-text-subtle)' }}>
-        {run.finishedAt ? new Date(run.finishedAt).toLocaleString() : run.startedAt ? new Date(run.startedAt).toLocaleString() : ''}
+        {when ? new Date(when).toLocaleString() : ''}
       </small>
     </div>
+  )
+}
+
+/** What an opened member shows: loading, the failure, a nested timeline or its runs. */
+function MemberBody({
+  loading,
+  error,
+  data,
+  allConversations,
+  depth,
+}: Readonly<{
+  loading: boolean
+  error: unknown
+  data: ConversationDetail | undefined
+  allConversations: ConversationSummary[]
+  depth: number
+}>) {
+  if (loading && !data) return <Loading />
+  if (error || !data) {
+    return <ErrorState title="Could not load this member">{String(error)}</ErrorState>
+  }
+  if (data.conversation.coordinator) {
+    // A member that is ITSELF a nested Coordinator's root: recurse,
+    // in place, rather than stopping at "this is also a coordinator".
+    return <CoordinatorTimeline rootDetail={data} allConversations={allConversations} depth={depth + 1} />
+  }
+  const runs = data.conversation.runs ?? []
+  if (runs.length === 0) return <Empty title="No completed runs" />
+  return (
+    <Stack>
+      {runs.map((r) => (
+        <StackItem key={r.runId}>
+          <RunEntry run={r} />
+        </StackItem>
+      ))}
+    </Stack>
   )
 }
 
@@ -985,11 +1037,11 @@ function MemberEntry({
   member,
   allConversations,
   depth,
-}: {
+}: Readonly<{
   member: ConversationSummary
   allConversations: ConversationSummary[]
   depth: number
-}) {
+}>) {
   const [expanded, setExpanded] = useState(false)
   // Lazy: a member's own transcript and runs are fetched only once its row is
   // opened, so a root with many members does not fetch all of them at once.
@@ -1018,24 +1070,14 @@ function MemberEntry({
         {member.coordinator && <Label isCompact color="teal">sub-coordinator</Label>}
       </summary>
       <div style={{ padding: '0.5em 0 0.75em 1.75em' }}>
-        {!expanded ? null : detail.isLoading && !detail.data ? (
-          <Loading />
-        ) : detail.error || !detail.data ? (
-          <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
-        ) : detail.data.conversation.coordinator ? (
-          // A member that is ITSELF a nested Coordinator's root: recurse,
-          // in place, rather than stopping at "this is also a coordinator".
-          <CoordinatorTimeline rootDetail={detail.data} allConversations={allConversations} depth={depth + 1} />
-        ) : (detail.data.conversation.runs ?? []).length === 0 ? (
-          <Empty title="No completed runs" />
-        ) : (
-          <Stack>
-            {(detail.data.conversation.runs ?? []).map((r) => (
-              <StackItem key={r.runId}>
-                <RunEntry run={r} />
-              </StackItem>
-            ))}
-          </Stack>
+        {expanded && (
+          <MemberBody
+            loading={detail.isLoading}
+            error={detail.error}
+            data={detail.data}
+            allConversations={allConversations}
+            depth={depth}
+          />
         )}
         <div style={{ marginTop: '0.5em' }}>
           <Link to={`/conversations/${member.name}`}>Open full transcript →</Link>

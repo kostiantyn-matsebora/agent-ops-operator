@@ -299,3 +299,29 @@ func TestQueuesWorkRowsAndStuckReasons(t *testing.T) {
 		t.Fatalf("a long-inflight run must report StuckRuntimeHung: %+v", r)
 	}
 }
+
+// summaryLine is the one key fact per kind. The coordination kinds and the
+// capability-routed pipeline shape had no direct test.
+func TestSummaryLinePerKind(t *testing.T) {
+	cases := []struct{ kind, spec, status, want string }{
+		{"pipelines", `{"profileRef":{"name":"ops"},"signalSourceRefs":[{"name":"a"}],"channelRefs":[{"name":"c"},{"name":"d"}]}`, "", "profile ops, 1 source, 2 channels"},
+		{"pipelines", `{"capabilityRef":{"name":"shared"}}`, "", "capability shared"},
+		{"channels", `{"adapter":"telegram"}`, "", "adapter telegram"},
+		{"channels", `{}`, "", ""},
+		{"agentprofiles", `{"runtimeRef":{"name":"claude"}}`, "", "runtime claude"},
+		{"agentprofiles", `{}`, "", ""},
+		{"conversations", `{"causedBy":{"parent":"root-1","entry":"triage"}}`, `{"phase":"Idle"}`, "member of root-1"},
+		{"conversations", `{}`, `{"phase":"Running"}`, "running"},
+		{"conversations", `{}`, `{}`, ""},
+		{"agentcapabilities", `{"profileRef":{"name":"ops"}}`, "", "profile ops"},
+		{"agentcapabilities", `{}`, "", ""},
+		{"coordinators", `{"agents":[{"name":"a"},{"name":"b"}]}`, "", "2 agents"},
+		{"unknown", `{}`, "", ""},
+	}
+	for _, c := range cases {
+		o := obj(c.kind, "x", "1", c.spec, c.status)
+		if got := summaryLine(o); got != c.want {
+			t.Errorf("%s %s: got %q, want %q", c.kind, c.spec, got, c.want)
+		}
+	}
+}
