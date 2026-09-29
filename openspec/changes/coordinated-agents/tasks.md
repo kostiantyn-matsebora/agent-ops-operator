@@ -198,7 +198,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       opening a Telegram thread. Record the verdict, not the transcript. NOT
       RUN in this remote session — no local cluster here
       (`remote-session.md`). Dispatched instead on `e2e-smoke.yml` against
-      this branch; left for that run, or a workstation session, to confirm.
+      this branch. Left for that run, or a workstation session, to confirm.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 

@@ -136,10 +136,12 @@ substrate they run on comes from this chart.
 | GitHub Copilot runtime | `copilot.enabled` | [copilot]({{ '/runtimes/copilot/' | relative_url }}) |
 | Coordination (`agentops-mcp-aops`) | `coordination.enabled` | [coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) |
 
-All seven are off by default. Each bundle's own page owns its values — this page
-does not repeat them. The last three start no work of their own: the runtimes
-execute, and coordination lets an agent invoke other agents rather than
-answering a source or a channel itself.
+All seven are off by default. Each bundle's own page owns its values — this
+page does not repeat them.
+
+The last three start no work of their own. The runtimes execute. Coordination
+lets an agent invoke other agents rather than answering a source or a channel
+itself.
 
 ## Configure
 

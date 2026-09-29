@@ -176,16 +176,17 @@ names the ONE HOP parent (D3), never the tree's top.
 
 ## What implementation changed
 
-**`brief` moved out of D-C into its own decision, D-I**, because a
-coordinator choosing WHICH conversation it means from a list is a different
-problem from ROUTING a member's result to its parent, and the two ended up
-with different failure shapes: a missing `brief` leaves `title` as the only
-description, a missing routed result loses work.
+**`brief` moved out of D-C into its own decision, D-I.** A coordinator
+choosing WHICH conversation it means from a list is a different problem from
+ROUTING a member's result to its parent.
+
+The two ended up with different failure shapes. A missing `brief` leaves
+`title` as the only description. A missing routed result loses work.
 
 **The cycle guard (D-E2) has no depth limit, and that stayed a stated risk
-rather than a follow-up field.** A `maxDepth` bounds a symptom — a long
-chain — not the failure a cycle actually is, and every level's own budget
-already bounds its own width and lifetime.
+rather than a follow-up field.** A `maxDepth` bounds a symptom, a long chain,
+not the failure a cycle actually is. Every level's own budget already bounds
+its own width and lifetime.
 
 **A caused conversation binds no human channel** turned out to be worth its
 own invariant, not merely a consequence of D-D: `spec.channelRefs` is empty
