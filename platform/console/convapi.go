@@ -106,6 +106,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pipelines := a.cache.List("pipelines")
+	coordinators := a.cache.List("coordinators")
 	consoleChannel := a.adapter.PrimaryChannel()
 	// Unreadness is answered for WHOEVER IS ASKING. With no salt projected, or
 	// under a shared token, this is "" and every viewer gets the channel-wide
@@ -114,7 +115,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	var all []ConversationSummary
 	unreadTotal := 0
 	for _, o := range a.cache.List("conversations") {
-		s := summarize(o, pipelines, consoleChannel, reader)
+		s := summarize(o, pipelines, coordinators, consoleChannel, reader)
 		s.RunCount = len(s.Runs)
 		// Run history is DROPPED from list rows: a result is a whole agent
 		// message, and thousands of them do not belong in a listing.
@@ -228,7 +229,7 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 // answer it produced arrives once, as a message, rather than again inside every
 // later delta.
 func (a *API) ConversationView(obj *Object, reader string) map[string]any {
-	summary := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel(), reader)
+	summary := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader)
 	// Archived — "there is nothing here to reply to" — is read from the
 	// CONVERSATION's phase first, and only then from this console's own
 	// transcript state.
@@ -276,7 +277,7 @@ func (a *API) ConversationView(obj *Object, reader string) map[string]any {
 // agent message, and a delta that carried thousands of them per change would be
 // heavier than the re-fetch it replaces.
 func (a *API) ConversationRow(obj *Object, reader string) ConversationSummary {
-	s := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel(), reader)
+	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader)
 	s.RunCount = len(s.Runs)
 	s.Runs = nil
 	return s
@@ -608,7 +609,7 @@ func (a *API) stampRead(r *http.Request, name string) {
 	if obj == nil {
 		return
 	}
-	s := summarize(obj, a.cache.List("pipelines"), a.adapter.PrimaryChannel(), reader)
+	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader)
 	if s.ConsoleThread == "" {
 		return
 	}
@@ -767,6 +768,7 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 
 	consoleChannel := a.adapter.PrimaryChannel()
 	pipelines := a.cache.List("pipelines")
+	coordinators := a.cache.List("coordinators")
 	reader := a.adapter.ReaderKey(Identity(r))
 	reports := make([]ReadReport, 0, len(in.Names))
 	results := make([]ReadResult, 0, len(in.Names))
@@ -777,7 +779,7 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 				Reason: "no such conversation"})
 			continue
 		}
-		s := summarize(obj, pipelines, consoleChannel, reader)
+		s := summarize(obj, pipelines, coordinators, consoleChannel, reader)
 		reports = append(reports, ReadReport{Conversation: name, ReadAt: s.sortKey()})
 	}
 	if len(reports) > 0 {

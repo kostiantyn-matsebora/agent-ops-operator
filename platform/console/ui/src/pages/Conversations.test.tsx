@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -79,10 +79,14 @@ function conv(name: string, over: Partial<ConversationSummary> = {}): Conversati
   }
 }
 
-// One PAGE of a larger result: 3 shown, 120 matching.
+// One PAGE of a larger result: 3 shown, 120 matching. Grouping tests swap this
+// out for their own items and restore it, so the default stays exactly what
+// every other test in this file was written against.
+let items: ConversationSummary[] = [conv('a', { unread: true }), conv('going', { deleting: true }), conv('b')]
+
 function page() {
   return {
-    items: [conv('a', { unread: true }), conv('going', { deleting: true }), conv('b')],
+    items,
     total: 120,
     unreadTotal: 7,
     offset: 0,
@@ -158,6 +162,43 @@ describe('a read-only console', () => {
     } finally {
       canWrite = true
     }
+  })
+})
+
+describe('grouping by root', () => {
+  const original = items
+
+  afterEach(() => {
+    items = original
+  })
+
+  it('is off by default: a member renders as an ordinary top-level row', () => {
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'triage' } }),
+    ]
+    renderList()
+    expect(screen.queryByText('member via triage')).toBeNull()
+  })
+
+  it('nests a member under its root when the toggle is on', async () => {
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'triage' } }),
+    ]
+    renderList()
+    await userEvent.click(screen.getByLabelText('Group by root'))
+    expect(screen.getByText('member via triage')).toBeInTheDocument()
+    expect(screen.getByText('coordinator')).toBeInTheDocument()
+  })
+
+  it('leaves a member whose root is not on this page as an ordinary row', async () => {
+    items = [conv('member-1', { causedBy: { parent: 'not-on-this-page', entry: 'triage' } })]
+    renderList()
+    await userEvent.click(screen.getByLabelText('Group by root'))
+    // No crash, and nothing claims a nesting relationship that cannot be shown.
+    expect(screen.queryByText('member via triage')).toBeNull()
+    expect(screen.getAllByText('member-1').length).toBeGreaterThan(0)
   })
 })
 

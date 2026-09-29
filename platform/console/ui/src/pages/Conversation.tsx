@@ -7,9 +7,11 @@ import {
   Title, Tooltip,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
-import { useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../components/States'
-import { useConversation, useConversationGraph, useMarkRead, useSession, useTopology, useVocabulary } from '../api/hooks'
+import {
+  useConversation, useConversationGraph, useConversations, useMarkRead, useSession, useTopology, useVocabulary,
+} from '../api/hooks'
 import { useStream } from '../api/stream'
 import { PlainText, RawText } from '../components/Text'
 import { Markdown } from '../components/Markdown'
@@ -28,7 +30,7 @@ import { matchEntries } from './NewConversation'
 import type { VocabularyEntry } from '../api/types'
 import { Yaml } from '../components/Yaml'
 import { MetadataCard, age } from '../components/Metadata'
-import type { ActivityEvent } from '../api/types'
+import type { ActivityEvent, ConversationDetail, ConversationSummary, Run } from '../api/types'
 
 // speaker names who said something, for a message carrying no sender. The
 // transcript kinds are plumbing vocabulary: `local` means "typed on this
@@ -100,7 +102,11 @@ function Avatar({ kind, icon }: { kind: string; icon?: string }) {
 export function ConversationPage() {
   const { name = '' } = useParams()
   const { data, isLoading, error, refetch } = useConversation(name)
-  const [tab, setTab] = useState<string | number>(0)
+  const [searchParams] = useSearchParams()
+  // ?tab=incident opens straight on the Incident tab — used by the fixed
+  // fixture's screenshot, and by a link from a member's "member of" banner
+  // that wants the reader looking at the root's timeline, not its Transcript.
+  const [tab, setTab] = useState<string | number>(searchParams.get('tab') || 0)
 
   // Opening a conversation reports its CONSOLE thread read, and reports again
   // as activity arrives while the view stays open.
@@ -210,6 +216,16 @@ export function ConversationPage() {
                 <Label isCompact status="danger">last run failed</Label>
               </Tooltip>
             )}
+            {/* An UN-escalated closure is a state worth its own mark: the
+                conversation ended without ever opening a thread anybody could
+                read the reason on, so the console is the only place it shows.
+                An escalated one has `escalatedAt` and its reason is read on
+                the thread it opened instead. */}
+            {c.phase === 'Closed' && !c.escalatedAt && c.closeReason && (
+              <Chip hint="closed without escalating a thread — the reason the manager recorded" color="orange" icon="aops:system">
+                {`closed: ${c.closeReason}`}
+              </Chip>
+            )}
             <Chip hint="completed runs on this conversation" color="grey" icon="aops:observe">
               {c.runCount} run(s)
             </Chip>
@@ -250,6 +266,14 @@ export function ConversationPage() {
             <Tab eventKey={3} title={<TabTitleText>Sequence</TabTitleText>}>
               <Sequence events={data.events ?? []} />
             </Tab>
+            {/* Shown whenever this conversation is relevant to a coordination
+                — its own root, or a member invoked by one. There is no new
+                route: the tab IS the incident view (design D-G). */}
+            {Boolean(c.coordinator || c.causedBy) && (
+              <Tab eventKey="incident" title={<TabTitleText>Incident</TabTitleText>}>
+                <IncidentTab conversation={c} />
+              </Tab>
+            )}
             <Tab eventKey={4} title={<TabTitleText>YAML</TabTitleText>}>
               <Stack hasGutter>
                 <StackItem>
@@ -777,6 +801,238 @@ function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConv
         </Card>
       </StackItem>
     </Stack>
+  )
+}
+
+/**
+ * The Incident tab.
+ *
+ * A ROOT (its own `coordinator` set) gets the interleaved timeline. A MEMBER
+ * with no `coordinator` of its own gets a banner pointing at its root instead
+ * — the tab's whole purpose there is telling the reader where the real
+ * timeline lives, not duplicating a slice of it.
+ *
+ * A conversation that is BOTH (a member that is itself a nested Coordinator's
+ * root) gets the timeline: design D-G says a member expands to its own nested
+ * timeline in place, and this is that same rule applied to the page it is
+ * reached from directly rather than through an ancestor's accordion.
+ */
+function IncidentTab({ conversation }: { conversation: ConversationSummary }) {
+  if (conversation.coordinator) {
+    return <CoordinatorIncident rootName={conversation.name} />
+  }
+  if (conversation.causedBy) {
+    return (
+      <Alert variant="info" isInline title="This is a member conversation">
+        <p>
+          Invoked via <strong>{conversation.causedBy.entry}</strong> from{' '}
+          <Link to={`/conversations/${conversation.causedBy.parent}?tab=incident`}>
+            {conversation.causedBy.parent}
+          </Link>
+          .
+        </p>
+        <p>The full incident — every member, interleaved — lives on that conversation's Incident tab.</p>
+      </Alert>
+    )
+  }
+  return null
+}
+
+/**
+ * Fetches what a root's timeline needs: the root's own detail, and every
+ * conversation the console currently holds so members can be found by
+ * `causedBy.parent`.
+ *
+ * There is NO server-side "list my members" endpoint (design D-G) — a member
+ * is any conversation whose `causedBy.parent` names this one, so membership is
+ * derived client-side from an ordinary conversations page. This is therefore
+ * bounded to what that one page returns; a root with more members than fit on
+ * one page shows only the ones that do, which is the pragmatic reading of "no
+ * depth limit, but also no new endpoint".
+ */
+function CoordinatorIncident({ rootName }: { rootName: string }) {
+  const root = useConversation(rootName)
+  const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
+  const members = useConversations(membersParams)
+  if ((root.isLoading && !root.data) || (members.isLoading && !members.data)) return <Loading />
+  if (root.error || !root.data) {
+    return <ErrorState title="Could not load this conversation">{String(root.error)}</ErrorState>
+  }
+  if (members.error || !members.data) {
+    return <ErrorState title="Could not load member conversations">{String(members.error)}</ErrorState>
+  }
+  return <CoordinatorTimeline rootDetail={root.data} allConversations={members.data.items} depth={0} />
+}
+
+interface TimelineEntry {
+  at: number
+  run?: Run
+  member?: ConversationSummary
+}
+
+/** Root runs and direct members, merged into one chronological list. */
+function buildTimeline(rootDetail: ConversationDetail, allConversations: ConversationSummary[]): TimelineEntry[] {
+  const rootName = rootDetail.conversation.name
+  const entries: TimelineEntry[] = (rootDetail.conversation.runs ?? []).map((run) => ({
+    at: Date.parse(run.startedAt || run.finishedAt || '') || 0,
+    run,
+  }))
+  for (const member of allConversations) {
+    if (member.causedBy?.parent === rootName) {
+      entries.push({ at: Date.parse(member.created || '') || 0, member })
+    }
+  }
+  entries.sort((a, b) => a.at - b.at)
+  return entries
+}
+
+/** The one timeline, root runs and member accordions interleaved by time. */
+function CoordinatorTimeline({
+  rootDetail,
+  allConversations,
+  depth,
+}: {
+  rootDetail: ConversationDetail
+  allConversations: ConversationSummary[]
+  depth: number
+}) {
+  const entries = useMemo(() => buildTimeline(rootDetail, allConversations), [rootDetail, allConversations])
+  const budget = rootDetail.conversation.budget
+  return (
+    <Stack hasGutter>
+      {budget && (
+        <StackItem>
+          <DescriptionList isCompact isHorizontal>
+            <DescriptionListGroup>
+              <DescriptionListTerm>Agents invoked</DescriptionListTerm>
+              <DescriptionListDescription>
+                {`${budget.agentsInvoked ?? 0}${budget.maxAgents ? ` of ${budget.maxAgents}` : ''}`}
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            <DescriptionListGroup>
+              <DescriptionListTerm>Turns</DescriptionListTerm>
+              <DescriptionListDescription>
+                {`${budget.turns ?? 0}${budget.maxTurns ? ` of ${budget.maxTurns}` : ''}`}
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            {budget.deadline && (
+              <DescriptionListGroup>
+                <DescriptionListTerm>Deadline</DescriptionListTerm>
+                <DescriptionListDescription>{new Date(budget.deadline).toLocaleString()}</DescriptionListDescription>
+              </DescriptionListGroup>
+            )}
+          </DescriptionList>
+        </StackItem>
+      )}
+      <StackItem>
+        {entries.length === 0 ? (
+          <Empty title="Nothing has happened on this incident yet" />
+        ) : (
+          <Stack>
+            {entries.map((e) =>
+              e.run ? (
+                <StackItem key={`run-${e.run.runId}`}>
+                  <RunEntry run={e.run} />
+                </StackItem>
+              ) : e.member ? (
+                <StackItem key={`member-${e.member.name}`}>
+                  <MemberEntry member={e.member} allConversations={allConversations} depth={depth} />
+                </StackItem>
+              ) : null,
+            )}
+          </Stack>
+        )}
+      </StackItem>
+    </Stack>
+  )
+}
+
+/** One of the root's own runs, on the timeline. */
+function RunEntry({ run }: { run: Run }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5em', padding: '0.35em 0' }}>
+      <Label isCompact color="grey" icon={<Icon icon="aops:observe" />}>
+        run
+      </Label>
+      <PlainText>{run.runId}</PlainText>
+      <Label isCompact status={run.status === 'succeeded' ? 'success' : 'danger'}>
+        <PlainText>{run.status}</PlainText>
+      </Label>
+      <small style={{ color: 'var(--ao-text-subtle)' }}>
+        {run.finishedAt ? new Date(run.finishedAt).toLocaleString() : run.startedAt ? new Date(run.startedAt).toLocaleString() : ''}
+      </small>
+    </div>
+  )
+}
+
+/**
+ * One member, EXPANDABLE and collapsed by default.
+ *
+ * A native `<details>` rather than a component library widget: it is
+ * keyboard-operable and announces its own state for free, and the only thing
+ * this needs from it is an open/close event to drive the lazy fetch.
+ */
+function MemberEntry({
+  member,
+  allConversations,
+  depth,
+}: {
+  member: ConversationSummary
+  allConversations: ConversationSummary[]
+  depth: number
+}) {
+  const [expanded, setExpanded] = useState(false)
+  // Lazy: a member's own transcript and runs are fetched only once its row is
+  // opened, so a root with many members does not fetch all of them at once.
+  const detail = useConversation(member.name, expanded)
+  return (
+    <details
+      style={{ marginLeft: depth * 20, borderLeft: depth ? '2px solid var(--ao-border)' : undefined, paddingLeft: depth ? '0.75em' : undefined }}
+      onToggle={(e) => setExpanded((e.target as HTMLDetailsElement).open)}
+    >
+      <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: '0.5em', flexWrap: 'wrap' }}>
+        <Icon icon="aops:agent" />
+        <strong>{stripLeadingIcon(member.brief || member.title || member.name)}</strong>
+        {member.causedBy?.entry && (
+          <Label isCompact color="purple">
+            <PlainText>{member.causedBy.entry}</PlainText>
+          </Label>
+        )}
+        <Label isCompact color={member.phase === 'Closed' ? 'grey' : 'blue'}>
+          <PlainText>{member.phase}</PlainText>
+        </Label>
+        {member.phase === 'Closed' && !member.escalatedAt && member.closeReason && (
+          <Label isCompact color="orange">
+            <PlainText>{`closed: ${member.closeReason}`}</PlainText>
+          </Label>
+        )}
+        {member.coordinator && <Label isCompact color="teal">sub-coordinator</Label>}
+      </summary>
+      <div style={{ padding: '0.5em 0 0.75em 1.75em' }}>
+        {!expanded ? null : detail.isLoading && !detail.data ? (
+          <Loading />
+        ) : detail.error || !detail.data ? (
+          <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
+        ) : detail.data.conversation.coordinator ? (
+          // A member that is ITSELF a nested Coordinator's root: recurse,
+          // in place, rather than stopping at "this is also a coordinator".
+          <CoordinatorTimeline rootDetail={detail.data} allConversations={allConversations} depth={depth + 1} />
+        ) : (detail.data.conversation.runs ?? []).length === 0 ? (
+          <Empty title="No completed runs" />
+        ) : (
+          <Stack>
+            {(detail.data.conversation.runs ?? []).map((r) => (
+              <StackItem key={r.runId}>
+                <RunEntry run={r} />
+              </StackItem>
+            ))}
+          </Stack>
+        )}
+        <div style={{ marginTop: '0.5em' }}>
+          <Link to={`/conversations/${member.name}`}>Open full transcript →</Link>
+        </div>
+      </div>
+    </details>
   )
 }
 

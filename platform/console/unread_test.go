@@ -55,7 +55,7 @@ func TestUnreadDerivation(t *testing.T) {
 		{"watermark ahead of activity", convWithRead("e", tEarly, tLate, true), false},
 	}
 	for _, tc := range cases {
-		if got := summarize(tc.obj, nil, "console", "").Unread; got != tc.want {
+		if got := summarize(tc.obj, nil, nil, "console", "").Unread; got != tc.want {
 			t.Fatalf("%s: unread=%v, want %v", tc.name, got, tc.want)
 		}
 	}
@@ -66,7 +66,7 @@ func TestUnreadDerivation(t *testing.T) {
 	observed := obj("conversations", "observed", "1",
 		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"telegram"}]}`,
 		`{"threads":[{"channel":"telegram","threadId":"55","readTracked":true}],"lastActivity":"`+tLate+`"}`)
-	if summarize(observed, nil, "console", "").Unread {
+	if summarize(observed, nil, nil, "console", "").Unread {
 		t.Fatal("a conversation with no console thread must never be unread")
 	}
 	// …and reading it on Telegram does not clear the console, nor the reverse:
@@ -76,7 +76,7 @@ func TestUnreadDerivation(t *testing.T) {
 		`{"threads":[{"channel":"telegram","threadId":"55","readTracked":true,"readAt":"`+tLate+`"},`+
 			`{"channel":"console","threadId":"console-uid-both","readTracked":true,"readAt":"`+tEarly+`"}],`+
 			`"lastActivity":"`+tLate+`"}`)
-	if !summarize(both, nil, "console", "").Unread {
+	if !summarize(both, nil, nil, "console", "").Unread {
 		t.Fatal("reading a conversation on another channel must not clear the console's mark")
 	}
 
@@ -85,7 +85,7 @@ func TestUnreadDerivation(t *testing.T) {
 	// cannot disagree.
 	never := convWithRead("never", "", "", true)
 	never.Metadata.CreationTimestamp = tLate
-	if !summarize(never, nil, "console", "").Unread {
+	if !summarize(never, nil, nil, "console", "").Unread {
 		t.Fatal("a bound, never-read conversation must be unread even before its first run")
 	}
 }

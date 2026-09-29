@@ -22,20 +22,66 @@ type Ref struct {
 }
 
 // pipelineSpec is the console's read of Pipeline.spec.
+//
+// ProfileRef/RuntimeRef/Toolsets/MCPConfigs are the INLINE capability fields —
+// populated only when CapabilityRef is absent, mutually exclusive per the CRD's
+// own CEL rule (design D-A). A Pipeline naming CapabilityRef carries none of
+// them, and the graph draws one "capability" edge to the AgentCapability
+// instead of drawing these directly — see capabilityFrom.
 type pipelineSpec struct {
 	// Icon is display metadata: how this Pipeline is recognised in a list.
 	Icon             string `json:"icon,omitempty"`
 	SignalSourceRefs []Ref  `json:"signalSourceRefs,omitempty"`
 	ChannelRefs      []Ref  `json:"channelRefs,omitempty"`
-	ProfileRef       Ref    `json:"profileRef"`
-	RuntimeRef       *Ref   `json:"runtimeRef,omitempty"`
-	Toolsets         *struct {
+	// CapabilityRef names an AgentCapability INSTEAD of inlining the fields
+	// below.
+	CapabilityRef *Ref `json:"capabilityRef,omitempty"`
+	ProfileRef    Ref  `json:"profileRef"`
+	RuntimeRef    *Ref `json:"runtimeRef,omitempty"`
+	Toolsets      *struct {
 		Mode string `json:"mode,omitempty"`
 		Refs []Ref  `json:"refs,omitempty"`
 	} `json:"toolsets,omitempty"`
 	MCPConfigs *struct {
 		Refs []Ref `json:"refs,omitempty"`
 	} `json:"mcpConfigs,omitempty"`
+}
+
+// agentCapabilitySpec is the console's read of AgentCapability.spec — the same
+// four capability fields a Pipeline or Coordinator may inline instead,
+// decoded standalone here and via the two owners' own inline fields.
+type agentCapabilitySpec struct {
+	ProfileRef Ref  `json:"profileRef,omitempty"`
+	RuntimeRef *Ref `json:"runtimeRef,omitempty"`
+	// Toolsets carries the same shape as pipelineSpec.Toolsets (Mode included,
+	// even though the graph never draws it) so the two anonymous struct types
+	// stay identical and a Pipeline's inline fields convert with no copying.
+	Toolsets *struct {
+		Mode string `json:"mode,omitempty"`
+		Refs []Ref  `json:"refs,omitempty"`
+	} `json:"toolsets,omitempty"`
+	MCPConfigs *struct {
+		Refs []Ref `json:"refs,omitempty"`
+	} `json:"mcpConfigs,omitempty"`
+}
+
+// coordinatorAgentEntry is the console's read of one Coordinator.spec.agents[]
+// entry — exactly one of the two refs, per the CRD's own CEL rule.
+type coordinatorAgentEntry struct {
+	Name           string `json:"name"`
+	CapabilityRef  *Ref   `json:"capabilityRef,omitempty"`
+	CoordinatorRef *Ref   `json:"coordinatorRef,omitempty"`
+}
+
+// coordinatorSpec is the console's read of Coordinator.spec. The embedded
+// agentCapabilitySpec is the coordinating agent's OWN capability, inline —
+// mutually exclusive with AgentRef, exactly as on a Pipeline.
+type coordinatorSpec struct {
+	agentCapabilitySpec
+	AgentRef         *Ref                    `json:"capabilityRef,omitempty"`
+	SignalSourceRefs []Ref                   `json:"signalSourceRefs,omitempty"`
+	ChannelRefs      []Ref                   `json:"channelRefs,omitempty"`
+	Agents           []coordinatorAgentEntry `json:"agents,omitempty"`
 }
 
 // servedSpec is the shared shape of Channel.spec and SignalSource.spec as far
@@ -115,11 +161,13 @@ const (
 // listing a condition type no reconciler writes manufactures a permanent
 // warning out of nothing.
 var healthConditions = map[string][]string{
-	"pipelines":       {"Ready"},
-	"channels":        {"Served"},
-	"signalsources":   {"Served", "Wired"},
-	"channeladapters": {"Ready"},
-	"signaladapters":  {"Ready"},
+	"pipelines":         {"Ready"},
+	"channels":          {"Served"},
+	"signalsources":     {"Served", "Wired"},
+	"channeladapters":   {"Ready"},
+	"signaladapters":    {"Ready"},
+	"agentcapabilities": {"Ready"},
+	"coordinators":      {"Ready"},
 }
 
 // Node is one vertex of the topology graph.
@@ -167,7 +215,13 @@ type Edge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	// Kind labels why the edge exists. Model: feeds | answers | posts |
-	// served-by | uses | runs-on | opened. Components: sends | calls.
+	// served-by | uses | runs-on | opened | capability | escalates-to |
+	// invokes. Components: sends | calls.
+	//
+	// capability: a Pipeline or Coordinator naming an AgentCapability instead
+	// of inlining it. escalates-to: a Coordinator's channelRefs — opened only
+	// on escalation, never an ordinary post. invokes: a Coordinator's
+	// agents[] entry, to the AgentCapability or nested Coordinator it names.
 	Kind string `json:"kind"`
 	// Dangling marks a reference to an object that does not exist — drawn as a
 	// broken edge to a placeholder rather than silently omitted.
@@ -236,6 +290,7 @@ var eventNodeKinds = map[string]string{
 	"toolset":         "mcptoolsets",
 	"mcp-config":      "mcpconfigs",
 	"conversation":    "conversations",
+	"coordinator":     "coordinators",
 }
 
 // applyTraffic attaches windowed edge stats to the graph, serves them raw for
@@ -493,14 +548,16 @@ func BuildTopology(c *Cache) Topology {
 		return false
 	}
 
-	// ALL TEN KINDS, not just the wiring spine. "What can this agent actually
+	// ALL TWELVE KINDS, not just the wiring spine. "What can this agent actually
 	// reach" is a question about MCPToolsets, MCPConfigs and AgentRuntimes, so
 	// they are on the graph and the Display panel folds them away — rather than
-	// being absent and unfoldable.
+	// being absent and unfoldable. AgentCapability and Coordinator join them for
+	// the same reason: a capability nothing yet references is still on the
+	// graph, distinct from being absent.
 	for _, kind := range []string{
 		"signalsources", "channels", "agentprofiles", "agentruntimes",
 		"pipelines", "channeladapters", "signaladapters", "mcptoolsets", "mcpconfigs",
-		"conversations",
+		"conversations", "agentcapabilities", "coordinators",
 	} {
 		for _, obj := range c.List(kind) {
 			add(obj)
@@ -537,42 +594,77 @@ func BuildTopology(c *Cache) Topology {
 			exists := reference("signalsources", ref.Name)
 			edges = append(edges, Edge{From: nodeID("signalsources", ref.Name), To: pid, Kind: "feeds", Dangling: !exists})
 		}
-		if spec.ProfileRef.Name != "" {
-			exists := reference("agentprofiles", spec.ProfileRef.Name)
-			edges = append(edges, Edge{From: pid, To: nodeID("agentprofiles", spec.ProfileRef.Name), Kind: "answers", Dangling: !exists})
-		}
 		for _, ref := range spec.ChannelRefs {
 			exists := reference("channels", ref.Name)
 			edges = append(edges, Edge{From: pid, To: nodeID("channels", ref.Name), Kind: "posts", Dangling: !exists})
 		}
-		// capability edges: the wiring is the ONLY place tool access is
-		// declared, so these edges ARE the answer to "what may this route do".
-		if spec.Toolsets != nil {
-			for _, ref := range spec.Toolsets.Refs {
-				exists := reference("mcptoolsets", ref.Name)
-				edges = append(edges, Edge{From: pid, To: nodeID("mcptoolsets", ref.Name), Kind: "uses", Dangling: !exists})
-			}
-		}
-		if spec.MCPConfigs != nil {
-			for _, ref := range spec.MCPConfigs.Refs {
-				exists := reference("mcpconfigs", ref.Name)
-				edges = append(edges, Edge{From: pid, To: nodeID("mcpconfigs", ref.Name), Kind: "uses", Dangling: !exists})
-			}
-		}
-		// pipeline → runtime: what EXECUTES the route. Execution is wiring, so
-		// the edge starts at the Pipeline and never at the profile.
-		if name := pipelineRuntime(c, spec); name != "" {
-			exists := reference("agentruntimes", name)
-			edges = append(edges, Edge{From: pid, To: nodeID("agentruntimes", name), Kind: "runs-on", Dangling: !exists})
+		// capability edges: either ONE edge to the AgentCapability this route
+		// references, or — inlined — the same edges drawn directly from the
+		// Pipeline, exactly as before capabilityRef existed. The two are
+		// mutually exclusive on the CRD, so never both.
+		if spec.CapabilityRef != nil && spec.CapabilityRef.Name != "" {
+			exists := reference("agentcapabilities", spec.CapabilityRef.Name)
+			edges = append(edges, Edge{From: pid, To: nodeID("agentcapabilities", spec.CapabilityRef.Name), Kind: "capability", Dangling: !exists})
+		} else {
+			edges = append(edges, capabilityEdges(reference, c, pid, agentCapabilitySpec{
+				ProfileRef: spec.ProfileRef, RuntimeRef: spec.RuntimeRef,
+				Toolsets: spec.Toolsets, MCPConfigs: spec.MCPConfigs,
+			})...)
 		}
 	}
 
-	// pipeline → conversation: what each route opened. A conversation no
-	// pipeline can be attributed to stands alone rather than on a guess.
+	// an AgentCapability draws its OWN declared edges regardless of whether
+	// anything references it — an unwired one is still fully described, and
+	// the reference() calls above mark it referenced when something is.
+	for _, obj := range c.List("agentcapabilities") {
+		spec := decodeSpec[agentCapabilitySpec](obj.Spec)
+		edges = append(edges, capabilityEdges(reference, c, nodeID("agentcapabilities", obj.Metadata.Name), spec)...)
+	}
+
+	// Coordinator: claims sources like a Pipeline, its OWN capability is
+	// either inlined or referenced exactly like a Pipeline's, its channels are
+	// escalation-only (never an ordinary post), and its agents[] are what it
+	// may INVOKE — an ordinary AgentCapability member or a nested Coordinator.
+	for _, obj := range c.List("coordinators") {
+		spec := decodeSpec[coordinatorSpec](obj.Spec)
+		cid := nodeID("coordinators", obj.Metadata.Name)
+		for _, ref := range spec.SignalSourceRefs {
+			exists := reference("signalsources", ref.Name)
+			edges = append(edges, Edge{From: nodeID("signalsources", ref.Name), To: cid, Kind: "feeds", Dangling: !exists})
+		}
+		for _, ref := range spec.ChannelRefs {
+			exists := reference("channels", ref.Name)
+			edges = append(edges, Edge{From: cid, To: nodeID("channels", ref.Name), Kind: "escalates-to", Dangling: !exists})
+		}
+		if spec.AgentRef != nil && spec.AgentRef.Name != "" {
+			exists := reference("agentcapabilities", spec.AgentRef.Name)
+			edges = append(edges, Edge{From: cid, To: nodeID("agentcapabilities", spec.AgentRef.Name), Kind: "capability", Dangling: !exists})
+		} else {
+			edges = append(edges, capabilityEdges(reference, c, cid, spec.agentCapabilitySpec)...)
+		}
+		for _, entry := range spec.Agents {
+			switch {
+			case entry.CapabilityRef != nil && entry.CapabilityRef.Name != "":
+				exists := reference("agentcapabilities", entry.CapabilityRef.Name)
+				edges = append(edges, Edge{From: cid, To: nodeID("agentcapabilities", entry.CapabilityRef.Name), Kind: "invokes", Dangling: !exists})
+			case entry.CoordinatorRef != nil && entry.CoordinatorRef.Name != "":
+				exists := reference("coordinators", entry.CoordinatorRef.Name)
+				edges = append(edges, Edge{From: cid, To: nodeID("coordinators", entry.CoordinatorRef.Name), Kind: "invokes", Dangling: !exists})
+			}
+		}
+	}
+
+	// pipeline/coordinator → conversation: what each route opened. A
+	// conversation neither can be attributed to stands alone rather than on a
+	// guess.
 	pipelines := c.List("pipelines")
+	coordinators := c.List("coordinators")
 	for _, conv := range c.List("conversations") {
 		if p := AttributePipeline(conv, pipelines); p != "" {
 			edges = append(edges, Edge{From: nodeID("pipelines", p), To: nodeID("conversations", conv.Metadata.Name), Kind: "opened"})
+		}
+		if co := AttributeCoordinator(conv, coordinators); co != "" {
+			edges = append(edges, Edge{From: nodeID("coordinators", co), To: nodeID("conversations", conv.Metadata.Name), Kind: "opened"})
 		}
 	}
 
@@ -586,10 +678,16 @@ func BuildTopology(c *Cache) Topology {
 
 	// Detached = nothing wires it. For a SignalSource that is the
 	// signal-dropping state the Wired condition already reports; drawing it
-	// off to the side is what makes it findable without kubectl.
+	// off to the side is what makes it findable without kubectl. For an
+	// AgentCapability it is the ORDINARY state of one that exists only to be
+	// referenced — distinct from Health, which comes solely from its own
+	// Ready condition (a capability with a dangling profileRef is unwired
+	// AND misconfigured; one nobody has wired yet is unwired and fine).
+	// Pipelines and Coordinators are never candidates: they are routes,
+	// addressed directly, never themselves the referenced end.
 	out := make([]Node, 0, len(nodes))
 	for id, n := range nodes {
-		if n.Kind == "signalsources" || n.Kind == "channels" {
+		if n.Kind == "signalsources" || n.Kind == "channels" || n.Kind == "agentcapabilities" {
 			n.Detached = !referenced[id]
 		}
 		out = append(out, n)
@@ -619,11 +717,14 @@ func sortEdges(edges []Edge) {
 // chain: the Pipeline's ref, then the profile's deprecated one, then
 // `default` when it exists. Empty means the bootstrap fallback, which has no
 // node to point at.
-func pipelineRuntime(c *Cache, spec pipelineSpec) string {
-	if spec.RuntimeRef != nil && spec.RuntimeRef.Name != "" {
-		return spec.RuntimeRef.Name
+// resolvedRuntime names the runtime a capability's conversations run on, by
+// the manager's own precedence — shared by a Pipeline's inline fields, a
+// Coordinator's, and an AgentCapability's own.
+func resolvedRuntime(c *Cache, runtimeRef *Ref, profileName string) string {
+	if runtimeRef != nil && runtimeRef.Name != "" {
+		return runtimeRef.Name
 	}
-	if p := c.Get("agentprofiles", spec.ProfileRef.Name); p != nil {
+	if p := c.Get("agentprofiles", profileName); p != nil {
 		if name := decodeSpec[profileSpec](p.Spec).RuntimeRef.Name; name != "" {
 			return name
 		}
@@ -632,6 +733,37 @@ func pipelineRuntime(c *Cache, spec pipelineSpec) string {
 		return "default"
 	}
 	return ""
+}
+
+// capabilityEdges draws the edges an AgentCapabilitySpec's own fields
+// declare, from ownerID — used for a Pipeline's or Coordinator's INLINE
+// capability, and for an AgentCapability's own spec (always, whether or not
+// anything references it).
+func capabilityEdges(reference func(kind, name string) bool, c *Cache, ownerID string, spec agentCapabilitySpec) []Edge {
+	var edges []Edge
+	if spec.ProfileRef.Name != "" {
+		exists := reference("agentprofiles", spec.ProfileRef.Name)
+		edges = append(edges, Edge{From: ownerID, To: nodeID("agentprofiles", spec.ProfileRef.Name), Kind: "answers", Dangling: !exists})
+	}
+	if spec.Toolsets != nil {
+		for _, ref := range spec.Toolsets.Refs {
+			exists := reference("mcptoolsets", ref.Name)
+			edges = append(edges, Edge{From: ownerID, To: nodeID("mcptoolsets", ref.Name), Kind: "uses", Dangling: !exists})
+		}
+	}
+	if spec.MCPConfigs != nil {
+		for _, ref := range spec.MCPConfigs.Refs {
+			exists := reference("mcpconfigs", ref.Name)
+			edges = append(edges, Edge{From: ownerID, To: nodeID("mcpconfigs", ref.Name), Kind: "uses", Dangling: !exists})
+		}
+	}
+	// runs-on: what EXECUTES the capability. Execution is wiring, so the edge
+	// starts at the owner and never at the profile.
+	if name := resolvedRuntime(c, spec.RuntimeRef, spec.ProfileRef.Name); name != "" {
+		exists := reference("agentruntimes", name)
+		edges = append(edges, Edge{From: ownerID, To: nodeID("agentruntimes", name), Kind: "runs-on", Dangling: !exists})
+	}
+	return edges
 }
 
 type activityCount struct{ active, recent int }
@@ -730,6 +862,25 @@ func AttributePipeline(conv *Object, pipelines []*Object) string {
 	}
 	if len(exact) == 0 && len(subset) == 1 {
 		return subset[0]
+	}
+	return ""
+}
+
+// AttributeCoordinator maps a Conversation back to the Coordinator it is the
+// ROOT of, or "" when it is not one.
+//
+// No fallback: every Coordinator-rooted conversation records
+// spec.coordinatorRef at creation (there is no predating generation to infer
+// for, unlike AttributePipeline), so this is a direct read.
+func AttributeCoordinator(conv *Object, coordinators []*Object) string {
+	ref := conversationView(conv).Spec.CoordinatorRef
+	if ref == nil || ref.Name == "" {
+		return ""
+	}
+	for _, co := range coordinators {
+		if co.Metadata.Name == ref.Name {
+			return ref.Name
+		}
 	}
 	return ""
 }

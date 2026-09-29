@@ -6,8 +6,9 @@ import type { ViewId } from '../types'
 
 export const VIEW_CLASSES: Record<ViewId, string[]> = {
   model: [
-    'signaladapters', 'signalsources', 'pipelines', 'agentprofiles', 'agentruntimes',
-    'mcptoolsets', 'mcpconfigs', 'channels', 'channeladapters', 'conversations',
+    'signaladapters', 'signalsources', 'pipelines', 'coordinators', 'agentprofiles',
+    'agentcapabilities', 'agentruntimes', 'mcptoolsets', 'mcpconfigs', 'channels',
+    'channeladapters', 'conversations',
   ],
   components: [
     'signal-adapter', 'manager', 'channel-adapter', 'gateway', 'runtime-image', 'sidecar',
@@ -22,8 +23,13 @@ export const SPINE_CLASS: Record<ViewId, string> = {
   infrastructure: 'pod',
 }
 
-/** The Model classes the routes-only fold keeps around each pipeline. */
-export const ROUTE_CLASSES = ['signaladapters', 'signalsources', 'pipelines', 'channels', 'channeladapters']
+/** The Model classes the routes-only fold keeps around each pipeline. A
+ * Coordinator is a route too — it claims sources and posts to channels
+ * exactly as a Pipeline does — so it is kept here. AgentCapability is not: it
+ * is a leaf/reach object, referenced rather than routing anything. */
+export const ROUTE_CLASSES = [
+  'signaladapters', 'signalsources', 'pipelines', 'coordinators', 'channels', 'channeladapters',
+]
 
 export const MANAGER = 'manager/manager'
 

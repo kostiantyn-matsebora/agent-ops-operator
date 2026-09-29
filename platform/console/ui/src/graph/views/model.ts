@@ -5,7 +5,11 @@ import { DEFAULT_EVENT_NODE_KINDS, SPINE_CLASS } from './classes'
 // THE MODEL: the declared objects and what references what. A runtime's image,
 // harness and vendor are facts in its panel, never nodes.
 
-const DASHED = new Set(['uses', 'opened'])
+// capability reads like a binding (as `uses` does); escalates-to and invokes
+// are CONDITIONAL — an escalation that may never happen, an agent that may
+// never be invoked — so all three are drawn dashed rather than as always-on
+// wiring.
+const DASHED = new Set(['uses', 'opened', 'capability', 'escalates-to', 'invokes'])
 
 export function modelView(topo: Topology): ViewGraph {
   const nodes: ViewNode[] = topo.nodes.map((n) => {
