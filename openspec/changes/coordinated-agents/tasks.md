@@ -197,8 +197,13 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       observed creating a member, result landing on the root, `escalate`
       opening a Telegram thread. Record the verdict, not the transcript. NOT
       RUN in this remote session — no local cluster here
-      (`remote-session.md`). Dispatched instead on `e2e-smoke.yml` against
-      this branch. Left for that run, or a workstation session, to confirm.
+      (`remote-session.md`). `gh workflow run e2e-smoke.yml --ref
+      change/coordinated-agents` was dispatched and PASSED (run 36637172129),
+      which confirms the chart deploys with `coordination.enabled` and the
+      existing smoke suite stays green — it does not exercise this
+      scenario's specific invoke/escalate path, which the pack's fixed
+      lanes do not cover yet. Left for a workstation session, or a follow-up
+      change adding a coordination lane to `platform/manager/test/e2e/`.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
