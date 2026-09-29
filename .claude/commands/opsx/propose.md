@@ -79,6 +79,15 @@ When ready to implement, run /opsx:apply
       - Use **AskUserQuestion tool** to clarify
       - Then continue with creation
 
+   d. **Contract-shaped artifacts are drafted by the contract role — THIS
+      REPOSITORY'S RULE**
+
+      Where the change's deltas touch a CRD field, an adapter contract or an
+      HTTP endpoint, dispatch the `api-architect` agent (`.claude/agents/`)
+      to draft those delta specs and the design's contract decisions.
+      Integrate its artifact exactly as one you wrote — read it, validate
+      it, own it. A change touching no contract dispatches nothing.
+
 4.5 **Open the tracking issue — THIS REPOSITORY'S RULE**
 
    One issue per change, opened once the artifacts exist so its title can come

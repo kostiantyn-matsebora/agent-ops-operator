@@ -78,9 +78,89 @@ TABLE: list[tuple[str, list[str]]] = [
     ("*", ["authoring", "writing", "documentation"]),   # a root file: README, CONTRIBUTING, CLAUDE.md
 ]
 
+AGENTS = ".claude/agents"
+
+# WHICH ROLE'S REVIEW CRITERIA a reader of a path holds, beside the rules.
+# FIRST MATCH WINS per path — a path holds at most one role's bar, and the
+# component's job unions across its paths. The criteria are the role file's
+# own `## Review criteria` section, never a rule restated (the rules above
+# already ride the same prefix). A path matching no row gets no role, and the
+# prefix is exactly what it was before roles existed.
+ROLE_TABLE: list[tuple[str, str]] = [
+    ("platform/manager/api/v1alpha1/**", "api-architect"),
+    ("openspec/specs/**", "api-architect"),
+    ("openspec/changes/*/specs/**", "api-architect"),
+    ("docs/contracts.md", "api-architect"),
+    ("**/*_test.go", "testing-specialist"),
+    ("test/**", "testing-specialist"),
+    ("platform/manager/test/**", "testing-specialist"),
+    (".github/tests/**", "testing-specialist"),
+    ("platform/console/ui/**", "frontend-developer"),
+    ("docs/_layouts/**", "frontend-developer"),
+    ("docs/_includes/**", "frontend-developer"),
+    ("docs/assets/**", "frontend-developer"),
+    ("docs/_data/**", "frontend-developer"),
+    ("chart/**", "deployment-engineer"),
+    (".github/workflows/**", "deployment-engineer"),
+    (".github/scripts/**", "deployment-engineer"),
+    (".github/actions/**", "deployment-engineer"),
+    (".github/docker/**", "deployment-engineer"),
+    ("**/Dockerfile", "deployment-engineer"),
+    ("platform/**", "backend-developer"),
+    ("signals/**", "backend-developer"),
+    ("channels/**", "backend-developer"),
+    ("gateways/**", "backend-developer"),
+    ("runtimes/**", "backend-developer"),
+]
+
+ROLE_CRITERIA_HEADING = "## Review criteria"
+
 
 def _file(name: str) -> str:
     return name if "/" in name else f"{RULES}/{name}.md"
+
+
+def _match(path: str, pattern: str) -> bool:
+    if pattern.startswith("**/"):
+        return fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], pattern[3:])
+    if pattern.endswith("/**") and path.startswith(pattern[:-3] + "/"):
+        return True
+    return fnmatch.fnmatchcase(path, pattern)
+
+
+def role_for(path: str) -> str | None:
+    """The role whose review criteria a reader of this path holds — first
+    matching row, or None for a path no role fits."""
+    path = path.strip().removeprefix("./")
+    for pattern, role in ROLE_TABLE:
+        if _match(path, pattern):
+            return role
+    return None
+
+
+def role_criteria(root: pathlib.Path, role: str) -> str:
+    """The role file's `## Review criteria` section alone, frontmatter
+    stripped — empty when the file or the section is missing. The
+    implementer's workflow and hand-back never reach a reader."""
+    f = root / AGENTS / f"{role}.md"
+    if not f.is_file():
+        return ""
+    text = f.read_text()
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end >= 0:
+            text = text[end + 5:]
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.strip() == ROLE_CRITERIA_HEADING), None)
+    if start is None:
+        return ""
+    body = [lines[start]]
+    for ln in lines[start + 1:]:
+        if ln.startswith("## "):
+            break
+        body.append(ln)
+    return "\n".join(body).strip() + "\n"
 
 
 def rules_for(path: str) -> list[str]:
@@ -115,6 +195,12 @@ def check(root: pathlib.Path) -> list[str]:
             continue
         if f"{RULES}/{rule.name}" not in named:
             errs.append(f"no path routes to {RULES}/{rule.name} — the review has stopped enforcing it")
+    for role in sorted({r for _, r in ROLE_TABLE}):
+        f = root / AGENTS / f"{role}.md"
+        if not f.is_file():
+            errs.append(f"role routed to a file that does not exist: {AGENTS}/{role}.md")
+        elif not role_criteria(root, role):
+            errs.append(f"{AGENTS}/{role}.md has no '{ROLE_CRITERIA_HEADING}' section to route")
     return errs
 
 

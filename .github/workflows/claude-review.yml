@@ -340,6 +340,11 @@ jobs:
           restore: |
             .claude/agents/file-reviewer.md
             .claude/agents/thread-verdict.md
+            .claude/agents/api-architect.md
+            .claude/agents/backend-developer.md
+            .claude/agents/deployment-engineer.md
+            .claude/agents/frontend-developer.md
+            .claude/agents/testing-specialist.md
       - if: steps.cli.outputs.restored != ''
         env:
           RESTORED: ${{ steps.cli.outputs.restored }}

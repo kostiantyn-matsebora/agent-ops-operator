@@ -113,3 +113,11 @@ rules:
       branch's. Both the build container and the GitOps deploy resolve a fixed
       path by default, so a verification run without the override silently
       tests master and reports success.
+    - >-
+      EACH IMPLEMENTATION SECTION NAMES THE ROLE AGENT THAT FULFILS IT, in the
+      section heading: `## <n>. <title> — <agent>`, one of api-architect,
+      backend-developer, deployment-engineer, frontend-developer or
+      testing-specialist (see .claude/agents/), chosen by the section's lane.
+      A section no role fits names none and is worked by the session itself.
+      The three trailing sections — unit tests, e2e tests, documentation —
+      name none: they keep the shape the rules above give them.
