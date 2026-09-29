@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // toolText runs one tools/call and returns the content text and isError.
 func toolText(t *testing.T, s *server, who caller, tool string, args map[string]any) (string, bool) {
@@ -134,7 +137,7 @@ func TestManagerErrorAndTransportFailureText(t *testing.T) {
 		t.Fatalf("got %q %v", text, isErr)
 	}
 	c := newManagerClient("http://127.0.0.1:1")
-	if err := c.post(t.Context(), "/x", "", map[string]any{}, nil); err == nil {
+	if err := c.post(context.Background(),"/x", "", map[string]any{}, nil); err == nil {
 		t.Fatal("want a transport error")
 	}
 	if text, isErr := jsonText(make(chan int)); !isErr || text == "" {

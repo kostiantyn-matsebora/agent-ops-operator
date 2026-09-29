@@ -528,7 +528,7 @@ invokes named members from `spec.agents[]`.
 - **`channelRefs` are reached only by escalation.** A member binds no channel
   at creation.
 - **Its conversation reaches the verbs through the aops MCP server.** The
-  Coordinator's capability must bind the `coordinate` toolset and the aops
+  Coordinator's capability must bind the `agentops-coordinate` toolset and the aops
   `MCPConfig`, and nothing else grants them.
 
 ### MCPConfig

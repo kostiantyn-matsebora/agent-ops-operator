@@ -87,9 +87,10 @@ forward the token and decide nothing, exactly as for a coordinator's.
 
 ### Requirement: The server sits behind the component wall
 
-The server SHALL be reachable only from runtime pods and the manager under the
+The server SHALL be reachable only from runtime pods under the
 network restriction ADR 0001 established, and SHALL hold no Secret reads and no
-credential stronger than the manager's adapter token.
+credential stronger than the manager's adapter token. The manager never calls
+it, since the server is the manager's caller.
 
 #### Scenario: A stranger pod cannot reach it
 - **WHEN** a pod outside the wired set connects to the server
