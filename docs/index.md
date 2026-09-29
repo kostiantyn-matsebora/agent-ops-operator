@@ -112,6 +112,10 @@ you control and conversations you stay in.
       - name: telegram            # where you talk to it
   ```
 
+  A `Coordinator` is the other wiring kind: instead of one profile, it lists
+  agents to invoke as its own tools. See
+  [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}).
+
 ## What agent-ops is
 
 agent-ops gives you a platform that puts an LLM agent behind the systems you
@@ -125,8 +129,8 @@ identity, mediated egress and at-least-once delivery are already in it.
 {: .ao-cards}
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes native
 
-  Eleven custom resources, validated by the API server like anything else you
-  deploy. `kubectl get conversations` tells you what is running.
+  Thirteen custom resources, validated by the API server like anything else
+  you deploy. `kubectl get conversations` tells you what is running.
 
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps ready
 

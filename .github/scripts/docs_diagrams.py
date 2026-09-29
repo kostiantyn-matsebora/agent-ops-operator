@@ -168,6 +168,17 @@ DIAGRAMS: dict[str, dict] = {
         "arrows": ["GET /work", "runs"],
         "back": ["POST /work/done", "the answer"],
     },
+    "coordinate-agents": {
+        "alt": "A Coordinator's root conversation invokes AgentCapabilities as "
+               "members, and escalates to a channel only when it decides to.",
+        "cols": [
+            [("SignalSource", "or /<coordinator>", "plain")],
+            [("Coordinator", "root agent + agents[]", "yours")],
+            [("AgentCapability", "invoked as a member", "plain"),
+             ("Channel", "escalate, root only", "subject")],
+        ],
+        "arrows": ["signalSourceRefs", "invoke"],
+    },
 }
 
 # The security page's illustrations.

@@ -193,6 +193,11 @@ one.** Such a conversation stays reusable only while exactly one Ready Pipeline
 serves its source — the state it was created in. It is left alone once a second
 joins.
 
+**A conversation a `Coordinator` invokes carries `spec.causedBy` instead** —
+the same shape of provenance, naming its PARENT one hop up rather than the
+wiring object that started it. See [Coordinated
+agents](#coordinated-agents).
+
 ### ConversationInput
 
 **Out-of-line payloads** — full alert JSON — so Conversation objects stay small
@@ -1229,6 +1234,152 @@ prometheus-community and Bitnami already use:
 is by definition not the release's to create, and a release that created one
 would own the lifecycle of storage holding agent context it did not put there.
 
+## Coordinated agents
+
+**A `Coordinator`'s own conversation can cause the manager to open more
+conversations.** Each one — a MEMBER — gets its own capability, its own
+identity and its own pod.
+
+**This is composition, not a subagent inside one pod.** Every step can hold
+less power than the one before it.
+
+### Provenance: `causedBy` and `coordinatorRef`
+
+| Field | Names | Resolves |
+|---|---|---|
+| `spec.causedBy.parent` | the PARENT conversation, one hop — never the tree's uncaused root | nothing |
+| `spec.causedBy.entry` | the `agents[]` entry the parent invoked | nothing |
+| `spec.coordinatorRef` | the Coordinator this conversation is itself the ROOT of | nothing beyond identifying it |
+
+Both are written once at creation and never change.
+
+**A conversation may carry both.** A member invoked through a
+`coordinatorRef` entry is simultaneously a MEMBER of its own parent and the
+ROOT of its own members — nesting has no depth limit.
+
+**Walking to the uncaused root means following `causedBy` one hop at a
+time.** No field names the root directly, so a viewer or a budget check
+follows the chain rather than reading it as already resolved.
+
+**Reuse is scoped by `causedBy`, at one hop.** Two uncaused conversations with
+one signature stay two conversations. Two members invoked by the same parent
+through the same entry, with one signature, attach to the same conversation.
+
+### The loop: invoke, result, close
+
+A Coordinator's conversation reaches the objects its `agents[]` lists through
+the [aops MCP server](contracts.md#the-aops-mcp-server-contract) — never by
+name, and never anything its own `agents[]` does not list.
+
+| Step | What happens |
+|---|---|
+| `invoke(agent, task)` | creates or attaches to a member, returns its name at once — never waits for a result |
+| the member runs | strictly serially, exactly as any conversation does |
+| `/work/done` on the member | its result is appended as an **input on the PARENT** — the one `causedBy` names, one hop |
+| the parent's next run | includes that input, attributed to the member's entry name |
+
+**A member binds no channel at creation.** Its inputs and results reach no
+surface — a coordinator reaches people only by escalating.
+
+**A conversation never receives its own output as input.** `/channel/inbound`
+refuses an inbound message whose origin surface is its own target
+conversation.
+
+**A member reporting after its parent is `Closed` is dropped.** No input is
+appended, and the result stays on the member's own record.
+
+### Escalation: only the uncaused root ever opens a human thread
+
+**Escalation is a decision, not an arrival.** A Coordinator's `channelRefs`
+bind nothing at creation. They are snapshotted onto the UNCAUSED root as
+`spec.escalationChannelRefs`, and nothing opens a thread on them until the
+agent calls `escalate(message)`.
+
+| Caller | `escalate` does |
+|---|---|
+| the uncaused root (no `causedBy`) | binds the snapshotted channels, opens a thread on each with `message` as its first post |
+| a nested member (carries `causedBy`) | opens **no** thread — closes itself with `message` as `closeReason` and result, landing on its own parent as an ordinary member-result input |
+
+**The bubble repeats.** A parent receiving that report may itself be nested,
+and calling `escalate` again closes it the same way, one hop up, until a call
+reaches the uncaused root.
+
+**Escalating reads no Coordinator.** It works even after the Coordinator is
+edited or deleted, because the channels were already snapshotted.
+
+**Prior inputs are never replayed into a late thread.** `DeliverInputs` fences
+on `status.escalatedAt` — nothing that arrived earlier is delivered to the
+channels escalation just bound.
+
+**After escalation the root is an ordinary multi-channel conversation.** A
+person's reply is an input, delivered to every other bound channel as usual.
+
+**Close and drop record why.** `status.closeReason` is stamped beside
+`closedAt`. The MCP `close` verb requires one. `/close` from a surface does
+not set one. A root closed without ever escalating stays listed with its
+reason — see the [console's incident view](console-guide.md).
+
+### Budget: three edges, evaluated per Coordinator level
+
+Every conversation that is itself a Coordinator's root — uncaused or nested —
+snapshots its OWN `spec.limits` into `status.budget` and enforces them
+independently of any ancestor's. **Nesting never pools a budget across
+levels.**
+
+| Limit | Bounds | Enforced |
+|---|---|---|
+| `maxAgents` | agents this conversation may invoke over its lifetime | the `invoke` verb, before creating another member |
+| `maxTurns` | this conversation's own completed runs | after each of its own runs is recorded |
+| `deadline` | this conversation's age | the reconciler, on a requeue at the deadline |
+
+Past any limit the manager closes that conversation `budget-exceeded`, closes
+every live member with it (same reason, recursively), and calls `escalate`
+with a manager-written digest — never a separate close, since `escalate`
+already performs one of the two outcomes above.
+
+**Turns count on the conversation whose own status they are.** A member's run
+finishing increments the member's own `turns`, not its parent's. Several
+members finishing at once is one turn on the parent, when the parent's own run
+that read their results completes.
+
+### The invoke cycle guard
+
+**A Coordinator invoking itself, directly or through others, never
+terminates**, so it is refused rather than merely bounded by depth.
+
+On `invoke`, the manager collects the calling conversation's own
+`coordinatorRef`, then walks its `causedBy` chain to the uncaused root
+collecting each ancestor's. An invoke whose target resolves to a Coordinator
+already in that list is refused, naming the repeated Coordinator.
+
+**No depth limit exists elsewhere.** A tree may nest as deep as every level's
+own budget allows. Only a repeated Coordinator is refused, never a long but
+acyclic chain.
+
+A separate, STATIC check catches a cycle built directly into `agents[]`. A
+Coordinator's own `Ready` walks its `coordinatorRef` entries and reports
+`False`, naming a Coordinator that reappears on the path, rather than
+recursing into it again.
+
+The live `invoke`-time guard above catches what that check cannot —
+`agents[]` edited into a cycle after a chain through it already exists.
+
+### `status.brief`: what a conversation is about
+
+**One or two sentences, written by the agent, replacing what came before.**
+Reported as `brief` in `/work/done` beside `result`, recorded LATEST-WINS —
+the same rule as `runtimeContextId`.
+
+- **Never a summary of what happened.** It states what the conversation
+  CONCERNS — the objects, the ask — not where it stands. Status already
+  carries that.
+- **A report that omits it leaves the stored brief unchanged.** A runtime that
+  never sends one leaves `title` as the only description.
+- **The manager parses nothing to get it, and reads it for no decision of its
+  own.** It exists for a reader picking a conversation without reading its
+  transcript — a Coordinator's `list_conversations`, the channel-reader
+  projection, the console's conversation list.
+
 ## Capacity: how many run at once
 
 **A conversation is active while a runtime pod exists for it.** That is the only
@@ -1412,6 +1563,12 @@ payload is not copied into the conversation object.
   well as what the agent answered), adapter cursors, delivery markers and
   suppression windows. Recovered by reading. Survives any restart and any
   rescheduling.
+  - **Coordination state rides the same home.** `causedBy`, `coordinatorRef`,
+    `status.budget` (per-level counts against the snapshotted limits),
+    `escalatedAt`, `closeReason` and `brief` are all ordinary Conversation
+    spec and status fields. A restart between a member's run being recorded
+    and its result landing on the parent is closed by the reconciler
+    re-deriving the missing append, exactly as a missing delivery is.
 - **A PersistentVolume** — state that genuinely *is* a filesystem: a
   conversation's accumulated context, and optionally its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never
