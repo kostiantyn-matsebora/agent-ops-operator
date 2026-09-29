@@ -141,12 +141,9 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       RBAC (none beyond the floor), `coordination.enabled` gate,
       `global.builtinToolsets.agentops-coordinate`, the rendered `MCPConfig`;
       NOTES.txt line.
-- [ ] 4.5 Smoke against a live install from the worktree chart: a Coordinator
-      with one AgentCapability, a signal, `invoke` observed creating a member, result
-      landing on the root, `escalate` opening a Telegram thread. Record the
-      verdict, not the transcript. NOT RUN in this remote session — no local
-      cluster here (`remote-session.md`). Left for a workstation session, or
-      for the dispatched cluster-tier run to complete.
+- **4.5 (the live-cluster smoke this phase owes) moved to the trailing E2E
+      tests section below**, per `docs/testing.md`'s tier split — a cluster
+      decides it, envtest does not.
 
 ## 5. Phase 4 — console (design D-G)
 
@@ -175,7 +172,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       the budget, "a caused conversation binds no human channel".
 - [x] 6.3 `retired-vocabulary.json`: no new term — nothing is retired.
 
-## 7. Verification
+## 7. Unit tests
 
 - [x] 7.1 Every module builds, vets and tests in the container, from the
       worktree path. Verdict: green, all modules including the new
@@ -193,35 +190,45 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       same gap `mcp-servers` closed) and `coordination.enabled=true` joined
       `everything`.
 
-## 8. Documentation — THE LAST TASK, and it is not optional
+## 8. E2E tests
 
-### 8a. Reference docs
+- [ ] 8.1 Smoke against a live install from the worktree chart (moved from
+      4.5): a Coordinator with one AgentCapability, a signal, `invoke`
+      observed creating a member, result landing on the root, `escalate`
+      opening a Telegram thread. Record the verdict, not the transcript. NOT
+      RUN in this remote session — no local cluster here
+      (`remote-session.md`). Dispatched instead on `e2e-smoke.yml` against
+      this branch; left for that run, or a workstation session, to confirm.
 
-- [ ] 8a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
+## 9. Documentation — THE LAST TASK, and it is not optional
+
+### 9a. Reference docs
+
+- [ ] 9a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
       `causedBy`, the loop, escalation, budget, `status.brief`, the state
       matrix rows.
-- [ ] 8a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
+- [ ] 9a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
       `brief`, `/channel/inbound` refusal, the aops MCP tool contract with its
       two reach classes, the five token derivation contexts.
-- [ ] 8a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
-- [ ] 8a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
+- [ ] 9a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
+- [ ] 9a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
       `python3 docs/diagrams/threat-model.py`.
-- [ ] 8a.5 `docs/installation.md`: `coordination.*` values, the component.
-- [ ] 8a.6 `docs/CHANGELOG.md`: two CRDs to apply by hand, the new component.
-- [ ] 8a.7 `docs/adr/0002-coordinated-agents.md`: status → Accepted, plus a
+- [ ] 9a.5 `docs/installation.md`: `coordination.*` values, the component.
+- [ ] 9a.6 `docs/CHANGELOG.md`: two CRDs to apply by hand, the new component.
+- [ ] 9a.7 `docs/adr/0002-coordinated-agents.md`: status → Accepted, plus a
       "What implementation changed" section as 0001 carries.
-- [ ] 8a.8 Re-run `python3 .github/scripts/docs-generate.py`; commit every
+- [ ] 9a.8 Re-run `python3 .github/scripts/docs-generate.py`; commit every
       regenerated block and `docs/cr-reference.md`.
 
-### 8b. Adopter site
+### 9b. Adopter site
 
-- [ ] 8b.1 `docs/index.md`: kind count, the "what you write" tab mentions a
+- [ ] 9b.1 `docs/index.md`: kind count, the "what you write" tab mentions a
       Coordinator.
-- [ ] 8b.2 `docs/introduction.md`: two wiring kinds over one capability.
-- [ ] 8b.3 `docs/installation.md`: component list.
-- [ ] 8b.4 `docs/guides/coordinate-agents.md`: new guide with generated CR
+- [ ] 9b.2 `docs/introduction.md`: two wiring kinds over one capability.
+- [ ] 9b.3 `docs/installation.md`: component list.
+- [ ] 9b.4 `docs/guides/coordinate-agents.md`: new guide with generated CR
       blocks; `_data/nav.yml` line.
-- [ ] 8b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
+- [ ] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
-- [ ] 8b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
+- [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
       `npm run demo`; commit the assets.
