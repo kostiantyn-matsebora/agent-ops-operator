@@ -116,6 +116,29 @@ piece of work its own HEAD and its own files.
 
 `.claude/rules/worktree-delivery.md` is the full rule.
 
+### The roles that implement it
+
+Five role agents live in `.claude/agents/` — `api-architect`,
+`backend-developer`, `deployment-engineer`, `frontend-developer`,
+`testing-specialist` — each owning a lane of the tree and carrying its own
+review bar.
+
+- **A change's tasks file names the fulfilling agent per implementation
+  section**, and the apply workflow dispatches each named section to its
+  role. The session stays the sole integrator: it verifies, ticks and
+  commits.
+- **Before the pull request opens, each section's diff is cross-reviewed by
+  another role**, one round — findings are fixed or recorded, never dropped.
+- **Contract-shaped artifacts** — delta specs touching a CRD field, an
+  adapter contract or an HTTP endpoint — are drafted by `api-architect` at
+  propose and update.
+- **The automated review reads with the same bars**: a component's file
+  readers hold the routed role's review criteria beside the routed rules,
+  taken from the base branch.
+
+None of this changes what a human contributor writes by hand. A tasks file
+section without a named agent is simply worked directly.
+
 ### The issue that tracks it
 
 Each change has **one** GitHub issue, opened when it is proposed and closed when

@@ -96,16 +96,26 @@ def _specs_text(d: dict) -> str:
 
 def reader_system(d: dict, slug: str) -> str:
     """The fixed, byte-identical system prefix for every file reader of one
-    component's job — role body, then every rule file the component's paths
-    route to (the union), then the delta specs."""
-    rules_for = _load_module("review-rules").rules_for
+    component's job — role body, then the review criteria of each role the
+    component's paths route to, then every rule file they route to (the
+    union), then the delta specs."""
+    rr = _load_module("review-rules")
     entry = _entry(d, slug)
     rule_files: list[str] = []
     for p in entry["all_paths"]:
-        for r in rules_for(p):
+        for r in rr.rules_for(p):
             if r not in rule_files:
                 rule_files.append(r)
+    roles: list[str] = []
+    for p in entry["all_paths"]:
+        role = rr.role_for(p)
+        if role and role not in roles:
+            roles.append(role)
     parts = [_role_body(FILE_REVIEWER).rstrip("\n")]
+    for role in roles:
+        crit = rr.role_criteria(ROOT, role)
+        if crit:
+            parts.append(f"## REVIEW CRITERIA OF THE {role} ROLE\n\n{crit}")
     for r in rule_files:
         f = ROOT / r
         text = f.read_text() if f.is_file() else ""

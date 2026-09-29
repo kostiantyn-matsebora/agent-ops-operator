@@ -153,11 +153,13 @@ and a failed build SKIPS EVERY READER: the job writes the reading itself,
 `unbuilt` with the build's own tail, and no model runs. A built component is
 then read ONE `claude -p` PROCESS PER FILE, blind — no thread, no previous
 finding — several at once from the shell (`xargs -P $REVIEW_READERS`), each
-holding the `file-reviewer` role and the rules `review-rules.py` routes to
-the component's paths as a SHARED SYSTEM PREFIX (`review-prompt.py
-reader-system`) — the same bytes for every file, paid once and served from
-cache after. NO CONTEXT INHERITS A RULE FILE, and `review-context.py` prints
-what each one holds at the top of the job. A file carrying an UNRESOLVED
+holding the `file-reviewer` role, the `## Review criteria` of the role agent
+`review-rules.py` routes to the component's paths (`ROLE_TABLE` — the five
+role agents in `.claude/agents/`, restored from the base branch with the
+reader) and the rules it routes there, as a SHARED SYSTEM PREFIX
+(`review-prompt.py reader-system`) — the same bytes for every file, paid
+once and served from cache after. NO CONTEXT INHERITS A RULE FILE, and
+`review-context.py` prints what each one holds at the top of the job. A file carrying an UNRESOLVED
 THREAD also gets a second, primed process — the `thread-verdict` role, no
 rules — judging `fixed`/`standing`/`gone`/`detached` for that thread alone; a
 `detached` verdict's relocated finding folds into the file's findings.
@@ -203,7 +205,8 @@ branch before building the queue; `read` restores the composite action,
 `review-rules.py`, `review-context.py`, `review-trace.py`, `review-post.py`
 and `mark-thread-resolved.sh`; both then install the CLI through
 `.github/actions/claude-cli`, which restores the job's role files (`read`
-restores `file-reviewer.md` AND `thread-verdict.md`); `reconcile` checks out
+restores `file-reviewer.md`, `thread-verdict.md` AND the five role agents
+whose criteria ride the prefix); `reconcile` checks out
 the base branch itself. So a pull request cannot rewrite the review that
 judges it, shrink its own queue, or resolve a thread it did not earn. The
 fan-out is the matrix and not a pool inside one session: `gotchas.md` has the

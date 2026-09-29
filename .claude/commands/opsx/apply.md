@@ -123,6 +123,42 @@ Implement tasks from an OpenSpec change.
    - Error or blocker encountered → report and wait for guidance
    - User interrupts
 
+6.5 **Dispatch each named section to its role agent — THIS REPOSITORY'S RULE**
+
+   The tasks file names a role agent in each implementation section's heading
+   (`## <n>. <title> — <agent>`, the rule `openspec/config.yaml` injects).
+   The five roles live in `.claude/agents/`: `api-architect`,
+   `backend-developer`, `deployment-engineer`, `frontend-developer`,
+   `testing-specialist`.
+
+   - **One Agent dispatch per named section**, handing it the section's
+     tasks, the change name and the working copy's path. The agent edits in
+     its lane and never commits.
+   - **This session is the sole integrator.** Read the report, verify the
+     work with the section's own gates, tick the tasks, commit on
+     `change/<name>`.
+   - **A section naming no agent is worked directly**, exactly as step 6
+     says. Tasks files predating the convention have no named sections and
+     stay valid.
+   - **Dispatch per SECTION, never per task.** Each dispatch pays the full
+     inherited-rules context (`.claude/rules/gotchas.md`), so the section is
+     the unit that keeps the cost at a handful of dispatches.
+
+6.6 **Cross-role review before the pull request — THIS REPOSITORY'S RULE**
+
+   After the implementation sections are complete and before the pull
+   request opens, one round:
+
+   - **Each section's diff is reviewed by a role other than the one that
+     wrote it.** Picked by lane: `api-architect` for a diff touching its
+     lane, otherwise `testing-specialist` for sections it did not write,
+     otherwise `backend-developer`.
+   - **Every finding is fixed on the branch, or recorded in the change with
+     the reason it stands.** None is silently dropped.
+   - **One round, bounded.** The CI review and its human triage remain the
+     authority — this pass catches what a role's bar sees before CI spends
+     a matrix on it.
+
 7. **On completion or pause, show status**
 
    Display:

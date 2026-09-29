@@ -76,4 +76,32 @@ assert_status 1 "$?"
 assert_contains "$err" "no path routes to .claude/rules/orphan.md"
 rm -rf "$tmp"
 
+role() { python3 -c "
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('rr', '$S')
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+print(rr.role_for(sys.argv[1]) or '')" "$1"; }
+
+it "a path routes to its role: console, chart, tests, contract, backend"
+assert_equals "frontend-developer"  "$(role platform/console/ui/src/App.tsx)"
+assert_equals "deployment-engineer" "$(role chart/values.yaml)"
+assert_equals "testing-specialist"  "$(role platform/manager/internal/chat/router_test.go)"
+assert_equals "api-architect"       "$(role platform/manager/api/v1alpha1/conversation_types.go)"
+assert_equals "backend-developer"   "$(role platform/manager/internal/chat/router.go)"
+
+it "a path no role fits routes to none"
+assert_equals "" "$(role docs/concepts.md)"
+assert_equals "" "$(role README.md)"
+
+it "--check fails on a role routed to a missing agent file"
+tmp=$(mktemp -d); mkdir -p "$tmp/.claude/rules" "$tmp/.claude/agents" "$tmp/docs"
+cp "$ROOT"/.claude/rules/*.md "$tmp/.claude/rules/"; cp "$ROOT/docs/CLAUDE.md" "$tmp/docs/"
+cp "$ROOT"/.claude/agents/*.md "$tmp/.claude/agents/"
+rm "$tmp/.claude/agents/frontend-developer.md"
+err=$(python3 "$S" --check --root "$tmp" 2>&1 >/dev/null)
+assert_status 1 "$?"
+assert_contains "$err" "frontend-developer.md"
+rm -rf "$tmp"
+
 summary
+

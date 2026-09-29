@@ -114,5 +114,19 @@ assert_contains "$cov" '"chart/values.yaml": {
    "quietBefore": 0
   }'
 
+it "reader-system holds the routed role's criteria, before the rules"
+sys=$(python3 "$PROMPT" reader-system --input "$tmp/input.json" --group chart)
+assert_contains "$sys" "## REVIEW CRITERIA OF THE deployment-engineer ROLE"
+crit_at=$(printf '%s\n' "$sys" | grep -n "REVIEW CRITERIA" | head -1 | cut -d: -f1)
+rule_at=$(printf '%s\n' "$sys" | grep -n "## RULE FILE:" | head -1 | cut -d: -f1)
+[ "$crit_at" -lt "$rule_at" ] && pass || fail "criteria at $crit_at, first rule at $rule_at"
+
+it "the role block is the criteria section alone — no workflow, no hand-back"
+assert_not_contains "$sys" "## Workflow"
+assert_not_contains "$sys" "## Hand-back"
+
+it "reader-system for a path no role fits carries no role block"
+assert_not_contains "$(python3 "$PROMPT" reader-system --input "$tmp/input.json" --group docs)" "REVIEW CRITERIA"
+
 rm -rf "$tmp"
 summary

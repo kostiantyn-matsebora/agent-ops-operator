@@ -61,6 +61,15 @@ Revise a change's existing planning artifacts and keep them coherent. Never edit
      openspec instructions <artifact-id> --change "<name>" --json
      ```
 
+5.5 **Contract-shaped revisions go through the contract role — THIS
+    REPOSITORY'S RULE**
+
+   Where a confirmed revision touches a CRD field, an adapter contract or an
+   HTTP endpoint in the change's deltas, dispatch the `api-architect` agent
+   (`.claude/agents/`) to draft that revision, and integrate its artifact
+   exactly as one you wrote. A revision touching no contract dispatches
+   nothing.
+
 6. **Point to the next step (guidance only - NEVER act on it)**
    - Artifacts still missing -> suggest `/opsx:continue` to create them.
    - Change already implemented (tasks checked off / already applied) -> the code may no longer match the revised plan; suggest `/opsx:apply` to carry the delta into code.
