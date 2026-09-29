@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -134,6 +135,46 @@ def failed_log(repo: str, run: str, job: str, tail_lines: int) -> str:
     if not lines:
         lines = raw.splitlines()
     return "\n".join(lines[-tail_lines:])
+
+
+GATE_LINE = "QUALITY GATE STATUS: FAILED"
+GATE_COMPONENT_RE = re.compile(r"agent-ops-operator_([A-Za-z0-9-]+)")
+
+
+def gate_verdict(tail: str, pr: int) -> dict | None:
+    """The failing quality-gate conditions, when the failed step IS the gate.
+
+    A gate verdict is the analysis service judging THIS TREE — `new_coverage`
+    under the threshold is tests to write, an issue rating is issues to fix —
+    and the fixer disputed one as not-the-tree on #272 because the item said
+    nothing but "the gate failed" and the log names no local command. The
+    conditions are public (the org is on a public plan), read anonymously
+    with one bounded curl; any failure to read them still marks the item a
+    gate verdict, which is the load-bearing half.
+
+    The component comes out of the dashboard URL in the LOG TAIL, where the
+    org half of the project key is masked (it is stored as a secret), so the
+    key is rebuilt from SONAR_ORG — set in the same step env that already
+    serves sonar-issues.py."""
+    if GATE_LINE not in tail:
+        return None
+    gate: dict = {"status": "FAILED", "failing": []}
+    org = os.environ.get("SONAR_ORG", "")
+    m = GATE_COMPONENT_RE.search(tail)
+    if org and m:
+        url = (f"https://sonarcloud.io/api/qualitygates/project_status"
+               f"?projectKey={org}_agent-ops-operator_{m.group(1)}"
+               f"&pullRequest={pr}")
+        out = subprocess.run(["curl", "-sf", "--max-time", "20", url],
+                             capture_output=True, text=True)
+        if out.returncode == 0:
+            try:
+                status = json.loads(out.stdout).get("projectStatus") or {}
+                gate["failing"] = [c for c in status.get("conditions") or []
+                                   if c.get("status") != "OK"]
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    return gate
 
 
 def disputed_checks(repo: str, pr: int, marker: str, since: str = "") -> set[str]:
@@ -246,7 +287,8 @@ def main() -> int:
             continue
         run = run_id(c)
         url = c.get("html_url") or c.get("details_url") or ""
-        items.append({
+        tail = failed_log(args.repo, run, name, args.tail_lines)
+        item = {
             "id": f"check:{name}",
             "source": "check",
             "kind": "check",
@@ -254,8 +296,14 @@ def main() -> int:
             "run_url": url,
             "path": ".github/workflows/ci.yml",
             "line": None,
-            "tail": failed_log(args.repo, run, name, args.tail_lines),
-        })
+            "tail": tail,
+        }
+        gate = gate_verdict(tail, args.pr)
+        if gate is not None:
+            # THE GATE'S VERDICT RIDES ON THE ITEM, so the fixer reads WHICH
+            # condition failed instead of a log line it cannot act on.
+            item["gate"] = gate
+        items.append(item)
 
     result = {"consulted": consulted, "checks": checks, "items": items, "awaiting": awaiting}
     args.out.write_text(json.dumps(result, indent=2) + "\n")

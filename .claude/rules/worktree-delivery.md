@@ -303,6 +303,13 @@ every start, never trusting that a workflow placed it before.
     command, and re-runs it before the patch is cut. A failure the tree does
     not explain — an outage, a rate limit, a flake — is DISPUTED with the log's
     reason, because a false fix for a flake is worse than the flake.
+    - **A QUALITY GATE'S VERDICT IS ALWAYS THE TREE'S, and reproduce-first
+      does not apply to it** — the gate has no local command, which is
+      exactly why the fixer disputed one as not-the-tree on #272 and froze
+      the loop on a coverage shortfall only tests could clear.
+      `failed-checks.py` marks such an item with a `gate` field naming the
+      failing conditions (read anonymously, failure-tolerant), and the
+      prompt says what each condition means in tree work.
   - **A DISPUTE'S REASON IS BOUND BY THIS REPOSITORY'S OWN ANSWERING AND
     WRITING RULES**, since it is posted verbatim to a thread or a pull
     request comment: at most 40 words, no timeline, no log excerpt. The

@@ -288,6 +288,62 @@ run_it >/dev/null
 assert_equals "1" "$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["items"]))' "$OUT")"
 assert_equals "[]" "$(read_out awaiting)"
 
+# --- a failed quality gate is the tree's verdict, named on the item ----------
+#
+# The fixer disputed a gate failure as not-the-tree on #272, because the item
+# said nothing but a log line with no local command. The failing CONDITIONS ride
+# on the item now, read anonymously; a read that fails still marks the verdict.
+
+stub_gate() {  # stub_gate <runs-file> <curl-behaviour: ok|fail>
+  cat > "$BIN/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$DIR/calls"
+case "\$*" in
+  *"check-runs"*) cat "$1" ;;
+  *"--log-failed"*) printf 'operator\tsonar\tERROR QUALITY GATE STATUS: FAILED - View details on https://sonarcloud.io/dashboard?id=***_agent-ops-operator_mcp-aops&pullRequest=5\n' ;;
+  *) : ;;
+esac
+STUB
+  chmod +x "$BIN/gh"
+  cat > "$BIN/curl" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "curl \$*" >> "$DIR/calls"
+if [ "$2" = "ok" ]; then
+  printf '{"projectStatus":{"status":"ERROR","conditions":[{"status":"OK","metricKey":"new_reliability_rating"},{"status":"ERROR","metricKey":"new_coverage","comparator":"LT","errorThreshold":"80","actualValue":"63.0"}]}}'
+else
+  exit 22
+fi
+STUB
+  chmod +x "$BIN/curl"
+}
+
+it "a failed quality gate rides on the item: the failing conditions, the key rebuilt from SONAR_ORG"
+setup; runs_file
+add_run operator failure; add_run chart success; add_run images success
+stub_gate "$RUNS" ok
+out=$(SONAR_ORG=the-org run_it); assert_status 0 "$?"
+gate=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["items"][0].get("gate"))' "$OUT")
+assert_contains "$gate" "new_coverage"
+assert_contains "$gate" "63.0"
+assert_not_contains "$gate" "new_reliability_rating"
+assert_contains "$(cat "$DIR/calls")" "projectKey=the-org_agent-ops-operator_mcp-aops&pullRequest=5"
+
+it "a gate whose conditions cannot be read is still marked a gate verdict, with nothing invented"
+setup; runs_file
+add_run operator failure; add_run chart success; add_run images success
+stub_gate "$RUNS" fail
+out=$(SONAR_ORG=the-org run_it); assert_status 0 "$?"
+gate=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["items"][0].get("gate"))' "$OUT")
+assert_contains "$gate" "FAILED"
+assert_contains "$gate" "'failing': []"
+
+it "a plain test failure carries NO gate field"
+setup; runs_file
+add_run operator failure; add_run chart success; add_run images success
+stub_checks "$RUNS"
+run_it >/dev/null
+assert_equals "None" "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["items"][0].get("gate"))' "$OUT")"
+
 it "a dispute posted BEFORE --since (a removed label's loop) does not hold the check awaiting"
 setup; runs_file
 add_run operator failure; add_run chart success; add_run images success
