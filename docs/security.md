@@ -140,6 +140,44 @@ Events become conversations.
   fall back to. Drain awareness is simply off there, reported once on each
   source's condition.
 
+### Agent-invoked agents
+
+**Coordination adds no new crossing.** A `Coordinator`'s conversation reaches
+the aops MCP server exactly like any other bound server — through crossing 2,
+the same egress-controlled path every MCP call takes.
+
+What is new is what a call across it can cause: the MANAGER creating more
+conversations and runtime pods on the caller's behalf, each under its own
+capability and identity.
+
+| | |
+|---|---|
+| **Threat** | a conversation causes the manager to provision more conversations and pods than its own route declared |
+| **Control** | the manager enforces every bound — the caller's own `agents[]` list, its own subtree, one hop for `close` — from a per-conversation token the aops server only forwards |
+| **Cost** | the aops server and its `NetworkPolicy`, reachable only from runtime pods |
+| **Residual risk** | a fan-out an operator did not expect, bounded but not forbidden — see [Residual risk](#residual-risk) |
+
+Three bounds keep it from becoming a second cluster boundary:
+
+- **A typed list, not a name.** `invoke` reaches only what the caller's own
+  Coordinator lists in `agents[]`, never an object it merely knows the name
+  of.
+- **A budget per level.** `maxAgents`, `maxTurns` and `deadline` close a
+  runaway coordination, evaluated on every level's own conversation and never
+  pooled across nesting.
+- **A cycle is refused outright.** A Coordinator invoking a chain that
+  returns to itself never terminates on its own, so the manager refuses it
+  rather than relying on the budget to eventually catch it.
+
+**Each invoked member gets its OWN capability and its OWN identity** — never
+the caller's, and never widened by it. A coordinating agent with a strong
+ServiceAccount can still invoke only members whose own `AgentCapability`
+names a weaker one, exactly as any other wiring resolves.
+
+**The aops MCP server decides none of this.** It holds no credential of its
+own and forwards the caller's token verbatim — every bound above is the
+manager's, re-checked on every call, never the server's.
+
 ---
 
 ## The platform's own posture
@@ -288,6 +326,7 @@ claim that the rest is handled too.
 | **Context isolation a runtime does not get** | a runtime declaring no context paths mounts the whole shared context volume into its agent container |
 | **Conversation content in pod logs** | the runtime writes what the agent produced to its pod's stdout |
 | **Signing and attestation** | no image is signed, and the chart carries no attestation |
+| **Depth in a coordination** | a tree of agents invoking agents nests as deep as every level's own budget allows — nothing bounds the number of LEVELS, only a repeated Coordinator is refused |
 
 **None of this is a surprise to the project.** These are decisions with reasons,
 and the reasons are in

@@ -813,7 +813,8 @@ An `AgentRuntime` image must:
    `runtimeContextId`: one or two sentences of what the conversation is
    ABOUT, replacing whatever was stored. A report that omits it leaves the
    stored brief unchanged, so a runtime that never sends one costs nothing —
-   `title` stays the only description. See [`status.brief`](concepts.md#status-brief-what-a-conversation-is-about).
+   `title` stays the only description. See
+   [`status.brief`](concepts.md#statusbrief-what-a-conversation-is-about).
 
 4. **Exit `0`** after `RUNTIME_IDLE_TTL_M` minutes without work
 
@@ -1450,7 +1451,7 @@ scrape time from the same in-memory state `/status` reports.
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token, see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token, see signal adapter contract) |
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
-| `POST /coordinate/*` | **proposed, not yet shipped** — the aops MCP server's four verbs and read tools (bearer token, see aops MCP server contract) |
+| `POST /coordinate/*` | the aops MCP server's verbs and read tools (per-conversation or channel-reader bearer token, see aops MCP server contract) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

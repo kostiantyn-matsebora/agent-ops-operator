@@ -12,6 +12,28 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- **Two new CRDs let a conversation's own agent invoke other agents.**
+  `AgentCapability` extracts the six capability fields a Pipeline already
+  carries inline (`profileRef`, `runtimeRef`, `serviceAccountName`,
+  `toolsets`, `mcpConfigs`, `persistence`), referenced with `capabilityRef`
+  instead of repeated. `Coordinator` wires a composition: sources claimed
+  like a Pipeline's, escalation `channelRefs`, a typed `agents[]` list of
+  members it may invoke (`capabilityRef` for a plain member, `coordinatorRef`
+  to nest one Coordinator inside another), and per-level `limits`
+  (`maxAgents`, `maxTurns`, `deadline`).
+  - A member's result returns as an input on its caller (`spec.causedBy`, one
+    hop). Only the tree's uncaused root ever opens a human thread, by calling
+    `escalate` — a nested member bubbles the message to its own parent
+    instead, one hop at a time, until a call reaches the root.
+  - A new component, **`agentops-mcp-aops`**, is the MCP server a
+    Coordinator's capability binds to reach these verbs — a thin forwarder
+    holding no credential of its own, behind the egress-proxy wall, rendered
+    only under `coordination.enabled` (off by default).
+  - Not breaking: every existing Pipeline is unaffected, and both CRDs are
+    inert until referenced. See
+    [concepts.md](concepts.md#coordinated-agents),
+    [contracts.md](contracts.md#the-aops-mcp-server-contract) and
+    [ADR 0002](adr/0002-coordinated-agents.md).
 - **The console's topology is a network, in three views of one activity
   feed.** Model draws the declared objects, Components one node per component
   plus the systems outside, and Infrastructure every pod. Each view has its
@@ -154,7 +176,9 @@ for the source and the reference material beside this file.
 
 1. **Apply the CRDs first** — `kubectl apply -f chart/crds/` — before
    `helm upgrade`. Helm never upgrades a CRD, and an old one silently prunes
-   `spec.externals` from every adapter CR.
+   `spec.externals` from every adapter CR. This step is also what INSTALLS
+   the two new kinds this release adds, `AgentCapability` and `Coordinator` —
+   Helm never creates a CRD it did not already own either.
 2. `helm upgrade`. Nothing to restate — the check arrives with the manager
    image.
 3. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.
@@ -166,6 +190,10 @@ for the source and the reference material beside this file.
    - An adapter CR with no `externals` draws no senders beside it.
    - The console's persisted display selections are re-keyed per view, so a
      selection saved by the old graph is dropped rather than misapplied.
+5. **The two new CRDs ship inert.** Nothing references an `AgentCapability`
+   or a `Coordinator` until you write one, and `coordination.enabled` (off
+   by default) is what renders the new `agentops-mcp-aops` component —
+   leaving it off costs nothing.
 
 ## [13.4.0] — 2026-09-06
 
