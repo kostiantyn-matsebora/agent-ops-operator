@@ -1198,7 +1198,7 @@ housekeeping:
   nodeSelector: {}
 
 # The aops MCP server (design coordinated-agents D-F): the verb surface a
-# Coordinator's own conversation reaches through global.builtinToolsets.agentops-coordinate.
+# Coordinator's own conversation reaches through global.builtinToolsets.coordinate (name: agentops-coordinate).
 # OFF by default — it renders nothing until a Coordinator is actually in use.
 #
 # A THIN CLIENT of the manager, so it needs NO Kubernetes access at all: no
