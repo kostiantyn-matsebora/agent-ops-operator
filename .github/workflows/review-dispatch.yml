@@ -418,6 +418,16 @@ jobs:
               not fix. If the tree is not the cause (a runner outage, a rate
               limit, a flaky download, a network 5xx), DISPUTE it and name what
               the log said; a false fix for a flake is worse than the flake.
+              THE ONE FAILURE THAT IS ALWAYS THE TREE'S AND NEVER DISPUTABLE
+              AS NOT-THE-TREE: a `gate` field on the item means the failed
+              step was the analysis service's QUALITY GATE judging this tree,
+              and `gate.failing` names the conditions. `new_coverage` below
+              its threshold means WRITE TESTS for that component's new code
+              until it clears (run that module's own test command with
+              coverage to see what is uncovered); an issue-rating condition
+              means fix the issues the sonar items already list. The
+              reproduce-first rule does not apply — the gate has no local
+              command and re-evaluates when your fix lands.
             Read it first.
 
             Address EVERY item, and nothing else:
