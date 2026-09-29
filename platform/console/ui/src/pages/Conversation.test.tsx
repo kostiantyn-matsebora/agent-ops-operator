@@ -144,8 +144,12 @@ describe('the Incident tab', () => {
   it('interleaves the root\'s own runs with its members, collapsed by default', async () => {
     mount('root-1', '?tab=incident')
     await screen.findByText('r-root')
-    // The budget is a fact about the ROOT, shown once.
-    expect(screen.getByText('2 of 5')).toBeInTheDocument()
+    // The budget is a fact about the ROOT, shown once. Queried against the
+    // page's text rather than one element: PatternFly's DescriptionList marks
+    // up the term and the value as siblings, so nothing on the page carries
+    // "Agents invoked" and "2 of 5" as one node's own text.
+    await screen.findByText('Agents invoked')
+    expect(document.body.textContent).toContain('2 of 5')
     // Both direct members are on the timeline as collapsed rows...
     expect(screen.getByText('Checked node-7 for disk pressure.')).toBeInTheDocument()
     expect(screen.getByText('Coordinating the mitigation.')).toBeInTheDocument()

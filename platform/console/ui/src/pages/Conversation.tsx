@@ -166,6 +166,15 @@ export function ConversationPage() {
             <Icon icon={pipelineIcon} />{' '}
             <PlainText>{stripLeadingIcon(c.title || c.name)}</PlainText>
           </Title>
+          {/* The agent's own one-or-two-sentence account of what this
+              conversation is about (design D-I) — shown wherever a view would
+              otherwise show only a name, and a root's is the first thing worth
+              reading before its timeline. */}
+          {c.brief && (
+            <p style={{ color: 'var(--ao-text-subtle)', margin: '0.15em 0 0.5em' }}>
+              <PlainText>{c.brief}</PlainText>
+            </p>
+          )}
           {/* The whole identity of the run, as chips: phase, attribution,
               profile, the runtime pod, and the capabilities it MATERIALIZED. */}
           <LabelGroup numLabels={10}>
