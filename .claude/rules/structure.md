@@ -6,7 +6,7 @@ container IS at runtime.
 
 | Group | Holds | The type |
 |---|---|---|
-| `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` | the product's own components |
+| `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` `mcp-aops` | the product's own components |
 | `runtimes/` | `claude` `ollama` `copilot` | client side of the work contract |
 | `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
@@ -381,11 +381,25 @@ what lives HERE is the implementation:
 - **Atomic generations plus a `current` symlink.** Copies are labelled quiesced
   or best-effort.
 
+**`platform/mcp-aops/`** — the aops MCP server, a thin client of the manager
+behind the coordination wall.
+
+- **Standard library only**, the shared Dockerfile recipe, MCP over streamable
+  HTTP. It holds ONE credential: its own derived token, context `mcp-aops`.
+- **It decides NOTHING about reach.** It forwards the caller's
+  `AOPS_MCP_TOKEN` to the manager's `/coordinate/*` surface verbatim. The
+  MANAGER validates it and enforces every per-verb bound.
+- **Tools:** `list_agents`, `list_conversations`, `get_conversation`,
+  `get_tree`, `invoke`, `close`, `escalate`, `read`.
+- **Rendered only when `coordination.enabled`**, wired as an `MCPConfig`
+  through `global.builtinToolsets.agentops-coordinate`. Reach through the
+  egress proxy is unchanged.
+
 ### `platform/console/`
 
 **The agent-ops console** — a ChannelAdapter that is ALSO the viewer.
 
-- **Config from read-only list/watch of the eight agentops kinds**, in-cluster
+- **Config from read-only list/watch of the TEN agentops kinds**, in-cluster
   API over `net/http`, the same technique as `signal-k8s-events`.
 - **Conversation traffic from the ordinary `/channel/*` contract.**
 - **Embedded SPA via `go:embed`** — no npm at runtime.

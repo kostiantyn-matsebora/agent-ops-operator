@@ -375,7 +375,12 @@ jobs:
             # ever looked at their ServiceAccounts. One of them mounted a token
             # while holding no grant, and only a live render found it.
             [mcp-servers]="--set kubernetes.enabled=true --set kubernetes.mcpServers.enabled=true $PROM --set prometheus.mcpServers.enabled=true --set prometheus.mcpServers.backend=http://metrics.example:8428 $HA --set home-assistant.adminMcp.enabled=true --set home-assistant.adminMcpServer.enabled=true"
-            [everything]="--set global.demo.enabled=true --set kubernetes.enabled=true $PROM $HA $TG"
+            # mcp-aops renders in NO OTHER PERMUTATION either — same gap,
+            # same fix, both network-policy shapes so the gated NetworkPolicy
+            # is validated too.
+            [coordination]="--set coordination.enabled=true"
+            [coordination-netpol]="--set coordination.enabled=true --set global.agentops.networkPolicy.enabled=true"
+            [everything]="--set global.demo.enabled=true --set kubernetes.enabled=true --set coordination.enabled=true $PROM $HA $TG"
           )
           failed=0
           for name in "${!PERMUTATIONS[@]}"; do

@@ -162,28 +162,36 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 6. Rules and vocabulary
 
-- [ ] 6.1 `.claude/rules/wiring.md`, three claims, each named: "no other CR
+- [x] 6.1 `.claude/rules/wiring.md`, three claims, each named: "no other CR
       carries wiring" → two wiring kinds; the `#### Capabilities are wiring,
       exclusively` header and its section → capabilities are declared on an
       AgentCapability OR inline on a Pipeline/Coordinator, and reached through wiring
       only; under `### MCPToolset`, "Bound from `Pipeline.spec.toolsets` ONLY"
       → bound from any capability's `toolsets`, never a profile's. Deleting
       a Coordinator cascades nothing, stated beside the Pipeline rule.
-- [ ] 6.2 `terminology.md`: the "Agent is TAKEN" entry names `AgentCapability`
+- [x] 6.2 `terminology.md`: the "Agent is TAKEN" entry names `AgentCapability`
       and why the CRD is not `Agent`; `Coordinator`, `root`, `member`, `escalate`;
       `structure.md`: `platform/mcp-aops`; `invariants.md`: the loop refusal,
       the budget, "a caused conversation binds no human channel".
-- [ ] 6.3 `retired-vocabulary.json`: no new term — nothing is retired.
+- [x] 6.3 `retired-vocabulary.json`: no new term — nothing is retired.
 
 ## 7. Verification
 
-- [ ] 7.1 Every module builds, vets and tests in the container, from the
-      worktree path.
-- [ ] 7.2 `KUBEBUILDER_ASSETS` envtest suite green.
-- [ ] 7.3 `python3 .github/scripts/publication-guard.py` and
-      `retired-vocabulary-guard.py` pass; record the verdict only.
-- [ ] 7.4 `helm template` with and without `coordination.enabled`;
-      `serviceaccount-guard.py` passes.
+- [x] 7.1 Every module builds, vets and tests in the container, from the
+      worktree path. Verdict: green, all modules including the new
+      `platform/mcp-aops`. `platform/context-sync` carries two pre-existing
+      failures unrelated to this change (unchanged since #221, reproduced on
+      `origin/master` alone).
+- [x] 7.2 `KUBEBUILDER_ASSETS` envtest suite green.
+- [x] 7.3 `python3 .github/scripts/publication-guard.py` and
+      `retired-vocabulary-guard.py` pass; record the verdict only. Verdict:
+      both clean.
+- [x] 7.4 `helm template` with and without `coordination.enabled`;
+      `serviceaccount-guard.py` passes. Verdict: clean, both network-policy
+      shapes. CI's permutation matrix gained `coordination` and
+      `coordination-netpol` rows (mcp-aops rendered in no other permutation,
+      same gap `mcp-servers` closed) and `coordination.enabled=true` joined
+      `everything`.
 
 ## 8. Documentation — THE LAST TASK, and it is not optional
 
