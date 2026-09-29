@@ -162,9 +162,8 @@ export function App() {
                 <ToolbarItem>
                   <Button
                     variant="secondary"
-                    onClick={async () => {
-                      await api.logout()
-                      session.refetch()
+                    onClick={() => {
+                      void api.logout().then(() => session.refetch())
                     }}
                   >
                     Sign out
