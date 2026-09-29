@@ -178,6 +178,57 @@ describe('the Incident tab', () => {
   })
 })
 
+describe('the Incident tab, edges', () => {
+  it('renders nothing for a coordinator-less, cause-less conversation', async () => {
+    served['conversation:plain'] = conversationView({ name: 'plain', phase: 'Idle' })
+    mount('plain', '?tab=incident')
+    await screen.findAllByText('plain')
+    expect(screen.queryByText(/This is a member conversation/)).toBeNull()
+    expect(screen.queryByText('Agents invoked')).toBeNull()
+  })
+
+  it('says so when a root has no runs and no members, and shows the deadline', async () => {
+    served['conversation:root-empty'] = conversationView({
+      name: 'root-empty', coordinator: 'root-empty', phase: 'Running',
+      budget: { agentsInvoked: 0, turns: 0, deadline: '2026-01-01T01:00:00Z' },
+    })
+    mount('root-empty', '?tab=incident')
+    await screen.findByText('Nothing has happened on this incident yet')
+    expect(screen.getByText('Deadline')).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain(' of ')
+  })
+
+  it('reports member conversations that cannot be listed', async () => {
+    delete served.conversations
+    mount('root-1', '?tab=incident')
+    expect(await screen.findByText('Could not load member conversations', {}, { timeout: 5000 })).toBeInTheDocument()
+  })
+
+  it('shows an empty member and why an un-escalated member closed', async () => {
+    const items = (served.conversations as { items: ConversationSummary[] }).items
+    items.push(summary({
+      name: 'member-3', phase: 'Closed', closeReason: 'budget exceeded', brief: 'Gave up early.',
+      causedBy: { parent: 'root-1', entry: 'retry' }, created: '2026-01-01T00:02:00Z',
+    }))
+    served['conversation:member-3'] = conversationView({ name: 'member-3', phase: 'Closed' })
+    mount('root-1', '?tab=incident')
+    await userEvent.click(await screen.findByText('Gave up early.'))
+    expect(await screen.findByText('No completed runs')).toBeInTheDocument()
+    expect(screen.getByText('closed: budget exceeded')).toBeInTheDocument()
+  })
+
+  it('reports a member whose detail cannot be loaded', async () => {
+    const items = (served.conversations as { items: ConversationSummary[] }).items
+    items.push(summary({
+      name: 'member-x', phase: 'Idle', brief: 'Unreadable member.',
+      causedBy: { parent: 'root-1', entry: 'x' }, created: '2026-01-01T00:03:00Z',
+    }))
+    mount('root-1', '?tab=incident')
+    await userEvent.click(await screen.findByText('Unreadable member.'))
+    expect(await screen.findByText('Could not load this member', {}, { timeout: 5000 })).toBeInTheDocument()
+  })
+})
+
 describe('an un-escalated closure', () => {
   it('marks the closeReason distinctly from an escalated close', async () => {
     served['conversation:closed-quiet'] = conversationView({
