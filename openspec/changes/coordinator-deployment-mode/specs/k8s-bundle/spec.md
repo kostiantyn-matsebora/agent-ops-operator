@@ -41,9 +41,14 @@ that knows what its own routes do, so a route needing more than the MCP path
 gives it SHALL get that from the bundle rather than from a release-wide preset.
 
 Under `global.agentops.wiringMode: coordinator`, the bundle SHALL render the
-SAME route identity as a standalone `AgentCapability` rather than an inline
-Pipeline — the `k8s-engineer` capability, at the same privilege level the
-observing route uses today.
+SAME two route identities as standalone `AgentCapability` objects rather than
+inline Pipelines.
+
+- `k8s-observe` is the observing capability, at the privilege level the
+  observing route uses today.
+- `k8s-operate` is the acting capability, at the level the acting route uses
+  today.
+- The two SHALL NEVER be merged into one.
 
 Coordinator mode renders the observing `AgentCapability` always, and the
 acting one too when its own flag (`pipelines.admin.enabled`) is enabled, exactly as the per-route flags

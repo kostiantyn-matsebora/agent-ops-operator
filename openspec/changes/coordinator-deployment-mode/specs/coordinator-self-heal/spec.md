@@ -1,5 +1,8 @@
 ## Purpose
 
+This change depends on `coordinated-agents` landing first. The
+`coordination-loop` spec cited here is defined there and is not yet archived.
+
 The reaper: an ordinary `AgentProfile`/`AgentCapability` pair, shipped by
 coordinator mode itself, addressed hourly by a claimed cron signal, that
 surveys its own Coordinator's open roots and closes the ones it judges

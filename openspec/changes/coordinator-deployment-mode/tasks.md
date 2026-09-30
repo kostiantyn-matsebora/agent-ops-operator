@@ -1,10 +1,11 @@
 ## 1. `AgentCapability` rendering per bundle — deployment-engineer
 
 - [ ] 1.1 `chart/charts/kubernetes/`: add the `coordinator`-mode rendering
-      branch for the `k8s-engineer` route per `k8s-bundle`'s delta —
-      `AgentCapability` at the observing privilege level, no `Pipeline` in
-      this mode. Verify with `helm template` under
-      `global.agentops.wiringMode: coordinator`.
+      branch per `k8s-bundle`'s delta — the observing `AgentCapability`
+      (`k8s-observe`) always, and the acting one (`k8s-operate`) only when
+      `pipelines.admin.enabled`, never merged, no `Pipeline` in this mode.
+      Verify with `helm template` under
+      `global.agentops.wiringMode: coordinator`, flag off and on.
 - [ ] 1.2 `chart/charts/prometheus/`: add the `coordinator`-mode branch for
       the `alert-investigator` route per `prometheus-bundle`'s delta — one
       `AgentCapability`, no `Pipeline`. Verify with `helm template`.
