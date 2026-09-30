@@ -485,11 +485,15 @@ its own routes.
 ### Requirement: A Pipeline names its agent inline or by reference
 
 A Pipeline SHALL declare its agent EITHER through the six inline capability
-fields OR through `spec.capabilityRef` naming an `AgentCapability`, and the API server SHALL
-reject a manifest carrying both. The inline form is unchanged from before this
-requirement existed. A referenced AgentCapability's CONTENT is re-read as an inline
-field's would be; the resolved identity and storage are snapshotted onto the
-conversation exactly as before.
+fields OR through `spec.capabilityRef` naming an `AgentCapability`.
+
+The API server SHALL reject a manifest carrying both.
+
+The inline form is unchanged from before this requirement existed.
+
+A referenced AgentCapability's CONTENT is re-read as an inline field's would
+be. The resolved identity and storage are snapshotted onto the conversation
+exactly as before.
 
 #### Scenario: Both forms refused
 - **WHEN** a Pipeline carries `capabilityRef` and `profileRef`

@@ -13,6 +13,13 @@ API rather than an inference, and one that may nest to any depth.
 this one, never the tree's ultimate root, plus the `agents[]` entry name it
 was invoked as. It SHALL be written once at creation and never changed.
 
+```yaml
+spec:
+  causedBy:
+    conversation: incident-7f3a   # the PARENT, one hop
+    entry: triage                 # the parent's agents[] entry name
+```
+
 Nothing SHALL resolve a profile, a channel set, a capability or a delivery
 decision through it.
 

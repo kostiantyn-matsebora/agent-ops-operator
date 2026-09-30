@@ -183,7 +183,7 @@ only the classes that view can draw, and SHALL remember its own hiding.
 
 | View | Offered classes |
 |---|---|
-| Model | signal sources, signal adapters, pipelines, agent profiles, agent runtimes, MCP toolsets, MCP configs, channels, channel adapters, conversations |
+| Model | signal sources, signal adapters, pipelines, agent capabilities, coordinators, agent profiles, agent runtimes, MCP toolsets, MCP configs, channels, channel adapters, conversations |
 | Components | signal adapters, channel adapters, the manager, the gateway, runtime images, sidecars, housekeeping, workloads, models, MCP servers, repositories, externals |
 | Infrastructure | pods, containers, models, MCP servers, repositories, externals |
 
@@ -486,11 +486,29 @@ The feed SHALL be identical on every view.
 
 ### Requirement: AgentCapabilities and Coordinators are graph nodes
 
-The topology graph SHALL render `AgentCapability` and `Coordinator` as nodes; a
-Pipeline's `capabilityRef` and a Coordinator's `agents[]` SHALL be edges to the
-AgentCapability, and an AgentCapability with no edge SHALL be shown as unwired, distinct from a
-misconfigured node.
+The topology graph SHALL render `AgentCapability` and `Coordinator` as nodes.
+
+- A Pipeline's `capabilityRef` SHALL be an edge to the AgentCapability.
+- A Coordinator's `agents[]` entry naming a `capabilityRef` SHALL be an edge to
+  that AgentCapability.
+- A Coordinator's `agents[]` entry naming a `coordinatorRef` SHALL be an edge
+  to that Coordinator's node.
+- An AgentCapability with no inbound edge SHALL be shown as unwired.
+- A node whose reference does not resolve SHALL be shown as misconfigured,
+  distinct from unwired.
 
 #### Scenario: Member edges
 - **WHEN** a Coordinator lists three AgentCapabilities
 - **THEN** the graph shows three edges from the Coordinator to those AgentCapabilities
+
+#### Scenario: Nested coordinator edge
+- **WHEN** a Coordinator's `agents[]` holds a `coordinatorRef`
+- **THEN** the graph shows an edge from the Coordinator to the nested Coordinator's node
+
+#### Scenario: Unwired AgentCapability
+- **WHEN** an AgentCapability is named by no Pipeline and no Coordinator
+- **THEN** its node is shown as unwired
+
+#### Scenario: Misconfigured AgentCapability
+- **WHEN** an AgentCapability's reference does not resolve
+- **THEN** its node is shown as misconfigured, not as unwired

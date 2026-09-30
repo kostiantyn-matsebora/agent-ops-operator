@@ -193,8 +193,8 @@ on a source one Coordinator alone claims SHALL route to it.
 root conversation for that Coordinator exactly as `/<pipeline> <task>` opens
 one for a Pipeline — a plain lookup by name across both kinds, no claim check,
 no Ready check. The ORIGIN SURFACE is bound at creation because a person is
-waiting on it; that is escalation at origin, and the Coordinator's other
-`channelRefs` bind only when it escalates. Pipelines and Coordinators share
+waiting on it. That is escalation at origin, and the Coordinator's snapshotted
+`escalationChannelRefs` bind only when it escalates. Pipelines and Coordinators share
 one name space for addressing, and a Coordinator named after a manager command
 is unreachable by it.
 
