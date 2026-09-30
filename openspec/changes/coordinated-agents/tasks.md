@@ -197,12 +197,11 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       e2e-smoke.yml --ref change/coordinated-agents` PASSED (run
       36637172129), confirming the chart deploys with `coordination.enabled`
       and the existing smoke suite stays green.
-- [x] 8.2 NOT OWED BY THIS CHANGE: a scripted `invoke`/`escalate` scenario
-      (Coordinator, one AgentCapability, a signal, a member created, its
-      result landing on the root, `escalate` opening a Telegram thread) has
-      no lane in `platform/manager/test/e2e/` today — the pack's fixed lanes
-      do not cover it, and none of this change's own tasks add one. That
-      lane is a SEPARATE change's scope, not a deferred step of this one.
+- [ ] 8.2 A scripted `invoke`/`escalate` lane in `platform/manager/test/e2e/`:
+      a Coordinator, one AgentCapability, a signal, a member created, its
+      result landing on the root, `escalate` opening a thread. Open until the
+      lane exists, or until a person rules that nothing here is decided by a
+      cluster and this becomes a ticked "not applicable".
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
@@ -236,10 +235,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       lines.
 - [x] 9b.6 `platform/console/ui`: the fixture already carries the root with
       three members (task 5.4), which is the change's own work.
-- [x] 9b.7 NOT OWED BY THIS CHANGE: re-running `npm run screenshots` and
-      `npm run demo` against that fixture needs a local cluster and a
-      port-forwarded console (`visual-check.md`, `remote-session.md`), which
-      no session implementing this change has had. Publishing those assets
-      is a WORKSTATION step with no remaining implementation work behind it —
-      tracked for a workstation session to run, not a task this change's
-      scope still owes.
+- [ ] 9b.7 `platform/console/ui`: re-run `npm run screenshots` and `npm run
+      demo` against that fixture and commit the assets. Needs a local cluster
+      and a port-forwarded console (`visual-check.md`), so it is open until a
+      workstation session runs it.
