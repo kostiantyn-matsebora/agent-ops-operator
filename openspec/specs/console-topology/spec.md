@@ -483,3 +483,14 @@ The feed SHALL be identical on every view.
 #### Scenario: Content comes from its durable home
 - **WHEN** a run's completion hop is opened
 - **THEN** the result shown is the one recorded on the conversation, not an excerpt carried by the event
+
+### Requirement: AgentCapabilities and Coordinators are graph nodes
+
+The topology graph SHALL render `AgentCapability` and `Coordinator` as nodes; a
+Pipeline's `capabilityRef` and a Coordinator's `agents[]` SHALL be edges to the
+AgentCapability, and an AgentCapability with no edge SHALL be shown as unwired, distinct from a
+misconfigured node.
+
+#### Scenario: Member edges
+- **WHEN** a Coordinator lists three AgentCapabilities
+- **THEN** the graph shows three edges from the Coordinator to those AgentCapabilities
