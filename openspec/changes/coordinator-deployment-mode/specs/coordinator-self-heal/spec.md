@@ -86,9 +86,9 @@ beyond the reach `coordinator-owner-reach` grants through the aops MCP
 server. It SHALL NOT bind any bundle's Kubernetes, metrics or Home Assistant
 toolset.
 
-Its privilege SHALL be scoped to exactly the Coordinator-owner reach class:
-listing and closing its own Coordinator's open roots, and invoking the
-`agents[]` entries that Coordinator already lists.
+Its privilege SHALL be scoped to the Coordinator-owner reach class
+(listing and closing its own Coordinator's open roots) plus its own `invoke`
+bound, the `agents[]` entries that Coordinator already lists.
 
 #### Scenario: The reaper cannot reach a domain tool directly
 

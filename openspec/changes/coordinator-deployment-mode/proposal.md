@@ -112,8 +112,9 @@ schedule and close when it has healed.
   templates, a `signal-cron` claim for the reaper.
 - `platform/manager/internal/httpapi/` (or wherever `/coordinate/*` is
   implemented): the new Coordinator-owner reach class. List open roots, and
-  widen `close` from "directly caused" to "any root this Coordinator
-  opened," both scoped to the caller's own Coordinator.
+  widen `close` from "directly caused" to "any open uncaused root this
+  Coordinator opened," both scoped to the caller's own Coordinator. The bound
+  excludes the caller's own ancestor root and every member.
 - `platform/manager/internal/dispatch/templates/`: a domain-agent prompt
   addition instructing self-close on resolution, and the reaper's prompt.
 - `.github/scripts/serviceaccount-guard.py` and any bundle-rendering guard in

@@ -6,7 +6,9 @@ The aops MCP server is the component through which a coordinating agent sees and
 ### Requirement: Four verbs, all asynchronous
 
 The server SHALL expose `invoke(agent, task)`, `close(conversation, reason)`,
-`escalate(message)`, `read(conversation)` and `list_open_roots()`. Each SHALL
+`escalate(message)`, `read(conversation)` and `list_open_roots()`.
+`list_conversations` and `get_conversation` are the channel-reader
+projection defined by `coordinated-agents`, not coordination verbs. Each SHALL
 return without waiting on any agent's work. `invoke` SHALL report created or
 attached.
 

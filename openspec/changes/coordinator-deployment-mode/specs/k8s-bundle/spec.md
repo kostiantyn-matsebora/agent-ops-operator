@@ -45,11 +45,11 @@ SAME route identity as a standalone `AgentCapability` rather than an inline
 Pipeline — the `k8s-engineer` capability, at the same privilege level the
 observing route uses today.
 
-The bundle ships ONE route, so it renders one `AgentCapability` and no acting
-one. It SHALL NOT render its own `Pipeline` in this mode.
+Coordinator mode renders only the observing `AgentCapability`, and no acting
+one. The bundle SHALL NOT render its own `Pipeline` in this mode.
 
-This branch SHALL follow the same four conditions `wiring-mode` restates for
-a bundle's coordinator-mode rendering:
+This branch SHALL follow the same four conditions the parent chart's
+bundle-wiring rules state for a bundle's own routes:
 
 - gated by the same explicit flag
 - every foreign reference a values-supplied name, omitted when unset
