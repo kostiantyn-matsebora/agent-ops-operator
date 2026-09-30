@@ -234,9 +234,9 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       blocks; `_data/nav.yml` line.
 - [x] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
-- [x] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
-      `npm run demo`, commit the assets. No local cluster or port-forwarded
-      console in this remote session (`visual-check.md`, `remote-session.md`).
-      The fixture already carries the root with three members (task 5.4), so
-      only the two commands remain — SCOPED OUT of this change: tracked as
-      its own follow-up, #283, for a workstation session run.
+- [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
+      `npm run demo`, commit the assets. NOT PERFORMED: no local cluster or
+      port-forwarded console in this remote session (`visual-check.md`,
+      `remote-session.md`). The fixture already carries the root with three
+      members (task 5.4), so only the two commands remain. Tracked as the
+      follow-up #283 for a workstation session. Tick this once they have run.
