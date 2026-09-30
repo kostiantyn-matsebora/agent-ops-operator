@@ -46,7 +46,7 @@ Pipeline — the `k8s-engineer` capability, at the same privilege level the
 observing route uses today.
 
 Coordinator mode renders the observing `AgentCapability` always, and the
-acting one too when its own flag is enabled, exactly as the per-route flags
+acting one too when its own flag (`pipelines.admin.enabled`) is enabled, exactly as the per-route flags
 decide under `pipelines` mode. Demo mode forces on only the observing one.
 The bundle SHALL NOT render its own `Pipeline` in this mode.
 
@@ -70,7 +70,7 @@ parent chart's bundle-wiring rules for a bundle's own routes:
 
 #### Scenario: The acting route is chosen, not inferred
 - **WHEN** an install wants the bundle's acting route
-- **THEN** it enables that route directly, and no release-wide permission value can select it instead
+- **THEN** it sets `pipelines.admin.enabled: true` directly, and no release-wide permission value can select it instead
 
 #### Scenario: Both routes are asked for
 - **WHEN** an operator enables both routes explicitly
@@ -98,7 +98,7 @@ parent chart's bundle-wiring rules for a bundle's own routes:
   wiring is enabled
 - **THEN** the bundle renders the `k8s-engineer` `AgentCapability` at the
   observing (read-only) privilege level, plus the acting one only when its
-  own flag is enabled, and renders no `Pipeline` of its own
+  own flag (`pipelines.admin.enabled`) is enabled, and renders no `Pipeline` of its own
 
 #### Scenario: Coordinator mode's capability is claimed by the chart Coordinator
 

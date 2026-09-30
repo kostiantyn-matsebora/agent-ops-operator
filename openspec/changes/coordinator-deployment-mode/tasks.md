@@ -146,8 +146,8 @@
 
 ### 9b. Adopter site
 
-- [ ] 9b.1 `docs/getting-started.md`: if demo mode's default posture
-      changes to `coordinator`, update the walkthrough's description of
+- [ ] 9b.1 `docs/getting-started.md`: demo mode now selects `coordinator`
+      posture, so update the walkthrough's description of
       what gets deployed.
 - [ ] 9b.2 `docs/installation.md`: the reaper's cron
       requirement (uses the existing `signals/cron` component — no new

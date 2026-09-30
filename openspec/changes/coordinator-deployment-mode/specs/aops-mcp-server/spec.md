@@ -1,6 +1,10 @@
 ## Purpose
 The aops MCP server is the component through which a coordinating agent sees and acts on agent-ops itself, with reach bounded per caller.
 
+This change depends on `coordinated-agents` landing first. The
+`aops-mcp-server` spec modified here is defined there and is not yet
+archived.
+
 ## MODIFIED Requirements
 
 ### Requirement: Four verbs, all asynchronous
@@ -13,7 +17,7 @@ return without waiting on any agent's work. `invoke` SHALL report created or
 attached.
 
 The heading keeps its name because a MODIFIED requirement matches the
-archived one by name. The verbs are now FIVE.
+pending base spec (`coordinated-agents`) by name. The verbs are now FIVE.
 
 `list_open_roots` is the Coordinator-owner reach class's own verb, defined
 in full by `coordinator-owner-reach`. It is listed here only so this file's
