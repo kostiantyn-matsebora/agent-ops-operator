@@ -45,11 +45,13 @@ SAME route identity as a standalone `AgentCapability` rather than an inline
 Pipeline — the `k8s-engineer` capability, at the same privilege level the
 observing route uses today.
 
-Coordinator mode renders only the observing `AgentCapability`, and no acting
-one. The bundle SHALL NOT render its own `Pipeline` in this mode.
+Coordinator mode renders the observing `AgentCapability` always, and the
+acting one too when its own flag is enabled, exactly as the per-route flags
+decide under `pipelines` mode. Demo mode forces on only the observing one.
+The bundle SHALL NOT render its own `Pipeline` in this mode.
 
-This branch SHALL follow the same four conditions the parent chart's
-bundle-wiring rules state for a bundle's own routes:
+This branch SHALL follow the four conditions `wiring-mode` restates from the
+parent chart's bundle-wiring rules for a bundle's own routes:
 
 - gated by the same explicit flag
 - every foreign reference a values-supplied name, omitted when unset
@@ -62,7 +64,7 @@ bundle-wiring rules state for a bundle's own routes:
 - **THEN** no `Pipeline` renders, the source reports `Wired=False`, and the install's own `pipelines:` remain the only routes
 
 #### Scenario: Demo mode renders the observing route
-- **WHEN** the chart is installed with `global.demo.enabled=true` and nothing else
+- **WHEN** the chart is installed with `global.demo.enabled=true` and `global.agentops.wiringMode: pipelines` (demo mode otherwise selects coordinator posture, below)
 - **THEN** exactly one `Pipeline` renders, claiming `cluster-events` with the read toolset and the `MCPConfig` and WITHOUT the mutating toolset
 - **AND** an admitted event opens a conversation with no further configuration
 
@@ -95,8 +97,8 @@ bundle-wiring rules state for a bundle's own routes:
 - **WHEN** `global.agentops.wiringMode: coordinator` is set and the bundle's
   wiring is enabled
 - **THEN** the bundle renders the `k8s-engineer` `AgentCapability` at the
-  observing (read-only) privilege level, and renders no `Pipeline` of its
-  own
+  observing (read-only) privilege level, plus the acting one only when its
+  own flag is enabled, and renders no `Pipeline` of its own
 
 #### Scenario: Coordinator mode's capability is claimed by the chart Coordinator
 
@@ -109,6 +111,6 @@ bundle-wiring rules state for a bundle's own routes:
 
 - **WHEN** `global.demo.enabled=true` and `global.agentops.wiringMode:
   coordinator` are both set
-- **THEN** the bundle renders only the observing capability, never the
+- **THEN** demo mode forces on only the observing capability, never the
   acting one, matching the least-privileged rule that already governs demo
   mode under `pipelines` posture

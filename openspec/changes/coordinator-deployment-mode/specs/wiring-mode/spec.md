@@ -133,6 +133,24 @@ with two Pipelines claiming one source.
 - **THEN** the API server accepts it, and nothing in the chart's own
   rendering refuses or reports on the coexistence
 
+### Requirement: A bundle's coordinator-mode branch follows the four bundle-wiring conditions
+
+A bundle's coordinator-mode branch SHALL hold all four conditions the
+parent chart's bundle-wiring rules set for a bundle shipping its own routes:
+
+1. Rendering is behind an explicit wiring flag.
+2. Every reference to an object the bundle does not itself render is a
+   values-supplied name, omitted when unset.
+3. Each `AgentCapability` renders only with its own profile.
+4. The flag defaults off, forced on by nothing but a turnkey-install values
+   path, and then only the least-privileged route.
+
+#### Scenario: A bundle branch without its flag renders nothing
+
+- **WHEN** coordinator mode is set and a bundle's wiring flag is off
+- **THEN** that bundle renders no `AgentCapability` and contributes no
+  `agents[]` entry
+
 #### Scenario: No guard compares the two kinds
 
 - **WHEN** a cluster holds both chart-rendered and hand-written objects of

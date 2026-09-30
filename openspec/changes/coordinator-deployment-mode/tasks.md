@@ -64,10 +64,12 @@
       field, and a Pipeline-addressed conversation resolves to nothing.
 - [ ] 4.2 Implement `list_open_roots()`: list uncaused conversations whose
       `coordinatorRef` matches the caller's resolved Coordinator, excluding
-      the caller's own ancestor root (design D-B). Unit test each exclusion
+      the caller's own root (its ancestor root when a member, itself when
+      it is a root) (design D-B). Populate `members` with the `agents[]`
+      entry names of each root's direct members. Unit test each exclusion
       scenario from `coordinator-owner-reach`'s spec: member excluded,
-      closed root excluded, cross-Coordinator root excluded, own-ancestor
-      root excluded.
+      closed root excluded, cross-Coordinator root excluded, own root
+      excluded, and the `members` projection.
 - [ ] 4.3 Widen `close`'s bound per design D-B: caller itself, a
       conversation it directly caused, OR — when resolved to a Coordinator
       — any open uncaused root of that Coordinator other than its own

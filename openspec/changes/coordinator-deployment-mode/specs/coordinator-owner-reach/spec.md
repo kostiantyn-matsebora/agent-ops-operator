@@ -21,10 +21,10 @@ A conversation that is itself a member (carries `causedBy`) SHALL NOT
 appear in the result, whatever Coordinator it carries as its own
 `coordinatorRef`.
 
-The caller's OWN ANCESTOR root — the uncaused root its `causedBy` chain
-leads to — SHALL also be excluded. It is itself an uncaused root of the
-caller's own Coordinator, but closing it would cascade to close the
-caller's own conversation before the caller finishes running.
+The caller's OWN root SHALL also be excluded: the uncaused root its
+`causedBy` chain leads to, or the caller itself when it is an uncaused root.
+Closing it would close the caller's own conversation before the caller
+finishes running.
 
 `list_open_roots` SHALL return each root's name, title, brief and phase —
 the same projection shape `list_conversations` already returns — plus
@@ -49,6 +49,11 @@ reaper re-invokes those entries. Never a transcript or a run.
 - **WHEN** one of the caller's Coordinator's roots has already reached phase
   `Closed`
 - **THEN** `list_open_roots` does not return it
+
+#### Scenario: A root caller does not list itself
+
+- **WHEN** the caller is itself an uncaused root of its own Coordinator
+- **THEN** `list_open_roots` does not include the caller
 
 #### Scenario: The caller's own ancestor root is excluded
 
