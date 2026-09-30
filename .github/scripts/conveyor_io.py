@@ -295,7 +295,7 @@ def unanswered_disputes(repo: str, pr: int, marker: str, with_location: bool = F
     found = unresolved_thread_findings(repo, pr, marker, with_location)
     raw = gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate")
     try:
-        comments = json.loads(raw or "[]")
+        comments = parse_paginated(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"unreadable JSON from gh api .../comments: {exc}")
     shaped = [{"body": c.get("body"),

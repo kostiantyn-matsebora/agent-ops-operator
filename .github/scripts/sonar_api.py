@@ -65,7 +65,9 @@ def fetch(api: str, path: str, token: str, **params) -> dict:
     if not SAFE_URL.match(url):
         raise SystemExit(f"refusing a malformed request URL: {url!r}")
     # The credential rides a curl config on stdin, never argv, where `ps` shows it.
-    out = subprocess.run(["curl", "-sf", "-K", "-", "--", url], input=f'user = "{token}:"\n',
+    # Backslash, quote and newline are escaped so a token cannot break out of the quoted value.
+    escaped = token.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
+    out = subprocess.run(["curl", "-sf", "-K", "-", "--", url], input=f'user = "{escaped}:"\n',
                          capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(f"{path}: curl exit {out.returncode} {out.stderr.strip()}")
