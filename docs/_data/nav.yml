@@ -59,3 +59,5 @@ groups:
         url: /guides/channel-adapter/
       - title: "Run agents on your own backend"
         url: /guides/agent-runtime/
+      - title: "Coordinate agents"
+        url: /guides/coordinate-agents/

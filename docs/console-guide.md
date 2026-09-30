@@ -74,6 +74,11 @@ Six views, one question each.
   Filter by phase, pipeline or profile. Unread is **per identity**, so clearing
   it in Telegram never clears it here.
 
+  **Group by root** nests each member directly under its immediate parent
+  in the coordination it belongs to, on the current page. A root closed without ever escalating
+  still lists, marked with its `closeReason` — "why was I not told" always
+  has an answer.
+
   ![Six conversations with mixed phases — Working, Pending, Idle and Closed — two marked unread, each showing its pipeline, run count, queue depth and last activity.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
 
 - **Conversation** — What did one agent actually do?
@@ -93,6 +98,14 @@ Six views, one question each.
   conversation — `/exit` to release its runtime, `/close` to end it — with the
   difference stated. It never offers a Pipeline: inside a conversation that text
   is input for the agent.
+
+  **A Coordinator's root, or one of its members, gains an Incident tab.** One
+  timeline interleaves the root's own turns with every member's start, result
+  and closure.
+
+  A member that is itself a nested Coordinator's root expands to its own
+  timeline in place, and its own page links back to the incident it belongs
+  to.
 
   ![One conversation: the signal that started it, the agent's answer explaining an OOM-killed container, a reply relayed in from another channel, and a box to reply from.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
 

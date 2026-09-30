@@ -134,10 +134,14 @@ substrate they run on comes from this chart.
 | Home Assistant | `home-assistant.enabled` | [home-assistant]({{ '/integrations/home-assistant/' | relative_url }}) |
 | Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
 | GitHub Copilot runtime | `copilot.enabled` | [copilot]({{ '/runtimes/copilot/' | relative_url }}) |
+| Coordination (`agentops-mcp-aops`) | `coordination.enabled` | [coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) |
 
-All six are off by default. Each bundle's own page owns its values — this page
-does not repeat them. The last two are RUNTIMES rather than integrations: they
-start no work and answer nowhere, they execute.
+All seven are off by default. Each bundle's own page owns its values — this
+page does not repeat them.
+
+The last three start no work of their own. The runtimes execute. Coordination
+lets an agent invoke other agents rather than answering a source or a channel
+itself.
 
 ## Configure
 

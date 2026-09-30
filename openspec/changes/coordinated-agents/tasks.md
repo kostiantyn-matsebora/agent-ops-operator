@@ -141,12 +141,9 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       RBAC (none beyond the floor), `coordination.enabled` gate,
       `global.builtinToolsets.agentops-coordinate`, the rendered `MCPConfig`;
       NOTES.txt line.
-- [ ] 4.5 Smoke against a live install from the worktree chart: a Coordinator
-      with one AgentCapability, a signal, `invoke` observed creating a member, result
-      landing on the root, `escalate` opening a Telegram thread. Record the
-      verdict, not the transcript. NOT RUN in this remote session — no local
-      cluster here (`remote-session.md`). Left for a workstation session, or
-      for the dispatched cluster-tier run to complete.
+- **4.5 (the live-cluster smoke this phase owes) moved to the trailing E2E
+      tests section below**, per `docs/testing.md`'s tier split — a cluster
+      decides it, envtest does not.
 
 ## 5. Phase 4 — console (design D-G)
 
@@ -162,58 +159,85 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 6. Rules and vocabulary
 
-- [ ] 6.1 `.claude/rules/wiring.md`, three claims, each named: "no other CR
+- [x] 6.1 `.claude/rules/wiring.md`, three claims, each named: "no other CR
       carries wiring" → two wiring kinds; the `#### Capabilities are wiring,
       exclusively` header and its section → capabilities are declared on an
       AgentCapability OR inline on a Pipeline/Coordinator, and reached through wiring
       only; under `### MCPToolset`, "Bound from `Pipeline.spec.toolsets` ONLY"
       → bound from any capability's `toolsets`, never a profile's. Deleting
       a Coordinator cascades nothing, stated beside the Pipeline rule.
-- [ ] 6.2 `terminology.md`: the "Agent is TAKEN" entry names `AgentCapability`
+- [x] 6.2 `terminology.md`: the "Agent is TAKEN" entry names `AgentCapability`
       and why the CRD is not `Agent`; `Coordinator`, `root`, `member`, `escalate`;
       `structure.md`: `platform/mcp-aops`; `invariants.md`: the loop refusal,
       the budget, "a caused conversation binds no human channel".
-- [ ] 6.3 `retired-vocabulary.json`: no new term — nothing is retired.
+- [x] 6.3 `retired-vocabulary.json`: no new term — nothing is retired.
 
-## 7. Verification
+## 7. Unit tests
 
-- [ ] 7.1 Every module builds, vets and tests in the container, from the
-      worktree path.
-- [ ] 7.2 `KUBEBUILDER_ASSETS` envtest suite green.
-- [ ] 7.3 `python3 .github/scripts/publication-guard.py` and
-      `retired-vocabulary-guard.py` pass; record the verdict only.
-- [ ] 7.4 `helm template` with and without `coordination.enabled`;
-      `serviceaccount-guard.py` passes.
+- [x] 7.1 Every module builds, vets and tests in the container, from the
+      worktree path. Verdict: green, all modules including the new
+      `platform/mcp-aops`. `platform/context-sync` carries two pre-existing
+      failures unrelated to this change (unchanged since #221, reproduced on
+      `origin/master` alone).
+- [x] 7.2 `KUBEBUILDER_ASSETS` envtest suite green.
+- [x] 7.3 `python3 .github/scripts/publication-guard.py` and
+      `retired-vocabulary-guard.py` pass; record the verdict only. Verdict:
+      both clean.
+- [x] 7.4 `helm template` with and without `coordination.enabled`;
+      `serviceaccount-guard.py` passes. Verdict: clean, both network-policy
+      shapes. CI's permutation matrix gained `coordination` and
+      `coordination-netpol` rows (mcp-aops rendered in no other permutation,
+      same gap `mcp-servers` closed) and `coordination.enabled=true` joined
+      `everything`.
 
-## 8. Documentation — THE LAST TASK, and it is not optional
+## 8. E2E tests
 
-### 8a. Reference docs
+- [ ] 8.1 Smoke against a live install from the worktree chart (moved from
+      4.5): a Coordinator with one AgentCapability, a signal, `invoke`
+      observed creating a member, result landing on the root, `escalate`
+      opening a Telegram thread. Record the verdict, not the transcript. NOT
+      RUN in this remote session — no local cluster here
+      (`remote-session.md`). `gh workflow run e2e-smoke.yml --ref
+      change/coordinated-agents` was dispatched and PASSED (run 36637172129),
+      which confirms the chart deploys with `coordination.enabled` and the
+      existing smoke suite stays green — it does not exercise this
+      scenario's specific invoke/escalate path, which the pack's fixed
+      lanes do not cover yet. Left for a workstation session, or a follow-up
+      change adding a coordination lane to `platform/manager/test/e2e/`.
 
-- [ ] 8a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
+## 9. Documentation — THE LAST TASK, and it is not optional
+
+### 9a. Reference docs
+
+- [x] 9a.1 `docs/concepts.md`: kind table (thirteen), `AgentCapability`, `Coordinator`,
       `causedBy`, the loop, escalation, budget, `status.brief`, the state
       matrix rows.
-- [ ] 8a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
+- [x] 9a.2 `docs/contracts.md`: `/coordinate/*`, `/work/done` root routing and
       `brief`, `/channel/inbound` refusal, the aops MCP tool contract with its
       two reach classes, the five token derivation contexts.
-- [ ] 8a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
-- [ ] 8a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
+- [x] 9a.3 `docs/console.md` and `docs/console-guide.md`: the incident view.
+- [x] 9a.4 `docs/security.md`: the agent-invokes-agents flow; re-run
       `python3 docs/diagrams/threat-model.py`.
-- [ ] 8a.5 `docs/installation.md`: `coordination.*` values, the component.
-- [ ] 8a.6 `docs/CHANGELOG.md`: two CRDs to apply by hand, the new component.
-- [ ] 8a.7 `docs/adr/0002-coordinated-agents.md`: status → Accepted, plus a
+- [x] 9a.5 `docs/installation.md`: `coordination.*` values, the component.
+- [x] 9a.6 `docs/CHANGELOG.md`: two CRDs to apply by hand, the new component.
+- [x] 9a.7 `docs/adr/0002-coordinated-agents.md`: status → Accepted, plus a
       "What implementation changed" section as 0001 carries.
-- [ ] 8a.8 Re-run `python3 .github/scripts/docs-generate.py`; commit every
+- [x] 9a.8 Re-run `python3 .github/scripts/docs-generate.py`; commit every
       regenerated block and `docs/cr-reference.md`.
 
-### 8b. Adopter site
+### 9b. Adopter site
 
-- [ ] 8b.1 `docs/index.md`: kind count, the "what you write" tab mentions a
+- [x] 9b.1 `docs/index.md`: kind count, the "what you write" tab mentions a
       Coordinator.
-- [ ] 8b.2 `docs/introduction.md`: two wiring kinds over one capability.
-- [ ] 8b.3 `docs/installation.md`: component list.
-- [ ] 8b.4 `docs/guides/coordinate-agents.md`: new guide with generated CR
+- [x] 9b.2 `docs/introduction.md`: two wiring kinds over one capability.
+- [x] 9b.3 `docs/installation.md`: component list.
+- [x] 9b.4 `docs/guides/coordinate-agents.md`: new guide with generated CR
       blocks; `_data/nav.yml` line.
-- [ ] 8b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
+- [x] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
-- [ ] 8b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
-      `npm run demo`; commit the assets.
+- [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
+      `npm run demo`; commit the assets. NOT RUN in this remote session — no
+      local cluster or port-forwarded console here (`visual-check.md`,
+      `remote-session.md`). The fixture already carries the root with three
+      members (task 5.4), so only the two commands remain. Left for a
+      workstation session.

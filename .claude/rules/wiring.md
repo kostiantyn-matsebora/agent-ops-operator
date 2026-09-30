@@ -4,8 +4,11 @@
 
 **THE wiring, exclusively:** sources[] × channels[] + profile + TOOL ACCESS.
 
-**No other CR carries wiring.** SignalSource has no profile or channel refs.
-Channel has no default profile.
+**Wiring lives on exactly two kinds now.** `Coordinator` is the second —
+sources[], channels[] and an `agents[]` fan-out over its own capability, see
+`terminology.md`'s conversation-shaped kinds table. **No other CR carries
+wiring.** SignalSource has no profile or channel refs. Channel has no default
+profile.
 
 - **Sources no Ready Pipeline lists DROP signals** — `Wired=False` plus a
   response reason. For a CHAT source the reason also goes back to the surface
@@ -49,6 +52,11 @@ name the agent.
 
 #### Capabilities are wiring, exclusively
 
+**A capability is declared on an `AgentCapability`, or inline on a Pipeline or
+a `Coordinator`.** All three shapes carry the identical
+`AgentCapabilitySpec` fields, and every one is reached through wiring only —
+naming an `AgentCapability` from neither wires nothing.
+
 Two optional stanzas of ordered refs:
 
 | Stanza | Points at | Is |
@@ -58,7 +66,7 @@ Two optional stanzas of ordered refs:
 
 **`spec.toolsets.mode`** (`merge` | `overwrite`, default `merge`) composes
 against the **AGENT DEFINITION** — the `tools:` frontmatter of the agent's file
-in the profile's REPO. WHERE that file is, is the RUNTIME's fact; the
+in the profile's REPO. WHERE that file is, is the RUNTIME's fact. The
 composition rule is the contract's and identical on all of them.
 
 | Runtime | Reads |
@@ -127,7 +135,7 @@ A Pipeline is reached two ways and no others:
 - **Every Pipeline the CHART ships must therefore declare its own tools.**
   Forgetting that is what made every signal-driven conversation toolless once.
 - **Consequence: runtimes are generic** — one `AgentRuntime` per VENDOR. Trust
-  level is no longer part of that product; see below.
+  level is no longer part of that product. See below.
 
 #### EXECUTION, IDENTITY AND STORAGE ARE WIRING TOO
 
@@ -140,11 +148,14 @@ Three more optional fields, and they complete the object:
 | `spec.persistence` | WHERE its conversations keep state — `context` and `workspace`, independently | the chart's RELEASE-WIDE claim, then EPHEMERAL |
 
 **SILENCE MEANS NO POWER.** A route that names no account can do nothing in the
-cluster. It shipped the other way once — the mode bound to the account every
-unnamed route inherited — and three of four routes in the reference install held
-pod-delete and node-patch because nobody typed a field, two of them routes that
-reach no Kubernetes API at all. Shrinking the ROLE fixed the blast radius and
-left the MODEL inverted.
+cluster.
+
+- **It shipped the other way once** — the mode bound to the account every
+  unnamed route inherited.
+- **Three of four routes in the reference install held pod-delete and
+  node-patch** because nobody typed a field, two of them routes that reach no
+  Kubernetes API at all.
+- **Shrinking the ROLE fixed the blast radius and left the MODEL inverted.**
 
 **CAPABILITIES AND EXECUTION IDENTITY ARE THE SAME DECISION.** One says which
 tools may be called, the other with whose credentials. Split across two objects,
@@ -170,9 +181,11 @@ SYMMETRY TEST**, and the history is kept because the argument is seductive:
 | identity | `conversation.spec.serviceAccountName` → `runtime.spec.serviceAccountName` → THE FLOOR |
 
 **THE IDENTITY CHAIN HAS NO MODE IN IT, AND NEVER DID HAVE ONE LEGITIMATELY.**
-`global.agentops.runtime.rbacMode` is DELETED with no alias: it rendered a NAMED
-account that granted nothing until a route typed its name, so it sat beside this
-chain rather than in it while reading as though it were part of it.
+`global.agentops.runtime.rbacMode` is DELETED with no alias.
+
+- **It rendered a NAMED account that granted nothing until a route typed its
+  name.** It sat beside this chain rather than in it, reading as though it
+  were part of it.
 
 - **The runtime's own account defaults to the FLOOR**, so an install that says
   nothing grants nothing.
@@ -236,15 +249,20 @@ binding was declared:
   no `delete` verb.** Deleting a Pipeline must NEVER delete the accumulated
   context of the conversations it started — storage is the one thing here whose
   loss cannot be repaired by reconciling again. Guarded twice, deliberately.
+- **Deleting a Coordinator cascades nothing, on the same grounds.** An open
+  root keeps running on its snapshot — budget, escalation channels, members —
+  until its own budget closes it or a person does.
 - **The rendered claim's storage class is an EXPLICIT empty string**, never an
   absent field: absent is filled in by admission with the cluster's default
   class, which provisions a SECOND volume beside the one that was named.
 
-**WHY IT IS HERE AND NOT ON THE RUNTIME.** A runtime is an ENGINE. Two Pipelines
-sharing one must be able to keep their conversations on different volumes
-without cloning it — exactly what expressing a second trust level used to
-require, and fixed the same way. Whoever is trusted to grant an agent tools and
-a cluster identity is more qualified to say where its context lives, not less.
+**WHY IT IS HERE AND NOT ON THE RUNTIME.** A runtime is an ENGINE.
+
+- **Two Pipelines sharing one must be able to keep their conversations on
+  different volumes without cloning it** — exactly what expressing a second
+  trust level used to require, and fixed the same way.
+- **Whoever is trusted to grant an agent tools and a cluster identity is more
+  qualified to say where its context lives, not less.**
 
 **NO BINDING USES A BUILT-IN ROLE.** Not `cluster-admin` under `full`, not
 `view` under `readonly` — the two postures a DECLARED account may state. Every grant is a role the chart writes out
@@ -276,8 +294,8 @@ unreadable everywhere. Nor is `secrets`, nor `clusterroles`.
   alone — a Job, a Deployment, a patch to a pod template are the same path.
   Gating one verb would be a flag that reads as a boundary and is not one.
 - **`--allowedTools` IS NOT A CONTROL HERE.** An allowlist configures a
-  COOPERATING agent; a ServiceAccount binding is what an uncooperative one with
-  a shell actually has. Same argument `platform/egress-proxy/` makes for
+  COOPERATING agent. A ServiceAccount binding is what an uncooperative one with
+  a shell actually has — the same argument `platform/egress-proxy/` makes for
   network reach.
 - **BOTH WALLS MOVE TOGETHER.** kubernetes's MCP server is the other wall on the
   same path — an agent reaches the cluster THROUGH it — so it carries the same
@@ -300,8 +318,9 @@ unreadable everywhere. Nor is `secrets`, nor `clusterroles`.
 - **No servers, no status.** Patterns are opaque, passed through like
   `allowedTools`. Servers live ONLY in `MCPConfig`.
 - **Manager RBAC on it is read-only.**
-- **Bound from `Pipeline.spec.toolsets` ONLY** — capabilities are wiring, never
-  profile fields.
+- **Bound from any capability's `spec.toolsets`** — a Pipeline's own, an
+  `AgentCapability`'s, or a `Coordinator`'s — **NEVER a profile's.** Capabilities
+  are wiring, never profile fields.
 
 **What the pipeline binds is HALF the allowlist.** The RUNTIME composes it with
 the agent definition's own `tools:` per the unit's `toolsMode`, since it alone

@@ -25,8 +25,15 @@ readable from the uncaused root without leaving the view.
 ### Requirement: A conversation is reached from its ancestors, and its ancestors from it
 
 A conversation's transcript SHALL name its PARENT and entry name and link to
-the incident view. The conversation list SHALL group every descendant under
-its uncaused root by default, at whatever depth, with a toggle to flatten.
+the incident view.
+
+The conversation list SHALL offer a toggle that groups a member under its
+parent when that parent is on the same page. Flat is the default, and the
+server's own ordering (newest activity first) is otherwise untouched.
+
+Grouping every descendant under its ultimate root at any depth would need a
+second fetch the toggle does not perform. A member whose root is not on the
+current page is left exactly where the server put it.
 
 #### Scenario: Navigation both ways
 - **WHEN** a person opens a member conversation

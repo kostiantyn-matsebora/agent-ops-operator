@@ -168,6 +168,19 @@ DIAGRAMS: dict[str, dict] = {
         "arrows": ["GET /work", "runs"],
         "back": ["POST /work/done", "the answer"],
     },
+    "coordinate-agents": {
+        # `named` gives the SVG itself an accessible name (title + aria-label).
+        "named": True,
+        "alt": "A Coordinator's root conversation invokes AgentCapabilities as "
+               "members, and escalates to a channel only when it decides to.",
+        "cols": [
+            [("SignalSource", "or /<coordinator>", "plain")],
+            [("Coordinator", "root agent + agents[]", "yours")],
+            [("AgentCapability", "invoked as a member", "plain"),
+             ("Channel", "escalate, root only", "subject")],
+        ],
+        "arrows": ["signalSourceRefs", ["invoke", "escalate"]],
+    },
 }
 
 # The security page's illustrations.
@@ -373,7 +386,9 @@ def _ink(kind: str, p: dict[str, str]) -> tuple[str, str, str]:
 
 def render(spec: dict, p: dict[str, str]) -> str:
     cols = spec["cols"]
-    for label in spec["arrows"] + spec.get("back", []):
+    labels = [x for a in spec["arrows"] + spec.get("back", [])
+              for x in (a if isinstance(a, list) else [a])]
+    for label in labels:
         if len(label) > LABEL_MAX:
             raise SystemExit(
                 f"arrow label {label!r} is {len(label)} characters, over the "
@@ -404,8 +419,12 @@ def render(spec: dict, p: dict[str, str]) -> str:
     out: list[str] = []
     out.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-        f'width="{width}" height="{height}" role="img">'
+        f'width="{width}" height="{height}" role="img"'
+        + (f' aria-label={sax.quoteattr(spec["alt"])}' if spec.get("named") else "")
+        + '>'
     )
+    if spec.get("named"):
+        out.append(f'<title>{sax.escape(spec["alt"])}</title>')
     # Its own ground: a transparent drawing on a dark page is invisible ink.
     out.append(f'<rect width="{width}" height="{height}" fill="{p["canvas"]}"/>')
     out.append(
@@ -466,6 +485,17 @@ def render(spec: dict, p: dict[str, str]) -> str:
         # diagram put `signalSourceRefs` straight through the Pipeline box the
         # moment a column had three rows in it.
         anchor_y = box_y(i, 0) + BOX_H / 2 if len(left) == 1 else box_y(i + 1, 0) + BOX_H / 2
+        if isinstance(label, list):
+            # One label per target row, for a fan-out whose arrows mean
+            # different things (invoke vs escalate).
+            for k, text in enumerate(label):
+                out.append(
+                    f'<text x="{(x1 + x2) / 2:.0f}" '
+                    f'y="{box_y(i + 1, k) + BOX_H / 2 - 12:.0f}" '
+                    f'text-anchor="middle" font-family="{MONO}" font-size="11.5" '
+                    f'fill="{p["text-subtle"]}">{sax.escape(text)}</text>'
+                )
+            continue
         out.append(
             f'<text x="{(x1 + x2) / 2:.0f}" y="{anchor_y - 12:.0f}" '
             f'text-anchor="middle" font-family="{MONO}" font-size="11.5" '

@@ -1,6 +1,6 @@
 # ADR 0002 — Coordinated agents: one capability kind, two wiring kinds
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-08-25
 
 ## Context
@@ -173,6 +173,25 @@ names the ONE HOP parent (D3), never the tree's top.
 | depth counter as loop breaker | bounds height, not width |
 | `structured` output mode, `audience` on adapters | guard for a leak D3 removes |
 | `worker` | retired vocabulary |
+
+## What implementation changed
+
+**`brief` moved out of D3 into its own decision.** A coordinator
+choosing WHICH conversation it means from a list is a different problem from
+ROUTING a member's result to its parent.
+
+The two ended up with different failure shapes. A missing `brief` leaves
+`title` as the only description. A missing routed result loses work.
+
+**The cycle guard (D7) has no depth limit, and that stayed a stated risk
+rather than a follow-up field.** A `maxDepth` bounds a symptom, a long chain,
+not the failure a cycle actually is. Every level's own budget already bounds
+its own width and lifetime.
+
+**A caused conversation binds no human channel** turned out to be worth its
+own invariant, not merely a consequence of D3: `spec.channelRefs` is empty
+by construction on every conversation `invoke` creates, so there is nothing
+for `DeliverInputs` to fence on until `escalate` reaches the uncaused root.
 
 ## Not decided here
 

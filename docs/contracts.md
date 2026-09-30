@@ -74,6 +74,10 @@ adapter.
    - **Delivery to the other bound surfaces and busy-acks happen
      manager-side.** A reply you push is delivered back to you only if your
      adapter declares `echoesOwnMessages: false`.
+   - **Refused when the origin surface names the thread's own target
+     conversation.** A message that would feed a conversation its own output
+     back as input is the shape a self-feeding loop takes, and the manager
+     refuses it with a reason rather than dispatching it.
 
    **To ORIGINATE**, your transport's general surface belongs to a chat
    `SignalSource`. Post to `/signal/inbound` (see `signals/telegram/`):
@@ -802,8 +806,15 @@ An `AgentRuntime` image must:
 3. **Report** the outcome:
 
    ```
-   POST $CONTROL_URL/work/done {convo, runId, status, runtimeContextId, result, turns, toolCalls}
+   POST $CONTROL_URL/work/done {convo, runId, status, runtimeContextId, result, brief, turns, toolCalls}
    ```
+
+   **`brief` is optional and LATEST-WINS**, the same rule as
+   `runtimeContextId`: one or two sentences of what the conversation is
+   ABOUT, replacing whatever was stored. A report that omits it leaves the
+   stored brief unchanged, so a runtime that never sends one costs nothing —
+   `title` stays the only description. See
+   [`status.brief`](concepts.md#statusbrief-what-a-conversation-is-about).
 
 4. **Exit `0`** after `RUNTIME_IDLE_TTL_M` minutes without work
 
@@ -980,11 +991,10 @@ the limit to `0` to disable the breaker without disabling the counting.
 
 ## The aops MCP server contract
 
-**Proposed, not yet shipped.** `platform/mcp-aops/` and `POST /coordinate/*`
-do not exist in this repository — this section is the contract
-[ADR 0002](adr/0002-coordinated-agents.md) and the `coordinated-agents`
-openspec change design against, kept here so the two stay coherent while the
-change is implemented.
+**Shipped as `platform/mcp-aops/`**, rendered only under the chart's
+`coordination.enabled` (off by default) — see
+[ADR 0002](adr/0002-coordinated-agents.md) for the design this contract
+carries.
 
 The interface through which a coordinating agent sees and acts on agent-ops
 itself. `platform/mcp-aops/` is a thin client of the manager — MCP over
@@ -1004,8 +1014,12 @@ This is deliberate. A server holding the manager's own adapter token and
 enforcing reach itself was considered and rejected — that puts a credential
 stronger than any caller's inside a component every coordinator can reach.
 
-**One credential of its own** — a derived token, context `mcp-aops`, used
-only to authenticate the server to the manager. Never a caller's.
+**It holds no credential of its own.** As shipped, the server authenticates no
+call to the manager beyond forwarding whatever the caller presented.
+
+There is nothing here for a stolen server process to abuse beyond what a
+caller's own token already reaches. What bounds who can reach the SERVER at
+all is the network wall below, never a secret it holds.
 
 ### Authentication and reach
 
@@ -1172,12 +1186,29 @@ end a conversation.
 The server learns nothing about channels. It forwards this token exactly as
 it forwards a coordinator's, and the manager alone decides the projection.
 
+### Every token derivation context, catalogued
+
+One HMAC family — `HMAC-SHA256(ADAPTER_TOKEN, context)`, base64url — one
+context string per surface, validated by RE-DERIVATION rather than storage.
+Nothing is minted or persisted anywhere.
+
+| Context | Identifies |
+|---|---|
+| `adapter:<name>` | a `ChannelAdapter`'s own `/channel/*` token |
+| `signal-adapter:<name>` | a `SignalAdapter`'s own `/signal/*` token |
+| `coordinator:<name>:<conversation>` | one coordinated conversation's own `/coordinate/*` token |
+| `channel-reader:<channel>` | the channel-reader projection token, above |
+
+A distinct context per surface is what keeps a `ChannelAdapter` and a
+`SignalAdapter` sharing a name — or a `Channel` and a `Coordinator` sharing
+one — from ever sharing a token.
+
 ### Placement
 
 | | |
 |---|---|
-| Reachable from | runtime pods and the manager only, under the [ADR 0001](adr/0001-bound-component-reach.md) network wall |
-| Holds | one derived token (`mcp-aops`) and no Secret reads |
+| Reachable from | runtime pods only, under the [ADR 0001](adr/0001-bound-component-reach.md) network wall — the manager never calls it, since the server is the manager's caller |
+| Holds | no credential of its own and no Secret reads |
 | Bound to a Coordinator via | `MCPConfig`, rendered by the chart, exposed through `global.builtinToolsets.agentops-coordinate` |
 | Component path | `platform/mcp-aops/` — standard-library Go, the shared Dockerfile recipe |
 
@@ -1420,7 +1451,7 @@ scrape time from the same in-memory state `/status` reports.
 | `GET/POST /channel/*` | adapter-facing channel contract (bearer token, see adapter contract) |
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token, see signal adapter contract) |
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
-| `POST /coordinate/*` | **proposed, not yet shipped** — the aops MCP server's four verbs and read tools (bearer token, see aops MCP server contract) |
+| `POST /coordinate/*` | the aops MCP server's verbs and read tools (per-conversation or channel-reader bearer token, see aops MCP server contract) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

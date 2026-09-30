@@ -93,12 +93,14 @@ agent-ops is more than a model and a prompt in a pod: grouping and cooldown, a
 capacity cap with a queue, context that survives a restart, per-route cluster
 identity, mediated egress and at-least-once delivery are already in it.
 
-- **Kubernetes native** — eleven custom resources, validated by the API server
-  like anything else you deploy.
+- **Kubernetes native** — thirteen custom resources, validated by the API
+  server like anything else you deploy.
 - **GitOps ready** — every route is text. It reviews as a diff and deploys
   through the pipeline you already run.
 - **Open at three seams** — your own signal source, runtime or channel.
   Documented HTTP contracts, no fork.
+- **Compose agents, another seam** — a `Coordinator` invokes other agents as
+  its own tools, each its own capability and budget.
 - **Any model you can run** — Claude Code, Ollama and GitHub Copilot ship with
   it. Point it at your own image and the work contract is unchanged.
 - **A pod per conversation** — isolated, serial and capped.
@@ -126,7 +128,7 @@ It is a channel too, so you answer the agent right there.
 
 ## The kinds you declare
 
-Eleven, one line each. [Every field, in full](docs/concepts.md).
+Thirteen, one line each. [Every field, in full](docs/concepts.md).
 
 | Kind | What it defines |
 |---|---|
@@ -139,6 +141,8 @@ Eleven, one line each. [Every field, in full](docs/concepts.md).
 | [`SignalSource`](docs/concepts.md#signalsource) | An ingest lane. Inert until a Pipeline claims it. |
 | [`SignalAdapter`](docs/concepts.md#signaladapter) | A signal implementation — the inbound-only sibling of ChannelAdapter. |
 | [`Pipeline`](docs/concepts.md#pipeline) | **The wiring**: sources × channels + profile + capabilities + what executes it and under whose identity. The only place any of them is declared. |
+| [`AgentCapability`](docs/concepts.md#agentcapability) | A named capability — profile, runtime, identity, tools, persistence — referenced by a Pipeline or Coordinator instead of inlined. |
+| [`Coordinator`](docs/concepts.md#coordinator) | The second wiring kind: a coordinating agent that invokes named members, budgeted per level, escalating to a channel only when it decides to. |
 | [`MCPConfig`](docs/concepts.md#mcpconfig) | Reusable MCP server sets, bound per wiring. |
 | [`MCPToolset`](docs/concepts.md#mcptoolset) | A named list of tool patterns — the allowlist half of a route's tools. |
 

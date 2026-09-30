@@ -80,6 +80,14 @@ Seven kinds. Each card links to the guide that teaches it.
   answers on. To learn what an agent can do, read its Pipeline. There is nowhere
   else to look.
 
+**Two wiring kinds share one capability shape.** A `Pipeline` wires one agent
+to sources and channels.
+
+A `Coordinator` wires a composition instead — one root agent that can invoke a
+list of other agents, each described only by what it does.
+[Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) has the
+how-to.
+
 ## Follow the guides
 
 The same objects, in the order they build on each other. **The order is what you

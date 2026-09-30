@@ -8,6 +8,10 @@
 - **"Agent" is TAKEN.** It names a DEFINITION in `.claude/agents/` inside a
   profile's repository, which is what `AgentProfile.spec.agent` selects. Two
   meanings on one word, and the more visible one was wrong.
+- **The capability CRD is `AgentCapability`, never `Agent`, for the same
+  reason.** It is a capability — `profileRef` among six fields — not the
+  definition the word already names, and a CRD called `Agent` would collide
+  with the taken word a third time.
 - **The word is carved into every install's composer.** `internal/chat`
   publishes the vocabulary a transport registers as its command menu, which is
   why this had to be right BEFORE that shipped.
@@ -43,7 +47,7 @@ The verbs, and they are the ones the invariants already use:
 CRD `AgentRuntime`, SA `agentops-runtime`, env `RUNTIME_*`, pkg `runtimepod`,
 pods `agentops-conv-<conversation>`.
 
-### The four conversation-shaped kinds
+### The six conversation-shaped kinds
 
 | Kind | Is |
 |---|---|
@@ -51,6 +55,8 @@ pods `agentops-conv-<conversation>`.
 | `AgentRuntime` | **what executes it** — an ENGINE. Image and pod-level defaults, plus `spec.contextStorage`. **It declares NO VOLUME**: persistence is wiring |
 | `Conversation` | **session + serial input queue + one thread PER bound channel** (`spec.channelRefs[]` / `status.threads[]{channel,threadId}`) |
 | `Pipeline` | **the wiring** — see below |
+| `AgentCapability` | **the capability, standalone** — the same six fields a Pipeline or Coordinator may instead embed inline. Nothing wired: an unwired one is inert |
+| `Coordinator` | **wiring for a composition of agents** — sources[], channels[] and an `agents[]` fan-out, each entry a `capabilityRef` or a nested `coordinatorRef`, plus its OWN capability for the coordinating agent itself |
 
 **`AgentProfile` carries NO capabilities.** No `allowedTools`, no `mcp`. What an
 agent MAY DO comes exclusively from the Pipeline routing it.
@@ -74,7 +80,9 @@ split is BEHAVIOUR against REACH, not identity against everything else.
 **AND IT DECLARES NO STORAGE EITHER.** `spec.home`, `spec.context` and
 `spec.workspace` are DELETED, with no alias — the concept moved to
 `Pipeline.spec.persistence`, so there is nothing on this object for an alias to
-point at. Two Pipelines sharing one runtime must be able to persist to different
+point at.
+
+Two Pipelines sharing one runtime must be able to persist to different
 volumes without cloning it, which is the same failure a second trust level had.
 
 **`Conversation.spec.toolsets` / `.mcpConfigs` / `.runtimeRef` /
@@ -87,14 +95,16 @@ it, editing a Pipeline changes what account an INFLIGHT conversation's next pod
 runs as — a privilege change applied to work already in progress.
 
 **THE STORAGE SNAPSHOT IS SHARPER STILL**, and it is frozen RESOLVED because
-there is no runtime CONTENT below it to heal from. A re-wiring would point an
-INFLIGHT conversation's next pod at a different disk — work that has ALREADY
-WRITTEN to the old one, coming back to an empty volume and reporting success.
+there is no runtime CONTENT below it to heal from.
+
+A re-wiring would point an INFLIGHT conversation's next pod at a different
+disk — work that has ALREADY WRITTEN to the old one, coming back to an empty
+volume and reporting success.
 
 - **The RUNTIME NAME is snapshotted RESOLVED**, so a conversation created while
   its Pipeline named none keeps the one it actually ran on.
 - **The SERVICE ACCOUNT is snapshotted ONLY where the PIPELINE named one.** A
-  Pipeline's account is wiring and is frozen; an `AgentRuntime`'s own account is
+  Pipeline's account is wiring and is frozen. An `AgentRuntime`'s own account is
   that runtime's CONTENT, so correcting a mistyped one must heal conversations
   already created. Empty is safe because resolution never reads a Pipeline.
 
@@ -120,6 +130,39 @@ Written once at creation, and read for exactly two things:
   `alert`, `job`, `task`, `chat` — from the one claiming the source, and a
   `/<pipeline> <task>` chat command from the one it addresses. Nothing creates a
   Conversation without wiring behind it.
+
+### `Coordinator`: root, member, escalate
+
+**A `Coordinator` wires a COMPOSITION of agents, never one.** Its `agents[]`
+list is the whole of what a conversation it starts may invoke, each entry a
+`capabilityRef` (a leaf agent) or a nested `coordinatorRef` (a sub-composition).
+
+| Word | Names |
+|---|---|
+| root | the UNCAUSED conversation a Coordinator's claim or `/<name>` address opens — no `spec.causedBy` |
+| member | a conversation `invoke` created, carrying `spec.causedBy` naming its PARENT, one hop, never the root |
+| escalate | the verb that reaches a HUMAN channel — see below |
+
+- **A member MAY ITSELF BE A ROOT.** `spec.coordinatorRef` and `spec.causedBy`
+  are independent fields, so a conversation invoked as a member of one
+  Coordinator can simultaneously be the root of its OWN nested composition.
+  The tree nests to any depth. Only a repeated Coordinator on the same
+  `causedBy` chain — a CYCLE — is refused.
+- **`causedBy` is PROVENANCE naming the PARENT, never the tree's ultimate
+  root.** Finding the root means walking it hop by hop, exactly as
+  `spec.pipelineRef` above is read for attribution and never for resolution.
+- **"Wake" is banned for what `invoke` does, on the same grounds a signal
+  never wakes an agent.** `invoke` OPENS a member conversation or reuses one.
+  Nothing was asleep.
+- **`escalate` reaches a human, and ONLY the uncaused root ever opens a
+  thread.** Called on the root, it binds `spec.channelRefs` from the
+  Coordinator's snapshotted `escalationChannelRefs` and opens the thread.
+  Called on a member, it carries no channels to bind, so it CLOSES that
+  member instead — the escalate message lands on the member's parent as an
+  ordinary result, bubbling one hop at a time until a call reaches the root.
+- **A caused conversation binds NO human channel of its own.** Only the
+  uncaused root a Coordinator opens ever carries `channelRefs` — see
+  `invariants.md`.
 
 ### `runtimeContextId`
 

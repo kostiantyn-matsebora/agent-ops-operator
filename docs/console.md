@@ -173,7 +173,7 @@ feed**, each a layer of the architecture with its own node identity.
 
 | View | Nodes | The spine, which cannot be hidden |
 |---|---|---|
-| **Model** | the declared objects: SignalSources, SignalAdapters, Pipelines, AgentProfiles, AgentRuntimes, MCPToolsets, MCPConfigs, Channels, ChannelAdapters, Conversations | pipelines |
+| **Model** | the declared objects: SignalSources, SignalAdapters, Pipelines, Coordinators, AgentProfiles, AgentCapabilities, AgentRuntimes, MCPToolsets, MCPConfigs, Channels, ChannelAdapters, Conversations | pipelines |
 | **Components** | one node per component the repository builds — each adapter, the gateway, the manager, each runtime image, context-sync, egress-proxy, housekeeping — plus the systems outside: models, MCP servers, repositories, the externals an adapter declares, the Kubernetes API | the manager |
 | **Infrastructure** | every pod, plus the models, MCP servers, repositories and externals outside the cluster. Nothing from the model is a node | the manager's pod |
 
@@ -1005,7 +1005,7 @@ Role is the chart's grant.
 
 | Group | Resources | Verbs |
 |---|---|---|
-| `agentops.dev` | all ten kinds | get, list, watch |
+| `agentops.dev` | all twelve kinds, `AgentCapability` and `Coordinator` included | get, list, watch |
 | `apps` | deployments | get, list, watch |
 | (core) | pods | get, list, watch |
 | `batch` | cronjobs | get, list, watch |
