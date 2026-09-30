@@ -22,8 +22,8 @@ context on its own.
 | Agent | Lane |
 |---|---|
 | `api-architect` | `platform/manager/api/v1alpha1/`, `openspec/specs/` deltas, `docs/contracts.md` |
-| `backend-developer` | the Go modules and the Node runtimes |
-| `deployment-engineer` | `chart/`, `.github/workflows/`, `.github/scripts/` |
+| `backend-developer` | the Go modules, the Node runtimes, `.github/scripts/` |
+| `deployment-engineer` | `chart/`, `.github/workflows/` |
 | `frontend-developer` | `platform/console/ui/`, the docs site's shell |
 | `testing-specialist` | the test tiers `docs/testing.md` owns, and the doubles under `test/` |
 

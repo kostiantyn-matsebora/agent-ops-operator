@@ -33,7 +33,7 @@ for dir in "$fixtures"/*/; do
   trap 'rm -rf "$tmp"' RETURN
   mkdir -p "$tmp/openspec/changes/$name" "$tmp/.github/scripts"
   cp "$dir/tasks.md" "$tmp/openspec/changes/$name/tasks.md"
-  cp "$guard" "$tmp/.github/scripts/"
+  cp "$guard" "$root/.github/scripts/openspec_diff.py" "$tmp/.github/scripts/"
 
   got_hook=0
   printf '{"tool_input":{"command":"openspec archive %s"}}' "$name" \
@@ -64,7 +64,7 @@ echo "  the worktree case"
 main=$(mktemp -d); wt=$(mktemp -d)
 for tree in "$main" "$wt"; do
   mkdir -p "$tree/openspec/changes/wt-change" "$tree/.github/scripts"
-  cp "$guard" "$tree/.github/scripts/"
+  cp "$guard" "$root/.github/scripts/openspec_diff.py" "$tree/.github/scripts/"
 done
 # The main checkout holds the change UNSTARTED, as `master` would.
 cp "$fixtures/unticked/tasks.md" "$main/openspec/changes/wt-change/tasks.md"
@@ -119,7 +119,7 @@ r=$(mktemp -d)
 git -C "$r" init -q -b master
 git -C "$r" config user.email test@example.com
 git -C "$r" config user.name Test
-mkdir -p "$r/.github/scripts"; cp "$guard" "$r/.github/scripts/"
+mkdir -p "$r/.github/scripts"; cp "$guard" "$root/.github/scripts/openspec_diff.py" "$r/.github/scripts/"
 echo seed > "$r/README.md"; git -C "$r" add .; git -C "$r" commit -qm seed
 base=$(git -C "$r" rev-parse HEAD)
 
@@ -196,7 +196,7 @@ check "a proposal whose last section is not documentation FAILS" 1 "FAILED   sha
 r2=$(mktemp -d)
 git -C "$r2" init -q -b master
 git -C "$r2" config user.email test@example.com; git -C "$r2" config user.name Test
-mkdir -p "$r2/.github/scripts"; cp "$guard" "$r2/.github/scripts/"
+mkdir -p "$r2/.github/scripts"; cp "$guard" "$root/.github/scripts/openspec_diff.py" "$r2/.github/scripts/"
 echo seed > "$r2/README.md"; git -C "$r2" add .; git -C "$r2" commit -qm seed
 base2=$(git -C "$r2" rev-parse HEAD)
 mkdir -p "$r2/openspec/changes/archive/2026-08-26-landed"

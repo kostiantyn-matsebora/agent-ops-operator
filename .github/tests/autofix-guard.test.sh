@@ -171,9 +171,10 @@ it "there is no --purpose any more: the archive command is the only caller, and 
 python3 "$S" --repo o/r --pr 7 --purpose ci >/dev/null 2>&1; assert_status 2 "$?"
 assert_not_contains "$(cat "$S")" '"ci"'
 
-it "the dispute reading is the machine's one copy, not a second one here"
+it "the dispute reading is conveyor_io's one walk, shared with the sweep"
 assert_not_contains "$(cat "$S")" "def unanswered_after_marker"
-assert_contains "$(cat "$S")" "conveyor.unanswered_after_marker"
+assert_contains "$(cat "$S")" "io.unanswered_disputes"
+assert_not_contains "$(cat "$S")" "query(\$owner:String!"
 
 labelled; none_running
 threads <<'JSON'

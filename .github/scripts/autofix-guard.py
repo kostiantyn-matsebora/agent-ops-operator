@@ -33,30 +33,10 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conveyor  # noqa: E402  -- the state machine: the verdict is its, this program gathers the facts
+import conveyor_io as io  # noqa: E402  -- the dispute-thread walk: the sweep reads the same one
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 WORKFLOW = "review-dispatch.yml"
-
-THREADS_QUERY = """
-query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$number) {
-      reviewThreads(first:50, after:$cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          id
-          isResolved
-          path
-          line
-          comments(first:100) {
-            nodes { body author { login __typename } }
-          }
-        }
-      }
-    }
-  }
-}
-"""
 
 
 class Unreadable(Exception):
@@ -83,12 +63,6 @@ def load_vocabulary(path: pathlib.Path) -> dict:
     return {"label": doc["approve_label"], "marker": doc["dispute_marker"], "raw": doc}
 
 
-# THE DISPUTE READING IS THE MACHINE'S. `conveyor.unanswered_after_marker` is the one
-# copy every reader of a dispute shares -- this guard, the thread collector and the
-# sweep -- so a dispute cannot read as answered to one of them and open to another.
-unanswered_after_marker = conveyor.unanswered_after_marker
-
-
 def running_rounds(repo: str, pr: int, branch: str) -> list[str]:
     """Runs of the dispatch workflow that are not finished and concern this
     pull request -- by head branch (a comment or label event) or by the
@@ -106,37 +80,17 @@ def running_rounds(repo: str, pr: int, branch: str) -> list[str]:
 
 
 def unanswered_disputes(repo: str, pr: int, marker: str) -> list[str]:
-    owner, _, name = repo.partition("/")
-    found = []
-    cursor = None
-    while True:
-        cmd = ["api", "graphql", "-f", f"query={THREADS_QUERY}", "-f", f"owner={owner}",
-               "-f", f"repo={name}", "-F", f"number={pr}"]
-        if cursor:
-            cmd += ["-f", f"cursor={cursor}"]
-        data = gh_json(*cmd)
-        try:
-            page = data["data"]["repository"]["pullRequest"]["reviewThreads"]
-        except (KeyError, TypeError):
-            raise Unreadable("the thread query returned no pull request")
-        for t in page["nodes"]:
-            if t.get("isResolved"):
-                continue
-            if unanswered_after_marker(t["comments"]["nodes"], marker):
-                found.append(f"thread {t['id']} ({t.get('path')}:{t.get('line') or '?'})")
-        if not page["pageInfo"]["hasNextPage"]:
-            break
-        cursor = page["pageInfo"]["endCursor"]
+    """What still waits on a person: every unresolved thread carrying an
+    unanswered dispute, plus a pull request comment disputing analysis issues
+    (a check or a Sonar finding has no thread of its own).
 
-    # A disputed ANALYSIS issue has no thread; the dispute is a pull request
-    # comment, answered by a later comment from a person.
-    comments = gh_json("api", f"repos/{repo}/issues/{pr}/comments", "--paginate") or []
-    shaped = [{"body": c.get("body"),
-               "author": {"login": (c.get("user") or {}).get("login"),
-                          "__typename": (c.get("user") or {}).get("type")}} for c in comments]
-    if unanswered_after_marker(shaped, marker):
-        found.append("a pull request comment disputing analysis issues")
-    return found
+    THE WALK IS `conveyor_io`'S -- shared with the sweep, which reads the exact
+    same two-part shape. A `RuntimeError` from that shared read is an
+    `Unreadable` here, this program's own fail-open vocabulary."""
+    try:
+        return io.unanswered_disputes(repo, pr, marker, with_location=True)
+    except RuntimeError as exc:
+        raise Unreadable(str(exc))
 
 
 def judge(repo: str, pr: int | None, vocabulary: dict) -> tuple[bool, str]:

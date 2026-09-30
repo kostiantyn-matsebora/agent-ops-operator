@@ -294,6 +294,17 @@ assert_contains "$summary_line" "conveyor:keep-going"
 assert_equals "capped" "$(loop_label)"
 printf '[]' > "$GH_COMMENTS"
 
+# `gh api --paginate` (no `--jq`) concatenates each page's own JSON array back
+# to back, so the wire shape genuinely is `[...][...]` -- and a comment BODY
+# containing that exact substring must not be mistaken for a page boundary.
+it "counts rounds correctly when a page boundary lands inside a comment whose own body contains ][ "
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nsomeone quoted ][ in their reply","created_at":"2026-08-29T11:00:00Z"}][{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"}]' > "$GH_COMMENTS"
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 3 -->"
+printf '[]' > "$GH_COMMENTS"
+
 # CONSUMED, THE MOMENT A ROUND RUNS UNDER IT. `conveyor:keep-going` is on the
 # pull request already (the fixture `gh pr view --json labels` names it); a
 # round running under it REMOVES it, never re-adds or re-checks it later.

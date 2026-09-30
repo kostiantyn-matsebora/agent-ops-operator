@@ -49,6 +49,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conveyor  # noqa: E402  -- the one reading of "is this dispute answered"
+import review_threads  # noqa: E402  -- gh_graphql and normalise_login: shared with the other thread readers
 
 THREADS_QUERY = """
 query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
@@ -86,21 +87,8 @@ WRITE_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 
 
-def gh_graphql(query: str, **variables) -> dict:
-    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
-    for key, value in variables.items():
-        flag = "-F" if isinstance(value, int) else "-f"
-        cmd += [flag, f"{key}={value}"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-    payload = json.loads(out)
-    if "errors" in payload:
-        raise RuntimeError(payload["errors"])
-    return payload["data"]
-
-
-def normalise_login(login: str) -> str:
-    """REST says `claude[bot]`, GraphQL says `claude`. Same rule as the resolver."""
-    return (login or "").strip().lower().removesuffix("[bot]")
+gh_graphql = review_threads.gh_graphql
+normalise_login = review_threads.normalise_login
 
 
 def load_vocabulary(path: pathlib.Path) -> dict:

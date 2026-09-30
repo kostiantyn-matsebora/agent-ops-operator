@@ -29,13 +29,12 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
+sys.path.insert(0, str(HERE))
+import load_script  # noqa: E402
+
 
 def _prompt_module():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("review_prompt", HERE / "review-prompt.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script.load("review-prompt")
 
 
 def size(path: str) -> int:

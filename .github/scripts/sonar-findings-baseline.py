@@ -32,82 +32,21 @@ import argparse
 import json
 import os
 import pathlib
-import re
 import subprocess
 import sys
-import urllib.parse
 
-DEFAULT_API = "https://sonarcloud.io"
-PAGE = 500
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from sonar_api import DEFAULT_API, components, issues_for, validated_api, validated_path  # noqa: E402
+
 QUALITIES = ("RELIABILITY", "SECURITY", "MAINTAINABILITY")
-
-
-def validated_api(raw: str) -> str:
-    """Refuses anything but an http(s) URL -- the base every request below is
-    built from, and the one CLI-supplied string this script must not hand to
-    `curl` unexamined (pythonsecurity:S8701/S8705)."""
-    parsed = urllib.parse.urlparse(raw)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise SystemExit(f"--api must be an http(s) URL, not {raw!r}")
-    return raw
-
-
-def validated_path(raw: pathlib.Path, *, must_exist: bool) -> pathlib.Path:
-    """Canonicalises the path and refuses one that resolves outside the
-    current working directory -- the exact pythonsecurity:S2083/S8707
-    remediation (their own compliant example: `os.path.realpath` against
-    `os.getcwd()`, checked with the trailing separator the rule's own
-    "partial path traversal" pitfall warns is required), applied to every
-    CLI-supplied path: `--out`, `--components` and `--components-script`.
-    """
-    base_dir = os.path.realpath(os.getcwd())
-    resolved = os.path.realpath(str(raw))
-    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):
-        raise SystemExit(f"path resolves outside the working directory: {raw}")
-    result = pathlib.Path(resolved)
-    if must_exist and not result.is_file():
-        raise SystemExit(f"not a file: {result}")
-    return result
-
-
-SAFE_URL = re.compile(r"^https?://[\w.\-~:/]+\?[\w.\-~%=&]*$")
-
-
-def fetch(api: str, path: str, token: str, **params) -> dict:
-    url = f"{api}/api/{path}?{urllib.parse.urlencode(params)}"
-    # Validated immediately before the subprocess call it guards, the same
-    # shape as pythonsecurity:S8705's own compliant example (a regex check
-    # adjacent to the sink) -- a validation several statements away was not
-    # credited, same lesson as `validated_path` below. `--` marks the end
-    # of options too: verified against curl itself that without it a URL
-    # beginning with "-" is read as an unrecognised flag ("curl: option
-    # ...: is unknown", exit 2) rather than the target -- the concrete case
-    # this regex also rules out, since only an http(s) scheme passes it.
-    if not SAFE_URL.match(url):
-        raise SystemExit(f"refusing a malformed request URL: {url!r}")
-    out = subprocess.run(["curl", "-sf", "-u", f"{token}:", "--", url], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(f"{path}: curl exit {out.returncode} {out.stderr.strip()}")
-    return json.loads(out.stdout or "{}")
-
-
-def components(path: pathlib.Path | None, script: pathlib.Path) -> list[dict]:
-    """[{component, ...}] from components.sh (or a captured copy, for the suite)."""
-    if path:
-        return json.loads(validated_path(path, must_exist=True).read_text())
-    resolved = validated_path(script, must_exist=True)
-    if not os.access(resolved, os.X_OK):
-        raise SystemExit(f"not executable: {resolved}")
-    out = subprocess.run([str(resolved), "images"], capture_output=True, text=True, check=True).stdout
-    return json.loads(out)
 
 
 def write_result(out: pathlib.Path, result: dict) -> pathlib.Path:
     """Validates `out` and writes `result` to it, returning the path used.
 
     A DEDICATED FUNCTION, not inlined at the call site in `main` -- the
-    working reference for pythonsecurity:S2083/S8707 is `components`
-    above, which takes its CLI-supplied path as its OWN parameter and
+    working reference for pythonsecurity:S2083/S8707 is `sonar_api.
+    components`, which takes its CLI-supplied path as its OWN parameter and
     validates it there; three earlier attempts at `main`'s own scope
     (a separated variable, adjacent statements, one nested expression)
     all stayed flagged on `args.out` specifically. This crosses the same
@@ -116,22 +55,6 @@ def write_result(out: pathlib.Path, result: dict) -> pathlib.Path:
     target = validated_path(out, must_exist=False)
     target.write_text(json.dumps(result, indent=2) + "\n")
     return target
-
-
-def issues_for(api: str, token: str, key: str, **filters) -> list[dict]:
-    """Every open (`resolved=false`) issue on `key` matching `filters`, paged.
-    NO `pullRequest` param -- the branch-wide backlog, not one pull request's."""
-    items: list[dict] = []
-    page = 1
-    while True:
-        payload = fetch(api, "issues/search", token, componentKeys=key, resolved="false",
-                         ps=PAGE, p=page, **filters)
-        found = payload.get("issues", [])
-        items.extend(found)
-        total = int(payload.get("total") or 0)
-        if page * PAGE >= total or not found:
-            return items
-        page += 1
 
 
 def clean_code_counts(found: list[dict]) -> dict[str, int]:

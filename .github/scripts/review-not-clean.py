@@ -28,10 +28,12 @@ review's own recognised login counts.
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import subprocess
+import pathlib
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import review_threads  # noqa: E402  -- gh_graphql and normalise_login: shared with the other thread readers
 
 THREADS_QUERY = """
 query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
@@ -54,22 +56,8 @@ query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
 """
 
 
-def gh_graphql(query: str, **variables) -> dict:
-    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
-    for key, value in variables.items():
-        flag = "-F" if isinstance(value, int) else "-f"
-        cmd += [flag, f"{key}={value}"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-    payload = json.loads(out)
-    if "errors" in payload:
-        raise RuntimeError(payload["errors"])
-    return payload["data"]
-
-
-def normalise_login(login: str) -> str:
-    """Same normalisation as `resolve-review-threads.py`: REST reports
-    `claude[bot]`, GraphQL reports `claude` plus `__typename: Bot`."""
-    return login.strip().lower().removesuffix("[bot]")
+gh_graphql = review_threads.gh_graphql
+normalise_login = review_threads.normalise_login
 
 
 def fetch_threads(owner: str, repo: str, number: int) -> list[dict]:

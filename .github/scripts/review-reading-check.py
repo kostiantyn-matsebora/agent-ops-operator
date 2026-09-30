@@ -62,6 +62,19 @@ def _is_str_list(v) -> bool:
     return isinstance(v, list) and all(isinstance(n, str) for n in v)
 
 
+def _thread_id_and_verdict_problems(t, prefix: str) -> list[str]:
+    """The one check `problems_verdict` and `problems_component` both make of
+    a thread entry: a string `id`, and a `verdict` from the closed set. Each
+    caller goes on to check more around it -- a verdict's own `finding`
+    pairing, a component's nothing further -- so only this shared core is
+    factored out."""
+    if not isinstance(t, dict) or not isinstance(t.get("id"), str):
+        return [f"{prefix} has no string id"]
+    if t.get("verdict") not in VERDICTS:
+        return [f"{prefix}.verdict is not one of {sorted(VERDICTS)}: {t.get('verdict')!r}"]
+    return []
+
+
 def _finding_problems(f, prefix: str) -> list[str]:
     if not isinstance(f, dict):
         return [f"{prefix} is not an object"]
@@ -99,13 +112,11 @@ def problems_verdict(reading: dict) -> list[str]:
         return ["threads is not a list"]
     out: list[str] = []
     for i, t in enumerate(reading["threads"]):
-        if not isinstance(t, dict) or not isinstance(t.get("id"), str):
-            out.append(f"threads[{i}] has no string id")
+        problems = _thread_id_and_verdict_problems(t, f"threads[{i}]")
+        if problems:
+            out.extend(problems)
             continue
         v = t.get("verdict")
-        if v not in VERDICTS:
-            out.append(f"threads[{i}].verdict is not one of {sorted(VERDICTS)}: {v!r}")
-            continue
         finding = t.get("finding")
         if v == "detached":
             if not isinstance(finding, dict):
@@ -161,10 +172,7 @@ def problems_component(reading: dict) -> list[str]:
         out.append("threads is not a list")
     else:
         for i, t in enumerate(reading["threads"]):
-            if not isinstance(t, dict) or not isinstance(t.get("id"), str):
-                out.append(f"threads[{i}] has no string id")
-            elif t.get("verdict") not in VERDICTS:
-                out.append(f"threads[{i}].verdict is not one of {sorted(VERDICTS)}: {t.get('verdict')!r}")
+            out.extend(_thread_id_and_verdict_problems(t, f"threads[{i}]"))
     return out
 
 
