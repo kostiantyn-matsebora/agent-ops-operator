@@ -147,7 +147,7 @@
 - [ ] 9b.1 `docs/getting-started.md`: if demo mode's default posture
       changes to `coordinator`, update the walkthrough's description of
       what gets deployed.
-- [ ] 9b.2 `docs/installation.md`: the new value, the reaper's cron
+- [ ] 9b.2 `docs/installation.md`: the reaper's cron
       requirement (uses the existing `signals/cron` component — no new
       component to install).
 - [ ] 9b.3 `docs/guides/coordinate-agents.md` (from `coordinated-agents`):

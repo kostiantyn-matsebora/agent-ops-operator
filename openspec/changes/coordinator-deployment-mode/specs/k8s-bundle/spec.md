@@ -43,8 +43,10 @@ gives it SHALL get that from the bundle rather than from a release-wide preset.
 Under `global.agentops.wiringMode: coordinator`, the bundle SHALL render the
 SAME route identity as a standalone `AgentCapability` rather than an inline
 Pipeline — the `k8s-engineer` capability, at the same privilege level the
-observing route uses today. The bundle SHALL NOT render its own `Pipeline`
-in this mode.
+observing route uses today.
+
+The bundle ships ONE route, so it renders one `AgentCapability` and no acting
+one. It SHALL NOT render its own `Pipeline` in this mode.
 
 This branch SHALL follow the same four conditions `wiring-mode` restates for
 a bundle's coordinator-mode rendering:

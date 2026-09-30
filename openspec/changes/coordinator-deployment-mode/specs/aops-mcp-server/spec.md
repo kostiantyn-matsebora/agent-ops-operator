@@ -6,7 +6,8 @@ The aops MCP server is the component through which a coordinating agent sees and
 ### Requirement: Four verbs, all asynchronous
 
 The server SHALL expose `invoke(agent, task)`, `close(conversation, reason)`,
-`escalate(message)`, `read(conversation)` and `list_open_roots()`. Each
+`escalate(message)`, `read(conversation)` and `list_open_roots()`. The heading keeps its name because a MODIFIED
+requirement matches the archived one by name, and the verbs are now FIVE. Each
 SHALL return without waiting on any agent's work. `invoke` SHALL report
 created or attached.
 
@@ -33,6 +34,7 @@ The MANAGER validates the token and enforces a bound per verb:
 | `escalate` | the caller itself — it takes no conversation argument and acts only on the calling conversation, never a member reached through it |
 | `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
 | `close` | the caller itself, a conversation it directly caused, per `conversation-close`'s rule, OR — when the caller RESOLVES to a Coordinator (`coordinator-owner-reach`'s walk) — any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor, never a deeper descendant reached through an intermediate member and never a member of any kind |
+| `list_conversations`, `get_conversation` | for a `channel-reader:<channel>` token, the projection of that Channel's conversations and no verb, per `coordinated-agents` |
 | `list_open_roots` | the calling conversation's own Coordinator's open UNCAUSED roots only — see `coordinator-owner-reach` |
 
 An allowlist inside the runtime pod SHALL NOT be relied on for any bound.

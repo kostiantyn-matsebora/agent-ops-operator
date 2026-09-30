@@ -102,7 +102,8 @@ listing and closing its own Coordinator's open roots, and invoking the
 On each hourly run, the reaper's conversation SHALL list its own
 Coordinator's open root conversations (the Coordinator-owner reach class,
 `coordinator-owner-reach`), and for each one SHALL `invoke` the SAME
-domain `AgentCapability` entry that root's original agent ran under, asking
+domain `AgentCapability` entry named in that root's `members` field
+(`coordinator-owner-reach`), asking
 it to re-check current state.
 
 The re-check SHALL be an ordinary `invoke` and the result SHALL reach the

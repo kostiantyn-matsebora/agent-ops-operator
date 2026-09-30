@@ -22,7 +22,9 @@ schedule and close when it has healed.
   is a release-wide switch, not per-bundle.
 - **Demo mode becomes one instance of `coordinator` mode** with a single
   bundle enabled, rather than separate demo-only logic — "one agent,
-  out-of-the-box" falls out of the general mechanism.
+  out-of-the-box" falls out of the general mechanism. `global.demo.enabled`
+  sets `wiringMode: coordinator` itself when the operator leaves it unset,
+  so the default in `values.yaml` stays `pipelines` (see `wiring-mode`).
 - **Per-incident self-resolution is a prompt instruction, not new
   machinery.** Domain agent templates are told they may `/close` their own
   conversation once they judge the problem resolved — reusing the existing
@@ -87,6 +89,10 @@ schedule and close when it has healed.
 
 **Not given a delta**, and why:
 
+- Per-incident self-resolution: a prompt instruction in the domain agent
+  templates, reusing the existing `/close` path. No capability requirement
+  changes, since `conversation-close` already lets a conversation close
+  itself.
 - `agent-capability-model`: a bundle rendering a standalone `AgentCapability`
   changes no requirement of the CRD itself — same six fields, same
   inert-when-unwired rule. Fully covered by `wiring-mode` and the three

@@ -1,5 +1,9 @@
 ## Purpose
 
+This change depends on `coordinated-agents` landing first. The
+`conversation-provenance` and `coordination-loop` specs cited here are
+defined there and are not yet archived.
+
 The Coordinator-owner reach class on the aops MCP server: a caller acting
 for its own Coordinator may list and close that Coordinator's OPEN ROOT
 conversations — scoped to one Coordinator, roots only, never a member and
@@ -23,8 +27,9 @@ caller's own Coordinator, but closing it would cascade to close the
 caller's own conversation before the caller finishes running.
 
 `list_open_roots` SHALL return each root's name, title, brief and phase —
-the same projection shape `list_conversations` already returns — never a
-transcript or a run.
+the same projection shape `list_conversations` already returns — plus
+`members`, the `agents[]` entry names of the root's direct members. The
+reaper re-invokes those entries. Never a transcript or a run.
 
 #### Scenario: Only uncaused roots of the caller's own Coordinator are listed
 

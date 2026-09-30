@@ -21,6 +21,13 @@ release enables.
 - **WHEN** a release sets no value for `global.agentops.wiringMode`
 - **THEN** the chart renders as though `pipelines` were set
 
+#### Scenario: Demo mode selects coordinator explicitly
+
+- **WHEN** `global.demo.enabled` is true and the release sets no value for
+  `global.agentops.wiringMode`
+- **THEN** the chart renders as though `coordinator` were set, and the
+  default in `values.yaml` remains `pipelines`
+
 #### Scenario: An unrecognized value fails the render
 
 - **WHEN** `global.agentops.wiringMode` is set to a value that is neither
@@ -64,6 +71,9 @@ exactly one `Coordinator` object. That Coordinator SHALL claim, in its
 otherwise have rendered a Pipeline — the same sources those bundles'
 `pipelines` mode routes claim today.
 
+The Coordinator SHALL also claim the `signals/cron` source of the reaper
+(`coordinator-self-heal`), which belongs to no bundle.
+
 Each enabled bundle SHALL contribute one `agents[]` entry per route it would
 render in `pipelines` mode, each entry's `capabilityRef` naming that
 bundle's own rendered `AgentCapability` at that route's existing privilege
@@ -75,7 +85,7 @@ two entries, never merged into one.
 - **WHEN** coordinator mode is set with exactly one bundle enabled and wired
 - **THEN** the rendered Coordinator claims that bundle's source and lists
   exactly the `AgentCapability` entries that bundle's own rendering branch
-  produces
+  produces, plus the reaper's own entry and the reaper's cron claim
 
 #### Scenario: Two bundles enabled
 
