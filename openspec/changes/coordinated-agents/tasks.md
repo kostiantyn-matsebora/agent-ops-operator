@@ -192,7 +192,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 8. E2E tests
 
-- [x] 8.1 Smoke against a live install from the worktree chart (moved from
+- [ ] 8.1 Smoke against a live install from the worktree chart (moved from
       4.5): a Coordinator with one AgentCapability, a signal, `invoke`
       observed creating a member, result landing on the root, `escalate`
       opening a Telegram thread. Record the verdict, not the transcript.
@@ -234,7 +234,7 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       blocks; `_data/nav.yml` line.
 - [x] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
-- [x] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
+- [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
       `npm run demo`; commit the assets. DEFERRED, deliberately: no local
       cluster or port-forwarded console in this remote session
       (`visual-check.md`, `remote-session.md`). The fixture already carries
