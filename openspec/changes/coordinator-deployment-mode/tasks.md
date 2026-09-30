@@ -11,7 +11,7 @@
       `AgentCapability`, no `Pipeline`. Verify with `helm template`.
 - [ ] 1.3 `chart/charts/home-assistant/`: add the `coordinator`-mode branch
       for BOTH routes per `ha-bundle`'s delta — two `AgentCapability`
-      objects (`ha-user`, `ha-operator`), never merged, no `Pipeline`.
+      objects (`ha-control`, `ha-ops`), never merged, no `Pipeline`.
       Verify with `helm template` that both privilege levels stay separate.
 - [ ] 1.4 Every bundle's `pipelines`-mode branch is untouched — verify with
       a render diff (`helm template` before and after this change, with

@@ -45,6 +45,9 @@ The MANAGER validates the token and enforces a bound per verb:
 | `list_conversations`, `get_conversation` | for a `channel-reader:<channel>` token, the projection of that Channel's conversations and no verb, per `coordinated-agents` |
 | `list_open_roots` | the calling conversation's own Coordinator's open UNCAUSED roots only — see `coordinator-owner-reach` |
 
+A refusal SHALL reach the caller as an error naming the bound that refused
+it, so the calling agent can report why instead of retrying blindly.
+
 An allowlist inside the runtime pod SHALL NOT be relied on for any bound.
 
 The token is per conversation because one Coordinator may hold several open
