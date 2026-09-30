@@ -105,6 +105,8 @@ ROLE_TABLE: list[tuple[str, str]] = [
     (".github/actions/**", "deployment-engineer"),
     (".github/docker/**", "deployment-engineer"),
     ("**/Dockerfile", "deployment-engineer"),
+    # The CI and review scripts are Python programs with their own suite, not
+    # workflow YAML or chart templates, so the code-shaped bar fits them.
     (".github/scripts/**", "backend-developer"),
     ("platform/**", "backend-developer"),
     ("signals/**", "backend-developer"),
