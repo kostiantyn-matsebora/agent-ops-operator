@@ -1,7 +1,7 @@
 ## Purpose
 
 The Kubernetes agent Helm subchart composition at
-`chart/charts/k8s-bundle/`. It packages the k8s events signal source, the
+`chart/charts/kubernetes/`. It packages the k8s events signal source, the
 `k8s-engineer` profile, the Kubernetes MCP tooling and its own wiring as
 individually toggleable components.
 

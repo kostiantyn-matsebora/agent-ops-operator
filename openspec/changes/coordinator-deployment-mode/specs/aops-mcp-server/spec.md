@@ -6,10 +6,12 @@ The aops MCP server is the component through which a coordinating agent sees and
 ### Requirement: Four verbs, all asynchronous
 
 The server SHALL expose `invoke(agent, task)`, `close(conversation, reason)`,
-`escalate(message)`, `read(conversation)` and `list_open_roots()`. The heading keeps its name because a MODIFIED
-requirement matches the archived one by name, and the verbs are now FIVE. Each
-SHALL return without waiting on any agent's work. `invoke` SHALL report
-created or attached.
+`escalate(message)`, `read(conversation)` and `list_open_roots()`. Each SHALL
+return without waiting on any agent's work. `invoke` SHALL report created or
+attached.
+
+The heading keeps its name because a MODIFIED requirement matches the
+archived one by name. The verbs are now FIVE.
 
 `list_open_roots` is the Coordinator-owner reach class's own verb, defined
 in full by `coordinator-owner-reach`. It is listed here only so this file's

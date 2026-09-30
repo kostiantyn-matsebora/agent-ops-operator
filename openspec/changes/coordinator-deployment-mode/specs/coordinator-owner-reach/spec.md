@@ -59,7 +59,8 @@ reaper re-invokes those entries. Never a transcript or a run.
 
 ### Requirement: The caller must itself be acting for a Coordinator
 
-`list_open_roots` and the widened `close` (below) SHALL be refused for a
+`list_open_roots` and the widened `close` (the Coordinator-owner bound on
+`close` in `aops-mcp-server`) SHALL be refused for a
 caller that resolves to no Coordinator by the walk below — an ordinary
 Pipeline-addressed conversation has no access to this reach class at all,
 whatever AgentCapability it runs.

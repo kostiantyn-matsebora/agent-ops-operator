@@ -1,7 +1,7 @@
 ## Purpose
 
 The Prometheus/Alertmanager Helm subchart composition at
-`chart/charts/prometheus-bundle/`. It packages the Alertmanager webhook
+`chart/charts/prometheus/`. It packages the Alertmanager webhook
 signal adapter, one Prometheus query MCP configuration with its deployable
 server, the `alert-investigator` profile, and the bundle's own default-off
 wiring.

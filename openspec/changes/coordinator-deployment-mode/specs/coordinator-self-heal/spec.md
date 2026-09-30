@@ -103,8 +103,11 @@ On each hourly run, the reaper's conversation SHALL list its own
 Coordinator's open root conversations (the Coordinator-owner reach class,
 `coordinator-owner-reach`), and for each one SHALL `invoke` the SAME
 domain `AgentCapability` entry named in that root's `members` field
-(`coordinator-owner-reach`), asking
-it to re-check current state.
+(`coordinator-owner-reach`), asking it to re-check current state.
+
+Where `members` lists more than one entry, the reaper SHALL re-invoke EACH
+entry in turn. The root counts as healed only when every re-check reports
+the condition cleared.
 
 The re-check SHALL be an ordinary `invoke` and the result SHALL reach the
 reaper's own conversation through the unchanged member-result routing

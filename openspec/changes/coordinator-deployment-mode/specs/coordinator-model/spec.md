@@ -1,4 +1,9 @@
 ## Purpose
+
+This change depends on `coordinated-agents` landing first. The
+`coordinator-model` spec modified here is defined there and is not yet
+archived.
+
 The `Coordinator` CRD is the wiring for a COMPOSITION: what feeds a coordinating agent, where it escalates to people, and the typed list of agents it may invoke.
 
 ## MODIFIED Requirements

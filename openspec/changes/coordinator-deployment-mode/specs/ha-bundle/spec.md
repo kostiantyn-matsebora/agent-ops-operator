@@ -83,8 +83,9 @@ the `pipelines`-mode rule that no turnkey mode enables this bundle at all.
 - **WHEN** coordinator mode is set and the bundle's wiring is enabled
 - **THEN** the chart-rendered Coordinator's `agents[]` lists both of this
   bundle's `AgentCapability` objects as separate entries, and its
-  `signalSourceRefs` claims the bundle's log source — so the source is not
-  left `Wired=False`
+  `signalSourceRefs` claims the bundle's log source and the chat sources
+  named in values, so the log source is not left `Wired=False` and both
+  routes stay reachable from chat
 
 #### Scenario: No turnkey mode forces this bundle's wiring on, in either posture
 

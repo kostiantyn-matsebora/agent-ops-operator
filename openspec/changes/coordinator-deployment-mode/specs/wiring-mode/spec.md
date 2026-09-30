@@ -12,6 +12,9 @@ choice with no API-server exclusivity behind it.
 `global.agentops.wiringMode` SHALL accept exactly two values, `pipelines` and
 `coordinator`, and SHALL default to `pipelines`.
 
+When the value is absent, the mode is `pipelines`, except that
+`global.demo.enabled: true` selects `coordinator`.
+
 The value SHALL decide only how the chart RENDERS each enabled bundle's
 route. It SHALL NOT be per-bundle: one value governs every bundle the
 release enables.
@@ -46,15 +49,16 @@ release enables.
 Under `global.agentops.wiringMode: pipelines`, every object the chart
 renders — from the parent chart and from every bundle — SHALL be identical
 to the objects the same values render with `global.agentops.wiringMode`
-entirely absent.
+entirely absent and `global.demo.enabled` false.
 
 No new object — no `Coordinator`, no `AgentCapability`, no reaper
 `AgentProfile` — SHALL render under `pipelines` mode.
 
 #### Scenario: Setting the default value explicitly changes nothing
 
-- **WHEN** a release renders once with `global.agentops.wiringMode` unset and
-  once with it explicitly set to `pipelines`, all other values equal
+- **WHEN** a release with `global.demo.enabled` false renders once with
+  `global.agentops.wiringMode` unset and once with it explicitly set to
+  `pipelines`, all other values equal
 - **THEN** the two renders produce byte-identical manifests
 
 #### Scenario: No coordinator-mode object leaks into pipelines mode
