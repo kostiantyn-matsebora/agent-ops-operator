@@ -18,6 +18,7 @@ import urllib.parse
 
 DEFAULT_API = "https://sonarcloud.io"
 PAGE = 500
+TIMEOUT = 60  # seconds per subprocess call, so a stalled service cannot hang the workflow
 
 SAFE_URL = re.compile(r"^https?://[\w.\-~:/]+\?[\w.\-~%=&+]*$")
 
@@ -67,8 +68,11 @@ def fetch(api: str, path: str, token: str, **params) -> dict:
     # The credential rides a curl config on stdin, never argv, where `ps` shows it.
     # Backslash, quote and newline are escaped so a token cannot break out of the quoted value.
     escaped = token.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
-    out = subprocess.run(["curl", "-sf", "-K", "-", "--", url], input=f'user = "{escaped}:"\n',
-                         capture_output=True, text=True)
+    try:
+        out = subprocess.run(["curl", "-sf", "-K", "-", "--", url], input=f'user = "{escaped}:"\n',
+                             capture_output=True, text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{path}: curl timed out after {TIMEOUT}s") from exc
     if out.returncode != 0:
         raise RuntimeError(f"{path}: curl exit {out.returncode} {out.stderr.strip()}")
     return json.loads(out.stdout or "{}")
@@ -82,7 +86,8 @@ def components(path: pathlib.Path | None, script: pathlib.Path) -> list[dict]:
     resolved = validated_path(script, must_exist=True)
     if not os.access(resolved, os.X_OK):
         raise SystemExit(f"not executable: {resolved}")
-    out = subprocess.run([str(resolved), "images"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([str(resolved), "images"], capture_output=True, text=True, check=True,
+                         timeout=TIMEOUT).stdout
     return json.loads(out)
 
 
