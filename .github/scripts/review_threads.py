@@ -21,6 +21,11 @@ def gh_graphql(query: str, **variables) -> dict:
     response carrying `errors`."""
     cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
     for key, value in variables.items():
+        if isinstance(value, bool):
+            # `-F` turns the literal `true`/`false` into a GraphQL Boolean;
+            # Python's `True` would be sent as the string "True".
+            cmd += ["-F", f"{key}={str(value).lower()}"]
+            continue
         flag = "-F" if isinstance(value, int) else "-f"
         cmd += [flag, f"{key}={value}"]
     out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
