@@ -466,6 +466,13 @@ async function reportDone(unit, out) {
   }
 }
 
+// Exported alongside the module.exports object above rather than folded
+// into it: both are declared below that object (function hoisting makes
+// either position work), and a second, small assignment here keeps them
+// visually beside the loop code they test.
+module.exports.pollNextUnit = pollNextUnit;
+module.exports.reportDone = reportDone;
+
 async function runLoop() {
   console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_DIR}`);
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }

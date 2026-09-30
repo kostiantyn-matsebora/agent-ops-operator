@@ -28,7 +28,17 @@ process.env.HOME = HOME; // controls SESSIONS_DIR
 const {
   gitEnv, repoURL, run, clearDir, syncRepo, formatEvent,
   confirmContextMissing, sessionFileExists, contextIdOf, strip, extractBrief, SESSIONS_DIR,
+  pollNextUnit, reportDone,
 } = require('./runtime');
+
+// Stubs the built-in global `fetch` for the duration of one test and
+// restores it after, even on failure -- the same shape `t.mock` would give,
+// written by hand since none of this file's existing tests mock anything.
+function withFetch(t, impl) {
+  const real = global.fetch;
+  global.fetch = impl;
+  t.after(() => { global.fetch = real; });
+}
 
 // ---- gitEnv / repoURL, default (no auth configured) ---------------------------
 
@@ -226,4 +236,89 @@ test('confirmContextMissing walks the full ladder and confirms loss when nothing
   const missing = await confirmContextMissing('genuinely-nowhere');
   assert.strictEqual(missing, true);
   assert.ok(Date.now() - start >= 5000, 'all three waits (500+1500+3000ms) must be spent before concluding loss');
+});
+
+// ---- pollNextUnit --------------------------------------------------------------
+
+test('pollNextUnit returns the parsed work unit on a 200 with a JSON body', async (t) => {
+  withFetch(t, async (url) => {
+    assert.ok(String(url).startsWith('http://127.0.0.1:1/work?convo=conv-test'));
+    return { status: 200, ok: true, json: async () => ({ runId: 'r1', prompt: 'hi' }) };
+  });
+  assert.deepStrictEqual(await pollNextUnit(), { runId: 'r1', prompt: 'hi' });
+});
+
+test('pollNextUnit returns undefined on a 204 (long-poll came back with nothing)', async (t) => {
+  withFetch(t, async () => ({ status: 204, ok: true, json: async () => { throw new Error('must not be read'); } }));
+  assert.strictEqual(await pollNextUnit(), undefined);
+});
+
+test('pollNextUnit returns undefined and does not throw on an unparsable body', async (t) => {
+  withFetch(t, async () => ({ status: 200, ok: true, json: async () => { throw new Error('bad json'); } }));
+  assert.strictEqual(await pollNextUnit(), undefined);
+});
+
+test('pollNextUnit returns undefined on a non-ok status, after the retry wait', async (t) => {
+  withFetch(t, async () => ({ status: 500, ok: false, json: async () => { throw new Error('must not be read'); } }));
+  const start = Date.now();
+  assert.strictEqual(await pollNextUnit(), undefined);
+  assert.ok(Date.now() - start >= 5000, 'a non-ok status is treated as transient and waits before the caller polls again');
+});
+
+test('pollNextUnit returns undefined and waits out a network error', async (t) => {
+  withFetch(t, async () => { throw new Error('ECONNREFUSED'); });
+  const start = Date.now();
+  assert.strictEqual(await pollNextUnit(), undefined);
+  assert.ok(Date.now() - start >= 5000);
+});
+
+// ---- reportDone -----------------------------------------------------------------
+
+test('reportDone posts the result and returns on the first ok response', async (t) => {
+  let calls = 0;
+  let body;
+  withFetch(t, async (url, init) => {
+    calls += 1;
+    body = JSON.parse(init.body);
+    assert.strictEqual(String(url), 'http://127.0.0.1:1/work/done');
+    return { ok: true };
+  });
+  await reportDone({ runId: 'r1' }, { result: 'ok', sessionId: 'sid-1' });
+  assert.strictEqual(calls, 1, 'a first-try ok response must not retry');
+  assert.strictEqual(body.convo, 'conv-test');
+  assert.strictEqual(body.runId, 'r1');
+  assert.strictEqual(body.result, 'ok');
+  assert.strictEqual(body.runtimeContextId, 'sid-1', 'the handle is reported under the current name');
+  assert.strictEqual(body.sessionId, 'sid-1', 'and the retired spelling, for one release');
+});
+
+test('reportDone omits runtimeContextId/sessionId when the run reported no handle', async (t) => {
+  let body;
+  withFetch(t, async (_url, init) => { body = JSON.parse(init.body); return { ok: true }; });
+  await reportDone({ runId: 'r2' }, { result: 'ok' });
+  assert.strictEqual('runtimeContextId' in body, false);
+  assert.strictEqual('sessionId' in body, false);
+});
+
+test('reportDone retries on a non-ok response until one succeeds', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2 };
+  });
+  const start = Date.now();
+  await reportDone({ runId: 'r3' }, { result: 'ok' });
+  assert.strictEqual(calls, 2);
+  assert.ok(Date.now() - start >= 10000, 'one retry spends the full 10s wait before trying again');
+});
+
+test('reportDone retries past a thrown network error, not just a non-ok response', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('ECONNRESET');
+    return { ok: true };
+  });
+  await reportDone({ runId: 'r4' }, { result: 'ok' });
+  assert.strictEqual(calls, 2);
 });
