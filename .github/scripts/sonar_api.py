@@ -86,8 +86,11 @@ def components(path: pathlib.Path | None, script: pathlib.Path) -> list[dict]:
     resolved = validated_path(script, must_exist=True)
     if not os.access(resolved, os.X_OK):
         raise SystemExit(f"not executable: {resolved}")
-    out = subprocess.run([str(resolved), "images"], capture_output=True, text=True, check=True,
-                         timeout=TIMEOUT).stdout
+    try:
+        out = subprocess.run([str(resolved), "images"], capture_output=True, text=True, check=True,
+                             timeout=TIMEOUT).stdout
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{resolved}: timed out after {TIMEOUT}s") from exc
     return json.loads(out)
 
 
