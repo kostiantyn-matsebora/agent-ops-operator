@@ -115,5 +115,6 @@ test('the default ladder really sleeps, using the real timer when no override is
   const start = Date.now();
   const got = await confirmContextMissing(s, 'gone', { delays: [5, 5] });
   assert.strictEqual(got, true);
-  assert.ok(Date.now() - start >= 10, 'expected the real timer to have waited');
+  // setTimeout may fire up to ~1ms early against the wall clock, per timer.
+  assert.ok(Date.now() - start >= 8, 'expected the real timer to have waited');
 });
