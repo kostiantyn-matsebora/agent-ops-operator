@@ -403,11 +403,14 @@ module.exports = {
   SESSIONS_DIR, CLAUDE_BIN, WORKSPACE,
 };
 
-// The IIFE below is wrapped rather than edited: its own lines are untouched
-// text, so SonarCloud's PR analysis tracks its existing findings as old
-// code rather than re-flagging them as new the moment a guard is added.
+// `void` on the IIFE satisfies javascript:S9383 (rule wants an awaited,
+// handled or explicitly-ignored promise) -- MEASURED: the "wrap instead of
+// edit" theory this comment used to state did not hold. SonarCloud's
+// new-code window is time-based (the leak period), not line-based, so
+// touching nothing here still let the finding count as new and fail
+// reliability_rating/new_reliability_rating once the window rolled onto it.
 if (require.main === module) {
-(async () => {
+void (async () => {
   console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
 

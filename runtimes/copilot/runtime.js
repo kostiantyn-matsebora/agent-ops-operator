@@ -420,10 +420,13 @@ module.exports = {
   SESSIONS_DIR, WORKSPACE, COPILOT_HOME,
 };
 
-// The block below is wrapped rather than edited: its own lines are untouched
-// text, so a static analyzer's PR-new-code tracking treats its existing
-// findings (if any) as old code rather than re-flagging them as new the
-// moment a guard is added.
+// `void` on the IIFE below satisfies javascript:S9383 (rule wants an
+// awaited, handled or explicitly-ignored promise) -- MEASURED: the
+// "wrap instead of edit" theory this comment used to state did not hold.
+// SonarCloud's new-code window is time-based (the leak period), not
+// line-based, so touching nothing here still let the finding count as new
+// and fail reliability_rating/new_reliability_rating once the window
+// rolled onto it.
 if (require.main === module) {
 // PID 1 GETS NO DEFAULT SIGNAL HANDLING. `node` is the container's entrypoint,
 // so a SIGTERM the kubelet sends on pod deletion is IGNORED unless handled —
@@ -440,7 +443,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   });
 }
 
-(async () => {
+void (async () => {
   console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_DIR}`);
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
 

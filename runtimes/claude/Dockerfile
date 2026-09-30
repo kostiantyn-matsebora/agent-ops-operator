@@ -36,6 +36,18 @@ LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/ag
 # Removing either half silently reopens the trap the next time any package
 # here gets a security fix, and the release path shares the same cache scope,
 # so a stale layer would reach a PUBLISHED image.
+# THE PIN ON npm@12.0.2 ALONE STOPPED BEING ENOUGH: npm 12.2.0 (the latest
+# release as of this fix) still bundles versions of `brace-expansion`,
+# `undici`, `tar` and `ip-address` below their fixed ones. There is no npm
+# release yet that clears the image scan, so each vendored package is
+# overwritten in place with a same-major bump that satisfies npm's own range
+# on it (minimatch wants brace-expansion ^5.0.5, node-gyp wants undici
+# ^6.25.0, node-gyp/pacote/libnpmdiff want tar ^7.4.3 or newer, socks wants
+# ip-address ^10.1.1) -- `npm pack` pulls the fixed tarball straight from the
+# registry, no extra file to commit. Re-check each range before ever bumping
+# npm past this pin, since a new npm version may resolve a different
+# transitive version, and re-verify against a Trivy scan that the CVE each
+# entry exists for stays fixed. Same fix runtimes/copilot applies.
 ARG APT_REFRESH=unset
 RUN echo "apt refresh: ${APT_REFRESH}" && \
     apt-get update -qq && \
@@ -45,6 +57,14 @@ RUN echo "apt refresh: ${APT_REFRESH}" && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g --ignore-scripts npm@12.0.2 @anthropic-ai/claude-code@2.1.252 && \
     node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" && \
+    NPM_ROOT="$(npm root -g)/npm/node_modules" && \
+    cd /tmp && \
+    for entry in brace-expansion@5.0.12 undici@6.28.1 tar@7.5.22 ip-address@10.7.2; do \
+      pkg="$(echo "$entry" | cut -d@ -f1)" && \
+      tgz="$(npm pack --silent "$entry")" && \
+      rm -rf "$NPM_ROOT/$pkg" && tar xzf "$tgz" && mv package "$NPM_ROOT/$pkg" && \
+      rm -f "$tgz"; \
+    done && \
     npm cache clean --force
 
 # NO kubectl, and no other domain tooling. This image is a VENDOR runtime: it
