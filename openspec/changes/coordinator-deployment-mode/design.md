@@ -24,9 +24,14 @@ below:
 
 Bundle wiring today (`k8s-bundle`, `prometheus-bundle`, `ha-bundle`) already
 follows a four-condition qualification pattern before rendering a Pipeline:
-gated by an explicit flag, every foreign reference a values-supplied name,
-rendered only alongside its own profile, defaulting off with demo mode
-forcing on only the least-privileged route.
+
+- gated by an explicit flag
+- every foreign reference a values-supplied name
+- rendered only alongside its own profile
+- defaulting off
+
+Demo mode forces on the least-privileged route for `k8s-bundle` only, not for
+`prometheus-bundle` or `ha-bundle`.
 
 ## Goals / Non-Goals
 

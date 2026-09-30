@@ -50,10 +50,14 @@ inline Pipelines.
   today.
 - The two SHALL NEVER be merged into one.
 
-Coordinator mode renders the observing `AgentCapability` always, and the
-acting one too when its own flag (`pipelines.admin.enabled`) is enabled, exactly as the per-route flags
-decide under `pipelines` mode. Demo mode forces on only the observing one.
-The bundle SHALL NOT render its own `Pipeline` in this mode.
+Coordinator mode renders the observing `AgentCapability` when its wiring is
+enabled.
+
+It renders the acting one too when `pipelines.admin.enabled` is set, exactly
+as the per-route flags decide under `pipelines` mode.
+
+Demo mode forces on only the observing one. The bundle SHALL NOT render its
+own `Pipeline` in this mode.
 
 This branch SHALL follow the four conditions `wiring-mode` restates from the
 parent chart's bundle-wiring rules for a bundle's own routes:

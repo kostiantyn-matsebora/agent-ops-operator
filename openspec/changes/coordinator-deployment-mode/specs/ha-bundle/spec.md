@@ -75,7 +75,7 @@ the `pipelines`-mode rule that no turnkey mode enables this bundle at all.
 
 - **WHEN** `global.agentops.wiringMode: coordinator` is set and the bundle's
   wiring is enabled with both credentials configured
-- **THEN** the bundle renders both the `ha-user` and `ha-operator`
+- **THEN** the bundle renders both the `ha-control` and `ha-ops`
   `AgentCapability` objects, each at its own privilege level, and renders
   no `Pipeline` of its own
 
