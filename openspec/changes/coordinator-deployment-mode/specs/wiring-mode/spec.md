@@ -1,5 +1,9 @@
 ## Purpose
 
+This change depends on `coordinated-agents` landing first. The Coordinator
+and AgentCapability kinds cited here are defined there and are not yet
+archived.
+
 The `global.agentops.wiringMode` chart posture: whether an enabled bundle
 renders an inline Pipeline per route, or a standalone AgentCapability
 gathered under one chart-rendered Coordinator — a release-wide rendering

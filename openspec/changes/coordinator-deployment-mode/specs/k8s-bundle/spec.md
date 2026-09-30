@@ -101,8 +101,8 @@ parent chart's bundle-wiring rules for a bundle's own routes:
 
 - **WHEN** `global.agentops.wiringMode: coordinator` is set and the bundle's
   wiring is enabled
-- **THEN** the bundle renders the `k8s-engineer` `AgentCapability` at the
-  observing (read-only) privilege level, plus the acting one only when its
+- **THEN** the bundle renders the `k8s-observe` `AgentCapability` at the
+  observing (read-only) privilege level, plus `k8s-operate` (the acting one) only when its
   own flag (`pipelines.admin.enabled`) is enabled, and renders no `Pipeline` of its own
 
 #### Scenario: Coordinator mode's capability is claimed by the chart Coordinator

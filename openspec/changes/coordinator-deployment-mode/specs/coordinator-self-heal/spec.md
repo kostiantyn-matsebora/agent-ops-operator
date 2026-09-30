@@ -112,6 +112,12 @@ Where `members` lists more than one entry, the reaper SHALL re-invoke EACH
 entry in turn. The root counts as healed only when every re-check reports
 the condition cleared.
 
+Where a `members` entry names a nested Coordinator (a `coordinatorRef`
+entry in `agents[]`) rather than an `AgentCapability`, the reaper SHALL
+`invoke` that entry the same way. The nested Coordinator's own coordinating
+agent then re-checks through its own `agents[]`, and its result counts as
+that entry's re-check.
+
 The re-check SHALL be an ordinary `invoke` and the result SHALL reach the
 reaper's own conversation through the unchanged member-result routing
 (`coordination-loop`) — no new routing path is introduced.
