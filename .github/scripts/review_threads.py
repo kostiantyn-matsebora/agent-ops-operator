@@ -16,8 +16,9 @@ import subprocess
 
 def gh_graphql(query: str, **variables) -> dict:
     """One GraphQL call, `gh`'s own way of making one: an int variable typed `-F`
-    (GraphQL's `Int`), everything else `-f` (a `String`). Raises RuntimeError on
-    a failed call or a response carrying `errors`."""
+    (GraphQL's `Int`), everything else `-f` (a `String`). Raises
+    `subprocess.CalledProcessError` on a failed call and RuntimeError on a
+    response carrying `errors`."""
     cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
     for key, value in variables.items():
         flag = "-F" if isinstance(value, int) else "-f"
