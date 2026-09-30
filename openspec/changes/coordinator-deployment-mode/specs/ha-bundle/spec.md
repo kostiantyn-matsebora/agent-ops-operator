@@ -40,8 +40,9 @@ Under `global.agentops.wiringMode: coordinator`, the bundle SHALL render the
 SAME two route identities as two standalone `AgentCapability` objects,
 never the two inline Pipelines.
 
-One capability carries `ha-user` at the everyday privilege level. The other
-carries `ha-operator` at the acting level.
+The capability `ha-control` carries `ha-user` at the everyday privilege level.
+The capability `ha-ops` carries `ha-operator` at the acting level. Each keeps
+the name of the route it replaces.
 
 The bundle SHALL NOT render either `Pipeline` in this mode. The two
 capabilities SHALL NEVER be merged into one — the privilege split this
