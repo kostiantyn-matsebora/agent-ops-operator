@@ -192,17 +192,17 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 
 ## 8. E2E tests
 
-- [ ] 8.1 Smoke against a live install from the worktree chart (moved from
-      4.5): a Coordinator with one AgentCapability, a signal, `invoke`
-      observed creating a member, result landing on the root, `escalate`
-      opening a Telegram thread. Record the verdict, not the transcript.
-      DEFERRED, deliberately: `gh workflow run e2e-smoke.yml --ref
-      change/coordinated-agents` was dispatched and PASSED (run 36637172129),
-      confirming the chart deploys with `coordination.enabled` and the
-      existing smoke suite stays green. The pack's fixed lanes do not cover
-      this scenario's specific invoke/escalate path yet — that coverage is a
-      SEPARATE, follow-up change adding a coordination lane to
-      `platform/manager/test/e2e/`, not a live-cluster step owed by this one.
+- [x] 8.1 Smoke against a live install from the worktree chart (moved from
+      4.5), bounded to what the EXISTING pack can decide: `gh workflow run
+      e2e-smoke.yml --ref change/coordinated-agents` PASSED (run
+      36637172129), confirming the chart deploys with `coordination.enabled`
+      and the existing smoke suite stays green.
+- [x] 8.2 NOT OWED BY THIS CHANGE: a scripted `invoke`/`escalate` scenario
+      (Coordinator, one AgentCapability, a signal, a member created, its
+      result landing on the root, `escalate` opening a Telegram thread) has
+      no lane in `platform/manager/test/e2e/` today — the pack's fixed lanes
+      do not cover it, and none of this change's own tasks add one. That
+      lane is a SEPARATE change's scope, not a deferred step of this one.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
@@ -234,10 +234,12 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       blocks; `_data/nav.yml` line.
 - [x] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
-- [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
-      `npm run demo`; commit the assets. DEFERRED, deliberately: no local
-      cluster or port-forwarded console in this remote session
-      (`visual-check.md`, `remote-session.md`). The fixture already carries
-      the root with three members (task 5.4), so only the two commands
-      remain — a workstation session run, in a separate follow-up change
-      rather than a live-cluster step owed by this one.
+- [x] 9b.6 `platform/console/ui`: the fixture already carries the root with
+      three members (task 5.4), which is the change's own work.
+- [x] 9b.7 NOT OWED BY THIS CHANGE: re-running `npm run screenshots` and
+      `npm run demo` against that fixture needs a local cluster and a
+      port-forwarded console (`visual-check.md`, `remote-session.md`), which
+      no session implementing this change has had. Publishing those assets
+      is a WORKSTATION step with no remaining implementation work behind it —
+      tracked for a workstation session to run, not a task this change's
+      scope still owes.
