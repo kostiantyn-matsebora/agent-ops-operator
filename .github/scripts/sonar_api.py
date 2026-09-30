@@ -19,7 +19,7 @@ import urllib.parse
 DEFAULT_API = "https://sonarcloud.io"
 PAGE = 500
 
-SAFE_URL = re.compile(r"^https?://[\w.\-~:/]+\?[\w.\-~%=&]*$")
+SAFE_URL = re.compile(r"^https?://[\w.\-~:/]+\?[\w.\-~%=&+]*$")
 
 
 def validated_api(raw: str) -> str:

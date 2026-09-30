@@ -40,7 +40,7 @@ query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
           isResolved
           path
           line
-          comments(first:100) { nodes { body author { login __typename } } }
+          comments(first:100) { totalCount nodes { body author { login __typename } } }
         }
       }
     }
@@ -245,11 +245,8 @@ def _thread_page(repo: str, pr: int, cursor: str | None) -> dict:
           "-F", f"number={pr}"]
     if cursor:
         cmd += ["-f", f"cursor={cursor}"]
-    out = subprocess.run(["gh", *cmd], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(f"gh api graphql: {(out.stderr or '').strip()}")
     try:
-        payload = json.loads(out.stdout)
+        payload = json.loads(gh(*cmd))
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"unreadable JSON from gh api graphql: {exc}")
     if "errors" in payload:
@@ -273,6 +270,9 @@ def unresolved_thread_findings(repo: str, pr: int, marker: str, with_location: b
     while True:
         page = _thread_page(repo, pr, cursor)
         for t in page["nodes"]:
+            if (t["comments"].get("totalCount") or 0) > len(t["comments"]["nodes"]):
+                print(f"warning: thread {t['id']} has more than {len(t['comments']['nodes'])} comments, "
+                      "only the first are read", file=sys.stderr)
             if t.get("isResolved") or not conveyor.unanswered_after_marker(t["comments"]["nodes"], marker):
                 continue
             where = f" ({t.get('path')}:{t.get('line') or '?'})" if with_location else ""
