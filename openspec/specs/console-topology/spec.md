@@ -495,7 +495,8 @@ The topology graph SHALL render `AgentCapability` and `Coordinator` as nodes.
   to that Coordinator's node.
 - An AgentCapability with no inbound edge SHALL be shown as unwired.
 - A node whose reference does not resolve SHALL be shown as misconfigured,
-  distinct from unwired.
+  distinct from unwired. The references are an AgentCapability's `profileRef`
+  and a Coordinator's `agents[].capabilityRef` or `agents[].coordinatorRef`.
 
 #### Scenario: Member edges
 - **WHEN** a Coordinator lists three AgentCapabilities
@@ -510,5 +511,5 @@ The topology graph SHALL render `AgentCapability` and `Coordinator` as nodes.
 - **THEN** its node is shown as unwired
 
 #### Scenario: Misconfigured AgentCapability
-- **WHEN** an AgentCapability's reference does not resolve
+- **WHEN** an AgentCapability's `profileRef` does not resolve
 - **THEN** its node is shown as misconfigured, not as unwired

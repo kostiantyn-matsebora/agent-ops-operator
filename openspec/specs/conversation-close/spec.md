@@ -315,6 +315,10 @@ member's own close then cascades to ITS members, keeping the same
 - **WHEN** a coordinator closes a direct member with a reason
 - **THEN** the member is `Closed` with that `closeReason`
 
+#### Scenario: Root close without a reason
+- **WHEN** a Coordinator's root closes itself, or a direct member it caused, with no reason
+- **THEN** the request is refused as missing a reason, and the conversation is unchanged
+
 #### Scenario: Out of scope — another conversation's member
 - **WHEN** a coordinator asks to close a conversation another conversation caused
 - **THEN** the request is refused naming the target as out of scope, and the conversation is unchanged

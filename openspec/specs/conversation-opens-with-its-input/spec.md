@@ -151,8 +151,8 @@ re-enqueues deduplicate.
 ### Requirement: A member result is an input with a member origin
 
 A result the manager appends to a root SHALL be an input whose origin has
-`kind: member` and a `name` of the member conversation, carrying its entry name
-beside it, so the record shows what was asked and
+`kind: member` and a `name` of the member conversation, carrying the
+Coordinator entry's name in `origin.entry` beside it, so the record shows what was asked and
 what each member answered. It SHALL be delivered to the root's bound channels
 per the ordinary per-destination rule — which is every channel, since no
 surface displayed it.
