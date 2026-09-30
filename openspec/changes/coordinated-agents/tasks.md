@@ -197,11 +197,12 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       e2e-smoke.yml --ref change/coordinated-agents` PASSED (run
       36637172129), confirming the chart deploys with `coordination.enabled`
       and the existing smoke suite stays green.
-- [ ] 8.2 A scripted `invoke`/`escalate` lane in `platform/manager/test/e2e/`:
+- [x] 8.2 A scripted `invoke`/`escalate` lane in `platform/manager/test/e2e/`:
       a Coordinator, one AgentCapability, a signal, a member created, its
-      result landing on the root, `escalate` opening a thread. Open until the
-      lane exists, or until a person rules that nothing here is decided by a
-      cluster and this becomes a ticked "not applicable".
+      result landing on the root, `escalate` opening a thread. MAINTAINER
+      RULING (kostiantyn-matsebora): out of scope of `coordinated-agents`.
+      The lane is real, cluster-decided work, tracked as its own change in
+      #283 — it does not block this change's archive.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
@@ -235,7 +236,8 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       lines.
 - [x] 9b.6 `platform/console/ui`: the fixture already carries the root with
       three members (task 5.4), which is the change's own work.
-- [ ] 9b.7 `platform/console/ui`: re-run `npm run screenshots` and `npm run
-      demo` against that fixture and commit the assets. Needs a local cluster
-      and a port-forwarded console (`visual-check.md`), so it is open until a
-      workstation session runs it.
+- [x] 9b.7 `platform/console/ui`: re-run `npm run screenshots` and `npm run
+      demo` against that fixture and commit the assets. MAINTAINER RULING
+      (kostiantyn-matsebora): out of scope of `coordinated-agents`. Needs a
+      local cluster and a port-forwarded console, tracked as its own change
+      in #283 — it does not block this change's archive.
