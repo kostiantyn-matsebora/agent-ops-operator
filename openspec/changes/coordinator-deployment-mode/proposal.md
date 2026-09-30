@@ -40,8 +40,9 @@ schedule and close when it has healed.
 - **New reach class on `platform/mcp-aops`**: a Coordinator-owner may list
   and close the OPEN ROOT conversations its own Coordinator has opened —
   scoped strictly to that Coordinator's own roots, never another
-  Coordinator's tree, never member conversations. This is the one new verb
-  surface in this change. Every other mechanism it uses (`invoke`,
+  Coordinator's tree, never member conversations. Only `list_open_roots` is a
+  new verb. `close` is an existing verb whose bound is widened to cover the
+  owner's own open roots. Every other mechanism it uses (`invoke`,
   member-result routing, escalation, budgets) is unchanged reuse.
 - **No new approval mechanism.** A coordinator "proposing a solution" and
   "coordinating it once approved" is ordinary escalation: the agent proposes
