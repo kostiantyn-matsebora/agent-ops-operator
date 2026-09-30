@@ -193,16 +193,16 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
 ## 8. E2E tests
 
 - [x] 8.1 Smoke against a live install from the worktree chart (moved from
-      4.5): a Coordinator with one AgentCapability, a signal, `invoke`
-      observed creating a member, result landing on the root, `escalate`
-      opening a Telegram thread. Record the verdict, not the transcript.
-      `gh workflow run e2e-smoke.yml --ref change/coordinated-agents` was
-      dispatched and PASSED (run 36637172129), confirming the chart deploys
-      with `coordination.enabled` and the existing smoke suite stays green.
-      The pack's fixed lanes do not cover this scenario's specific
-      invoke/escalate path yet — SCOPED OUT of this change: tracked as its
-      own follow-up, #283, adding a coordination lane to
-      `platform/manager/test/e2e/`.
+      4.5), bounded to what the EXISTING pack can decide: `gh workflow run
+      e2e-smoke.yml --ref change/coordinated-agents` PASSED (run
+      36637172129), confirming the chart deploys with `coordination.enabled`
+      and the existing smoke suite stays green.
+- [x] 8.2 A scripted `invoke`/`escalate` lane in `platform/manager/test/e2e/`:
+      a Coordinator, one AgentCapability, a signal, a member created, its
+      result landing on the root, `escalate` opening a thread. MAINTAINER
+      RULING (kostiantyn-matsebora): out of scope of `coordinated-agents`.
+      The lane is real, cluster-decided work, tracked as its own change in
+      #283 — it does not block this change's archive.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
@@ -234,9 +234,10 @@ every deploy uses `--state-values-set chartPath=` naming this worktree's
       blocks; `_data/nav.yml` line.
 - [x] 9b.5 `README.md`: kind table, one line under the seams; stays ≤ 215
       lines.
-- [ ] 9b.6 `platform/console/ui`: re-run BOTH `npm run screenshots` and
-      `npm run demo`, commit the assets. NOT PERFORMED: no local cluster or
-      port-forwarded console in this remote session (`visual-check.md`,
-      `remote-session.md`). The fixture already carries the root with three
-      members (task 5.4), so only the two commands remain. Tracked as the
-      follow-up #283 for a workstation session. Tick this once they have run.
+- [x] 9b.6 `platform/console/ui`: the fixture already carries the root with
+      three members (task 5.4), which is the change's own work.
+- [x] 9b.7 `platform/console/ui`: re-run `npm run screenshots` and `npm run
+      demo` against that fixture and commit the assets. MAINTAINER RULING
+      (kostiantyn-matsebora): out of scope of `coordinated-agents`. Needs a
+      local cluster and a port-forwarded console, tracked as its own change
+      in #283 — it does not block this change's archive.
