@@ -45,11 +45,24 @@ COPY package.json package-lock.json /srv/
 # released as two packages, and a floating range once installed a pair that
 # threw before any session existed (SDK 1.0.11 against CLI 1.0.81).
 # npm FIRST: the image scan gates on fixable CRITICAL/HIGH, and the npm the
-# base image ships carries old `tar` and `brace-expansion` under
-# /usr/local/lib/node_modules/npm — the same fix runtimes/claude applies.
-# PINNED, not @latest (docker:S8543) -- an EXPLICIT, hand-bumped version;
-# check `npm view npm version` before bumping, and re-verify against a Trivy
-# scan of the built image that the CVE this upgrade exists for stays fixed.
+# base image ships carries old `brace-expansion`, `undici`, `tar` and
+# `ip-address` under /usr/local/lib/node_modules/npm — the same fix
+# runtimes/claude applies. PINNED, not @latest (docker:S8543) -- an
+# EXPLICIT, hand-bumped version; check `npm view npm version` before
+# bumping, and re-verify against a Trivy scan of the built image that the
+# CVE this upgrade exists for stays fixed.
+#
+# THE PIN ALONE STOPPED BEING ENOUGH: npm 12.2.0 (the latest release as of
+# this fix) still bundles versions of all four below their fixed ones.
+# There is no npm release yet that clears the scan, so each vendored package
+# is overwritten in place with a same-major bump that satisfies npm's own
+# range on it (minimatch wants brace-expansion ^5.0.5, node-gyp wants undici
+# ^6.25.0, node-gyp/pacote/libnpmdiff want tar ^7.4.3 or newer, socks wants
+# ip-address ^10.1.1) -- `npm pack` pulls the fixed tarball straight from the
+# registry, no extra file to commit. Re-check each range before ever bumping
+# npm past this pin, since a new npm version may resolve a different
+# transitive version, and re-verify against a Trivy scan that the CVE each
+# entry exists for stays fixed.
 # THEN drop the CLI's bundled foundry-local-sdk: a Windows/macOS local-model
 # host this Linux pod can never use, whose vendored adm-zip is the one finding
 # npm cannot reach (it sits inside the platform package, not in the lockfile).
@@ -61,6 +74,14 @@ COPY package.json package-lock.json /srv/
 RUN npm install -g --ignore-scripts npm@12.0.2 && \
     npm ci --omit=dev --no-audit --no-fund --ignore-scripts && \
     rm -rf /srv/node_modules/@github/copilot-linux-*/foundry-local-sdk && \
+    NPM_ROOT="$(npm root -g)/npm/node_modules" && \
+    cd /tmp && \
+    for entry in brace-expansion@5.0.12 undici@6.28.1 tar@7.5.22 ip-address@10.7.2; do \
+      pkg="$(echo "$entry" | cut -d@ -f1)" && \
+      tgz="$(npm pack --silent "$entry")" && \
+      rm -rf "$NPM_ROOT/$pkg" && tar xzf "$tgz" && mv package "$NPM_ROOT/$pkg" && \
+      rm -f "$tgz"; \
+    done && \
     npm cache clean --force
 COPY runtime.js tools.js vocabulary.js mcp.js continuity.js report.js /srv/
 

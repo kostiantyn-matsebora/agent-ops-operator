@@ -403,11 +403,63 @@ module.exports = {
   SESSIONS_DIR, CLAUDE_BIN, WORKSPACE,
 };
 
-// The IIFE below is wrapped rather than edited: its own lines are untouched
-// text, so SonarCloud's PR analysis tracks its existing findings as old
-// code rather than re-flagging them as new the moment a guard is added.
-if (require.main === module) {
-(async () => {
+// Extracted to a NAMED top-level function rather than left as an inline
+// IIFE body: SonarCloud's javascript:S3776 (cognitive complexity) charges a
+// nested function literal's control flow to the ENCLOSING function, so
+// wrapping it in a closure (or `t.Run`-style callback) does not reset the
+// score. A plain call is not a nesting-increasing construct, so the guarded
+// `void runLoop()` below costs nothing -- MEASURED: adding `void` to the
+// previous inline IIFE (for javascript:S9383, above) touched this
+// function's first line and made SonarCloud count its PRE-EXISTING
+// complexity (30, against a limit of 15) as new code, failing
+// new_maintainability_rating on a change that added no control flow here.
+// A `fetch` that cannot reach $CONTROL_URL, or a long-poll that came back
+// empty, is ordinary — the caller just polls again. `undefined` means
+// "nothing to do this iteration", never an error.
+async function pollNextUnit() {
+  let res;
+  try {
+    res = await fetch(`${CONTROL_URL}/work?convo=${encodeURIComponent(CONVO_ID)}&pod=${encodeURIComponent(POD_NAME)}&wait=25`);
+  } catch { await sleep(5000); return undefined; }
+  if (res.status === 204) return undefined;
+  if (!res.ok) { await sleep(5000); return undefined; }
+  try { return await res.json(); } catch { return undefined; }
+}
+
+// Retries for up to ten minutes (60 * 10s) rather than failing the run: the
+// manager's own outage must not discard a result claude-code already
+// produced. `continuity` rides along from spawnClaude — the manager cannot
+// infer it, since it sends a handle and gets a handle back.
+async function reportDone(unit, out) {
+  // Report the handle under BOTH names for one release: the current one,
+  // and the retired spelling so this image also works against an older
+  // manager.
+  const { sessionId, ...rest } = out;
+  const done = {
+    convo: CONVO_ID,
+    runId: unit.runId,
+    ...rest,
+    ...(sessionId ? { runtimeContextId: sessionId, sessionId } : {}),
+  };
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(`${CONTROL_URL}/work/done`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(done),
+      });
+      if (r.ok) return;
+    } catch {}
+    await sleep(10000);
+  }
+}
+
+// Exported alongside the module.exports object above rather than folded
+// into it: both are declared below that object (function hoisting makes
+// either position work), and a second, small assignment here keeps them
+// visually beside the loop code they test.
+module.exports.pollNextUnit = pollNextUnit;
+module.exports.reportDone = reportDone;
+
+async function runLoop() {
   console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
 
@@ -419,39 +471,22 @@ if (require.main === module) {
       idle = true;
       continue;
     }
-    let res;
-    try {
-      res = await fetch(`${CONTROL_URL}/work?convo=${encodeURIComponent(CONVO_ID)}&pod=${encodeURIComponent(POD_NAME)}&wait=25`);
-    } catch { await sleep(5000); continue; }
-    if (res.status === 204) continue;
-    if (!res.ok) { await sleep(5000); continue; }
-    let unit;
-    try { unit = await res.json(); } catch { continue; }
+    const unit = await pollNextUnit();
+    if (!unit) continue;
     lastWork = Date.now();
     try { await syncRepo(); } catch (e) { console.error(`[runtime] sync: ${e.message}`); }
     const out = await runClaude(unit);
     lastWork = Date.now();
-    // Report the handle under BOTH names for one release: the current one, and
-    // the retired spelling so this image also works against an older manager.
-    // `continuity` rides along from spawnClaude — the manager cannot infer it,
-    // since it sends a handle and gets a handle back.
-    const { sessionId, ...rest } = out;
-    const done = {
-      convo: CONVO_ID,
-      runId: unit.runId,
-      ...rest,
-      ...(sessionId ? { runtimeContextId: sessionId, sessionId } : {}),
-    };
-    for (let i = 0; i < 60; i++) {
-      try {
-        const r = await fetch(`${CONTROL_URL}/work/done`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(done),
-        });
-        if (r.ok) break;
-      } catch {}
-      await sleep(10000);
-    }
+    await reportDone(unit, out);
   }
   process.exit(0);
-})();
+}
+
+if (require.main === module) {
+  // javascript:S7785 wants top-level `await` here instead. Real top-level
+  // await is an ESM feature and is a SyntaxError in a CommonJS module (this
+  // file has no package.json, so CommonJS is Node's default) -- converting
+  // this file and everything it requires to ESM is a far larger change than
+  // this line justifies. NOSONAR rather than a real fix.
+  void runLoop(); // NOSONAR
 }
