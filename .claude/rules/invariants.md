@@ -648,6 +648,64 @@ loop breaker is not one. A nil excluder still applies mechanism 1 on purpose.
 the failure. Routing it back through ingest to open a conversation is the
 architectural error, not merely a noisy one.
 
+### No coordination loops
+
+A third lane, one hop shorter than the other two: **the `invoke` verb refuses
+a cycle in the Coordinator graph, at the point of the call rather than after
+the fact.**
+
+- **On `invoke`, the manager collects the calling conversation's OWN
+  `coordinatorRef` first**, then walks its `causedBy` chain to the uncaused
+  root, collecting each ancestor's.
+- **The invoked entry's target already in that list is refused**, naming the
+  repeated Coordinator. Only a `coordinatorRef` entry can ever be the
+  repeated target — a `capabilityRef` entry names an AgentCapability, which
+  carries no `agents[]` to invoke from.
+- **NO DEPTH LIMIT is imposed.** A tree may nest as deep as its own per-level
+  budgets allow. A cycle is a different failure from depth: A invoking B
+  invoking A never terminates, however generous every budget is.
+- **The walk is bounded by the chain's own length**, which the three ordinary
+  budgets below already keep finite, so the check adds no new unbounded work.
+
+**BUDGET ENFORCEMENT HAS TWO EDGES, EVALUATED PER COORDINATOR LEVEL —
+NESTING DOES NOT POOL A BUDGET ACROSS LEVELS.** Each conversation that is
+itself a Coordinator's root enforces its OWN snapshotted `limits`, independent
+of any ancestor's.
+
+| Edge | Where | Action |
+|---|---|---|
+| `maxAgents` | the `invoke` verb | refuse, then close THIS conversation `budget-exceeded` |
+| `maxTurns` | `handleWorkDone` on THIS conversation | close `budget-exceeded` after recording |
+| `deadline` | the conversation reconciler, requeue at the deadline | close `budget-exceeded` |
+
+- **Closing a conversation closes every member with `causedBy` naming it**,
+  the same `closeReason` kept verbatim, recursively — a closed member may
+  itself have members.
+- **`budget-exceeded` closes every live member first, then calls `escalate`
+  on THIS conversation** with a manager-written digest (limit, counts, member
+  list), never a separate close: `escalate` performs one of its two outcomes
+  (below) and that IS the close on a nested conversation.
+- **`agentsInvoked` increments on the conversation's OWN status under
+  optimistic concurrency.** A conflict retries.
+
+**A CAUSED CONVERSATION BINDS NO HUMAN CHANNEL.** Only the UNCAUSED root a
+Coordinator opens ever carries `spec.channelRefs` — a member's `spec.channelRefs`
+is always empty, by construction at creation, never emptied later.
+
+- **`escalate` is the one path a human ever sees a nested conversation
+  through, and only indirectly.** Called on a member (one carrying
+  `causedBy`), it opens NO thread: it closes the member with the escalate
+  message as `closeReason` and result, which lands on the member's PARENT as
+  an ordinary member-result input — bubbling one hop at a time until a call
+  reaches the uncaused root, which opens the human thread instead of closing.
+- **`DeliverInputs` fences on `escalatedAt`**: nothing arrived before an
+  uncaused root's escalation is delivered to the channels that escalation
+  just bound. Replaying the backlog into a freshly opened thread would show a
+  transcript that predates the human's own arrival.
+- **The Coordinator's `channelRefs` are SNAPSHOTTED onto the root as
+  `spec.escalationChannelRefs` at creation**, refs frozen like every other
+  binding — `escalate` reads the snapshot, never the Coordinator.
+
 ### Runtime pods
 
 - **ownerRef → Conversation**, for GC.

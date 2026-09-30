@@ -34,7 +34,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import conveyor_io as io  # noqa: E402  -- the dispute-thread walk: the archive guard reads the same one
+import conveyor_io  # noqa: E402  -- the dispute-thread walk: the archive guard reads the same one
 
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 WORKFLOW = "review-dispatch.yml"
@@ -73,7 +73,7 @@ def unanswered(repo: str, pr: int, marker: str) -> list[str]:
     the exact same two-part shape. A `RuntimeError` from that shared read is
     an `Unreadable` here, this program's own vocabulary for "left as it is"."""
     try:
-        return io.unanswered_disputes(repo, pr, marker,
+        return conveyor_io.unanswered_disputes(repo, pr, marker,
                                       comment_note="a pull request comment disputing analysis issues or checks")
     except RuntimeError as exc:
         raise Unreadable(str(exc))
