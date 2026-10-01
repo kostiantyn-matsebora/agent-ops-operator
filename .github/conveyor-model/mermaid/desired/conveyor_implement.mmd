@@ -8,14 +8,21 @@ stateDiagram-v2
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state ready
     state implementing
+    state implemented
+    state implemented_with_issues
+    state ready_to_merge
     state done
-    state stalled
+    state merge_failed
     ready --> implementing : implement_fired [placer_has_access AND NOT is_session_at_work] / fire
     ready --> implementing : implement_fired [grant_placer_has_access AND NOT is_session_at_work] / fire
     implementing --> implementing : implement_fired [placer_has_access AND NOT is_session_at_work] / fire
     implementing --> implementing : implement_fired [grant_placer_has_access AND NOT is_session_at_work] / fire
-    implementing --> done : implementing_pr_merged [all_pr_merged]
-    implementing --> stalled : implementing_pr_merged [NOT all_pr_merged]
+    implementing --> implemented : prs_are_created [has_open_prs]
+    implemented --> ready_to_merge : checks_completed [all_pr_mergeable]
+    implemented --> implemented_with_issues : checks_completed [NOT all_pr_mergeable]
+    ready_to_merge --> done : all_prs_merged [master_is_green]
+    ready_to_merge --> merge_failed : all_prs_merged [NOT master_is_green]
+    implemented_with_issues --> [*]
     done --> [*]
-    stalled --> [*]
-    class ready, implementing, done, stalled stationState
+    merge_failed --> [*]
+    class ready, implementing, implemented, implemented_with_issues, ready_to_merge, done, merge_failed stationState

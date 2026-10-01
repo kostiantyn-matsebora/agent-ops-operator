@@ -50,15 +50,30 @@ workflows:
             to: implementing
             guard: "grant_placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
-          - event: "implementing_pr_merged"
+          - event: "prs_are_created"
+            to: implemented
+            guard: "has_open_prs"
+      implemented:
+        transitions:
+          - event: "checks_completed"
+            to: ready_to_merge
+            guard: "all_pr_mergeable"
+          - event: "checks_completed"
+            to: implemented_with_issues
+            guard: "NOT all_pr_mergeable"
+      implemented_with_issues:
+        final: true
+      ready_to_merge:
+        transitions:
+          - event: "all_prs_merged"
             to: done
-            guard: "all_pr_merged"
-          - event: "implementing_pr_merged"
-            to: stalled
-            guard: "NOT all_pr_merged"
+            guard: "master_is_green"
+          - event: "all_prs_merged"
+            to: merge_failed
+            guard: "NOT master_is_green"
       done:
         final: true
-      stalled:
+      merge_failed:
         final: true
 
   conveyor.fix:
@@ -77,9 +92,8 @@ workflows:
             to: mergeable
       mergeable:
         transitions:
-          - event: "fixing_pr_merged"
+          - event: "all_prs_merged"
             to: done
-            guard: "all_pr_merged"
       done:
         final: true
 
@@ -101,8 +115,7 @@ workflows:
       finalizing:
         invokes: loop
         transitions:
-          - event: "finalize_pr_merged"
+          - event: "all_prs_merged"
             to: finalized
-            guard: "all_pr_merged"
       finalized:
         final: true
