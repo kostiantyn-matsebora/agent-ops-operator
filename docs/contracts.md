@@ -1050,10 +1050,14 @@ caller.** The manager reads the caller's own `coordinatorRef` first.
 - **This is what lets a plain member reach it.** One with no `coordinatorRef`
   of its own — the self-heal reaper's own shape — still reaches
   `list_open_roots` and the widened `close`.
+- **`invoke` resolves the caller's Coordinator the SAME walk.** A plain
+  member may `invoke` a sibling entry of the Coordinator it resolves to,
+  never only the coordinating root — the reaper calling `invoke` on the
+  domain capability it is re-checking is this walk's own reason to exist.
 
 | Verb | Bound |
 |---|---|
-| `invoke` | the Coordinator's `agents[]` list |
+| `invoke` | the `agents[]` list of the Coordinator the caller RESOLVES to (its own `coordinatorRef`, or failing that, its uncaused root's) |
 | `escalate` | the caller itself — never a member reached through it |
 | `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
 | `close` | the caller itself, a conversation it directly caused — OR, when the caller RESOLVES to a Coordinator, any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor root. Never a member of any kind, and never a different Coordinator's root |
@@ -1064,10 +1068,10 @@ A refusal reaches the caller as an error naming the bound that refused it.
 
 | Refused | By |
 |---|---|
-| Invoking an AgentCapability outside the caller's `agents[]` list | manager |
+| Invoking an AgentCapability outside the caller's resolved Coordinator's `agents[]` list | manager |
+| `invoke`, `close` or `list_open_roots` for a caller that resolves to no Coordinator at all — an ordinary Pipeline-addressed conversation | manager |
 | Acting on a conversation outside the caller's own subtree | manager |
 | `close` past one hop — a directly caused member only, never a deeper descendant reached through it, even within the caller's own subtree | manager |
-| `close` or `list_open_roots` for a caller that resolves to no Coordinator at all | manager |
 | `close` or `list_open_roots` reaching a member, however shallow, even one within the caller's own Coordinator's tree | manager |
 | `close` or `list_open_roots` reaching a different Coordinator's root | manager |
 | `close` reaching the caller's own ancestor root through the widened bound | manager |

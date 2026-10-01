@@ -173,7 +173,12 @@ func (s *Server) handleCoordinateInvoke(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	ctx := r.Context()
-	caller, err := s.callerConversation(ctx, in.Conversation, bearerToken(r))
+	// callerActingForCoordinator, not callerConversation: invoke's bound now
+	// resolves the Coordinator the caller ACTS FOR (coordinator-owner-reach's
+	// walk), reachable from a plain MEMBER caller — the reaper included —
+	// which carries no coordinatorRef of its own. See InvokeMember's doc
+	// comment (chat/coordinate.go).
+	caller, err := s.callerActingForCoordinator(ctx, in.Conversation, bearerToken(r))
 	if err != nil {
 		writeCoordinateError(w, statusFor(err), err)
 		return

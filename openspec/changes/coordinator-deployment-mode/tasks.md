@@ -161,6 +161,41 @@
       real conversation objects — the one behavior a real API server's
       `causedBy` chain must be walked against, not a fake. Run the pack and
       record the verdict.
+      `test/e2e/coordinator.go` + `test/e2e/coordinator_test.go` added:
+      `TestCoordinatorModeInvokeAndMemberResultRouting` (source claim,
+      invoke, member-result routing, over hand-authored
+      Coordinator/AgentCapability CRs — legitimate per `wiring-mode`'s own
+      "an operator may hand-write a Coordinator" scenario, since rendering
+      one from the chart is already pinned at the envtest tier) and
+      `TestCoordinatorSelfHealSurveyExcludesAncestorRoot` (real cron-adapter
+      pod fires an admitted signal every minute standing in for the hourly
+      schedule — the same substitution `TestCronLane` already makes —
+      reaper invoked as a real member, `list_open_roots` asserted against
+      REAL conversation objects over the LIVE deployed manager, the reaper's
+      own re-check `invoke` on the domain capability, ancestor-root
+      exclusion asserted, widened `close` asserted both ways). Both compile
+      under `-tags e2e` (`go test -tags e2e -c -o /dev/null ./test/e2e/`),
+      `go vet ./...` and the untagged `go test ./...` stay green.
+      A gap surfaced while writing the second lane and was fixed, not
+      merely noted: `coordinator-self-heal` requires the reaper (a plain
+      `causedBy` member) to `invoke` a domain capability to re-check it, but
+      `handleCoordinateInvoke`'s `callerConversation`
+      (`platform/manager/internal/httpapi/coordinate.go`) required the
+      caller to carry `spec.coordinatorRef` DIRECTLY — unlike
+      `handleCoordinateClose` / `handleCoordinateOpenRoots`, which already
+      resolved through `callerActingForCoordinator`
+      (`ResolveActingCoordinator`, design D-A). `handleCoordinateInvoke` now
+      calls `callerActingForCoordinator` too, and `chat.Router.InvokeMember`
+      resolves the Coordinator it searches `agents[]` on via
+      `ResolveActingCoordinator` instead of reading
+      `caller.Spec.CoordinatorRef` directly — the same walk `close` and
+      `list_open_roots` already use. `docs/contracts.md`'s `invoke` bound
+      row and refusal table updated to match.
+      NOT RUN against a live cluster: this session has no docker daemon and
+      no `k3d` — workstation/CI-only per `remote-session.md`. Left
+      UNTICKED for that reason alone — the lane is written, compiles, and
+      (per the fix above) should pass end to end once actually run against
+      a cluster, but "should pass" is not a verdict this session can claim.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 

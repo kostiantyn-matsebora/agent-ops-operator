@@ -61,19 +61,31 @@ var (
 )
 
 // InvokeMember is the manager's half of the MCP `invoke(agent, task)` verb
-// (design D-F): resolve the named `agents[]` entry against the CALLER's own
-// Coordinator, refuse a cycle or a spent budget, then create or attach a
-// member conversation and hand it the task.
+// (design D-F): resolve the named `agents[]` entry against the Coordinator
+// the CALLER acts for, refuse a cycle or a spent budget, then create or
+// attach a member conversation and hand it the task.
 //
-// The caller MUST itself be a Coordinator's own conversation
-// (`spec.coordinatorRef` set) — invoking is a capability of the coordinating
-// agent's OWN conversation, never of an arbitrary one.
+// The caller resolves which Coordinator it acts for the SAME way the
+// Coordinator-owner reach class does (coordinator-owner-reach, design D-A,
+// ResolveActingCoordinator): its own `coordinatorRef` when it is itself a
+// Coordinator's root, or — failing that — the uncaused root its `causedBy`
+// chain leads to. This is what lets an ORDINARY `agents[]` member invoke a
+// sibling entry of its own Coordinator, which `coordinator-self-heal`
+// requires of the reaper: it is invoked as a plain member of the
+// cron-triggered root, and must itself call `invoke` to re-check a domain
+// capability, never merely the coordinating root. A caller that resolves to
+// no Coordinator at all (an ordinary Pipeline-addressed conversation) is
+// refused exactly as before.
 func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, agentName, task string) (*InvokeResult, error) {
-	if caller.Spec.CoordinatorRef == nil {
+	scope, err := r.ResolveActingCoordinator(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	if scope.Name == "" {
 		return nil, ErrNotCoordinatorRoot
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: scope.Name}, &co); err != nil {
 		return nil, err
 	}
 	entry := findAgentEntry(&co, agentName)

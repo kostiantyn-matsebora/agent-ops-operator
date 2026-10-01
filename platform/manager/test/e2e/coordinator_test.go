@@ -111,26 +111,15 @@ func TestCoordinatorModeInvokeAndMemberResultRouting(t *testing.T) {
 // thing beyond what internal/integration/coordinator_owner_reach_test.go
 // already pins against envtest's in-process handler call.
 //
-// KNOWN GAP, surfaced rather than hidden or weakened: coordinator-self-heal's
-// spec requires the reaper itself to re-invoke the incident's domain
-// capability to re-check it ("SHALL invoke the SAME domain AgentCapability
-// entry named in that root's members field"). As implemented today,
-// `/coordinate/invoke`'s callerConversation
-// (platform/manager/internal/httpapi/coordinate.go) refuses any caller that
-// does not carry `spec.coordinatorRef` DIRECTLY — the reaper, an ordinary
-// causedBy member with no coordinatorRef of its own (coordinator-self-heal's
-// own description of its shape), never does. Design D-A's walk, and the
-// callerActingForCoordinator resolution built on it, were wired into
-// handleCoordinateClose and handleCoordinateOpenRoots (both asserted
-// working below) but NOT into handleCoordinateInvoke /
-// chat.Router.InvokeMember, which still hard-requires the literal field.
-// This test asserts the SPEC's behaviour at that step, not the
-// implementation's, so it is expected to fail there until backend-developer
-// (owner of tasks 4.1-4.5 in
-// openspec/changes/coordinator-deployment-mode/tasks.md) widens
-// handleCoordinateInvoke's caller resolution the same way. Every assertion
-// before that step is the already-working mechanism and should pass on its
-// own.
+// The reaper itself re-invokes the incident's domain capability to re-check
+// it ("SHALL invoke the SAME domain AgentCapability entry named in that
+// root's members field") — an ordinary `causedBy` member invoking a sibling
+// entry of the Coordinator it resolves to, never only the coordinating root.
+// `handleCoordinateInvoke` / `chat.Router.InvokeMember` resolve the caller
+// via the SAME `ResolveActingCoordinator` walk `callerActingForCoordinator`
+// already uses for `close` and `list_open_roots` (coordinator-owner-reach,
+// design D-A), so this reaches the manager exactly as `close` and
+// `list_open_roots` do below.
 func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	fullTier(t)
 	e := requireEnv(t)
@@ -244,22 +233,13 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 		t.Fatalf("the incident root's members projection must name its domain-agent entry, got %v", incidentMembers)
 	}
 
-	// KNOWN GAP (see this test's doc comment): the reaper re-invokes the
-	// incident's own domain-agent entry to re-check it, scripted here to
-	// report the condition cleared. Expected to be refused today — see the
-	// doc comment for exactly why and who owns the fix.
+	// The reaper re-invokes the incident's own domain-agent entry to re-check
+	// it, as a plain member of the cron-triggered root — scripted here to
+	// report the condition cleared.
 	healCode, healOut := e.coordinateCall(t, "/coordinate/invoke", reaperToken,
 		map[string]any{"conversation": reaperName, "agent": "domain-agent", "task": "echo healed-" + stamp})
 	if healCode != 200 {
-		t.Fatalf("reaper re-check invoke refused (%d %v) — KNOWN GAP: handleCoordinateInvoke's "+
-			"callerConversation (platform/manager/internal/httpapi/coordinate.go) requires "+
-			"spec.coordinatorRef set DIRECTLY on the caller, which a plain causedBy member (the "+
-			"reaper) never carries. coordinator-self-heal's spec requires this call to succeed via "+
-			"the SAME ResolveActingCoordinator walk callerActingForCoordinator already uses for "+
-			"close and open-roots (coordinator-owner-reach design D-A). Route to backend-developer, "+
-			"owner of tasks 4.1-4.5 in openspec/changes/coordinator-deployment-mode/tasks.md, to "+
-			"widen handleCoordinateInvoke / chat.Router.InvokeMember's caller resolution the same way.",
-			healCode, healOut)
+		t.Fatalf("reaper re-check invoke refused (%d %v)", healCode, healOut)
 	}
 	healedMember, _ := healOut["member"].(string)
 	e.WaitRun(t, healedMember, 1, 3*time.Minute)
