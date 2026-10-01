@@ -16,6 +16,7 @@ workflows:
         transitions:
           - event: "loop_entered_mergeable"
             to: proposed
+            guard: "proposal_pr_is_mergeable"
       proposed:
         transitions:
           - event: "proposal_pr_merged"
