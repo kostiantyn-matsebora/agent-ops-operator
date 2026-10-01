@@ -11,7 +11,7 @@ stateDiagram-v2
     state proposed
     state ready
     none --> proposing : proposal_pr_opened
-    proposing --> proposed : proposal_pr_mergeable
+    proposing --> proposed : loop_entered_mergeable
     proposed --> ready : proposal_pr_merged
     ready --> [*]
     class none, proposing, proposed, ready stationState
