@@ -134,5 +134,5 @@ workflows:
         transitions:
           - event: "round_finished"
             to: mergeable
-            guard: "session_finished AND checks_completed"
+            guard: "session_finished AND checks_completed AND pr_is_mergeable"
       mergeable: {}
