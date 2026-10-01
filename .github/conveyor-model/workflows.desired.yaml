@@ -144,3 +144,11 @@ workflows:
           - event: "round_started"
             to: fixing
             guard: "NOT is_capped"
+          - event: "restarted"
+            to: restarted
+            guard: "is_capped AND reset AND has_access"
+      restarted:
+        transitions:
+          - event: "round_started"
+            to: fixing
+            guard: "has_access"

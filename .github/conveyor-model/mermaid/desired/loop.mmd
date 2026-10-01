@@ -10,9 +10,12 @@ stateDiagram-v2
     state fixing
     state mergeable
     state fixing_failed
+    state restarted
     started --> fixing : round_started [has_access]
     fixing --> mergeable : round_finished [session_finished AND checks_completed AND pr_is_mergeable]
     fixing --> fixing_failed : round_finished [session_finished AND checks_completed AND NOT pr_is_mergeable]
     fixing_failed --> fixing : round_started [NOT is_capped]
+    fixing_failed --> restarted : restarted [is_capped AND reset AND has_access]
+    restarted --> fixing : round_started [has_access]
     mergeable --> [*]
-    class started, fixing, mergeable, fixing_failed loopState
+    class started, fixing, mergeable, fixing_failed, restarted loopState
