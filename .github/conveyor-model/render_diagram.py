@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Render each conveyor:* workflow in workflows.yaml as its OWN Mermaid
-state diagram -- mechanically, no inference, no cross-conveyor merging.
+"""Render each conveyor:* workflow in workflows.desired.yaml as its OWN
+Mermaid state diagram -- mechanically, no inference, no cross-conveyor
+merging.
 
 MODEL: a conveyor is a PROCESS. Its diagram shows exactly its own `states:`
 mapping, written directly in station's or loop's real vocabulary. STATES OWN
@@ -83,7 +84,7 @@ def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[s
 
 
 def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> str:
-    """One conveyor, drawn exactly as workflows.yaml declares it -- every
+    """One conveyor, drawn exactly as workflows.desired.yaml declares it -- every
     state, every transition, every guard it lists, nothing inferred.
 
     COLLAPSE, mechanical not guessed: when every state in this workflow
@@ -195,7 +196,7 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
 
 
 def main() -> int:
-    workflows = load("workflows.yaml")["workflows"]
+    workflows = load("workflows.desired.yaml")["workflows"]
 
     out_dir = HERE / "mermaid"
     out_dir.mkdir(exist_ok=True)
@@ -208,24 +209,6 @@ def main() -> int:
 
     print(f"wrote {len(list(out_dir.glob('*.mmd')))} mermaid files to {out_dir}")
     print("one diagram per conveyor, every edge is event [guard] / owner inline.")
-
-    # DESIRED workflows -- NOT YET IMPLEMENTED, rendered into a SEPARATE
-    # subfolder so a reader can never mistake a target design for verified,
-    # already-shipped behavior. Every title is prefixed "[DESIRED]".
-    desired_path = HERE / "workflows.desired.yaml"
-    if desired_path.exists():
-        desired = load("workflows.desired.yaml")["workflows"]
-        desired_dir = HERE / "mermaid" / "desired"
-        desired_dir.mkdir(exist_ok=True, parents=True)
-        for old in desired_dir.glob("*.mmd"):
-            old.unlink()
-        combined = {**workflows, **desired}
-        for name, w in desired.items():
-            safe = name.replace(".", "_").replace(":", "_")
-            text = render_workflow(f"[DESIRED] {name}", w, all_workflows=combined)
-            (desired_dir / f"{safe}.mmd").write_text(text + "\n")
-        print(f"wrote {len(list(desired_dir.glob('*.mmd')))} DESIRED (not yet implemented) "
-              f"mermaid files to {desired_dir}")
 
     return 0
 
