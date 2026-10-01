@@ -1,14 +1,23 @@
-# Declarative definition of the five conveyor:* label-triggered workflows.
+# Declarative definition of the five conveyor:* label-triggered workflows,
+# verified against conveyor.py's real functions -- not against an assumed
+# shape. See triggers.yaml's module docstring for the correction history.
 #
-# Each is its own tiny machine (idle -> running -> done), kept SEPARATE from
-# station.yaml / loop.yaml (the two machines conveyor.py already implements)
-# because these are a different kind of thing: a workflow's DONE state is
-# what fires a station or loop event, never the other way around.
+# CORRECTED, found by auditing against the real code: conveyor.run does NOT
+# "invoke" implement/fix/archive as child workflows through any single
+# function. There is no such function. conveyor:run is a STANDING FACT on
+# the issue, independently re-read by THREE SEPARATE decision functions at
+# THREE DIFFERENT real GitHub events:
 #
-# conveyor:run is the one workflow that COMPOSES the other four: while
-# running, it conditionally INVOKES them as nested/child workflows. This is
-# what "conveyor:run triggers conveyor:implement/fix/keep-going/archive" means
-# in state-machine terms -- hierarchical composition, not a shared state.
+#   fire()           on `issues: labeled`            -> implement OR archive
+#                                                        (fire() never picks "fix")
+#   carry_fix()       on a pull request's CI completing -> carries conveyor:fix
+#   carry_archive()   on a pull request merging          -> carries conveyor:run
+#                                                            onward, restarts
+#                                                            implement, or stalls
+#
+# So each of implement/fix/archive below has its OWN real entry transitions,
+# each naming which real function and which real event fires it -- conveyor.run
+# has no `invokes:` list, because there is nothing in the code for it to name.
 #
 # EVERY guard and action below is a NAME, resolved against a Python registry
 # at load time (see registry.yaml). This file never contains logic, only the
@@ -32,24 +41,18 @@ workflows:
     # NO `done`: this is the STANDING instruction, not one-shot. It cycles
     # idle<->running for as long as a person leaves the label on, and is
     # never "finished" the way implement/fix/keep_going/archive are.
+    #
+    # NO `invokes:` HERE. conveyor.run does not call out to the other
+    # workflows -- it is a FACT those workflows' own decision functions
+    # independently re-check (standing_grant()) at their OWN real trigger
+    # points. See triggers.yaml for exactly which function fires on which
+    # event, and conveyor_implement.mmd / conveyor_fix.mmd / conveyor_archive.mmd
+    # for each one's real entry transitions.
     states: [idle, running]
     initial: idle
     transitions:
-      - { from: idle,    event: label.placed,  guard: placer.may_push,            to: running, action: none }
-      - { from: running, event: label.removed,                                     to: idle,    action: none }
-    # re-evaluated on every station transition WHILE running -- not a single
-    # fire-and-forget entry action, because the standing grant must be
-    # re-checked at every boundary (conveyor.py's own `standing_grant`).
-    reevaluate_on: [station.transitioned, pull_request.ci_completed, pull_request.review_completed]
-    invokes:
-      # each entry: which child workflow to trigger, and the guard deciding
-      # whether THIS re-evaluation is the one that triggers it. Mutually
-      # exclusive in practice (conveyor.py's fire() picks exactly one
-      # station), but declared as independent guarded entries so adding a
-      # station later is additive.
-      - { workflow: conveyor.implement, guard: "station.current in (none, implement, fix, merge, stalled) and not line.change_finished" }
-      - { workflow: conveyor.fix,       guard: "station.current == fix" }
-      - { workflow: conveyor.archive,   guard: "station.current in (merge, archive) and line.change_finished" }
+      - { from: idle,    event: run.label_placed,  guard: placer.may_push,  to: running, action: none }
+      - { from: running, event: run.label_removed,                          to: idle,    action: none }
 
   conveyor.implement:
     subject: issue
@@ -57,9 +60,15 @@ workflows:
     states: [idle, running, done]
     initial: idle
     transitions:
-      - { from: idle,    event: label.placed,     guard: implement.may_fire,  to: running, action: session.implement }
-      - { from: running, event: session.completed,                             to: done,    action: station.fire_implement }
-    one_shot: true   # does not return to idle after done; a fresh placement is a fresh instruction (fire()'s own rule)
+      # TWO real entries, both through fire() -- it does not distinguish
+      # which label it was handed, only that the label decodes to the
+      # implement station (anything that isn't conveyor:archive while the
+      # change is finished).
+      - { from: idle, event: implement.label_placed, guard: implement.may_fire, to: running, action: session.implement,
+          note: "a person places conveyor:implement directly" }
+      - { from: idle, event: run.label_placed,        guard: implement.may_fire, to: running, action: session.implement,
+          note: "conveyor:run stands and the change is not finished -- fire() picks implement" }
+      - { from: running, event: session.completed,     to: done, action: station.fire_implement }
 
   conveyor.fix:
     subject: pull_request
@@ -67,8 +76,12 @@ workflows:
     states: [idle, running, done]
     initial: idle
     transitions:
-      - { from: idle,    event: label.placed,  guard: fix.may_carry_or_place,  to: running, action: loop.start }
-      - { from: running, event: loop.reached_mergeable_and_merged,              to: done,    action: station.advance_from_fix }
+      # TWO real entries, through TWO DIFFERENT functions:
+      - { from: idle, event: fix.label_placed,       guard: fix.may_place,          to: running, action: loop.start,
+          note: "a person places conveyor:fix directly on the pull request (gate())" }
+      - { from: idle, event: fix.carried_onto_pr,     guard: fix.may_carry,          to: running, action: loop.start,
+          note: "the pull request's CI completed and conveyor:run (or the archive grant) stands (carry_fix())" }
+      - { from: running, event: loop.reached_mergeable_and_merged, to: done, action: station.advance_from_fix }
     note: >
       "running" for conveyor:fix does not mean one round -- it means the
       label stands while the loop workflow (loop.yaml) runs its own full
@@ -80,9 +93,8 @@ workflows:
     states: [idle, running, done]
     initial: idle
     transitions:
-      - { from: idle,    event: label.placed,  guard: loop.is_capped,  to: running, action: loop.extend_cap }
-      - { from: running, event: grant.consumed,                         to: done,    action: none }
-    one_shot: true
+      - { from: idle,    event: keep_going.label_placed,  guard: loop.is_capped,  to: running, action: loop.extend_cap }
+      - { from: running, event: grant.consumed,                                    to: done,    action: none }
 
   conveyor.archive:
     subject: issue
@@ -90,10 +102,16 @@ workflows:
     states: [idle, running, done]
     initial: idle
     transitions:
-      - { from: idle,    event: label.placed,     guard: archive.may_fire,  to: running, action: session.archive }
-      - { from: running, event: session.completed,                           to: done,    action: station.fire_archive }
-    one_shot: true
+      # TWO real entries, through TWO DIFFERENT functions:
+      - { from: idle, event: archive.label_placed,       guard: archive.may_fire,   to: running, action: session.archive,
+          note: "a person places conveyor:archive directly (fire())" }
+      - { from: idle, event: archive.carried_onto_issue,  guard: archive.may_carry,  to: running, action: session.archive,
+          note: "a change/* pull request merged, the change is finished, and conveyor:run stands (carry_archive())" }
+      - { from: running, event: session.completed,         to: done, action: station.fire_archive }
     note: >
       Also stands for the fix workflow OF THE ARCHIVE PULL REQUEST ITSELF
       (the one whose body says Closes #n) -- conveyor.py's standing_grant()
       treats this as the same grant, not a sixth workflow.
+      carry_archive() ALSO restarts conveyor.implement (not drawn as a
+      conveyor.archive transition) when an apply merge leaves the change
+      unfinished -- see triggers.yaml's implement.restarted entry.

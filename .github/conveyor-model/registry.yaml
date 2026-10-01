@@ -28,15 +28,37 @@ guards:
     reads: [line.lane, line.change_finished, line.fired, line.open_pr_from_change, placer]
     note: fire() itself also decides WHICH station (implement vs archive); the guard here is the implement-station branch of it.
 
-  fix.may_carry_or_place:
+  fix.may_place:
     implemented_in: conveyor.py
-    as: "standing_grant + _carried_by_a_person_or_a_bot"
-    reads: [line.issue_labels, pr.closes, grant_placer]
+    as: gate
+    reads: [pr.fork, pr.labels, placer]
+    note: >
+      a person places conveyor:fix directly, with no conveyor:run grant in
+      sight -- gate()'s plain write-access check for a labeled trigger whose
+      sender is not the workflow bot.
+
+  fix.may_carry:
+    implemented_in: conveyor.py
+    as: carry_fix
+    reads: [line.issue_labels, pr.closes, pr.refs, pr.same_repo_change_branch, grant_placer]
+    note: >
+      fires on a pull request's CI completing -- standing_grant() finds
+      conveyor:run (or the archive grant) on the tracking issue, and the
+      placer behind it can still push here.
 
   archive.may_fire:
     implemented_in: conveyor.py
     as: fire
     reads: [line.lane, line.change_finished, line.fired, line.open_pr_from_change, placer]
+
+  archive.may_carry:
+    implemented_in: conveyor.py
+    as: carry_archive
+    reads: [pr.same_repo_change_branch, pr.refs, line.lane, line.change_finished, line.issue_labels, grant_placer]
+    note: >
+      fires on a change/* pull request merging -- the change is finished,
+      conveyor:run stands on the tracking issue, and its placer can still
+      push here.
 
   loop.is_capped:
     implemented_in: conveyor.py

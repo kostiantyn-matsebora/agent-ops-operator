@@ -1,0 +1,4 @@
+stateDiagram-v2
+    [*] --> idle
+    idle --> running : run.label_placed  [placer.may_push]
+    running --> idle : run.label_removed

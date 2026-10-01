@@ -1,5 +1,0 @@
-stateDiagram-v2
-    [*] --> idle
-    idle --> running : label.placed  [fix.may_carry_or_place]  / loop.start
-    running --> done : loop.reached_mergeable_and_merged  / station.advance_from_fix
-    done --> [*]

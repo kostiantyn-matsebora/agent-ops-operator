@@ -103,9 +103,10 @@ our transitions is event-driven), so the converter always sets it.
 **Consequence for our design:**
 
 - Every one of our `guard:` names in `workflows.yaml`
-  (`fix.may_carry_or_place`, `archive.may_fire`, ...) calls a real Python
-  decision function (`conveyor.py`'s `fire`, `standing_grant`, etc.) that
-  reads GitHub facts no restricted expression could reach.
+  (`fix.may_place`, `fix.may_carry`, `archive.may_fire`, ...) calls a real
+  Python decision function (`conveyor.py`'s `fire`, `carry_fix`,
+  `carry_archive`, etc.) that reads GitHub facts no restricted expression
+  could reach.
 - Those guards CANNOT be declared as `cond:` strings inside this schema.
   They have to be evaluated **before** calling into the loaded chart, by our
   own orchestrator, which then fires only the already-decided event.
@@ -116,23 +117,42 @@ our transitions is event-driven), so the converter always sets it.
   *our* names, resolved by *our* orchestrator, rather than pushing them into
   this schema's `cond:`/`enter:` fields.
 
-## What this means for nested conveyor workflows
+## What this means for the one real nested case
 
-`invoke:` on a state is the real mechanism for "while running, conditionally
-start another workflow as a child" — SCXML's own composition primitive, not
-something we'd simulate with a flag. A `conveyor.run` chart's `running`
-state could declare:
+**CORRECTED.** An earlier version of this section described
+`conveyor.run`'s `running` state conditionally invoking
+implement/fix/archive as children.
+
+- That never matched `conveyor.py` — see `workflows.yaml`'s and
+  `triggers.yaml`'s own correction notes.
+- `conveyor:run` is a standing fact, re-checked by three separate decision
+  functions at three different real GitHub events.
+- It is not a parent state that invokes anything.
+
+**The one place composition is real:** `conveyor.fix`'s `running` state
+contains the ENTIRE `loop` machine (`loop.yaml`) for as long as the fixing
+round-by-round cycle runs.
+
+`invoke:` on a state is SCXML's own mechanism for exactly this — "while in
+this state, run another statechart as a child." `conveyor.fix`'s chart
+could declare:
 
 ```yaml
 states:
   running:
     invoke:
-      - id: implement_child
-        src: workflows/conveyor.implement.yaml   # or an inline `content:` mapping
+      - id: loop_child
+        src: loop.yaml   # or an inline `content:` mapping
 ```
 
 This was not exercised in the spike. The spike only covered the flat
 station/loop case.
+
+The Mermaid renderer (`render_diagram.py`) already draws this relationship
+as a plain composite state (`state running { ... }` containing the loop
+machine's own states), never SCXML's `invoke:`. Worth checking whether that
+rendering choice and an eventual `invoke:`-based engine implementation
+actually agree on the semantics, before committing to either.
 
 It should be its own follow-up spike before committing to it as the nesting
 mechanism: `invoke` in SCXML also carries semantics (autoforwarding events,
@@ -150,5 +170,17 @@ mechanism: `invoke` in SCXML also carries semantics (autoforwarding events,
 
 ## Open questions for a follow-up spike
 
-1. Whether `invoke:` is the right fit for `conveyor.run → conveyor.implement/fix/archive`, or whether that composition is simpler modeled as plain orchestrator-level dispatch (the orchestrator reads `workflows.yaml`'s `invokes:` list itself and calls `load()` again for the child) rather than nesting inside one SCXML document.
-2. Whether `[validation]` extra's JSON-Schema `validate=True` path is worth turning on in CI once our converter is final, so a malformed generated document fails loudly instead of at `load()` time.
+1. **Superseded by auditing against the real code.** An earlier draft of
+   this question assumed `conveyor.run` "invokes" implement/fix/archive
+   through some composition mechanism, which never existed in `conveyor.py`
+   — see `workflows.yaml`'s and `triggers.yaml`'s own correction notes.
+   `conveyor:run` is a standing fact three separate decision functions
+   (`fire`, `carry_fix`, `carry_archive`) independently re-check at three
+   different real GitHub events. Whether `invoke:` (SCXML's composition
+   primitive) is still useful for the one real nesting case —
+   `conveyor.fix`'s `running` state containing the whole `loop` machine —
+   is still open, but the broader "run invokes the other three" framing is
+   not something to spike further.
+2. Whether `[validation]` extra's JSON-Schema `validate=True` path is worth
+   turning on in CI once our converter is final, so a malformed generated
+   document fails loudly instead of at `load()` time.

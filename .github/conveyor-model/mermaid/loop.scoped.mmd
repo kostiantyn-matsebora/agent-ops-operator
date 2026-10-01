@@ -1,7 +1,0 @@
-stateDiagram-v2
-    [*] --> none
-    none --> running : end:continue
-    running --> waiting : recover:waiting
-    waiting --> mergeable : ci:green_clean
-    running --> capped : end:capped
-    running --> stalled : end:stalled

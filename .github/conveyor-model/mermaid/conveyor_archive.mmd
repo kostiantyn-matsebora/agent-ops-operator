@@ -1,0 +1,6 @@
+stateDiagram-v2
+    [*] --> idle
+    idle --> running : archive.label_placed  [archive.may_fire]  / session.archive
+    idle --> running : when(archive.carried_onto_issue)  [archive.may_carry]  / session.archive
+    running --> done : session.completed  / station.fire_archive
+    done --> [*]

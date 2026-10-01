@@ -1,0 +1,15 @@
+stateDiagram-v2
+    [*] --> idle
+    idle --> running : fix.label_placed  [fix.may_place]  / loop.start
+    idle --> running : when(fix.carried_onto_pr)  [fix.may_carry]  / loop.start
+    state running {
+        [*] --> none
+        none --> running_ : end.continue, round.start
+        running_ --> waiting : end.waiting, recover.waiting
+        waiting --> mergeable : ci.green_clean, end.mergeable
+        running_ --> capped : end.capped
+        running_ --> stalled : end.stalled
+        mergeable --> [*] : person merges
+    }
+    running --> done : loop.reached_mergeable_and_merged  / station.advance_from_fix
+    done --> [*]

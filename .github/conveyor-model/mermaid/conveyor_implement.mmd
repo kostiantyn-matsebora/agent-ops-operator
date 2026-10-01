@@ -1,0 +1,6 @@
+stateDiagram-v2
+    [*] --> idle
+    idle --> running : implement.label_placed  [implement.may_fire]  / session.implement
+    idle --> running : run.label_placed  [implement.may_fire]  / session.implement
+    running --> done : session.completed  / station.fire_implement
+    done --> [*]

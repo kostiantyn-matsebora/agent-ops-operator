@@ -1,5 +1,0 @@
-stateDiagram-v2
-    [*] --> idle
-    idle --> running : label.placed  [archive.may_fire]  / session.archive
-    running --> done : session.completed  / station.fire_archive
-    done --> [*]

@@ -1,20 +1,50 @@
 #!/usr/bin/env python3
-"""Render station.yaml, loop.yaml and workflows.yaml into Mermaid state diagrams.
+"""Render workflows.yaml (+ loop.yaml + triggers.yaml) into Mermaid state diagrams.
 
-Mermaid's `stateDiagram-v2` already gives correct UML notation (filled-circle
-start, bullseye end, `trigger [guard] / action` labels) with no hand-rolled
-layout math -- GitHub, the Artifact viewer and most editors render it
-natively. One file per machine, two variants for station/loop:
+STRUCTURE, verified against conveyor.py's real functions, not assumed:
 
-  mermaid/station.mmd, loop.mmd                the FULL literal table --
-      every (state, event) pair, for diffing against the engine's own
-      rendering later. Dense by design: these tables are TOTAL.
-  mermaid/station.scoped.mmd, loop.scoped.mmd  forward path + the few named
-      exceptions worth a reader's attention (the loop stalling, the restart)
-      -- the rest of the total table is implementation completeness, not
-      domain flow, and is left out of this one on purpose.
-  mermaid/workflow_<name>.mmd                  each of the 5 conveyor:*
-      workflows, drawn in full -- small enough that literal is also readable.
+  conveyor.run has no "invokes" -- that function never existed (see
+  workflows.yaml's and triggers.yaml's own correction notes). It is a
+  standing fact three SEPARATE decision functions independently re-check:
+  fire() (on a label placement), carry_fix() (on a pull request's CI
+  completing), carry_archive() (on a pull request merging). So each of
+  conveyor.implement / .fix / .archive carries its OWN real entry
+  transitions in workflows.yaml -- some from a direct label placement, some
+  CARRIED from conveyor:run's standing grant -- and this renderer draws
+  every one of them on that workflow's own diagram. There is no single
+  "main" diagram any more: five independently-triggerable workflows, five
+  diagrams, each complete on its own terms.
+
+  `loop` is never triggered on its own -- only conveyor.fix's `running`
+  state starts it -- so it is drawn ONLY as a nested composite state inside
+  conveyor.fix's diagram, never as a diagram of its own.
+
+  `station` is not a workflow -- it is STATE, a value the conveyor workflows
+  read as a guard and write as an action. It gets no diagram.
+
+MANUAL VS AUTOMATIC, drawn with UML's OWN vocabulary (not an invented one):
+  - a SIGNAL event (event_type: signal in triggers.yaml) is a person's (or
+    an external system's) own action -- drawn as a plain trigger name,
+    `trigger [guard] / action`.
+  - a CHANGE event (event_type: change) fires because a condition became
+    true, with nobody acting at that moment -- carry_fix() and
+    carry_archive() are exactly this: an unconditional GitHub event
+    (CI finished, a PR merged) re-checks a standing grant. Drawn with UML's
+    own `when(condition)` syntax instead of a bare trigger name, so the
+    picture itself shows which edges are automatic.
+
+GOTCHA, found live: Mermaid's stateDiagram-v2 parser treats a literal `:`
+ANYWHERE in an edge label as the label delimiter, even inside a nested
+composite state and even when quoted or HTML-entity-escaped -- tried
+`&colon;`, `&#58;`, and a wrapping `"..."`, all still broke the parse.
+conveyor.py's own event names are colon-namespaced (`fire:implement`,
+`round:start`, `end:continue`), so every label is sanitized here, replacing
+`:` with `.` for DISPLAY ONLY -- the YAML files keep the real event names.
+
+GOTCHA, found live: two SIBLING composite states cannot reuse the same
+substate names (idle/running/done), even though each sits in its own
+`state X { ... }` block -- rejected as a syntax error regardless of nesting
+depth. Composite substates are prefixed with their own label.
 
 Usage:
     python3 render_diagram.py          # writes into ./mermaid/
@@ -33,98 +63,116 @@ def load(name: str) -> dict:
     return yaml.safe_load((HERE / name).read_text())
 
 
-def mermaid_for_machine(doc: dict) -> str:
-    """station.yaml / loop.yaml shape -> the FULL literal mermaid diagram.
+def mmd_safe(label: str) -> str:
+    """Mermaid's stateDiagram-v2 breaks on a literal `:` anywhere in a label
+    (see module docstring) -- never emit one un-sanitized."""
+    return label.replace(":", ".")
 
-    SKIP transitions (`to: null`) are deliberately NOT drawn as edges --
-    they are the reason this diagram is dense (nearly every state answers
-    nearly every event), and the full table is already visible as the
-    source YAML. What IS preserved here is the real-to-real edges only.
-    """
-    lines = ["stateDiagram-v2"]
-    terminal = set(doc.get("terminal", []))
-    for s in terminal:
-        lines.append(f"    {s} --> [*]")
-    initial = "none" if "none" in doc["states"] else doc["states"][0]
-    lines.append(f"    [*] --> {initial}")
 
+def build_trigger_index(triggers: list[dict]) -> dict[str, dict]:
+    """event name -> its trigger entry, so a transition can ask "is this a
+    signal or a change event" without repeating triggers.yaml's own data."""
+    return {t["event"]: t for t in triggers}
+
+
+def transition_label(t: dict, trigger_index: dict[str, dict]) -> str:
+    """`trigger [guard] / action` for a signal event, or UML's
+    `when(trigger) [guard] / action` for a change event -- the one visible
+    difference between a person acting and a condition becoming true."""
+    trig = trigger_index.get(t["event"])
+    event_text = t["event"]
+    if trig and trig.get("event_type") == "change":
+        event_text = f"when({event_text})"
+    label = event_text
+    if t.get("guard"):
+        label += f"  [{t['guard']}]"
+    if t.get("action") and t["action"] != "none":
+        label += f"  / {t['action']}"
+    return mmd_safe(label)
+
+
+def loop_pairs(loop: dict) -> dict[tuple[str, str], list[str]]:
     by_pair: dict[tuple[str, str], list[str]] = {}
-    for t in doc["transitions"]:
-        if t["to"] is not None and t["from"] != t["to"]:
+    for t in loop["transitions"]:
+        if t["to"] is not None:
             by_pair.setdefault((t["from"], t["to"]), []).append(t["event"])
-
-    for (frm, to), events in sorted(by_pair.items()):
-        label = ", ".join(sorted(events))
-        lines.append(f"    {frm} --> {to} : {label}")
-
-    return "\n".join(lines)
+    return by_pair
 
 
-def mermaid_scoped(doc: dict, path: list[str], exceptions: list[tuple[str, str, str]]) -> str:
-    """The readable view: the real forward sequence plus a short, hand-picked
-    list of exceptions -- NOT the total table. See render_diagram.py's
-    module docstring and docs/python-statemachine-schema.md for why the
-    full table is excluded here on purpose."""
-    by_pair = {(t["from"], t["to"]): t["event"] for t in doc["transitions"] if t["to"] is not None}
-    lines = ["stateDiagram-v2", f"    [*] --> {path[0]}"]
-    terminal = set(doc.get("terminal", []))
-    for a, b in zip(path, path[1:]):
-        ev = by_pair.get((a, b), "")
-        lines.append(f"    {a} --> {b} : {ev}")
-    for s in path:
-        if s in terminal:
-            lines.append(f"    {s} --> [*]")
-    for frm, ev, tgt in exceptions:
-        lines.append(f"    {frm} --> {tgt} : {ev}")
-    return "\n".join(lines)
+def render_loop_block(by_pair: dict, exceptions: list[tuple[str, str, str]], indent: str) -> list[str]:
+    """The loop machine as a Mermaid composite-state BODY (no `state X {`
+    wrapper -- the caller owns that). Every one of loop.yaml's real events
+    is a SIGNAL in UML's sense -- none of them is "a condition became true
+    with nobody acting"; a round starting, a check completing, a thread
+    opening are all themselves the triggering occurrence -- so no when(...)
+    wrapping applies inside this block."""
+    def ev(a, b):
+        return mmd_safe(", ".join(sorted(by_pair[(a, b)])))
+
+    lines = [
+        f"{indent}[*] --> none",
+        f"{indent}none --> running_ : {ev('none', 'running')}",
+        f"{indent}running_ --> waiting : {ev('running', 'waiting')}",
+        f"{indent}waiting --> mergeable : {ev('waiting', 'mergeable')}",
+    ]
+    for frm, event, tgt in exceptions:
+        frm_id = "running_" if frm == "running" else frm
+        tgt_id = "running_" if tgt == "running" else tgt
+        lines.append(f"{indent}{frm_id} --> {tgt_id} : {mmd_safe(event)}")
+    lines.append(f"{indent}mergeable --> [*] : person merges")
+    return lines
 
 
-def mermaid_for_workflow(name: str, wf: dict) -> str:
+LOOP_EXCEPTIONS = [("running", "end:capped", "capped"), ("running", "end:stalled", "stalled")]
+
+
+def mermaid_for_workflow(name: str, wf: dict, trigger_index: dict[str, dict], loop: dict | None = None) -> str:
+    """One workflow's own complete diagram -- every real entry transition
+    workflows.yaml declares, whether it is a direct (signal) label
+    placement or a carried (change) grant re-check. `loop` is passed only
+    for conveyor.fix."""
     lines = ["stateDiagram-v2", "    [*] --> " + wf["initial"]]
+
     for t in wf["transitions"]:
-        label = t["event"]
-        if t.get("guard"):
-            label += f"  [{t['guard']}]"
-        if t.get("action") and t["action"] != "none":
-            label += f"  / {t['action']}"
-        lines.append(f"    {t['from']} --> {t['to']} : {label}")
-    # a state is terminal only if something transitions INTO it and nothing
-    # transitions OUT of it -- never assumed from a naming convention.
+        if loop is not None and t["from"] == "running" and t["event"].startswith("loop."):
+            continue   # drawn as the edge OUT of the nested composite state instead
+        lines.append(f"    {t['from']} --> {t['to']} : {transition_label(t, trigger_index)}")
+
+    if loop is not None:
+        lines.append("    state running {")
+        lines += render_loop_block(loop_pairs(loop), LOOP_EXCEPTIONS, "        ")
+        lines.append("    }")
+        done_edge = next(t for t in wf["transitions"] if t["from"] == "running" and t["event"].startswith("loop."))
+        lines.append(f"    running --> done : {transition_label(done_edge, trigger_index)}")
+
     targets_only = {s for s in wf["states"]
                     if any(t["to"] == s for t in wf["transitions"])
                     and not any(t["from"] == s for t in wf["transitions"])}
     for s in targets_only:
         lines.append(f"    {s} --> [*]")
+
     return "\n".join(lines)
 
 
 def main() -> int:
-    station = load("station.yaml")
     loop = load("loop.yaml")
     workflows = load("workflows.yaml")["workflows"]
+    triggers = load("triggers.yaml")["triggers"]
+    trigger_index = build_trigger_index(triggers)
 
     out_dir = HERE / "mermaid"
     out_dir.mkdir(exist_ok=True)
-
-    (out_dir / "station.mmd").write_text(mermaid_for_machine(station) + "\n")
-    (out_dir / "loop.mmd").write_text(mermaid_for_machine(loop) + "\n")
-
-    (out_dir / "station.scoped.mmd").write_text(mermaid_scoped(
-        station,
-        path=["none", "implement", "fix", "merge", "archive", "done"],
-        exceptions=[("fix", "end:stalled (loop)", "stalled"), ("stalled", "run re-placed", "implement")],
-    ) + "\n")
-    (out_dir / "loop.scoped.mmd").write_text(mermaid_scoped(
-        loop,
-        path=["none", "running", "waiting", "mergeable"],
-        exceptions=[("running", "end:capped", "capped"), ("running", "end:stalled", "stalled")],
-    ) + "\n")
+    for old in out_dir.glob("*.mmd"):
+        old.unlink()
 
     for name, wf in workflows.items():
         safe = name.replace(".", "_")
-        (out_dir / f"workflow_{safe}.mmd").write_text(mermaid_for_workflow(name, wf) + "\n")
+        l = loop if name == "conveyor.fix" else None
+        (out_dir / f"{safe}.mmd").write_text(mermaid_for_workflow(name, wf, trigger_index, loop=l) + "\n")
 
     print(f"wrote {len(list(out_dir.glob('*.mmd')))} mermaid files to {out_dir}")
+    print("every workflow's diagram shows ALL its real entries: signal (a person's label)")
+    print("and change (when(...), a carried grant re-checked on a GitHub event).")
     return 0
 
 
