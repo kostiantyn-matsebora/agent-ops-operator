@@ -1,4 +1,20 @@
 stateDiagram-v2
-    [*] --> idle
-    idle --> running : run.label_placed  [placer.may_push]
-    running --> idle : run.label_removed
+    %% no single initial state: this conveyor's real trigger fires identically from most of its own states (see its own note:)
+    state none
+    state implement
+    state fix
+    state merge
+    state archive
+    state stalled
+    archive --> archive : merge.finished_carried
+    archive --> implement : merge.proposal_or_apply
+    fix --> archive : merge.finished_carried
+    fix --> implement : merge.proposal_or_apply
+    implement --> archive : merge.finished_carried
+    implement --> implement : merge.proposal_or_apply
+    merge --> archive : merge.finished_carried
+    merge --> implement : merge.proposal_or_apply
+    none --> archive : merge.finished_carried
+    none --> implement : merge.proposal_or_apply
+    stalled --> archive : merge.finished_carried
+    stalled --> implement : merge.proposal_or_apply

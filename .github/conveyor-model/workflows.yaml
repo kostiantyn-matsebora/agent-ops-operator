@@ -1,117 +1,132 @@
-# Declarative definition of the five conveyor:* label-triggered workflows,
-# verified against conveyor.py's real functions -- not against an assumed
-# shape. See triggers.yaml's module docstring for the correction history.
+# The five conveyor:* workflows, each declared as a COMPLETE, SELF-CONTAINED
+# state machine in its OWN real vocabulary -- station's real state names and
+# event names for an issue-side conveyor, loop's for a pull-request-side one.
 #
-# CORRECTED, found by auditing against the real code: conveyor.run does NOT
-# "invoke" implement/fix/archive as child workflows through any single
-# function. There is no such function. conveyor:run is a STANDING FACT on
-# the issue, independently re-read by THREE SEPARATE decision functions at
-# THREE DIFFERENT real GitHub events:
+# AGREED SHAPE: a conveyor is a PROCESS. Its states are NOT its own invented
+# idle/running/done -- no such label value exists in conveyor.py. A
+# conveyor's states ARE the real station or loop values it moves between,
+# because that is literally what changes while the conveyor:* label stands.
+# `acts_on` names which real machine (station or loop) this conveyor's
+# vocabulary is drawn from.
 #
-#   fire()           on `issues: labeled`            -> implement OR archive
-#                                                        (fire() never picks "fix")
-#   carry_fix()       on a pull request's CI completing -> carries conveyor:fix
-#   carry_archive()   on a pull request merging          -> carries conveyor:run
-#                                                            onward, restarts
-#                                                            implement, or stalls
+# NO SHARED "gates:" TABLE. Each conveyor lists its OWN `states:` and
+# `transitions:`, in the SAME shape station.yaml/loop.yaml use -- so a
+# diagram is a direct, mechanical render of one block, never a cross-file
+# lookup or an inferred pattern.
 #
-# So each of implement/fix/archive below has its OWN real entry transitions,
-# each naming which real function and which real event fires it -- conveyor.run
-# has no `invokes:` list, because there is nothing in the code for it to name.
+# NO SINGLE INITIAL STATE WHERE NONE EXISTS. UML's initial pseudostate means
+# exactly one unconditional entry point (verified against the spec: "there
+# can be at most one initial vertex in a region"). Several of these
+# conveyors fire identically from MOST real states (conveyor.py's tables are
+# total), so forcing one of them to be "the" start would misstate what the
+# decision function actually checks. Where that is true, `initial: null` and
+# every listed `from:` is a real, independent entry -- not a fork from one
+# shared [*].
 #
-# EVERY guard and action below is a NAME, resolved against a Python registry
-# at load time (see registry.yaml). This file never contains logic, only the
-# wiring -- the same split this repo's own CRD model already uses elsewhere
-# (a Pipeline wires a tool by name; the runtime supplies the implementation).
+# EVERY (from, event, to) below is VERIFIED against station.yaml / loop.yaml
+# by validate.py -- never hand-typed and trusted.
 
 version: 1
-
-# a workflow instance's state is stored exactly where conveyor.py already
-# stores station/loop state: as a label on the subject. Adding a workflow
-# here means declaring one more label family, never a new storage mechanism.
-state_storage:
-  mechanism: github_label
-  one_active_state_per: [subject, label_family]
 
 workflows:
 
   conveyor.run:
+    label: "conveyor:run"
     subject: issue
-    label_family: "conveyor:run"       # a single boolean-shaped label: present = running
-    # NO `done`: this is the STANDING instruction, not one-shot. It cycles
-    # idle<->running for as long as a person leaves the label on, and is
-    # never "finished" the way implement/fix/keep_going/archive are.
-    #
-    # NO `invokes:` HERE. conveyor.run does not call out to the other
-    # workflows -- it is a FACT those workflows' own decision functions
-    # independently re-check (standing_grant()) at their OWN real trigger
-    # points. See triggers.yaml for exactly which function fires on which
-    # event, and conveyor_implement.mmd / conveyor_fix.mmd / conveyor_archive.mmd
-    # for each one's real entry transitions.
-    states: [idle, running]
-    initial: idle
+    acts_on: station
+    initial: null
+    note: >
+      THE STANDING GRANT. standing_grant() reads conveyor:run as a FACT,
+      called from carry_fix(), carry_archive() and gate() -- it does not
+      itself decide a station transition the way fire() does. Its own real
+      effect is two station transitions (both via carry_archive(), once the
+      grant is found to stand) plus starting the loop machine via carry_fix().
+      Fires identically from every non-terminal station value -- there is no
+      single state this conveyor "starts" from.
+    states: [none, implement, fix, merge, archive, stalled]
     transitions:
-      - { from: idle,    event: run.label_placed,  guard: placer.may_push,  to: running, action: none }
-      - { from: running, event: run.label_removed,                          to: idle,    action: none }
+      - { from: none,      event: "merge:finished_carried", to: archive }
+      - { from: implement, event: "merge:finished_carried", to: archive }
+      - { from: fix,       event: "merge:finished_carried", to: archive }
+      - { from: merge,     event: "merge:finished_carried", to: archive }
+      - { from: archive,   event: "merge:finished_carried", to: archive }
+      - { from: stalled,   event: "merge:finished_carried", to: archive }
+      - { from: none,      event: "merge:proposal_or_apply", to: implement,
+          note: "the restart path: an apply merge whose change is not finished" }
+      - { from: implement, event: "merge:proposal_or_apply", to: implement }
+      - { from: fix,       event: "merge:proposal_or_apply", to: implement }
+      - { from: merge,     event: "merge:proposal_or_apply", to: implement }
+      - { from: archive,   event: "merge:proposal_or_apply", to: implement }
+      - { from: stalled,   event: "merge:proposal_or_apply", to: implement }
 
   conveyor.implement:
+    label: "conveyor:implement"
     subject: issue
-    label_family: "conveyor:implement"
-    states: [idle, running, done]
-    initial: idle
+    acts_on: station
+    initial: null
+    note: >
+      fire() reads this label (or conveyor:run, when the change is not
+      finished) and fires station_event fire:implement. Fires identically
+      from every state but archive and done (fire() refuses an implement
+      regression once archive is reached; done is terminal) -- no single
+      entry state.
+    states: [none, implement, fix, merge, stalled]
     transitions:
-      # TWO real entries, both through fire() -- it does not distinguish
-      # which label it was handed, only that the label decodes to the
-      # implement station (anything that isn't conveyor:archive while the
-      # change is finished).
-      - { from: idle, event: implement.label_placed, guard: implement.may_fire, to: running, action: session.implement,
-          note: "a person places conveyor:implement directly" }
-      - { from: idle, event: run.label_placed,        guard: implement.may_fire, to: running, action: session.implement,
-          note: "conveyor:run stands and the change is not finished -- fire() picks implement" }
-      - { from: running, event: session.completed,     to: done, action: station.fire_implement }
+      - { from: none,      event: "fire:implement", to: implement }
+      - { from: implement, event: "fire:implement", to: implement }
+      - { from: fix,       event: "fire:implement", to: implement }
+      - { from: merge,     event: "fire:implement", to: implement }
+      - { from: stalled,   event: "fire:implement", to: implement }
 
   conveyor.fix:
+    label: "conveyor:fix"
     subject: pull_request
-    label_family: "conveyor:fix"
-    states: [idle, running, done]
-    initial: idle
-    transitions:
-      # TWO real entries, through TWO DIFFERENT functions:
-      - { from: idle, event: fix.label_placed,       guard: fix.may_place,          to: running, action: loop.start,
-          note: "a person places conveyor:fix directly on the pull request (gate())" }
-      - { from: idle, event: fix.carried_onto_pr,     guard: fix.may_carry,          to: running, action: loop.start,
-          note: "the pull request's CI completed and conveyor:run (or the archive grant) stands (carry_fix())" }
-      - { from: running, event: loop.reached_mergeable_and_merged, to: done, action: station.advance_from_fix }
+    acts_on: loop
+    initial: none
     note: >
-      "running" for conveyor:fix does not mean one round -- it means the
-      label stands while the loop workflow (loop.yaml) runs its own full
-      cycle underneath. See loop.yaml for the round-by-round machine.
+      gate() reads this label directly on a `labeled` trigger for the pull
+      request, OR carry_fix() carries conveyor:run's grant onto it once CI
+      completes. Both fire loop_event round:start. Unlike the station-side
+      conveyors, this one DOES have a single meaningful entry: the loop has
+      not started yet (`none`) -- round:start from any OTHER loop state is a
+      later round of the SAME running loop, not a new conveyor:fix entry.
+    states: [none, running]
+    transitions:
+      - { from: none, event: "round:start", to: running }
 
   conveyor.keep_going:
+    label: "conveyor:keep-going"
     subject: pull_request
-    label_family: "conveyor:keep-going"
-    states: [idle, running, done]
-    initial: idle
+    acts_on: loop
+    initial: capped
+    note: >
+      gate() reads this label on a `labeled` trigger, only meaningful once
+      the loop is `capped` (cap_for() computes a new ceiling from
+      pr.grants). Its one real effect is the SAME round:start transition
+      conveyor.fix's gate uses, entered only from `capped` -- re-opening an
+      already-running loop, never starting a fresh one.
+    states: [capped, running]
     transitions:
-      - { from: idle,    event: keep_going.label_placed,  guard: loop.is_capped,  to: running, action: loop.extend_cap }
-      - { from: running, event: grant.consumed,                                    to: done,    action: none }
+      - { from: capped, event: "round:start", to: running }
 
   conveyor.archive:
+    label: "conveyor:archive"
     subject: issue
-    label_family: "conveyor:archive"
-    states: [idle, running, done]
-    initial: idle
-    transitions:
-      # TWO real entries, through TWO DIFFERENT functions:
-      - { from: idle, event: archive.label_placed,       guard: archive.may_fire,   to: running, action: session.archive,
-          note: "a person places conveyor:archive directly (fire())" }
-      - { from: idle, event: archive.carried_onto_issue,  guard: archive.may_carry,  to: running, action: session.archive,
-          note: "a change/* pull request merged, the change is finished, and conveyor:run stands (carry_archive())" }
-      - { from: running, event: session.completed,         to: done, action: station.fire_archive }
+    acts_on: station
+    initial: null
     note: >
-      Also stands for the fix workflow OF THE ARCHIVE PULL REQUEST ITSELF
-      (the one whose body says Closes #n) -- conveyor.py's standing_grant()
-      treats this as the same grant, not a sixth workflow.
-      carry_archive() ALSO restarts conveyor.implement (not drawn as a
-      conveyor.archive transition) when an apply merge leaves the change
-      unfinished -- see triggers.yaml's implement.restarted entry.
+      fire() reads this label directly, refusing it where the lane has no
+      archive station or the change is not finished. Fires identically from
+      every state but done (terminal) -- no single entry state. ALSO stands
+      for the fix station OF THE ARCHIVE PULL REQUEST ITSELF (the one whose
+      body says Closes #n) -- standing_grant()'s own special case, read by
+      carry_fix() exactly as conveyor:run is, starting the SAME loop entry
+      conveyor.fix uses.
+    states: [none, implement, fix, merge, archive, stalled]
+    transitions:
+      - { from: none,      event: "fire:archive", to: archive }
+      - { from: implement, event: "fire:archive", to: archive }
+      - { from: fix,       event: "fire:archive", to: archive }
+      - { from: merge,     event: "fire:archive", to: archive }
+      - { from: archive,   event: "fire:archive", to: archive }
+      - { from: stalled,   event: "fire:archive", to: archive }

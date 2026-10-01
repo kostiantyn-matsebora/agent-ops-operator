@@ -1,126 +1,74 @@
-# The NAME -> IMPLEMENTATION map every guard: and action: in workflows.yaml,
-# station.yaml and loop.yaml resolves against. This is the ONLY file where a
-# name meets code -- every other YAML file stays pure data, which is what
-# makes them safe to feed to a diagram generator with no risk of executing
-# anything.
-#
-# A guard returns true/false from facts. An action performs a side effect
-# and, where noted, returns the station_event / loop_event it caused --
-# which is how a workflow's own transition can, in turn, drive the station
-# or loop machine without workflows.yaml needing to know HOW.
-#
-# THIS FILE IS WHAT A FUTURE TRIGGER CHANGE TOUCHES LEAST. Swapping "a label
-# placed" for "a PR comment matching /fix-accepted" is a change to
-# triggers.yaml (what EVENT fires), never to this file (what the event DOES
-# once it fires) -- the whole reason triggers are kept separate.
+# Reference: the decision FUNCTIONS of conveyor.py that READ the conveyor:*
+# labels and WRITE the real station_event / loop_event values workflows.yaml
+# declares per conveyor. Not cross-checked by validate.py directly -- each
+# conveyor's own transitions in workflows.yaml are what is verified, against
+# station.yaml / loop.yaml. This file exists only to say WHICH function is
+# behind each conveyor's real effect and what facts it reads, since that is
+# not otherwise written down anywhere in the YAML.
 
 version: 1
 
-guards:
-  placer.may_push:
-    implemented_in: conveyor.py
-    as: "Placer.may_push"
-    reads: [placer.permission]
-
-  implement.may_fire:
-    implemented_in: conveyor.py
-    as: fire
-    reads: [line.lane, line.change_finished, line.fired, line.open_pr_from_change, placer]
-    note: fire() itself also decides WHICH station (implement vs archive); the guard here is the implement-station branch of it.
-
-  fix.may_place:
-    implemented_in: conveyor.py
-    as: gate
-    reads: [pr.fork, pr.labels, placer]
-    note: >
-      a person places conveyor:fix directly, with no conveyor:run grant in
-      sight -- gate()'s plain write-access check for a labeled trigger whose
-      sender is not the workflow bot.
-
-  fix.may_carry:
-    implemented_in: conveyor.py
-    as: carry_fix
-    reads: [line.issue_labels, pr.closes, pr.refs, pr.same_repo_change_branch, grant_placer]
-    note: >
-      fires on a pull request's CI completing -- standing_grant() finds
-      conveyor:run (or the archive grant) on the tracking issue, and the
-      placer behind it can still push here.
-
-  archive.may_fire:
-    implemented_in: conveyor.py
-    as: fire
-    reads: [line.lane, line.change_finished, line.fired, line.open_pr_from_change, placer]
-
-  archive.may_carry:
-    implemented_in: conveyor.py
-    as: carry_archive
-    reads: [pr.same_repo_change_branch, pr.refs, line.lane, line.change_finished, line.issue_labels, grant_placer]
-    note: >
-      fires on a change/* pull request merging -- the change is finished,
-      conveyor:run stands on the tracking issue, and its placer can still
-      push here.
-
-  loop.is_capped:
-    implemented_in: conveyor.py
-    as: "pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)"
-    reads: [pr.rounds_used, pr.max_rounds, pr.grants]
-
-actions:
-  none:
-    implemented_in: null
-    note: a transition with no side effect -- the machine moves, nothing else happens.
-
-  session.implement:
-    implemented_in: remote-implement.py
-    does: starts a remote session that implements the change and opens its pull request.
-
-  session.archive:
-    implemented_in: remote-implement.py
-    does: starts a remote session that archives the change on its branch and opens the archive pull request.
-
-  station.fire_implement:
-    implemented_in: conveyor-state.py
-    does: "applies station event fire:implement"
-    fires_station_event: "fire:implement"
-
-  station.fire_archive:
-    implemented_in: conveyor-state.py
-    does: "applies station event fire:archive"
-    fires_station_event: "fire:archive"
-
-  station.advance_from_fix:
-    implemented_in: conveyor-state.py
-    does: "applies station event pr:green, once the loop workflow reports mergeable and a person merged"
-    fires_station_event: "pr:green"
-
-  loop.start:
-    implemented_in: dispatch-gate.py
-    does: "starts the first fixing round; the loop machine's own state then tracks it (see loop.yaml)"
-    fires_loop_event: "round:start"
-
-  loop.reopen:
-    implemented_in: dispatch-gate.py
-    does: "starts a round on a capped loop under the extended cap"
-    fires_loop_event: "round:start"
-
-  loop.extend_cap:
-    implemented_in: conveyor.py
-    as: "cap_for(max_rounds, grants + 1)"
-    does: raises the effective round ceiling by one full max_rounds set.
-
-# the decision FUNCTIONS of conveyor.py that are not 1:1 with a single guard
-# or action above -- each combines several guards and can emit several
-# different actions/events depending on the facts. Kept here so the registry
-# is the complete map from "a name appearing anywhere in the YAML" to "where
-# the real logic lives", even for the ones too combinational to flatten.
 decision_functions:
-  fire: { in: conveyor.py, emits_actions: [ignore, refuse, skip, fire], emits_station_events: ["fire:implement", "fire:archive"] }
-  carry_fix: { in: conveyor.py, emits_actions: [nothing, carry], emits_station_events: ["pr:green"], emits_loop_events: ["ci:green_clean"] }
-  carry_archive: { in: conveyor.py, emits_actions: [nothing, done, stalled, restart, carry], emits_station_events: ["merge:archive_pr", "merge:plain", "merge:proposal_or_apply", "merge:finished_stalled", "merge:finished_carried"] }
-  gate: { in: conveyor.py, emits_actions: [refuse, none, threads, round], emits_station_events: ["round:start"], emits_loop_events: ["round:start", "end:capped"] }
-  round_may_start: { in: conveyor.py, emits_actions: [start, defer] }
-  guard: { in: conveyor.py, emits_actions: [allow, refuse] }
-  ending: { in: conveyor.py, emits_actions: [capped, continue, waiting, mergeable, stalled], emits_loop_events: ["end:continue", "end:capped", "end:waiting", "end:mergeable", "end:stalled"] }
-  check_is_work: { in: conveyor.py, emits_actions: [skip, work] }
-  recover: { in: conveyor.py, emits_loop_events: ["recover:waiting", "recover:capped"] }
-  refresh: { in: conveyor.py, emits_loop_events: ["thread:opened"] }
+  fire:
+    in: conveyor.py
+    reads: [label, line.lane, line.change_finished, line.fired, line.open_pr_from_change, placer, grant_placer]
+    emits_actions: [ignore, refuse, skip, fire]
+    emits_station_events: ["fire:implement", "fire:archive"]
+
+  carry_fix:
+    in: conveyor.py
+    reads: [pr.same_repo_change_branch, pr.refs, pr.closes, line.issue_labels, placer]
+    emits_actions: [nothing, carry]
+    emits_station_events: ["pr:green"]
+    emits_loop_events: ["round:start", "ci:green_clean"]
+    note: >
+      the ONE function that starts a round for conveyor:fix (round:start)
+      AND can mark the loop mergeable in the same decision (ci:green_clean)
+      when the carried CI run was already green.
+
+  carry_archive:
+    in: conveyor.py
+    reads: [pr.same_repo_change_branch, pr.refs, pr.closes, line.lane, line.change_finished, line.issue_labels, placer]
+    emits_actions: [nothing, done, stalled, restart, carry]
+    emits_station_events: ["merge:archive_pr", "merge:plain", "merge:proposal_or_apply", "merge:finished_stalled", "merge:finished_carried"]
+
+  gate:
+    in: conveyor.py
+    reads: [trigger, pr.fork, pr.state, pr.labels, pr.rounds_used, pr.grants, pr.max_rounds, line.issue_labels, grant_placer]
+    emits_actions: [refuse, none, threads, round]
+    emits_loop_events: ["round:start", "end:capped"]
+    note: >
+      the one function BOTH conveyor:fix (a direct label placement) and
+      conveyor:keep-going (re-opening a capped loop) go through -- they
+      share this function, not two separate ones.
+
+  round_may_start:
+    in: conveyor.py
+    reads: [ci, review]
+    emits_actions: [start, defer]
+
+  guard:
+    in: conveyor.py
+    reads: [pr.state, pr.labels, running_rounds, unanswered_disputes]
+    emits_actions: [allow, refuse]
+
+  ending:
+    in: conveyor.py
+    reads: [kind, number, cap, thread_open, waiting_on_person]
+    emits_actions: [capped, continue, waiting, mergeable, stalled]
+    emits_loop_events: ["end:continue", "end:capped", "end:waiting", "end:mergeable", "end:stalled"]
+
+  check_is_work:
+    in: conveyor.py
+    reads: [job, conclusion, required]
+    emits_actions: [skip, work]
+
+  recover:
+    in: conveyor.py
+    reads: [current, rounds_used, cap, thread_open]
+    emits_loop_events: ["recover:waiting", "recover:capped"]
+
+  refresh:
+    in: conveyor.py
+    reads: [current, thread_open]
+    emits_loop_events: ["thread:opened"]

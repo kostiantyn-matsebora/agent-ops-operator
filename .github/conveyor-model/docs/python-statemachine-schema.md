@@ -12,11 +12,20 @@ accepts.
 **This is the library's OWN vocabulary, not ours — kept deliberately
 separate.**
 
-- Our hand-authored files (`station.yaml`, `loop.yaml`, `workflows.yaml`) use
-  a flatter, easier-to-diff shape (`transitions: [{from, event, to}, ...]`)
-  and are the source of truth.
-- A converter (`to_native_schema()` in `spike.py`) turns ours into this one
-  only at load time, for the engine and the diagram.
+- `station.yaml` / `loop.yaml` use a flat, easier-to-diff shape
+  (`transitions: [{from, event, to}, ...]`), mechanically extracted from
+  `conveyor.py` and the real source of truth for the engine.
+- `workflows.yaml` does NOT duplicate that shape. A conveyor:* workflow has
+  no states of its own — each is a `gates:` entry naming a REAL
+  `(from, event, to)` already in `station.yaml` / `loop.yaml`, plus which
+  decision function reads the label.
+- See `workflows.yaml`'s own header comment for why. An earlier draft
+  invented idle/running/done states for these labels. `conveyor.py` never
+  tracks any such value.
+- A converter (`to_native_schema()` in `spike.py`) turns `station.yaml` /
+  `loop.yaml` into this library's native shape only at load time, for the
+  engine and the diagram. `spike.py` predates the `workflows.yaml`
+  correction and has not been re-run against it.
 - **Why the two stay apart:** the native shape has no slot for an EXPLICIT
   no-op transition. `conveyor.py`'s `SKIP` means "considered, and defined as
   a no-op" — the totality test depends on that distinction — but the native

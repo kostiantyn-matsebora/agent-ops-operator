@@ -2,26 +2,27 @@
 """Cross-check the four declarative files for consistency.
 
 station.yaml / loop.yaml are GENERATED (extract_machines.py) and therefore
-trusted as ground truth. workflows.yaml and registry.yaml are HAND-AUTHORED,
-so this is where drift between "what the docs say an action fires" and
-"what the real machine actually accepts" would surface -- the exact failure
-mode gotchas.md documents for every hand-copied rule in this repository.
+trusted as ground truth. workflows.yaml (each conveyor:* as its own complete
+state machine, in station's or loop's real vocabulary) and triggers.yaml
+(what GitHub event calls which decision function) are HAND-AUTHORED, so this
+is where drift between "what the docs say happens" and "what the real
+tables accept" would surface.
 
 Checks:
-  1. Every `fires_station_event` / `fires_loop_event` named in registry.yaml
-     is a real event that appears in station.yaml / loop.yaml.
-  2. Every `guard:` / `action:` name used in workflows.yaml transitions has
-     an entry in registry.yaml (guards: / actions:), OR is the literal
-     `none`.
-  3. Every workflow named in triggers.yaml exists in workflows.yaml.
-  4. Totality: station.yaml / loop.yaml define a transition for every
+  1. Totality: station.yaml / loop.yaml define a transition for every
      (state, event) pair -- the same property conveyor.test.py enforces on
      the Python tables, re-checked here on the generated YAML as a guard
-     against a hand-run extraction going stale.
+     against a stale hand-run extraction.
+  2. Every transition in EVERY conveyor workflow is a REAL (from, event, to)
+     tuple in the machine it `acts_on` (station.yaml or loop.yaml) -- every
+     one looked up directly, none inferred or assumed.
+  3. Every workflow's `states:` list is a subset of its `acts_on` machine's
+     real states -- a conveyor cannot claim to occupy a state that machine
+     does not have.
+  4. Every `workflow:` named in triggers.yaml is declared in workflows.yaml.
 
 Exit code 0 and silence on success; a nonzero exit and one line per problem
-otherwise. Never prints which production data, if any, triggered a problem
--- this operates on the schema files alone.
+otherwise.
 """
 from __future__ import annotations
 
@@ -46,8 +47,42 @@ def check_totality(machine: dict) -> list[str]:
         for e in events:
             if (s, e) not in seen:
                 problems.append(f"{machine['machine']}.yaml: no transition declared for ({s!r}, {e!r}) "
-                                 f"-- station_table()/loop_table() in conveyor.py fills every cell, including SKIP; "
-                                 f"this file is missing one, which means it was hand-edited or extracted stale")
+                                 f"-- the real table fills every cell, including SKIP; this file is "
+                                 f"missing one, meaning it was hand-edited or extracted stale")
+    return problems
+
+
+def check_workflows(workflows: dict, machines: dict) -> list[str]:
+    problems = []
+    for name, w in workflows.items():
+        machine = machines.get(w["acts_on"])
+        if machine is None:
+            problems.append(f"workflows.yaml: {name}.acts_on={w['acts_on']!r} is not 'station' or 'loop'")
+            continue
+
+        real = {(t["from"], t["event"]): t["to"] for t in machine["transitions"]}
+        real_states = set(machine["states"])
+
+        unknown_states = set(w.get("states", [])) - real_states
+        if unknown_states:
+            problems.append(f"workflows.yaml: {name} claims states {sorted(unknown_states)}, "
+                             f"not in {w['acts_on']}.yaml's real states {sorted(real_states)}")
+
+        for t in w.get("transitions", []):
+            key = (t["from"], t["event"])
+            if key not in real:
+                problems.append(f"workflows.yaml: {name} transition ({t['from']!r}, {t['event']!r}) "
+                                 f"-- no such transition in {w['acts_on']}.yaml")
+                continue
+            if real[key] != t["to"]:
+                problems.append(f"workflows.yaml: {name} transition ({t['from']!r}, {t['event']!r}) "
+                                 f"declares to={t['to']!r}, the real table says {real[key]!r}")
+            if t["from"] not in w.get("states", []):
+                problems.append(f"workflows.yaml: {name} transition from={t['from']!r} "
+                                 f"is not listed in its own states: {w.get('states')}")
+            if t["to"] not in w.get("states", []):
+                problems.append(f"workflows.yaml: {name} transition to={t['to']!r} "
+                                 f"is not listed in its own states: {w.get('states')}")
     return problems
 
 
@@ -55,67 +90,25 @@ def main() -> int:
     station = load("station.yaml")
     loop = load("loop.yaml")
     workflows = load("workflows.yaml")["workflows"]
-    registry = load("registry.yaml")
     triggers = load("triggers.yaml")["triggers"]
 
     problems: list[str] = []
-
     problems += check_totality(station)
     problems += check_totality(loop)
+    problems += check_workflows(workflows, {"station": station, "loop": loop})
 
-    station_events = {t["event"] for t in station["transitions"]}
-    loop_events = {t["event"] for t in loop["transitions"]}
-
-    # check 1: registry's claimed emitted events are real
-    for section, events_key in (("actions", "fires_station_event"), ("actions", "fires_loop_event")):
-        for name, spec in registry.get(section, {}).items():
-            ev = spec.get(events_key)
-            if ev is None:
-                continue
-            pool = station_events if events_key == "fires_station_event" else loop_events
-            if ev not in pool:
-                problems.append(f"registry.yaml: {section}.{name}.{events_key} names {ev!r}, "
-                                 f"which does not exist in {'station' if 'station' in events_key else 'loop'}.yaml")
-
-    for fn_name, spec in registry.get("decision_functions", {}).items():
-        for ev in spec.get("emits_station_events", []):
-            if ev not in station_events:
-                problems.append(f"registry.yaml: decision_functions.{fn_name} claims station event {ev!r}, "
-                                 f"not found in station.yaml")
-        for ev in spec.get("emits_loop_events", []):
-            if ev not in loop_events:
-                problems.append(f"registry.yaml: decision_functions.{fn_name} claims loop event {ev!r}, "
-                                 f"not found in loop.yaml")
-
-    # check 2: every guard/action named in workflows.yaml resolves in registry.yaml
-    known_guards = set(registry.get("guards", {}).keys())
-    known_actions = set(registry.get("actions", {}).keys()) | {"none"}
-    for wf_name, wf in workflows.items():
-        for t in wf.get("transitions", []):
-            g = t.get("guard")
-            if g and g not in known_guards:
-                problems.append(f"workflows.yaml: {wf_name} references guard {g!r}, not declared in registry.yaml")
-            a = t.get("action")
-            if a and a not in known_actions:
-                problems.append(f"workflows.yaml: {wf_name} references action {a!r}, not declared in registry.yaml")
-        for inv in wf.get("invokes", []):
-            target = inv["workflow"]
-            if target not in workflows:
-                problems.append(f"workflows.yaml: {wf_name} invokes {target!r}, which is not a declared workflow")
-
-    # check 3: every trigger names a real workflow (where it names one at all)
     for trig in triggers:
         wf_name = trig.get("workflow")
         if wf_name and wf_name not in workflows:
             problems.append(f"triggers.yaml: trigger for event {trig['event']!r} names workflow {wf_name!r}, "
-                             f"which is not declared in workflows.yaml")
+                             f"not declared in workflows.yaml")
 
     if problems:
         print(f"{len(problems)} problem(s):")
         for p in problems:
             print(f"  - {p}")
         return 1
-    print("all four files are consistent.")
+    print("all files are consistent.")
     return 0
 
 

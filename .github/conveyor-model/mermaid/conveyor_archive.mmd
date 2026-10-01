@@ -1,6 +1,14 @@
 stateDiagram-v2
-    [*] --> idle
-    idle --> running : archive.label_placed  [archive.may_fire]  / session.archive
-    idle --> running : when(archive.carried_onto_issue)  [archive.may_carry]  / session.archive
-    running --> done : session.completed  / station.fire_archive
-    done --> [*]
+    %% no single initial state: this conveyor's real trigger fires identically from most of its own states (see its own note:)
+    state none
+    state implement
+    state fix
+    state merge
+    state archive
+    state stalled
+    archive --> archive : fire.archive
+    fix --> archive : fire.archive
+    implement --> archive : fire.archive
+    merge --> archive : fire.archive
+    none --> archive : fire.archive
+    stalled --> archive : fire.archive

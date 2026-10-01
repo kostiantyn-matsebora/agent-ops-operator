@@ -1,6 +1,12 @@
 stateDiagram-v2
-    [*] --> idle
-    idle --> running : implement.label_placed  [implement.may_fire]  / session.implement
-    idle --> running : run.label_placed  [implement.may_fire]  / session.implement
-    running --> done : session.completed  / station.fire_implement
-    done --> [*]
+    %% no single initial state: this conveyor's real trigger fires identically from most of its own states (see its own note:)
+    state none
+    state implement
+    state fix
+    state merge
+    state stalled
+    fix --> implement : fire.implement
+    implement --> implement : fire.implement
+    merge --> implement : fire.implement
+    none --> implement : fire.implement
+    stalled --> implement : fire.implement
