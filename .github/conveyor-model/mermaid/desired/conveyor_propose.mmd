@@ -16,6 +16,6 @@ stateDiagram-v2
     ready --> [*]
     class none, proposing, proposed, ready stationState
     state proposing {
-        [*] --> loop
-        state "loop" as loop
+        [*] --> proposing__loop
+        state "loop" as proposing__loop
     }

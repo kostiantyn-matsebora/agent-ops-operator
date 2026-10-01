@@ -68,7 +68,12 @@ def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[s
     once. The invoked workflow's OWN states/transitions are not flattened in
     here -- that workflow already has its own diagram; this is a pointer
     into it, not a duplicate of it."""
-    dep_id = mmd_id(dep_name)
+    # The alias is scoped to the PARENT state, not just the invoked workflow's
+    # name -- two sibling states can both invoke the same workflow (e.g.
+    # conveyor.fix invoked from both implemented_with_issues and merge_failed),
+    # and Mermaid treats two composites declaring the identical alias as one
+    # shared node, merging their boxes visually. Verified live.
+    dep_id = f"{mmd_id(at_state)}__{mmd_id(dep_name)}"
     return [
         f"    state {at_state} {{",
         f"        [*] --> {dep_id}",
@@ -214,9 +219,10 @@ def main() -> int:
         desired_dir.mkdir(exist_ok=True, parents=True)
         for old in desired_dir.glob("*.mmd"):
             old.unlink()
+        combined = {**workflows, **desired}
         for name, w in desired.items():
             safe = name.replace(".", "_").replace(":", "_")
-            text = render_workflow(f"[DESIRED] {name}", w, all_workflows=workflows)
+            text = render_workflow(f"[DESIRED] {name}", w, all_workflows=combined)
             (desired_dir / f"{safe}.mmd").write_text(text + "\n")
         print(f"wrote {len(list(desired_dir.glob('*.mmd')))} DESIRED (not yet implemented) "
               f"mermaid files to {desired_dir}")

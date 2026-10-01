@@ -1,0 +1,43 @@
+stateDiagram-v2
+    direction LR
+    [*] --> none
+    note left of none
+        [DESIRED] conveyor.run  --  subject: issue
+    end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
+    state none
+    state ready
+    state implemented_with_issues
+    state merge_failed
+    state done
+    state finalized
+    none --> ready : propose_entered_ready
+    ready --> done : implement_entered_done
+    ready --> implemented_with_issues : implement_entered_implemented_with_issues
+    ready --> merge_failed : implement_entered_merge_failed
+    implemented_with_issues --> done : fix_entered_done
+    merge_failed --> done : fix_entered_done
+    done --> finalized : finalize_entered_finalized
+    finalized --> [*]
+    class none, ready, implemented_with_issues, merge_failed, done, finalized stationState
+    state none {
+        [*] --> none__conveyor_propose
+        state "conveyor.propose" as none__conveyor_propose
+    }
+    state ready {
+        [*] --> ready__conveyor_implement
+        state "conveyor.implement" as ready__conveyor_implement
+    }
+    state implemented_with_issues {
+        [*] --> implemented_with_issues__conveyor_fix
+        state "conveyor.fix" as implemented_with_issues__conveyor_fix
+    }
+    state merge_failed {
+        [*] --> merge_failed__conveyor_fix
+        state "conveyor.fix" as merge_failed__conveyor_fix
+    }
+    state done {
+        [*] --> done__conveyor_finalize
+        state "conveyor.finalize" as done__conveyor_finalize
+    }

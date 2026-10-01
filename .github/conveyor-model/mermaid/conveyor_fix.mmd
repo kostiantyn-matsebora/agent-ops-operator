@@ -13,6 +13,6 @@ stateDiagram-v2
     running --> [*]
     class none, running loopState
     state running {
-        [*] --> loop
-        state "loop" as loop
+        [*] --> running__loop
+        state "loop" as running__loop
     }

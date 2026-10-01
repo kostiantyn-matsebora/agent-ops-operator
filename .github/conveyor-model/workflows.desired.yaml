@@ -152,3 +152,41 @@ workflows:
           - event: "round_started"
             to: fixing
             guard: "has_access"
+
+  conveyor.run:
+    label: "conveyor:run"
+    subject: issue
+    acts_on: station
+    states:
+      none:
+        initial: true
+        invokes: conveyor.propose
+        transitions:
+          - event: "propose_entered_ready"
+            to: ready
+      ready:
+        invokes: conveyor.implement
+        transitions:
+          - event: "implement_entered_done"
+            to: done
+          - event: "implement_entered_implemented_with_issues"
+            to: implemented_with_issues
+          - event: "implement_entered_merge_failed"
+            to: merge_failed
+      implemented_with_issues:
+        invokes: conveyor.fix
+        transitions:
+          - event: "fix_entered_done"
+            to: done
+      merge_failed:
+        invokes: conveyor.fix
+        transitions:
+          - event: "fix_entered_done"
+            to: done
+      done:
+        invokes: conveyor.finalize
+        transitions:
+          - event: "finalize_entered_finalized"
+            to: finalized
+      finalized:
+        final: true

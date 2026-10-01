@@ -21,6 +21,6 @@ stateDiagram-v2
     done --> [*]
     class implemented_with_issues, merge_failed, hotfix_created, fixing, mergeable, done stationState
     state fixing {
-        [*] --> loop
-        state "loop" as loop
+        [*] --> fixing__loop
+        state "loop" as fixing__loop
     }
