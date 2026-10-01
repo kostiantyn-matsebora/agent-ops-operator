@@ -612,3 +612,116 @@ func TestHandleCoordinateTreeRefusesAWrongToken(t *testing.T) {
 		t.Fatalf("want 401 for a wrong token, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// coordMember mirrors chat's own helper: the causedBy field AND the label,
+// since the Router trusts only the field.
+func coordMemberOf(name, parent, entry string) *agentopsv1alpha1.Conversation {
+	m := &agentopsv1alpha1.Conversation{}
+	m.Name, m.Namespace = name, "agent-ops"
+	m.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	m.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: entry}
+	return m
+}
+
+// The reaper's own shape: a plain member (no coordinatorRef of its own)
+// authenticates /coordinate/open-roots with a token derived against the
+// Coordinator its ANCESTOR ROOT names — callerActingForCoordinator's whole
+// point (design D-A, coordinator-owner-reach).
+func TestHandleCoordinateOpenRootsAuthenticatesAPlainMemberViaItsAncestorRoot(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	incident := coordRoot("incident-1", "co-a")
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, reaper, incident)
+
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")
+	rec := postCoordinate(s, "/coordinate/open-roots", token, map[string]any{"conversation": "reaper-1"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Roots []openRootView `json:"roots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Roots) != 1 || out.Roots[0].Name != "incident-1" {
+		t.Fatalf("want only incident-1 (root-1 is the caller's own ancestor root), got %+v", out.Roots)
+	}
+}
+
+func TestHandleCoordinateOpenRootsRefusesAWrongToken(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	s, _ := coordServer(t, coordCoordinator("co-a"), root, reaper)
+
+	rec := postCoordinate(s, "/coordinate/open-roots", "wrong-token", map[string]any{"conversation": "reaper-1"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a wrong token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A conversation resolving to no Coordinator at all (plain, no causedBy, no
+// coordinatorRef) cannot be authenticated for this reach class — there is no
+// name to re-derive a token against, so any presented token is refused
+// identically to a wrong one.
+func TestHandleCoordinateOpenRootsRefusesACallerWithNoCoordinatorScope(t *testing.T) {
+	plain := &agentopsv1alpha1.Conversation{}
+	plain.Name, plain.Namespace = "plain-1", "agent-ops"
+	s, _ := coordServer(t, plain)
+
+	rec := postCoordinate(s, "/coordinate/open-roots", "anything", map[string]any{"conversation": "plain-1"})
+	if rec.Code != 401 {
+		t.Fatalf("want 401 for a caller with no Coordinator scope, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCoordinateOpenRootsRejectsBadJSON(t *testing.T) {
+	s, _ := coordServer(t)
+	req := httptest.NewRequest("POST", "/coordinate/open-roots", strings.NewReader("not json"))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Fatalf("want 400 for malformed JSON, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The widened bound reachable at the HTTP layer: the reaper (a plain member)
+// closes a SIBLING root of its own Coordinator it did not directly cause.
+func TestHandleCoordinateCloseWidenedBoundPermitsAPlainMemberToCloseASiblingRoot(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	incident := coordRoot("incident-1", "co-a")
+	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper, incident)
+
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "reaper-1", "target": "incident-1", "reason": "resolved by the reaper"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "incident-1"}, &got)
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatal("the sibling root must be closed")
+	}
+}
+
+// The reaper cannot reach its OWN ancestor root through the widened bound,
+// even named directly.
+func TestHandleCoordinateCloseWidenedBoundRefusesTheCallersOwnAncestorRoot(t *testing.T) {
+	root := coordRoot("root-1", "co-a")
+	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper)
+
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "reaper-1", "target": "root-1", "reason": "trying to close my own root"})
+	if rec.Code != 403 {
+		t.Fatalf("want 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got)
+	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		t.Fatal("the reaper must never close its own ancestor root")
+	}
+}

@@ -1,61 +1,68 @@
 ## 1. `AgentCapability` rendering per bundle — deployment-engineer
 
-- [ ] 1.1 `chart/charts/kubernetes/`: add the `coordinator`-mode rendering
+- [x] 1.1 `chart/charts/kubernetes/`: add the `coordinator`-mode rendering
       branch per `k8s-bundle`'s delta — the observing `AgentCapability`
       (`k8s-observe`) always, and the acting one (`k8s-operate`) only when
       `pipelines.admin.enabled`, never merged, no `Pipeline` in this mode.
       Verify with `helm template` under
       `global.agentops.wiringMode: coordinator`, flag off and on.
-- [ ] 1.2 `chart/charts/prometheus/`: add the `coordinator`-mode branch for
+- [x] 1.2 `chart/charts/prometheus/`: add the `coordinator`-mode branch for
       the `alert-investigator` route per `prometheus-bundle`'s delta — one
       `AgentCapability`, no `Pipeline`. Verify with `helm template`.
-- [ ] 1.3 `chart/charts/home-assistant/`: add the `coordinator`-mode branch
+- [x] 1.3 `chart/charts/home-assistant/`: add the `coordinator`-mode branch
       for BOTH routes per `ha-bundle`'s delta — two `AgentCapability`
       objects (`ha-control`, `ha-ops`), never merged, no `Pipeline`.
       Verify with `helm template` that both privilege levels stay separate.
-- [ ] 1.4 Every bundle's `pipelines`-mode branch is untouched — verify with
+- [x] 1.4 Every bundle's `pipelines`-mode branch is untouched — verify with
       a render diff (`helm template` before and after this change, with
       `wiringMode` unset) showing zero output difference.
 
 ## 2. Chart-level Coordinator, reaper, and wiringMode — deployment-engineer
 
-- [ ] 2.1 `chart/values.yaml`: add `global.agentops.wiringMode`, default
+- [x] 2.1 `chart/values.yaml`: add `global.agentops.wiringMode`, default
       `pipelines`, validated against exactly `pipelines` \| `coordinator` in
       the values schema or a render-time guard. Verify an unrecognized
       value fails the render naming both accepted values.
-- [ ] 2.2 `chart/templates/`: render exactly one `Coordinator` object under
+- [x] 2.2 `chart/templates/`: render exactly one `Coordinator` object under
       `coordinator` mode, its `signalSourceRefs` listing every enabled
       bundle's source (including the hourly `signals/cron` claim, task 2.4)
       and its `agents[]` listing every enabled bundle's `AgentCapability`
       entries from section 1. Nothing renders under `pipelines` mode.
-- [ ] 2.3 Add the reaper's `AgentProfile` and `AgentCapability` templates,
+- [x] 2.3 Add the reaper's `AgentProfile` and `AgentCapability` templates,
       gated by `coordinator` mode alone (not a separate flag) — no domain
       toolset or MCPConfig bound beyond the coordination toolset. Add the
       reaper as one more `agents[]` entry on the chart-rendered Coordinator.
-- [ ] 2.4 Claim `signals/cron` hourly on the chart-rendered Coordinator's
+- [x] 2.4 Claim `signals/cron` hourly on the chart-rendered Coordinator's
       `signalSourceRefs` (design D-E) — no per-entry trigger field, no new
       CRD field.
-- [ ] 2.5 Write the Coordinator's own coordinating-agent prompt (template
+- [x] 2.5 Write the Coordinator's own coordinating-agent prompt (template
       under `platform/manager/internal/dispatch/templates/` or the
       chart-rendered `AgentProfile`'s prompt, per whichever the existing
       `Coordinator` inline-capability convention uses) to recognise an
       hourly cron signal and respond with `invoke(reaper, ...)`. Verify by
       reading the rendered prompt in a `helm template` dry run.
-- [ ] 2.6 Verify `pipelines` mode stays byte-identical: `helm template` with
+- [x] 2.6 Verify `pipelines` mode stays byte-identical: `helm template` with
       `wiringMode` unset vs. explicitly `pipelines`, diff is empty, across
       every bundle enabled.
 
 ## 3. Domain agent self-close prompt — deployment-engineer
 
-- [ ] 3.1 `platform/manager/internal/dispatch/templates/`: add the
+- [x] 3.1 `platform/manager/internal/dispatch/templates/`: add the
       self-close instruction to the shared/base prompt template (or each
       bundle's profile prompt, per whichever the existing per-bundle prompt
       convention uses) — an agent may `/close` its own conversation once it
       judges the problem resolved. Verify by reading the rendered prompt.
+      DONE ON THE CHART SIDE ONLY: `agentops.selfCloseInstruction` /
+      `agentops.withSelfClose` in `chart/templates/_helpers.tpl`, appended
+      in every bundle profile template. The shared dispatch template under
+      `platform/manager/internal/dispatch/templates/` was left untouched
+      (out of this role's lane) — see the hand-back report for whether a
+      backend-side instruction is also needed for non-chart-authored
+      profiles.
 
 ## 4. Coordinator-owner reach on `platform/mcp-aops` and the manager — backend-developer
 
-- [ ] 4.1 `platform/manager/internal/` (wherever `/coordinate/*` handlers
+- [x] 4.1 `platform/manager/internal/` (wherever `/coordinate/*` handlers
       live): implement the `coordinatorRef` resolution walk from design
       D-A — read the caller's own `coordinatorRef`, and if empty, walk
       `causedBy` to the uncaused root and read that root's `coordinatorRef`.
@@ -63,7 +70,7 @@
       test three cases: a plain member (no `coordinatorRef`) resolves via
       its ancestor root, a Coordinator's own root resolves via its own
       field, and a Pipeline-addressed conversation resolves to nothing.
-- [ ] 4.2 Implement `list_open_roots()`: list uncaused conversations whose
+- [x] 4.2 Implement `list_open_roots()`: list uncaused conversations whose
       `coordinatorRef` matches the caller's resolved Coordinator, excluding
       the caller's own root (its ancestor root when a member, itself when
       it is a root) (design D-B). Populate `members` with the `agents[]`
@@ -71,18 +78,18 @@
       scenario from `coordinator-owner-reach`'s spec: member excluded,
       closed root excluded, cross-Coordinator root excluded, own root
       excluded, and the `members` projection.
-- [ ] 4.3 Widen `close`'s bound per design D-B: caller itself, a
+- [x] 4.3 Widen `close`'s bound per design D-B: caller itself, a
       conversation it directly caused, OR — when resolved to a Coordinator
       — any open uncaused root of that Coordinator other than its own
       ancestor. Unit test every scenario in `aops-mcp-server`'s delta
       (sibling-root close permitted, cross-Coordinator refused, member
       refused, Pipeline-addressed caller keeps the narrow bound).
-- [ ] 4.4 `platform/mcp-aops/`: expose `list_open_roots` as a new MCP tool,
+- [x] 4.4 `platform/mcp-aops/`: expose `list_open_roots` as a new MCP tool,
       forwarding the caller's existing `coordinator:<name>:<conversation>`
       token unchanged — no new token derivation, no new context string
       (design D-D). Verify the tool is listed and callable in the server's
       existing conformance-style test, if one exists for the other verbs.
-- [ ] 4.5 Update the `/coordinate/*` HTTP surface's bound table in code to
+- [x] 4.5 Update the `/coordinate/*` HTTP surface's bound table in code to
       match `aops-mcp-server`'s delta spec exactly.
 
 ## 5. Smoke against a live install — testing-specialist
@@ -97,11 +104,11 @@
 
 ## 6. Rules and vocabulary
 
-- [ ] 6.1 `.claude/rules/gotchas.md`: extend the bundle-qualification table
+- [x] 6.1 `.claude/rules/gotchas.md`: extend the bundle-qualification table
       with the coordinator-mode column per bundle (mirrors
       `coordinated-agents`' own rule-file updates for the primitive this
       change wires by default).
-- [ ] 6.2 `.claude/rules/wiring.md`: note that `global.agentops.wiringMode`
+- [x] 6.2 `.claude/rules/wiring.md`: note that `global.agentops.wiringMode`
       is a chart-rendering choice only, never a CRD-level exclusivity — the
       many-to-many invariant is unchanged.
 
@@ -115,9 +122,33 @@
       and `: pipelines` (and unset), every bundle combination the existing
       permutation matrix already covers, plus the byte-identical diff from
       task 2.6. `serviceaccount-guard.py` passes on all of them.
+      PARTIAL, left UNTICKED: the deployment-engineer's own hand-run
+      `helm template` matrix (every bundle on/off, both modes, unset, the
+      byte-identical diff) and `serviceaccount-guard.py` all pass — see the
+      hand-back report. But the EXISTING permutation matrix this task points
+      at is `platform/manager/internal/integration/charttemplate_test.go`'s
+      `go test` suite, and five of its tests
+      (`TestDemoModeWiresTheObservingRoute`,
+      `TestAllowMutationsPromotesTheRouteToActing`,
+      `TestExplicitRouteValuesBeatTheDerivation`,
+      `TestBothRoutesRenderWithoutConflict`,
+      `TestWiringNamesOnlyWhatWasRendered`) now FAIL — demo mode's default
+      posture flipping to `coordinator` (per `wiring-mode`'s own spec) is a
+      real, intended behaviour change those tests still pin to the old
+      default. `TestK8sProfileStatesTheWithheldPosture` and
+      `TestK8sProfilePostureCanBeDeclined` also fail on the expected
+      self-close text task 3 adds. None of these are chart defects — they are
+      `platform/manager/` test updates outside this role's lane, detailed in
+      `.claude/rules/gotchas.md`'s new coordinator-mode section and the
+      hand-back report.
 - [ ] 7.4 `python3 .github/scripts/publication-guard.py` and
       `retired-vocabulary-guard.py` pass — record the verdict only, never
       the matched text.
+      DONE for the chart/rules files this role touched: both guards report
+      clean over the whole tree (`publication-guard: clean`,
+      `retired-vocabulary guard: clean, 122 files`). Left unticked because
+      this task is repository-wide and the change as a whole is not
+      finished.
 
 ## 8. E2E tests
 
