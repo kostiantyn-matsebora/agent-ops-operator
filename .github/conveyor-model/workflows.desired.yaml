@@ -26,15 +26,6 @@ workflows:
       ready:
         final: true
 
-  # conveyor.implement, EXTENDED: the real, already-shipped version
-  # (workflows.yaml) fires `fire:implement` from every real station except
-  # `ready` and `archive` -- `ready` did not exist as a real station when it
-  # shipped. Here it is added as one more station the same transition fires
-  # from, and the workflow gains a real terminal transition it does not have
-  # today: the implementing PR actually merging, landing the issue at the
-  # real station `merge`. This whole workflow entry is DESIRED, not a
-  # redeclaration of the real one -- conveyor.py has no `ready` station and
-  # no `merge:implementation` event yet.
   conveyor.implement:
     label: "conveyor:implement"
     subject: issue
