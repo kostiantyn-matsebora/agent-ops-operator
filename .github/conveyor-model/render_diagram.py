@@ -97,6 +97,7 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
 
     lines = [
         "stateDiagram-v2",
+        "    direction LR",
         "    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f",
         "    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33",
     ]
@@ -128,7 +129,7 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
         entry = initial
     else:
         entry = state_ids[0]
-    idx = lines.index("stateDiagram-v2") + 1
+    idx = lines.index("    direction LR") + 1
     lines.insert(idx, f"    [*] --> {entry}")
     lines.insert(idx + 1, f"    note left of {entry}")
     lines.insert(idx + 2, f"        {name}  --  subject: {w['subject']}")

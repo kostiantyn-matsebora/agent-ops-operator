@@ -2,7 +2,7 @@ version: 1
 
 workflows:
 
-  propose:
+  conveyor.propose:
     subject: issue
     acts_on: station
     states:
