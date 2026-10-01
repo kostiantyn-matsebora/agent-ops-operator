@@ -128,11 +128,11 @@ workflows:
         initial: true
         transitions:
           - event: "round_started"
-            to: round_started
+            to: fixing
             guard: "has_access"
-      round_started:
+      fixing:
         transitions:
           - event: "round_finished"
-            to: round_finished
+            to: mergeable
             guard: "session_finished AND checks_completed"
-      round_finished: {}
+      mergeable: {}
