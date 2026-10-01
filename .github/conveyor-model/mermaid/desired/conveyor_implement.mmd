@@ -7,13 +7,13 @@ stateDiagram-v2
     classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state ready
-    state implement
+    state implementing
     state done
     state stalled
-    ready --> implement : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire
-    implement --> implement : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire
-    implement --> done : merge.plain / carry_archive
-    implement --> stalled : merge.finished_stalled / carry_archive
+    ready --> implementing : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire
+    implementing --> implementing : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire
+    implementing --> done : merge.plain / carry_archive
+    implementing --> stalled : merge.finished_stalled / carry_archive
     done --> [*]
     stalled --> [*]
-    class ready, implement, done, stalled stationState
+    class ready, implementing, done, stalled stationState

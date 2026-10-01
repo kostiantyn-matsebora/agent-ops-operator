@@ -35,13 +35,13 @@ workflows:
         initial: true
         transitions:
           - event: "fire:implement"
-            to: implement
+            to: implementing
             guard: "has_access placer grant_placer AND NOT is_session_at_work line"
             owned_by: "fire"
-      implement:
+      implementing:
         transitions:
           - event: "fire:implement"
-            to: implement
+            to: implementing
             guard: "has_access placer grant_placer AND NOT is_session_at_work line"
             owned_by: "fire"
           - event: "merge:plain"
@@ -63,8 +63,8 @@ workflows:
         initial: true
         transitions:
           - event: "round:start"
-            to: fix
-      fix:
+            to: fixing
+      fixing:
         invokes: loop
         transitions:
           - event: "pr:green"
