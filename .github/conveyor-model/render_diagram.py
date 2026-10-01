@@ -154,6 +154,48 @@ def mermaid_for_workflow(name: str, wf: dict, trigger_index: dict[str, dict], lo
     return "\n".join(lines)
 
 
+def carried_entries(wf: dict) -> list[dict]:
+    """The subset of a workflow's OWN idle->running transitions that fire
+    because conveyor:run's grant was read (a `run.label_placed` entry, or
+    one whose event name marks it as carried onto/from the pull request or
+    issue) -- as opposed to a person placing THAT workflow's own label
+    directly. Derived from the real event names workflows.yaml already
+    declares, never hardcoded per workflow, so a new carried path is picked
+    up automatically."""
+    out = []
+    for t in wf["transitions"]:
+        if t["from"] != "idle":
+            continue
+        ev = t["event"]
+        if ev.startswith("run.") or "carried" in ev:
+            out.append(t)
+    return out
+
+
+def mermaid_for_run(run: dict, siblings: dict[str, dict], trigger_index: dict[str, dict]) -> str:
+    """conveyor.run's OWN diagram, PLUS the real relationship the audit
+    found: while running, its standing grant is what each sibling's CARRIED
+    entry (never its direct-label entry, which lives on that sibling's own
+    diagram) reads. Each sibling is drawn as a plain referenced state --
+    its own standalone diagram already shows its full internals -- with the
+    edge into it labeled by the REAL carried transition workflows.yaml
+    declares, not a guard this renderer invents."""
+    lines = ["stateDiagram-v2", "    [*] --> idle"]
+    for t in run["transitions"]:
+        lines.append(f"    {t['from']} --> {t['to']} : {transition_label(t, trigger_index)}")
+
+    for name, wf in siblings.items():
+        label = name.replace("conveyor.", "")
+        for t in carried_entries(wf):
+            lines.append(f"    running --> {label} : {transition_label(t, trigger_index)}")
+        lines.append(f"    {label} --> running : done")
+        lines.append(f"    note right of {label}")
+        lines.append(f"        see {name}'s own diagram for its full states")
+        lines.append(f"    end note")
+
+    return "\n".join(lines)
+
+
 def main() -> int:
     loop = load("loop.yaml")
     workflows = load("workflows.yaml")["workflows"]
@@ -170,9 +212,16 @@ def main() -> int:
         l = loop if name == "conveyor.fix" else None
         (out_dir / f"{safe}.mmd").write_text(mermaid_for_workflow(name, wf, trigger_index, loop=l) + "\n")
 
+    siblings = {k: v for k, v in workflows.items()
+                if k in ("conveyor.implement", "conveyor.fix", "conveyor.archive")}
+    (out_dir / "conveyor_run_and_siblings.mmd").write_text(
+        mermaid_for_run(workflows["conveyor.run"], siblings, trigger_index) + "\n")
+
     print(f"wrote {len(list(out_dir.glob('*.mmd')))} mermaid files to {out_dir}")
-    print("every workflow's diagram shows ALL its real entries: signal (a person's label)")
-    print("and change (when(...), a carried grant re-checked on a GitHub event).")
+    print("every workflow's standalone diagram shows ALL its real entries: signal (a")
+    print("person's label) and change (when(...), a carried grant re-checked on a")
+    print("GitHub event). conveyor_run_and_siblings.mmd shows ONLY the carried edges,")
+    print("each one the real transition workflows.yaml declares -- not an invented guard.")
     return 0
 
 
