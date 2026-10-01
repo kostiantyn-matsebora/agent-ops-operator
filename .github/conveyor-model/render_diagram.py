@@ -102,7 +102,8 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
         "    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33",
     ]
     state_class = "stationState" if w["acts_on"] == "station" else "loopState"
-    initial = next((sid for sid, s in states.items() if s.get("initial")), None)
+    initial_states = [sid for sid, s in states.items() if s.get("initial")]
+    initial = initial_states[0] if initial_states else None
 
     # outcomes[state] = frozenset of (event, guard, owned_by, to) -- the
     # complete, real effect of being in that state, for the "do all states
@@ -124,16 +125,19 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     final_states = [sid for sid in state_ids if sid in has_incoming and sid not in has_outgoing]
 
     if all_same:
-        entry = "any_state"
-    elif initial:
-        entry = initial
+        entries = ["any_state"]
+    elif initial_states:
+        entries = initial_states
     else:
-        entry = state_ids[0]
+        entries = [state_ids[0]]
+    entry = entries[0]
     idx = lines.index("    direction LR") + 1
-    lines.insert(idx, f"    [*] --> {entry}")
-    lines.insert(idx + 1, f"    note left of {entry}")
-    lines.insert(idx + 2, f"        {name}  --  subject: {w['subject']}")
-    lines.insert(idx + 3, "    end note")
+    for offset, sid in enumerate(entries):
+        lines.insert(idx + offset, f"    [*] --> {sid}")
+    note_idx = idx + len(entries)
+    lines.insert(note_idx, f"    note left of {entry}")
+    lines.insert(note_idx + 1, f"        {name}  --  subject: {w['subject']}")
+    lines.insert(note_idx + 2, "    end note")
 
     if all_same:
         shared = next(iter(non_empty.values()))

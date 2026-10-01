@@ -1,20 +1,23 @@
 stateDiagram-v2
     direction LR
-    [*] --> stalled
-    note left of stalled
+    [*] --> implemented_with_issues
+    [*] --> merge_failed
+    note left of implemented_with_issues
         [DESIRED] conveyor.fix  --  subject: issue
     end note
     classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
-    state stalled
+    state implemented_with_issues
+    state merge_failed
     state fixing
     state mergeable
     state done
-    stalled --> fixing : round_started
+    implemented_with_issues --> fixing : round_started
+    merge_failed --> fixing : round_started
     fixing --> mergeable : loop_entered_mergeable
     mergeable --> done : all_prs_merged [all_prs_merged]
     done --> [*]
-    class stalled, fixing, mergeable, done stationState
+    class implemented_with_issues, merge_failed, fixing, mergeable, done stationState
     state fixing {
         [*] --> loop
         state "loop" as loop

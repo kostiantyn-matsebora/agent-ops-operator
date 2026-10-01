@@ -80,7 +80,12 @@ workflows:
     subject: issue
     acts_on: station
     states:
-      stalled:
+      implemented_with_issues:
+        initial: true
+        transitions:
+          - event: "round_started"
+            to: fixing
+      merge_failed:
         initial: true
         transitions:
           - event: "round_started"
