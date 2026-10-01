@@ -11,18 +11,15 @@ workflows:
         transitions:
           - event: "proposal_pr_opened"
             to: proposing
-            guard: "exists"
       proposing:
         invokes: loop
         transitions:
           - event: "proposal_pr_mergeable"
             to: proposed
-            guard: "is_mergeable"
       proposed:
         transitions:
           - event: "proposal_pr_merged"
             to: ready
-            guard: "is_merged"
       ready:
         final: true
 
