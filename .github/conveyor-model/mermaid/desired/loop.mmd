@@ -1,0 +1,31 @@
+stateDiagram-v2
+    direction LR
+    [*] --> none
+    note left of none
+        [DESIRED] loop  --  subject: pull_request
+    end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
+    state none
+    state running
+    state waiting
+    state stalled
+    state capped
+    state mergeable
+    none --> mergeable : ci.green_clean / carry_fix()
+    running --> running : end.continue / ending()
+    running --> mergeable : end.mergeable / ending()
+    running --> waiting : end.waiting / ending()
+    running --> stalled : end.stalled / ending()
+    running --> capped : end.capped / ending()
+    running --> waiting : recover.waiting [NOT is_capped(pr) AND has_open_thread(pr)] / recover()
+    running --> capped : recover.capped [is_capped(pr)] / recover()
+    waiting --> running : round.start / gate()
+    waiting --> mergeable : ci.green_clean / carry_fix()
+    stalled --> running : round.start / gate()
+    stalled --> mergeable : ci.green_clean / carry_fix()
+    capped --> mergeable : ci.green_clean / carry_fix()
+    mergeable --> mergeable : ci.green_clean / carry_fix()
+    mergeable --> waiting : thread.opened / refresh()
+    mergeable --> running : round.start / gate()
+    class none, running, waiting, stalled, capped, mergeable loopState
