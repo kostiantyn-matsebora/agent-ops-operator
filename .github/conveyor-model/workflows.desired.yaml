@@ -44,9 +44,13 @@ workflows:
             to: implement
             guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
             owned_by: "fire()"
-          - event: "merge:implementation"
-            to: merge
-            guard: "is_merged(implementation_pr)"
-            owned_by: "carry_implement()"
-      merge:
+          - event: "merge:plain"
+            to: done
+            owned_by: "carry_archive()"
+          - event: "merge:finished_stalled"
+            to: stalled
+            owned_by: "carry_archive()"
+      done:
+        final: true
+      stalled:
         final: true

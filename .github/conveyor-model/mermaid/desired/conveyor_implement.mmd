@@ -7,9 +7,12 @@ stateDiagram-v2
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state ready
     state implement
-    state merge
+    state done
+    state stalled
     ready --> implement : fire.implement [has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))] / fire()
     implement --> implement : fire.implement [has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))] / fire()
-    implement --> merge : merge.implementation [is_merged(implementation_pr)] / carry_implement()
-    merge --> [*]
-    class ready, implement, merge stationState
+    implement --> done : merge.plain / carry_archive()
+    implement --> stalled : merge.finished_stalled / carry_archive()
+    done --> [*]
+    stalled --> [*]
+    class ready, implement, done, stalled stationState
