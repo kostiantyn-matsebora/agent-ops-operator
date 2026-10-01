@@ -158,13 +158,8 @@ workflows:
     subject: issue
     acts_on: station
     states:
-      station:none:
-        initial: true
-        invokes: conveyor.propose
-        transitions:
-          - event: "propose_entered_ready"
-            to: station:ready
       station:ready:
+        initial: true
         invokes: conveyor.implement
         transitions:
           - event: "implement_entered_done"

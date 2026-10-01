@@ -111,11 +111,6 @@ triggers:
     invocation: sub_workflow_entry
     workflows: [conveyor.propose, conveyor.fix]
 
-  propose_entered_ready:
-    label: null
-    invocation: sub_workflow_entry
-    workflows: [conveyor.run]
-
   implement_entered_done:
     label: null
     invocation: sub_workflow_entry
@@ -148,7 +143,7 @@ triggers:
 states:
 
   station:none:
-    workflows: [conveyor.propose, conveyor.run]
+    workflows: [conveyor.propose]
     prefix: station
 
   station:proposing:
