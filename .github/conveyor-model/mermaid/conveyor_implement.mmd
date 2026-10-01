@@ -11,8 +11,5 @@ stateDiagram-v2
     state fix
     state merge
     state stalled
-    any_state --> implement : fire.implement [g1]
+    any_state --> implement : fire.implement [has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))]
     class none, implement, fix, merge, stalled, any_state stationState
-    note right of any_state
-        g1: (IF placer.bot THEN conveyor.run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)
-    end note

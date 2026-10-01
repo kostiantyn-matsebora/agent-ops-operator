@@ -8,12 +8,36 @@
 # `acts_on` names which real machine (station or loop) this conveyor's
 # vocabulary is drawn from.
 #
-# `guard:` IS A CONDITION, NOT PROSE. CORRECTED TWICE: first by drawing
-# fire:archive as firing unconditionally (it does not), then by writing the
-# "guard" as an explanatory paragraph including what happens when it's
-# false -- that is documentation, not a boolean. `guard:` is now the real
-# expression, read off the function body, short enough to put on an edge
-# label; what happens when it does NOT hold (refuse/skip/nothing) is in
+# `guard:` IS A CONDITION, NOT PROSE, IN FUNCTION-CALL SYNTAX. CORRECTED
+# THREE TIMES: first by drawing fire:archive as firing unconditionally (it
+# does not); then by writing the "guard" as an explanatory paragraph
+# including what happens when it's false (documentation, not a boolean);
+# then by writing predicates as bare attribute access (`placer.may_push`,
+# `line.change_finished`) and an inline IF/THEN/ELSE, which an evaluation
+# engine cannot parse as a predicate call the way it can `has_write_access(placer)`.
+#
+# EVERY PREDICATE IS NOW `name(arguments)`, matching how an evaluation
+# engine will actually call it -- never a bare attribute read, membership
+# test, or inline conditional. AND / OR / NOT / == stay as infix operators
+# (they are universal, not vendor-specific). The predicate glossary:
+#
+#   has_access(placer, grant_placer)   direct placer has write access, OR
+#                                        (placed by the workflow bot) the
+#                                        grant's own placer still can
+#   has_write_access(who)              who.may_push
+#   is_fork(pr)                        the pull request is from a fork
+#   is_same_repo_change_branch(pr)     a change/* branch of this repository
+#   has_issue_ref(pr)                  pr.refs or pr.closes names an issue
+#   has_standing_grant(line, pr)       standing_grant() finds a real grant
+#   is_lane(line, name)                line.lane == name
+#   is_change_finished(line)           every task of the change is ticked
+#   has_fired(line, station)           that station already has a fire record
+#   has_open_pr(line)                  a pull request is open from the
+#                                        change's branch right now
+#   is_capped(pr)                      pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)
+#   has_open_thread(pr)                a review-authored thread is unresolved
+#
+# What happens when a guard does NOT hold (refuse/skip/nothing) is in
 # `note:` instead, which is prose and never rendered as a condition.
 #
 # NO SINGLE INITIAL STATE WHERE NONE EXISTS. UML's initial pseudostate means
@@ -44,29 +68,29 @@ workflows:
       - from: none
         event: "merge:finished_carried"
         to: archive
-        guard: "line.change_finished AND grant_placer.may_push"
+        guard: "is_change_finished(line) AND has_write_access(grant_placer)"
         note: >
           carry_archive(). ELSE: `nothing` (no station_event), or `stalled`
           if conveyor:run is itself absent from the issue.
-      - { from: implement, event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
-      - { from: fix,       event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
-      - { from: merge,     event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
-      - { from: archive,   event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
-      - { from: stalled,   event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
+      - { from: implement, event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
+      - { from: fix,       event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
+      - { from: merge,     event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
+      - { from: archive,   event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
+      - { from: stalled,   event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
       - from: none
         event: "merge:proposal_or_apply"
         to: implement
-        guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push"
+        guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
         note: >
           carry_archive()'s restart path: an apply merge whose change is not
           finished. ELSE: `nothing` (a session is still at work, or
           implement never fired at all -- the ordinary `fire()` start path
           handles that case instead).
-      - { from: implement, event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
-      - { from: fix,       event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
-      - { from: merge,     event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
-      - { from: archive,   event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
-      - { from: stalled,   event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
+      - { from: implement, event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
+      - { from: fix,       event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
+      - { from: merge,     event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
+      - { from: archive,   event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
+      - { from: stalled,   event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
 
   conveyor.implement:
     label: "conveyor:implement"
@@ -80,11 +104,11 @@ workflows:
       line.fired with a pull request still open from the change's branch).
     states: [none, implement, fix, merge, stalled]
     transitions:
-      - { from: none,      event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
-      - { from: implement, event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
-      - { from: fix,       event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
-      - { from: merge,     event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
-      - { from: stalled,   event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
+      - { from: none,      event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
+      - { from: implement, event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
+      - { from: fix,       event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
+      - { from: merge,     event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
+      - { from: stalled,   event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
 
   loop:
     subject: pull_request
@@ -107,8 +131,8 @@ workflows:
       - { from: running, event: "end:waiting", to: waiting, owned_by: "ending()", note: "every item left is a dispute, or a thread is open" }
       - { from: running, event: "end:stalled", to: stalled, owned_by: "ending()", note: "no report, the fixer failed or timed out, or the next round could not start" }
       - { from: running, event: "end:capped", to: capped, owned_by: "ending()", note: "the round ceiling was reached" }
-      - { from: running, event: "recover:waiting", to: waiting, owned_by: "recover()", guard: "rounds_used < cap AND thread_open", note: "a running label left behind by a round that was never reported" }
-      - { from: running, event: "recover:capped", to: capped, owned_by: "recover()", guard: "rounds_used >= cap", note: "same gap, but the round ceiling was already reached" }
+      - { from: running, event: "recover:waiting", to: waiting, owned_by: "recover()", guard: "NOT is_capped(pr) AND has_open_thread(pr)", note: "a running label left behind by a round that was never reported" }
+      - { from: running, event: "recover:capped", to: capped, owned_by: "recover()", guard: "is_capped(pr)", note: "same gap, but the round ceiling was already reached" }
       - { from: waiting, event: "round:start", to: running, owned_by: "gate()", note: "a writer's comment answers the dispute the loop was waiting on" }
       - { from: stalled, event: "round:start", to: running, owned_by: "gate()", note: "a person's comment restarts a loop the machine had given up on" }
       - { from: none, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()", note: "carried onto a pull request whose CI was already green with no open thread" }
@@ -135,13 +159,13 @@ workflows:
       - from: none
         event: "round:start"
         to: running
-        guard: "NOT pr.fork AND placer.may_push"
+        guard: "NOT is_fork(pr) AND has_write_access(placer)"
         owned_by: "gate()"
         note: "direct placement of conveyor:fix on the pull request"
       - from: none
         event: "round:start"
         to: running
-        guard: "pr.same_repo_change_branch AND (pr.refs OR pr.closes) AND standing_grant(...) is not None AND grant_placer.may_push"
+        guard: "is_same_repo_change_branch(pr) AND has_issue_ref(pr) AND has_standing_grant(line, pr) AND has_write_access(grant_placer)"
         owned_by: "carry_fix()"
         note: "carried from conveyor:run (or the archive grant), once CI completes"
 
@@ -161,7 +185,7 @@ workflows:
       - from: capped
         event: "round:start"
         to: running
-        guard: "NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)"
+        guard: "NOT is_fork(pr) AND has_write_access(placer) AND is_capped(pr)"
         owned_by: "gate()"
 
   conveyor.archive:
@@ -177,9 +201,9 @@ workflows:
       fire() returns `refuse` (plain lane, or change not finished) or `skip`.
     states: [none, implement, fix, merge, archive, stalled]
     transitions:
-      - { from: none,      event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
-      - { from: implement, event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
-      - { from: fix,       event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
-      - { from: merge,     event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
-      - { from: archive,   event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
-      - { from: stalled,   event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
+      - { from: none,      event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
+      - { from: implement, event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
+      - { from: fix,       event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
+      - { from: merge,     event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
+      - { from: archive,   event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
+      - { from: stalled,   event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }

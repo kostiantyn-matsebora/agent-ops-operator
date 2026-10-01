@@ -8,13 +8,7 @@ stateDiagram-v2
     state none
     state proposing
     state proposed
-    none --> proposing : proposal.pr_opened [g1]
-    proposing --> proposed : proposal.mergeable [g2]
+    none --> proposing : proposal.pr_opened [exists(proposal_pr)]
+    proposing --> proposed : proposal.mergeable [is_mergeable(proposal_pr)]
     proposed --> [*]
     class none, proposing, proposed stationState
-    note right of none
-        g1: proposal_pr exists
-    end note
-    note right of none
-        g2: proposal_pr.loop == mergeable
-    end note

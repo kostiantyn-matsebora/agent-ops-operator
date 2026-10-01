@@ -7,9 +7,6 @@ stateDiagram-v2
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state capped
     state running
-    capped --> running : round.start [g1]
+    capped --> running : round.start [NOT is_fork(pr) AND has_write_access(placer) AND is_capped(pr)] / gate()
     running --> [*]
     class capped, running loopState
-    note right of capped
-        g1: NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)
-    end note

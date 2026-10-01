@@ -7,12 +7,7 @@ stateDiagram-v2
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state none
     state running
-    none --> running : round.start [g1], round.start [g2]
+    none --> running : round.start [NOT is_fork(pr) AND has_write_access(placer)] / gate()
+    none --> running : round.start [is_same_repo_change_branch(pr) AND has_issue_ref(pr) AND has_standing_grant(line, pr) AND has_write_access(grant_placer)] / carry_fix()
     running --> [*]
     class none, running loopState
-    note right of none
-        g1: NOT pr.fork AND placer.may_push
-    end note
-    note right of none
-        g2: pr.same_repo_change_branch AND (pr.refs OR pr.closes) AND standing_grant(...) is not None AND grant_placer.may_push
-    end note

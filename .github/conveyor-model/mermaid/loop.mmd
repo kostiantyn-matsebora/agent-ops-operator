@@ -11,24 +11,20 @@ stateDiagram-v2
     state stalled
     state capped
     state mergeable
-    capped --> mergeable : ci.green_clean [carry_fix()]
-    mergeable --> mergeable : ci.green_clean [carry_fix()]
-    mergeable --> running : round.start [gate()]
-    mergeable --> waiting : thread.opened [refresh()]
-    none --> mergeable : ci.green_clean [carry_fix()]
-    running --> capped : end.capped [ending()], recover.capped [g2]
-    running --> mergeable : end.mergeable [ending()]
-    running --> running : end.continue [ending()]
-    running --> stalled : end.stalled [ending()]
-    running --> waiting : end.waiting [ending()], recover.waiting [g1]
-    stalled --> mergeable : ci.green_clean [carry_fix()]
-    stalled --> running : round.start [gate()]
-    waiting --> mergeable : ci.green_clean [carry_fix()]
-    waiting --> running : round.start [gate()]
+    running --> running : end.continue / ending()
+    running --> mergeable : end.mergeable / ending()
+    running --> waiting : end.waiting / ending()
+    running --> stalled : end.stalled / ending()
+    running --> capped : end.capped / ending()
+    running --> waiting : recover.waiting [NOT is_capped(pr) AND has_open_thread(pr)] / recover()
+    running --> capped : recover.capped [is_capped(pr)] / recover()
+    waiting --> running : round.start / gate()
+    stalled --> running : round.start / gate()
+    none --> mergeable : ci.green_clean / carry_fix()
+    waiting --> mergeable : ci.green_clean / carry_fix()
+    stalled --> mergeable : ci.green_clean / carry_fix()
+    capped --> mergeable : ci.green_clean / carry_fix()
+    mergeable --> mergeable : ci.green_clean / carry_fix()
+    mergeable --> waiting : thread.opened / refresh()
+    mergeable --> running : round.start / gate()
     class none, running, waiting, stalled, capped, mergeable loopState
-    note right of none
-        g1: rounds_used < cap AND thread_open
-    end note
-    note right of none
-        g2: rounds_used >= cap
-    end note

@@ -6,10 +6,28 @@
 # is actually implemented, workflows.yaml is re-extracted/re-verified
 # against the real code the normal way, and the corresponding entry here is
 # removed (implemented, not duplicated).
+#
+# `guard:` IS A CONDITION IN FUNCTION-CALL SYNTAX, same rule as
+# workflows.yaml: every predicate is `name(arguments)`, never bare
+# attribute access or an inline conditional. AND / OR / NOT / == stay as
+# infix operators.
+#
+# DEPENDS ON `loop` -- declared in full below (NOT a copy: this IS the same
+# workflow already verified in workflows.yaml, restated here only so a
+# reader of this file does not have to cross-reference the other one to
+# know what `is_mergeable(proposal_pr)` means). When `propose` ships, this
+# `loop` entry is deleted from this file; it never becomes a second,
+# diverging copy.
 
 version: 1
 
 workflows:
+
+  loop:
+    subject: pull_request
+    acts_on: loop
+    status: ALREADY IMPLEMENTED -- see workflows.yaml's own `loop` entry; restated here only as a reference for `propose`'s guards below, never a second copy to maintain
+    states: [none, running, waiting, stalled, capped, mergeable]
 
   propose:
     subject: issue
@@ -27,18 +45,18 @@ workflows:
       a checkable fact instead of something a person verifies by hand
       before placing conveyor:run.
 
-      DEPENDS ON `loop` (see workflows.yaml's own `loop` entry -- not
-      duplicated here). `proposal_pr` below names the SAME loop machine,
-      read against the openspec change's proposal pull request
-      specifically, as opposed to the eventual implementation PR loop
-      already governs today. Both PRs run the identical loop lifecycle;
-      only which PR is being read differs.
+      `proposal_pr` in the guards below is the openspec change's proposal
+      pull request specifically -- it runs the SAME `loop` workflow
+      declared above, read against a different pull request than the one
+      loop already governs today (the change's eventual implementation
+      PR). Both run the identical lifecycle; only which PR is being read
+      differs.
     states: [none, proposing, proposed]
     transitions:
       - from: none
         event: "proposal:pr_opened"
         to: proposing
-        guard: "proposal_pr exists"
+        guard: "exists(proposal_pr)"
         note: >
           the real moment /opsx:propose pushes the branch and opens the
           pull request -- a person or the `/opsx:propose` session, not an
@@ -47,7 +65,7 @@ workflows:
       - from: proposing
         event: "proposal:mergeable"
         to: proposed
-        guard: "proposal_pr.loop == mergeable"
+        guard: "is_mergeable(proposal_pr)"
         note: >
           reuses loop:mergeable's real definition -- CI green, no open
           review thread -- rather than restating it as prose. The three
