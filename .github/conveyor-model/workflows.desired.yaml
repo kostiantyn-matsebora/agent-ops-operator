@@ -36,13 +36,13 @@ workflows:
         transitions:
           - event: "fire:implement"
             to: implement
-            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            guard: "has_access(placer, grant_placer) AND NOT is_session_at_work(line)"
             owned_by: "fire()"
       implement:
         transitions:
           - event: "fire:implement"
             to: implement
-            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            guard: "has_access(placer, grant_placer) AND NOT is_session_at_work(line)"
             owned_by: "fire()"
           - event: "merge:plain"
             to: done
