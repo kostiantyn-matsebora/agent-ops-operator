@@ -37,19 +37,19 @@ workflows:
           - event: "fire:implement"
             to: implement
             guard: "has_access placer grant_placer AND NOT is_session_at_work line"
-            owned_by: "fire()"
+            owned_by: "fire"
       implement:
         transitions:
           - event: "fire:implement"
             to: implement
             guard: "has_access placer grant_placer AND NOT is_session_at_work line"
-            owned_by: "fire()"
+            owned_by: "fire"
           - event: "merge:plain"
             to: done
-            owned_by: "carry_archive()"
+            owned_by: "carry_archive"
           - event: "merge:finished_stalled"
             to: stalled
-            owned_by: "carry_archive()"
+            owned_by: "carry_archive"
       done:
         final: true
       stalled:

@@ -9,10 +9,10 @@ stateDiagram-v2
     state implement
     state done
     state stalled
-    ready --> implement : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire()
-    implement --> implement : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire()
-    implement --> done : merge.plain / carry_archive()
-    implement --> stalled : merge.finished_stalled / carry_archive()
+    ready --> implement : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire
+    implement --> implement : fire.implement [has_access placer grant_placer AND NOT is_session_at_work line] / fire
+    implement --> done : merge.plain / carry_archive
+    implement --> stalled : merge.finished_stalled / carry_archive
     done --> [*]
     stalled --> [*]
     class ready, implement, done, stalled stationState
