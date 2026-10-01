@@ -11,5 +11,5 @@ stateDiagram-v2
     state fix
     state merge
     state stalled
-    any_state --> implement : fire.implement [has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))]
+    any_state --> implement : fire.implement [has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))] / fire()
     class none, implement, fix, merge, stalled, any_state stationState

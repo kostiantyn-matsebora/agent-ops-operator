@@ -12,5 +12,5 @@ stateDiagram-v2
     state merge
     state archive
     state stalled
-    any_state --> archive : fire.archive [has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))]
+    any_state --> archive : fire.archive [has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))] / fire()
     class none, implement, fix, merge, archive, stalled, any_state stationState

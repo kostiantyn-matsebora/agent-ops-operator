@@ -12,6 +12,6 @@ stateDiagram-v2
     state merge
     state archive
     state stalled
-    any_state --> archive : merge.finished_carried [is_change_finished(line) AND has_write_access(grant_placer)]
-    any_state --> implement : merge.proposal_or_apply [NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)]
+    any_state --> archive : merge.finished_carried [is_change_finished(line) AND has_write_access(grant_placer)] / carry_archive()
+    any_state --> implement : merge.proposal_or_apply [NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)] / carry_archive()
     class none, implement, fix, merge, archive, stalled, any_state stationState

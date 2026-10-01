@@ -8,19 +8,27 @@ away from conveyor.py. Once an engine loads and runs workflows.yaml
 directly, there is nothing left to compare it against: the declaration IS
 the behaviour.
 
+STATES OWN THEIR TRANSITIONS. `states:` is a MAPPING keyed by state id, each
+holding its own `initial`/`final` flag and its own `transitions:` list
+(event, to, guard, owned_by) -- not a flat `transitions: [{from, ...}]` list
+with a separate `states: [...]` name array. A state's own behavior lives on
+the state.
+
 Checks:
-  1. Every transition's `from` and `to` are in that workflow's own
-     `states:` list -- a workflow cannot move through a state it never
-     declared.
+  1. Every transition's `to` names a state this workflow actually declares
+     -- a workflow cannot move through a state it never declared.
   2. Every workflow's `acts_on` names either a real subject-machine concept
      (`station`, `loop`) or another declared workflow.
-  3. No duplicate (from, event) pairs claim two different `to` targets
-     within one workflow -- that would make the machine non-deterministic
-     for the same trigger.
-  4. Every `invokes:` entry maps a state this workflow actually declares to
-     a workflow that actually exists -- an invocation naming either wrong
-     is exactly the kind of prose-pretending-to-be-structure this format
-     exists to make impossible.
+  3. No duplicate (state, event) pairs claim two different `to` targets --
+     that would make the machine non-deterministic for the same trigger.
+  4. At most one state per workflow is marked `initial: true` -- UML's
+     initial pseudostate means exactly one unconditional entry point. A
+     workflow with none is fine (several real states are independent entry
+     points, each gated by its own transitions).
+  5. Every `invokes:` value on a state names a workflow that actually
+     exists -- an invocation naming the wrong one is exactly the kind of
+     prose-pretending-to-be-structure this format exists to make
+     impossible.
 
 Also checks workflows.desired.yaml (target designs, not yet implemented)
 against itself AND against workflows.yaml, since a desired workflow's
@@ -44,30 +52,31 @@ def load(name: str) -> dict:
 
 def check_workflow(name: str, w: dict, all_workflows: dict) -> list[str]:
     problems = []
-    states = set(w.get("states", []))
+    states: dict = w.get("states", {})
+    state_ids = set(states.keys())
 
     acts_on = w.get("acts_on")
     if acts_on not in KNOWN_SUBJECTS and acts_on not in all_workflows:
         problems.append(f"{name}: acts_on={acts_on!r} is not a known subject "
                          f"({sorted(KNOWN_SUBJECTS)}) or another declared workflow")
 
-    seen: dict[tuple[str, str], str] = {}
-    for t in w.get("transitions", []):
-        if t["from"] not in states:
-            problems.append(f"{name}: transition from={t['from']!r} not in its own states: {sorted(states)}")
-        if t["to"] not in states:
-            problems.append(f"{name}: transition to={t['to']!r} not in its own states: {sorted(states)}")
-        key = (t["from"], t["event"])
-        if key in seen and seen[key] != t["to"]:
-            problems.append(f"{name}: ({t['from']!r}, {t['event']!r}) declared to both "
-                             f"{seen[key]!r} and {t['to']!r} -- non-deterministic")
-        seen[key] = t["to"]
+    initial_states = [sid for sid, s in states.items() if s.get("initial")]
+    if len(initial_states) > 1:
+        problems.append(f"{name}: more than one state marked initial: true -- {initial_states}")
 
-    for state, dep_name in w.get("invokes", {}).items():
-        if state not in states:
-            problems.append(f"{name}: invokes.{state} -- {state!r} is not in this workflow's own states")
-        if dep_name not in all_workflows:
-            problems.append(f"{name}: invokes.{state}: {dep_name!r} -- no such workflow declared")
+    for sid, s in states.items():
+        seen: dict[str, str] = {}
+        for t in s.get("transitions", []):
+            if t["to"] not in state_ids:
+                problems.append(f"{name}.{sid}: transition to={t['to']!r} not in this workflow's own states: {sorted(state_ids)}")
+            if t["event"] in seen and seen[t["event"]] != t["to"]:
+                problems.append(f"{name}.{sid}: event {t['event']!r} declared to both "
+                                 f"{seen[t['event']]!r} and {t['to']!r} -- non-deterministic")
+            seen[t["event"]] = t["to"]
+
+        invoked = s.get("invokes")
+        if invoked and invoked not in all_workflows:
+            problems.append(f"{name}.{sid}: invokes {invoked!r} -- no such workflow declared")
 
     return problems
 

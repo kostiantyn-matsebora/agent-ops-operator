@@ -3,21 +3,17 @@
 state diagram -- mechanically, no inference, no cross-conveyor merging.
 
 MODEL: a conveyor is a PROCESS. Its diagram shows exactly its own `states:`
-and `transitions:`, written directly in station's or loop's real
-vocabulary. If workflows.yaml says a conveyor has no single initial state
-(`initial: null`), the diagram draws NO `[*]` at all, not a fan-out
+mapping, written directly in station's or loop's real vocabulary. STATES OWN
+THEIR TRANSITIONS: `states:` is keyed by state id, each holding its own
+`initial`/`final` flag and its own `transitions:` list -- not a flat list
+with a separate name array. If no state in a workflow is marked
+`initial: true`, the diagram draws NO single `[*]` entry, not a fan-out
 fiction -- UML's initial pseudostate means exactly one unconditional entry
 point, verified against the spec.
 
 EVERY EDGE IS AN EVENT, LABELED `event [guard] / owner`, THE GUARD INLINE --
-not a numbered reference to a separate note. CORRECTED: an earlier version
-split the guard out into a `note` block with a `gN` reference on the edge,
-reasoning the full guard text (often a long prose paragraph, at the time)
-would be unreadable crammed onto an arrow. Once guards became compact
-function-call expressions (`is_capped(pr)`, `has_write_access(placer)`),
-that reasoning no longer applied, and the indirection just made a reader
-look two places for one fact. An edge is the TRANSITION -- its trigger, its
-guard and who owns it belong ON it, not beside it.
+not a numbered reference to a separate note. An edge is the TRANSITION --
+its trigger, its guard and who owns it belong ON it, not beside it.
 
 GOTCHA, found live: Mermaid's stateDiagram-v2 parser treats a literal `:`
 ANYWHERE in an edge label as the label delimiter, even quoted or
@@ -49,10 +45,7 @@ def mmd_safe(label: str) -> str:
 
 
 def edge_label(ev: str, guard: str | None, owned_by: str | None) -> str:
-    """event [guard] / owner -- every part the edge actually has, inline.
-    `owned_by` is shown only when distinct from the implicit "this
-    conveyor's own label", i.e. for a loop-internal transition fired by a
-    different real function (ending(), recover(), refresh())."""
+    """event [guard] / owner -- every part the edge actually has, inline."""
     label = mmd_safe(ev)
     if guard:
         label += f" [{mmd_safe(guard)}]"
@@ -62,25 +55,23 @@ def edge_label(ev: str, guard: str | None, owned_by: str | None) -> str:
 
 
 def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[str]:
-    """`w["invokes"]` maps a STATE to another REAL workflow that runs AS
-    that state's own internal behavior -- a COMPOSITE state, drawn with the
+    """A state's `invokes:` names another REAL workflow that runs AS that
+    state's own internal behavior -- a COMPOSITE state, drawn with the
     invoked workflow's real initial pseudostate and real states/transitions
     INSIDE the parent state's own box, exactly UML's composite-state
     notation (a named container with its own [*] entry point leading into
-    its internal states). CORRECTED: a first attempt drew this as a
-    disconnected side box labeled "invokes: X" with an arrow pointing at
-    it -- a fork, not containment, and a different shape entirely from what
-    was asked for. The invoked workflow's real internal [*] and its states
-    belong INSIDE {at_state}'s border, not beside it."""
+    its internal states)."""
+    dep_states: dict = dep["states"]
     prefix = f"{dep_name}_"
     lines = [f"    state {at_state} {{"]
-    dep_initial = dep.get("initial") or dep["states"][0]
+    dep_initial = next((sid for sid, s in dep_states.items() if s.get("initial")), next(iter(dep_states)))
     lines.append(f"        [*] --> {prefix}{dep_initial}")
-    for s in dep["states"]:
-        lines.append(f"        state {prefix}{s}")
-    for t in dep["transitions"]:
-        label = edge_label(t["event"], t.get("guard"), t.get("owned_by"))
-        lines.append(f"        {prefix}{t['from']} --> {prefix}{t['to']} : {label}")
+    for sid in dep_states:
+        lines.append(f"        state {prefix}{sid}")
+    for sid, s in dep_states.items():
+        for t in s.get("transitions", []):
+            label = edge_label(t["event"], t.get("guard"), t.get("owned_by"))
+            lines.append(f"        {prefix}{sid} --> {prefix}{t['to']} : {label}")
     lines.append("    }")
     return lines
 
@@ -89,49 +80,36 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     """One conveyor, drawn exactly as workflows.yaml declares it -- every
     state, every transition, every guard it lists, nothing inferred.
 
-    COLLAPSE, mechanical not guessed: when every `from:` state in this
-    workflow produces the IDENTICAL set of (event, guard, owned_by, to)
-    outcomes -- checked by comparing the real data, never assumed from a
-    count or a name -- that is a true "fires from any state" fact
-    (conveyor.py's own tables are built this way), and drawing N copies of
-    the same edge is noise Mermaid's auto-layout cannot cope with (verified
-    live: a 6-state, 2-event fan-in rendered as an unreadable tangle). It
-    collapses to ONE edge per (event, guard, owned_by, to) from a single
-    synthetic `*` node instead. A workflow whose states do NOT all agree is
-    left fully literal -- collapsing a real difference would hide it.
+    COLLAPSE, mechanical not guessed: when every state in this workflow
+    produces the IDENTICAL set of (event, guard, owned_by, to) outcomes --
+    checked by comparing the real data, never assumed from a count or a
+    name -- that is a true "fires from any state" fact (conveyor.py's own
+    tables are built this way), and drawing N copies of the same edge is
+    noise Mermaid's auto-layout cannot cope with (verified live: a 6-state,
+    2-event fan-in rendered as an unreadable tangle). It collapses to ONE
+    edge per (event, guard, owned_by, to) from a single synthetic `*` node
+    instead. A workflow whose states do NOT all agree is left fully literal
+    -- collapsing a real difference would hide it.
     """
-    # SUBJECT IS VISIBLE ON THE DIAGRAM ITSELF -- not left for a reader to
-    # cross-check against workflows.yaml. loop's states (running/waiting/
-    # capped/mergeable) and a station-acting conveyor's states (implement/
-    # fix/merge/archive) read as interchangeable label words on their own.
-    # GOTCHA, found live: Mermaid's documented YAML-frontmatter `title:`
-    # block (the only documented way to title a stateDiagram-v2) produced
-    # `data-processed="true"` with ZERO <svg> output in this CDN build --
-    # not a syntax error, a silent no-render. A note anchored on the entry
-    # state is proven to work, so the subject is stated there instead of
-    # risking the frontmatter path.
-    # COLOR BY acts_on: station-acting workflows (the issue) get one color
-    # family, loop-acting workflows (the pull request) another -- the same
-    # distinction the subject note states in words, now also visible at a
-    # glance. classDef/class is the documented mechanism for this in
-    # stateDiagram-v2; confirmed live it actually paints (some Mermaid
-    # versions silently ignore state-diagram styling, so this was verified
-    # by screenshot, not assumed from the docs).
+    states: dict = w["states"]
+    state_ids = list(states.keys())
+
     lines = [
         "stateDiagram-v2",
         "    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f",
         "    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33",
     ]
     state_class = "stationState" if w["acts_on"] == "station" else "loopState"
-    initial = w.get("initial")
+    initial = next((sid for sid, s in states.items() if s.get("initial")), None)
 
-    # outcomes[from_state] = frozenset of (event, guard, owned_by, to) -- the
+    # outcomes[state] = frozenset of (event, guard, owned_by, to) -- the
     # complete, real effect of being in that state, for the "do all states
     # agree" check below.
-    outcomes: dict[str, set[tuple[str, str, str, str]]] = {s: set() for s in w["states"]}
-    for t in w["transitions"]:
-        outcomes[t["from"]].add((t["event"], t.get("guard") or "", t.get("owned_by") or "", t["to"]))
-
+    outcomes: dict[str, set[tuple[str, str, str, str]]] = {
+        sid: {(t["event"], t.get("guard") or "", t.get("owned_by") or "", t["to"])
+              for t in s.get("transitions", [])}
+        for sid, s in states.items()
+    }
     non_empty = {s: o for s, o in outcomes.items() if o}
     all_same = len(non_empty) > 1 and len(set(map(frozenset, non_empty.values()))) == 1
 
@@ -139,16 +117,16 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     # outgoing transition, a real [*] end -- a comment standing in for a
     # missing pseudostate is not valid syntax in that position either
     # (confirmed live).
-    has_outgoing = {t["from"] for t in w["transitions"]}
-    has_incoming = {t["to"] for t in w["transitions"]}
-    final_states = [s for s in w["states"] if s in has_incoming and s not in has_outgoing]
+    has_outgoing = {sid for sid, s in states.items() if s.get("transitions")}
+    has_incoming = {t["to"] for s in states.values() for t in s.get("transitions", [])}
+    final_states = [sid for sid in state_ids if sid in has_incoming and sid not in has_outgoing]
 
     if all_same:
         entry = "any_state"
     elif initial:
         entry = initial
     else:
-        entry = w["states"][0]
+        entry = state_ids[0]
     idx = lines.index("stateDiagram-v2") + 1
     lines.insert(idx, f"    [*] --> {entry}")
     lines.insert(idx + 1, f"    note left of {entry}")
@@ -158,8 +136,8 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     if all_same:
         shared = next(iter(non_empty.values()))
         lines.append('    state "*" as any_state')
-        for s in w["states"]:
-            lines.append(f"    state {s}")
+        for sid in state_ids:
+            lines.append(f"    state {sid}")
         by_to: dict[str, list[tuple[str, str, str]]] = {}
         for ev, guard, owned_by, to in shared:
             by_to.setdefault(to, []).append((ev, guard, owned_by))
@@ -167,39 +145,40 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
             for ev, guard, owned_by in sorted(triples):
                 lines.append(f"    any_state --> {to} : {edge_label(ev, guard, owned_by)}")
         covered = set(non_empty.keys())
-        excluded = [s for s in w["states"] if s not in covered]
+        excluded = [sid for sid in state_ids if sid not in covered]
         if excluded:
             lines.append(f"    note right of any_state")
             lines.append(f"        excludes: {', '.join(excluded)}")
             lines.append(f"    end note")
     else:
-        for s in w["states"]:
-            lines.append(f"    state {s}")
-        for t in w["transitions"]:
-            lines.append(f"    {t['from']} --> {t['to']} : "
-                         f"{edge_label(t['event'], t.get('guard'), t.get('owned_by'))}")
+        for sid in state_ids:
+            lines.append(f"    state {sid}")
+        for sid, s in states.items():
+            for t in s.get("transitions", []):
+                lines.append(f"    {sid} --> {t['to']} : "
+                             f"{edge_label(t['event'], t.get('guard'), t.get('owned_by'))}")
 
-    for s in final_states:
-        if not all_same or s != entry:
-            lines.append(f"    {s} --> [*]")
+    for sid in final_states:
+        if not all_same or sid != entry:
+            lines.append(f"    {sid} --> [*]")
 
-    colored = list(w["states"]) + (["any_state"] if all_same else [])
+    colored = list(state_ids) + (["any_state"] if all_same else [])
     lines.append(f"    class {', '.join(colored)} {state_class}")
 
-    # `invokes:` MAPS A STATE TO A REAL SUB-WORKFLOW -- drawn as a nested
+    # `invokes:` ON A STATE NAMES A REAL SUB-WORKFLOW -- drawn as a nested
     # composite, never left in prose a program cannot follow. An `invokes:`
-    # entry naming a state this workflow does not declare, or a workflow
-    # that does not exist, is a real inconsistency -- surfaced as a visible
-    # error marker on the diagram, never silently skipped.
-    for state, dep_name in w.get("invokes", {}).items():
-        if state not in w["states"]:
-            lines.append(f"    %% ERROR: invokes.{state} -- {state!r} is not in this workflow's own states")
+    # naming a workflow that does not exist is a real inconsistency --
+    # surfaced as a visible error marker on the diagram, never silently
+    # skipped.
+    for sid, s in states.items():
+        dep_name = s.get("invokes")
+        if not dep_name:
             continue
         dep = (all_workflows or {}).get(dep_name)
         if dep is None:
-            lines.append(f"    %% ERROR: invokes.{state}: {dep_name} -- no such workflow")
+            lines.append(f"    %% ERROR: {sid}.invokes: {dep_name} -- no such workflow")
             continue
-        lines += render_invoked_submachine(dep_name, dep, state)
+        lines += render_invoked_submachine(dep_name, dep, sid)
 
     return "\n".join(lines)
 
@@ -221,10 +200,7 @@ def main() -> int:
 
     # DESIRED workflows -- NOT YET IMPLEMENTED, rendered into a SEPARATE
     # subfolder so a reader can never mistake a target design for verified,
-    # already-shipped behavior. Every title is prefixed "[DESIRED]". A
-    # workflow entry with no `transitions:` is a REFERENCE to an
-    # already-implemented workflow (see workflows.desired.yaml's own `loop`
-    # entry) -- skipped here, since workflows.yaml already renders it.
+    # already-shipped behavior. Every title is prefixed "[DESIRED]".
     desired_path = HERE / "workflows.desired.yaml"
     if desired_path.exists():
         desired = load("workflows.desired.yaml")["workflows"]
@@ -233,8 +209,6 @@ def main() -> int:
         for old in desired_dir.glob("*.mmd"):
             old.unlink()
         for name, w in desired.items():
-            if "transitions" not in w:
-                continue
             safe = name.replace(".", "_").replace(":", "_")
             text = render_workflow(f"[DESIRED] {name}", w, all_workflows=workflows)
             (desired_dir / f"{safe}.mmd").write_text(text + "\n")

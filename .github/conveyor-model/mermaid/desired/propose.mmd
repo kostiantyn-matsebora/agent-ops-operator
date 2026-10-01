@@ -8,12 +8,12 @@ stateDiagram-v2
     state none
     state proposing
     state proposed
-    state merged
+    state ready
     none --> proposing : proposal.pr_opened [exists(proposal_pr)]
     proposing --> proposed : proposal.mergeable [is_mergeable(proposal_pr)]
-    proposed --> merged : proposal.pr_merged [is_merged(proposal_pr)]
-    merged --> [*]
-    class none, proposing, proposed, merged stationState
+    proposed --> ready : proposal.pr_merged [is_merged(proposal_pr)]
+    ready --> [*]
+    class none, proposing, proposed, ready stationState
     state proposing {
         [*] --> loop_none
         state loop_none
@@ -22,6 +22,7 @@ stateDiagram-v2
         state loop_stalled
         state loop_capped
         state loop_mergeable
+        loop_none --> loop_mergeable : ci.green_clean / carry_fix()
         loop_running --> loop_running : end.continue / ending()
         loop_running --> loop_mergeable : end.mergeable / ending()
         loop_running --> loop_waiting : end.waiting / ending()
@@ -30,9 +31,8 @@ stateDiagram-v2
         loop_running --> loop_waiting : recover.waiting [NOT is_capped(pr) AND has_open_thread(pr)] / recover()
         loop_running --> loop_capped : recover.capped [is_capped(pr)] / recover()
         loop_waiting --> loop_running : round.start / gate()
-        loop_stalled --> loop_running : round.start / gate()
-        loop_none --> loop_mergeable : ci.green_clean / carry_fix()
         loop_waiting --> loop_mergeable : ci.green_clean / carry_fix()
+        loop_stalled --> loop_running : round.start / gate()
         loop_stalled --> loop_mergeable : ci.green_clean / carry_fix()
         loop_capped --> loop_mergeable : ci.green_clean / carry_fix()
         loop_mergeable --> loop_mergeable : ci.green_clean / carry_fix()

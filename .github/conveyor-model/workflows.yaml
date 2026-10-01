@@ -8,6 +8,21 @@
 # `acts_on` names which real machine (station or loop) this conveyor's
 # vocabulary is drawn from.
 #
+# STATES OWN THEIR TRANSITIONS. CORRECTED: an earlier draft of this file was
+# a flat transition list with a separate `states: [...]` name-check array --
+# a state's own behavior lived somewhere else in the file, which is backwards
+# for a STATE machine. `states:` is now a MAPPING keyed by state id; each
+# state holds its own `initial`/`final` flag and its own `transitions:` list
+# (event, to, guard, owned_by). This also matches how Mermaid's
+# stateDiagram-v2 actually reads -- an arrow leaving a box, labeled with its
+# own event/guard/action -- which is the shape this file renders into and
+# the shape screenshots confirmed is legible, unlike python-statemachine's
+# native schema (docs/python-statemachine-schema.md), whose `cond:`/`unless:`
+# fields are a restricted AST with NO function calls -- it cannot even
+# express `has_write_access(placer)`, so adopting its field names would still
+# hide the real guard logic behind a string the schema's own evaluator cannot
+# run.
+#
 # `guard:` IS A CONDITION, NOT PROSE, IN FUNCTION-CALL SYNTAX. CORRECTED
 # THREE TIMES: first by drawing fire:archive as firing unconditionally (it
 # does not); then by writing the "guard" as an explanatory paragraph
@@ -37,15 +52,13 @@
 #   is_capped(pr)                      pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)
 #   has_open_thread(pr)                a review-authored thread is unresolved
 #
-# What happens when a guard does NOT hold (refuse/skip/nothing) is in
-# `note:` instead, which is prose and never rendered as a condition.
-#
 # NO SINGLE INITIAL STATE WHERE NONE EXISTS. UML's initial pseudostate means
-# exactly one unconditional entry point (verified against the spec). Several
-# conveyors fire identically from most real states once their guard holds,
-# so `initial: null` and every listed `from:` is an independent real entry.
+# exactly one unconditional entry point (verified against the spec). A
+# conveyor whose real guard fires identically from most real states has NO
+# state marked `initial: true` at all -- every state with a matching
+# transition is an independent real entry, drawn as such.
 #
-# EVERY (from, event, to) is VERIFIED against station.yaml / loop.yaml by
+# EVERY (event, to) under every state is VERIFIED against the real source by
 # validate.py. Guards are READ off the function body by hand, not generated
 # -- a future change to a guard's real condition needs a matching edit here.
 
@@ -57,153 +70,244 @@ workflows:
     label: "conveyor:run"
     subject: issue
     acts_on: station
-    initial: null
-    note: >
-      THE STANDING GRANT. standing_grant() reads conveyor:run as a FACT,
-      called from carry_fix(), carry_archive() and gate(). Its own real
-      station effects are both inside carry_archive(), once the grant is
-      found to stand there.
-    states: [none, implement, fix, merge, archive, stalled]
-    transitions:
-      - from: none
-        event: "merge:finished_carried"
-        to: archive
-        guard: "is_change_finished(line) AND has_write_access(grant_placer)"
-        note: >
-          carry_archive(). ELSE: `nothing` (no station_event), or `stalled`
-          if conveyor:run is itself absent from the issue.
-      - { from: implement, event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
-      - { from: fix,       event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
-      - { from: merge,     event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
-      - { from: archive,   event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
-      - { from: stalled,   event: "merge:finished_carried", to: archive, guard: "is_change_finished(line) AND has_write_access(grant_placer)" }
-      - from: none
-        event: "merge:proposal_or_apply"
-        to: implement
-        guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
-        note: >
-          carry_archive()'s restart path: an apply merge whose change is not
-          finished. ELSE: `nothing` (a session is still at work, or
-          implement never fired at all -- the ordinary `fire()` start path
-          handles that case instead).
-      - { from: implement, event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
-      - { from: fix,       event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
-      - { from: merge,     event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
-      - { from: archive,   event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
-      - { from: stalled,   event: "merge:proposal_or_apply", to: implement, guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)" }
+    states:
+      none:
+        transitions:
+          - event: "merge:finished_carried"
+            to: archive
+            guard: "is_change_finished(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+          - event: "merge:proposal_or_apply"
+            to: implement
+            guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+      implement:
+        transitions:
+          - event: "merge:finished_carried"
+            to: archive
+            guard: "is_change_finished(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+          - event: "merge:proposal_or_apply"
+            to: implement
+            guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+      fix:
+        transitions:
+          - event: "merge:finished_carried"
+            to: archive
+            guard: "is_change_finished(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+          - event: "merge:proposal_or_apply"
+            to: implement
+            guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+      merge:
+        transitions:
+          - event: "merge:finished_carried"
+            to: archive
+            guard: "is_change_finished(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+          - event: "merge:proposal_or_apply"
+            to: implement
+            guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+      archive:
+        transitions:
+          - event: "merge:finished_carried"
+            to: archive
+            guard: "is_change_finished(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+          - event: "merge:proposal_or_apply"
+            to: implement
+            guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+      stalled:
+        transitions:
+          - event: "merge:finished_carried"
+            to: archive
+            guard: "is_change_finished(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
+          - event: "merge:proposal_or_apply"
+            to: implement
+            guard: "NOT is_change_finished(line) AND has_fired(line, 'implement') AND NOT has_open_pr(line) AND has_write_access(grant_placer)"
+            owned_by: "carry_archive()"
 
   conveyor.implement:
     label: "conveyor:implement"
     subject: issue
     acts_on: station
-    initial: null
-    note: >
-      fire() reads this label (or conveyor:run, when the change is not
-      finished) and fires station_event fire:implement. ELSE: `refuse`
-      (strips the label, no write access) or `skip` ("implement" already in
-      line.fired with a pull request still open from the change's branch).
-    states: [none, implement, fix, merge, stalled]
-    transitions:
-      - { from: none,      event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
-      - { from: implement, event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
-      - { from: fix,       event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
-      - { from: merge,     event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
-      - { from: stalled,   event: "fire:implement", to: implement, guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))" }
+    states:
+      none:
+        transitions:
+          - event: "fire:implement"
+            to: implement
+            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            owned_by: "fire()"
+      implement:
+        transitions:
+          - event: "fire:implement"
+            to: implement
+            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            owned_by: "fire()"
+      fix:
+        transitions:
+          - event: "fire:implement"
+            to: implement
+            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            owned_by: "fire()"
+      merge:
+        transitions:
+          - event: "fire:implement"
+            to: implement
+            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            owned_by: "fire()"
+      stalled:
+        transitions:
+          - event: "fire:implement"
+            to: implement
+            guard: "has_access(placer, grant_placer) AND NOT (has_fired(line, 'implement') AND has_open_pr(line))"
+            owned_by: "fire()"
 
   loop:
     subject: pull_request
     acts_on: loop
-    initial: none
-    note: >
-      THE PULL REQUEST'S OWN WORKFLOW -- the fixing loop itself, labeled
-      loop:* (running/waiting/stalled/capped/mergeable), exactly parallel
-      to how conveyor:* is the issue's workflow and station:* is the
-      issue's state. Entered by conveyor.fix or conveyor.keep_going (each
-      names which of its own transitions enters here); everything else
-      below is the loop's OWN lifecycle, owned by DIFFERENT real functions
-      entirely (ending(), recover(), refresh(), gate()'s round-start and
-      cap check) once it is running -- not gated by either conveyor label
-      at all.
-    states: [none, running, waiting, stalled, capped, mergeable]
-    transitions:
-      - { from: running, event: "end:continue", to: running, owned_by: "ending()", note: "landed, checks re-run, or a retry with items still eligible" }
-      - { from: running, event: "end:mergeable", to: mergeable, owned_by: "ending()", note: "nothing left to fix and the head is green" }
-      - { from: running, event: "end:waiting", to: waiting, owned_by: "ending()", note: "every item left is a dispute, or a thread is open" }
-      - { from: running, event: "end:stalled", to: stalled, owned_by: "ending()", note: "no report, the fixer failed or timed out, or the next round could not start" }
-      - { from: running, event: "end:capped", to: capped, owned_by: "ending()", note: "the round ceiling was reached" }
-      - { from: running, event: "recover:waiting", to: waiting, owned_by: "recover()", guard: "NOT is_capped(pr) AND has_open_thread(pr)", note: "a running label left behind by a round that was never reported" }
-      - { from: running, event: "recover:capped", to: capped, owned_by: "recover()", guard: "is_capped(pr)", note: "same gap, but the round ceiling was already reached" }
-      - { from: waiting, event: "round:start", to: running, owned_by: "gate()", note: "a writer's comment answers the dispute the loop was waiting on" }
-      - { from: stalled, event: "round:start", to: running, owned_by: "gate()", note: "a person's comment restarts a loop the machine had given up on" }
-      - { from: none, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()", note: "carried onto a pull request whose CI was already green with no open thread" }
-      - { from: waiting, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
-      - { from: stalled, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
-      - { from: capped, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
-      - { from: mergeable, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
-      - { from: mergeable, event: "thread:opened", to: waiting, owned_by: "refresh()", note: "a review completed after mergeable without starting a round" }
-      - { from: mergeable, event: "round:start", to: running, owned_by: "gate()", note: "a later review found something new" }
+    states:
+      none:
+        initial: true
+        transitions:
+          - event: "ci:green_clean"
+            to: mergeable
+            owned_by: "carry_fix()"
+      running:
+        transitions:
+          - event: "end:continue"
+            to: running
+            owned_by: "ending()"
+          - event: "end:mergeable"
+            to: mergeable
+            owned_by: "ending()"
+          - event: "end:waiting"
+            to: waiting
+            owned_by: "ending()"
+          - event: "end:stalled"
+            to: stalled
+            owned_by: "ending()"
+          - event: "end:capped"
+            to: capped
+            owned_by: "ending()"
+          - event: "recover:waiting"
+            to: waiting
+            guard: "NOT is_capped(pr) AND has_open_thread(pr)"
+            owned_by: "recover()"
+          - event: "recover:capped"
+            to: capped
+            guard: "is_capped(pr)"
+            owned_by: "recover()"
+      waiting:
+        transitions:
+          - event: "round:start"
+            to: running
+            owned_by: "gate()"
+          - event: "ci:green_clean"
+            to: mergeable
+            owned_by: "carry_fix()"
+      stalled:
+        transitions:
+          - event: "round:start"
+            to: running
+            owned_by: "gate()"
+          - event: "ci:green_clean"
+            to: mergeable
+            owned_by: "carry_fix()"
+      capped:
+        transitions:
+          - event: "ci:green_clean"
+            to: mergeable
+            owned_by: "carry_fix()"
+      mergeable:
+        transitions:
+          - event: "ci:green_clean"
+            to: mergeable
+            owned_by: "carry_fix()"
+          - event: "thread:opened"
+            to: waiting
+            owned_by: "refresh()"
+          - event: "round:start"
+            to: running
+            owned_by: "gate()"
 
   conveyor.fix:
     label: "conveyor:fix"
     subject: pull_request
     acts_on: loop
-    initial: null
-    note: >
-      conveyor:fix's OWN label only ever causes round:start FROM `none` --
-      starting the loop workflow above, which then runs by its own rules.
-      DIRECT (gate()): a person places conveyor:fix on the pull request.
-      CARRIED (carry_fix()): CI completes and conveyor:run's grant is read.
-      ELSE: gate() returns `refuse`/`none`, carry_fix() returns `nothing`.
-    states: [none, running]
-    transitions:
-      - from: none
-        event: "round:start"
-        to: running
-        guard: "NOT is_fork(pr) AND has_write_access(placer)"
-        owned_by: "gate()"
-        note: "direct placement of conveyor:fix on the pull request"
-      - from: none
-        event: "round:start"
-        to: running
-        guard: "is_same_repo_change_branch(pr) AND has_issue_ref(pr) AND has_standing_grant(line, pr) AND has_write_access(grant_placer)"
-        owned_by: "carry_fix()"
-        note: "carried from conveyor:run (or the archive grant), once CI completes"
+    states:
+      none:
+        initial: true
+        transitions:
+          - event: "round:start"
+            to: running
+            guard: "NOT is_fork(pr) AND has_write_access(placer)"
+            owned_by: "gate()"
+          - event: "round:start"
+            to: running
+            guard: "is_same_repo_change_branch(pr) AND has_issue_ref(pr) AND has_standing_grant(line, pr) AND has_write_access(grant_placer)"
+            owned_by: "carry_fix()"
+      running:
+        invokes: loop
 
   conveyor.keep_going:
     label: "conveyor:keep-going"
     subject: pull_request
     acts_on: loop
-    initial: capped
-    note: >
-      conveyor:keep-going's OWN label causes the loop's capped -> running
-      edge (see `loop`'s own transition of the same name) -- gate() reads
-      this label on a `labeled` trigger, only meaningful once the loop is
-      already `capped`. ELSE: placing it on a loop that is not capped has
-      no effect gate() acts on.
-    states: [capped, running]
-    transitions:
-      - from: capped
-        event: "round:start"
-        to: running
-        guard: "NOT is_fork(pr) AND has_write_access(placer) AND is_capped(pr)"
-        owned_by: "gate()"
+    states:
+      capped:
+        initial: true
+        transitions:
+          - event: "round:start"
+            to: running
+            guard: "NOT is_fork(pr) AND has_write_access(placer) AND is_capped(pr)"
+            owned_by: "gate()"
+      running:
+        invokes: loop
 
   conveyor.archive:
     label: "conveyor:archive"
     subject: issue
     acts_on: station
-    initial: null
-    note: >
-      fire() reads this label directly. ALSO stands for the fix station OF
-      THE ARCHIVE PULL REQUEST ITSELF (Closes #n) -- standing_grant()'s own
-      special case, read by carry_fix() exactly as conveyor:run is, starting
-      the SAME loop entry conveyor.fix uses (not duplicated here). ELSE:
-      fire() returns `refuse` (plain lane, or change not finished) or `skip`.
-    states: [none, implement, fix, merge, archive, stalled]
-    transitions:
-      - { from: none,      event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
-      - { from: implement, event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
-      - { from: fix,       event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
-      - { from: merge,     event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
-      - { from: archive,   event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
-      - { from: stalled,   event: "fire:archive", to: archive, guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))" }
+    states:
+      none:
+        transitions:
+          - event: "fire:archive"
+            to: archive
+            guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))"
+            owned_by: "fire()"
+      implement:
+        transitions:
+          - event: "fire:archive"
+            to: archive
+            guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))"
+            owned_by: "fire()"
+      fix:
+        transitions:
+          - event: "fire:archive"
+            to: archive
+            guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))"
+            owned_by: "fire()"
+      merge:
+        transitions:
+          - event: "fire:archive"
+            to: archive
+            guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))"
+            owned_by: "fire()"
+      archive:
+        transitions:
+          - event: "fire:archive"
+            to: archive
+            guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))"
+            owned_by: "fire()"
+      stalled:
+        transitions:
+          - event: "fire:archive"
+            to: archive
+            guard: "has_access(placer, grant_placer) AND is_lane(line, 'opsx') AND is_change_finished(line) AND NOT (has_fired(line, 'archive') AND has_open_pr(line))"
+            owned_by: "fire()"

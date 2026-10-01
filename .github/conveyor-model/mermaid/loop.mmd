@@ -11,6 +11,7 @@ stateDiagram-v2
     state stalled
     state capped
     state mergeable
+    none --> mergeable : ci.green_clean / carry_fix()
     running --> running : end.continue / ending()
     running --> mergeable : end.mergeable / ending()
     running --> waiting : end.waiting / ending()
@@ -19,9 +20,8 @@ stateDiagram-v2
     running --> waiting : recover.waiting [NOT is_capped(pr) AND has_open_thread(pr)] / recover()
     running --> capped : recover.capped [is_capped(pr)] / recover()
     waiting --> running : round.start / gate()
-    stalled --> running : round.start / gate()
-    none --> mergeable : ci.green_clean / carry_fix()
     waiting --> mergeable : ci.green_clean / carry_fix()
+    stalled --> running : round.start / gate()
     stalled --> mergeable : ci.green_clean / carry_fix()
     capped --> mergeable : ci.green_clean / carry_fix()
     mergeable --> mergeable : ci.green_clean / carry_fix()
