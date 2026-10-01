@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> none
+    none --> implement : merge:proposal_or_apply
+    implement --> fix : round:start
+    fix --> merge : pr:green
+    merge --> archive : merge:finished_carried
+    archive --> done : merge:archive_pr
+    done --> [*]
+    fix --> stalled : end:stalled (loop)
+    stalled --> implement : run re-placed

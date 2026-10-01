@@ -1,0 +1,83 @@
+# What causes a workflow EVENT, today. This is the ONE file meant to grow or
+# change shape without touching workflows.yaml, registry.yaml, station.yaml
+# or loop.yaml -- adding a dependabot-style comment trigger is a new entry
+# here and nothing else.
+#
+# A workflow only ever reacts to a named event (label.placed, label.removed,
+# session.completed, ...). This file maps a real-world occurrence onto that
+# name. Swap the mechanism, keep the name, and every machine stays untouched.
+
+version: 1
+
+triggers:
+  - event: label.placed
+    workflow: conveyor.run
+    kind: label_placed
+    label: "conveyor:run"
+    subject: issue
+    requires: write_access
+
+  - event: label.placed
+    workflow: conveyor.implement
+    kind: label_placed
+    label: "conveyor:implement"
+    subject: issue
+    requires: write_access
+
+  - event: label.placed
+    workflow: conveyor.fix
+    kind: label_placed
+    label: "conveyor:fix"
+    subject: pull_request
+    requires: write_access
+
+  - event: label.placed
+    workflow: conveyor.keep_going
+    kind: label_placed
+    label: "conveyor:keep-going"
+    subject: pull_request
+    requires: write_access
+
+  - event: label.placed
+    workflow: conveyor.archive
+    kind: label_placed
+    label: "conveyor:archive"
+    subject: issue
+    requires: write_access
+
+  - event: label.removed
+    workflow: conveyor.run
+    kind: label_removed
+    label: "conveyor:run"
+    subject: issue
+
+  # ---- events that are NOT label-shaped, already true today ----
+  # these show the pattern a future trigger follows: same `event` name the
+  # workflow already reacts to, a different `kind`.
+
+  - event: pull_request.ci_completed
+    kind: workflow_run_completed
+    workflow_name: ci.yml
+    subject: pull_request
+
+  - event: pull_request.review_completed
+    kind: workflow_run_completed
+    workflow_name: claude-review.yml
+    subject: pull_request
+
+  - event: session.completed
+    kind: pull_request_opened
+    subject: issue
+    note: an implement/archive session's own PR opening is read as "session.completed" for that workflow.
+
+  # ---- the future this schema exists to make cheap (dependabot-style) ----
+  # UNCOMMENT AND ADAPT: triggering conveyor:fix's "label.placed" event from
+  # a PR comment instead of an actual label. Nothing in workflows.yaml,
+  # registry.yaml or loop.yaml would change -- only this entry is added.
+  #
+  # - event: label.placed
+  #   workflow: conveyor.fix
+  #   kind: comment_posted
+  #   subject: pull_request
+  #   match: "/fix-accepted"
+  #   requires: write_access
