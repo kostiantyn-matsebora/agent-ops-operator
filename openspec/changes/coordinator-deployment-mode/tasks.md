@@ -114,41 +114,42 @@
 
 ## 7. Unit tests
 
-- [ ] 7.1 Every module builds, vets and tests in the container, from the
+- [x] 7.1 Every module builds, vets and tests in the container, from the
       worktree path (`platform/manager`, `platform/mcp-aops` included).
-- [ ] 7.2 `KUBEBUILDER_ASSETS` envtest suite green, covering the
+      Verified: `go build ./... && go vet ./... && go test ./...` green in
+      every module `.github/components.sh modules` lists. Two unrelated,
+      pre-existing failures confirmed present on `origin/master` too (not
+      caused by this change): `platform/console` (`ui.go` embeds
+      `ui/dist`, which is build output nobody ran `npm run build` for in
+      this environment) and `platform/context-sync`
+      (`TestCheckpointReportsFailureWhenScanErrors` /
+      `...StoreCheckpointErrors`, untouched by this change).
+- [x] 7.2 `KUBEBUILDER_ASSETS` envtest suite green, covering the
       `coordinatorRef`-resolution walk and the widened `close` bound.
-- [ ] 7.3 `helm template` under `global.agentops.wiringMode: coordinator`
+      `platform/manager/internal/integration` (envtest) is green, including
+      the two new `coordinator_owner_reach_test.go` cases.
+- [x] 7.3 `helm template` under `global.agentops.wiringMode: coordinator`
       and `: pipelines` (and unset), every bundle combination the existing
       permutation matrix already covers, plus the byte-identical diff from
       task 2.6. `serviceaccount-guard.py` passes on all of them.
-      PARTIAL, left UNTICKED: the deployment-engineer's own hand-run
-      `helm template` matrix (every bundle on/off, both modes, unset, the
-      byte-identical diff) and `serviceaccount-guard.py` all pass — see the
-      hand-back report. But the EXISTING permutation matrix this task points
-      at is `platform/manager/internal/integration/charttemplate_test.go`'s
-      `go test` suite, and five of its tests
-      (`TestDemoModeWiresTheObservingRoute`,
+      The deployment-engineer's hand-run `helm template` matrix (every
+      bundle on/off, both modes, unset, the byte-identical diff) and
+      `serviceaccount-guard.py` all pass. The five
+      `charttemplate_test.go` tests that pinned the old
+      demo-always-pipelines default (`TestDemoModeWiresTheObservingRoute`,
       `TestAllowMutationsPromotesTheRouteToActing`,
       `TestExplicitRouteValuesBeatTheDerivation`,
       `TestBothRoutesRenderWithoutConflict`,
-      `TestWiringNamesOnlyWhatWasRendered`) now FAIL — demo mode's default
-      posture flipping to `coordinator` (per `wiring-mode`'s own spec) is a
-      real, intended behaviour change those tests still pin to the old
-      default. `TestK8sProfileStatesTheWithheldPosture` and
-      `TestK8sProfilePostureCanBeDeclined` also fail on the expected
-      self-close text task 3 adds. None of these are chart defects — they are
-      `platform/manager/` test updates outside this role's lane, detailed in
-      `.claude/rules/gotchas.md`'s new coordinator-mode section and the
-      hand-back report.
-- [ ] 7.4 `python3 .github/scripts/publication-guard.py` and
+      `TestWiringNamesOnlyWhatWasRendered`) are now pinned to
+      `--set global.agentops.wiringMode=pipelines`, and
+      `TestK8sProfileStatesTheWithheldPosture` /
+      `TestK8sProfilePostureCanBeDeclined` updated for the self-close
+      instruction task 3 appends. Full suite green.
+- [x] 7.4 `python3 .github/scripts/publication-guard.py` and
       `retired-vocabulary-guard.py` pass — record the verdict only, never
       the matched text.
-      DONE for the chart/rules files this role touched: both guards report
-      clean over the whole tree (`publication-guard: clean`,
-      `retired-vocabulary guard: clean, 122 files`). Left unticked because
-      this task is repository-wide and the change as a whole is not
-      finished.
+      Both clean over the whole tree: `publication-guard: clean`,
+      `retired-vocabulary guard: clean (122 files)`.
 
 ## 8. E2E tests
 
