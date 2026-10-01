@@ -75,7 +75,19 @@ def render_workflow(name: str, w: dict) -> str:
     # not a syntax error, a silent no-render. A note anchored on the entry
     # state is proven to work (same mechanism already used for guards), so
     # the subject is stated there instead of risking the frontmatter path.
-    lines = ["stateDiagram-v2"]
+    # COLOR BY acts_on: station-acting workflows (the issue) get one color
+    # family, loop-acting workflows (the pull request) another -- the same
+    # distinction the subject note states in words, now also visible at a
+    # glance without reading text. classDef/class is the documented
+    # mechanism for this in stateDiagram-v2; confirmed live it actually
+    # paints (some Mermaid versions silently ignore state-diagram styling,
+    # so this was verified by screenshot, not assumed from the docs).
+    lines = [
+        "stateDiagram-v2",
+        "    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f",
+        "    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33",
+    ]
+    state_class = "stationState" if w["acts_on"] == "station" else "loopState"
     initial = w.get("initial")
 
     guard_text_to_id: dict[str, int] = {}
@@ -155,6 +167,9 @@ def render_workflow(name: str, w: dict) -> str:
         if not all_same or s != entry:
             lines.append(f"    {s} --> [*]")
 
+    colored = list(w["states"]) + (["any_state"] if all_same else [])
+    lines.append(f"    class {', '.join(colored)} {state_class}")
+
     # GOTCHA, found live: Mermaid's stateDiagram-v2 parser throws "Syntax
     # error in text" if a `note` targets a state with NO EDGE touching it
     # in the diagram -- bisected down to exactly this. `entry` (the real
@@ -183,6 +198,24 @@ def main() -> int:
     print(f"wrote {len(list(out_dir.glob('*.mmd')))} mermaid files to {out_dir}")
     print("one diagram per conveyor, each transition carries its real guard (gN),")
     print("the full guard text in a note below. Nothing fires unconditionally.")
+
+    # DESIRED workflows -- NOT YET IMPLEMENTED, rendered into a SEPARATE
+    # subfolder so a reader can never mistake a target design for verified,
+    # already-shipped behavior. Every title is prefixed "[DESIRED]".
+    desired_path = HERE / "workflows.desired.yaml"
+    if desired_path.exists():
+        desired = load("workflows.desired.yaml")["workflows"]
+        desired_dir = HERE / "mermaid" / "desired"
+        desired_dir.mkdir(exist_ok=True, parents=True)
+        for old in desired_dir.glob("*.mmd"):
+            old.unlink()
+        for name, w in desired.items():
+            safe = name.replace(".", "_").replace(":", "_")
+            text = render_workflow(f"[DESIRED] {name}", w)
+            (desired_dir / f"{safe}.mmd").write_text(text + "\n")
+        print(f"wrote {len(list(desired_dir.glob('*.mmd')))} DESIRED (not yet implemented) "
+              f"mermaid files to {desired_dir}")
+
     return 0
 
 

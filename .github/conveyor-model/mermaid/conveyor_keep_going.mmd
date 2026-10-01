@@ -3,10 +3,13 @@ stateDiagram-v2
     note left of capped
         conveyor.keep_going  --  subject: pull_request
     end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state capped
     state running
     capped --> running : round.start [g1]
     running --> [*]
+    class capped, running loopState
     note right of capped
         g1: NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)
     end note

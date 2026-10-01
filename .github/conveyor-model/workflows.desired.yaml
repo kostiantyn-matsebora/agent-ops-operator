@@ -1,0 +1,63 @@
+# DESIRED workflows -- NOT YET IMPLEMENTED. Unlike workflows.yaml (which is
+# verified against conveyor.py's real, already-shipped behavior), every
+# entry here is a TARGET DESIGN: what we intend to build, not what exists.
+#
+# Never merge this into workflows.yaml by copying. When a desired workflow
+# is actually implemented, workflows.yaml is re-extracted/re-verified
+# against the real code the normal way, and the corresponding entry here is
+# removed (implemented, not duplicated).
+
+version: 1
+
+workflows:
+
+  propose:
+    subject: issue
+    acts_on: station
+    initial: null
+    status: DESIRED -- not yet implemented
+    note: >
+      THE GAP THIS FILLS: today, `none` means both "nothing has happened to
+      this issue" AND "a proposal PR is open and mergeable" -- conveyor.py
+      makes no distinction, and there is no real station for "a proposal PR
+      exists but is not mergeable yet" either (CI still running, or under
+      review). This workflow introduces TWO new real station values between
+      none and implement: proposing (the PR exists, is not yet mergeable)
+      and proposed (the PR is mergeable) -- so "ready to implement" becomes
+      a checkable fact instead of something a person verifies by hand
+      before placing conveyor:run.
+
+      DEPENDS ON `loop` (see workflows.yaml's own `loop` entry -- not
+      duplicated here). `proposal_pr` below names the SAME loop machine,
+      read against the openspec change's proposal pull request
+      specifically, as opposed to the eventual implementation PR loop
+      already governs today. Both PRs run the identical loop lifecycle;
+      only which PR is being read differs.
+    states: [none, proposing, proposed]
+    transitions:
+      - from: none
+        event: "proposal:pr_opened"
+        to: proposing
+        guard: "proposal_pr exists"
+        note: >
+          the real moment /opsx:propose pushes the branch and opens the
+          pull request -- a person or the `/opsx:propose` session, not an
+          automated trigger. proposal_pr's own loop machine starts here,
+          at loop:none, the same way any pull request's loop does.
+      - from: proposing
+        event: "proposal:mergeable"
+        to: proposed
+        guard: "proposal_pr.loop == mergeable"
+        note: >
+          reuses loop:mergeable's real definition -- CI green, no open
+          review thread -- rather than restating it as prose. The three
+          artifacts (proposal.md, design.md, tasks.md) being committed on
+          that PR is what loop's own real checks (CI, review) verify; this
+          guard does not re-check their content separately.
+
+  # station:implement's real entry conditions (fire:implement,
+  # merge:proposal_or_apply) would gain an additional real guard once this
+  # ships: the issue must be AT station:proposed, not bare none, before
+  # conveyor:run / conveyor:implement may fire it into implement. That
+  # change to the EXISTING conveyor.implement / conveyor.run entries is not
+  # drafted here yet -- confirm the `proposing`/`proposed` stations first.

@@ -1,0 +1,20 @@
+stateDiagram-v2
+    [*] --> none
+    note left of none
+        [DESIRED] propose  --  subject: issue
+    end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
+    state none
+    state proposing
+    state proposed
+    none --> proposing : proposal.pr_opened [g1]
+    proposing --> proposed : proposal.mergeable [g2]
+    proposed --> [*]
+    class none, proposing, proposed stationState
+    note right of none
+        g1: proposal_pr exists
+    end note
+    note right of none
+        g2: proposal_pr.loop == mergeable
+    end note
