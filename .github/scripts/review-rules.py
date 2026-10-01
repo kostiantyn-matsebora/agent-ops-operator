@@ -102,10 +102,12 @@ ROLE_TABLE: list[tuple[str, str]] = [
     ("docs/_data/**", "frontend-developer"),
     ("chart/**", "deployment-engineer"),
     (".github/workflows/**", "deployment-engineer"),
-    (".github/scripts/**", "deployment-engineer"),
     (".github/actions/**", "deployment-engineer"),
     (".github/docker/**", "deployment-engineer"),
     ("**/Dockerfile", "deployment-engineer"),
+    # The CI and review scripts are Python programs with their own suite, not
+    # workflow YAML or chart templates, so the code-shaped bar fits them.
+    (".github/scripts/**", "backend-developer"),
     ("platform/**", "backend-developer"),
     ("signals/**", "backend-developer"),
     ("channels/**", "backend-developer"),
@@ -168,13 +170,14 @@ def rules_for(path: str) -> list[str]:
     out: list[str] = [_file(n) for n in ALWAYS]
     matched = False
     for pattern, names in TABLE:
+        # `*` IS THE ONE PATTERN `_match` DOES NOT KNOW: a root file, matched
+        # only once nothing more specific already did. Every other pattern is
+        # the SAME glob `_match` already answers for `ROLE_TABLE`, so this is
+        # that one question asked twice rather than a second implementation.
         if pattern == "*":
             if matched or "/" in path:
                 continue
-        elif pattern.startswith("**/"):
-            if path.rsplit("/", 1)[-1] != pattern[3:]:
-                continue
-        elif not (fnmatch.fnmatchcase(path, pattern) or (pattern.endswith("/**") and path.startswith(pattern[:-3] + "/"))):
+        elif not _match(path, pattern):
             continue
         matched = True
         for n in names:

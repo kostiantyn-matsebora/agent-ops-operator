@@ -41,27 +41,9 @@ import os
 import pathlib
 import subprocess
 import sys
-import urllib.parse
 
-DEFAULT_API = "https://sonarcloud.io"
-PAGE = 500
-
-
-def fetch(api: str, path: str, token: str, **params) -> dict:
-    url = f"{api}/api/{path}?{urllib.parse.urlencode(params)}"
-    out = subprocess.run(["curl", "-sf", "-u", f"{token}:", url], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(f"{path}: curl exit {out.returncode} {out.stderr.strip()}")
-    return json.loads(out.stdout or "{}")
-
-
-def components(path: pathlib.Path | None, script: pathlib.Path) -> list[dict]:
-    """[{component, context}] from components.sh (or a captured copy of its
-    output, for the suite)."""
-    if path:
-        return json.loads(path.read_text())
-    out = subprocess.run([str(script), "images"], capture_output=True, text=True, check=True).stdout
-    return json.loads(out)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from sonar_api import DEFAULT_API, PAGE, components, fetch, validated_api, validated_path  # noqa: E402
 
 
 def project_status(api: str, token: str, key: str, pr: int, head: str) -> dict:
@@ -128,6 +110,13 @@ def main() -> int:
     if not token:
         print("SONAR_TOKEN is not set; the analysis is not consulted", file=sys.stderr)
 
+    args.api = validated_api(args.api)
+    # Fails fast, before any network call -- the same two-pass shape
+    # `sonar-findings-baseline.py` uses: refused HERE if the path is already
+    # wrong, and `components`/the write below validate again in their own
+    # scope, which is what pythonsecurity:S2083/S8707 actually credits.
+    validated_path(args.out, must_exist=False)
+
     projects: list[dict] = []
     issues: list[dict] = []
     for c in components(args.components, args.components_script):
@@ -158,9 +147,10 @@ def main() -> int:
     consulted = any(p["status"] == "analysed" for p in projects)
     stale = [p["component"] for p in projects if p["status"] == "stale"]
     result = {"consulted": consulted, "stale": stale, "projects": projects, "issues": issues}
-    args.out.write_text(json.dumps(result, indent=2) + "\n")
+    out_path = validated_path(args.out, must_exist=False)
+    out_path.write_text(json.dumps(result, indent=2) + "\n")
     print(f"\nanalysis {'consulted' if consulted else 'NOT consulted'}: "
-          f"{len(issues)} open issue(s) written to {args.out}"
+          f"{len(issues)} open issue(s) written to {out_path}"
           + (f"; stale for {', '.join(stale)}" if stale else ""))
     return 0
 

@@ -54,11 +54,6 @@ BETA = "experimental-cc-routine-2026-04-01"
 API_VERSION = "2023-06-01"
 
 
-
-def vocabulary(path: pathlib.Path) -> dict:
-    return json.loads(path.read_text())
-
-
 def comment(repo: str, number: int, body: str) -> None:
     subprocess.run(["gh", "issue", "comment", str(number), "--repo", repo, "--body", body],
                    check=False)

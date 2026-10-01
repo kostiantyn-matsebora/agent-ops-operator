@@ -97,22 +97,31 @@ def wall_elapsed(events: list[dict]) -> str:
     return f"{seconds}s"
 
 
-def render_summary(tests: dict[str, dict], elapsed: str) -> str:
+def status_counts(tests: dict[str, dict]) -> dict[str | None, int]:
     counts = {"pass": 0, "fail": 0, "skip": 0, None: 0}
-    failed, skipped = [], []
-    for name, test in tests.items():
+    for test in tests.values():
         counts[test["status"]] = counts.get(test["status"], 0) + 1
-        if test["status"] == "fail":
-            failed.append(name)
-        elif test["status"] == "skip":
-            skipped.append(name)
+    return counts
 
-    lines = [
-        "## E2E report (summary)",
+
+def header(title: str, tests: dict[str, dict], elapsed: str) -> list[str]:
+    """The two lines every level opens with: the heading, then the one-line
+    pass/fail/skip tally -- the fact a reader wants before anything else,
+    whichever level they asked for."""
+    counts = status_counts(tests)
+    return [
+        f"## E2E report ({title})",
         "",
         f"**{counts['pass']} passed, {counts['fail']} failed, {counts['skip']} skipped** "
         f"of {len(tests)} test(s), in {elapsed}",
     ]
+
+
+def render_summary(tests: dict[str, dict], elapsed: str) -> str:
+    failed = [name for name, test in tests.items() if test["status"] == "fail"]
+    skipped = [name for name, test in tests.items() if test["status"] == "skip"]
+
+    lines = header("summary", tests, elapsed)
     if failed:
         lines += ["", "**Failed:**"] + [f"- `{name}`" for name in failed]
     if skipped:
@@ -121,15 +130,7 @@ def render_summary(tests: dict[str, dict], elapsed: str) -> str:
 
 
 def render_full(tests: dict[str, dict], elapsed: str) -> str:
-    counts = {"pass": 0, "fail": 0, "skip": 0, None: 0}
-    for test in tests.values():
-        counts[test["status"]] = counts.get(test["status"], 0) + 1
-
-    lines = [
-        "## E2E report (full)",
-        "",
-        f"**{counts['pass']} passed, {counts['fail']} failed, {counts['skip']} skipped** "
-        f"of {len(tests)} test(s), in {elapsed}",
+    lines = header("full", tests, elapsed) + [
         "",
         "| Test | Status | Elapsed |",
         "|---|---|---|",

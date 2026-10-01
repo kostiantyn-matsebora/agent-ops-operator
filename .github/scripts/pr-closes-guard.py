@@ -35,16 +35,17 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
-import subprocess
 import sys
 import traceback
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from openspec_diff import ARCHIVED_DIR, archived_change_names  # noqa: E402
 
 # GitHub's own closing keywords, as documented. `Refs #12` is deliberately absent
 # -- that is the form this guard exists to steer people towards.
 CLOSING = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)", re.I
 )
-ARCHIVED_DIR = re.compile(r"^\d{4}-\d{2}-\d{2}-(.+)$")
 
 
 def tracked_issues(root: pathlib.Path) -> dict[int, str]:
@@ -68,21 +69,7 @@ def tracked_issues(root: pathlib.Path) -> dict[int, str]:
 
 def archived_by(diff_range: str, root: pathlib.Path) -> set[str]:
     """Changes this diff moves into openspec/changes/archive/."""
-    try:
-        out = subprocess.run(
-            ["git", "diff", "--name-only", diff_range],
-            cwd=root, capture_output=True, text=True, check=True,
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return set()
-
-    names = set()
-    for path in out.splitlines():
-        parts = path.split("/")
-        if len(parts) > 4 and parts[:3] == ["openspec", "changes", "archive"]:
-            if m := ARCHIVED_DIR.match(parts[3]):
-                names.add(m.group(1))
-    return names
+    return set(archived_change_names(diff_range, root))
 
 
 def main() -> int:

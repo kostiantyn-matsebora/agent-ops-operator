@@ -72,6 +72,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from openspec_diff import archived_change_names, diff_paths  # noqa: E402
+
 HEADING = re.compile(r"^## +(.*)$")
 UNTICKED = re.compile(r"^\s*- \[ \]")
 DOCUMENTATION = re.compile(r"documentation", re.I)
@@ -202,25 +205,18 @@ def verdict(tasks: pathlib.Path) -> tuple[bool, str]:
 def changed_changes(diff_range: str, root: pathlib.Path) -> list[str]:
     """Change names touched by a diff range, archived ones excluded."""
     try:
-        out = subprocess.run(
-            ["git", "diff", "--name-only", diff_range],
-            cwd=root, capture_output=True, text=True, check=True,
-        ).stdout
+        paths = diff_paths(diff_range, root)
     except (OSError, subprocess.CalledProcessError) as exc:
         print(f"docs-task-guard: cannot read the diff range ({exc}); nothing to check",
               file=sys.stderr)
         return []
-
     names = set()
-    for path in out.splitlines():
+    for path in paths:
         parts = path.split("/")
         # openspec/changes/<name>/... , but never openspec/changes/archive/...
         if len(parts) > 3 and parts[:2] == ["openspec", "changes"] and parts[2] != "archive":
             names.add(parts[2])
     return sorted(names)
-
-
-ARCHIVED_DIR = re.compile(r"^\d{4}-\d{2}-\d{2}-(.+)$")
 
 
 def archived_changes(diff_range: str, root: pathlib.Path) -> dict[str, pathlib.Path]:
@@ -230,21 +226,8 @@ def archived_changes(diff_range: str, root: pathlib.Path) -> dict[str, pathlib.P
     documentation rule exists for -- so it is judged even though the live change
     directory has just disappeared from the tree.
     """
-    try:
-        out = subprocess.run(
-            ["git", "diff", "--name-only", diff_range],
-            cwd=root, capture_output=True, text=True, check=True,
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return {}
-
-    found: dict[str, pathlib.Path] = {}
-    for path in out.splitlines():
-        parts = path.split("/")
-        if len(parts) > 4 and parts[:3] == ["openspec", "changes", "archive"]:
-            if m := ARCHIVED_DIR.match(parts[3]):
-                found[m.group(1)] = root / "openspec" / "changes" / "archive" / parts[3] / "tasks.md"
-    return found
+    return {name: root / "openspec" / "changes" / "archive" / archived_dir / "tasks.md"
+            for name, archived_dir in archived_change_names(diff_range, root).items()}
 
 
 def main() -> int:

@@ -83,9 +83,10 @@ reset; prs 220; threads 220 true no
 out=$(DISPATCH_FAILS=1 run); rc=$?
 assert_status 0 "$rc"; assert_contains "$out" "could not be started"
 
-it "the dispute reading is the machine's, shared with the guard and the thread collector"
-assert_contains "$(cat "$S")" "conveyor.unanswered_after_marker"
+it "the dispute reading is conveyor_io's one walk, shared with the archive guard"
+assert_contains "$(cat "$S")" "conveyor_io.unanswered_disputes"
 assert_not_contains "$(cat "$S")" "def unanswered_after_marker"
+assert_not_contains "$(cat "$S")" "query(\$owner:String!"
 
 # ---- the workflow's shape
 py() { python3 -c "

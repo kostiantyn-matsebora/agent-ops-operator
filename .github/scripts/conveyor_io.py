@@ -25,6 +25,29 @@ import conveyor  # noqa: E402
 DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
 FIRE_MARKERS = {"implement": "<!-- remote-implement:fired -->", "archive": "<!-- remote-implement:fired:archive -->"}
 
+# The unresolved review threads of a pull request, paginated, with just enough
+# shape for `conveyor.unanswered_after_marker`: WHO commented and WHAT they
+# wrote. `path`/`line` ride along for a caller that wants to name where a
+# thread sits; a caller that doesn't just leaves them unread.
+THREADS_QUERY = """
+query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$number) {
+      reviewThreads(first:50, after:$cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          path
+          line
+          comments(first:100) { totalCount nodes { body author { login __typename } } }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 def gh(*args: str, check: bool = True) -> str:
     out = subprocess.run(["gh", *args], capture_output=True, text=True)
@@ -212,6 +235,75 @@ def already_marked(repo: str, target: int, marker: str) -> bool:
         return marker in gh("api", f"repos/{repo}/issues/{target}/comments", "--paginate", "--jq", ".[].body")
     except RuntimeError:
         return True   # unreadable: assume it stands, so nothing is posted twice
+
+
+def _thread_page(repo: str, pr: int, cursor: str | None) -> dict:
+    """One page of `THREADS_QUERY`. Raises RuntimeError on a failed call, a
+    malformed response, or a response naming no pull request."""
+    owner, _, name = repo.partition("/")
+    cmd = ["api", "graphql", "-f", f"query={THREADS_QUERY}", "-f", f"owner={owner}", "-f", f"repo={name}",
+          "-F", f"number={pr}"]
+    if cursor:
+        cmd += ["-f", f"cursor={cursor}"]
+    try:
+        payload = json.loads(gh(*cmd))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"unreadable JSON from gh api graphql: {exc}")
+    if "errors" in payload:
+        raise RuntimeError(payload["errors"])
+    try:
+        return payload["data"]["repository"]["pullRequest"]["reviewThreads"]
+    except (KeyError, TypeError):
+        raise RuntimeError("the thread query returned no pull request")
+
+
+def unresolved_thread_findings(repo: str, pr: int, marker: str, with_location: bool = False) -> list[str]:
+    """Every unresolved review thread carrying an unanswered dispute of `marker`,
+    as `"thread <id>"` or -- with `with_location` -- `"thread <id> (path:line)"`.
+
+    THE ONE WALK OF `THREADS_QUERY`, shared by the archive guard and the sweep.
+    Both paged this GraphQL query and applied `conveyor.unanswered_after_marker`
+    to each node identically; only the reported STRING differed, which is why
+    that stays a caller's choice rather than a second copy of the walk."""
+    found: list[str] = []
+    cursor = None
+    while True:
+        page = _thread_page(repo, pr, cursor)
+        for t in page["nodes"]:
+            if (t["comments"].get("totalCount") or 0) > len(t["comments"]["nodes"]):
+                print(f"warning: thread {t['id']} has more than {len(t['comments']['nodes'])} comments, "
+                      "only the first are read", file=sys.stderr)
+            if t.get("isResolved") or not conveyor.unanswered_after_marker(t["comments"]["nodes"], marker):
+                continue
+            where = f" ({t.get('path')}:{t.get('line') or '?'})" if with_location else ""
+            found.append(f"thread {t['id']}{where}")
+        if not page["pageInfo"]["hasNextPage"]:
+            return found
+        cursor = page["pageInfo"]["endCursor"]
+
+
+def unanswered_disputes(repo: str, pr: int, marker: str, with_location: bool = False,
+                        comment_note: str = "a pull request comment disputing analysis issues") -> list[str]:
+    """Everything on the pull request still waiting on a person: every unresolved
+    thread `unresolved_thread_findings` finds, plus -- if the pull request's own
+    comments carry an unanswered dispute (a check or an analysis issue has no
+    thread to hang one on) -- `comment_note` appended once.
+
+    THE ARCHIVE GUARD AND THE SWEEP READ ONE DISPUTE THE SAME WAY. Each
+    re-implemented this exact two-part walk; only `with_location` and the
+    comment's wording ever differed between them."""
+    found = unresolved_thread_findings(repo, pr, marker, with_location)
+    raw = gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate")
+    try:
+        comments = parse_paginated(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"unreadable JSON from gh api .../comments: {exc}")
+    shaped = [{"body": c.get("body"),
+              "author": {"login": (c.get("user") or {}).get("login"),
+                        "__typename": (c.get("user") or {}).get("type")}} for c in comments]
+    if conveyor.unanswered_after_marker(shaped, marker):
+        found.append(comment_note)
+    return found
 
 
 def apply_events(repo: str, target: int, station_event: str = "", loop_event: str = "",

@@ -62,9 +62,12 @@ cat > "$FIXTURES/issues-org_agent-ops-operator_signal-cron-p1.json" <<'JSON'
 {"total":1,"issues":[{"key":"STALE","rule":"go:S1","severity":"MAJOR","type":"BUG","component":"org_agent-ops-operator_signal-cron:main.go","line":1,"message":"old"}]}
 JSON
 
+# cd'd into $tmp: --components and --out resolve under it, and
+# validated_path (pythonsecurity:S2083/S8707's own remediation) refuses
+# anything that doesn't -- see the dedicated refusal test below.
 run() { : > "$CURL_CALLS"; rm -f "$tmp/out.json"
-        SONAR_TOKEN=t python3 "$S" --organization org --pr 7 --head abc1234abc1234deadbeef \
-          --components "$tmp/components.json" --api http://sonar.test --out "$tmp/out.json" "$@" 2>&1; }
+        (cd "$tmp" && SONAR_TOKEN=t python3 "$S" --organization org --pr 7 --head abc1234abc1234deadbeef \
+          --components components.json --api http://sonar.test --out out.json "$@" 2>&1); }
 field() { python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(eval(sys.argv[2]))' "$tmp/out.json" "$1"; }
 
 out=$(run); rc=$?
@@ -106,7 +109,7 @@ assert_equals "0" "$(field 'len(d["issues"])')"
 assert_contains "$out" "analysis NOT consulted"
 
 it "asks nothing of the service without a token, and says so"
-out=$(: > "$CURL_CALLS"; SONAR_TOKEN= python3 "$S" --organization org --pr 7 --head abc --components "$tmp/components.json" --out "$tmp/out.json" 2>&1)
+out=$(: > "$CURL_CALLS"; cd "$tmp" && SONAR_TOKEN= python3 "$S" --organization org --pr 7 --head abc --components components.json --out out.json 2>&1)
 assert_equals "" "$(cat "$CURL_CALLS")"
 assert_contains "$out" "SONAR_TOKEN is not set"
 assert_equals "False" "$(field 'd["consulted"]')"
@@ -118,6 +121,18 @@ JSON
 out=$(run)
 assert_equals "error" "$(field 'd["projects"][2]["status"]')"
 rm "$FIXTURES/prs-org_agent-ops-operator_console.json"
+
+it "refuses an --out path that resolves outside the working directory"
+out=$(cd "$tmp" && SONAR_TOKEN=t python3 "$S" --organization org --pr 7 --head abc1234 \
+  --components components.json --api http://sonar.test --out ../../../../etc/passwd 2>&1); rc=$?
+assert_status 1 "$rc"
+assert_contains "$out" "outside the working directory"
+
+it "refuses a malformed --api URL rather than handing it to curl"
+out=$(cd "$tmp" && SONAR_TOKEN=t python3 "$S" --organization org --pr 7 --head abc1234 \
+  --components components.json --api 'not-a-url' --out out.json 2>&1); rc=$?
+assert_status 1 "$rc"
+assert_contains "$out" "must be an http(s) URL"
 
 it "pages through a project's issues"
 cat > "$FIXTURES/issues-org_agent-ops-operator_manager-p1.json" <<'JSON'

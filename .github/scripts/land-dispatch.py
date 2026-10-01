@@ -242,15 +242,32 @@ def describe(item: dict) -> str:
 
 
 def parse_comments(raw: str) -> list[dict]:
-    """`gh api --paginate` concatenates pages as adjacent JSON arrays."""
-    try:
-        return json.loads(raw or "[]")
-    except json.JSONDecodeError:
-        comments: list[dict] = []
-        for chunk in raw.replace("][", "]\n[").splitlines():
-            if chunk.strip():
-                comments.extend(json.loads(chunk))
-        return comments
+    """`gh api --paginate` without `--jq` concatenates each page's JSON array
+    back to back rather than merging them, so a bare `json.loads` raises on
+    any pull request whose comments span more than one page.
+
+    A STREAMING DECODE, NOT A STRING SPLIT -- the same fix `conveyor_io.
+    parse_paginated` carries, ported here rather than imported: this program
+    is restored to `$RUNNER_TEMP` beside `land-dispatch.py`, `conveyor.py` and
+    three others ALONE (`review-dispatch.yml`'s `land` job), and importing
+    `conveyor_io` would grow the trusted set a `contents: write` step
+    restores. Splitting on the literal `"]["` breaks the moment a value
+    inside a page -- a comment body -- contains that exact substring, which a
+    person's own reply can: `parse_comments('][')` on a first attempt of this
+    fix raised `JSONDecodeError` on a fixture built for exactly that."""
+    text = (raw or "[]").strip()
+    if not text:
+        return []
+    decoder = json.JSONDecoder()
+    comments: list[dict] = []
+    i = 0
+    while i < len(text):
+        page, end = decoder.raw_decode(text, i)
+        comments.extend(page)
+        i = end
+        while i < len(text) and text[i].isspace():
+            i += 1
+    return comments
 
 
 class Round:

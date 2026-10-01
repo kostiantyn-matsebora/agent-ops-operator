@@ -99,6 +99,19 @@ def job_name(check_name: str) -> str:
     return check_name.split(" (", 1)[0].strip()
 
 
+def newline_delimited_json(raw: str) -> list:
+    """`gh api --paginate --jq '...'` prints one JSON VALUE per line, one line
+    per page -- an object where the filter selects one, an array where it
+    selects several. Parsed here rather than `json.loads`ed whole, since a
+    multi-page answer is several such lines back to back, not one document."""
+    values = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if line:
+            values.append(json.loads(line))
+    return values
+
+
 def check_runs(repo: str, sha: str) -> list[dict]:
     # `--method GET` IS NOT OPTIONAL. Without it `gh api` with `-f` sends the
     # params as a BODY, and this route answers a bodied GET with a plain 404 —
@@ -106,12 +119,7 @@ def check_runs(repo: str, sha: str) -> list[dict]:
     # that cost.
     raw = gh("api", "--method", "GET", "--paginate",
              f"repos/{repo}/commits/{sha}/check-runs", "--jq", ".check_runs[]")
-    runs = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if line:
-            runs.append(json.loads(line))
-    return runs
+    return newline_delimited_json(raw)
 
 
 def run_id(check: dict) -> str:
@@ -193,16 +201,12 @@ def disputed_checks(repo: str, pr: int, marker: str, since: str = "") -> set[str
         raw = gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate", "--jq",
                  '[.[] | {body: .body, created_at: .created_at, '
                  'author: {login: .user.login, __typename: .user.type}}]')
-    except RuntimeError:
+        # ONE JSON ARRAY PER PAGE (the jq filter above wraps each page as
+        # `[...]`), so a page's own comments are the elements to flatten in --
+        # unlike `check_runs`, whose filter already yields one object per line.
+        comments: list[dict] = [c for page in newline_delimited_json(raw) for c in page]
+    except (RuntimeError, json.JSONDecodeError):
         return set()
-    comments: list[dict] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if line:
-            try:
-                comments.extend(json.loads(line))
-            except json.JSONDecodeError:
-                return set()
     if since:
         comments = [c for c in comments if (c.get("created_at") or "") >= since]
     if not conveyor.unanswered_after_marker(comments, marker):

@@ -34,20 +34,13 @@ import json
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import load_script  # noqa: E402
+
 
 def header(d: dict) -> str:
     return (f"REPO: {d['repo']}\nPR NUMBER: {d['number']}\nBASE REF: origin/{d['base']}\n"
             f"HEAD SHA: {d.get('headSha') or 'unknown'}\n")
-
-
-def _load_module(name: str):
-    """A hyphenated script file by path — it is not a module name."""
-    import importlib.util
-    p = pathlib.Path(__file__).resolve().parent / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), p)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _role_body(path: pathlib.Path) -> str:
@@ -99,7 +92,7 @@ def reader_system(d: dict, slug: str) -> str:
     component's job — role body, then the review criteria of each role the
     component's paths route to, then every rule file they route to (the
     union), then the delta specs."""
-    rr = _load_module("review-rules")
+    rr = load_script.load("review-rules")
     entry = _entry(d, slug)
     rule_files: list[str] = []
     for p in entry["all_paths"]:
