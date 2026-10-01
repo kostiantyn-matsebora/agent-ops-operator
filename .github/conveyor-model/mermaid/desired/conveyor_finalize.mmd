@@ -1,0 +1,19 @@
+stateDiagram-v2
+    direction LR
+    [*] --> done
+    note left of done
+        [DESIRED] conveyor.finalize  --  subject: issue
+    end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
+    state done
+    state finalizing
+    state finalized
+    done --> finalizing : fire.finalize [has_access placer grant_placer AND is_change_finished line AND NOT is_session_at_work line] / fire
+    finalizing --> finalized : merge.finalize_pr / carry_archive
+    finalized --> [*]
+    class done, finalizing, finalized stationState
+    state finalizing {
+        [*] --> loop
+        state "loop" as loop
+    }

@@ -76,3 +76,23 @@ workflows:
             owned_by: "carry_archive"
       done:
         final: true
+
+  conveyor.finalize:
+    subject: issue
+    acts_on: station
+    states:
+      done:
+        initial: true
+        transitions:
+          - event: "fire:finalize"
+            to: finalizing
+            guard: "has_access placer grant_placer AND is_change_finished line AND NOT is_session_at_work line"
+            owned_by: "fire"
+      finalizing:
+        invokes: loop
+        transitions:
+          - event: "merge:finalize_pr"
+            to: finalized
+            owned_by: "carry_archive"
+      finalized:
+        final: true
