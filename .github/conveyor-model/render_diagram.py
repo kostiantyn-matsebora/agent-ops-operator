@@ -54,26 +54,27 @@ def edge_label(ev: str, guard: str | None, owned_by: str | None) -> str:
     return label
 
 
+def mmd_id(name: str) -> str:
+    """A state ID, unlike a label, cannot carry a literal `.` either --
+    `conveyor.fix` as a node name is invalid syntax, not merely ambiguous."""
+    return name.replace(".", "_").replace(":", "_")
+
+
 def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[str]:
     """A state's `invokes:` names another REAL workflow that runs AS that
-    state's own internal behavior -- a COMPOSITE state, drawn with the
-    invoked workflow's real initial pseudostate and real states/transitions
-    INSIDE the parent state's own box, exactly UML's composite-state
-    notation (a named container with its own [*] entry point leading into
-    its internal states)."""
-    dep_states: dict = dep["states"]
-    prefix = f"{dep_name}_"
-    lines = [f"    state {at_state} {{"]
-    dep_initial = next((sid for sid, s in dep_states.items() if s.get("initial")), next(iter(dep_states)))
-    lines.append(f"        [*] --> {prefix}{dep_initial}")
-    for sid in dep_states:
-        lines.append(f"        state {prefix}{sid}")
-    for sid, s in dep_states.items():
-        for t in s.get("transitions", []):
-            label = edge_label(t["event"], t.get("guard"), t.get("owned_by"))
-            lines.append(f"        {prefix}{sid} --> {prefix}{t['to']} : {label}")
-    lines.append("    }")
-    return lines
+    state's own internal behavior -- drawn as UML composite CONTAINMENT, the
+    same shape as a reference composite state: a named container holding its
+    own [*] entry point leading straight into the invoked workflow, named
+    once. The invoked workflow's OWN states/transitions are not flattened in
+    here -- that workflow already has its own diagram; this is a pointer
+    into it, not a duplicate of it."""
+    dep_id = mmd_id(dep_name)
+    return [
+        f"    state {at_state} {{",
+        f"        [*] --> {dep_id}",
+        f"        state \"{dep_name}\" as {dep_id}",
+        "    }",
+    ]
 
 
 def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> str:
