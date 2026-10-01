@@ -55,7 +55,7 @@ workflows:
       stalled:
         final: true
 
-  conveyor.fix_stalled:
+  conveyor.fix:
     subject: issue
     acts_on: station
     states:
