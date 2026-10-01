@@ -172,6 +172,10 @@ lacks.
 reason, and the rule that a Coordinator root's close must carry one governs
 the MCP `close` verb alone.
 
+This requirement is the single home of the instruction. The `k8s-bundle`,
+`ha-bundle` and `prometheus-bundle` deltas state no copy of it, because each
+bundle's profile inherits it from here and a second statement would drift.
+
 A coordinator-mode member conversation binds no channel of its own, so the
 instruction does nothing there. Ending a member is the reaper's and the
 coordinating agent's job.

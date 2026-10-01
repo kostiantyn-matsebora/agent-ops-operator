@@ -337,7 +337,9 @@ domain tools of its own.
 - **Domain agents may also close themselves, in-turn, where a thread is
   bound.** Every bundle's profile carries an instruction to reply `/close`
   once it judges a problem resolved. It is the same `/close` a person types,
-  and does nothing in a member conversation, which has no thread.
+  and does nothing in a member conversation, which has no thread. The
+  requirement is `coordinator-self-heal`'s "Domain agent profiles carry a
+  self-close instruction".
 
 ### Coordinator-owner reach: how the reaper sees its own roots
 
