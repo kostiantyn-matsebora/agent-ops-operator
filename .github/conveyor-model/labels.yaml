@@ -3,10 +3,10 @@ version: 1
 # Labels are the IMPLEMENTATION of the workflow abstraction, never part of it.
 # workflows.desired.yaml states events, guards and states in the abstract --
 # this file states which real label string each one uses, what actually
-# causes it (its invocation mechanism), and how it propagates between an
-# issue and its related pull request(s). Nothing here changes what a
-# workflow means; it only says how its meaning is carried as a real GitHub
-# label.
+# causes it (its invocation mechanism), which workflow(s) own it, and how it
+# propagates between an issue and its related pull request(s). Nothing here
+# changes what a workflow means; it only says how its meaning is carried as
+# a real GitHub label.
 
 prefixes:
 
@@ -35,7 +35,8 @@ prefixes:
     set_manually_on: [pull_request]
 
 # Every trigger in workflows.desired.yaml, its real label where one exists,
-# and the mechanism that actually fires it.
+# the mechanism that actually fires it, and every workflow that declares a
+# transition on it.
 #
 # invocation:
 #   label_placed        a real GitHub label placement is the whole fact
@@ -50,77 +51,95 @@ triggers:
     label: "conveyor:implement"
     invocation: label_placed
     prefix: conveyor
+    workflows: [conveyor.implement]
 
   conveyor:finalize:
     label: "conveyor:finalize"
     invocation: label_placed
     prefix: conveyor
+    workflows: [conveyor.finalize]
 
   loop:fix:
     label: "loop:fix"
     invocation: label_placed
     prefix: loop
+    workflows: [conveyor.fix, loop]
 
   loop:restart:
     label: "loop:restart"
     invocation: label_placed
     prefix: loop
+    workflows: [loop]
 
   proposal_pr_opened:
     label: null
     invocation: webhook
+    workflows: [conveyor.propose]
 
   proposal_pr_merged:
     label: null
     invocation: webhook
+    workflows: [conveyor.propose]
 
   checks_completed:
     label: null
     invocation: webhook
+    workflows: [conveyor.implement]
 
   prs_are_created:
     label: null
     invocation: derived
+    workflows: [conveyor.implement]
 
   all_prs_merged:
     label: null
     invocation: derived
+    workflows: [conveyor.implement, conveyor.fix, conveyor.finalize]
 
   hotfix_started:
     label: null
     invocation: derived
+    workflows: [conveyor.fix]
 
   round_finished:
     label: null
     invocation: derived
+    workflows: [loop]
 
   loop_entered_mergeable:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.propose, conveyor.fix]
 
   propose_entered_ready:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.run]
 
   implement_entered_done:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.run]
 
   implement_entered_implemented_with_issues:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.run]
 
   implement_entered_merge_failed:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.run]
 
   fix_entered_done:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.run]
 
   finalize_entered_finalized:
     label: null
     invocation: sub_workflow_entry
+    workflows: [conveyor.run]
 
 # Every state in workflows.desired.yaml. Each state's id already IS its real
 # label (see workflows.desired.yaml) -- this entry names which workflow owns
