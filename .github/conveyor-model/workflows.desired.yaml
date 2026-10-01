@@ -9,18 +9,18 @@ workflows:
       none:
         initial: true
         transitions:
-          - event: "proposal pr opened"
+          - event: "proposal_pr_opened"
             to: proposing
             guard: "exists"
       proposing:
         invokes: loop
         transitions:
-          - event: "proposal pr mergeable"
+          - event: "proposal_pr_mergeable"
             to: proposed
             guard: "is_mergeable"
       proposed:
         transitions:
-          - event: "proposal pr merged"
+          - event: "proposal_pr_merged"
             to: ready
             guard: "is_merged"
       ready:
@@ -34,28 +34,28 @@ workflows:
       ready:
         initial: true
         transitions:
-          - event: "implement fired"
+          - event: "implement_fired"
             to: implementing
             guard: "placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
-          - event: "implement fired"
+          - event: "implement_fired"
             to: implementing
             guard: "grant_placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
       implementing:
         transitions:
-          - event: "implement fired"
+          - event: "implement_fired"
             to: implementing
             guard: "placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
-          - event: "implement fired"
+          - event: "implement_fired"
             to: implementing
             guard: "grant_placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
-          - event: "implementing pr merged"
+          - event: "implementing_pr_merged"
             to: done
             guard: "all_pr_merged"
-          - event: "implementing pr merged"
+          - event: "implementing_pr_merged"
             to: stalled
             guard: "NOT all_pr_merged"
       done:
@@ -70,16 +70,16 @@ workflows:
       stalled:
         initial: true
         transitions:
-          - event: "round started"
+          - event: "round_started"
             to: fixing
       fixing:
         invokes: loop
         transitions:
-          - event: "pr green"
+          - event: "pr_green"
             to: mergeable
       mergeable:
         transitions:
-          - event: "fixing pr merged"
+          - event: "fixing_pr_merged"
             to: done
             guard: "all_pr_merged"
       done:
@@ -92,18 +92,18 @@ workflows:
       done:
         initial: true
         transitions:
-          - event: "finalize fired"
+          - event: "finalize_fired"
             to: finalizing
             guard: "placer_has_access AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
-          - event: "finalize fired"
+          - event: "finalize_fired"
             to: finalizing
             guard: "grant_placer_has_access AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
       finalizing:
         invokes: loop
         transitions:
-          - event: "finalize pr merged"
+          - event: "finalize_pr_merged"
             to: finalized
             guard: "all_pr_merged"
       finalized:

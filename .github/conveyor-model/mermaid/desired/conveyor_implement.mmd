@@ -10,12 +10,12 @@ stateDiagram-v2
     state implementing
     state done
     state stalled
-    ready --> implementing : implement fired [placer_has_access AND NOT is_session_at_work] / fire
-    ready --> implementing : implement fired [grant_placer_has_access AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement fired [placer_has_access AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement fired [grant_placer_has_access AND NOT is_session_at_work] / fire
-    implementing --> done : implementing pr merged [all_pr_merged]
-    implementing --> stalled : implementing pr merged [NOT all_pr_merged]
+    ready --> implementing : implement_fired [placer_has_access AND NOT is_session_at_work] / fire
+    ready --> implementing : implement_fired [grant_placer_has_access AND NOT is_session_at_work] / fire
+    implementing --> implementing : implement_fired [placer_has_access AND NOT is_session_at_work] / fire
+    implementing --> implementing : implement_fired [grant_placer_has_access AND NOT is_session_at_work] / fire
+    implementing --> done : implementing_pr_merged [all_pr_merged]
+    implementing --> stalled : implementing_pr_merged [NOT all_pr_merged]
     done --> [*]
     stalled --> [*]
     class ready, implementing, done, stalled stationState
