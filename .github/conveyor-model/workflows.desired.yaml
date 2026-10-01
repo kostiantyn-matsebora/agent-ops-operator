@@ -11,18 +11,18 @@ workflows:
         transitions:
           - event: "proposal:pr_opened"
             to: proposing
-            guard: "exists(proposal_pr)"
+            guard: "exists proposal_pr"
       proposing:
         invokes: loop
         transitions:
           - event: "proposal:mergeable"
             to: proposed
-            guard: "is_mergeable(proposal_pr)"
+            guard: "is_mergeable proposal_pr"
       proposed:
         transitions:
           - event: "proposal:pr_merged"
             to: ready
-            guard: "is_merged(proposal_pr)"
+            guard: "is_merged proposal_pr"
       ready:
         final: true
 
@@ -36,13 +36,13 @@ workflows:
         transitions:
           - event: "fire:implement"
             to: implement
-            guard: "has_access(placer, grant_placer) AND NOT is_session_at_work(line)"
+            guard: "has_access placer grant_placer AND NOT is_session_at_work line"
             owned_by: "fire()"
       implement:
         transitions:
           - event: "fire:implement"
             to: implement
-            guard: "has_access(placer, grant_placer) AND NOT is_session_at_work(line)"
+            guard: "has_access placer grant_placer AND NOT is_session_at_work line"
             owned_by: "fire()"
           - event: "merge:plain"
             to: done

@@ -9,9 +9,9 @@ stateDiagram-v2
     state proposing
     state proposed
     state ready
-    none --> proposing : proposal.pr_opened [exists(proposal_pr)]
-    proposing --> proposed : proposal.mergeable [is_mergeable(proposal_pr)]
-    proposed --> ready : proposal.pr_merged [is_merged(proposal_pr)]
+    none --> proposing : proposal.pr_opened [exists proposal_pr]
+    proposing --> proposed : proposal.mergeable [is_mergeable proposal_pr]
+    proposed --> ready : proposal.pr_merged [is_merged proposal_pr]
     ready --> [*]
     class none, proposing, proposed, ready stationState
     state proposing {
