@@ -39,6 +39,10 @@ spec:
   {{- else if $posture }}
   {{- $role = $posture }}
   {{- end }}
+  {{- /* coordinator-deployment-mode task 3: every profile owes the agent the
+  option to end its own conversation once it judges the problem resolved — see
+  agentops.selfCloseInstruction for why it is a no-op on a threadless member. */ -}}
+  {{- $role = include "agentops.withSelfClose" (dict "text" $role) | trim }}
   {{- with $role }}
   # Inline role, because this profile has no repository to hold a definition
   # file. Appended to the runtime's system prompt; it grants nothing.

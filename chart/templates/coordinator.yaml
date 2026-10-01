@@ -1,0 +1,167 @@
+{{- /*
+THE CHART-RENDERED Coordinator (coordinator-deployment-mode) — rendered
+exactly once, ONLY under `global.agentops.wiringMode: coordinator`.
+
+This is the parent chart's half of "the parent owns wiring that spans
+bundles" (see `.claude/rules/gotchas.md`'s bundle-qualification table, and the
+same argument `chart/templates/pipelines.yaml` makes for an install-declared
+Pipeline): a subchart sees only itself, so claiming every enabled bundle's
+source and listing every enabled bundle's AgentCapability in one Coordinator's
+`agents[]` can only happen here, read through `agentops.coordinatorContributions`
+— which re-derives from each bundle's OWN helper, so this cannot drift from
+what each bundle actually rendered in `capabilities.yaml`.
+
+`reaper.yaml` renders the reaper's own AgentProfile, AgentCapability, and its
+hourly `signals/cron` claim — THIS file folds the reaper in as one more
+`agents[]` entry and one more `signalSourceRefs` claim (coordinator-self-heal,
+design D-E), never a reaper-specific field on the Coordinator object itself.
+*/ -}}
+{{- if eq (include "agentops.wiringMode" .) "coordinator" }}
+{{- $c := .Values.coordinator }}
+{{- $r := .Values.reaper }}
+{{- $g := .Values.global | default dict }}
+{{- $contrib := include "agentops.coordinatorContributions" . | fromYaml }}
+{{- $sources := $contrib.sources | default list }}
+{{- $agents := $contrib.agents | default list }}
+{{- /* The reaper is an ORDINARY agents[] entry (coordinator-self-heal) — same
+shape as every bundle's, never a reaper-specific field here. Its description
+is deliberately an INSTRUCTION ("invoke this ONLY in response to...") rather
+than a job label, because — unlike a domain entry a signal's content decides —
+this one is chosen by RECOGNIZING a specific trigger, named again below in the
+coordinating agent's own prompt so the instruction is not the description's to
+carry alone. */ -}}
+{{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs the hourly self-heal sweep: lists this Coordinator's own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the hourly self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
+{{- $sources = append $sources $r.source.name }}
+{{- /* Every ref below is emitted only when the object it names is rendered —
+same rule every bundle's own wiring component follows. */ -}}
+{{- $toolsets := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $toolsets = append $toolsets (dig "builtinToolsets" "coordinate" "name" "agentops-coordinate" $g) }}
+{{- end }}
+{{- /* coordination.yaml renders UNCONDITIONALLY under coordinator mode (see
+its own comment) — this capability's one reason to exist is reaching it, so
+the ref is never conditional here. */ -}}
+{{- $mcpConfigs := list .Values.coordination.name }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $c.profileName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-coordinator
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  maxTurns: {{ $c.maxTurns }}
+  # Behaviour only — no repository, no capabilities. GENERATED: the routing
+  # instructions below are built from the SAME aggregation that fills this
+  # Coordinator's own `agents[]`, so the reaper's name always matches what the
+  # agent is told to invoke for the hourly signal (design D-E, task 2.5).
+  systemPrompt: |
+    {{- with $c.systemPromptPrefix }}
+{{ . | trim | indent 4 }}
+
+    {{- end }}
+    You are the coordinating agent for this install. A conversation of yours
+    opens whenever a signal arrives on a source you claim, or when someone
+    addresses you by name. You answer nothing domain-specific yourself — your
+    only job is reading what started the conversation and routing it.
+
+    Call `list_agents` to see every entry you may invoke, each with a
+    description of when to use it. Pick the one whose description matches
+    what arrived, and `invoke` it with a clear, specific task. Its result
+    reaches you later as an ordinary input — read it, and decide whether to
+    answer, invoke another entry, or `escalate` to a human.
+
+    ## The hourly self-heal signal
+
+    One of your claimed sources (`{{ $r.source.name }}`) fires on an hourly
+    schedule and carries no incident of its own — it exists only to trigger a
+    survey of what your `agents[]` has left open. When a conversation starts
+    from that source, invoke the entry named `{{ $r.name }}` and nothing
+    else: do not treat it as an ordinary task, and do not attempt the survey
+    yourself.
+  # REQUIRED, and with no default on purpose: `none` leaves output unformatted
+  # unless this profile's prompt says otherwise, and `blocks` shapes it by
+  # something the author never asked for. The author declares it.
+  outputFormat: {{ $c.outputFormat }}
+  {{- with $c.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Coordinator
+metadata:
+  name: {{ $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-coordinator
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  # The coordinating agent's OWN capability — inline, exactly as a Pipeline's
+  # six fields would be. This is the agent that reads what started the
+  # conversation and decides what to invoke; it is never one of the domain
+  # agents in `agents[]` below.
+  profileRef:
+    name: {{ $c.profileName }}
+  {{- with $c.runtimeRef }}
+  # WHAT EXECUTES this conversation. Unset resolves the AgentRuntime named
+  # `default`, which the PARENT renders.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with $c.serviceAccountName }}
+  # UNDER WHOSE IDENTITY. The account is the PARENT's to render
+  # (`rbac.runtime.serviceAccounts`) or yours to grant.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with $toolsets }}
+  # The coordination reach ONLY — list_agents, invoke, close, escalate, read
+  # and the list/get tools `global.builtinToolsets.coordinate` wildcards. No
+  # domain tool is ever bound here: what a domain task needs comes from the
+  # invoked entry's OWN capability, never from this one.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $sources }}
+  # Claimed exactly as a Pipeline claims — shareable, fanned out, counted in
+  # Wired. Every enabled bundle's own source (the same one its `pipelines`
+  # mode route would claim), plus the reaper's hourly cron claim.
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $c.channels }}
+  # ESCALATION ONLY — never bound at conversation creation (coordinator-model).
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $c.limits }}
+  limits:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # Every enabled bundle's AgentCapability (one entry per route it would have
+  # rendered as a Pipeline, never merged — `agentops.coordinatorContributions`)
+  # plus the reaper's own entry above.
+  agents:
+    {{- range $agents }}
+    - name: {{ .name }}
+      description: {{ .description | quote }}
+      capabilityRef:
+        name: {{ .capability }}
+    {{- end }}
+{{- end }}

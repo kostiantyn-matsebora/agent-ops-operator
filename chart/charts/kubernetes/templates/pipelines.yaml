@@ -17,8 +17,13 @@ binding, and rendering both would open two conversations per event with one of
 them able to mutate the cluster. Both together is allowed, deliberately (sources
 are shareable, and there is no conflict guard to reinstate), but it is asked for
 explicitly.
+
+UNDER `global.agentops.wiringMode: coordinator` THIS FILE RENDERS NOTHING —
+`capabilities.yaml` renders the SAME two routes as standalone AgentCapability
+objects instead, and the chart-rendered Coordinator claims this bundle's source
+and lists them in its own `agents[]` (see `kubernetes.coordinatorContribution`).
 */ -}}
-{{- if and (include "kubernetes.wiringActive" .) .Values.profile.enabled }}
+{{- if and (eq (include "agentops.wiringMode" .) "pipelines") (include "kubernetes.wiringActive" .) .Values.profile.enabled }}
 {{- $p := .Values.pipelines }}
 {{- $g := .Values.global | default dict }}
 {{- $ea := .Values.eventsAdapter }}

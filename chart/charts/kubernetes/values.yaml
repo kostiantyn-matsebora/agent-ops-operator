@@ -580,6 +580,14 @@ pipelines:
     # network and works air-gapped. `mdi:<name>` or a URL also work, where the
     # surface can fetch one.
     icon: aops:observe
+    # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
+    # Coordinator's own coordinating agent — what it tells the agent about WHEN
+    # to invoke this entry, never a routing rule of its own. Unused under
+    # `pipelines` mode.
+    description: >-
+      Investigate a Kubernetes cluster event read-only — inspect the object,
+      recent logs and related resources, and report the likely cause. Never
+      changes the cluster.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
@@ -595,6 +603,10 @@ pipelines:
     # internet too. k8s-observe stays read-only and does not gain it.
     name: k8s-operate
     icon: aops:operate
+    # See observe.description above — same purpose, coordinator mode only.
+    description: >-
+      Act on the cluster to remediate a Kubernetes issue once the cause is
+      known — restart, scale or patch the affected workload.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""

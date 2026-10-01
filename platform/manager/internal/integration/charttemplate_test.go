@@ -1076,7 +1076,7 @@ func TestDecliningWiringLeavesTheRestOfTheBundle(t *testing.T) {
 // Demo mode's whole promise is one flag and a working install. Before this it
 // rendered an events lane, a profile and tooling that answered nothing.
 func TestDemoModeWiresTheObservingRoute(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines")
 	pipes := bundlePipelines(out)
 	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
 		t.Fatalf("demo mode must render exactly k8s-observe, got %v", got)
@@ -1104,7 +1104,7 @@ func TestDemoModeWiresTheObservingRoute(t *testing.T) {
 // exercise. It is the bundle's OWN value now — the release-wide permission mode
 // that used to drive all four named none of them.
 func TestAllowMutationsPromotesTheRouteToActing(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.allowMutations=true")
 	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-operate" {
 		t.Fatalf("allowMutations must render exactly k8s-operate, got %v", got)
@@ -1121,7 +1121,7 @@ func TestAllowMutationsPromotesTheRouteToActing(t *testing.T) {
 // decides in both directions, exactly as mcpServers.readOnly does.
 func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 	// acting route asked for under a read-only release
-	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.pipelines.admin.enabled=true",
 		"--set", "kubernetes.pipelines.observe.enabled=false")
 	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-operate" {
@@ -1133,7 +1133,7 @@ func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 	}
 
 	// observing route asked for under `full`
-	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.allowMutations=true",
 		"--set", "kubernetes.pipelines.observe.enabled=true",
 		"--set", "kubernetes.pipelines.admin.enabled=false")
@@ -1146,7 +1146,7 @@ func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 // shareable and sourceConflicts was deleted. Failing the render here would be
 // that guard returning one layer up.
 func TestBothRoutesRenderWithoutConflict(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.pipelines.observe.enabled=true",
 		"--set", "kubernetes.pipelines.admin.enabled=true")
 	got := pipelineNames(out)
@@ -1166,7 +1166,7 @@ func TestBothRoutesRenderWithoutConflict(t *testing.T) {
 func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	// The console is deployed by default and the route claims it, so a turnkey
 	// install can start a conversation in the surface it just installed.
-	bare := bundlePipelines(helmTemplate(t, "--set", "global.demo.enabled=true"))["k8s-observe"]
+	bare := bundlePipelines(helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines"))["k8s-observe"]
 	if !strings.Contains(bare, "channelRefs:\n    - name: console") {
 		t.Errorf("the console must be bound as a channel by default:\n%s", bare)
 	}
@@ -1175,7 +1175,7 @@ func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	}
 
 	// A named channel joins the console rather than replacing it.
-	named := helmTemplate(t, "--set", "global.demo.enabled=true",
+	named := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.pipelines.channels={home-ops}")
 	if doc := bundlePipelines(named)["k8s-observe"]; !strings.Contains(doc, "- name: home-ops") ||
 		!strings.Contains(doc, "- name: console") {
@@ -1184,7 +1184,7 @@ func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
 
 	// Every component the route would reference, turned off at once — INCLUDING
 	// the console, whose names the parent must clear when it is not deployed.
-	off := helmTemplate(t, "--set", "global.demo.enabled=true",
+	off := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.mcp.enabled=false",
 		"--set", "kubernetes.mcpServers.enabled=false",
 		"--set", "global.builtinToolsets.enabled=false",
@@ -2276,6 +2276,12 @@ func k8sEngineerRole(t *testing.T, args ...string) string {
 
 const postureMarker = "This install withholds pod execution"
 
+// selfCloseMarker is coordinator-deployment-mode's self-close instruction
+// (chart/templates/_helpers.tpl's `agentops.selfCloseInstruction`), appended
+// to every bundle profile's prompt after everything else — including the
+// posture paragraph, when both render.
+const selfCloseMarker = "If a thread is bound to this conversation"
+
 func TestK8sProfileStatesTheWithheldPosture(t *testing.T) {
 	role := k8sEngineerRole(t)
 	at := strings.Index(role, postureMarker)
@@ -2286,9 +2292,13 @@ func TestK8sProfileStatesTheWithheldPosture(t *testing.T) {
 	if job := strings.Index(role, "You are a Kubernetes site reliability engineer"); job < 0 || job > at {
 		t.Errorf("the posture paragraph must follow the shipped role, not replace or precede it:\n%s", role)
 	}
-	paragraph := role[at:]
-	if strings.Contains(paragraph, "\n\n") {
-		t.Errorf("the posture paragraph must be the last thing in the role:\n%s", paragraph)
+	selfCloseAt := strings.Index(role, selfCloseMarker)
+	if selfCloseAt < 0 {
+		t.Fatalf("the self-close instruction must follow the posture paragraph:\n%s", role)
+	}
+	paragraph := role[at:selfCloseAt]
+	if strings.Contains(strings.TrimRight(paragraph, "\n"), "\n\n") {
+		t.Errorf("the posture paragraph must be the last thing before the self-close instruction:\n%s", paragraph)
 	}
 	// It names every workload kind runtimeWriteRules gates — widening the helper
 	// without widening the text fails here.
@@ -2338,8 +2348,15 @@ func TestK8sProfilePostureCanBeDeclined(t *testing.T) {
 	if strings.Contains(role, postureMarker) {
 		t.Fatalf("an emptied value must render no posture paragraph:\n%s", role)
 	}
-	if !strings.HasSuffix(role, "Lead with the finding, then the evidence.") {
-		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", role)
+	// The self-close instruction (coordinator-deployment-mode) always follows
+	// the shipped role now — declining the posture paragraph leaves the role
+	// itself untouched, right up to that addition.
+	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
+	if !ok {
+		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)
+	}
+	if !strings.HasSuffix(before, "Lead with the finding, then the evidence.") {
+		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", before)
 	}
 }
 

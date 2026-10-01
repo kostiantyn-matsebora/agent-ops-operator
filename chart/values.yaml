@@ -547,6 +547,28 @@ global:
       signalSource: console
       channel: console
 
+    # THE RELEASE-WIDE WIRING POSTURE (coordinator-deployment-mode): whether an
+    # enabled bundle renders an inline Pipeline per route ("pipelines") or a
+    # standalone AgentCapability gathered under one chart-rendered Coordinator
+    # ("coordinator"). CHART RENDERING ONLY — it introduces no CRD validation
+    # or CEL rule making a Pipeline and a Coordinator mutually exclusive, on
+    # one object, one release or one cluster. See
+    # openspec/changes/coordinator-deployment-mode/specs/wiring-mode/spec.md.
+    #
+    # `null` — DEFAULT, and this is the load-bearing reason it is nullable
+    # rather than the plain string "pipelines", same reason
+    # `kubernetes.pipelines.enabled` is: left unset, the render FOLLOWS
+    # `global.demo.enabled` — off, the DEFAULT BEHAVIOUR is "pipelines"
+    # (today's posture, rendered byte-identical); true selects "coordinator",
+    # so a turnkey install exercises the Coordinator model out of the box. An
+    # EXPLICIT value here is absolute in both directions —
+    # `wiringMode: pipelines` under demo mode keeps today's single-Pipeline
+    # demo, and that is the one case a plain (non-nullable) value could not
+    # express.
+    #
+    # An unrecognized value fails the render naming both accepted ones.
+    wiringMode: null
+
   # The built-in tool vocabulary as MCPToolset CRs, so profiles and pipelines can
   # NAME tools instead of inlining comma strings. Split by risk on purpose — that
   # is what lets one route observe while another executes:
@@ -1218,6 +1240,84 @@ coordination:
   port: 8080
   resources: {}
   nodeSelector: {}
+
+# THE CHART-RENDERED Coordinator (coordinator-deployment-mode) — rendered
+# exactly once, ONLY under `global.agentops.wiringMode: coordinator`. It claims
+# every enabled bundle's source (the same sources those bundles' `pipelines`
+# mode routes claim today) plus the reaper's own hourly `signals/cron` claim,
+# and lists every enabled bundle's AgentCapability plus the reaper's in its own
+# `agents[]` — see `agentops.coordinatorContributions` and
+# `chart/templates/coordinator.yaml`.
+#
+# This is the COORDINATING agent's OWN capability and profile — the agent that
+# reads what started a conversation and decides which `agents[]` entry to
+# invoke. It is never a domain agent itself: every domain decision is
+# delegated to the bundle capability (or the reaper) whose description best
+# matches.
+coordinator:
+  # Coordinator CR name.
+  name: agentops-coordinator
+  # Its own AgentProfile name.
+  profileName: agentops-coordinator
+  maxTurns: 20
+  # WHAT EXECUTES it, and UNDER WHOSE IDENTITY — same meaning as a Pipeline's
+  # own `runtimeRef` / `serviceAccountName`. Unset resolves the AgentRuntime
+  # named `default` and the floor account.
+  runtimeRef: ""
+  serviceAccountName: ""
+  # REQUIRED on the rendered AgentProfile, with no default on purpose — see
+  # every bundle profile's own `outputFormat` comment.
+  outputFormat: blocks
+  # Prepended to the generated routing instructions below (empty by default).
+  # Use it to add install-specific guidance — a severity scale, an on-call
+  # convention — without rewriting the generated routing text.
+  systemPromptPrefix: ""
+  # Channels an ESCALATION may open — never bound at creation (coordinator-model).
+  channels: []
+  # Bounds this Coordinator's own conversation tree. Empty renders no `limits`
+  # stanza at all: a zero field there means unset, not zero, so an install that
+  # wants one states it (`maxAgents`, `maxTurns`, `deadline`).
+  limits: {}
+
+# THE SELF-HEAL REAPER (coordinator-self-heal) — an ORDINARY AgentProfile /
+# AgentCapability pair, rendered under `coordinator` mode ALONE (no separate
+# flag). Addressed hourly through the chart-rendered Coordinator's own
+# coordinating agent, which recognises the cron signal and invokes it exactly
+# as it invokes a domain entry for a domain signal.
+#
+# IT BINDS NO DOMAIN TOOLSET — only the coordination reach
+# (list_open_roots / invoke / close) through `global.builtinToolsets.coordinate`
+# and the `coordination` MCPConfig above. No new CRD: this is one more
+# AgentCapability, one more `agents[]` entry.
+reaper:
+  # Its own AgentCapability / agents[] entry name.
+  name: reaper
+  # Its own AgentProfile name.
+  profileName: reaper
+  # Five-field cron schedule (minute hour dom month dow) served by
+  # `signals/cron` — see reaper.cronAdapter below.
+  schedule: "0 * * * *"
+  maxTurns: 20
+  runtimeRef: ""
+  serviceAccountName: ""
+  outputFormat: none
+  # Prepended to the generated survey instructions below (empty by default).
+  systemPromptPrefix: ""
+  # The `signals/cron` SignalAdapter this chart deploys to serve the reaper's
+  # hourly SignalSource — the one implementation shipping the reaper's trigger
+  # needs, since no bundle owns a cron lane. `servedBy` is not an option here:
+  # nothing else in a coordinator-mode install already runs this process.
+  cronAdapter:
+    name: reaper-cron
+    image:
+      repository: ghcr.io/kostiantyn-matsebora/agentops-signal-cron
+      tag: 0.2.0
+    resources: {}
+  # The SignalSource the hourly tick posts to — claimed on the chart-rendered
+  # Coordinator's own signalSourceRefs (design D-E), never on a per-entry
+  # trigger field.
+  source:
+    name: reaper-sweep
 
 # CRDs ARE NOT VALUES ANY MORE. They live in `chart/crds/`, which Helm applies
 # out-of-band BEFORE it builds the rest of the manifest — the only thing that

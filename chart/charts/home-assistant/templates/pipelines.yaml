@@ -16,8 +16,13 @@ by as many Pipelines as an install wants — so a surface serving both agents is
 the ordinary shape, and it is what puts both in the list an unaddressed message
 is answered with. The ops route additionally claims the log source, which is the
 only asymmetry between them.
+
+UNDER `global.agentops.wiringMode: coordinator` THIS FILE RENDERS NOTHING —
+`capabilities.yaml` renders the same two routes as standalone AgentCapability
+objects instead, claimed by the chart-rendered Coordinator
+(`home-assistant.coordinatorContribution`).
 */ -}}
-{{- if include "home-assistant.wiringActive" . }}
+{{- if and (eq (include "agentops.wiringMode" .) "pipelines") (include "home-assistant.wiringActive" .) }}
 {{- $p := .Values.pipelines }}
 {{- $g := .Values.global | default dict }}
 {{- $la := .Values.logsAdapter }}

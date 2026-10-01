@@ -288,3 +288,35 @@ and naming is not creating. */ -}}
 {{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): see
+kubernetes.coordinatorContribution for the calling convention. BOTH routes keep
+the name of the route they replace (`ha-control`, `ha-ops`), per ha-bundle's
+own delta — never merged, the privilege split this bundle's whole design rests
+on carries over unchanged. The missing-admin-credential case is already the
+SAME gate `home-assistant.opsProfileEnabled` uses for the Pipeline today, so
+withholding `ha-ops` here needs no second check. */ -}}
+{{- define "home-assistant.coordinatorContribution" -}}
+{{- $sources := list -}}
+{{- $agents := list -}}
+{{- if include "home-assistant.wiringActive" . -}}
+{{- $p := .Values.pipelines -}}
+{{- $la := .Values.logsAdapter -}}
+{{- $chatSources := $p.chatSources | default list -}}
+{{- $logSource := list -}}
+{{- if and $la.enabled $la.source.create -}}{{- $logSource = append $logSource $la.source.name -}}{{- end -}}
+{{- if include "home-assistant.userProfileEnabled" . -}}
+{{- range $s := $chatSources -}}{{- if not (has $s $sources) -}}{{- $sources = append $sources $s -}}{{- end -}}{{- end -}}
+{{- $agents = append $agents (dict "name" $p.control.name "capability" $p.control.name "description" $p.control.description) -}}
+{{- end -}}
+{{- if include "home-assistant.opsProfileEnabled" . -}}
+{{- range $s := $chatSources -}}{{- if not (has $s $sources) -}}{{- $sources = append $sources $s -}}{{- end -}}{{- end -}}
+{{- range $s := $logSource -}}{{- if not (has $s $sources) -}}{{- $sources = append $sources $s -}}{{- end -}}{{- end -}}
+{{- $agents = append $agents (dict "name" $p.ops.name "capability" $p.ops.name "description" $p.ops.description) -}}
+{{- end -}}
+{{- end -}}
+sources:
+{{ toYaml $sources | indent 2 }}
+agents:
+{{ toYaml $agents | indent 2 }}
+{{- end -}}

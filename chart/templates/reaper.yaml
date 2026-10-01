@@ -1,0 +1,175 @@
+{{- /*
+THE SELF-HEAL REAPER (coordinator-self-heal) — an ORDINARY AgentProfile /
+AgentCapability pair, gated on `coordinator` mode ALONE, no separate flag: the
+reaper is what makes that mode self-healing, not a component an operator opts
+into on top of it.
+
+It is reached, invoked and bounded by exactly the mechanisms `coordinator-model`
+and `coordination-loop` already define for any `agents[]` entry — NO new CRD.
+`chart/templates/coordinator.yaml` is what lists this capability in the
+chart-rendered Coordinator's `agents[]` and claims the SignalSource below; this
+file renders only the reaper's OWN objects plus the cron adapter that gives it
+a trigger, since no bundle owns a cron lane (design D-E).
+*/ -}}
+{{- if eq (include "agentops.wiringMode" .) "coordinator" }}
+{{- $r := .Values.reaper }}
+{{- $g := .Values.global | default dict }}
+---
+# The signals/cron implementation (design D-E): the one adapter a
+# coordinator-mode install needs that no bundle ships, since the reaper's
+# trigger belongs to no domain. No Kubernetes access (signals/cron's own
+# README), so it runs as the release FLOOR account — bound to nothing.
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $r.cronAdapter.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-reaper
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  image: {{ printf "%s:%s" $r.cronAdapter.image.repository (toString $r.cronAdapter.image.tag) | quote }}
+  # Two schedulers would double-fire ticks — the CRD already defaults this to
+  # true, stated here for the same reason the kubernetes bundle states it.
+  singleton: true
+  {{- with $r.cronAdapter.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  externals:
+    - name: signals/cron
+      kind: other
+  # Interface metadata only — see signals/cron's own configSchema in its
+  # README / samples for the authoritative shape.
+  configSchema:
+    type: object
+    properties:
+      schedule:
+        type: string
+        description: Five-field cron expression (minute hour dom month dow).
+      input:
+        type: string
+        description: Task text handed to the coordinating agent on each tick.
+      title:
+        type: string
+        description: Conversation title override.
+    required:
+      - schedule
+      - input
+---
+# Claimed on the chart-rendered Coordinator's OWN signalSourceRefs
+# (coordinator.yaml), exactly like every bundle's source — no per-entry
+# trigger field, no new CRD field (design D-E, coordinator-self-heal).
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $r.source.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-reaper
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  adapter: {{ $r.cronAdapter.name }}
+  config:
+    schedule: {{ $r.schedule | quote }}
+    input: >-
+      Hourly self-heal sweep. This is not a new incident: survey this
+      Coordinator's own open roots and re-check each one.
+    title: Self-heal sweep
+---
+# Behaviour only — no repository, no capabilities. GENERATED survey
+# instructions, per coordinator-self-heal's own requirement: list this
+# Coordinator's open roots, re-invoke the ORIGINAL agent named in each root's
+# `members`, and close only the ones every re-check reports cleared.
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $r.profileName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-reaper
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  maxTurns: {{ $r.maxTurns }}
+  systemPrompt: |
+    {{- with $r.systemPromptPrefix }}
+{{ . | trim | indent 4 }}
+
+    {{- end }}
+    You are the self-heal reaper for this install's Coordinator. You run once
+    per hour, invoked by the coordinating agent in response to its own cron
+    signal. You handle NO domain work yourself — your only tools are
+    `list_open_roots`, `invoke` and `close`.
+
+    On each run:
+
+    1. Call `list_open_roots` to list this Coordinator's own open root
+       conversations (never a member, never another Coordinator's root — the
+       tool already excludes both, including the root that invoked you).
+    2. For each root, read its `members` field: the agents[] entry name(s)
+       that originally handled it.
+    3. For EACH member entry listed, `invoke` that SAME entry again, asking
+       it to re-check whether the condition that opened this root still
+       holds. If `members` lists more than one entry, re-invoke every one —
+       the root counts as healed only once EVERY re-check reports the
+       condition cleared.
+    4. Read each re-check's result as it arrives (an ordinary member-result
+       input). Once every re-check for a root reports the condition cleared,
+       `close` that root, naming the re-check as the reason. A root where any
+       re-check still finds the condition present is left open — take no
+       close action on it, and let the next hourly run or an escalation
+       handle it.
+
+    Never close the root that invoked you — it is not one of the roots
+    `list_open_roots` will ever show you. Never invoke an entry that is not
+    named in the root's own `members` field: you are re-checking, not
+    deciding what should have handled it.
+  # REQUIRED, and with no default on purpose: `none` leaves output unformatted
+  # unless this profile's prompt says otherwise, and `blocks` shapes it by
+  # something the author never asked for. The author declares it — the reaper
+  # defaults to `none` since nothing surfaces its output to a person directly.
+  outputFormat: {{ $r.outputFormat }}
+  {{- with $r.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+---
+# THE REAPER HOLDS NO DOMAIN TOOLSET AND NO DOMAIN MCPConfig
+# (coordinator-self-heal) — only the coordination reach a Coordinator-owner
+# caller gets through `global.builtinToolsets.coordinate` and the aops
+# MCPConfig every coordinating agent binds. It reaches a domain agent's OWN
+# capability only by invoking it through the Coordinator's agents[], never by
+# calling that agent's tools itself.
+apiVersion: agentops.dev/v1alpha1
+kind: AgentCapability
+metadata:
+  name: {{ $r.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-reaper
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  profileRef:
+    name: {{ $r.profileName }}
+  {{- with $r.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with $r.serviceAccountName }}
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- $toolsets := list }}
+  {{- if dig "builtinToolsets" "enabled" false $g }}
+  {{- $toolsets = append $toolsets (dig "builtinToolsets" "coordinate" "name" "agentops-coordinate" $g) }}
+  {{- end }}
+  {{- with $toolsets }}
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  mcpConfigs:
+    refs:
+      - name: {{ .Values.coordination.name }}
+{{- end }}

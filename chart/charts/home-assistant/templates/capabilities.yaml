@@ -1,0 +1,128 @@
+{{- /*
+Coordinator-mode wiring component (coordinator-deployment-mode): the SAME two
+routes `pipelines.yaml` would have rendered as inline Pipelines, as two
+standalone AgentCapability objects instead — NEVER merged, the privilege split
+this bundle's whole design rests on carries over unchanged.
+
+An AgentCapability carries no subscription: the chart-rendered Coordinator
+(`chart/templates/coordinator.yaml`) is the one object that claims the chat
+sources and the log source, and lists these capabilities in its own
+`agents[]`, read through `home-assistant.coordinatorContribution` — the SAME
+helper this file reuses below, so the two cannot drift apart on which route
+renders.
+
+Each keeps the name of the route it replaces: `ha-control` carries `ha-user`
+at the everyday privilege level, `ha-ops` carries `ha-operator` at the acting
+one — gated on the SAME profile-enablement helpers as `pipelines.yaml`, so a
+missing admin credential withholds `ha-ops` here exactly as it withholds the
+Pipeline today.
+*/ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "home-assistant.wiringActive" .) }}
+{{- $p := .Values.pipelines }}
+{{- $g := .Values.global | default dict }}
+{{- $mcp := .Values.mcp }}
+{{- /* The tools BOTH routes share: the built-in observe set and, when the MCP
+component renders, the house's own looking and doing intents. The everyday
+route binds the doing half too — invoking services IS its job. */ -}}
+{{- $baseTools := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $baseTools = append $baseTools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
+{{- end }}
+{{- $mcpConfigs := list }}
+{{- if include "home-assistant.mcpEnabled" . }}
+{{- $baseTools = append $baseTools $mcp.toolsets.observe.name }}
+{{- $mcpConfigs = append $mcpConfigs $mcp.name }}
+{{- if include "home-assistant.mcpActionsEnabled" . }}
+{{- $baseTools = append $baseTools $mcp.toolsets.actions.name }}
+{{- end }}
+{{- end }}
+{{- /* The ADMIN path is the ops route's alone. */ -}}
+{{- $opsOnlyTools := list }}
+{{- $opsOnlyConfigs := list }}
+{{- if include "home-assistant.adminMcpEnabled" . }}
+{{- $opsOnlyTools = append $opsOnlyTools .Values.adminMcp.toolset.name }}
+{{- $opsOnlyConfigs = append $opsOnlyConfigs .Values.adminMcp.name }}
+{{- end }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $opsOnlyTools = append $opsOnlyTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
+{{- end }}
+{{- /* The SHELL toolset opens the REST path, and it is per route. */ -}}
+{{- $shell := "" }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $shell = dig "builtinToolsets" "shell" "name" "agentops-shell" $g }}
+{{- end }}
+{{- $controlTools := $baseTools }}
+{{- if and $shell (include "home-assistant.restAccessFor" (dict "ctx" . "route" "control")) }}
+{{- $controlTools = append $controlTools $shell }}
+{{- end }}
+{{- $opsTools := concat $baseTools $opsOnlyTools }}
+{{- if and $shell (include "home-assistant.restAccessFor" (dict "ctx" . "route" "ops")) }}
+{{- $opsTools = append $opsTools $shell }}
+{{- end }}
+
+{{- $caps := list }}
+{{- if include "home-assistant.userProfileEnabled" . }}
+{{- $caps = append $caps (dict
+      "name" $p.control.name
+      "runtimeRef" ($p.control.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "home-assistant.routeAccount" (dict "ctx" $ "cfg" $p.control "p" $p))
+      "profile" .Values.profiles.user.name
+      "tools" $controlTools
+      "configs" $mcpConfigs) }}
+{{- end }}
+{{- if include "home-assistant.opsProfileEnabled" . }}
+{{- $caps = append $caps (dict
+      "name" $p.ops.name
+      "runtimeRef" ($p.ops.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "home-assistant.routeAccount" (dict "ctx" $ "cfg" $p.ops "p" $p))
+      "profile" .Values.profiles.ops.name
+      "tools" $opsTools
+      "configs" (concat $mcpConfigs $opsOnlyConfigs)) }}
+{{- end }}
+{{- range $caps }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentCapability
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  profileRef:
+    name: {{ .profile }}
+  {{- with .runtimeRef }}
+  # WHAT EXECUTES this capability's conversations. Unset resolves the
+  # AgentRuntime named `default`, which the PARENT renders — no bundle renders
+  # a runtime, an identity or a credential, and naming one here creates
+  # nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with .serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own — the same identity a
+  # Pipeline at this route would have named.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with .tools }}
+  # Declared, not inherited: profiles carry no capabilities and nothing
+  # supplies a default, so this stanza IS the agent's allowlist.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with .configs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
