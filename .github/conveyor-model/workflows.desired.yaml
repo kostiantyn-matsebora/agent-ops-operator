@@ -9,18 +9,18 @@ workflows:
       none:
         initial: true
         transitions:
-          - event: "proposal:pr_opened"
+          - event: "proposal pr opened"
             to: proposing
             guard: "exists proposal_pr"
       proposing:
         invokes: loop
         transitions:
-          - event: "proposal:mergeable"
+          - event: "proposal pr mergeable"
             to: proposed
             guard: "is_mergeable proposal_pr"
       proposed:
         transitions:
-          - event: "proposal:pr_merged"
+          - event: "proposal pr merged"
             to: ready
             guard: "is_merged proposal_pr"
       ready:
@@ -34,21 +34,30 @@ workflows:
       ready:
         initial: true
         transitions:
-          - event: "fire:implement"
+          - event: "implement fired"
             to: implementing
-            guard: "has_access placer grant_placer AND NOT is_session_at_work line"
+            guard: "has_access placer AND NOT is_session_at_work"
+            owned_by: "fire"
+          - event: "implement fired"
+            to: implementing
+            guard: "has_access grant_placer AND NOT is_session_at_work"
             owned_by: "fire"
       implementing:
         transitions:
-          - event: "fire:implement"
+          - event: "implement fired"
             to: implementing
-            guard: "has_access placer grant_placer AND NOT is_session_at_work line"
+            guard: "has_access placer AND NOT is_session_at_work"
             owned_by: "fire"
-          - event: "merge:plain"
+          - event: "implement fired"
+            to: implementing
+            guard: "has_access grant_placer AND NOT is_session_at_work"
+            owned_by: "fire"
+          - event: "implementing pr merged"
             to: done
-            guard: "all_prs_merged"
-          - event: "merge:finished_stalled"
+            guard: "all_pr_merged"
+          - event: "implementing pr merged"
             to: stalled
+            guard: "NOT all_pr_merged"
       done:
         final: true
       stalled:
@@ -61,18 +70,18 @@ workflows:
       stalled:
         initial: true
         transitions:
-          - event: "round:start"
+          - event: "round started"
             to: fixing
       fixing:
         invokes: loop
         transitions:
-          - event: "pr:green"
+          - event: "pr green"
             to: mergeable
       mergeable:
         transitions:
-          - event: "merge:plain"
+          - event: "fixing pr merged"
             to: done
-            guard: "all_prs_merged"
+            guard: "all_pr_merged"
       done:
         final: true
 
@@ -83,15 +92,19 @@ workflows:
       done:
         initial: true
         transitions:
-          - event: "fire:finalize"
+          - event: "finalize fired"
             to: finalizing
-            guard: "has_access placer grant_placer AND is_change_finished line AND NOT is_session_at_work line"
+            guard: "has_access placer AND is_change_finished AND NOT is_session_at_work"
+            owned_by: "fire"
+          - event: "finalize fired"
+            to: finalizing
+            guard: "has_access grant_placer AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
       finalizing:
         invokes: loop
         transitions:
-          - event: "merge:finalize_pr"
+          - event: "finalize pr merged"
             to: finalized
-            guard: "all_prs_merged"
+            guard: "all_pr_merged"
       finalized:
         final: true
