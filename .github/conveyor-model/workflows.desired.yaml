@@ -67,10 +67,10 @@ workflows:
         transitions:
           - event: "all_prs_merged"
             to: done
-            guard: "master_is_green"
+            guard: "all_prs_merged AND master_is_green"
           - event: "all_prs_merged"
             to: merge_failed
-            guard: "NOT master_is_green"
+            guard: "all_prs_merged AND NOT master_is_green"
       done:
         final: true
       merge_failed:
@@ -94,6 +94,7 @@ workflows:
         transitions:
           - event: "all_prs_merged"
             to: done
+            guard: "all_prs_merged"
       done:
         final: true
 
@@ -117,5 +118,6 @@ workflows:
         transitions:
           - event: "all_prs_merged"
             to: finalized
+            guard: "all_prs_merged"
       finalized:
         final: true
