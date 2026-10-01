@@ -47,7 +47,13 @@ var (
 	ErrUnknownAgent       = fmt.Errorf("no such agents[] entry")
 	ErrCoordinatorCycle   = fmt.Errorf("would repeat a Coordinator already in this coordination")
 	ErrMaxAgents          = fmt.Errorf("maxAgents reached")
-	ErrOutOfScope         = fmt.Errorf("out of scope: not the caller itself or a direct member")
+	ErrOutOfScope         = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
+	// ErrNoCoordinatorScope refuses the Coordinator-owner reach class
+	// (list_open_roots, the widened close — coordinator-owner-reach) for a
+	// caller that resolves to no Coordinator at all by ResolveActingCoordinator:
+	// an ordinary Pipeline-addressed conversation has no access to this reach
+	// class, whatever AgentCapability it runs.
+	ErrNoCoordinatorScope = fmt.Errorf("caller does not act for any Coordinator")
 	// ErrSelfInput guards the rule that a conversation must never receive its
 	// own output as an input (coordination-loop) — an inbound message whose
 	// origin channel is named identically to its own target conversation.
@@ -55,19 +61,31 @@ var (
 )
 
 // InvokeMember is the manager's half of the MCP `invoke(agent, task)` verb
-// (design D-F): resolve the named `agents[]` entry against the CALLER's own
-// Coordinator, refuse a cycle or a spent budget, then create or attach a
-// member conversation and hand it the task.
+// (design D-F): resolve the named `agents[]` entry against the Coordinator
+// the CALLER acts for, refuse a cycle or a spent budget, then create or
+// attach a member conversation and hand it the task.
 //
-// The caller MUST itself be a Coordinator's own conversation
-// (`spec.coordinatorRef` set) — invoking is a capability of the coordinating
-// agent's OWN conversation, never of an arbitrary one.
+// The caller resolves which Coordinator it acts for the SAME way the
+// Coordinator-owner reach class does (coordinator-owner-reach, design D-A,
+// ResolveActingCoordinator): its own `coordinatorRef` when it is itself a
+// Coordinator's root, or — failing that — the uncaused root its `causedBy`
+// chain leads to. This is what lets an ORDINARY `agents[]` member invoke a
+// sibling entry of its own Coordinator, which `coordinator-self-heal`
+// requires of the reaper: it is invoked as a plain member of the
+// cron-triggered root, and must itself call `invoke` to re-check a domain
+// capability, never merely the coordinating root. A caller that resolves to
+// no Coordinator at all (an ordinary Pipeline-addressed conversation) is
+// refused exactly as before.
 func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, agentName, task string) (*InvokeResult, error) {
-	if caller.Spec.CoordinatorRef == nil {
+	scope, err := r.ResolveActingCoordinator(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	if scope.Name == "" {
 		return nil, ErrNotCoordinatorRoot
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: scope.Name}, &co); err != nil {
 		return nil, err
 	}
 	entry := findAgentEntry(&co, agentName)
@@ -185,27 +203,204 @@ func (r *Router) Descendants(ctx context.Context, rootName string) ([]agentopsv1
 	return out, nil
 }
 
-// coordinatorChain collects the calling conversation's OWN coordinatorRef,
-// then every ancestor's, walking `causedBy` to the uncaused root (design
-// D-E2). Bounded defensively: the ordinary budgets already keep a live chain
-// finite, so a walk this long means something else is wrong.
-func (r *Router) coordinatorChain(ctx context.Context, conv *agentopsv1alpha1.Conversation) (map[string]bool, error) {
-	visited := map[string]bool{}
+// causedByAncestry walks `causedBy` from conv up to and including the
+// UNCAUSED root, returning every conversation visited in order — conv itself
+// first, the uncaused root last. Shared by the cycle guard (coordinatorChain)
+// and the Coordinator-owner resolution walk (design D-A,
+// ResolveActingCoordinator) — one traversal, two different questions asked of
+// its result. Bounded defensively: the ordinary budgets already keep a live
+// chain finite, so a walk this long means something else is wrong.
+func (r *Router) causedByAncestry(ctx context.Context, conv *agentopsv1alpha1.Conversation) ([]*agentopsv1alpha1.Conversation, error) {
+	chain := []*agentopsv1alpha1.Conversation{conv}
 	cur := conv
 	for i := 0; i < 1000; i++ {
-		if cur.Spec.CoordinatorRef != nil {
-			visited[cur.Spec.CoordinatorRef.Name] = true
-		}
 		if cur.Spec.CausedBy == nil {
-			return visited, nil
+			return chain, nil
 		}
 		var parent agentopsv1alpha1.Conversation
 		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cur.Spec.CausedBy.Parent}, &parent); err != nil {
-			return visited, err
+			return nil, err
 		}
+		chain = append(chain, &parent)
 		cur = &parent
 	}
-	return visited, fmt.Errorf("causedBy chain from %s did not terminate", conv.Name)
+	return nil, fmt.Errorf("causedBy chain from %s did not terminate", conv.Name)
+}
+
+// coordinatorChain collects the calling conversation's OWN coordinatorRef,
+// then every ancestor's, walking `causedBy` to the uncaused root (design
+// D-E2).
+func (r *Router) coordinatorChain(ctx context.Context, conv *agentopsv1alpha1.Conversation) (map[string]bool, error) {
+	ancestry, err := r.causedByAncestry(ctx, conv)
+	if err != nil {
+		return nil, err
+	}
+	visited := map[string]bool{}
+	for _, c := range ancestry {
+		if c.Spec.CoordinatorRef != nil {
+			visited[c.Spec.CoordinatorRef.Name] = true
+		}
+	}
+	return visited, nil
+}
+
+// ActingCoordinator is what the Coordinator-owner reach class resolves a
+// caller into (design D-A, coordinator-owner-reach): which Coordinator it
+// acts for, and the name of its own ROOT — itself when it carries no
+// causedBy, or the uncaused root its causedBy chain leads to otherwise. Both
+// fields are empty together when the caller resolves to no Coordinator at
+// all — an ordinary Pipeline-addressed conversation.
+type ActingCoordinator struct {
+	// Name is the Coordinator this caller acts for, "" when it acts for none.
+	Name string
+	// RootName is the caller's own uncaused root — itself when it IS one.
+	// Always "" alongside Name == "".
+	RootName string
+}
+
+// ResolveActingCoordinator is the resolution walk design D-A specifies,
+// REUSING causedByAncestry — the exact traversal the invoke-time cycle guard
+// (coordinatorChain) already performs — rather than a new walk of its own.
+//
+// It reads the caller's OWN coordinatorRef first. If empty, it walks
+// causedBy to the UNCAUSED root and reads THAT root's coordinatorRef
+// instead. This is a read of existing fields, never a new one.
+//
+// runtimepod.ResolveActingCoordinator DUPLICATES the Name half of this (see
+// that function's doc comment for why): a MEMBER conversation — one with no
+// coordinatorRef of its own, like the self-heal reaper — still needs a
+// usable `coordinator:<name>:<conversation>` token in its own pod, derived
+// at pod-build time before any caller has presented anything for this
+// function to authenticate.
+func (r *Router) ResolveActingCoordinator(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ActingCoordinator, error) {
+	if conv.Spec.CausedBy == nil {
+		if conv.Spec.CoordinatorRef == nil {
+			return ActingCoordinator{}, nil
+		}
+		return ActingCoordinator{Name: conv.Spec.CoordinatorRef.Name, RootName: conv.Name}, nil
+	}
+	ancestry, err := r.causedByAncestry(ctx, conv)
+	if err != nil {
+		return ActingCoordinator{}, err
+	}
+	root := ancestry[len(ancestry)-1]
+	name := ""
+	switch {
+	case conv.Spec.CoordinatorRef != nil:
+		name = conv.Spec.CoordinatorRef.Name
+	case root.Spec.CoordinatorRef != nil:
+		name = root.Spec.CoordinatorRef.Name
+	}
+	if name == "" {
+		return ActingCoordinator{}, nil
+	}
+	return ActingCoordinator{Name: name, RootName: root.Name}, nil
+}
+
+// OpenRoot is one row of `list_open_roots`' projection (coordinator-owner-
+// reach): the same bounded shape `list_conversations` already returns, plus
+// Members — the agents[] entry names of this root's own direct members,
+// which is what the reaper re-invokes to re-check. Never a transcript or a
+// run.
+type OpenRoot struct {
+	Name    string
+	Title   string
+	Brief   string
+	Phase   agentopsv1alpha1.ConversationPhase
+	Members []string
+}
+
+// ListOpenRoots is the manager's half of the MCP `list_open_roots()` verb
+// (coordinator-owner-reach, design D-A/D-B): every OPEN, UNCAUSED
+// conversation whose coordinatorRef names the SAME Coordinator the caller
+// acts for — never a member (whatever Coordinator it carries), never a
+// different Coordinator's root, and never the caller's own root, since
+// closing it would cascade to close the caller's own conversation mid-run.
+func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]OpenRoot, error) {
+	scope, err := r.ResolveActingCoordinator(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	if scope.Name == "" {
+		return nil, ErrNoCoordinatorScope
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace)); err != nil {
+		return nil, err
+	}
+	var out []OpenRoot
+	for i := range list.Items {
+		c := &list.Items[i]
+		if c.Spec.CausedBy != nil {
+			continue // a member — never an uncaused root, whatever it carries
+		}
+		if c.Spec.CoordinatorRef == nil || c.Spec.CoordinatorRef.Name != scope.Name {
+			continue // not this Coordinator's own root
+		}
+		if c.Name == scope.RootName {
+			continue // the caller's own root
+		}
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
+		members, err := r.directMemberEntries(ctx, c.Name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, OpenRoot{
+			Name: c.Name, Title: c.Spec.Title, Brief: c.Status.Brief, Phase: c.Status.Phase, Members: members,
+		})
+	}
+	return out, nil
+}
+
+// directMemberEntries lists the agents[] entry names of rootName's own DIRECT
+// members only — one hop, never a grandchild — deduplicated so an entry
+// reattached to more than once (or re-invoked after its first member closed)
+// is named once. The reaper re-invokes exactly these entries to re-check them.
+func (r *Router) directMemberEntries(ctx context.Context, rootName string) ([]string, error) {
+	var list agentopsv1alpha1.ConversationList
+	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
+		client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: rootName}); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for i := range list.Items {
+		m := &list.Items[i]
+		if m.Spec.CausedBy == nil || m.Spec.CausedBy.Parent != rootName || seen[m.Spec.CausedBy.Entry] {
+			continue // the label is a hint; the field is the fact
+		}
+		seen[m.Spec.CausedBy.Entry] = true
+		out = append(out, m.Spec.CausedBy.Entry)
+	}
+	return out, nil
+}
+
+// isOwnCoordinatorSiblingRoot is `close`'s WIDENED bound (design D-B,
+// aops-mcp-server): a caller that resolves to a Coordinator may close any
+// OPEN, UNCAUSED root of that SAME Coordinator, other than its own ancestor
+// root — never a member, however shallow (even one inside the caller's own
+// Coordinator's tree — the ordinary one-hop bound already owns that case),
+// and never a root of a different Coordinator.
+func (r *Router) isOwnCoordinatorSiblingRoot(ctx context.Context, caller, target *agentopsv1alpha1.Conversation) (bool, error) {
+	if target.Spec.CausedBy != nil {
+		return false, nil // a member is never a target of this reach class
+	}
+	if target.Spec.CoordinatorRef == nil {
+		return false, nil
+	}
+	scope, err := r.ResolveActingCoordinator(ctx, caller)
+	if err != nil {
+		return false, err
+	}
+	if scope.Name == "" || target.Spec.CoordinatorRef.Name != scope.Name {
+		return false, nil // no Coordinator to act for, or a different Coordinator's root
+	}
+	if target.Name == scope.RootName {
+		return false, nil // the caller's own ancestor root
+	}
+	return true, nil
 }
 
 // findReusableMember is conversation-provenance's reuse rule: a live
@@ -392,10 +587,13 @@ func (r *Router) appendInputIdempotent(ctx context.Context, convName string, ite
 }
 
 // CloseCoordinated is the manager's half of the MCP `close(conversation,
-// reason)` verb (conversation-close): reach is ONE HOP — the caller itself,
-// or a conversation it directly caused — and a reason is required. A deeper
-// descendant is refused naming it out of scope; reaching one means asking the
-// direct member to close it, whose own close cascades in turn.
+// reason)` verb (conversation-close, widened by coordinator-owner-reach): a
+// reason is required, and the target must be the caller itself, a
+// conversation it directly caused (ONE HOP — a deeper descendant is refused
+// naming it out of scope; reaching one means asking the direct member to
+// close it, whose own close cascades in turn), OR — only when the caller
+// RESOLVES to a Coordinator (design D-A) — any OTHER open, uncaused root of
+// that SAME Coordinator (design D-B).
 func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.Conversation, targetName, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("a coordinator's close requires a reason")
@@ -407,7 +605,14 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: targetName}, &target); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if target.Spec.CausedBy == nil || target.Spec.CausedBy.Parent != caller.Name {
+	if target.Spec.CausedBy != nil && target.Spec.CausedBy.Parent == caller.Name {
+		return r.closeWithCascade(ctx, &target, reason)
+	}
+	ok, err := r.isOwnCoordinatorSiblingRoot(ctx, caller, &target)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return ErrOutOfScope
 	}
 	return r.closeWithCascade(ctx, &target, reason)

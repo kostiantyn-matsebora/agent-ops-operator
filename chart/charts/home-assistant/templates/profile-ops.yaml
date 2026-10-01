@@ -20,7 +20,10 @@ metadata:
     helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   maxTurns: {{ $p.maxTurns }}
-  {{- with $p.systemPrompt }}
+  {{- /* coordinator-deployment-mode task 3: see kubernetes/templates/profile.yaml
+  for why this is appended unconditionally. */ -}}
+  {{- $role := include "agentops.withSelfClose" (dict "text" $p.systemPrompt) | trim }}
+  {{- with $role }}
   # Inline role: no repository, so no agent definition file exists to read.
   systemPrompt: |
 {{ . | trim | indent 4 }}

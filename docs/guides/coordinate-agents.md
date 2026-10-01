@@ -275,6 +275,87 @@ spec:
 allowlist.** The token the manager injects only ever unlocks `invoke` against
 THIS Coordinator's own `agents[]`, whatever tools the pod can see.
 
+## Let the chart wire this for you
+
+Everything above is for hand-authoring a `Coordinator`. The chart can also
+render one — for every bundle you already enable — without writing any of
+these objects yourself.
+
+```sh
+helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  -n agent-ops --reuse-values \
+  --set global.agentops.wiringMode=coordinator
+```
+
+```powershell
+helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  -n agent-ops --reuse-values `
+  --set global.agentops.wiringMode=coordinator
+```
+
+| Each enabled bundle renders | The chart also renders |
+|---|---|
+| a standalone `AgentCapability` per route it would have shipped as a Pipeline — never two privilege levels merged into one | one `Coordinator`, claiming every one of those sources and listing every one of those capabilities in `agents[]` |
+
+- **`global.demo.enabled: true` selects this mode when you leave `wiringMode`
+  unset**, so a fresh demo install now exercises the Coordinator model by
+  default — see [Configuration]({{ '/configuration/' | relative_url }}) for
+  the value and its default.
+- **Nothing here is exclusive with a hand-written `Pipeline`.** Both may
+  claim the same source at once, and the API server fans it out to each.
+
+{: .ao-callout}
+> **The console does not auto-wire itself under this mode, yet.** A
+> `Pipeline`-rendering bundle claims the console's signal source and binds
+> its channel for you (Installation's demo). An `AgentCapability` carries no
+> subscription of its own, and a `Coordinator`'s `channelRefs` are reached
+> only by escalation — never bound to a new conversation the way a
+> Pipeline's are. Asking the console something will not reach the
+> chart-rendered Coordinator until you claim its source by hand, and even
+> then the answer will not appear as a console thread the way a `Pipeline`
+> route's does — that second half has no coordinator-mode equivalent yet.
+
+## Self-heal: the hourly reaper
+
+`coordinator` mode ships one more `agents[]` entry beyond your bundles: the
+**reaper**, an ordinary `AgentProfile` / `AgentCapability` pair with no
+domain tools of its own.
+
+| Step | Does |
+|---|---|
+| once an hour | a `signals/cron` source the chart deploys and claims for you fires |
+| the Coordinator's own agent | recognises that signal and `invoke`s the reaper, exactly as it invokes any domain entry |
+| the reaper | calls `list_open_roots`, then re-`invoke`s the SAME capability named in each root's `members` to ask it to re-check |
+| a re-check reporting the condition cleared | the reaper `close`s that root |
+| a re-check still finding the condition | the root is left open |
+
+- **No new mechanism.** The survey is built entirely from `invoke`,
+  member-result routing and `list_open_roots` — the Coordinator-owner reach
+  class described below.
+- **It never closes the root that invoked it.** That root is excluded from
+  its own `list_open_roots` call.
+- **Domain agents may also close themselves, in-turn, where a thread is
+  bound.** Every bundle's profile carries an instruction to reply `/close`
+  once it judges a problem resolved. It is the same `/close` a person types,
+  and does nothing in a member conversation, which has no thread. The
+  requirement is `coordinator-self-heal`'s "Domain agent profiles carry a
+  self-close instruction".
+
+### Coordinator-owner reach: how the reaper sees its own roots
+
+A caller acting for a Coordinator — the reaper included, an ordinary member
+rather than a root — may list and close that SAME Coordinator's other open
+roots, through two additions to the aops MCP server:
+
+- **`list_open_roots()`** returns every open, uncaused root of the caller's
+  own Coordinator, excluding the caller's own root — name, title, brief,
+  phase, and `members` (the `agents[]` entry names to re-check).
+- **`close` widens** to also reach any of those roots, never a member and
+  never a different Coordinator's tree.
+
+See [the aops MCP server contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-aops-mcp-server-contract)
+for the exact bound.
+
 ## What comes next
 
 1. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})**

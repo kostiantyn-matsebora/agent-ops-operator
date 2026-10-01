@@ -901,3 +901,104 @@ conversation on that install answering out of the wrong volume.
 {{- fail (printf "These values moved under persistence.context and are no longer read: %s. Rewrite them there — for example persistence.enabled becomes persistence.context.enabled. If this install already holds an agentops-home claim, set persistence.context.existingClaim: agentops-home as well, which keeps the volume you have and copies nothing." (join ", " $retired)) -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* THE DOMAIN AGENT SELF-CLOSE INSTRUCTION (coordinator-deployment-mode,
+task 3) — appended to every bundle profile's prompt, pipelines mode and
+coordinator mode alike, since both reference the SAME AgentProfile object.
+
+Only load-bearing where a THREAD binds the conversation: `/close` is a reply-
+path command on a bound channel's thread (invariants.md, "Closing itself is
+still /close on a thread"). A coordinator-mode MEMBER conversation binds no
+channel of its own, so the instruction is a harmless no-op there — the
+instruction says so, rather than claiming a capability that mode does not
+grant. Ending a MEMBER conversation is the reaper's and the coordinating
+agent's job (coordinator-self-heal), not this agent's own. */ -}}
+{{- define "agentops.selfCloseInstruction" -}}
+If a thread is bound to this conversation and you judge the problem it is
+about to be resolved, you may end it yourself by replying with `/close` as
+your message — the same command a person uses to end a conversation. Only do
+this once you are confident: closing drops it from any further follow-up on
+this incident. If no thread is bound here, this instruction does nothing —
+leave ending the conversation to whatever invoked you.
+{{- end -}}
+
+{{- /* Appends the self-close instruction above to a profile's own prompt text,
+never discarding either half. Call with `(dict "text" <systemPrompt value>)`. */ -}}
+{{- define "agentops.withSelfClose" -}}
+{{- $role := trim (.text | default "") -}}
+{{- $extra := trim (include "agentops.selfCloseInstruction" .) -}}
+{{- if and $role $extra -}}
+{{ printf "%s\n\n%s" $role $extra }}
+{{- else if $extra -}}
+{{ $extra }}
+{{- else -}}
+{{ $role }}
+{{- end -}}
+{{- end -}}
+
+{{- /* THE RELEASE-WIDE WIRING POSTURE (coordinator-deployment-mode): "pipelines"
+or "coordinator", resolved from `.Values.global` alone so every subchart can
+call this exactly as it calls every other helper in this file.
+
+Unset follows demo mode — off, the posture is "pipelines" (today's behaviour,
+byte-identical); `global.demo.enabled: true` selects "coordinator" instead, so
+a turnkey install exercises the Coordinator model out of the box. Either value
+set explicitly wins outright, in both directions: `wiringMode: pipelines`
+under demo mode keeps today's single-Pipeline demo.
+
+THIS CONTROLS RENDERING ONLY. No CRD, CEL rule or admission check anywhere
+makes a Pipeline and a Coordinator mutually exclusive — see wiring-mode's own
+spec and `.claude/rules/wiring.md`. */ -}}
+{{- define "agentops.wiringMode" -}}
+{{- $g := .Values.global | default dict -}}
+{{- $m := dig "agentops" "wiringMode" "" $g -}}
+{{- if not $m -}}
+{{- if dig "demo" "enabled" false $g -}}
+{{- $m = "coordinator" -}}
+{{- else -}}
+{{- $m = "pipelines" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (has $m (list "pipelines" "coordinator")) -}}
+{{- fail (printf "global.agentops.wiringMode: %q is not a recognized value — it accepts exactly \"pipelines\" or \"coordinator\"" $m) -}}
+{{- end -}}
+{{- $m -}}
+{{- end -}}
+
+{{- /* EVERY ENABLED BUNDLE'S COORDINATOR-MODE CONTRIBUTION, gathered through
+the SAME bundle registry and context-construction `agentops.defaultRuntimeGuard`
+already uses above — re-deriving through each bundle's own
+`<bundle>.coordinatorContribution` helper is what keeps this from drifting from
+what actually rendered, exactly as that guard's own comment argues.
+
+Each bundle's helper returns the sources its own wiring would have claimed and
+the AgentCapability entries its own wiring would have rendered (coordinator
+mode's `capabilities.yaml` in that bundle), as YAML this helper decodes with
+`fromYaml` and re-aggregates. Returns YAML: `sources: [...]` (deduped bundle
+source names) and `agents: [...]` (dicts: name, capability, description) —
+decoded by `chart/templates/coordinator.yaml`. */ -}}
+{{- define "agentops.coordinatorContributions" -}}
+{{- $root := . -}}
+{{- $sources := list -}}
+{{- $agents := list -}}
+{{- range $b := list
+      (dict "key" "kubernetes" "helper" "kubernetes.coordinatorContribution" "gated" false)
+      (dict "key" "home-assistant" "helper" "home-assistant.coordinatorContribution" "gated" true)
+      (dict "key" "prometheus" "helper" "prometheus.coordinatorContribution" "gated" true) -}}
+{{- $bv := index $root.Values $b.key -}}
+{{- if and $bv (or (not $b.gated) $bv.enabled) -}}
+{{- $ctx := dict "Values" (merge (deepCopy $bv) (dict "global" $root.Values.global)) "Release" $root.Release "Chart" $root.Chart -}}
+{{- $contrib := fromYaml (include $b.helper $ctx) -}}
+{{- range $s := ($contrib.sources | default list) -}}
+{{- if not (has $s $sources) -}}{{- $sources = append $sources $s -}}{{- end -}}
+{{- end -}}
+{{- range $a := ($contrib.agents | default list) -}}
+{{- $agents = append $agents $a -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+sources:
+{{ toYaml $sources | indent 2 }}
+agents:
+{{ toYaml $agents | indent 2 }}
+{{- end -}}

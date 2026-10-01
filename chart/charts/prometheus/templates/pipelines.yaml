@@ -1,8 +1,13 @@
 {{- /* Wiring component: the bundle's OWN route, claiming the source it renders
 with the profile it renders. Permitted because the bundle owns its whole lane —
 a channel is the only foreign name, and that is values-supplied. ONE route: a
-query server is read-only, so there is no second posture to express. */ -}}
-{{- if and (include "prometheus.wiringActive" .) .Values.profile.enabled }}
+query server is read-only, so there is no second posture to express.
+
+UNDER `global.agentops.wiringMode: coordinator` THIS FILE RENDERS NOTHING —
+`capabilities.yaml` renders the same route as a standalone AgentCapability
+instead, claimed by the chart-rendered Coordinator
+(`prometheus.coordinatorContribution`). */ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "pipelines") (include "prometheus.wiringActive" .) .Values.profile.enabled }}
 {{- $p := .Values.pipelines }}
 {{- $g := .Values.global | default dict }}
 {{- $am := .Values.alertmanager }}

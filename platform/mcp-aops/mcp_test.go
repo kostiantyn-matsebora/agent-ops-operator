@@ -92,7 +92,7 @@ func TestInitializeReportsProtocolVersionAndToolsCapability(t *testing.T) {
 	}
 }
 
-func TestToolsListReturnsAllEightTools(t *testing.T) {
+func TestToolsListReturnsAllNineTools(t *testing.T) {
 	_, ts := newFakeManager(t)
 	defer ts.Close()
 	s := newServer(ts.URL)
@@ -100,12 +100,12 @@ func TestToolsListReturnsAllEightTools(t *testing.T) {
 	out := rpcCall(t, s, caller{}, "tools/list", map[string]any{})
 	result := out.Result.(map[string]any)
 	tools := result["tools"].([]any)
-	if len(tools) != 8 {
-		t.Fatalf("want 8 tools, got %d", len(tools))
+	if len(tools) != 9 {
+		t.Fatalf("want 9 tools, got %d", len(tools))
 	}
 	want := map[string]bool{
 		"list_agents": true, "list_conversations": true, "get_conversation": true, "get_tree": true,
-		"invoke": true, "close": true, "escalate": true, "read": true,
+		"invoke": true, "close": true, "escalate": true, "read": true, "list_open_roots": true,
 	}
 	for _, raw := range tools {
 		name := raw.(map[string]any)["name"].(string)

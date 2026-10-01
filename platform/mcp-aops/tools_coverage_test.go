@@ -19,7 +19,7 @@ func TestEveryConversationToolNeedsAnIdentity(t *testing.T) {
 	fm, ts := newFakeManager(t)
 	defer ts.Close()
 	s := newServer(ts.URL)
-	for _, tool := range []string{"list_agents", "list_conversations", "get_conversation", "get_tree", "invoke", "close", "escalate", "read"} {
+	for _, tool := range []string{"list_agents", "list_conversations", "get_conversation", "get_tree", "invoke", "close", "escalate", "read", "list_open_roots"} {
 		text, isErr := toolText(t, s, caller{Token: "tok-1"}, tool, map[string]any{})
 		if !isErr || !contains(text, "X-Aops-Conversation") {
 			t.Fatalf("%s: want an identity refusal, got %q (isError=%v)", tool, text, isErr)
@@ -44,6 +44,7 @@ func TestForwardingToolsPostToTheirManagerPath(t *testing.T) {
 		{"invoke", "/coordinate/invoke", map[string]any{"agent": "a", "task": "do"}, "task", "do"},
 		{"escalate", "/coordinate/escalate", map[string]any{"message": "help"}, "message", "help"},
 		{"close", "/coordinate/close", map[string]any{"conversation": "member-1", "reason": "done"}, "target", "member-1"},
+		{"list_open_roots", "/coordinate/open-roots", map[string]any{}, "conversation", "root-1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) { assertForwards(t, tc.tool, tc.path, tc.args, tc.wantKey, tc.wantVal) })
@@ -78,6 +79,7 @@ func TestToolsReportAManagerRefusalAsToolError(t *testing.T) {
 		"close":              {"/coordinate/close", map[string]any{"reason": "r"}},
 		"escalate":           {"/coordinate/escalate", map[string]any{"message": "m"}},
 		"read":               {"/coordinate/read", map[string]any{}},
+		"list_open_roots":    {"/coordinate/open-roots", map[string]any{}},
 	}
 	for tool, tc := range cases {
 		t.Run(tool, func(t *testing.T) { assertRefusal(t, tool, tc.path, tc.args) })

@@ -110,6 +110,37 @@ two entries, never merged into one.
   Coordinator's `agents[]` carries two entries, one per capability, never one
   merged entry
 
+### Requirement: coordinator mode forces the coordination MCP server on, independent of coordination.enabled
+
+The chart-rendered `Coordinator` and its self-heal reaper both bind the
+`coordination` MCPConfig by construction. A Coordinator's own conversation
+reaches `invoke`, `close`, `escalate` and the rest of the coordination
+surface only through it.
+
+Under `global.agentops.wiringMode: coordinator`, the chart SHALL therefore
+render the `coordination` MCP server (the `agentops-mcp-aops` Deployment and
+its MCPConfig) whether or not `coordination.enabled` is set. It SHALL never
+condition that rendering on `coordination.enabled`.
+
+This is a release-wide consequence of the posture, not a value an installer
+sets separately: `coordination.enabled` exists for an install that wires a
+hand-written Coordinator or Pipeline to the server under `pipelines` mode,
+where nothing else would render it.
+
+#### Scenario: coordinator mode renders the server with coordination.enabled false
+
+- **WHEN** `global.agentops.wiringMode: coordinator` is set and
+  `coordination.enabled` is `false`
+- **THEN** the chart still renders the `agentops-mcp-aops` Deployment and the
+  `coordination` MCPConfig
+
+#### Scenario: pipelines mode respects coordination.enabled
+
+- **WHEN** `global.agentops.wiringMode: pipelines` (or unset) and
+  `coordination.enabled` is `false`
+- **THEN** the chart renders neither the `agentops-mcp-aops` Deployment nor
+  the `coordination` MCPConfig
+
 ### Requirement: The mode switch carries no API-server exclusivity between Pipeline and Coordinator
 
 `global.agentops.wiringMode` SHALL control chart rendering only. It SHALL

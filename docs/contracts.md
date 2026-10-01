@@ -1025,23 +1025,56 @@ all is the network wall below, never a secret it holds.
 
 | Token context | Injected into | Reaches |
 |---|---|---|
-| `coordinator:<name>:<conversation>` | a Coordinator's own conversation, as `AOPS_MCP_TOKEN` | every tool and verb, scoped to that ONE CONVERSATION'S OWN SUBTREE |
+| `coordinator:<name>:<conversation>` | a Coordinator's own conversation (root OR a plain member, as `AOPS_MCP_TOKEN`) | the coordinator class, scoped to that ONE CONVERSATION'S OWN SUBTREE, PLUS — when the conversation resolves to a Coordinator — the Coordinator-owner class |
 | `channel-reader:<channel>` | a reader with no coordination role | `list_conversations` / `get_conversation` only, projected, no verb |
 
 **The token is per conversation, never per Coordinator.** One Coordinator may
 hold several open conversations at once, nested or not, and a token naming
 only the Coordinator could not scope to one of them.
 
+**The reach classes are THREE**, each decided by the manager from the
+token's context, never by the server: the coordinator class (`invoke`,
+`escalate`, `read`, the narrow `close`), the Coordinator-owner class
+(`list_open_roots`, the widened `close`), and the channel-reader class.
+
 **A nested caller's reach is its own subtree, never the tree's ultimate
 root.** A Coordinator's conversation three levels deep sees its own members
 and their descendants, and nothing above it — not its parent, and not a
 sibling branch.
 
+**The Coordinator-owner class is resolved by WALKING, not by a field on the
+caller.** The manager reads the caller's own `coordinatorRef` first.
+
+- **Empty?** It walks `causedBy` to the UNCAUSED root and reads THAT root's
+  `coordinatorRef` instead — the same walk the cycle guard performs.
+- **This is what lets a plain member reach it.** One with no `coordinatorRef`
+  of its own — the self-heal reaper's own shape — still reaches
+  `list_open_roots` and the widened `close`.
+- **`invoke` resolves the caller's Coordinator the SAME walk.** A plain
+  member may `invoke` a sibling entry of the Coordinator it resolves to,
+  never only the coordinating root — the reaper calling `invoke` on the
+  domain capability it is re-checking is this walk's own reason to exist.
+
+| Verb | Bound |
+|---|---|
+| `invoke` | the `agents[]` list of the Coordinator the caller RESOLVES to (its own `coordinatorRef`, or failing that, its uncaused root's) |
+| `escalate` | the caller itself — never a member reached through it |
+| `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
+| `close` | the caller itself, a conversation it directly caused — OR, when the caller RESOLVES to a Coordinator, any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor root. Never a member of any kind, and never a different Coordinator's root |
+| `list_open_roots` | the calling conversation's own Coordinator's open UNCAUSED roots only, excluding the caller's own root |
+| `list_conversations`, `get_conversation` | for a `channel-reader:<channel>` token, the projection of that Channel's conversations and no verb |
+
+A refusal reaches the caller as an error naming the bound that refused it.
+
 | Refused | By |
 |---|---|
-| Invoking an AgentCapability outside the caller's `agents[]` list | manager |
+| Invoking an AgentCapability outside the caller's resolved Coordinator's `agents[]` list | manager |
+| `invoke`, `close` or `list_open_roots` for a caller that resolves to no Coordinator at all — an ordinary Pipeline-addressed conversation | manager |
 | Acting on a conversation outside the caller's own subtree | manager |
 | `close` past one hop — a directly caused member only, never a deeper descendant reached through it, even within the caller's own subtree | manager |
+| `close` or `list_open_roots` reaching a member, however shallow, even one within the caller's own Coordinator's tree | manager |
+| `close` or `list_open_roots` reaching a different Coordinator's root | manager |
+| `close` reaching the caller's own ancestor root through the widened bound | manager |
 | Any verb, from a `channel-reader` token | manager |
 | An `invoke` that would repeat a Coordinator already in the caller's ancestor chain | manager (cycle guard, below) |
 
@@ -1059,17 +1092,29 @@ An allowlist inside the runtime pod is never relied on for any of these.
 | `close(conversation, reason)` | verb | acknowledgement |
 | `escalate(message)` | verb | acknowledgement |
 | `read(conversation)` | verb | a conversation's own record, in scope |
+| `list_open_roots()` | read | the caller's own Coordinator's OTHER open, uncaused roots — name, title, brief, phase, plus `members` (each root's direct `agents[]` entry names) |
 
-**All eight complete within the request.** None waits on another agent's
+**All nine complete within the request.** None waits on another agent's
 work — a `list_conversations` call never blocks on a member still running.
+
+`list_open_roots` is the Coordinator-owner reach class's own verb. It is
+refused outright for a caller that resolves to no Coordinator, and it never
+returns a transcript or a run — the same bounded shape `list_conversations`
+already returns, plus `members`.
 
 ### Read tools
 
-The four read tools — `list_agents`, `list_conversations`, `get_conversation`
-and `get_tree` — cover Conversations and the caller's own Coordinator's
-`agents[]` entries, filtered to what the calling Coordinator lists and what it
-caused. Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels
-have no reader here.
+The five read tools — `list_agents`, `list_conversations`, `get_conversation`,
+`get_tree` and `list_open_roots` — cover Conversations and the caller's own
+Coordinator's `agents[]` entries, filtered to what the calling Coordinator
+lists and what it caused.
+
+`list_open_roots` is the exception to "what it caused". It lists the
+Coordinator's other open, uncaused roots, for a caller that resolves to a
+Coordinator.
+
+Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels have no
+reader here.
 
 `list_conversations` carries `brief` beside name, title, phase and pipeline,
 so a caller deciding WHICH conversation it means never has to `read` one
@@ -1105,7 +1150,7 @@ never toward the tree's ultimate root when the caller is itself nested:
 The parent that invoked this Coordinator, and any sibling branch, sit outside
 this response — refused if named directly, not merely omitted.
 
-### The four verbs, all asynchronous
+### The verbs, all asynchronous
 
 Every verb returns without waiting on any agent's work. A result, when there
 is one, arrives later as an ordinary input.
@@ -1120,8 +1165,18 @@ cycle the Coordinator graph (below).
 
 **`close(conversation, reason)`.** Ends the caller itself, or a conversation
 it directly caused, stamping `reason` as `closeReason`. Required from a
-coordinator — refused with none. Refused outright for anything else,
-including a deeper descendant reached through an intermediate member.
+coordinator — refused with none. Refused outright for a deeper descendant
+reached through an intermediate member.
+
+A caller that RESOLVES to a Coordinator (above) may also close any OTHER
+open, uncaused root of that SAME Coordinator — never its own ancestor root,
+never a member, and never a different Coordinator's root. This is the
+Coordinator-owner class's own widening of this verb.
+
+**`list_open_roots()`.** The Coordinator-owner class's own verb. Lists the
+caller's own Coordinator's other open, uncaused roots, each with its direct
+members' `agents[]` entry names. Refused for a caller that resolves to no
+Coordinator.
 
 **`escalate(message)`, on the tree's UNCAUSED conversation** (no
 `causedBy`): binds the Coordinator's escalation channels, snapshotted at

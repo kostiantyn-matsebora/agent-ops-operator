@@ -86,7 +86,13 @@ DOCUMENTED_PLACEHOLDERS = {
     # public model name, both shapes the allowlist permits.
     "http://ollama.ollama.svc:11434",
     "qwen2.5:14b",
+    # chart/values.yaml, global.agentops.wiringMode — one of the two literal
+    # values the field accepts, not an invented example.
+    "pipelines",
 }
+# A value too generic to prove documentation by bare substring is anchored to
+# the chart text that actually documents it.
+PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines"}
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
     "placeholder:token",
@@ -137,6 +143,13 @@ PRESETS = {
         "sets": {
             "global.demo.enabled": "true",
             "kubernetes.enabled": "true",
+            # `guides/pipeline.md`'s worked example is a `Pipeline` object —
+            # pin the wiring posture explicitly so the preset keeps rendering
+            # one even now that `demo.enabled` alone selects `coordinator`
+            # (coordinator-deployment-mode). A preset reaching for a Pipeline
+            # example is about the PIPELINE kind, not about demo mode's own
+            # default posture.
+            "global.agentops.wiringMode": "pipelines",
         },
     },
     "tier2": {
@@ -615,7 +628,7 @@ def assert_placeholders() -> list[str]:
                     f"{what}: {key}={value!r} is not a declared placeholder. "
                     f"Add it to DOCUMENTED_PLACEHOLDERS only once it names nothing real."
                 )
-            elif value not in values:
+            elif PLACEHOLDER_ANCHORS.get(value, value) not in values:
                 problems.append(
                     f"{what}: {key}={value!r} is no longer documented by any "
                     f"chart values file. The site and the chart must name the SAME "

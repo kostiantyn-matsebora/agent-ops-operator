@@ -22,7 +22,10 @@ metadata:
     helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   maxTurns: {{ $p.maxTurns }}
-  {{- with $p.systemPrompt }}
+  {{- /* coordinator-deployment-mode task 3: see kubernetes/templates/profile.yaml
+  for why this is appended unconditionally. */ -}}
+  {{- $role := include "agentops.withSelfClose" (dict "text" $p.systemPrompt) | trim }}
+  {{- with $role }}
   # Inline role: this profile has no repository, so there is no
   # .claude/agents/<name>.md to read and nothing else would give the agent a
   # personality.

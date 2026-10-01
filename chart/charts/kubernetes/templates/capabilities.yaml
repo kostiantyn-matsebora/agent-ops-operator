@@ -1,0 +1,103 @@
+{{- /*
+Coordinator-mode wiring component (coordinator-deployment-mode): the SAME two
+routes `pipelines.yaml` would have rendered as inline Pipelines, as standalone
+AgentCapability objects instead — never both, never merged.
+
+An AgentCapability carries no subscription (no signalSourceRefs, no
+channelRefs): the chart-rendered Coordinator
+(`chart/templates/coordinator.yaml`) is the one object that claims this
+bundle's events source and lists these capabilities in its own `agents[]`,
+read through `kubernetes.coordinatorContribution` — the SAME helper this file
+reuses below, so the two cannot drift apart on which route renders.
+
+Mirrors `pipelines.yaml`'s four conditions exactly: same flag
+(`kubernetes.wiringActive`), same profile gate, same two routes
+(`kubernetes.observePipelineEnabled` / `kubernetes.adminPipelineEnabled`), same
+per-route identity — `pipeline-identity.yaml` already renders it for both
+modes, since an AgentCapability needs exactly the ServiceAccount a Pipeline
+route would have.
+*/ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "kubernetes.wiringActive" .) .Values.profile.enabled }}
+{{- $p := .Values.pipelines }}
+{{- $g := .Values.global | default dict }}
+{{- $mcp := .Values.mcp }}
+{{- /* Every ref below is emitted only when the object it names is rendered:
+a ref to a toolset nobody created is how an allowlist rots into fiction. */ -}}
+{{- $readTools := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $readTools = append $readTools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
+{{- end }}
+{{- $mcpConfigs := list }}
+{{- if $mcp.enabled }}
+{{- $readTools = append $readTools $mcp.toolsets.observe.name }}
+{{- $mcpConfigs = append $mcpConfigs $mcp.name }}
+{{- end }}
+{{- $writeTools := list }}
+{{- if and $mcp.enabled (include "kubernetes.mcpAdminEnabled" .) }}
+{{- $writeTools = append $writeTools $mcp.toolsets.admin.name }}
+{{- end }}
+{{- /* The admin route is already trusted to act on the cluster; web search is
+the one built-in bucket scoped to it alone, never to the read-only route. */ -}}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $writeTools = append $writeTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
+{{- end }}
+{{- $caps := list }}
+{{- if include "kubernetes.observePipelineEnabled" . }}
+{{- $caps = append $caps (dict "name" $p.observe.name
+      "runtimeRef" ($p.observe.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "kubernetes.routeAccount" (dict "ctx" $ "cfg" $p.observe "p" $p))
+      "tools" $readTools) }}
+{{- end }}
+{{- if include "kubernetes.adminPipelineEnabled" . }}
+{{- $caps = append $caps (dict "name" $p.admin.name
+      "runtimeRef" ($p.admin.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "kubernetes.routeAccount" (dict "ctx" $ "cfg" $p.admin "p" $p))
+      "tools" (concat $readTools $writeTools)) }}
+{{- end }}
+{{- range $caps }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentCapability
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  profileRef:
+    name: {{ $.Values.profile.name }}
+  {{- with .runtimeRef }}
+  # WHAT EXECUTES this capability's conversations. Unset resolves the
+  # AgentRuntime named `default`, which the PARENT renders — no bundle renders
+  # a runtime, an identity or a credential, and naming one here creates
+  # nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with .serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own — the same identity a
+  # Pipeline at this route would have named.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with .tools }}
+  # Declared, not inherited: profiles carry no capabilities and nothing
+  # supplies a default, so this stanza IS the agent's allowlist.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

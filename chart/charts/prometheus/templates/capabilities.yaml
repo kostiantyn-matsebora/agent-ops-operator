@@ -1,0 +1,73 @@
+{{- /*
+Coordinator-mode wiring component (coordinator-deployment-mode): the SAME
+route `pipelines.yaml` would have rendered as an inline Pipeline, as a
+standalone AgentCapability instead — the `alert-investigator` capability,
+bound to the same toolset and MCPConfig the Pipeline route binds today.
+
+An AgentCapability carries no subscription: the chart-rendered Coordinator
+(`chart/templates/coordinator.yaml`) is the one object that claims this
+bundle's alert source and lists this capability in its own `agents[]`, read
+through `prometheus.coordinatorContribution` — the SAME helper this file
+reuses below, so the two cannot drift apart on whether the route renders.
+
+Named for the PROFILE (`alert-investigator`), not the Pipeline route
+(`alert-triage`): this bundle offers exactly one route, so there is exactly
+one capability to render, and no turnkey mode forces this bundle's wiring on
+in either posture.
+*/ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "prometheus.wiringActive" .) .Values.profile.enabled }}
+{{- $p := .Values.pipelines }}
+{{- $g := .Values.global | default dict }}
+{{- $mcp := .Values.mcp }}
+{{- $tools := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $tools = append $tools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
+{{- end }}
+{{- $mcpConfigs := list }}
+{{- if $mcp.enabled }}
+{{- $tools = append $tools $mcp.toolset.name }}
+{{- $mcpConfigs = append $mcpConfigs $mcp.name }}
+{{- end }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentCapability
+metadata:
+  name: {{ .Values.profile.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-prometheus
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  profileRef:
+    name: {{ .Values.profile.name }}
+  {{- with $p.runtimeRef }}
+  # WHAT EXECUTES this capability's conversations. Unset resolves the
+  # AgentRuntime named `default`, which the PARENT renders — no bundle renders
+  # a runtime, an identity or a credential, and naming one here creates
+  # nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with (include "prometheus.routeAccount" (dict "ctx" $ "p" $p)) }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own — the same identity a
+  # Pipeline at this route would have named.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with $tools }}
+  # Declared, not inherited: profiles carry no capabilities.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}

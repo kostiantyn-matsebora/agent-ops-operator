@@ -411,6 +411,27 @@ the Kubernetes bundle CALLS, where only `.Values.global` resolves.
 A wrong credential fails late and quietly. The pod is created, then sits in
 `CreateContainerConfigError` while conversations queue behind it.
 
+### Wiring posture: pipelines or coordinator
+
+| Key | Default | Consequence |
+|---|---|---|
+| `global.agentops.wiringMode` | `null`, which resolves to `pipelines` — or `coordinator` when `global.demo.enabled` is `true` | whether an enabled bundle renders an inline `Pipeline` per route (`pipelines`) or a standalone `AgentCapability` gathered under one chart-rendered `Coordinator` (`coordinator`) |
+
+- **Chart rendering only.** It adds no CRD validation or CEL rule making a
+  `Pipeline` and a `Coordinator` mutually exclusive, on one object, one
+  release or one cluster.
+- **Any other value fails the render**, naming the value and the two it
+  accepts.
+- **`coordinator` mode also renders `agentops-mcp-aops`**, whatever
+  `coordination.enabled` says, since the chart-rendered Coordinator and its
+  self-heal reaper both bind that MCP server by construction.
+- **Reversible.** Set it back, or clear it, and `helm upgrade` — the
+  chart-rendered `Coordinator`, its bundles' `AgentCapability` objects and
+  the reaper stop rendering.
+- See [Coordinate agents](https://kostiantyn-matsebora.github.io/agent-ops-operator/guides/coordinate-agents/)
+  for what each mode deploys and what to watch for when trying `coordinator`
+  mode.
+
 ### Who may reach what
 
 Nothing restricts which pods may reach this release's components. Several of

@@ -68,6 +68,7 @@ fifteen minutes, most of it the install.
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
      -n agent-ops --create-namespace \
      --set global.demo.enabled=true \
+     --set global.agentops.wiringMode=pipelines \
      --set console.auth.uiToken=demo
    ```
 
@@ -76,8 +77,20 @@ fifteen minutes, most of it the install.
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
      -n agent-ops --create-namespace `
      --set global.demo.enabled=true `
+     --set global.agentops.wiringMode=pipelines `
      --set console.auth.uiToken=demo
    ```
+
+   {: .ao-callout}
+   > **Why `wiringMode=pipelines` is spelled out.** Demo mode alone now
+   > defaults to the newer `coordinator` posture, where a chart-rendered
+   > `Coordinator` stands in for the `Pipeline` below — but nothing yet
+   > auto-claims the console's source and channel for a `Coordinator` the way
+   > `pipelines` mode does. Left at the new default, the console in this
+   > walkthrough would come up with no route answering it. Pinning
+   > `pipelines` here keeps this walkthrough working. See
+   > [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }})
+   > to try `coordinator` mode and its hand-wiring step instead.
 
 3. **Wait for the manager.**
 

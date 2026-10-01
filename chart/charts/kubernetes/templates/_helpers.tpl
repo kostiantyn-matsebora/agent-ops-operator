@@ -212,3 +212,36 @@ and naming is not creating. */ -}}
 {{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): the sources
+this bundle's wiring would claim and the AgentCapability entries it would list
+in a Coordinator's `agents[]`, mirroring EXACTLY the gating `pipelines.yaml`
+and `capabilities.yaml` use — this is the single place that decides it, read by
+both the capability template (which route renders) and the parent chart's
+Coordinator aggregator (`agentops.coordinatorContributions`), so the two
+cannot drift apart.
+
+Called from the parent as
+`include "kubernetes.coordinatorContribution" (dict "Values" (merge (deepCopy .Values.kubernetes) (dict "global" .Values.global)) "Release" .Release "Chart" .Chart)`
+— the exact context-construction `agentops.defaultRuntimeGuard` already uses.
+Returns YAML `sources: [...]` / `agents: [...]` (name, capability,
+description), decoded with `fromYaml`. */ -}}
+{{- define "kubernetes.coordinatorContribution" -}}
+{{- $sources := list -}}
+{{- $agents := list -}}
+{{- if and (include "kubernetes.wiringActive" .) .Values.profile.enabled -}}
+{{- $p := .Values.pipelines -}}
+{{- $ea := .Values.eventsAdapter -}}
+{{- if and $ea.enabled $ea.source.create -}}{{- $sources = append $sources $ea.source.name -}}{{- end -}}
+{{- if include "kubernetes.observePipelineEnabled" . -}}
+{{- $agents = append $agents (dict "name" $p.observe.name "capability" $p.observe.name "description" $p.observe.description) -}}
+{{- end -}}
+{{- if include "kubernetes.adminPipelineEnabled" . -}}
+{{- $agents = append $agents (dict "name" $p.admin.name "capability" $p.admin.name "description" $p.admin.description) -}}
+{{- end -}}
+{{- end -}}
+sources:
+{{ toYaml $sources | indent 2 }}
+agents:
+{{ toYaml $agents | indent 2 }}
+{{- end -}}

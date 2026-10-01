@@ -4,10 +4,16 @@ CLIENT of the manager's /coordinate/* surface. It decides no reach itself, so
 it needs no Kubernetes access at all — no ServiceAccount token, no RBAC. Every
 verb's bound is enforced by the MANAGER, from the caller's own bearer token.
 
-Renders only under coordination.enabled: an install with no Coordinator gets
-none of this.
+Renders under coordination.enabled, OR UNCONDITIONALLY under
+`global.agentops.wiringMode: coordinator` (coordinator-deployment-mode): the
+chart-rendered Coordinator's own coordinating agent and the reaper
+(`chart/templates/coordinator.yaml`, `reaper.yaml`) both bind this MCPConfig
+by construction, so coordinator mode would otherwise ship two inert
+AgentCapability-ish objects naming an MCP server nobody deployed — a dangling
+ref exactly like one a bundle takes care never to render. An install with
+NEITHER gets none of this.
 */ -}}
-{{- if .Values.coordination.enabled }}
+{{- if or .Values.coordination.enabled (eq (include "agentops.wiringMode" .) "coordinator") }}
 {{- $c := .Values.coordination }}
 {{- $name := "agentops-mcp-aops" }}
 apiVersion: apps/v1

@@ -154,3 +154,41 @@ A root the re-check still finds unhealthy SHALL be left open.
 - **WHEN** the reaper lists open conversations
 - **THEN** it receives only UNCAUSED roots of its own Coordinator, never a
   member conversation, per the Coordinator-owner reach class's own bound
+
+### Requirement: Domain agent profiles carry a self-close instruction that applies only where a thread is bound
+
+Every bundle profile's system prompt SHALL end with an instruction that the
+agent MAY end its own conversation by replying `/close` once it is confident
+the problem is resolved.
+
+The instruction SHALL be the same in pipelines mode and coordinator mode,
+since both reference the same `AgentProfile`.
+
+The instruction SHALL state that it applies only where a thread is bound to
+the conversation. It SHALL NOT claim a capability a threadless conversation
+lacks.
+
+`/close` here is the ordinary surface command a person types. It carries no
+reason, and the rule that a Coordinator root's close must carry one governs
+the MCP `close` verb alone.
+
+This requirement is the single home of the instruction. The `k8s-bundle`,
+`ha-bundle` and `prometheus-bundle` deltas state no copy of it, because each
+bundle's profile inherits it from here and a second statement would drift.
+
+A coordinator-mode member conversation binds no channel of its own, so the
+instruction does nothing there. Ending a member is the reaper's and the
+coordinating agent's job.
+
+#### Scenario: A threaded conversation may end itself
+
+- **WHEN** a domain agent's conversation has a thread bound and the agent
+  judges the problem resolved
+- **THEN** its prompt permits it to reply `/close`, handled by the ordinary
+  reply-path command
+
+#### Scenario: A threadless member has nothing to close through
+
+- **WHEN** a domain agent runs as a coordinator-mode member with no thread
+- **THEN** the instruction does nothing and the agent leaves closing to
+  whatever invoked it

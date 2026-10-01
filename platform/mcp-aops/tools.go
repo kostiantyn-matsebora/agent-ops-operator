@@ -24,6 +24,7 @@ var toolImpls = map[string]toolImpl{
 	"close":              toolClose,
 	"escalate":           toolEscalate,
 	"read":               toolRead,
+	"list_open_roots":    toolListOpenRoots,
 }
 
 // jsonText renders v as the tool's success text, or an error text when v
@@ -231,6 +232,23 @@ func toolRead(ctx context.Context, c *managerClient, who caller, raw json.RawMes
 	return jsonText(out)
 }
 
+// toolListOpenRoots is the Coordinator-owner reach class's own verb
+// (coordinator-owner-reach, design D-A/D-D): forwards the caller's EXISTING
+// coordinator:<name>:<conversation> token verbatim — no new token
+// derivation, no new context string. The manager decides whether this
+// caller acts for a Coordinator at all; this tool makes no such judgement.
+func toolListOpenRoots(ctx context.Context, c *managerClient, who caller, _ json.RawMessage) (string, bool) {
+	if who.Conversation == "" {
+		return needsIdentity()
+	}
+	var out map[string]any
+	if err := c.post(ctx, "/coordinate/open-roots", who.Token,
+		map[string]any{"conversation": who.Conversation}, &out); err != nil {
+		return errText(err)
+	}
+	return jsonText(out)
+}
+
 // toolDefinitions is tools/list's whole answer — name, a one-line
 // description an agent picks the right tool from, and a JSON Schema for its
 // arguments.
@@ -288,5 +306,10 @@ var toolDefinitions = []map[string]any{
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 			"name": map[string]any{"type": "string"},
 		}},
+	},
+	{
+		"name":        "list_open_roots",
+		"description": "List the caller's own Coordinator's other open, uncaused root conversations — name, title, brief, phase and each root's direct member entry names. Never the caller's own root. Refused for a caller that does not act for any Coordinator.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 }

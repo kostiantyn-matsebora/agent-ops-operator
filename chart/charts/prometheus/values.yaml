@@ -155,6 +155,13 @@ pipelines:
   name: alert-triage
   # Display only — see kubernetes's `pipelines.observe.icon`.
   icon: aops:alert
+  # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
+  # Coordinator's own coordinating agent — what it tells the agent about WHEN
+  # to invoke this entry, never a routing rule of its own. Unused under
+  # `pipelines` mode.
+  description: >-
+    Investigate a firing alert using live metrics and report the likely cause
+    and its severity.
   # Channels to deliver to, BY NAME — the one object the bundle does not render,
   # so the key is omitted entirely when empty. Empty works: the conversation
   # dispatches immediately and the answer lands in status.runs[].result.

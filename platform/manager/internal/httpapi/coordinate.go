@@ -42,6 +42,7 @@ func (s *Server) RegisterCoordinateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /coordinate/read", s.handleCoordinateRead)
 	mux.HandleFunc("POST /coordinate/agents", s.handleCoordinateAgents)
 	mux.HandleFunc("POST /coordinate/tree", s.handleCoordinateTree)
+	mux.HandleFunc("POST /coordinate/open-roots", s.handleCoordinateOpenRoots)
 }
 
 // bearerToken reads the presented token, exactly as the adapter contract does.
@@ -71,6 +72,40 @@ func (s *Server) callerConversation(ctx context.Context, name, token string) (*a
 		return nil, errWrongToken
 	}
 	want := chat.DeriveCoordinatorToken(s.AdapterToken, conv.Spec.CoordinatorRef.Name, conv.Name)
+	if subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
+		return nil, errWrongToken
+	}
+	return &conv, nil
+}
+
+// callerActingForCoordinator authenticates a caller for the Coordinator-owner
+// reach class (coordinator-owner-reach, design D-A): unlike callerConversation,
+// the presented conversation need not carry a coordinatorRef of its own — an
+// ordinary member (the self-heal reaper included) resolves which Coordinator
+// it acts for by walking causedBy to its uncaused root
+// (chat.Router.ResolveActingCoordinator). The token is STILL
+// `coordinator:<name>:<conversation>`, re-derived against the RESOLVED name
+// rather than a name read directly off the conversation — no new context,
+// no new derivation (design D-D).
+//
+// A caller that resolves to no Coordinator at all (an ordinary
+// Pipeline-addressed conversation) cannot be authenticated here: there is no
+// name to re-derive a token against, so it fails identically to a wrong
+// token — the server has made no decision either way
+// (coordinator-owner-reach: "A Pipeline-addressed conversation is refused").
+func (s *Server) callerActingForCoordinator(ctx context.Context, name, token string) (*agentopsv1alpha1.Conversation, error) {
+	if s.AdapterToken == "" || name == "" || token == "" {
+		return nil, errWrongToken
+	}
+	var conv agentopsv1alpha1.Conversation
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+		return nil, errWrongToken
+	}
+	scope, err := s.Router.ResolveActingCoordinator(ctx, &conv)
+	if err != nil || scope.Name == "" {
+		return nil, errWrongToken
+	}
+	want := chat.DeriveCoordinatorToken(s.AdapterToken, scope.Name, conv.Name)
 	if subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
 		return nil, errWrongToken
 	}
@@ -117,7 +152,8 @@ func statusFor(err error) int {
 		errors.Is(err, chat.ErrUnknownAgent),
 		errors.Is(err, chat.ErrCoordinatorCycle),
 		errors.Is(err, chat.ErrMaxAgents),
-		errors.Is(err, chat.ErrOutOfScope):
+		errors.Is(err, chat.ErrOutOfScope),
+		errors.Is(err, chat.ErrNoCoordinatorScope):
 		return 403
 	default:
 		return 500
@@ -137,7 +173,12 @@ func (s *Server) handleCoordinateInvoke(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	ctx := r.Context()
-	caller, err := s.callerConversation(ctx, in.Conversation, bearerToken(r))
+	// callerActingForCoordinator, not callerConversation: invoke's bound now
+	// resolves the Coordinator the caller ACTS FOR (coordinator-owner-reach's
+	// walk), reachable from a plain MEMBER caller — the reaper included —
+	// which carries no coordinatorRef of its own. See InvokeMember's doc
+	// comment (chat/coordinate.go).
+	caller, err := s.callerActingForCoordinator(ctx, in.Conversation, bearerToken(r))
 	if err != nil {
 		writeCoordinateError(w, statusFor(err), err)
 		return
@@ -167,7 +208,11 @@ func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	caller, err := s.callerConversation(ctx, in.Conversation, bearerToken(r))
+	// callerActingForCoordinator, not callerConversation: close's bound is
+	// widened to any open sibling root of the caller's own Coordinator
+	// (coordinator-owner-reach), reachable from a plain MEMBER caller — the
+	// reaper included — which carries no coordinatorRef of its own.
+	caller, err := s.callerActingForCoordinator(ctx, in.Conversation, bearerToken(r))
 	if err != nil {
 		writeCoordinateError(w, statusFor(err), err)
 		return
@@ -422,6 +467,52 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, buildTree(target, descendants))
+}
+
+type openRootsReq struct {
+	Conversation string `json:"conversation"`
+}
+
+// openRootView is `list_open_roots`' whole answer per root: the same bounded
+// projection shape every other coordination read gives, plus Members — see
+// chat.OpenRoot.
+type openRootView struct {
+	Name    string   `json:"name"`
+	Title   string   `json:"title,omitempty"`
+	Brief   string   `json:"brief,omitempty"`
+	Phase   string   `json:"phase,omitempty"`
+	Members []string `json:"members,omitempty"`
+}
+
+// handleCoordinateOpenRoots serves `list_open_roots` (coordinator-owner-
+// reach): the Coordinator-owner reach class's own verb, reachable by any
+// caller that resolves to a Coordinator — a plain member (the reaper) as
+// much as a root — never by a caller that resolves to none.
+func (s *Server) handleCoordinateOpenRoots(w http.ResponseWriter, r *http.Request) {
+	var in openRootsReq
+	if err := readJSON(r, &in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": `need {"conversation"}`})
+		return
+	}
+	ctx := r.Context()
+	caller, err := s.callerActingForCoordinator(ctx, in.Conversation, bearerToken(r))
+	if err != nil {
+		writeCoordinateError(w, statusFor(err), err)
+		return
+	}
+	roots, err := s.Router.ListOpenRoots(ctx, caller)
+	if err != nil {
+		writeCoordinateError(w, statusFor(err), err)
+		return
+	}
+	out := make([]openRootView, 0, len(roots))
+	for _, root := range roots {
+		out = append(out, openRootView{
+			Name: root.Name, Title: root.Title, Brief: root.Brief,
+			Phase: string(root.Phase), Members: root.Members,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"roots": out})
 }
 
 func (s *Server) readChannelProjection(w http.ResponseWriter, r *http.Request, ch *agentopsv1alpha1.Channel) {

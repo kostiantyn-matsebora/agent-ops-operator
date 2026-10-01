@@ -760,6 +760,13 @@ pipelines:
     name: ha-control
     # Display only — see kubernetes's `pipelines.observe.icon`.
     icon: aops:home
+    # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
+    # Coordinator's own coordinating agent — what it tells the agent about WHEN
+    # to invoke this entry, never a routing rule of its own. Unused under
+    # `pipelines` mode.
+    description: >-
+      Answer an everyday question about the house using Assist intents —
+      read-only, never reconfigures anything.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
@@ -772,6 +779,10 @@ pipelines:
     # too. ha-control stays scoped to the house and does not gain it.
     name: ha-ops
     icon: aops:operate
+    # See control.description above — same purpose, coordinator mode only.
+    description: >-
+      Repair or reconfigure a Home Assistant integration once the cause is
+      known — the only route that can reach configuration.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""

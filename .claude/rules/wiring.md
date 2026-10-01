@@ -10,6 +10,23 @@ sources[], channels[] and an `agents[]` fan-out over its own capability, see
 wiring.** SignalSource has no profile or channel refs. Channel has no default
 profile.
 
+**`global.agentops.wiringMode` (coordinator-deployment-mode) is a CHART
+RENDERING CHOICE, NEVER CRD-LEVEL EXCLUSIVITY.** It decides whether an enabled
+bundle's chart-side wiring component renders an inline `Pipeline` per route
+("pipelines") or a standalone `AgentCapability` gathered under one
+chart-rendered `Coordinator` ("coordinator") — see
+`openspec/changes/coordinator-deployment-mode/specs/wiring-mode/spec.md`.
+
+- **The many-to-many invariant above is UNCHANGED.** A hand-written `Pipeline`
+  and a hand-written `Coordinator` may claim the SAME source in the SAME
+  cluster, whatever `wiringMode` the chart last rendered with — the API
+  server accepts both, exactly as it accepts two Pipelines claiming one
+  source today.
+- **No CRD validation, CEL rule or admission check anywhere makes a Pipeline
+  and a Coordinator mutually exclusive.** `wiringMode` never reaches the API
+  server as a constraint. It is read once, at render time, by the chart's own
+  templates.
+
 - **Sources no Ready Pipeline lists DROP signals** — `Wired=False` plus a
   response reason. For a CHAT source the reason also goes back to the surface
   the person typed on, because they are waiting.

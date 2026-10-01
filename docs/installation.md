@@ -143,6 +143,15 @@ The last three start no work of their own. The runtimes execute. Coordination
 lets an agent invoke other agents rather than answering a source or a channel
 itself.
 
+**`global.agentops.wiringMode: coordinator` also brings up Coordination**,
+whatever `coordination.enabled` says — the chart-rendered `Coordinator` and
+its self-heal reaper both need that MCP server.
+
+It needs nothing else to install. The reaper's hourly trigger is the chart's
+own `signals/cron` `SignalAdapter`, deployed automatically with it — no
+bundle to enable and no extra component. See
+[Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}).
+
 ## Configure
 
 **Storage is the only setting that must be right before you install.**
