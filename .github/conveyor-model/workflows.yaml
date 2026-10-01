@@ -86,28 +86,64 @@ workflows:
       - { from: merge,     event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
       - { from: stalled,   event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
 
-  conveyor.fix:
-    label: "conveyor:fix"
+  loop:
     subject: pull_request
     acts_on: loop
     initial: none
     note: >
-      Two real entries, two functions. DIRECT (gate()): a person places
-      conveyor:fix on the pull request. CARRIED (carry_fix()): CI completes
-      and conveyor:run's grant is read. ELSE: gate() returns `refuse`/`none`,
-      carry_fix() returns `nothing`.
+      THE PULL REQUEST'S OWN WORKFLOW -- the fixing loop itself, labeled
+      loop:* (running/waiting/stalled/capped/mergeable), exactly parallel
+      to how conveyor:* is the issue's workflow and station:* is the
+      issue's state. Entered by conveyor.fix or conveyor.keep_going (each
+      names which of its own transitions enters here); everything else
+      below is the loop's OWN lifecycle, owned by DIFFERENT real functions
+      entirely (ending(), recover(), refresh(), gate()'s round-start and
+      cap check) once it is running -- not gated by either conveyor label
+      at all.
+    states: [none, running, waiting, stalled, capped, mergeable]
+    transitions:
+      - { from: running, event: "end:continue", to: running, owned_by: "ending()", note: "landed, checks re-run, or a retry with items still eligible" }
+      - { from: running, event: "end:mergeable", to: mergeable, owned_by: "ending()", note: "nothing left to fix and the head is green" }
+      - { from: running, event: "end:waiting", to: waiting, owned_by: "ending()", note: "every item left is a dispute, or a thread is open" }
+      - { from: running, event: "end:stalled", to: stalled, owned_by: "ending()", note: "no report, the fixer failed or timed out, or the next round could not start" }
+      - { from: running, event: "end:capped", to: capped, owned_by: "ending()", note: "the round ceiling was reached" }
+      - { from: running, event: "recover:waiting", to: waiting, owned_by: "recover()", guard: "rounds_used < cap AND thread_open", note: "a running label left behind by a round that was never reported" }
+      - { from: running, event: "recover:capped", to: capped, owned_by: "recover()", guard: "rounds_used >= cap", note: "same gap, but the round ceiling was already reached" }
+      - { from: waiting, event: "round:start", to: running, owned_by: "gate()", note: "a writer's comment answers the dispute the loop was waiting on" }
+      - { from: stalled, event: "round:start", to: running, owned_by: "gate()", note: "a person's comment restarts a loop the machine had given up on" }
+      - { from: none, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()", note: "carried onto a pull request whose CI was already green with no open thread" }
+      - { from: waiting, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
+      - { from: stalled, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
+      - { from: capped, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
+      - { from: mergeable, event: "ci:green_clean", to: mergeable, owned_by: "carry_fix()" }
+      - { from: mergeable, event: "thread:opened", to: waiting, owned_by: "refresh()", note: "a review completed after mergeable without starting a round" }
+      - { from: mergeable, event: "round:start", to: running, owned_by: "gate()", note: "a later review found something new" }
+
+  conveyor.fix:
+    label: "conveyor:fix"
+    subject: pull_request
+    acts_on: loop
+    initial: null
+    note: >
+      conveyor:fix's OWN label only ever causes round:start FROM `none` --
+      starting the loop workflow above, which then runs by its own rules.
+      DIRECT (gate()): a person places conveyor:fix on the pull request.
+      CARRIED (carry_fix()): CI completes and conveyor:run's grant is read.
+      ELSE: gate() returns `refuse`/`none`, carry_fix() returns `nothing`.
     states: [none, running]
     transitions:
       - from: none
         event: "round:start"
         to: running
         guard: "NOT pr.fork AND placer.may_push"
-        note: "direct placement, via gate()"
+        owned_by: "gate()"
+        note: "direct placement of conveyor:fix on the pull request"
       - from: none
         event: "round:start"
         to: running
         guard: "pr.same_repo_change_branch AND (pr.refs OR pr.closes) AND standing_grant(...) is not None AND grant_placer.may_push"
-        note: "carried from conveyor:run (or the archive grant), via carry_fix()"
+        owned_by: "carry_fix()"
+        note: "carried from conveyor:run (or the archive grant), once CI completes"
 
   conveyor.keep_going:
     label: "conveyor:keep-going"
@@ -115,14 +151,18 @@ workflows:
     acts_on: loop
     initial: capped
     note: >
-      gate() reads this label on a `labeled` trigger. ELSE: placing it on a
-      loop that is not capped has no effect gate() acts on.
+      conveyor:keep-going's OWN label causes the loop's capped -> running
+      edge (see `loop`'s own transition of the same name) -- gate() reads
+      this label on a `labeled` trigger, only meaningful once the loop is
+      already `capped`. ELSE: placing it on a loop that is not capped has
+      no effect gate() acts on.
     states: [capped, running]
     transitions:
       - from: capped
         event: "round:start"
         to: running
         guard: "NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)"
+        owned_by: "gate()"
 
   conveyor.archive:
     label: "conveyor:archive"

@@ -74,7 +74,11 @@ def render_workflow(name: str, w: dict) -> str:
 
     # collect transitions by (from, to), merging same-guard events the way
     # earlier renders did, but now also tracking which guard text backs
-    # each one so "[g1]" can be attached per edge.
+    # each one so "[g1]" can be attached per edge. A transition OWNED BY a
+    # different function than this conveyor's own label (ending(),
+    # recover(), refresh() -- the loop's own lifecycle, included for
+    # context) commonly has no simple boolean guard to state; it is shown
+    # as "ownerFn()" instead of a guard id, never silently dropped.
     guard_text_to_id: dict[str, int] = {}
     guard_order: list[str] = []
 
@@ -85,13 +89,16 @@ def render_workflow(name: str, w: dict) -> str:
             guard_order.append(text)
         return guard_text_to_id[text]
 
-    by_pair: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    by_pair: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for t in w["transitions"]:
-        gid = guard_id(t["guard"])
-        by_pair.setdefault((t["from"], t["to"]), []).append((t["event"], gid))
+        if t.get("guard"):
+            tag = f"g{guard_id(t['guard'])}"
+        else:
+            tag = t.get("owned_by", "?")
+        by_pair.setdefault((t["from"], t["to"]), []).append((t["event"], tag))
 
     for (frm, to), pairs in sorted(by_pair.items()):
-        parts = [f"{mmd_safe(ev)} [g{gid}]" for ev, gid in sorted(pairs)]
+        parts = [f"{mmd_safe(ev)} [{tag}]" for ev, tag in sorted(pairs)]
         lines.append(f"    {frm} --> {to} : {', '.join(parts)}")
 
     for text, gid in zip(guard_order, range(1, len(guard_order) + 1)):

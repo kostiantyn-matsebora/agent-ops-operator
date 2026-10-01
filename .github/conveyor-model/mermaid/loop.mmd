@@ -1,0 +1,28 @@
+stateDiagram-v2
+    [*] --> none
+    state none
+    state running
+    state waiting
+    state stalled
+    state capped
+    state mergeable
+    capped --> mergeable : ci.green_clean [carry_fix()]
+    mergeable --> mergeable : ci.green_clean [carry_fix()]
+    mergeable --> running : round.start [gate()]
+    mergeable --> waiting : thread.opened [refresh()]
+    none --> mergeable : ci.green_clean [carry_fix()]
+    running --> capped : end.capped [ending()], recover.capped [g2]
+    running --> mergeable : end.mergeable [ending()]
+    running --> running : end.continue [ending()]
+    running --> stalled : end.stalled [ending()]
+    running --> waiting : end.waiting [ending()], recover.waiting [g1]
+    stalled --> mergeable : ci.green_clean [carry_fix()]
+    stalled --> running : round.start [gate()]
+    waiting --> mergeable : ci.green_clean [carry_fix()]
+    waiting --> running : round.start [gate()]
+    note right of mergeable
+        g1: rounds_used < cap AND thread_open
+    end note
+    note right of mergeable
+        g2: rounds_used >= cap
+    end note

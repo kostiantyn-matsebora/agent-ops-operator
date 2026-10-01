@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Cross-check the four declarative files for consistency.
+"""Cross-check workflows.yaml against station.yaml / loop.yaml.
 
-station.yaml / loop.yaml are GENERATED (extract_machines.py) and therefore
-trusted as ground truth. workflows.yaml (each conveyor:* as its own complete
-state machine, in station's or loop's real vocabulary) and triggers.yaml
-(what GitHub event calls which decision function) are HAND-AUTHORED, so this
-is where drift between "what the docs say happens" and "what the real
-tables accept" would surface.
+station IS THE ISSUE'S STATE. loop IS THE PULL REQUEST'S STATE. Neither is a
+process -- both are GENERATED (extract_machines.py) plain data, trusted as
+ground truth for what conveyor.py's real tables actually say.
+
+workflows.yaml is the only PROCESS declaration: each conveyor:* is its own
+complete state machine, written directly in station's or loop's real
+vocabulary (never a separate invented one), hand-authored and checked here.
 
 Checks:
   1. Totality: station.yaml / loop.yaml define a transition for every
@@ -19,7 +20,6 @@ Checks:
   3. Every workflow's `states:` list is a subset of its `acts_on` machine's
      real states -- a conveyor cannot claim to occupy a state that machine
      does not have.
-  4. Every `workflow:` named in triggers.yaml is declared in workflows.yaml.
 
 Exit code 0 and silence on success; a nonzero exit and one line per problem
 otherwise.
@@ -90,18 +90,11 @@ def main() -> int:
     station = load("station.yaml")
     loop = load("loop.yaml")
     workflows = load("workflows.yaml")["workflows"]
-    triggers = load("triggers.yaml")["triggers"]
 
     problems: list[str] = []
     problems += check_totality(station)
     problems += check_totality(loop)
     problems += check_workflows(workflows, {"station": station, "loop": loop})
-
-    for trig in triggers:
-        wf_name = trig.get("workflow")
-        if wf_name and wf_name not in workflows:
-            problems.append(f"triggers.yaml: trigger for event {trig['event']!r} names workflow {wf_name!r}, "
-                             f"not declared in workflows.yaml")
 
     if problems:
         print(f"{len(problems)} problem(s):")
