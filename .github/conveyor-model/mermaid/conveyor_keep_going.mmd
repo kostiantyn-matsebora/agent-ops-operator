@@ -1,8 +1,12 @@
 stateDiagram-v2
     [*] --> capped
+    note left of capped
+        conveyor.keep_going  --  subject: pull_request
+    end note
     state capped
     state running
     capped --> running : round.start [g1]
-    note right of running
+    running --> [*]
+    note right of capped
         g1: NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)
     end note

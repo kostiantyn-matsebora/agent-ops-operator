@@ -1,15 +1,15 @@
 stateDiagram-v2
-    %% no single initial state: this conveyor's real trigger fires identically from most of its own states once its guard holds
+    [*] --> any_state
+    note left of any_state
+        conveyor.implement  --  subject: issue
+    end note
+    state "*" as any_state
     state none
     state implement
     state fix
     state merge
     state stalled
-    fix --> implement : fire.implement [g1]
-    implement --> implement : fire.implement [g1]
-    merge --> implement : fire.implement [g1]
-    none --> implement : fire.implement [g1]
-    stalled --> implement : fire.implement [g1]
-    note right of stalled
+    any_state --> implement : fire.implement [g1]
+    note right of any_state
         g1: (IF placer.bot THEN conveyor.run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)
     end note

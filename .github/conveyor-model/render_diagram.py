@@ -54,31 +54,30 @@ def render_workflow(name: str, w: dict) -> str:
     """One conveyor, drawn exactly as workflows.yaml declares it -- every
     state, every transition, every guard it lists, nothing inferred.
 
-    Guards are often identical prose repeated across several `from:`
-    entries (the same real condition, verified in conveyor.py not to
-    depend on the source state) -- deduplicated into ONE numbered legend
-    entry rather than printed once per edge, so "same as above" collapses
-    to the same reference instead of looking like N different conditions.
+    COLLAPSE, mechanical not guessed: when every `from:` state in this
+    workflow produces the IDENTICAL set of (event, guard, to) outcomes --
+    checked by comparing the real data, never assumed from a count or a
+    name -- that is a true "fires from any state" fact (conveyor.py's own
+    tables are built this way), and drawing N copies of the same edge is
+    noise Mermaid's auto-layout cannot cope with (verified live: a 6-state,
+    2-event fan-in rendered as an unreadable tangle). It collapses to ONE
+    edge per (event, guard, to) from a single synthetic `*` node instead.
+    A workflow whose states do NOT all agree is left fully literal --
+    collapsing a real difference between states would hide it.
     """
+    # SUBJECT IS VISIBLE ON THE DIAGRAM ITSELF -- not left for a reader to
+    # cross-check against workflows.yaml. loop's states (running/waiting/
+    # capped/mergeable) and a station-acting conveyor's states (implement/
+    # fix/merge/archive) read as interchangeable label words on their own.
+    # GOTCHA, found live: Mermaid's documented YAML-frontmatter `title:`
+    # block (the only documented way to title a stateDiagram-v2) produced
+    # `data-processed="true"` with ZERO <svg> output in this CDN build --
+    # not a syntax error, a silent no-render. A note anchored on the entry
+    # state is proven to work (same mechanism already used for guards), so
+    # the subject is stated there instead of risking the frontmatter path.
     lines = ["stateDiagram-v2"]
-
     initial = w.get("initial")
-    if initial:
-        lines.append(f"    [*] --> {initial}")
-    else:
-        lines.append(f"    %% no single initial state: this conveyor's real trigger "
-                      f"fires identically from most of its own states once its guard holds")
 
-    for s in w["states"]:
-        lines.append(f"    state {s}")
-
-    # collect transitions by (from, to), merging same-guard events the way
-    # earlier renders did, but now also tracking which guard text backs
-    # each one so "[g1]" can be attached per edge. A transition OWNED BY a
-    # different function than this conveyor's own label (ending(),
-    # recover(), refresh() -- the loop's own lifecycle, included for
-    # context) commonly has no simple boolean guard to state; it is shown
-    # as "ownerFn()" instead of a guard id, never silently dropped.
     guard_text_to_id: dict[str, int] = {}
     guard_order: list[str] = []
 
@@ -89,20 +88,80 @@ def render_workflow(name: str, w: dict) -> str:
             guard_order.append(text)
         return guard_text_to_id[text]
 
-    by_pair: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for t in w["transitions"]:
+    def tag_for(t: dict) -> str:
         if t.get("guard"):
-            tag = f"g{guard_id(t['guard'])}"
-        else:
-            tag = t.get("owned_by", "?")
-        by_pair.setdefault((t["from"], t["to"]), []).append((t["event"], tag))
+            return f"g{guard_id(t['guard'])}"
+        return t.get("owned_by", "?")
 
-    for (frm, to), pairs in sorted(by_pair.items()):
-        parts = [f"{mmd_safe(ev)} [{tag}]" for ev, tag in sorted(pairs)]
-        lines.append(f"    {frm} --> {to} : {', '.join(parts)}")
+    # outcomes[from_state] = frozenset of (event, tag, to) -- the complete,
+    # real effect of being in that state, for the "do all states agree"
+    # check below.
+    outcomes: dict[str, set[tuple[str, str, str]]] = {s: set() for s in w["states"]}
+    for t in w["transitions"]:
+        outcomes[t["from"]].add((t["event"], tag_for(t), t["to"]))
 
+    non_empty = {s: o for s, o in outcomes.items() if o}
+    all_same = len(non_empty) > 1 and len(set(map(frozenset, non_empty.values()))) == 1
+
+    # EVERY diagram gets a real [*] start and, where a state truly has no
+    # outgoing transition, a real [*] end -- a comment standing in for a
+    # missing pseudostate is not a diagram, it is a diagram that failed to
+    # render (confirmed live: stateDiagram-v2 does not accept a %% comment
+    # in that position at all).
+    has_outgoing = {t["from"] for t in w["transitions"]}
+    has_incoming = {t["to"] for t in w["transitions"]}
+    final_states = [s for s in w["states"] if s in has_incoming and s not in has_outgoing]
+
+    if all_same:
+        entry = "any_state"
+    elif initial:
+        entry = initial
+    else:
+        entry = w["states"][0]
+    idx = lines.index("stateDiagram-v2") + 1
+    lines.insert(idx, f"    [*] --> {entry}")
+    lines.insert(idx + 1, f"    note left of {entry}")
+    lines.insert(idx + 2, f"        {name}  --  subject: {w['subject']}")
+    lines.insert(idx + 3, "    end note")
+
+    if all_same:
+        shared = next(iter(non_empty.values()))
+        lines.append('    state "*" as any_state')
+        for s in w["states"]:
+            lines.append(f"    state {s}")
+        by_to: dict[str, list[tuple[str, str]]] = {}
+        for ev, tag, to in shared:
+            by_to.setdefault(to, []).append((ev, tag))
+        for to, pairs in sorted(by_to.items()):
+            parts = [f"{mmd_safe(ev)} [{tag}]" for ev, tag in sorted(pairs)]
+            lines.append(f"    any_state --> {to} : {', '.join(parts)}")
+        covered = set(non_empty.keys())
+        excluded = [s for s in w["states"] if s not in covered]
+        if excluded:
+            lines.append(f"    note right of any_state")
+            lines.append(f"        excludes: {', '.join(excluded)}")
+            lines.append(f"    end note")
+    else:
+        for s in w["states"]:
+            lines.append(f"    state {s}")
+        by_pair: dict[tuple[str, str], list[tuple[str, str]]] = {}
+        for t in w["transitions"]:
+            by_pair.setdefault((t["from"], t["to"]), []).append((t["event"], tag_for(t)))
+        for (frm, to), pairs in sorted(by_pair.items()):
+            parts = [f"{mmd_safe(ev)} [{tag}]" for ev, tag in sorted(pairs)]
+            lines.append(f"    {frm} --> {to} : {', '.join(parts)}")
+
+    for s in final_states:
+        if not all_same or s != entry:
+            lines.append(f"    {s} --> [*]")
+
+    # GOTCHA, found live: Mermaid's stateDiagram-v2 parser throws "Syntax
+    # error in text" if a `note` targets a state with NO EDGE touching it
+    # in the diagram -- bisected down to exactly this. `entry` (the real
+    # [*] target) is always connected, so every note anchors there, never
+    # on an arbitrary state from the states: list.
     for text, gid in zip(guard_order, range(1, len(guard_order) + 1)):
-        lines.append(f"    note right of {w['states'][-1]}")
+        lines.append(f"    note right of {entry}")
         lines.append(f"        g{gid}: {mmd_safe(text)}")
         lines.append("    end note")
 

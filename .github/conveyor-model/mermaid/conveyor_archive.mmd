@@ -1,17 +1,16 @@
 stateDiagram-v2
-    %% no single initial state: this conveyor's real trigger fires identically from most of its own states once its guard holds
+    [*] --> any_state
+    note left of any_state
+        conveyor.archive  --  subject: issue
+    end note
+    state "*" as any_state
     state none
     state implement
     state fix
     state merge
     state archive
     state stalled
-    archive --> archive : fire.archive [g1]
-    fix --> archive : fire.archive [g1]
-    implement --> archive : fire.archive [g1]
-    merge --> archive : fire.archive [g1]
-    none --> archive : fire.archive [g1]
-    stalled --> archive : fire.archive [g1]
-    note right of stalled
+    any_state --> archive : fire.archive [g1]
+    note right of any_state
         g1: (IF placer.bot THEN conveyor.run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)
     end note

@@ -1,5 +1,8 @@
 stateDiagram-v2
     [*] --> none
+    note left of none
+        loop  --  subject: pull_request
+    end note
     state none
     state running
     state waiting
@@ -20,9 +23,9 @@ stateDiagram-v2
     stalled --> running : round.start [gate()]
     waiting --> mergeable : ci.green_clean [carry_fix()]
     waiting --> running : round.start [gate()]
-    note right of mergeable
+    note right of none
         g1: rounds_used < cap AND thread_open
     end note
-    note right of mergeable
+    note right of none
         g2: rounds_used >= cap
     end note
