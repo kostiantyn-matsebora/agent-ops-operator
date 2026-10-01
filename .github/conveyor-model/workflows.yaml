@@ -4,27 +4,26 @@
 #
 # AGREED SHAPE: a conveyor is a PROCESS. Its states are NOT its own invented
 # idle/running/done -- no such label value exists in conveyor.py. A
-# conveyor's states ARE the real station or loop values it moves between,
-# because that is literally what changes while the conveyor:* label stands.
+# conveyor's states ARE the real station or loop values it moves between.
 # `acts_on` names which real machine (station or loop) this conveyor's
 # vocabulary is drawn from.
 #
-# NO SHARED "gates:" TABLE. Each conveyor lists its OWN `states:` and
-# `transitions:`, in the SAME shape station.yaml/loop.yaml use -- so a
-# diagram is a direct, mechanical render of one block, never a cross-file
-# lookup or an inferred pattern.
+# `guard:` IS A CONDITION, NOT PROSE. CORRECTED TWICE: first by drawing
+# fire:archive as firing unconditionally (it does not), then by writing the
+# "guard" as an explanatory paragraph including what happens when it's
+# false -- that is documentation, not a boolean. `guard:` is now the real
+# expression, read off the function body, short enough to put on an edge
+# label; what happens when it does NOT hold (refuse/skip/nothing) is in
+# `note:` instead, which is prose and never rendered as a condition.
 #
 # NO SINGLE INITIAL STATE WHERE NONE EXISTS. UML's initial pseudostate means
-# exactly one unconditional entry point (verified against the spec: "there
-# can be at most one initial vertex in a region"). Several of these
-# conveyors fire identically from MOST real states (conveyor.py's tables are
-# total), so forcing one of them to be "the" start would misstate what the
-# decision function actually checks. Where that is true, `initial: null` and
-# every listed `from:` is a real, independent entry -- not a fork from one
-# shared [*].
+# exactly one unconditional entry point (verified against the spec). Several
+# conveyors fire identically from most real states once their guard holds,
+# so `initial: null` and every listed `from:` is an independent real entry.
 #
-# EVERY (from, event, to) below is VERIFIED against station.yaml / loop.yaml
-# by validate.py -- never hand-typed and trusted.
+# EVERY (from, event, to) is VERIFIED against station.yaml / loop.yaml by
+# validate.py. Guards are READ off the function body by hand, not generated
+# -- a future change to a guard's real condition needs a matching edit here.
 
 version: 1
 
@@ -37,27 +36,37 @@ workflows:
     initial: null
     note: >
       THE STANDING GRANT. standing_grant() reads conveyor:run as a FACT,
-      called from carry_fix(), carry_archive() and gate() -- it does not
-      itself decide a station transition the way fire() does. Its own real
-      effect is two station transitions (both via carry_archive(), once the
-      grant is found to stand) plus starting the loop machine via carry_fix().
-      Fires identically from every non-terminal station value -- there is no
-      single state this conveyor "starts" from.
+      called from carry_fix(), carry_archive() and gate(). Its own real
+      station effects are both inside carry_archive(), once the grant is
+      found to stand there.
     states: [none, implement, fix, merge, archive, stalled]
     transitions:
-      - { from: none,      event: "merge:finished_carried", to: archive }
-      - { from: implement, event: "merge:finished_carried", to: archive }
-      - { from: fix,       event: "merge:finished_carried", to: archive }
-      - { from: merge,     event: "merge:finished_carried", to: archive }
-      - { from: archive,   event: "merge:finished_carried", to: archive }
-      - { from: stalled,   event: "merge:finished_carried", to: archive }
-      - { from: none,      event: "merge:proposal_or_apply", to: implement,
-          note: "the restart path: an apply merge whose change is not finished" }
-      - { from: implement, event: "merge:proposal_or_apply", to: implement }
-      - { from: fix,       event: "merge:proposal_or_apply", to: implement }
-      - { from: merge,     event: "merge:proposal_or_apply", to: implement }
-      - { from: archive,   event: "merge:proposal_or_apply", to: implement }
-      - { from: stalled,   event: "merge:proposal_or_apply", to: implement }
+      - from: none
+        event: "merge:finished_carried"
+        to: archive
+        guard: "line.change_finished AND grant_placer.may_push"
+        note: >
+          carry_archive(). ELSE: `nothing` (no station_event), or `stalled`
+          if conveyor:run is itself absent from the issue.
+      - { from: implement, event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
+      - { from: fix,       event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
+      - { from: merge,     event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
+      - { from: archive,   event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
+      - { from: stalled,   event: "merge:finished_carried", to: archive, guard: "line.change_finished AND grant_placer.may_push" }
+      - from: none
+        event: "merge:proposal_or_apply"
+        to: implement
+        guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push"
+        note: >
+          carry_archive()'s restart path: an apply merge whose change is not
+          finished. ELSE: `nothing` (a session is still at work, or
+          implement never fired at all -- the ordinary `fire()` start path
+          handles that case instead).
+      - { from: implement, event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
+      - { from: fix,       event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
+      - { from: merge,     event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
+      - { from: archive,   event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
+      - { from: stalled,   event: "merge:proposal_or_apply", to: implement, guard: "NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push" }
 
   conveyor.implement:
     label: "conveyor:implement"
@@ -66,17 +75,16 @@ workflows:
     initial: null
     note: >
       fire() reads this label (or conveyor:run, when the change is not
-      finished) and fires station_event fire:implement. Fires identically
-      from every state but archive and done (fire() refuses an implement
-      regression once archive is reached; done is terminal) -- no single
-      entry state.
+      finished) and fires station_event fire:implement. ELSE: `refuse`
+      (strips the label, no write access) or `skip` ("implement" already in
+      line.fired with a pull request still open from the change's branch).
     states: [none, implement, fix, merge, stalled]
     transitions:
-      - { from: none,      event: "fire:implement", to: implement }
-      - { from: implement, event: "fire:implement", to: implement }
-      - { from: fix,       event: "fire:implement", to: implement }
-      - { from: merge,     event: "fire:implement", to: implement }
-      - { from: stalled,   event: "fire:implement", to: implement }
+      - { from: none,      event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
+      - { from: implement, event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
+      - { from: fix,       event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
+      - { from: merge,     event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
+      - { from: stalled,   event: "fire:implement", to: implement, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND NOT ('implement' in line.fired AND line.open_pr_from_change)" }
 
   conveyor.fix:
     label: "conveyor:fix"
@@ -84,15 +92,22 @@ workflows:
     acts_on: loop
     initial: none
     note: >
-      gate() reads this label directly on a `labeled` trigger for the pull
-      request, OR carry_fix() carries conveyor:run's grant onto it once CI
-      completes. Both fire loop_event round:start. Unlike the station-side
-      conveyors, this one DOES have a single meaningful entry: the loop has
-      not started yet (`none`) -- round:start from any OTHER loop state is a
-      later round of the SAME running loop, not a new conveyor:fix entry.
+      Two real entries, two functions. DIRECT (gate()): a person places
+      conveyor:fix on the pull request. CARRIED (carry_fix()): CI completes
+      and conveyor:run's grant is read. ELSE: gate() returns `refuse`/`none`,
+      carry_fix() returns `nothing`.
     states: [none, running]
     transitions:
-      - { from: none, event: "round:start", to: running }
+      - from: none
+        event: "round:start"
+        to: running
+        guard: "NOT pr.fork AND placer.may_push"
+        note: "direct placement, via gate()"
+      - from: none
+        event: "round:start"
+        to: running
+        guard: "pr.same_repo_change_branch AND (pr.refs OR pr.closes) AND standing_grant(...) is not None AND grant_placer.may_push"
+        note: "carried from conveyor:run (or the archive grant), via carry_fix()"
 
   conveyor.keep_going:
     label: "conveyor:keep-going"
@@ -100,14 +115,14 @@ workflows:
     acts_on: loop
     initial: capped
     note: >
-      gate() reads this label on a `labeled` trigger, only meaningful once
-      the loop is `capped` (cap_for() computes a new ceiling from
-      pr.grants). Its one real effect is the SAME round:start transition
-      conveyor.fix's gate uses, entered only from `capped` -- re-opening an
-      already-running loop, never starting a fresh one.
+      gate() reads this label on a `labeled` trigger. ELSE: placing it on a
+      loop that is not capped has no effect gate() acts on.
     states: [capped, running]
     transitions:
-      - { from: capped, event: "round:start", to: running }
+      - from: capped
+        event: "round:start"
+        to: running
+        guard: "NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)"
 
   conveyor.archive:
     label: "conveyor:archive"
@@ -115,18 +130,16 @@ workflows:
     acts_on: station
     initial: null
     note: >
-      fire() reads this label directly, refusing it where the lane has no
-      archive station or the change is not finished. Fires identically from
-      every state but done (terminal) -- no single entry state. ALSO stands
-      for the fix station OF THE ARCHIVE PULL REQUEST ITSELF (the one whose
-      body says Closes #n) -- standing_grant()'s own special case, read by
-      carry_fix() exactly as conveyor:run is, starting the SAME loop entry
-      conveyor.fix uses.
+      fire() reads this label directly. ALSO stands for the fix station OF
+      THE ARCHIVE PULL REQUEST ITSELF (Closes #n) -- standing_grant()'s own
+      special case, read by carry_fix() exactly as conveyor:run is, starting
+      the SAME loop entry conveyor.fix uses (not duplicated here). ELSE:
+      fire() returns `refuse` (plain lane, or change not finished) or `skip`.
     states: [none, implement, fix, merge, archive, stalled]
     transitions:
-      - { from: none,      event: "fire:archive", to: archive }
-      - { from: implement, event: "fire:archive", to: archive }
-      - { from: fix,       event: "fire:archive", to: archive }
-      - { from: merge,     event: "fire:archive", to: archive }
-      - { from: archive,   event: "fire:archive", to: archive }
-      - { from: stalled,   event: "fire:archive", to: archive }
+      - { from: none,      event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
+      - { from: implement, event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
+      - { from: fix,       event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
+      - { from: merge,     event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
+      - { from: archive,   event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }
+      - { from: stalled,   event: "fire:archive", to: archive, guard: "(IF placer.bot THEN conveyor:run stands AND grant_placer.may_push ELSE placer.may_push) AND line.lane == opsx AND line.change_finished AND NOT ('archive' in line.fired AND line.open_pr_from_change)" }

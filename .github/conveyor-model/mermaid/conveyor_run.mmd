@@ -1,20 +1,26 @@
 stateDiagram-v2
-    %% no single initial state: this conveyor's real trigger fires identically from most of its own states (see its own note:)
+    %% no single initial state: this conveyor's real trigger fires identically from most of its own states once its guard holds
     state none
     state implement
     state fix
     state merge
     state archive
     state stalled
-    archive --> archive : merge.finished_carried
-    archive --> implement : merge.proposal_or_apply
-    fix --> archive : merge.finished_carried
-    fix --> implement : merge.proposal_or_apply
-    implement --> archive : merge.finished_carried
-    implement --> implement : merge.proposal_or_apply
-    merge --> archive : merge.finished_carried
-    merge --> implement : merge.proposal_or_apply
-    none --> archive : merge.finished_carried
-    none --> implement : merge.proposal_or_apply
-    stalled --> archive : merge.finished_carried
-    stalled --> implement : merge.proposal_or_apply
+    archive --> archive : merge.finished_carried [g1]
+    archive --> implement : merge.proposal_or_apply [g2]
+    fix --> archive : merge.finished_carried [g1]
+    fix --> implement : merge.proposal_or_apply [g2]
+    implement --> archive : merge.finished_carried [g1]
+    implement --> implement : merge.proposal_or_apply [g2]
+    merge --> archive : merge.finished_carried [g1]
+    merge --> implement : merge.proposal_or_apply [g2]
+    none --> archive : merge.finished_carried [g1]
+    none --> implement : merge.proposal_or_apply [g2]
+    stalled --> archive : merge.finished_carried [g1]
+    stalled --> implement : merge.proposal_or_apply [g2]
+    note right of stalled
+        g1: line.change_finished AND grant_placer.may_push
+    end note
+    note right of stalled
+        g2: NOT line.change_finished AND 'implement' in line.fired AND NOT line.open_pr_from_change AND grant_placer.may_push
+    end note

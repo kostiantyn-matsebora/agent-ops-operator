@@ -2,4 +2,7 @@ stateDiagram-v2
     [*] --> capped
     state capped
     state running
-    capped --> running : round.start
+    capped --> running : round.start [g1]
+    note right of running
+        g1: NOT pr.fork AND placer.may_push AND pr.rounds_used >= cap_for(pr.max_rounds, pr.grants)
+    end note

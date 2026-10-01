@@ -2,4 +2,10 @@ stateDiagram-v2
     [*] --> none
     state none
     state running
-    none --> running : round.start
+    none --> running : round.start [g1], round.start [g2]
+    note right of running
+        g1: NOT pr.fork AND placer.may_push
+    end note
+    note right of running
+        g2: pr.same_repo_change_branch AND (pr.refs OR pr.closes) AND standing_grant(...) is not None AND grant_placer.may_push
+    end note
