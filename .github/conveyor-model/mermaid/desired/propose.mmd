@@ -14,8 +14,28 @@ stateDiagram-v2
     proposed --> merged : proposal.pr_merged [is_merged(proposal_pr)]
     merged --> [*]
     class none, proposing, proposed, merged stationState
-    state "invokes: loop" as proposing__loop
-    proposing --> proposing__loop
-    note right of proposing__loop
-        see loop.mmd for its full states/transitions
-    end note
+    state proposing {
+        [*] --> loop_none
+        state loop_none
+        state loop_running
+        state loop_waiting
+        state loop_stalled
+        state loop_capped
+        state loop_mergeable
+        loop_running --> loop_running : end.continue / ending()
+        loop_running --> loop_mergeable : end.mergeable / ending()
+        loop_running --> loop_waiting : end.waiting / ending()
+        loop_running --> loop_stalled : end.stalled / ending()
+        loop_running --> loop_capped : end.capped / ending()
+        loop_running --> loop_waiting : recover.waiting [NOT is_capped(pr) AND has_open_thread(pr)] / recover()
+        loop_running --> loop_capped : recover.capped [is_capped(pr)] / recover()
+        loop_waiting --> loop_running : round.start / gate()
+        loop_stalled --> loop_running : round.start / gate()
+        loop_none --> loop_mergeable : ci.green_clean / carry_fix()
+        loop_waiting --> loop_mergeable : ci.green_clean / carry_fix()
+        loop_stalled --> loop_mergeable : ci.green_clean / carry_fix()
+        loop_capped --> loop_mergeable : ci.green_clean / carry_fix()
+        loop_mergeable --> loop_mergeable : ci.green_clean / carry_fix()
+        loop_mergeable --> loop_waiting : thread.opened / refresh()
+        loop_mergeable --> loop_running : round.start / gate()
+    }

@@ -62,23 +62,27 @@ def edge_label(ev: str, guard: str | None, owned_by: str | None) -> str:
 
 
 def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[str]:
-    """`w["invokes"]` maps a STATE to another REAL workflow that runs as its
-    sub-machine while that state is active -- drawn as a REFERENCE, not a
-    duplicate of its internals. `loop` already has its own full, legible
-    diagram; redrawing all six of its states and every transition a second
-    time inside the invoking workflow is redundant and makes the parent
-    diagram dense for no reason. This draws one labeled placeholder state
-    naming what runs, with a note pointing at the real diagram -- the
-    invocation is visible in the PICTURE, never left in prose, without
-    inlining a second copy of a machine that already exists elsewhere."""
-    ref_id = f"{at_state}__{dep_name}"
-    return [
-        f'    state "invokes: {dep_name}" as {ref_id}',
-        f"    {at_state} --> {ref_id}",
-        f"    note right of {ref_id}",
-        f"        see {dep_name}.mmd for its full states/transitions",
-        f"    end note",
-    ]
+    """`w["invokes"]` maps a STATE to another REAL workflow that runs AS
+    that state's own internal behavior -- a COMPOSITE state, drawn with the
+    invoked workflow's real initial pseudostate and real states/transitions
+    INSIDE the parent state's own box, exactly UML's composite-state
+    notation (a named container with its own [*] entry point leading into
+    its internal states). CORRECTED: a first attempt drew this as a
+    disconnected side box labeled "invokes: X" with an arrow pointing at
+    it -- a fork, not containment, and a different shape entirely from what
+    was asked for. The invoked workflow's real internal [*] and its states
+    belong INSIDE {at_state}'s border, not beside it."""
+    prefix = f"{dep_name}_"
+    lines = [f"    state {at_state} {{"]
+    dep_initial = dep.get("initial") or dep["states"][0]
+    lines.append(f"        [*] --> {prefix}{dep_initial}")
+    for s in dep["states"]:
+        lines.append(f"        state {prefix}{s}")
+    for t in dep["transitions"]:
+        label = edge_label(t["event"], t.get("guard"), t.get("owned_by"))
+        lines.append(f"        {prefix}{t['from']} --> {prefix}{t['to']} : {label}")
+    lines.append("    }")
+    return lines
 
 
 def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> str:
