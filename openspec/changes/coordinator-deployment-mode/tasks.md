@@ -166,30 +166,93 @@
 
 ### 9a. Reference docs
 
-- [ ] 9a.1 `docs/concepts.md`: `global.agentops.wiringMode`, the reaper's
+- [x] 9a.1 `docs/concepts.md`: `global.agentops.wiringMode`, the reaper's
       role, the `coordinatorRef`-resolution walk, the widened `close`
       bound, the new `list_open_roots` verb.
-- [ ] 9a.2 `docs/contracts.md`: the Coordinator-owner reach class added to
+      DONE: a bullet on `### Coordinator` plus three new subsections at the
+      end of `## Coordinated agents` — Deployment posture, The self-heal
+      reaper, Coordinator-owner reach — linking to `contracts.md` for the
+      full verb/bound table rather than restating it.
+- [x] 9a.2 `docs/contracts.md`: the Coordinator-owner reach class added to
       the `/coordinate/*` verb table, alongside the existing coordinator
       and channel-reader classes.
-- [ ] 9a.3 `docs/configuration.md`: `global.agentops.wiringMode` value
+      VERIFIED, no change needed: the backend engineer's commit (3287c00)
+      already carries this in full — the three reach classes, the widened
+      `close` bound, `list_open_roots` in the tool list and the verb
+      section. Checked against the landed code in
+      `platform/manager/internal/chat/coordinate.go` and
+      `platform/mcp-aops/tools.go` — matches.
+- [x] 9a.3 `docs/configuration.md`: `global.agentops.wiringMode` value
       documented, both accepted values, default.
-- [ ] 9a.4 `.github/scripts/docs-generate.py` re-run, then commit every
+      DONE: new `### Wiring posture: pipelines or coordinator` section
+      after `### The runtime`, as a REFERENCE-page table (no front matter,
+      no component markup) — value, default, the Coordination side effect,
+      reversibility, and a link to the guide.
+- [x] 9a.4 `.github/scripts/docs-generate.py` re-run, then commit every
       regenerated block and `docs/cr-reference.md`.
+      DONE. `--check` first caught a REAL regression this change
+      introduced: preset `tier1` (`global.demo.enabled=true`) now renders
+      coordinator mode by default, so `guides/pipeline.md`'s
+      `Pipeline/k8s-observe` worked example no longer existed to generate
+      from. Fixed by pinning `global.agentops.wiringMode: pipelines` on
+      that preset (it is a guide about the Pipeline kind, not about demo
+      mode's own default posture) and adding the literal to
+      `DOCUMENTED_PLACEHOLDERS`. Regenerating then picked up one real
+      change already landed but never regenerated:
+      `guides/agent-profile.md`'s rendered `k8s-engineer` prompt now carries
+      the self-close instruction (task 3). `docs/cr-reference.md` is
+      unchanged — the `Coordinator`/`AgentCapability` CRDs are untouched by
+      this change. `--check` is clean.
 
 ### 9b. Adopter site
 
-- [ ] 9b.1 `docs/getting-started.md`: demo mode now selects `coordinator`
+- [x] 9b.1 `docs/getting-started.md`: demo mode now selects `coordinator`
       posture, so update the walkthrough's description of
       what gets deployed.
-- [ ] 9b.2 `docs/installation.md`: the reaper's cron
+      DONE, honestly: the install command now pins
+      `--set global.agentops.wiringMode=pipelines` explicitly, with a
+      callout stating PLAINLY that demo mode alone now defaults to
+      `coordinator` posture, that nothing yet auto-claims the console's
+      source and channel for a chart-rendered `Coordinator` the way
+      `pipelines` mode does for a `Pipeline`, and that leaving the new
+      default in place would leave this walkthrough's console with no
+      route answering it. Chose to keep this page's own promise — ending at
+      something working — over silently landing on a broken default, and
+      linked `guides/coordinate-agents.md` for trying `coordinator` mode
+      instead.
+- [x] 9b.2 `docs/installation.md`: the reaper's cron
       requirement (uses the existing `signals/cron` component — no new
       component to install).
-- [ ] 9b.3 `docs/guides/coordinate-agents.md` (from `coordinated-agents`):
+      DONE: one paragraph under "Enable a bundle" — `coordinator` mode also
+      renders Coordination regardless of `coordination.enabled`, and the
+      reaper's hourly trigger is the chart's own `signals/cron`
+      `SignalAdapter`, deployed automatically — no bundle to enable, no new
+      component.
+- [x] 9b.3 `docs/guides/coordinate-agents.md` (from `coordinated-agents`):
       add the deployment-mode and self-heal sections — regenerate any CR
       blocks the guide's generated markers cover.
-- [ ] 9b.4 `README.md`: update the "what you write" tab if the demo's
+      DONE: two new sections before "What comes next" — "Let the chart wire
+      this for you" (wiringMode, what each mode renders, the hand-written
+      `Pipeline`/`Coordinator` coexistence, and a callout stating the
+      console auto-wiring gap plainly, including that even a hand-claimed
+      source would not reach the console as a thread since a Coordinator's
+      `channelRefs` are escalation-only) and "Self-heal: the hourly reaper"
+      (the survey/re-check/close flow, the self-close instruction, and the
+      Coordinator-owner reach class). No generated marker in this guide
+      needed a field-list change — `docs-generate.py --check` is clean.
+- [x] 9b.4 `README.md`: update the "what you write" tab if the demo's
       default shape changes, staying within its line budget.
+      VERIFIED, no change made: "What you write" shows a generic hand-wired
+      `Pipeline` example unrelated to demo mode's own default shape, and
+      "Try it" / "What agent-ops is" make no claim this change breaks — the
+      Kubernetes-events half of the demo (no console involved) still works
+      under `coordinator` mode, since the chart-rendered Coordinator claims
+      that source too. `wc -l README.md`: 210 before and after.
 - [ ] 9b.5 `platform/console/ui`: re-run BOTH `npm run screenshots` and
       `npm run demo` if the reaper's conversations need distinct treatment
       in the tree view, then commit the assets.
+      LEFT UNTICKED: this needs a live cluster and a browser
+      (`visual-check.md`, `remote-session.md`) this remote session does not
+      have. No console code changed in this change either, so there is
+      nothing for the screenshots to pick up yet — left for whoever runs
+      the workstation-only verification.

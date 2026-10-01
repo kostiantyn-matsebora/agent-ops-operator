@@ -535,6 +535,11 @@ invokes named members from `spec.agents[]`.
 - **Its conversation reaches the verbs through the aops MCP server.** The
   Coordinator's capability must bind the `agentops-coordinate` toolset and the aops
   `MCPConfig`, and nothing else grants them.
+- **The chart may render one for you.** Under
+  `global.agentops.wiringMode: coordinator`, one chart-rendered Coordinator
+  claims every enabled bundle's source and lists each bundle's
+  `AgentCapability` in `agents[]` — see
+  [Deployment posture](#deployment-posture-globalagentopswiringmode) below.
 
 ### MCPConfig
 
@@ -1379,6 +1384,83 @@ the same rule as `runtimeContextId`.
   own.** It exists for a reader picking a conversation without reading its
   transcript — a Coordinator's `list_conversations`, the channel-reader
   projection, the console's conversation list.
+
+### Deployment posture: `global.agentops.wiringMode`
+
+**A chart-rendering choice, not a CRD field.** It decides how each ENABLED
+bundle renders its routes, release-wide:
+
+| Value | Each enabled bundle renders |
+|---|---|
+| `pipelines` (default) | an inline `Pipeline` per route, same as every release before this one |
+| `coordinator` | a standalone `AgentCapability` per route, gathered into one chart-rendered `Coordinator` |
+
+- **`global.demo.enabled: true` selects `coordinator` when the value is left
+  unset.** An explicit value wins either way — `wiringMode: pipelines` under
+  demo mode keeps today's single-Pipeline demo.
+- **A two-privilege bundle (home-assistant) still ships two `AgentCapability`
+  objects under `coordinator` mode**, never merged — the same privilege split
+  `pipelines` mode keeps.
+- **The chart-rendered Coordinator claims every enabled bundle's source** —
+  the same ones its `pipelines`-mode routes claim — plus the self-heal
+  reaper's own hourly `signals/cron` claim, below.
+- **No API-server exclusivity exists between the two kinds.** An operator may
+  hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
+  same cluster, whatever the chart last rendered. The API server accepts
+  both and fans the source out to each.
+
+### The self-heal reaper
+
+**An ordinary `agents[]` entry, shipped by `coordinator` mode alone — no new
+CRD.** It surveys its own Coordinator's open roots on an hourly schedule and
+closes the ones it judges healed.
+
+| Step | Does |
+|---|---|
+| an hourly `signals/cron` signal, claimed on the chart-rendered Coordinator | opens a conversation running the Coordinator's own coordinating agent |
+| the coordinating agent | recognises the cron signal and `invoke`s the reaper's `agents[]` entry |
+| the reaper | calls `list_open_roots`, then `invoke`s the SAME capability named in each root's `members` to re-check it |
+| a re-check reporting the condition cleared | the reaper `close`s that root, naming the re-check as the reason |
+| a re-check still finding the condition present | the root is left open for the next hourly run or an escalation |
+
+- **It holds no domain toolset and no domain `MCPConfig`** — only the
+  coordination reach through `agentops-coordinate` and the aops `MCPConfig`.
+  It reaches a domain agent only by invoking it, never by calling that
+  agent's own tools.
+- **A root with more than one `members` entry heals only once EVERY entry's
+  re-check reports clear.**
+- **It never closes the root that invoked it.** `list_open_roots` excludes
+  that root at the listing step, below, and `close` refuses it even named
+  directly.
+- **Domain agent prompts carry a matching self-close instruction.** An agent
+  may `/close` its own conversation once it judges the problem resolved,
+  reusing the ordinary `/close` path. It is a no-op where no thread is bound
+  — the shape every `coordinator`-mode member conversation has.
+
+### Coordinator-owner reach: `list_open_roots` and the widened `close`
+
+**A caller acting for a Coordinator may see and close that Coordinator's own
+open roots — never a member, and never another Coordinator's tree.** This is
+how the reaper, an ordinary member rather than a root, reaches roots it did
+not cause.
+
+- **The manager resolves which Coordinator a caller acts for** by reading its
+  own `coordinatorRef` first and, if empty, walking `causedBy` to the
+  UNCAUSED root and reading that root's `coordinatorRef` instead — the SAME
+  walk the invoke cycle guard above already performs.
+- **`list_open_roots()` returns every open, uncaused root naming that
+  Coordinator**, excluding the caller's own root: name, title, brief, phase,
+  plus `members` (the root's direct `agents[]` entry names). Never a
+  transcript or a run.
+- **`close` widens for a caller that resolves to a Coordinator.** It may
+  also close any open, uncaused root of that SAME Coordinator, other than
+  its own ancestor root. A member is still never a valid target, and
+  neither is a different Coordinator's root.
+- **A caller resolving to no Coordinator** — an ordinary Pipeline-addressed
+  conversation — is refused outright for both.
+
+See [the aops MCP server contract](contracts.md#the-aops-mcp-server-contract)
+for the full verb and bound table.
 
 ## Capacity: how many run at once
 

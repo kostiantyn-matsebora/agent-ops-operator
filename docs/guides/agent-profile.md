@@ -216,6 +216,13 @@ spec:
     NetworkPolicies, PodDisruptionBudgets, HorizontalPodAutoscalers and
     PersistentVolumeClaims — and suggest the operator makes the edit. The
     value that decides this is global.agentops.runtimeDefaults.allowPodExecution.
+    
+    If a thread is bound to this conversation and you judge the problem it is
+    about to be resolved, you may end it yourself by replying with `/close` as
+    your message — the same command a person uses to end a conversation. Only do
+    this once you are confident: closing drops it from any further follow-up on
+    this incident. If no thread is bound here, this instruction does nothing —
+    leave ending the conversation to whatever invoked you.
   # REQUIRED, and with no default on purpose: `none` leaves output unformatted
   # unless this profile's prompt says otherwise, and `blocks` shapes it by
   # something the author never asked for. The author declares it.

@@ -86,6 +86,9 @@ DOCUMENTED_PLACEHOLDERS = {
     # public model name, both shapes the allowlist permits.
     "http://ollama.ollama.svc:11434",
     "qwen2.5:14b",
+    # chart/values.yaml, global.agentops.wiringMode — one of the two literal
+    # values the field accepts, not an invented example.
+    "pipelines",
 }
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
@@ -137,6 +140,13 @@ PRESETS = {
         "sets": {
             "global.demo.enabled": "true",
             "kubernetes.enabled": "true",
+            # `guides/pipeline.md`'s worked example is a `Pipeline` object —
+            # pin the wiring posture explicitly so the preset keeps rendering
+            # one even now that `demo.enabled` alone selects `coordinator`
+            # (coordinator-deployment-mode). A preset reaching for a Pipeline
+            # example is about the PIPELINE kind, not about demo mode's own
+            # default posture.
+            "global.agentops.wiringMode": "pipelines",
         },
     },
     "tier2": {
