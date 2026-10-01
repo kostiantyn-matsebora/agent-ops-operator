@@ -8,13 +8,13 @@ stateDiagram-v2
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state stalled
     state fixing
-    state merge
+    state mergeable
     state done
     stalled --> fixing : round.start
-    fixing --> merge : pr.green
-    merge --> done : merge.plain / carry_line
+    fixing --> mergeable : pr.green
+    mergeable --> done : merge.plain
     done --> [*]
-    class stalled, fixing, merge, done stationState
+    class stalled, fixing, mergeable, done stationState
     state fixing {
         [*] --> loop
         state "loop" as loop
