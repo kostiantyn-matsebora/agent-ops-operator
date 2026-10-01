@@ -9,15 +9,17 @@ stateDiagram-v2
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state implemented_with_issues
     state merge_failed
+    state hotfix_created
     state fixing
     state mergeable
     state done
     implemented_with_issues --> fixing : round_started
-    merge_failed --> fixing : round_started
+    merge_failed --> hotfix_created : hotfix_started [hotfix_pr_is_created AND all_checks_ran]
+    hotfix_created --> fixing : round_started
     fixing --> mergeable : loop_entered_mergeable
     mergeable --> done : all_prs_merged [all_prs_merged]
     done --> [*]
-    class implemented_with_issues, merge_failed, fixing, mergeable, done stationState
+    class implemented_with_issues, merge_failed, hotfix_created, fixing, mergeable, done stationState
     state fixing {
         [*] --> loop
         state "loop" as loop

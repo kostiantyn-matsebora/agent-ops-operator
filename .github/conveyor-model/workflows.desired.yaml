@@ -88,6 +88,11 @@ workflows:
       merge_failed:
         initial: true
         transitions:
+          - event: "hotfix_started"
+            to: hotfix_created
+            guard: "hotfix_pr_is_created AND all_checks_ran"
+      hotfix_created:
+        transitions:
           - event: "round_started"
             to: fixing
       fixing:
