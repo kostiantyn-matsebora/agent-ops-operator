@@ -13,10 +13,8 @@ stateDiagram-v2
     state ready_to_merge
     state done
     state merge_failed
-    ready --> implementing : implement_fired [placer_has_access AND NOT is_session_at_work] / fire
-    ready --> implementing : implement_fired [grant_placer_has_access AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement_fired [placer_has_access AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement_fired [grant_placer_has_access AND NOT is_session_at_work] / fire
+    ready --> implementing : implement_fired [has_access AND NOT is_session_at_work] / fire
+    implementing --> implementing : implement_fired [has_access AND NOT is_session_at_work] / fire
     implementing --> implemented : prs_are_created [has_open_prs]
     implemented --> ready_to_merge : checks_completed [all_pr_mergeable]
     implemented --> implemented_with_issues : checks_completed [NOT all_pr_mergeable]

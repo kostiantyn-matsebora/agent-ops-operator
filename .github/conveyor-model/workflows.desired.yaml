@@ -34,21 +34,13 @@ workflows:
         transitions:
           - event: "implement_fired"
             to: implementing
-            guard: "placer_has_access AND NOT is_session_at_work"
-            owned_by: "fire"
-          - event: "implement_fired"
-            to: implementing
-            guard: "grant_placer_has_access AND NOT is_session_at_work"
+            guard: "has_access AND NOT is_session_at_work"
             owned_by: "fire"
       implementing:
         transitions:
           - event: "implement_fired"
             to: implementing
-            guard: "placer_has_access AND NOT is_session_at_work"
-            owned_by: "fire"
-          - event: "implement_fired"
-            to: implementing
-            guard: "grant_placer_has_access AND NOT is_session_at_work"
+            guard: "has_access AND NOT is_session_at_work"
             owned_by: "fire"
           - event: "prs_are_created"
             to: implemented
@@ -117,11 +109,7 @@ workflows:
         transitions:
           - event: "finalize_fired"
             to: finalizing
-            guard: "placer_has_access AND is_change_finished AND NOT is_session_at_work"
-            owned_by: "fire"
-          - event: "finalize_fired"
-            to: finalizing
-            guard: "grant_placer_has_access AND is_change_finished AND NOT is_session_at_work"
+            guard: "has_access AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
       finalizing:
         invokes: loop
