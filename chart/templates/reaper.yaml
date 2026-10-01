@@ -36,9 +36,6 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
-  externals:
-    - name: signals/cron
-      kind: other
   # Interface metadata only — see signals/cron's own configSchema in its
   # README / samples for the authoritative shape.
   configSchema:

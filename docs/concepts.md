@@ -1434,8 +1434,9 @@ closes the ones it judges healed.
   directly.
 - **Domain agent prompts carry a matching self-close instruction.** An agent
   may `/close` its own conversation once it judges the problem resolved,
-  reusing the ordinary `/close` path. It is a no-op where no thread is bound
-  — the shape every `coordinator`-mode member conversation has.
+  reusing the ordinary `/close` path, which carries no reason. It is a no-op
+  where no thread is bound — the shape every `coordinator`-mode member
+  conversation has. The delta spec is `coordinator-self-heal`.
 
 ### Coordinator-owner reach: `list_open_roots` and the widened `close`
 

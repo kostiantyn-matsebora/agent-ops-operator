@@ -613,23 +613,13 @@ func TestHandleCoordinateTreeRefusesAWrongToken(t *testing.T) {
 	}
 }
 
-// coordMember mirrors chat's own helper: the causedBy field AND the label,
-// since the Router trusts only the field.
-func coordMemberOf(name, parent, entry string) *agentopsv1alpha1.Conversation {
-	m := &agentopsv1alpha1.Conversation{}
-	m.Name, m.Namespace = name, "agent-ops"
-	m.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
-	m.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: entry}
-	return m
-}
-
 // The reaper's own shape: a plain member (no coordinatorRef of its own)
 // authenticates /coordinate/open-roots with a token derived against the
 // Coordinator its ANCESTOR ROOT names — callerActingForCoordinator's whole
 // point (design D-A, coordinator-owner-reach).
 func TestHandleCoordinateOpenRootsAuthenticatesAPlainMemberViaItsAncestorRoot(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
-	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	reaper := coordMember("reaper-1", "root-1", "reaper")
 	incident := coordRoot("incident-1", "co-a")
 	s, _ := coordServer(t, coordCoordinator("co-a"), root, reaper, incident)
 
@@ -651,7 +641,7 @@ func TestHandleCoordinateOpenRootsAuthenticatesAPlainMemberViaItsAncestorRoot(t 
 
 func TestHandleCoordinateOpenRootsRefusesAWrongToken(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
-	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	reaper := coordMember("reaper-1", "root-1", "reaper")
 	s, _ := coordServer(t, coordCoordinator("co-a"), root, reaper)
 
 	rec := postCoordinate(s, "/coordinate/open-roots", "wrong-token", map[string]any{"conversation": "reaper-1"})
@@ -689,7 +679,7 @@ func TestHandleCoordinateOpenRootsRejectsBadJSON(t *testing.T) {
 // closes a SIBLING root of its own Coordinator it did not directly cause.
 func TestHandleCoordinateCloseWidenedBoundPermitsAPlainMemberToCloseASiblingRoot(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
-	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	reaper := coordMember("reaper-1", "root-1", "reaper")
 	incident := coordRoot("incident-1", "co-a")
 	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper, incident)
 
@@ -710,7 +700,7 @@ func TestHandleCoordinateCloseWidenedBoundPermitsAPlainMemberToCloseASiblingRoot
 // even named directly.
 func TestHandleCoordinateCloseWidenedBoundRefusesTheCallersOwnAncestorRoot(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
-	reaper := coordMemberOf("reaper-1", "root-1", "reaper")
+	reaper := coordMember("reaper-1", "root-1", "reaper")
 	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper)
 
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")

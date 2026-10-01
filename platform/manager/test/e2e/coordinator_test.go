@@ -168,21 +168,7 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	// The REAL cron adapter fires its real schedule and admits a signal the
 	// Coordinator claims — a genuinely kubelet-backed root, not a posted
 	// stand-in.
-	var cronRoot *agentopsv1alpha1.Conversation
-	waitFor(t, "a conversation from the self-heal cron source", 4*time.Minute, func() (bool, error) {
-		items, err := e.K.Conversations(ctx)
-		if err != nil {
-			return false, err
-		}
-		for i := range items {
-			c := &items[i]
-			if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == cronSrc {
-				cronRoot = c
-				return true, nil
-			}
-		}
-		return false, nil
-	})
+	cronRoot := waitForCronRoot(ctx, t, e, cronSrc)
 	if cronRoot.Spec.CoordinatorRef == nil || cronRoot.Spec.CoordinatorRef.Name != coordName {
 		t.Fatalf("the cron-triggered root must be claimed by the Coordinator, got %+v", cronRoot.Spec.CoordinatorRef)
 	}
@@ -203,35 +189,7 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("list_open_roots: %d %v", code, out)
 	}
-	roots, _ := out["roots"].([]any)
-	var sawIncident, sawOwnAncestor bool
-	var incidentMembers []string
-	for _, r := range roots {
-		root, _ := r.(map[string]any)
-		name, _ := root["name"].(string)
-		switch name {
-		case incident.Name:
-			sawIncident = true
-			if ms, ok := root["members"].([]any); ok {
-				for _, m := range ms {
-					if s, ok := m.(string); ok {
-						incidentMembers = append(incidentMembers, s)
-					}
-				}
-			}
-		case cronRoot.Name:
-			sawOwnAncestor = true
-		}
-	}
-	if !sawIncident {
-		t.Fatalf("list_open_roots must return the open incident sibling root, got %v", roots)
-	}
-	if sawOwnAncestor {
-		t.Fatalf("list_open_roots must EXCLUDE the reaper's own ancestor root (the cron-triggered root), got %v", roots)
-	}
-	if len(incidentMembers) == 0 || incidentMembers[0] != "domain-agent" {
-		t.Fatalf("the incident root's members projection must name its domain-agent entry, got %v", incidentMembers)
-	}
+	assertOpenRootsSurvey(t, out, incident.Name, cronRoot.Name)
 
 	// The reaper re-invokes the incident's own domain-agent entry to re-check
 	// it, as a plain member of the cron-triggered root — scripted here to
@@ -269,4 +227,65 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	if ownCode != 403 {
 		t.Fatalf("want 403 closing the reaper's own ancestor root, got %d %v", ownCode, ownOut)
 	}
+}
+
+// waitForCronRoot waits for the conversation the cron source's signal opened.
+func waitForCronRoot(ctx context.Context, t *testing.T, e *Env, cronSrc string) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	var cronRoot *agentopsv1alpha1.Conversation
+	waitFor(t, "a conversation from the self-heal cron source", 4*time.Minute, func() (bool, error) {
+		items, err := e.K.Conversations(ctx)
+		if err != nil {
+			return false, err
+		}
+		for i := range items {
+			c := &items[i]
+			if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == cronSrc {
+				cronRoot = c
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	return cronRoot
+}
+
+// assertOpenRootsSurvey checks a list_open_roots answer: it names the incident
+// sibling with its domain-agent member and excludes the caller's ancestor root.
+func assertOpenRootsSurvey(t *testing.T, out map[string]any, incident, ancestor string) {
+	t.Helper()
+	roots, _ := out["roots"].([]any)
+	var sawIncident, sawOwnAncestor bool
+	var incidentMembers []string
+	for _, r := range roots {
+		root, _ := r.(map[string]any)
+		switch name, _ := root["name"].(string); name {
+		case incident:
+			sawIncident = true
+			incidentMembers = stringMembers(root["members"])
+		case ancestor:
+			sawOwnAncestor = true
+		}
+	}
+	if !sawIncident {
+		t.Fatalf("list_open_roots must return the open incident sibling root, got %v", roots)
+	}
+	if sawOwnAncestor {
+		t.Fatalf("list_open_roots must EXCLUDE the reaper's own ancestor root (the cron-triggered root), got %v", roots)
+	}
+	if len(incidentMembers) == 0 || incidentMembers[0] != "domain-agent" {
+		t.Fatalf("the incident root's members projection must name its domain-agent entry, got %v", incidentMembers)
+	}
+}
+
+// stringMembers reads a decoded JSON array of strings, skipping anything else.
+func stringMembers(v any) []string {
+	var out []string
+	ms, _ := v.([]any)
+	for _, m := range ms {
+		if s, ok := m.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

@@ -1104,11 +1104,17 @@ already returns, plus `members`.
 
 ### Read tools
 
-The four read tools — `list_agents`, `list_conversations`, `get_conversation`
-and `get_tree` — cover Conversations and the caller's own Coordinator's
-`agents[]` entries, filtered to what the calling Coordinator lists and what it
-caused. Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels
-have no reader here.
+The five read tools — `list_agents`, `list_conversations`, `get_conversation`,
+`get_tree` and `list_open_roots` — cover Conversations and the caller's own
+Coordinator's `agents[]` entries, filtered to what the calling Coordinator
+lists and what it caused.
+
+`list_open_roots` is the exception to "what it caused". It lists the
+Coordinator's other open, uncaused roots, for a caller that resolves to a
+Coordinator.
+
+Pipelines, AgentCapabilities, Coordinators, SignalSources and Channels have no
+reader here.
 
 `list_conversations` carries `brief` beside name, title, phase and pipeline,
 so a caller deciding WHICH conversation it means never has to `read` one

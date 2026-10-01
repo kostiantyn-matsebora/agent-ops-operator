@@ -90,6 +90,9 @@ DOCUMENTED_PLACEHOLDERS = {
     # values the field accepts, not an invented example.
     "pipelines",
 }
+# A value too generic to prove documentation by bare substring is anchored to
+# the chart text that actually documents it.
+PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines"}
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
     "placeholder:token",
@@ -625,7 +628,7 @@ def assert_placeholders() -> list[str]:
                     f"{what}: {key}={value!r} is not a declared placeholder. "
                     f"Add it to DOCUMENTED_PLACEHOLDERS only once it names nothing real."
                 )
-            elif value not in values:
+            elif PLACEHOLDER_ANCHORS.get(value, value) not in values:
                 problems.append(
                     f"{what}: {key}={value!r} is no longer documented by any "
                     f"chart values file. The site and the chart must name the SAME "

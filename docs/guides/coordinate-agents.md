@@ -334,9 +334,10 @@ domain tools of its own.
   class described below.
 - **It never closes the root that invoked it.** That root is excluded from
   its own `list_open_roots` call.
-- **Domain agents may also close themselves, in-turn.** Every bundle's
-  profile now carries an instruction to reply `/close` once it judges a
-  problem resolved — the same `/close` a person types, reused unchanged.
+- **Domain agents may also close themselves, in-turn, where a thread is
+  bound.** Every bundle's profile carries an instruction to reply `/close`
+  once it judges a problem resolved. It is the same `/close` a person types,
+  and does nothing in a member conversation, which has no thread.
 
 ### Coordinator-owner reach: how the reaper sees its own roots
 
