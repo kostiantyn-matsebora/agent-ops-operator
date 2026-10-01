@@ -46,6 +46,7 @@ workflows:
             owned_by: "fire"
           - event: "merge:plain"
             to: done
+            guard: "all_prs_merged"
           - event: "merge:finished_stalled"
             to: stalled
       done:
@@ -71,6 +72,7 @@ workflows:
         transitions:
           - event: "merge:plain"
             to: done
+            guard: "all_prs_merged"
       done:
         final: true
 
@@ -90,5 +92,6 @@ workflows:
         transitions:
           - event: "merge:finalize_pr"
             to: finalized
+            guard: "all_prs_merged"
       finalized:
         final: true

@@ -12,7 +12,7 @@ stateDiagram-v2
     state done
     stalled --> fixing : round.start
     fixing --> mergeable : pr.green
-    mergeable --> done : merge.plain
+    mergeable --> done : merge.plain [all_prs_merged]
     done --> [*]
     class stalled, fixing, mergeable, done stationState
     state fixing {
