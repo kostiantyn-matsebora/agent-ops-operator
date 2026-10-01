@@ -1,26 +1,26 @@
 stateDiagram-v2
     direction LR
-    [*] --> ready
-    note left of ready
+    [*] --> station_ready
+    note left of station_ready
         conveyor.implement  --  subject: issue
     end note
     classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
-    state ready
-    state implementing
-    state implemented
-    state implemented_with_issues
-    state ready_to_merge
-    state done
-    state merge_failed
-    ready --> implementing : implement_fired [has_access AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement_fired [has_access AND NOT is_session_at_work] / fire
-    implementing --> implemented : prs_are_created [has_open_prs]
-    implemented --> ready_to_merge : checks_completed [all_pr_mergeable]
-    implemented --> implemented_with_issues : checks_completed [NOT all_pr_mergeable]
-    ready_to_merge --> done : all_prs_merged [all_prs_merged AND master_is_green]
-    ready_to_merge --> merge_failed : all_prs_merged [all_prs_merged AND NOT master_is_green]
-    implemented_with_issues --> [*]
-    done --> [*]
-    merge_failed --> [*]
-    class ready, implementing, implemented, implemented_with_issues, ready_to_merge, done, merge_failed stationState
+    state "station:ready" as station_ready
+    state "station:implementing" as station_implementing
+    state "station:implemented" as station_implemented
+    state "station:implemented_with_issues" as station_implemented_with_issues
+    state "station:ready_to_merge" as station_ready_to_merge
+    state "station:done" as station_done
+    state "station:merge_failed" as station_merge_failed
+    station_ready --> station_implementing : conveyor.implement [has_access AND NOT is_session_at_work] / fire
+    station_implementing --> station_implementing : conveyor.implement [has_access AND NOT is_session_at_work] / fire
+    station_implementing --> station_implemented : prs_are_created [has_open_prs]
+    station_implemented --> station_ready_to_merge : checks_completed [all_pr_mergeable]
+    station_implemented --> station_implemented_with_issues : checks_completed [NOT all_pr_mergeable]
+    station_ready_to_merge --> station_done : all_prs_merged [all_prs_merged AND master_is_green]
+    station_ready_to_merge --> station_merge_failed : all_prs_merged [all_prs_merged AND NOT master_is_green]
+    station_implemented_with_issues --> [*]
+    station_done --> [*]
+    station_merge_failed --> [*]
+    class station_ready, station_implementing, station_implemented, station_implemented_with_issues, station_ready_to_merge, station_done, station_merge_failed stationState

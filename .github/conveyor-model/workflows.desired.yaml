@@ -6,22 +6,22 @@ workflows:
     subject: issue
     acts_on: station
     states:
-      none:
+      station:none:
         initial: true
         transitions:
           - event: "proposal_pr_opened"
-            to: proposing
-      proposing:
+            to: station:proposing
+      station:proposing:
         invokes: loop
         transitions:
           - event: "loop_entered_mergeable"
-            to: proposed
+            to: station:proposed
             guard: "proposal_pr_is_mergeable"
-      proposed:
+      station:proposed:
         transitions:
           - event: "proposal_pr_merged"
-            to: ready
-      ready:
+            to: station:ready
+      station:ready:
         final: true
 
   conveyor.implement:
@@ -29,128 +29,128 @@ workflows:
     subject: issue
     acts_on: station
     states:
-      ready:
+      station:ready:
         initial: true
         transitions:
-          - event: "implement_fired"
-            to: implementing
+          - event: "conveyor:implement"
+            to: station:implementing
             guard: "has_access AND NOT is_session_at_work"
             owned_by: "fire"
-      implementing:
+      station:implementing:
         transitions:
-          - event: "implement_fired"
-            to: implementing
+          - event: "conveyor:implement"
+            to: station:implementing
             guard: "has_access AND NOT is_session_at_work"
             owned_by: "fire"
           - event: "prs_are_created"
-            to: implemented
+            to: station:implemented
             guard: "has_open_prs"
-      implemented:
+      station:implemented:
         transitions:
           - event: "checks_completed"
-            to: ready_to_merge
+            to: station:ready_to_merge
             guard: "all_pr_mergeable"
           - event: "checks_completed"
-            to: implemented_with_issues
+            to: station:implemented_with_issues
             guard: "NOT all_pr_mergeable"
-      implemented_with_issues:
+      station:implemented_with_issues:
         final: true
-      ready_to_merge:
+      station:ready_to_merge:
         transitions:
           - event: "all_prs_merged"
-            to: done
+            to: station:done
             guard: "all_prs_merged AND master_is_green"
           - event: "all_prs_merged"
-            to: merge_failed
+            to: station:merge_failed
             guard: "all_prs_merged AND NOT master_is_green"
-      done:
+      station:done:
         final: true
-      merge_failed:
+      station:merge_failed:
         final: true
 
   conveyor.fix:
     subject: issue
     acts_on: station
     states:
-      implemented_with_issues:
+      station:implemented_with_issues:
         initial: true
         transitions:
-          - event: "round_started"
-            to: fixing
-      merge_failed:
+          - event: "loop:fix"
+            to: station:fixing
+      station:merge_failed:
         initial: true
         transitions:
           - event: "hotfix_started"
-            to: hotfix_created
+            to: station:hotfix_created
             guard: "hotfix_pr_is_created AND all_checks_ran"
-      hotfix_created:
+      station:hotfix_created:
         transitions:
-          - event: "round_started"
-            to: fixing
-      fixing:
+          - event: "loop:fix"
+            to: station:fixing
+      station:fixing:
         invokes: loop
         transitions:
           - event: "loop_entered_mergeable"
-            to: mergeable
-      mergeable:
+            to: station:mergeable
+      station:mergeable:
         transitions:
           - event: "all_prs_merged"
-            to: done
+            to: station:done
             guard: "all_prs_merged"
-      done:
+      station:done:
         final: true
 
   conveyor.finalize:
     subject: issue
     acts_on: station
     states:
-      done:
+      station:done:
         initial: true
         transitions:
-          - event: "finalize_fired"
-            to: finalizing
+          - event: "conveyor:finalize"
+            to: station:finalizing
             guard: "has_access AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
-      finalizing:
+      station:finalizing:
         invokes: loop
         transitions:
           - event: "all_prs_merged"
-            to: finalized
+            to: station:finalized
             guard: "all_prs_merged"
-      finalized:
+      station:finalized:
         final: true
 
   loop:
     subject: pull_request
     acts_on: loop
     states:
-      started:
+      round:started:
         initial: true
         transitions:
-          - event: "round_started"
-            to: fixing
+          - event: "loop:fix"
+            to: round:fixing
             guard: "has_access"
-      fixing:
+      round:fixing:
         transitions:
           - event: "round_finished"
-            to: mergeable
+            to: round:mergeable
             guard: "session_finished AND checks_completed AND pr_is_mergeable"
           - event: "round_finished"
-            to: fixing_failed
+            to: round:fixing_failed
             guard: "session_finished AND checks_completed AND NOT pr_is_mergeable"
-      mergeable: {}
-      fixing_failed:
+      round:mergeable: {}
+      round:fixing_failed:
         transitions:
-          - event: "round_started"
-            to: fixing
+          - event: "loop:fix"
+            to: round:fixing
             guard: "NOT is_capped"
-          - event: "restarted"
-            to: restarted
+          - event: "loop:restart"
+            to: round:restarted
             guard: "is_capped AND reset AND has_access"
-      restarted:
+      round:restarted:
         transitions:
-          - event: "round_started"
-            to: fixing
+          - event: "loop:fix"
+            to: round:fixing
             guard: "has_access"
 
   conveyor.run:
@@ -158,35 +158,35 @@ workflows:
     subject: issue
     acts_on: station
     states:
-      none:
+      station:none:
         initial: true
         invokes: conveyor.propose
         transitions:
           - event: "propose_entered_ready"
-            to: ready
-      ready:
+            to: station:ready
+      station:ready:
         invokes: conveyor.implement
         transitions:
           - event: "implement_entered_done"
-            to: done
+            to: station:done
           - event: "implement_entered_implemented_with_issues"
-            to: implemented_with_issues
+            to: station:implemented_with_issues
           - event: "implement_entered_merge_failed"
-            to: merge_failed
-      implemented_with_issues:
+            to: station:merge_failed
+      station:implemented_with_issues:
         invokes: conveyor.fix
         transitions:
           - event: "fix_entered_done"
-            to: done
-      merge_failed:
+            to: station:done
+      station:merge_failed:
         invokes: conveyor.fix
         transitions:
           - event: "fix_entered_done"
-            to: done
-      done:
+            to: station:done
+      station:done:
         invokes: conveyor.finalize
         transitions:
           - event: "finalize_entered_finalized"
-            to: finalized
-      finalized:
+            to: station:finalized
+      station:finalized:
         final: true

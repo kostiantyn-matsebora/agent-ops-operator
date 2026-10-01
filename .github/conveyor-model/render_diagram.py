@@ -74,9 +74,10 @@ def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[s
     # conveyor.fix invoked from both implemented_with_issues and merge_failed),
     # and Mermaid treats two composites declaring the identical alias as one
     # shared node, merging their boxes visually. Verified live.
-    dep_id = f"{mmd_id(at_state)}__{mmd_id(dep_name)}"
+    at_id = mmd_id(at_state)
+    dep_id = f"{at_id}__{mmd_id(dep_name)}"
     return [
-        f"    state {at_state} {{",
+        f"    state {at_id} {{",
         f"        [*] --> {dep_id}",
         f"        state \"{dep_name}\" as {dep_id}",
         "    }",
@@ -100,6 +101,13 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     """
     states: dict = w["states"]
     state_ids = list(states.keys())
+
+    # A state's real id IS its real label (station:none, round:fixing), and
+    # Mermaid's node-name syntax cannot carry the `:` a real label needs --
+    # the same gotcha edge labels already have, now on node names too.
+    # `mmd_id()` sanitizes the NODE NAME only; `state "station:none" as
+    # station_none` keeps the real label visible as the drawn text.
+    ids = {sid: mmd_id(sid) for sid in state_ids}
 
     lines = [
         "stateDiagram-v2",
@@ -137,11 +145,12 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     else:
         entries = [state_ids[0]]
     entry = entries[0]
+    entry_id = ids.get(entry, entry)
     idx = lines.index("    direction LR") + 1
     for offset, sid in enumerate(entries):
-        lines.insert(idx + offset, f"    [*] --> {sid}")
+        lines.insert(idx + offset, f"    [*] --> {ids.get(sid, sid)}")
     note_idx = idx + len(entries)
-    lines.insert(note_idx, f"    note left of {entry}")
+    lines.insert(note_idx, f"    note left of {entry_id}")
     lines.insert(note_idx + 1, f"        {name}  --  subject: {w['subject']}")
     lines.insert(note_idx + 2, "    end note")
 
@@ -149,13 +158,13 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
         shared = next(iter(non_empty.values()))
         lines.append('    state "*" as any_state')
         for sid in state_ids:
-            lines.append(f"    state {sid}")
+            lines.append(f"    state \"{sid}\" as {ids[sid]}")
         by_to: dict[str, list[tuple[str, str, str]]] = {}
         for ev, guard, owned_by, to in shared:
             by_to.setdefault(to, []).append((ev, guard, owned_by))
         for to, triples in sorted(by_to.items()):
             for ev, guard, owned_by in sorted(triples):
-                lines.append(f"    any_state --> {to} : {edge_label(ev, guard, owned_by)}")
+                lines.append(f"    any_state --> {ids.get(to, to)} : {edge_label(ev, guard, owned_by)}")
         covered = set(non_empty.keys())
         excluded = [sid for sid in state_ids if sid not in covered]
         if excluded:
@@ -164,17 +173,17 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
             lines.append(f"    end note")
     else:
         for sid in state_ids:
-            lines.append(f"    state {sid}")
+            lines.append(f"    state \"{sid}\" as {ids[sid]}")
         for sid, s in states.items():
             for t in s.get("transitions", []):
-                lines.append(f"    {sid} --> {t['to']} : "
+                lines.append(f"    {ids[sid]} --> {ids.get(t['to'], t['to'])} : "
                              f"{edge_label(t['event'], t.get('guard'), t.get('owned_by'))}")
 
     for sid in final_states:
         if not all_same or sid != entry:
-            lines.append(f"    {sid} --> [*]")
+            lines.append(f"    {ids.get(sid, sid)} --> [*]")
 
-    colored = list(state_ids) + (["any_state"] if all_same else [])
+    colored = [ids[sid] for sid in state_ids] + (["any_state"] if all_same else [])
     lines.append(f"    class {', '.join(colored)} {state_class}")
 
     # `invokes:` ON A STATE NAMES A REAL SUB-WORKFLOW -- drawn as a nested

@@ -1,19 +1,19 @@
 stateDiagram-v2
     direction LR
-    [*] --> done
-    note left of done
+    [*] --> station_done
+    note left of station_done
         conveyor.finalize  --  subject: issue
     end note
     classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
     classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
-    state done
-    state finalizing
-    state finalized
-    done --> finalizing : finalize_fired [has_access AND is_change_finished AND NOT is_session_at_work] / fire
-    finalizing --> finalized : all_prs_merged [all_prs_merged]
-    finalized --> [*]
-    class done, finalizing, finalized stationState
-    state finalizing {
-        [*] --> finalizing__loop
-        state "loop" as finalizing__loop
+    state "station:done" as station_done
+    state "station:finalizing" as station_finalizing
+    state "station:finalized" as station_finalized
+    station_done --> station_finalizing : conveyor.finalize [has_access AND is_change_finished AND NOT is_session_at_work] / fire
+    station_finalizing --> station_finalized : all_prs_merged [all_prs_merged]
+    station_finalized --> [*]
+    class station_done, station_finalizing, station_finalized stationState
+    state station_finalizing {
+        [*] --> station_finalizing__loop
+        state "loop" as station_finalizing__loop
     }
