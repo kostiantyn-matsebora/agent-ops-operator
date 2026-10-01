@@ -10,10 +10,10 @@ stateDiagram-v2
     state implementing
     state done
     state stalled
-    ready --> implementing : implement fired [has_access placer AND NOT is_session_at_work] / fire
-    ready --> implementing : implement fired [has_access grant_placer AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement fired [has_access placer AND NOT is_session_at_work] / fire
-    implementing --> implementing : implement fired [has_access grant_placer AND NOT is_session_at_work] / fire
+    ready --> implementing : implement fired [placer_has_access AND NOT is_session_at_work] / fire
+    ready --> implementing : implement fired [grant_placer_has_access AND NOT is_session_at_work] / fire
+    implementing --> implementing : implement fired [placer_has_access AND NOT is_session_at_work] / fire
+    implementing --> implementing : implement fired [grant_placer_has_access AND NOT is_session_at_work] / fire
     implementing --> done : implementing pr merged [all_pr_merged]
     implementing --> stalled : implementing pr merged [NOT all_pr_merged]
     done --> [*]

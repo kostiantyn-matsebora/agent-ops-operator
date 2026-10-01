@@ -36,21 +36,21 @@ workflows:
         transitions:
           - event: "implement fired"
             to: implementing
-            guard: "has_access placer AND NOT is_session_at_work"
+            guard: "placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
           - event: "implement fired"
             to: implementing
-            guard: "has_access grant_placer AND NOT is_session_at_work"
+            guard: "grant_placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
       implementing:
         transitions:
           - event: "implement fired"
             to: implementing
-            guard: "has_access placer AND NOT is_session_at_work"
+            guard: "placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
           - event: "implement fired"
             to: implementing
-            guard: "has_access grant_placer AND NOT is_session_at_work"
+            guard: "grant_placer_has_access AND NOT is_session_at_work"
             owned_by: "fire"
           - event: "implementing pr merged"
             to: done
@@ -94,11 +94,11 @@ workflows:
         transitions:
           - event: "finalize fired"
             to: finalizing
-            guard: "has_access placer AND is_change_finished AND NOT is_session_at_work"
+            guard: "placer_has_access AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
           - event: "finalize fired"
             to: finalizing
-            guard: "has_access grant_placer AND is_change_finished AND NOT is_session_at_work"
+            guard: "grant_placer_has_access AND is_change_finished AND NOT is_session_at_work"
             owned_by: "fire"
       finalizing:
         invokes: loop

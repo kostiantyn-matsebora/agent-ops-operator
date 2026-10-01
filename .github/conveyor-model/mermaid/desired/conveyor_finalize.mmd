@@ -9,8 +9,8 @@ stateDiagram-v2
     state done
     state finalizing
     state finalized
-    done --> finalizing : finalize fired [has_access placer AND is_change_finished AND NOT is_session_at_work] / fire
-    done --> finalizing : finalize fired [has_access grant_placer AND is_change_finished AND NOT is_session_at_work] / fire
+    done --> finalizing : finalize fired [placer_has_access AND is_change_finished AND NOT is_session_at_work] / fire
+    done --> finalizing : finalize fired [grant_placer_has_access AND is_change_finished AND NOT is_session_at_work] / fire
     finalizing --> finalized : finalize pr merged [all_pr_merged]
     finalized --> [*]
     class done, finalizing, finalized stationState
