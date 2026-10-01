@@ -55,8 +55,9 @@ session starts.
 
 ### 1. The engine is a single Python package under `.github/scripts/conveyor_engine/`
 
-A package, not a script. It has three independently testable layers (loader,
-trigger matcher, guard registry), each worth its own test file.
+A package, not a script. It has four independently testable layers (loader,
+label mapping, trigger matcher, guard registry), each worth its own test
+file.
 
 **Alternative considered: one flat script.** Rejected. A flat script big
 enough to hold a YAML loader, a trigger matcher and a guard registry
@@ -104,6 +105,38 @@ label in that workflow's own vocabulary, in one call.
 No separate store, file, or second label family holds the state. This is the
 same property the conveyor has always had — the change is who computes the
 next state, not where the result is kept.
+
+### 4a. The label mapping is its own file, read once, separate from the workflow declaration
+
+`.github/conveyor-model/labels.yaml` names every real label a state or a
+`label_placed` trigger uses, which prefix it belongs to, and that prefix's
+propagation rule. `workflows.desired.yaml` never names a real label string
+directly beyond what a state's or trigger's own id already is.
+
+The engine loads this file once alongside the workflow declarations.
+
+Every label read or write goes through it rather than a literal string
+written at the call site.
+
+**Alternative considered: fold the label mapping into `workflows.desired.yaml`
+itself.** Rejected. Labels are the implementation of the workflow
+abstraction, not part of it — the same split `labels.yaml`'s own header
+states.
+
+Mixing them would mean an edit to which real string carries a state is also
+an edit to the abstract workflow file, for no abstract reason.
+
+### 4b. A prefix's propagation rule is applied by the state writer, not by each caller
+
+When the engine writes a label whose prefix is declared `bidirectional`, it
+also writes the matching label on the subject's related pull request(s) (if
+written on an issue) or on the related issue (if written on a pull request).
+
+Both writes happen in the same call.
+
+A caller never computes or requests propagation itself. The propagation
+rule lives in one place, so a workflow that later moves between prefixes, or
+a prefix whose rule changes, needs no caller rewritten.
 
 ### 5. A failed state write never fails the calling job
 

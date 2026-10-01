@@ -25,8 +25,17 @@ YAML is its only source.
   any workflow the YAML declares rather than two hardcoded tables.
 - **A trigger is a real GitHub event or action**, recognized and dispatched to
   the matching workflow/state by name, matching each workflow's own event
-  vocabulary (`implement_fired`, `round_started`, `all_prs_merged`, and so
-  on) — no event name is invented at runtime that the YAML does not declare.
+  vocabulary (`conveyor:implement`, `loop:fix`, `all_prs_merged`, and so on)
+  — no event name is invented at runtime that the YAML does not declare.
+- **A new file, `.github/conveyor-model/labels.yaml`, is the only source for
+  which real label carries which state or trigger, and how it propagates.**
+  `workflows.desired.yaml` states the abstraction. `labels.yaml` states the
+  implementation. Every trigger whose nature is `label_placed` names its real
+  label and the prefix it belongs to (`conveyor:*` on the issue, `loop:*` on
+  the pull request). Every state's id already is its real label
+  (`station:*` on the issue, `round:*` on the pull request). A prefix's
+  propagation rule — `bidirectional` or `none` — decides whether placing it
+  on one subject writes the matching label on the other.
 - **Every guard is a real predicate implementation**, evaluated against live
   GitHub state: `has_access`, `is_session_at_work`, `is_change_finished`,
   `all_pr_mergeable`, `all_prs_merged`, `pr_is_mergeable`, `has_open_prs`,
