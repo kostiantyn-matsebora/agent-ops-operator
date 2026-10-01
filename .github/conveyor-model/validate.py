@@ -17,6 +17,15 @@ Checks:
   3. No duplicate (from, event) pairs claim two different `to` targets
      within one workflow -- that would make the machine non-deterministic
      for the same trigger.
+  4. Every `invokes:` entry maps a state this workflow actually declares to
+     a workflow that actually exists -- an invocation naming either wrong
+     is exactly the kind of prose-pretending-to-be-structure this format
+     exists to make impossible.
+
+Also checks workflows.desired.yaml (target designs, not yet implemented)
+against itself AND against workflows.yaml, since a desired workflow's
+`invokes:` commonly names an already-verified real workflow (e.g.
+`propose` invokes `loop`) -- that reference has to resolve too.
 """
 from __future__ import annotations
 
@@ -53,6 +62,13 @@ def check_workflow(name: str, w: dict, all_workflows: dict) -> list[str]:
             problems.append(f"{name}: ({t['from']!r}, {t['event']!r}) declared to both "
                              f"{seen[key]!r} and {t['to']!r} -- non-deterministic")
         seen[key] = t["to"]
+
+    for state, dep_name in w.get("invokes", {}).items():
+        if state not in states:
+            problems.append(f"{name}: invokes.{state} -- {state!r} is not in this workflow's own states")
+        if dep_name not in all_workflows:
+            problems.append(f"{name}: invokes.{state}: {dep_name!r} -- no such workflow declared")
+
     return problems
 
 
@@ -63,12 +79,21 @@ def main() -> int:
     for name, w in workflows.items():
         problems += check_workflow(name, w, workflows)
 
+    desired_path = HERE / "workflows.desired.yaml"
+    if desired_path.exists():
+        desired = load("workflows.desired.yaml")["workflows"]
+        # a desired workflow may invoke either another desired one or an
+        # already-verified real one -- both pools are visible to it.
+        combined = {**workflows, **desired}
+        for name, w in desired.items():
+            problems += check_workflow(f"[DESIRED] {name}", w, combined)
+
     if problems:
         print(f"{len(problems)} problem(s):")
         for p in problems:
             print(f"  - {p}")
         return 1
-    print("workflows.yaml is internally consistent.")
+    print("workflows.yaml and workflows.desired.yaml are internally consistent.")
     return 0
 
 

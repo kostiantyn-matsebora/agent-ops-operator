@@ -1,81 +1,24 @@
-# DESIRED workflows -- NOT YET IMPLEMENTED. Unlike workflows.yaml (which is
-# verified against conveyor.py's real, already-shipped behavior), every
-# entry here is a TARGET DESIGN: what we intend to build, not what exists.
-#
-# Never merge this into workflows.yaml by copying. When a desired workflow
-# is actually implemented, workflows.yaml is re-extracted/re-verified
-# against the real code the normal way, and the corresponding entry here is
-# removed (implemented, not duplicated).
-#
-# `guard:` IS A CONDITION IN FUNCTION-CALL SYNTAX, same rule as
-# workflows.yaml: every predicate is `name(arguments)`, never bare
-# attribute access or an inline conditional. AND / OR / NOT / == stay as
-# infix operators.
-#
-# DEPENDS ON `loop` -- declared in full below (NOT a copy: this IS the same
-# workflow already verified in workflows.yaml, restated here only so a
-# reader of this file does not have to cross-reference the other one to
-# know what `is_mergeable(proposal_pr)` means). When `propose` ships, this
-# `loop` entry is deleted from this file; it never becomes a second,
-# diverging copy.
-
 version: 1
 
 workflows:
-
-  loop:
-    subject: pull_request
-    acts_on: loop
-    status: ALREADY IMPLEMENTED -- see workflows.yaml's own `loop` entry; restated here only as a reference for `propose`'s guards below, never a second copy to maintain
-    states: [none, running, waiting, stalled, capped, mergeable]
 
   propose:
     subject: issue
     acts_on: station
     initial: null
-    status: DESIRED -- not yet implemented
-    note: >
-      THE GAP THIS FILLS: today, `none` means both "nothing has happened to
-      this issue" AND "a proposal PR is open and mergeable" -- conveyor.py
-      makes no distinction, and there is no real station for "a proposal PR
-      exists but is not mergeable yet" either (CI still running, or under
-      review). This workflow introduces TWO new real station values between
-      none and implement: proposing (the PR exists, is not yet mergeable)
-      and proposed (the PR is mergeable) -- so "ready to implement" becomes
-      a checkable fact instead of something a person verifies by hand
-      before placing conveyor:run.
-
-      `proposal_pr` in the guards below is the openspec change's proposal
-      pull request specifically -- it runs the SAME `loop` workflow
-      declared above, read against a different pull request than the one
-      loop already governs today (the change's eventual implementation
-      PR). Both run the identical lifecycle; only which PR is being read
-      differs.
-    states: [none, proposing, proposed]
+    states: [none, proposing, proposed, merged]
+    invokes:
+      proposing: loop
     transitions:
       - from: none
         event: "proposal:pr_opened"
         to: proposing
         guard: "exists(proposal_pr)"
-        note: >
-          the real moment /opsx:propose pushes the branch and opens the
-          pull request -- a person or the `/opsx:propose` session, not an
-          automated trigger. proposal_pr's own loop machine starts here,
-          at loop:none, the same way any pull request's loop does.
       - from: proposing
         event: "proposal:mergeable"
         to: proposed
         guard: "is_mergeable(proposal_pr)"
-        note: >
-          reuses loop:mergeable's real definition -- CI green, no open
-          review thread -- rather than restating it as prose. The three
-          artifacts (proposal.md, design.md, tasks.md) being committed on
-          that PR is what loop's own real checks (CI, review) verify; this
-          guard does not re-check their content separately.
-
-  # station:implement's real entry conditions (fire:implement,
-  # merge:proposal_or_apply) would gain an additional real guard once this
-  # ships: the issue must be AT station:proposed, not bare none, before
-  # conveyor:run / conveyor:implement may fire it into implement. That
-  # change to the EXISTING conveyor.implement / conveyor.run entries is not
-  # drafted here yet -- confirm the `proposing`/`proposed` stations first.
+      - from: proposed
+        event: "proposal:pr_merged"
+        to: merged
+        guard: "is_merged(proposal_pr)"

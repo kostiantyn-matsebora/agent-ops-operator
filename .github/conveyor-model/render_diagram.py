@@ -61,7 +61,27 @@ def edge_label(ev: str, guard: str | None, owned_by: str | None) -> str:
     return label
 
 
-def render_workflow(name: str, w: dict) -> str:
+def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[str]:
+    """`w["invokes"]` maps a STATE to another REAL workflow that runs as its
+    sub-machine while that state is active -- drawn as a REFERENCE, not a
+    duplicate of its internals. `loop` already has its own full, legible
+    diagram; redrawing all six of its states and every transition a second
+    time inside the invoking workflow is redundant and makes the parent
+    diagram dense for no reason. This draws one labeled placeholder state
+    naming what runs, with a note pointing at the real diagram -- the
+    invocation is visible in the PICTURE, never left in prose, without
+    inlining a second copy of a machine that already exists elsewhere."""
+    ref_id = f"{at_state}__{dep_name}"
+    return [
+        f'    state "invokes: {dep_name}" as {ref_id}',
+        f"    {at_state} --> {ref_id}",
+        f"    note right of {ref_id}",
+        f"        see {dep_name}.mmd for its full states/transitions",
+        f"    end note",
+    ]
+
+
+def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> str:
     """One conveyor, drawn exactly as workflows.yaml declares it -- every
     state, every transition, every guard it lists, nothing inferred.
 
@@ -162,6 +182,21 @@ def render_workflow(name: str, w: dict) -> str:
     colored = list(w["states"]) + (["any_state"] if all_same else [])
     lines.append(f"    class {', '.join(colored)} {state_class}")
 
+    # `invokes:` MAPS A STATE TO A REAL SUB-WORKFLOW -- drawn as a nested
+    # composite, never left in prose a program cannot follow. An `invokes:`
+    # entry naming a state this workflow does not declare, or a workflow
+    # that does not exist, is a real inconsistency -- surfaced as a visible
+    # error marker on the diagram, never silently skipped.
+    for state, dep_name in w.get("invokes", {}).items():
+        if state not in w["states"]:
+            lines.append(f"    %% ERROR: invokes.{state} -- {state!r} is not in this workflow's own states")
+            continue
+        dep = (all_workflows or {}).get(dep_name)
+        if dep is None:
+            lines.append(f"    %% ERROR: invokes.{state}: {dep_name} -- no such workflow")
+            continue
+        lines += render_invoked_submachine(dep_name, dep, state)
+
     return "\n".join(lines)
 
 
@@ -175,7 +210,7 @@ def main() -> int:
 
     for name, w in workflows.items():
         safe = name.replace(".", "_").replace(":", "_")
-        (out_dir / f"{safe}.mmd").write_text(render_workflow(name, w) + "\n")
+        (out_dir / f"{safe}.mmd").write_text(render_workflow(name, w, all_workflows=workflows) + "\n")
 
     print(f"wrote {len(list(out_dir.glob('*.mmd')))} mermaid files to {out_dir}")
     print("one diagram per conveyor, every edge is event [guard] / owner inline.")
@@ -197,7 +232,7 @@ def main() -> int:
             if "transitions" not in w:
                 continue
             safe = name.replace(".", "_").replace(":", "_")
-            text = render_workflow(f"[DESIRED] {name}", w)
+            text = render_workflow(f"[DESIRED] {name}", w, all_workflows=workflows)
             (desired_dir / f"{safe}.mmd").write_text(text + "\n")
         print(f"wrote {len(list(desired_dir.glob('*.mmd')))} DESIRED (not yet implemented) "
               f"mermaid files to {desired_dir}")

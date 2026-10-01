@@ -8,7 +8,14 @@ stateDiagram-v2
     state none
     state proposing
     state proposed
+    state merged
     none --> proposing : proposal.pr_opened [exists(proposal_pr)]
     proposing --> proposed : proposal.mergeable [is_mergeable(proposal_pr)]
-    proposed --> [*]
-    class none, proposing, proposed stationState
+    proposed --> merged : proposal.pr_merged [is_merged(proposal_pr)]
+    merged --> [*]
+    class none, proposing, proposed, merged stationState
+    state "invokes: loop" as proposing__loop
+    proposing --> proposing__loop
+    note right of proposing__loop
+        see loop.mmd for its full states/transitions
+    end note
