@@ -124,66 +124,15 @@ workflows:
     subject: pull_request
     acts_on: loop
     states:
-      none:
+      started:
         initial: true
         transitions:
-          - event: "ci:green_clean"
-            to: mergeable
-            owned_by: "carry_fix()"
-      running:
+          - event: "round_started"
+            to: round_started
+            guard: "has_access"
+      round_started:
         transitions:
-          - event: "end:continue"
-            to: running
-            owned_by: "ending()"
-          - event: "end:mergeable"
-            to: mergeable
-            owned_by: "ending()"
-          - event: "end:waiting"
-            to: waiting
-            owned_by: "ending()"
-          - event: "end:stalled"
-            to: stalled
-            owned_by: "ending()"
-          - event: "end:capped"
-            to: capped
-            owned_by: "ending()"
-          - event: "recover:waiting"
-            to: waiting
-            guard: "NOT is_capped(pr) AND has_open_thread(pr)"
-            owned_by: "recover()"
-          - event: "recover:capped"
-            to: capped
-            guard: "is_capped(pr)"
-            owned_by: "recover()"
-      waiting:
-        transitions:
-          - event: "round:start"
-            to: running
-            owned_by: "gate()"
-          - event: "ci:green_clean"
-            to: mergeable
-            owned_by: "carry_fix()"
-      stalled:
-        transitions:
-          - event: "round:start"
-            to: running
-            owned_by: "gate()"
-          - event: "ci:green_clean"
-            to: mergeable
-            owned_by: "carry_fix()"
-      capped:
-        transitions:
-          - event: "ci:green_clean"
-            to: mergeable
-            owned_by: "carry_fix()"
-      mergeable:
-        transitions:
-          - event: "ci:green_clean"
-            to: mergeable
-            owned_by: "carry_fix()"
-          - event: "thread:opened"
-            to: waiting
-            owned_by: "refresh()"
-          - event: "round:start"
-            to: running
-            owned_by: "gate()"
+          - event: "round_finished"
+            to: round_finished
+            guard: "session_finished AND checks_completed"
+      round_finished: {}
