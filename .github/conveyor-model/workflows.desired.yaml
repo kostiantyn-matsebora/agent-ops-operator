@@ -54,3 +54,25 @@ workflows:
         final: true
       stalled:
         final: true
+
+  conveyor.fix_stalled:
+    subject: issue
+    acts_on: station
+    states:
+      stalled:
+        initial: true
+        transitions:
+          - event: "round:start"
+            to: fix
+      fix:
+        invokes: loop
+        transitions:
+          - event: "pr:green"
+            to: merge
+      merge:
+        transitions:
+          - event: "merge:plain"
+            to: done
+            owned_by: "carry_archive"
+      done:
+        final: true
