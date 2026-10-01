@@ -46,10 +46,10 @@ workflows:
             owned_by: "fire"
           - event: "merge:plain"
             to: done
-            owned_by: "carry_archive"
+            owned_by: "carry_line"
           - event: "merge:finished_stalled"
             to: stalled
-            owned_by: "carry_archive"
+            owned_by: "carry_line"
       done:
         final: true
       stalled:
@@ -73,7 +73,7 @@ workflows:
         transitions:
           - event: "merge:plain"
             to: done
-            owned_by: "carry_archive"
+            owned_by: "carry_line"
       done:
         final: true
 
@@ -93,6 +93,6 @@ workflows:
         transitions:
           - event: "merge:finalize_pr"
             to: finalized
-            owned_by: "carry_archive"
+            owned_by: "carry_finalize"
       finalized:
         final: true

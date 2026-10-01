@@ -10,7 +10,7 @@ stateDiagram-v2
     state finalizing
     state finalized
     done --> finalizing : fire.finalize [has_access placer grant_placer AND is_change_finished line AND NOT is_session_at_work line] / fire
-    finalizing --> finalized : merge.finalize_pr / carry_archive
+    finalizing --> finalized : merge.finalize_pr / carry_finalize
     finalized --> [*]
     class done, finalizing, finalized stationState
     state finalizing {
