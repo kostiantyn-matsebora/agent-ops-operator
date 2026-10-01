@@ -122,11 +122,24 @@ out=$(run)
 assert_equals "error" "$(field 'd["projects"][2]["status"]')"
 rm "$FIXTURES/prs-org_agent-ops-operator_console.json"
 
-it "refuses an --out path that resolves outside the working directory"
+it "refuses an --out path that resolves outside every allowed root"
 out=$(cd "$tmp" && SONAR_TOKEN=t python3 "$S" --organization org --pr 7 --head abc1234 \
   --components components.json --api http://sonar.test --out ../../../../etc/passwd 2>&1); rc=$?
 assert_status 1 "$rc"
-assert_contains "$out" "outside the working directory"
+assert_contains "$out" "outside every allowed root"
+
+# review-dispatch.yml writes every round's scratch to $RUNNER_TEMP/dispatch/,
+# outside the checkout, on purpose (gotchas.md). validated_path must accept
+# that root exactly as it accepts the working directory, or every round dies
+# here before fix/land ever run — the regression this test is for.
+it "accepts an --out path under RUNNER_TEMP, outside the working directory"
+runner_temp=$(mktemp -d); mkdir -p "$runner_temp/dispatch"
+out=$(cd "$tmp" && RUNNER_TEMP="$runner_temp" SONAR_TOKEN=t python3 "$S" --organization org --pr 7 \
+  --head abc1234 --components components.json --api http://sonar.test \
+  --out "$runner_temp/dispatch/sonar.json" 2>&1); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "written to $runner_temp/dispatch/sonar.json"
+rm -rf "$runner_temp"
 
 it "refuses a malformed --api URL rather than handing it to curl"
 out=$(cd "$tmp" && SONAR_TOKEN=t python3 "$S" --organization org --pr 7 --head abc1234 \

@@ -135,11 +135,11 @@ assert_equals "3" "$(field 'd["components"][1]["legacyCount"]')"
 assert_equals "True" "$(field 'd["components"][1]["taxonomyMismatch"]')"
 assert_contains "$out" "TAXONOMY MISMATCH"
 
-it "refuses an --out path that resolves outside the working directory"
+it "refuses an --out path that resolves outside every allowed root"
 out=$(cd "$tmp" && SONAR_TOKEN=t python3 "$S" --organization org --components components.json \
   --api http://sonar.test --out ../../../../etc/passwd 2>&1); rc=$?
 assert_status 1 "$rc"
-assert_contains "$out" "outside the working directory"
+assert_contains "$out" "outside every allowed root"
 
 it "asks nothing of the service without a token, and fails rather than reporting an empty baseline"
 out=$(: > "$CURL_CALLS"; SONAR_TOKEN= python3 "$S" --organization org --components "$tmp/components.json" --out "$tmp/out.json" 2>&1); rc=$?

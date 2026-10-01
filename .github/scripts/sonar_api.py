@@ -34,16 +34,26 @@ def validated_api(raw: str) -> str:
 
 
 def validated_path(raw: pathlib.Path, *, must_exist: bool) -> pathlib.Path:
-    """Canonicalises the path and refuses one that resolves outside the
-    current working directory -- the pythonsecurity:S2083/S8707 remediation
-    (their own compliant example: `os.path.realpath` against `os.getcwd()`,
-    checked with the trailing separator the rule's own "partial path
-    traversal" pitfall warns is required), applied to every CLI-supplied
-    path: `--out`, `--components`, `--components-script`."""
-    base_dir = os.path.realpath(os.getcwd())
+    """Canonicalises the path and refuses one that resolves outside every
+    allowed root -- the pythonsecurity:S2083/S8707 remediation (their own
+    compliant example: `os.path.realpath` against a known root, checked with
+    the trailing separator the rule's own "partial path traversal" pitfall
+    warns is required), applied to every CLI-supplied path: `--out`,
+    `--components`, `--components-script`.
+
+    THE WORKING DIRECTORY IS NOT THE ONLY LEGITIMATE ROOT. `review-dispatch.yml`
+    writes every round's scratch to `$RUNNER_TEMP/dispatch/`, outside the
+    checkout, on purpose -- the fix for a fixer that once committed its
+    scratch into the repository (`gotchas.md`). `RUNNER_TEMP` is therefore an
+    allowed root whenever the environment sets it, beside `os.getcwd()`; a
+    hand run with no such variable keeps the original, narrower check."""
+    bases = [os.path.realpath(os.getcwd())]
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp:
+        bases.append(os.path.realpath(runner_temp))
     resolved = os.path.realpath(str(raw))
-    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):
-        raise SystemExit(f"path resolves outside the working directory: {raw}")
+    if not any(resolved == base or resolved.startswith(base + os.sep) for base in bases):
+        raise SystemExit(f"path resolves outside every allowed root: {raw}")
     result = pathlib.Path(resolved)
     if must_exist and not result.is_file():
         raise SystemExit(f"not a file: {result}")
