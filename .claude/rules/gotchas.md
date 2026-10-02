@@ -317,15 +317,54 @@ A bundle MAY ship its own only when ALL of:
    declared purpose is a turnkey install (`global.demo.enabled`), and then only
    the LEAST-PRIVILEGED route.
 
-| Bundle | Qualifies | `enabled` default | Routes |
-|---|---|---|---|
-| `kubernetes.pipelines` | yes — it owns its whole lane (source, profile, both toolsets), so channels are the only foreign name | **nullable**, so an explicit `false` can decline the route even under demo mode | one |
-| `prometheus.pipelines` | yes, on the same grounds | plain `false` — demo mode never enables that bundle, so there is nothing for an explicit `false` to beat | one |
-| `home-assistant.pipelines` | yes, same plain `false` for the same reason | plain `false` | **two**, because its lane has two privilege levels |
-| `telegram` | **no — the counter-example.** Its routes genuinely span bundles, because a chat surface is answered by an agent from somewhere else | — | none |
+| Bundle | Qualifies | `enabled` default | Routes | `coordinator` mode |
+|---|---|---|---|---|
+| `kubernetes.pipelines` | yes — it owns its whole lane (source, profile, both toolsets), so channels are the only foreign name | **nullable**, so an explicit `false` can decline the route even under demo mode | one | SAME flag, SAME routes — `k8s-observe` / `k8s-operate` render as standalone `AgentCapability` objects instead of inline Pipelines, claimed by the chart-rendered Coordinator |
+| `prometheus.pipelines` | yes, on the same grounds | plain `false` — demo mode never enables that bundle, so there is nothing for an explicit `false` to beat | one | one `AgentCapability` (`alert-investigator`, named for the PROFILE rather than the route — this bundle ships exactly one) |
+| `home-assistant.pipelines` | yes, same plain `false` for the same reason | plain `false` | **two**, because its lane has two privilege levels | two `AgentCapability` objects (`ha-control` / `ha-ops`), never merged — same privilege split |
+| `telegram` | **no — the counter-example.** Its routes genuinely span bundles, because a chat surface is answered by an agent from somewhere else | — | none | none — unaffected by `wiringMode`, same as `pipelines` mode |
 
 **`home-assistant`'s acting route claims the log source and NO chat source**, so
 reaching it is `/ha-ops <task>` and never an accident.
+
+**`global.agentops.wiringMode` (coordinator-deployment-mode) PICKS WHICH OBJECT
+A QUALIFYING BUNDLE RENDERS, NEVER WHETHER IT QUALIFIES.**
+
+- **The same four conditions gate `capabilities.yaml` that gate
+  `pipelines.yaml`** — same flag, same values-supplied foreign names, same
+  per-route profile gate, same demo-mode exception.
+- **Only the rendered KIND changes.** A `Pipeline` under `pipelines` mode, a
+  standalone `AgentCapability` under `coordinator` mode, never both.
+- **An `AgentCapability` carries no wiring of its own.** Claiming the
+  bundle's source, and listing the capability in `agents[]`, is the
+  CHART-RENDERED COORDINATOR's job (`chart/templates/coordinator.yaml`).
+- **Re-derived, not restated.** The Coordinator reads each bundle's own
+  `<bundle>.coordinatorContribution` helper through
+  `agentops.coordinatorContributions` — the SAME bundle-registry pattern
+  `agentops.defaultRuntimeGuard` already uses, so the Coordinator's claims
+  cannot drift from what each bundle actually rendered.
+
+**DEMO MODE'S CONSOLE WIRING DOES NOT CARRY OVER TO COORDINATOR MODE, AND
+THAT IS A KNOWN GAP, NOT A DECISION.**
+
+- **Under `pipelines` mode, `kubernetes/templates/pipelines.yaml` claims the
+  console's source and binds its channel** on the SAME Pipeline the bundle
+  renders (`chart.md`, "THE DEMO WIRES THE CONSOLE").
+- **An `AgentCapability` carries no subscription at all**, so that claim has
+  nowhere to attach under `coordinator` mode, and the chart renders no
+  auto-console-wiring there.
+- **`global.demo.enabled: true` with no `wiringMode` override now defaults to
+  "coordinator"** (`wiring-mode`'s own spec), so a fresh demo install ships a
+  console that cannot start a conversation until someone hand-claims the
+  source on the chart-rendered Coordinator.
+- **Five tests in `platform/manager/internal/integration/charttemplate_test.go`
+  pinned the OLD demo-always-pipelines behaviour** —
+  `TestDemoModeWiresTheObservingRoute`, `TestAllowMutationsPromotesTheRouteToActing`,
+  `TestExplicitRouteValuesBeatTheDerivation`, `TestBothRoutesRenderWithoutConflict`
+  and `TestWiringNamesOnlyWhatWasRendered`. Each now pins `--set
+  global.agentops.wiringMode=pipelines` to keep testing the Pipeline path. That
+  fixes the TEST SUITE, not the console-wiring gap above, which is still open
+  for whoever designs the console's coordinator-mode wiring.
 
 - **Name pipelines for their JOB**, not for the channel they answer on.
 - **A SignalSource is NOT claimed by exactly one pipeline.** Sources are

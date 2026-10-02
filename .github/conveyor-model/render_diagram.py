@@ -61,6 +61,18 @@ def mmd_id(name: str) -> str:
     return name.replace(".", "_").replace(":", "_")
 
 
+def state_class_for(w: dict) -> str:
+    """The classDef a workflow's states wear, by the subject it acts on."""
+    return "stationState" if w["acts_on"] == "station" else "loopState"
+
+
+def require(w: dict, wf_name: str, key: str):
+    """A workflow key the renderer indexes, or an error naming the workflow."""
+    if key not in w:
+        raise KeyError(f"workflow {wf_name!r} in workflows.desired.yaml has no `{key}:`")
+    return w[key]
+
+
 def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[str]:
     """A state's `invokes:` names another REAL workflow that runs AS that
     state's own internal behavior -- drawn as UML composite CONTAINMENT, the
@@ -81,6 +93,7 @@ def render_invoked_submachine(dep_name: str, dep: dict, at_state: str) -> list[s
         f"        [*] --> {dep_id}",
         f"        state \"{dep_name}\" as {dep_id}",
         "    }",
+        f"    class {dep_id} {state_class_for(dep)}",
     ]
 
 
@@ -99,7 +112,9 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     instead. A workflow whose states do NOT all agree is left fully literal
     -- collapsing a real difference would hide it.
     """
-    states: dict = w["states"]
+    states: dict = require(w, name, "states")
+    require(w, name, "acts_on")
+    require(w, name, "subject")
     state_ids = list(states.keys())
 
     # A state's real id IS its real label (station:none, round:fixing), and
@@ -108,14 +123,26 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     # `mmd_id()` sanitizes the NODE NAME only; `state "station:none" as
     # station_none` keeps the real label visible as the drawn text.
     ids = {sid: mmd_id(sid) for sid in state_ids}
+    if len(set(ids.values())) != len(ids):
+        raise ValueError(f"workflow {name!r}: two state ids collapse to one Mermaid node id")
+
+    # Only the classDefs something wears are declared: an unused one is noise.
+    class_defs = {
+        "stationState": "    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f",
+        "loopState": "    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33",
+    }
+    state_class = state_class_for(w)
+    used_classes = {state_class}
+    for s in states.values():
+        dep = (all_workflows or {}).get(s.get("invokes") or "")
+        if dep is not None:
+            used_classes.add(state_class_for(dep))
 
     lines = [
         "stateDiagram-v2",
         "    direction LR",
-        "    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f",
-        "    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33",
+        *[d for k, d in class_defs.items() if k in used_classes],
     ]
-    state_class = "stationState" if w["acts_on"] == "station" else "loopState"
     initial_states = [sid for sid, s in states.items() if s.get("initial")]
     initial = initial_states[0] if initial_states else None
 
@@ -143,8 +170,8 @@ def render_workflow(name: str, w: dict, all_workflows: dict | None = None) -> st
     elif initial_states:
         entries = initial_states
     else:
-        entries = [state_ids[0]]
-    entry = entries[0]
+        entries = []  # no `initial: true` -- no `[*] -->` line at all
+    entry = entries[0] if entries else state_ids[0]  # anchors the note only
     entry_id = ids.get(entry, entry)
     idx = lines.index("    direction LR") + 1
     for offset, sid in enumerate(entries):
@@ -213,7 +240,7 @@ def main() -> int:
         old.unlink()
 
     for name, w in workflows.items():
-        safe = name.replace(".", "_").replace(":", "_")
+        safe = mmd_id(name)
         (out_dir / f"{safe}.mmd").write_text(render_workflow(name, w, all_workflows=workflows) + "\n")
 
     print(f"wrote {len(list(out_dir.glob('*.mmd')))} mermaid files to {out_dir}")

@@ -38,7 +38,7 @@ YAML is its only source.
   on one subject writes the matching label on the other.
 - **Every guard is a real predicate implementation**, evaluated against live
   GitHub state: `has_access`, `is_session_at_work`, `is_change_finished`,
-  `all_pr_mergeable`, `all_prs_merged`, `pr_is_mergeable`, `has_open_prs`,
+  `all_prs_mergeable`, `all_prs_merged`, `pr_is_mergeable`, `has_open_prs`,
   `master_is_green`, `is_capped`, and every other bare predicate the YAML
   names. Each takes no explicit argument, evaluated implicitly against the
   workflow's own declared `subject` (an issue or a pull request).
@@ -113,6 +113,10 @@ YAML is its only source.
   and `.github/workflows/review-dispatch.yml` keep their trigger wiring
   (`issues: labeled`, `workflow_run`, `issue_comment`, `workflow_dispatch`)
   but call the new engine instead of the deleted file.
+- **Docs to re-check**: `docs/security.md`'s "fixing loop's push credential"
+  section describes `conveyor:fix` and the `autofix-guard.py` path, which
+  this change rewires. It is re-read against the engine in the
+  documentation task.
 - **`claude-review.yml` gains a call into the engine for the `review`
   workflow**: a `pull_request` (`opened`/`synchronize`/`ready_for_review`)
   firing `review:pr_pushed`, and the workflow's own conclusion (read by the

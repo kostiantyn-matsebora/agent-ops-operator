@@ -5,7 +5,6 @@ stateDiagram-v2
         conveyor.implement  --  subject: issue
     end note
     classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
-    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state "station:ready" as station_ready
     state "station:implementing" as station_implementing
     state "station:implemented" as station_implemented
@@ -16,8 +15,8 @@ stateDiagram-v2
     station_ready --> station_implementing : conveyor.implement [has_access AND NOT is_session_at_work] / fire
     station_implementing --> station_implementing : conveyor.implement [has_access AND NOT is_session_at_work] / fire
     station_implementing --> station_implemented : prs_are_created [has_open_prs]
-    station_implemented --> station_ready_to_merge : checks_completed [all_pr_mergeable]
-    station_implemented --> station_implemented_with_issues : checks_completed [NOT all_pr_mergeable]
+    station_implemented --> station_ready_to_merge : checks_completed [all_prs_mergeable]
+    station_implemented --> station_implemented_with_issues : checks_completed [NOT all_prs_mergeable]
     station_ready_to_merge --> station_done : all_prs_merged [all_prs_merged AND master_is_green]
     station_ready_to_merge --> station_merge_failed : all_prs_merged [all_prs_merged AND NOT master_is_green]
     station_implemented_with_issues --> [*]

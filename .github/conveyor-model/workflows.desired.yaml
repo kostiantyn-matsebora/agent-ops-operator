@@ -49,10 +49,10 @@ workflows:
         transitions:
           - event: "checks_completed"
             to: station:ready_to_merge
-            guard: "all_pr_mergeable"
+            guard: "all_prs_mergeable"
           - event: "checks_completed"
             to: station:implemented_with_issues
-            guard: "NOT all_pr_mergeable"
+            guard: "NOT all_prs_mergeable"
       station:implemented_with_issues:
         final: true
       station:ready_to_merge:
@@ -138,7 +138,8 @@ workflows:
           - event: "round_finished"
             to: round:fixing_failed
             guard: "session_finished AND checks_completed AND NOT pr_is_mergeable"
-      round:mergeable: {}
+      round:mergeable:
+        final: true
       round:fixing_failed:
         transitions:
           - event: "loop:fix"

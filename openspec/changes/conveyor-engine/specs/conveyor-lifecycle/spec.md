@@ -19,7 +19,7 @@ transition, never by naming the value directly.
 **Unreadable facts fail closed.** Where a guard's underlying read fails, the
 guard SHALL return the answer that does not start new unattended work.
 
-#### Scenario: A caller names an event the table skips
+#### Scenario: A caller names a trigger the table skips
 
 - **WHEN** a green CI arrives for a pull request whose loop workflow declares
   no transition for that trigger from the current state
@@ -31,8 +31,8 @@ guard SHALL return the answer that does not start new unattended work.
   recognized trigger
 - **THEN** it refuses and writes nothing
 
-#### Scenario: The fire records cannot be read
+#### Scenario: A guard's underlying read fails
 
-- **WHEN** a person places the standing instruction and the comments cannot be
-  read
+- **WHEN** a person places the standing instruction and a guard's read of live
+  state fails
 - **THEN** no session starts

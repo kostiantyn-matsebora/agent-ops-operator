@@ -5,7 +5,6 @@ stateDiagram-v2
         conveyor.run  --  subject: issue
     end note
     classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
-    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
     state "station:ready" as station_ready
     state "station:implemented_with_issues" as station_implemented_with_issues
     state "station:merge_failed" as station_merge_failed
@@ -23,15 +22,19 @@ stateDiagram-v2
         [*] --> station_ready__conveyor_implement
         state "conveyor.implement" as station_ready__conveyor_implement
     }
+    class station_ready__conveyor_implement stationState
     state station_implemented_with_issues {
         [*] --> station_implemented_with_issues__conveyor_fix
         state "conveyor.fix" as station_implemented_with_issues__conveyor_fix
     }
+    class station_implemented_with_issues__conveyor_fix stationState
     state station_merge_failed {
         [*] --> station_merge_failed__conveyor_fix
         state "conveyor.fix" as station_merge_failed__conveyor_fix
     }
+    class station_merge_failed__conveyor_fix stationState
     state station_done {
         [*] --> station_done__conveyor_finalize
         state "conveyor.finalize" as station_done__conveyor_finalize
     }
+    class station_done__conveyor_finalize stationState

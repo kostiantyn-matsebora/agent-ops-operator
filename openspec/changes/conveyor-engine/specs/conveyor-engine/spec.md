@@ -90,6 +90,10 @@ An event recognized for a transition whose guard is not satisfied SHALL move
 nothing, even where another transition from the same state and the same
 event, gated by a different guard, is satisfied.
 
+Guards on transitions sharing one state and one event SHALL be mutually
+exclusive. Where more than one evaluates true, the engine SHALL move nothing
+and log an error naming the transitions, rather than pick one.
+
 #### Scenario: A satisfied guard permits its transition
 
 - **WHEN** a recognized event's transition carries a guard that evaluates true

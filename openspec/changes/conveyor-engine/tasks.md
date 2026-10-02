@@ -14,7 +14,7 @@
 - [ ] 2.1 Implement `has_access`, reading the real actor's collaborator permission from the GitHub API, failing closed (treated as no access) on an unreadable permission, and verify a unit test for granted, denied, and unreadable
 - [ ] 2.2 Implement `is_session_at_work`, reading whether a pull request is already open from the subject's own branch, failing closed (treated as a session already at work) on an unreadable pull request list, and verify a unit test for each case
 - [ ] 2.3 Implement `is_change_finished`, reading the bound change's tasks file and checking every task is ticked, failing closed (treated as not finished) on an unreadable file, and verify a unit test for finished, unfinished, and unreadable
-- [ ] 2.4 Implement `has_open_prs`, `all_pr_mergeable`, `pr_is_mergeable`, `all_prs_merged`, and `master_is_green`, each reading the real pull request and check-run state needed, each failing closed toward "not yet" rather than "proceed," and verify a unit test per predicate covering its true, false, and unreadable cases
+- [ ] 2.4 Implement `has_open_prs`, `all_prs_mergeable`, `pr_is_mergeable`, `all_prs_merged`, and `master_is_green`, each reading the real pull request and check-run state needed, each failing closed toward "not yet" rather than "proceed," and verify a unit test per predicate covering its true, false, and unreadable cases
 - [ ] 2.5 Implement `is_capped` and `reset`, reading the loop's own round count and cap against the same bound this repository's `conveyor-lifecycle` capability already publishes, and verify a unit test for under the cap, at the cap, and a granted reset
 - [ ] 2.6 Implement `proposal_pr_is_mergeable` and `hotfix_pr_is_created`/`all_checks_ran`, reading the specific pull requests `conveyor.propose` and `conveyor.fix` name, and verify a unit test per predicate
 - [ ] 2.7 Implement `review_run_succeeded`, `has_open_review_threads`, and `review_run_skipped` for the `review` workflow, reading the pull request's own review run conclusion, its open review-thread count, and the run's own skip condition (never re-derived — read from the run that already happened), each failing closed toward "not yet landed" rather than "clean," and verify a unit test per predicate covering its true, false, and unreadable cases
@@ -52,9 +52,11 @@
 
 ### Reference docs
 
-- [ ] 8.1 Add an entry to `docs/CHANGELOG.md` naming the engine replacing `conveyor.py` and the new standalone `review` workflow it also runs, and verify the entry names every real caller rewired
+- [ ] 8.1 Confirm `docs/CHANGELOG.md` needs no entry (the engine is non-breaking internal delivery tooling with no upgrade step for an adopter), and record that confirmation in this task
 - [ ] 8.2 Confirm `docs/concepts.md` and `docs/contracts.md` need no change (the conveyor is internal delivery tooling, not part of the published product contract), and record that confirmation in this task
+- [ ] 8.3 Re-read `docs/security.md`'s fixing-loop push-credential section against the engine's `conveyor:fix` and `autofix-guard.py` path, and update it where the rewiring made it untrue
+- [ ] 8.4 Add `.github/retired-vocabulary.json` entries retiring `conveyor.py` (write: the conveyor engine) and the lifecycle spec's old "event" and "pure functions" wording (write: "trigger" and "declared workflow"), each with an `allow` pattern for lines recording the removal, and verify the retired-vocabulary guard passes
 
 ### Adopter site
 
-- [ ] 8.3 Confirm the landing page, Introduction, Getting started, Installation page, and every guide under `docs/guides/` need no change (none describes the conveyor), and record that confirmation in this task
+- [ ] 8.5 Confirm the landing page, Introduction, Getting started, Installation page, and every guide under `docs/guides/` need no change (none describes the conveyor), and record that confirmation in this task
