@@ -105,6 +105,12 @@ and log an error naming the transitions, rather than pick one.
   false
 - **THEN** the state does not move to that transition's next state
 
+#### Scenario: Two guards on one event both evaluate true
+
+- **WHEN** a recognized event matches two transitions from the current state
+  and both of their guards evaluate true
+- **THEN** the engine moves nothing and logs an error naming both transitions
+
 #### Scenario: Two transitions on the same event, different guards
 
 - **WHEN** a recognized event matches two transitions from the current state,

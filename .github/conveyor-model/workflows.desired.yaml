@@ -141,6 +141,8 @@ workflows:
       round:mergeable:
         final: true
       round:fixing_failed:
+        # Not final: a person's loop:fix or loop:restart leaves it. While
+        # capped with no reset, it stays put on purpose.
         transitions:
           - event: "loop:fix"
             to: round:fixing

@@ -5,7 +5,7 @@ version: 1
 # this file states which real label string each one uses, what actually
 # causes it (its invocation mechanism), which workflow(s) own it, and how it
 # propagates between an issue and its related pull request(s). Nothing here
-# changes what a workflow means; it only says how its meaning is carried as
+# changes what a workflow means. It only says how that meaning is carried as
 # a real GitHub label.
 
 prefixes:
