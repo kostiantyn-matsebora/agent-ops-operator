@@ -17,7 +17,8 @@
 - [ ] 2.4 Implement `has_open_prs`, `all_pr_mergeable`, `pr_is_mergeable`, `all_prs_merged`, and `master_is_green`, each reading the real pull request and check-run state needed, each failing closed toward "not yet" rather than "proceed," and verify a unit test per predicate covering its true, false, and unreadable cases
 - [ ] 2.5 Implement `is_capped` and `reset`, reading the loop's own round count and cap against the same bound this repository's `conveyor-lifecycle` capability already publishes, and verify a unit test for under the cap, at the cap, and a granted reset
 - [ ] 2.6 Implement `proposal_pr_is_mergeable` and `hotfix_pr_is_created`/`all_checks_ran`, reading the specific pull requests `conveyor.propose` and `conveyor.fix` name, and verify a unit test per predicate
-- [ ] 2.7 Add a CI-run test asserting every bare predicate name referenced anywhere in `workflows.desired.yaml`'s guard strings resolves to a registered function, failing the build on a name with no implementation
+- [ ] 2.7 Implement `review_run_succeeded`, `has_open_review_threads`, and `review_run_skipped` for the `review` workflow, reading the pull request's own review run conclusion, its open review-thread count, and the run's own skip condition (never re-derived — read from the run that already happened), each failing closed toward "not yet landed" rather than "clean," and verify a unit test per predicate covering its true, false, and unreadable cases
+- [ ] 2.8 Add a CI-run test asserting every bare predicate name referenced anywhere in `workflows.desired.yaml`'s guard strings resolves to a registered function, failing the build on a name with no implementation
 
 ## 3. Rewire `remote-implement.py` — backend-developer
 
@@ -31,22 +32,29 @@
 - [ ] 4.3 Rewire `land-dispatch.py`, `failed-checks.py`, `autofix-guard.py`, `recover-loop-state.py`, and `refresh-loop-state.py` onto the matching declared workflow's transitions each one drives, one at a time, and verify each script's existing test suite passes rewired before moving to the next
 - [ ] 4.4 Remove every remaining import of or reference to the deleted `conveyor.py` from `.github/scripts/`, and verify `git grep conveyor\\.py` across `.github/` finds no hit outside this change's own history
 
-## 5. Unit tests
+## 5. Wire the `review` workflow — deployment-engineer
 
-- [ ] 5.1 Run `.github/tests/run.sh` (or the equivalent script-suite entry point this repository uses) and verify it passes with every rewired caller's own test file included
-- [ ] 5.2 Run the conveyor engine's own test suite (tasks 1.1–1.8, 2.1–2.7) standalone and verify every test passes
+- [ ] 5.1 Add a step to `.github/workflows/claude-review.yml`'s `queue` job calling `conveyor_engine.evaluate` for the `review` workflow's `review:pr_pushed` trigger on every `pull_request` event (`opened`, `synchronize`, `ready_for_review`), and verify a unit test drives it against a pull request carrying no `scan:*` label and one already carrying an outcome label
+- [ ] 5.2 Add a step, run once the workflow's own jobs conclude, calling `conveyor_engine.evaluate` for `review:run_completed`, reading the run's own conclusion, the pull request's open review-thread count, and the `queue` job's own skip decision as the caller-supplied facts, and verify a unit test drives all four outcomes (`scan:clean`, `scan:found_issues`, `scan:skipped`, `scan:failed`) from fixed facts
+- [ ] 5.3 Verify neither step added in 5.1 or 5.2 changes any existing job's `needs:`, output, or conclusion, and verify `git diff` against the pre-change `claude-review.yml` touches only the two new steps
+- [ ] 5.4 Verify `ci.yml`'s `review-clean` job and its `needs: [... review-clean]` consumer are unchanged by this task, and record that confirmation in this task
 
-## 6. E2E tests
+## 6. Unit tests
 
-- [ ] 6.1 Nothing here is decided by a cluster. The engine reads GitHub API state and writes GitHub labels through GitHub Actions. No kubelet, RBAC rule, informer, pod lifecycle, or context-continuity behavior is touched by this change.
+- [ ] 6.1 Run `.github/tests/run.sh` (or the equivalent script-suite entry point this repository uses) and verify it passes with every rewired caller's own test file included
+- [ ] 6.2 Run the conveyor engine's own test suite (tasks 1.1–1.8, 2.1–2.8) standalone and verify every test passes
 
-## 7. Documentation
+## 7. E2E tests
+
+- [ ] 7.1 Nothing here is decided by a cluster. The engine reads GitHub API state and writes GitHub labels through GitHub Actions. No kubelet, RBAC rule, informer, pod lifecycle, or context-continuity behavior is touched by this change.
+
+## 8. Documentation
 
 ### Reference docs
 
-- [ ] 7.1 Add an entry to `docs/CHANGELOG.md` naming the engine replacing `conveyor.py`, and verify the entry names every real caller rewired
-- [ ] 7.2 Confirm `docs/concepts.md` and `docs/contracts.md` need no change (the conveyor is internal delivery tooling, not part of the published product contract), and record that confirmation in this task
+- [ ] 8.1 Add an entry to `docs/CHANGELOG.md` naming the engine replacing `conveyor.py` and the new standalone `review` workflow it also runs, and verify the entry names every real caller rewired
+- [ ] 8.2 Confirm `docs/concepts.md` and `docs/contracts.md` need no change (the conveyor is internal delivery tooling, not part of the published product contract), and record that confirmation in this task
 
 ### Adopter site
 
-- [ ] 7.3 Confirm the landing page, Introduction, Getting started, Installation page, and every guide under `docs/guides/` need no change (none describes the conveyor), and record that confirmation in this task
+- [ ] 8.3 Confirm the landing page, Introduction, Getting started, Installation page, and every guide under `docs/guides/` need no change (none describes the conveyor), and record that confirmation in this task

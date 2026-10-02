@@ -185,3 +185,52 @@ workflows:
             to: station:finalized
       station:finalized:
         final: true
+
+  # STANDALONE. Not invoked by conveyor.run and invokes nothing of its own --
+  # this tracks the real claude-review.yml / review-dispatch.yml pipeline's
+  # own lifecycle on its pull request, never the station/loop line. A review
+  # finding is surfaced through branch protection's own required-conversation-
+  # resolution, not through this machine failing anything -- see
+  # conveyor-lifecycle's own requirement that no check carry the thread
+  # question.
+  review:
+    subject: pull_request
+    acts_on: scan
+    states:
+      scan:none:
+        initial: true
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:running:
+        transitions:
+          - event: "review:run_completed"
+            to: scan:clean
+            guard: "review_run_succeeded AND NOT has_open_review_threads"
+          - event: "review:run_completed"
+            to: scan:found_issues
+            guard: "review_run_succeeded AND has_open_review_threads"
+            owned_by: "notify_findings"
+          - event: "review:run_completed"
+            to: scan:skipped
+            guard: "review_run_skipped"
+          - event: "review:run_completed"
+            to: scan:failed
+            guard: "NOT review_run_succeeded AND NOT review_run_skipped"
+            owned_by: "notify_failure"
+      scan:clean:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:found_issues:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:skipped:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:failed:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running

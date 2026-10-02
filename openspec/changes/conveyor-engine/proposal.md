@@ -47,6 +47,20 @@ YAML is its only source.
   State storage, trigger recognition, and guard evaluation are real and
   load-bearing. The side effects a transition's owner performs are not, in
   this change.
+- **A new, standalone `review` workflow tracks the code-review pipeline's own
+  lifecycle on its pull request** — `claude-review.yml`'s queue → read →
+  consolidate → reconcile run, and `review-dispatch.yml`'s fixing loop that
+  follows it — never the station/loop line a tracking issue drives.
+  `subject: pull_request`, trigger prefix `review:*`, state prefix `scan:*`
+  (`scan:none`, `scan:running`, `scan:clean`, `scan:found_issues`,
+  `scan:skipped`, `scan:failed`, cycling back to `scan:running` on every push).
+  It `invokes` nothing and is `invoked` by nothing — `conveyor.run` and
+  `ci-green` are unchanged by this workflow's existence, and a found-issues or
+  failed scan surfaces through branch protection's required conversation
+  resolution exactly as it does today, never through this machine failing a
+  check. Its two outcome-bearing transitions (`scan:found_issues`,
+  `scan:failed`) name stub actions (`notify_findings`, `notify_failure`),
+  stubbed in this change like every other `owned_by` action.
 - **The engine runs through the existing remote-session mechanism,
   unchanged.** `conveyor:implement` and `conveyor:run` placed on an issue
   already start a remote Claude session per the repository's own
@@ -68,6 +82,13 @@ YAML is its only source.
   real GitHub event to a trigger, evaluating a named guard against live
   state, writing the resulting state as a label, and the registry of
   stubbed `owned_by:` actions.
+- `review-lifecycle`: the `review` workflow's own declared shape — its
+  `scan:*` states, its `review:*` triggers, and the guard predicates
+  (`review_run_succeeded`, `has_open_review_threads`, `review_run_skipped`)
+  that decide which outcome a completed run lands on. Standalone from
+  `conveyor-lifecycle`: it tracks the code-review pipeline on its pull
+  request, never a tracking issue's station or a fixing loop's round, and
+  nothing in `conveyor-lifecycle`'s grant-and-recheck rules applies to it.
 
 ### Modified Capabilities
 
@@ -92,6 +113,12 @@ YAML is its only source.
   and `.github/workflows/review-dispatch.yml` keep their trigger wiring
   (`issues: labeled`, `workflow_run`, `issue_comment`, `workflow_dispatch`)
   but call the new engine instead of the deleted file.
+- **`claude-review.yml` gains a call into the engine for the `review`
+  workflow**: a `pull_request` (`opened`/`synchronize`/`ready_for_review`)
+  firing `review:pr_pushed`, and the workflow's own conclusion (read by the
+  caller, never invented) firing `review:run_completed`. Neither edits the
+  workflow's existing jobs or `ci-green`'s `needs:` — the engine call is
+  additive, state-tracking only.
 - **Reference docs made untrue**: none yet — `conveyor.py` and its mechanism
   were never documented in `docs/concepts.md` or `docs/contracts.md` (they are
   internal tooling, not part of the published product contract), and

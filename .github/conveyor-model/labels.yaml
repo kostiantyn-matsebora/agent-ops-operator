@@ -34,6 +34,12 @@ prefixes:
     propagation: none
     set_manually_on: [pull_request]
 
+  scan:
+    kind: state
+    native_subject: pull_request
+    propagation: none
+    set_manually_on: []
+
 # Every trigger in workflows.desired.yaml, its real label where one exists,
 # the mechanism that actually fires it, and every workflow that declares a
 # transition on it.
@@ -136,6 +142,16 @@ triggers:
     invocation: sub_workflow_entry
     workflows: [conveyor.run]
 
+  review:pr_pushed:
+    label: null
+    invocation: webhook
+    workflows: [review]
+
+  review:run_completed:
+    label: null
+    invocation: derived
+    workflows: [review]
+
 # Every state in workflows.desired.yaml. Each state's id already IS its real
 # label (see workflows.desired.yaml) -- this entry names which workflow owns
 # it and which prefix's propagation rule applies.
@@ -221,3 +237,27 @@ states:
   round:restarted:
     workflows: [loop]
     prefix: round
+
+  scan:none:
+    workflows: [review]
+    prefix: scan
+
+  scan:running:
+    workflows: [review]
+    prefix: scan
+
+  scan:clean:
+    workflows: [review]
+    prefix: scan
+
+  scan:found_issues:
+    workflows: [review]
+    prefix: scan
+
+  scan:skipped:
+    workflows: [review]
+    prefix: scan
+
+  scan:failed:
+    workflows: [review]
+    prefix: scan

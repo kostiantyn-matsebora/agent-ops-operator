@@ -6,6 +6,15 @@ See `proposal.md` — Why, for the motivation.
 (`conveyor.propose`, `conveyor.implement`, `conveyor.fix`, `conveyor.finalize`,
 `loop`, and the orchestrating `conveyor.run`) in a settled shape.
 
+This change adds a seventh: `review`. It is standalone, `subject:
+pull_request`, and tracks `claude-review.yml` plus `review-dispatch.yml`'s own
+lifecycle rather than any station or loop a tracking issue drives.
+
+- States: `scan:none` → `scan:running` → one of `scan:clean`,
+  `scan:found_issues`, `scan:skipped`, `scan:failed`.
+- Every outcome cycles back to `scan:running` on the next push.
+- It `invokes` nothing, and no workflow `invokes` it.
+
 `states:` is a mapping keyed by state id, each state owns its own
 `transitions:` list (`event`, `to`, `guard`, `owned_by`), guards are bare
 `snake_case` predicates combined with `AND`/`OR`/`NOT` and take no explicit
@@ -153,6 +162,40 @@ A stub records the action's name, the workflow, the subject, and the facts
 available at the call, as a GitHub Actions annotation (`::notice::`) so it
 is visible in the run's own log without a second reporting mechanism.
 
+### 7. `review` is a tracker, not a gate — its guards read the run that already happened
+
+`review:pr_pushed` fires from the real `pull_request` webhook
+(`opened`/`synchronize`/`ready_for_review`), the same trigger surface
+`claude-review.yml` already declares. `review:run_completed` fires once that
+workflow's own run concludes, carrying facts the caller reads from the
+finished run rather than facts the engine computes itself:
+
+| Guard | Reads |
+|---|---|
+| `review_run_skipped` | the run's `queue` job's own `decide` output — a draft, a fork, a dependabot actor, a failed hygiene guard, or an edited `claude-review.yml` |
+| `review_run_succeeded` | the run's own conclusion, read from the Checks API |
+| `has_open_review_threads` | the pull request's open review-thread count |
+
+**Alternative considered: have the engine itself decide skip/success/failure
+by re-deriving `claude-review.yml`'s own conditions.** Rejected.
+
+- That workflow's skip conditions already live in its `queue` job, exercised
+  by its own tests.
+- Restating them as a second guard implementation is the drift this
+  change's other guards are built to avoid.
+- The risk accepted instead: a caller reading the wrong field from the
+  finished run, caught the same way any guard's test would catch it.
+
+**`scan:found_issues` and `scan:failed` name stub actions
+(`notify_findings`, `notify_failure`), not left bare.** Every other
+information-only transition in `conveyor.propose` carries none, and
+`review` follows that same rule for `scan:clean` and `scan:skipped`.
+
+These two outcomes are where a future change would act — a comment, a
+label, a paging hook. They are declared now and stubbed like every other
+`owned_by` action in this change, rather than added as a second edit to the
+YAML later.
+
 ## Risks / Trade-offs
 
 - **A guard predicate's own correctness is now the single point every
@@ -184,6 +227,10 @@ is visible in the run's own log without a second reporting mechanism.
    `recover-loop-state.py`, `refresh-loop-state.py`) one at a time, each its
    own task with its own test, so a regression in one caller's rewiring is
    caught before the next is attempted.
-4. No rollback step beyond reverting the change: every `owned_by` action is a
+4. Wire `claude-review.yml` to call the engine for the `review` workflow —
+   `review:pr_pushed` on the pull request event, `review:run_completed` once
+   the run concludes — additively, touching no existing job and no
+   `ci-green` dependency.
+5. No rollback step beyond reverting the change: every `owned_by` action is a
    stub, so no production side effect depends on the engine being correct
    yet, and nothing this change does is irreversible on its own.
