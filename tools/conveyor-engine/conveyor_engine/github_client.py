@@ -16,6 +16,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 import json
+import re
 import subprocess
 from typing import Literal, Optional
 
@@ -165,33 +166,44 @@ class GhCliClient(GitHubClient):
             capture_output=True,
         )
 
+    # `<owner>/<name>` is split because the REST timeline endpoint this
+    # repository's own `worktree-delivery.md` convention needs (any PR that
+    # MENTIONS the issue, via a plain `Refs #<n>` and not only a GitHub
+    # "closing" keyword) has no `gh issue view --json` field: `timelineItems`
+    # looked like one and is not -- `gh` rejects it outright. `--json
+    # closingIssuesReferences` is a REAL field, but it only ever catches a
+    # `Closes #<n>` pull request, which per this repository's own convention
+    # is the ARCHIVING pull request alone -- every ordinary implementing or
+    # applying pull request says `Refs #<n>` instead, so that field would
+    # silently miss the common case.
     def related_pull_requests(self, issue: Subject) -> list[Subject]:
         repo = issue.repo or self.repo
         result = subprocess.run(
             [
                 "gh",
-                "issue",
-                "view",
-                str(issue.number),
-                *self._repo_args(issue),
-                "--json",
-                "timelineItems",
+                "api",
+                f"repos/{repo}/issues/{issue.number}/timeline",
+                "--paginate",
+                "--jq",
+                '.[] | select(.event=="cross-referenced" and '
+                ".source.issue.pull_request != null) | .source.issue.number",
             ],
             capture_output=True,
             text=True,
             check=True,
         )
-        data = json.loads(result.stdout)
-        numbers = {
-            item["source"]["number"]
-            for item in data.get("timelineItems", [])
-            if item.get("__typename") == "CrossReferencedEvent"
-            and item.get("source", {}).get("number")
-        }
+        numbers = {int(line) for line in result.stdout.splitlines() if line.strip()}
         return [
             Subject(kind="pull_request", number=number, repo=repo)
             for number in sorted(numbers)
         ]
+
+    # The REST timeline endpoint records a cross-reference on the subject
+    # MENTIONED, never on the mentioning pull request's own timeline -- there
+    # is no symmetric query from this side. A plain text read of the pull
+    # request's own body is what this repository's `Refs #<n>` / `Closes
+    # #<n>` convention is written in, so that is read directly instead.
+    _REFERENCE_RE = re.compile(r"\b(?:Refs|Closes)\s+#(\d+)", re.I)
 
     def related_issue(self, pull_request: Subject) -> Optional[Subject]:
         repo = pull_request.repo or self.repo
@@ -203,17 +215,17 @@ class GhCliClient(GitHubClient):
                 str(pull_request.number),
                 *self._repo_args(pull_request),
                 "--json",
-                "closingIssuesReferences",
+                "body",
             ],
             capture_output=True,
             text=True,
             check=True,
         )
         data = json.loads(result.stdout)
-        refs = data.get("closingIssuesReferences") or []
-        if not refs:
+        match = self._REFERENCE_RE.search(data.get("body") or "")
+        if match is None:
             return None
-        return Subject(kind="issue", number=refs[0]["number"], repo=repo)
+        return Subject(kind="issue", number=int(match.group(1)), repo=repo)
 
     def permission(self, repo: str, login: str) -> str:
         result = subprocess.run(
@@ -231,6 +243,10 @@ class GhCliClient(GitHubClient):
         return result.stdout.strip()
 
     def open_pull_request_branches(self, repo: str) -> list[str]:
+        # `gh pr list` defaults to 30 -- well short of every open pull
+        # request once a release line like this one accumulates dozens of
+        # live worktree branches. An unbounded `is_session_at_work` read
+        # would silently stop seeing branches past that cutoff.
         result = subprocess.run(
             [
                 "gh",
@@ -240,6 +256,8 @@ class GhCliClient(GitHubClient):
                 repo,
                 "--state",
                 "open",
+                "--limit",
+                "500",
                 "--json",
                 "headRefName",
             ],
@@ -258,6 +276,10 @@ class GhCliClient(GitHubClient):
     )
 
     def pull_request_info(self, subject: Subject) -> PullRequestInfo:
+        # `gh pr view --json` has NO `merged` FIELD -- confirmed live
+        # ("Unknown JSON field"). `state` already reads `"MERGED"` once a
+        # pull request merges, so that is the one read, never a second
+        # field restating it.
         result = subprocess.run(
             [
                 "gh",
@@ -266,7 +288,7 @@ class GhCliClient(GitHubClient):
                 str(subject.number),
                 *self._repo_args(subject),
                 "--json",
-                "state,merged,mergeStateStatus,statusCheckRollup",
+                "state,mergeStateStatus,statusCheckRollup",
             ],
             capture_output=True,
             text=True,
@@ -278,10 +300,11 @@ class GhCliClient(GitHubClient):
             (item.get("status") or "").upper() in self._RUNNING_STATUSES
             for item in rollup
         )
+        state = data.get("state", "")
         return PullRequestInfo(
             subject=subject,
-            state=data.get("state", ""),
-            merged=bool(data.get("merged", False)),
+            state=state,
+            merged=state == "MERGED",
             merge_state_status=data.get("mergeStateStatus", ""),
             checks_running=checks_running,
         )

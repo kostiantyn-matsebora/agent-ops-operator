@@ -23,7 +23,7 @@
 ## 3. Unit tests
 
 - [x] 3.1 Run the engine's own test suite (tasks 1.1–1.8, 2.1–2.8) standalone, with no network and no real GitHub call (every guard's I/O boundary stubbed in its test), and verify every test passes — `python3 -m unittest discover -s tools/conveyor-engine`: 118 tests, 0.28s, OK
-- [x] 3.2 Confirm `.github/tests/run.sh` needs no change and still passes unmodified: this package is not wired into it, since no file under `.github/` is touched or depends on `tools/conveyor-engine/`, and record that confirmation in this task — ran it, `every script test passed`, exit 0, unmodified
+- [x] 3.2 Confirm `.github/tests/run.sh` needs no change and still passes unmodified: this package is not wired into it, since no file under `.github/` is touched or depends on `tools/conveyor-engine/`, and record that confirmation in this task — a cross-role review caught this FAILING. `review-rules.py --check` had no path routing to the new `.claude/rules/conveyor-engine.md`, so the review would stop enforcing it. Fixed with one new `TABLE` row in `review-rules.py` routing `tools/conveyor-engine/**` to it. Re-ran: `every script test passed`, exit 0
 
 ## 4. E2E tests
 
