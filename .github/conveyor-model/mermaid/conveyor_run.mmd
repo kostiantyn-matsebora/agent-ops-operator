@@ -1,0 +1,40 @@
+stateDiagram-v2
+    direction LR
+    [*] --> station_ready
+    note left of station_ready
+        conveyor.run  --  subject: issue
+    end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    state "station:ready" as station_ready
+    state "station:implemented_with_issues" as station_implemented_with_issues
+    state "station:merge_failed" as station_merge_failed
+    state "station:done" as station_done
+    state "station:finalized" as station_finalized
+    station_ready --> station_done : implement_entered_done
+    station_ready --> station_implemented_with_issues : implement_entered_implemented_with_issues
+    station_ready --> station_merge_failed : implement_entered_merge_failed
+    station_implemented_with_issues --> station_done : fix_entered_done
+    station_merge_failed --> station_done : fix_entered_done
+    station_done --> station_finalized : finalize_entered_finalized
+    station_finalized --> [*]
+    class station_ready, station_implemented_with_issues, station_merge_failed, station_done, station_finalized stationState
+    state station_ready {
+        [*] --> station_ready__conveyor_implement
+        state "conveyor.implement" as station_ready__conveyor_implement
+    }
+    class station_ready__conveyor_implement stationState
+    state station_implemented_with_issues {
+        [*] --> station_implemented_with_issues__conveyor_fix
+        state "conveyor.fix" as station_implemented_with_issues__conveyor_fix
+    }
+    class station_implemented_with_issues__conveyor_fix stationState
+    state station_merge_failed {
+        [*] --> station_merge_failed__conveyor_fix
+        state "conveyor.fix" as station_merge_failed__conveyor_fix
+    }
+    class station_merge_failed__conveyor_fix stationState
+    state station_done {
+        [*] --> station_done__conveyor_finalize
+        state "conveyor.finalize" as station_done__conveyor_finalize
+    }
+    class station_done__conveyor_finalize stationState

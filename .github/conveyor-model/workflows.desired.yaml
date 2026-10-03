@@ -1,0 +1,239 @@
+version: 1
+
+workflows:
+
+  conveyor.propose:
+    subject: issue
+    acts_on: station
+    states:
+      station:none:
+        initial: true
+        transitions:
+          - event: "proposal_pr_opened"
+            to: station:proposing
+      station:proposing:
+        invokes: loop
+        transitions:
+          - event: "loop_entered_mergeable"
+            to: station:proposed
+            guard: "proposal_pr_is_mergeable"
+      station:proposed:
+        transitions:
+          - event: "proposal_pr_merged"
+            to: station:ready
+      station:ready:
+        final: true
+
+  conveyor.implement:
+    label: "conveyor:implement"
+    subject: issue
+    acts_on: station
+    states:
+      station:ready:
+        initial: true
+        transitions:
+          - event: "conveyor:implement"
+            to: station:implementing
+            guard: "has_access AND NOT is_session_at_work"
+            owned_by: "fire"
+      station:implementing:
+        transitions:
+          - event: "conveyor:implement"
+            to: station:implementing
+            guard: "has_access AND NOT is_session_at_work"
+            owned_by: "fire"
+          - event: "prs_are_created"
+            to: station:implemented
+            guard: "has_open_prs"
+      station:implemented:
+        transitions:
+          - event: "checks_completed"
+            to: station:ready_to_merge
+            guard: "all_prs_mergeable"
+          - event: "checks_completed"
+            to: station:implemented_with_issues
+            guard: "NOT all_prs_mergeable"
+      station:implemented_with_issues:
+        final: true
+      station:ready_to_merge:
+        transitions:
+          - event: "all_prs_merged"
+            to: station:done
+            guard: "all_prs_merged AND master_is_green"
+          - event: "all_prs_merged"
+            to: station:merge_failed
+            guard: "all_prs_merged AND NOT master_is_green"
+      station:done:
+        final: true
+      station:merge_failed:
+        final: true
+
+  conveyor.fix:
+    subject: issue
+    acts_on: station
+    states:
+      station:implemented_with_issues:
+        initial: true
+        transitions:
+          - event: "loop:fix"
+            to: station:fixing
+      station:merge_failed:
+        initial: true
+        transitions:
+          - event: "hotfix_started"
+            to: station:hotfix_created
+            guard: "hotfix_pr_is_created AND all_checks_ran"
+      station:hotfix_created:
+        transitions:
+          - event: "loop:fix"
+            to: station:fixing
+      station:fixing:
+        invokes: loop
+        transitions:
+          - event: "loop_entered_mergeable"
+            to: station:mergeable
+      station:mergeable:
+        transitions:
+          - event: "all_prs_merged"
+            to: station:done
+            guard: "all_prs_merged"
+      station:done:
+        final: true
+
+  conveyor.finalize:
+    subject: issue
+    acts_on: station
+    states:
+      station:done:
+        initial: true
+        transitions:
+          - event: "conveyor:finalize"
+            to: station:finalizing
+            guard: "has_access AND is_change_finished AND NOT is_session_at_work"
+            owned_by: "fire"
+      station:finalizing:
+        invokes: loop
+        transitions:
+          - event: "all_prs_merged"
+            to: station:finalized
+            guard: "all_prs_merged"
+      station:finalized:
+        final: true
+
+  loop:
+    subject: pull_request
+    acts_on: loop
+    states:
+      round:started:
+        initial: true
+        transitions:
+          - event: "loop:fix"
+            to: round:fixing
+            guard: "has_access"
+      round:fixing:
+        transitions:
+          - event: "round_finished"
+            to: round:mergeable
+            guard: "session_finished AND checks_completed AND pr_is_mergeable"
+          - event: "round_finished"
+            to: round:fixing_failed
+            guard: "session_finished AND checks_completed AND NOT pr_is_mergeable"
+      round:mergeable:
+        final: true
+      round:fixing_failed:
+        # Not final: a person's loop:fix or loop:restart leaves it. While
+        # capped with no reset, it stays put on purpose.
+        transitions:
+          - event: "loop:fix"
+            to: round:fixing
+            guard: "NOT is_capped"
+          - event: "loop:restart"
+            to: round:restarted
+            guard: "is_capped AND reset AND has_access"
+      round:restarted:
+        transitions:
+          - event: "loop:fix"
+            to: round:fixing
+            guard: "has_access"
+
+  conveyor.run:
+    label: "conveyor:run"
+    subject: issue
+    acts_on: station
+    states:
+      station:ready:
+        initial: true
+        invokes: conveyor.implement
+        transitions:
+          - event: "implement_entered_done"
+            to: station:done
+          - event: "implement_entered_implemented_with_issues"
+            to: station:implemented_with_issues
+          - event: "implement_entered_merge_failed"
+            to: station:merge_failed
+      station:implemented_with_issues:
+        invokes: conveyor.fix
+        transitions:
+          - event: "fix_entered_done"
+            to: station:done
+      station:merge_failed:
+        invokes: conveyor.fix
+        transitions:
+          - event: "fix_entered_done"
+            to: station:done
+      station:done:
+        invokes: conveyor.finalize
+        transitions:
+          - event: "finalize_entered_finalized"
+            to: station:finalized
+      station:finalized:
+        final: true
+
+  # STANDALONE. Not invoked by conveyor.run and invokes nothing of its own --
+  # this tracks the real claude-review.yml / review-dispatch.yml pipeline's
+  # own lifecycle on its pull request, never the station/loop line. A review
+  # finding is surfaced through branch protection's own required-conversation-
+  # resolution, not through this machine failing anything -- see
+  # conveyor-lifecycle's own requirement that no check carry the thread
+  # question.
+  review:
+    subject: pull_request
+    acts_on: scan
+    states:
+      scan:none:
+        initial: true
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:running:
+        transitions:
+          - event: "review:run_completed"
+            to: scan:clean
+            guard: "review_run_succeeded AND NOT has_open_review_threads"
+          - event: "review:run_completed"
+            to: scan:found_issues
+            guard: "review_run_succeeded AND has_open_review_threads"
+            owned_by: "notify_findings"
+          - event: "review:run_completed"
+            to: scan:skipped
+            guard: "review_run_skipped"
+          - event: "review:run_completed"
+            to: scan:failed
+            guard: "NOT review_run_succeeded AND NOT review_run_skipped"
+            owned_by: "notify_failure"
+      scan:clean:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:found_issues:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:skipped:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
+      scan:failed:
+        transitions:
+          - event: "review:pr_pushed"
+            to: scan:running
