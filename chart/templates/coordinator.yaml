@@ -35,18 +35,20 @@ carry alone. */ -}}
 {{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
 "DEMO MODE'S CONSOLE WIRING DOES NOT CARRY OVER TO COORDINATOR MODE" gap).
 Under pipelines mode a bundle route claims it; an AgentCapability carries no
-subscription at all, so nothing claimed it here — until now. Unconditional on
-console.enabled alone, same as `console.yaml` renders the object itself,
-never gated on demo mode or any bundle. Dedup against a bundle's own
+subscription at all, so nothing claimed it here — until now. Gated on
+console.enabled alone, the flag `console.yaml` renders the object by,
+never on demo mode or any bundle. Dedup against a bundle's own
 chatSources contribution (home-assistant's, say), which may already have
 added it. */ -}}
 {{- $gc := dig "agentops" "console" dict $g }}
 {{- $channels := $c.channels | default list }}
+{{- if .Values.console.enabled }}
 {{- with get $gc "signalSource" | default "" }}
 {{- if not (has . $sources) }}{{ $sources = append $sources . }}{{ end }}
 {{- end }}
 {{- with get $gc "channel" | default "" }}
 {{- if not (has . $channels) }}{{ $channels = append $channels . }}{{ end }}
+{{- end }}
 {{- end }}
 {{- /* Every ref below is emitted only when the object it names is rendered —
 same rule every bundle's own wiring component follows. */ -}}

@@ -498,8 +498,9 @@ is on
 [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/#egress-control).
 
 An agent that can run commands reaches a bound MCP server directly and calls
-whatever that server registers. `agentops-shell` is bound on ordinary routes, so
-this is the common case, not an exotic one.
+whatever that server registers. Routes you declare in `pipelines:` can bind
+`agentops-shell`, and the `kubernetes` acting route gets it when
+`allowPodExecution` is on, so this is the common case, not an exotic one.
 
 `global.agentops.runtimeDefaults.egressMediation.enabled` puts a proxy in the
 runtime pod that the agent's traffic cannot route around, and enforces the bound

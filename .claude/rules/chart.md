@@ -30,12 +30,6 @@ profile and toolsets, channels values-supplied and omitted when unset.
   drove all four once and named none of them.
 - **Per-route booleans win both ways**, and both at once is ALLOWED and fans
   out.
-- **The acting route ALSO binds `agentops-websearch` unconditionally, and
-  `agentops-shell` when `allowPodExecution` is true** — both release-wide
-  built-ins, never the observing route's. A local shell in the agent's own
-  pod is narrower than the `pods/exec` grant that flag already carries, so
-  withholding it once that grant exists buys nothing. `capabilities.yaml`
-  (coordinator mode) mirrors this exactly — the two files must not drift.
 
 **NO substrate**: no AgentRuntime, no floor SA, no credential, no context
 volume. All of that is the parent's `global.agentops.runtimeDefaults` +
@@ -120,8 +114,8 @@ The Home Assistant lane and a PRIVILEGE SPLIT:
 - **The ingest lane: the log plus four health surfaces.**
   - **Each surface is switched and tuned under
     `logsAdapter.source.surfaces`** — one `enabled` and one knob apiece.
-  - **Config entries, repairs and sensors default ON.** The update digest
-    is OFF.
+  - **Config entries, repairs and sensors default ON; the update digest
+    OFF.**
   - **The shipped `rules` open with one rule per surface, AHEAD of the log
     rules.**
   - **A surface rule selects by `surface=`, never by message** — a log
@@ -207,7 +201,7 @@ Manager Deployment, RBAC and Service, plus the CRDs.
   built-in role — see `invariants.md`.
 - **`templates/rbac.yaml` ALWAYS renders the floor** and NEVER creates the
   account `runtimeDefaults.serviceAccountName` points at. Naming is not
-  creating — rendering the floor regardless is what keeps it nameable.
+  creating; rendering the floor regardless is what keeps it nameable.
 - **`agentops.defaultRuntimeGuard` fails the render** when nothing answers to
   `default` while a route resolves to it — parent `pipelines:` AND bundle-shipped
   routes, re-derived through each bundle's own wiring helper so the check cannot
