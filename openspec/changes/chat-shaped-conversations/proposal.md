@@ -211,5 +211,5 @@ they have not read.
   `console-coordination-view` capability, on the pages this change deletes.
 - `console-conversation-tree` (above) supersedes it rather than coordinating
   with it. The `conversation-close` and `console-coordination-view` entries
-  under Modified Capabilities, and their delta specs once created, carry
+  under Modified Capabilities, and their delta specs, already created, carry
   that supersession explicitly.
