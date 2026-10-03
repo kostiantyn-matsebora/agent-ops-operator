@@ -181,9 +181,9 @@ class HotfixPrIsCreatedTest(unittest.TestCase):
         client = FakeClient(pr_infos={PR1: _pr_info(PR1, state="MERGED", merged=True)})
         self.assertTrue(hotfix_pr_is_created(client, PR1)())
 
-    def test_false_when_unreadable(self):
+    def test_unreadable_fails_closed_to_already_created(self):
         client = FakeClient(fail_on="pull_request_info")
-        self.assertFalse(hotfix_pr_is_created(client, PR1)())
+        self.assertTrue(hotfix_pr_is_created(client, PR1)())
 
 
 class AllChecksRanTest(unittest.TestCase):

@@ -166,13 +166,14 @@ def hotfix_pr_is_created(client: GitHubClient, pull_request: Subject) -> Callabl
     """True when `pull_request` (the hotfix pull request `conveyor.fix`'s
     own transition names) exists and is readable, open or merged.
 
-    FAILS CLOSED TOWARD "NOT YET CREATED" (False).
+    FAILS CLOSED TOWARD "ALREADY CREATED" (True) -- a wrong "not created"
+    would start a duplicate hotfix pull request unattended.
     """
 
     def read() -> bool:
         return client.pull_request_info(pull_request).state in ("OPEN", "MERGED")
 
-    return _guarded(read, fail_closed=False)
+    return _guarded(read, fail_closed=True)
 
 
 def all_checks_ran(client: GitHubClient, pull_request: Subject) -> Callable[[], bool]:

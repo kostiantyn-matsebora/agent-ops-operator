@@ -50,7 +50,7 @@ ALWAYS = ["retired-vocabulary"]
 # more: doctrine for the operator's code, the chart rule for the chart, the
 # writing rules for prose, the palette rule for the theme.
 TABLE: list[tuple[str, list[str]]] = [
-    ("tools/conveyor-engine/**", ["conveyor-engine"]),
+    ("tools/conveyor-engine/**", ["writing"]),
     ("platform/manager/internal/ingest/**", ["signal-rules"]),
     ("platform/manager/internal/integration/charttemplate_test.go", ["signal-rules", "chart"]),
     ("platform/manager/**", ["invariants", "terminology", "wiring", "adapters", "writing"]),

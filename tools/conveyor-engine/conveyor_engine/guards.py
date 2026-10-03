@@ -22,7 +22,7 @@ from typing import Callable, Optional
 
 GuardRegistry = dict[str, Callable[[], bool]]
 
-_TOKEN_RE = re.compile(r"\(|\)|AND|OR|NOT|[A-Za-z_][A-Za-z0-9_]*")
+_TOKEN_RE = re.compile(r"\(|\)|\b(?:AND|OR|NOT)\b|[A-Za-z_][A-Za-z0-9_]*")
 
 
 class GuardError(Exception):
