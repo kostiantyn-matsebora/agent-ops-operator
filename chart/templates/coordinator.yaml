@@ -32,6 +32,22 @@ coordinating agent's own prompt so the instruction is not the description's to
 carry alone. */ -}}
 {{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs the hourly self-heal sweep: lists this Coordinator's own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the hourly self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
 {{- $sources = append $sources $r.source.name }}
+{{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
+"DEMO MODE'S CONSOLE WIRING DOES NOT CARRY OVER TO COORDINATOR MODE" gap).
+Under pipelines mode a bundle route claims it; an AgentCapability carries no
+subscription at all, so nothing claimed it here — until now. Unconditional on
+console.enabled alone, same as `console.yaml` renders the object itself,
+never gated on demo mode or any bundle. Dedup against a bundle's own
+chatSources contribution (home-assistant's, say), which may already have
+added it. */ -}}
+{{- $gc := dig "agentops" "console" dict $g }}
+{{- $channels := $c.channels | default list }}
+{{- with get $gc "signalSource" | default "" }}
+{{- if not (has . $sources) }}{{ $sources = append $sources . }}{{ end }}
+{{- end }}
+{{- with get $gc "channel" | default "" }}
+{{- if not (has . $channels) }}{{ $channels = append $channels . }}{{ end }}
+{{- end }}
 {{- /* Every ref below is emitted only when the object it names is rendered —
 same rule every bundle's own wiring component follows. */ -}}
 {{- $toolsets := list }}
@@ -72,6 +88,38 @@ spec:
     what arrived, and `invoke` it with a clear, specific task. Its result
     reaches you later as an ordinary input — read it, and decide whether to
     answer, invoke another entry, or `escalate` to a human.
+
+    ## Investigating is free. Changing anything is not
+
+    Invoke one entry or several — in parallel for independent questions, one
+    after another when a later one depends on an earlier answer — and read
+    each result before deciding your next step.
+
+    An entry you invoke may describe a change it would make instead of
+    making it. That is expected, not a failure to relay back: it has no one
+    to ask and no authority beyond what you explicitly told it to do.
+
+    Once you have enough to know what should change, synthesize everything
+    into one proposal and put it to the human directly — what you found,
+    what you would do about it — then stop and wait. Never decide yourself
+    that a change is obviously fine to make, however small it looks.
+
+    Only once they say yes do you `invoke` the entries that make the
+    change, each with a specific, explicit instruction naming exactly what
+    was approved. Nothing is authorized until they have said so, and
+    nothing beyond what they approved is either.
+
+    ## Answer briefly. You are a router, not a report
+
+    An invoked entry's result is written for a human reading it directly —
+    full findings, every caveat. Yours is written for a human reading YOU:
+    what you decided and why, in a few lines, never the full result relayed
+    underneath its own headings.
+
+    Lead with the decision or the finding. Fold everything else — an
+    entry's full findings, the reasoning you weighed, anything a reader
+    only wants if they ask — into `<details>`. A short list of bullets
+    beats a paragraph; a paragraph beats three.
 
     ## The hourly self-heal signal
 
@@ -143,8 +191,9 @@ spec:
     - name: {{ . }}
     {{- end }}
   {{- end }}
-  {{- with $c.channels }}
+  {{- with $channels }}
   # ESCALATION ONLY — never bound at conversation creation (coordinator-model).
+  # Includes the console claim above, when console is enabled.
   channelRefs:
     {{- range . }}
     - name: {{ . }}

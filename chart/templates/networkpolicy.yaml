@@ -32,8 +32,13 @@ spec:
       app.kubernetes.io/name: agentops-manager
   policyTypes: [Ingress]
   ingress:
-    # The callers the wiring implies: runtime pods asking for work, and the
-    # adapters serving channels and signals.
+    # The callers the wiring implies: runtime pods asking for work, the
+    # adapters serving channels and signals, and the aops MCP server —
+    # coordination-deployment-mode's thin client of /coordinate/*, which a
+    # runtime pod reaches through it rather than calling the manager
+    # directly. Missing this entry timed out every `invoke`/`list_agents`
+    # call silently: a NetworkPolicy DROP looks identical to the manager
+    # being down, "context deadline exceeded" with no refusal anywhere.
     - from:
         - podSelector:
             matchLabels:
@@ -44,6 +49,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-signal-adapter
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-mcp-aops
         {{- with $np.extraIngress }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
