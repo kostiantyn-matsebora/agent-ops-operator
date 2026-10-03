@@ -26,13 +26,24 @@ from the prototype files and are written down nowhere else.
 - The console persists nothing in the browser today, by a documented rule in
   `docs/console.md` and `api/queryClient.ts`. That rule guards CORRECTNESS
   state, which a resync replaces wholesale.
-- `coordinated-agents` (in flight) adds `spec.causedBy {parent, entry}` —
-  the immediate parent, one hop, nesting to any depth — `spec.coordinatorRef`
-  on a conversation whose entry point is a Coordinator, `status.brief`,
+- `coordinated-agents` (archived into `coordinator-model`,
+  `conversation-provenance`, `coordination-escalation` and
+  `coordination-loop`) added `spec.causedBy {parent, entry}` — the immediate
+  parent, one hop, nesting to any depth — `spec.coordinatorRef` on a
+  conversation whose entry point is a Coordinator, `status.brief`,
   `status.closeReason`, `status.escalatedAt` and a per-level `status.budget`.
   Only the uncaused root ever opens a human thread: a nested coordinator's
   escalation closes its own conversation and reaches its parent as an
-  ordinary result.
+  ordinary result. It also shipped the full incident view on the OLD pages,
+  published as `console-coordination-view` — this change's own pages
+  supersede it (D-K's sibling note below, and proposal.md).
+- Cascading close exists today ONLY on the coordinator's own MCP `close`
+  verb (`chat/coordinate.go`'s `closeWithCascade` / `cascadeCloseMembers`).
+  The human `/close` path (`chat/router.go`'s `CloseConversation`, which the
+  console's bulk close also drives by posting `/close`) closes the ONE
+  conversation it is given. Deletion (`httpapi/server.go`'s
+  `handleConversationDelete`) cascades nowhere, for any originator. Both are
+  gaps this change closes (D-K), not new behavior invented for it.
 
 ## Goals / Non-Goals
 
@@ -179,6 +190,41 @@ from the prototype files and are written down nowhere else.
 - **The pane mid-drag.** `C-collapsed.html` shows a width readout on the
   handle. The view shows it only while dragging.
 
+### D-K — Closing and deleting cascade for every originator, not only the coordinator's own verb
+
+- `router.CloseConversation` and `AutoCloseConversation` call the SAME
+  `cascadeCloseMembers` helper `coordinate.go`'s `CloseCoordinated` already
+  uses, after closing the named conversation — so `/close`, the console's
+  bulk close (a fan-out of `/close`), and the idle timer all reach every
+  live descendant, recursively, exactly as the coordinator's own MCP verb
+  already did. The cascade carries no reason unless the close that started
+  it had one. A plain human close passes none through, which the existing
+  "a cascade close takes the reason of the close that started it" rule
+  already allows.
+- `handleConversationDelete` gains the matching shape: before deleting the
+  named conversation it lists conversations labelled
+  `agentops.dev/caused-by=<name>` — the same label `cascadeCloseMembers`
+  filters on — confirms each one's `causedBy.parent` against the fact
+  rather than the label, and deletes every one found, recursively,
+  tolerating `NotFound`. Every descendant is already `Closed` by the time
+  the root is, which the cascade above guarantees, so no descendant is ever
+  skipped as not-yet-closed.
+- `console-coordination-view` is retired by the same move: its
+  page-specific mechanics (the list's grouping toggle, the flat default,
+  the old transcript's parent link) described the pages this change
+  deletes. `console-conversation-tree` carries the substance forward.
+- Alternative rejected: leaving delete uncascaded and refusing to delete a
+  root with live descendants. A human or the console's bulk delete has no
+  way to reach a member directly — it holds no channel binding — so that
+  would make a closed incident with members permanently undeletable except
+  by `kubectl delete` on every object by hand.
+- Alternative rejected: a server-side bulk endpoint walking the whole tree
+  in one request. Keeping the cascade INSIDE the single-conversation verb
+  preserves the per-item outcome shape (`closed`/`skipped`/`failed`,
+  `deleted`/`skipped`/`failed`) the console already reports, so a batch of
+  N selected roots still reports N outcomes, each now implicitly covering
+  its descendants.
+
 ## Risks / Trade-offs
 
 - [The count reads `status.runs[]` per row on every list request] → the
@@ -196,18 +242,37 @@ from the prototype files and are written down nowhere else.
   marker that its parent is missing, never dropped.
 - [The first browser persistence in the console] → one key, layout only,
   guarded reads. Documented as the exception it is.
-- [Two changes touching the console for coordination] → this change owns
-  the view. `coordinated-agents` keeps the kinds and the inventory rows.
-  Its phase 5 is expected to shrink to that by its own update, and the two
-  delta specs are written to agree so either archive order folds cleanly.
+- [`coordinated-agents` archived before this change was applied, shipping
+  the full incident view on the OLD pages as `console-coordination-view`]
+  → `console-conversation-tree` supersedes it. The delta spec marks
+  `console-coordination-view` REMOVED, retiring its page-specific
+  requirements in favor of the tree and the incident timeline this view
+  now owns.
+- [Cascading close and delete widens what one `/close` or one delete call
+  does] → every originator already called the one shared implementation,
+  per `conversation-close`'s own invariant. This change makes the cascade
+  part of that one implementation instead of a second path only the
+  coordinator's own MCP verb had. No new authorization: closing and
+  deleting a root were already bounded exactly as closing or deleting
+  anything else is.
 
 ## Migration Plan
 
-- Ships as a console image. No CRD, no chart value, no data migration.
+- Ships as a console image AND a manager image. No CRD, no chart value, no
+  data migration — the cascade (D-K) is a behavior change on existing
+  verbs, not a new field.
 - The read verb's `rewind` field is additive. An older manager ignores it,
   and the console then hides mark unread after the first refused rewind.
-- Rollback is the previous console image. A stored layout key is harmless
-  to the old build, which never reads it.
+- An older console against a NEWER manager sees the cascade already —
+  closing or deleting a root through the old pages closes or deletes its
+  members too, since the cascade lives in the manager and does not depend
+  on the console knowing about it.
+- A newer console against an OLDER manager that has not yet picked up D-K
+  shows a confirmation naming a member count the manager will not actually
+  honor. Rolling the manager forward first, or together with the console,
+  avoids that window.
+- Rollback is the previous console and manager images. A stored layout key
+  is harmless to the old console build, which never reads it.
 
 ## Open Questions
 

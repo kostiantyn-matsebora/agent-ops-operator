@@ -45,10 +45,15 @@ Every row SHALL open a menu offering:
 An action the conversation's state or the viewer's rights do not allow
 SHALL be absent, never disabled without a reason.
 
+A member conversation holds no channel binding of its own, so none of mark
+unread/read, reopen, exit runtime, close or delete ever apply to it. Its
+menu SHALL offer only open in a new tab, copy link and open the incident.
+
 #### Scenario: A closed row offers reopen and delete
 - **WHEN** the operator opens the menu on a closed conversation
 - **THEN** it offers reopen and delete, and not close or exit runtime
 
-#### Scenario: A member row leads to its incident
+#### Scenario: A member row offers only navigation
 - **WHEN** the operator opens the menu on a member of a coordination
-- **THEN** it offers opening the incident the member belongs to
+- **THEN** it offers only open in a new tab, copy link and open the
+  incident the member belongs to, and none of the other actions
