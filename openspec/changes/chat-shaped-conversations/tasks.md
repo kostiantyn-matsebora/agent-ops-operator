@@ -64,7 +64,7 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 
 ### 9.1 Reference docs
 
-- [ ] 9.1.1 `docs/console.md`: the Conversations section (one view, the four columns, the splitters, the collapsed inbox, the secondary views), the Unread section (the counting rule by kind, the sum, mark unread as a reader-scoped rewind, and the "no mark as unread" paragraph removed), "What the browser keeps" (layout preferences persist, conversation state does not), the Closing and Deleting sections (both now cascade to every live descendant, the selection bar and the row menu say so), the Reopening section, and the coordination tree.
+- [ ] 9.1.1 `docs/console.md`: the Conversations section (one view, the four columns, the splitters, the collapsed inbox, the secondary views), the Unread section (the counting rule by kind, the sum, mark unread as a reader-scoped rewind, and the "no mark as unread" paragraph removed), "What the browser keeps" (layout preferences persist, conversation state does not), the Closing and Deleting sections (closing cascades to every live descendant and deleting to every already-closed one, the selection bar and the row menu say so), the Reopening section, and the coordination tree.
 - [ ] 9.1.2 `docs/concepts.md`: the read-state section names the console's counting rule and the rewind form beside the thread rule. The Closing and Deletion sections state the cascade through `causedBy`, for every originator.
 - [ ] 9.1.3 `docs/contracts.md`: `POST /channel/read` documents `rewind`.
 - [ ] 9.1.4 `docs/CHANGELOG.md`: an Unreleased entry for the console image naming the new view, the counting rule, mark unread and the layout key, and a manager entry for the close/delete cascade.

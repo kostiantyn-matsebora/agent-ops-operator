@@ -41,8 +41,8 @@ reaches — its own bound threads, if it has any. A member typically has none.
 contract operation and no CRD field CLOSES a conversation: an external
 caller reaches closing only by posting `/close` on a thread it holds.
 
-Deleting and reopening are separate verbs with their own rule (below) and
-are not a way to close.
+Deleting and reopening are separate verbs with their own rules and are not
+a way to close. Deleting's cascade is the requirement added in this file.
 
 #### Scenario: A batch close is N ordinary closes
 - **WHEN** a surface closes several conversations in one gesture

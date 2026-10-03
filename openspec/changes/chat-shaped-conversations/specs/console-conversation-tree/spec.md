@@ -105,8 +105,8 @@ parent.
   other selected conversation closes normally
 
 ### Requirement: Deleting a root is shown as deleting its members
-The manager cascades a delete through every live descendant the same way
-it cascades a close. The confirmation for deleting a selection containing a
+The manager cascades a delete through every already-closed descendant, the
+way it cascades a close through every live one. The confirmation for deleting a selection containing a
 coordinator's root SHALL state how many descendants delete with it, at
 every depth.
 
