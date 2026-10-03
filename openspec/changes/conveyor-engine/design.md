@@ -27,10 +27,22 @@ dataclasses.
 
 The conveyor already runs inside GitHub Actions, triggered by `issues:
 labeled`, `workflow_run` completions, `issue_comment`, and `workflow_dispatch`,
-and a `conveyor:implement`/`conveyor:run` label already starts a remote Claude
-Code session through the mechanism `remote-session.md` and the
-`remote-change-sessions` spec describe. This design does not change how a
-session starts.
+and a `conveyor:implement`/`conveyor:run` label already starts a remote
+Claude Code session through `remote-session.md` and the
+`remote-change-sessions` spec. This design does not change how a session
+starts, and does not touch that machinery at all.
+
+**Scoped down, before implementation started:**
+
+- The engine is built and proven as a standalone package in this change.
+- No file under `.github/scripts/` or `.github/workflows/` is edited.
+- `conveyor.py` and `conveyor_io.py` are neither imported nor referenced.
+- The real callers keep running on `conveyor.py` exactly as they do today.
+- Rewiring them, and wiring `claude-review.yml` for the `review` workflow,
+  is a follow-up change.
+
+Every decision below that originally assumed the engine replaces
+`conveyor.py` immediately is read against that narrower scope.
 
 ## Goals / Non-Goals
 
@@ -44,13 +56,21 @@ session starts.
   own declared vocabulary.
 - Evaluate every named guard against live GitHub state through a real
   predicate implementation, fail-closed on an unreadable fact.
-- Replace every real caller of the deleted `conveyor.py` with a call into
-  this engine.
+- Prove the engine correct in isolation, against the real
+  `workflows.desired.yaml` and `labels.yaml`, through its own test suite
+  alone.
 
 **Non-Goals:**
 
 - Implementing any `owned_by` action's real side effect. Every one is a
   logging stub in this change.
+- Rewiring any real caller of `conveyor.py` (`carry.py`,
+  `remote-implement.py`, `dispatch-gate.py`, `land-dispatch.py`,
+  `failed-checks.py`, `autofix-guard.py`, `recover-loop-state.py`,
+  `refresh-loop-state.py`) onto the engine. They keep calling `conveyor.py`.
+  A follow-up change does the rewiring.
+- Wiring `claude-review.yml` or any other workflow file to call the engine
+  for the `review` workflow. Also the follow-up change's job.
 - Changing the remote-session start mechanism, the GitHub Actions trigger
   surface (`issues: labeled`, `workflow_run`, `issue_comment`,
   `workflow_dispatch`), or anything `remote-change-sessions` already
@@ -62,11 +82,26 @@ session starts.
 
 ## Decisions
 
-### 1. The engine is a single Python package under `.github/scripts/conveyor_engine/`
+### 1. The engine is a single Python package under `tools/conveyor-engine/`, isolated from the production line
 
 A package, not a script. It has four independently testable layers (loader,
 label mapping, trigger matcher, guard registry), each worth its own test
 file.
+
+**Not under `.github/scripts/`.** That directory holds the real conveyor's
+production callers, which this change does not touch. A new package
+sitting beside them would read as already wired in, when nothing calls it
+yet.
+
+`tools/` is a new top-level directory for this repository's own delivery
+tooling, parallel to `test/`'s own carve-out from component discovery. It
+carries no `Dockerfile` and no `go.mod`, so `.github/components.sh` never
+discovers it as a published component.
+
+**No dependency on `conveyor.py`, `conveyor_io.py`, or `load_script.py`.**
+The engine imports none of them. It reads the two merged model files under
+`.github/conveyor-model/` as plain data (paths resolved from the repository
+root the caller passes in), and nothing else under `.github/`.
 
 **Alternative considered: one flat script.** Rejected. A flat script big
 enough to hold a YAML loader, a trigger matcher and a guard registry
@@ -196,6 +231,12 @@ label, a paging hook. They are declared now and stubbed like every other
 `owned_by` action in this change, rather than added as a second edit to the
 YAML later.
 
+**Nothing calls `evaluate()` for `review` in this change.** The guard
+predicates it needs (`review_run_succeeded`, `has_open_review_threads`,
+`review_run_skipped`) are built and tested in isolation, same as every
+other guard. Wiring `claude-review.yml` to actually fire `review:pr_pushed`
+and `review:run_completed` is the follow-up change.
+
 ## Risks / Trade-offs
 
 - **A guard predicate's own correctness is now the single point every
@@ -204,12 +245,11 @@ YAML later.
   YAML's own completeness (every state's transitions are already declared)
   plus a test asserting every guard name a workflow references resolves to
   a registered predicate, run against the live YAML in CI.
-- **Stubbed actions mean this change cannot, by itself, replace the
-  production conveyor.** A session merging this change still needs
-  `owned_by`'s real side effects implemented in a later change before any
-  cutover. Mitigation: explicit in the proposal's Non-Goals and this design's
-  Non-Goals, and the delta spec only changes the DECISION mechanism, not the
-  grant and bound behavior `conveyor-lifecycle` already publishes.
+- **This change cannot, by itself, replace the production conveyor.** No
+  caller is rewired and no workflow is wired, so the engine ships unused.
+  Mitigation: explicit in the proposal's Non-Goals and this design's
+  Non-Goals — the follow-up change rewires the callers, and only then does
+  `conveyor-lifecycle`'s published contract change.
 - **A fail-closed guard that is wrong in the closed direction silently
   blocks real work.** Mitigation: the chosen failure direction (block, never
   proceed) is stated once per predicate in its own implementation and
@@ -218,19 +258,18 @@ YAML later.
 
 ## Migration Plan
 
-1. Build the engine and its guard registry against `workflows.desired.yaml`,
-   with every `owned_by` action stubbed, with no real caller rewired yet.
-2. Rewire one real caller (`remote-implement.py`, the simplest: one event,
-   one decision) onto the engine, keeping every other caller on hold.
-3. Rewire the remaining callers (`carry.py`, `dispatch-gate.py`,
-   `land-dispatch.py`, `failed-checks.py`, `autofix-guard.py`,
-   `recover-loop-state.py`, `refresh-loop-state.py`) one at a time, each its
-   own task with its own test, so a regression in one caller's rewiring is
-   caught before the next is attempted.
-4. Wire `claude-review.yml` to call the engine for the `review` workflow —
-   `review:pr_pushed` on the pull request event, `review:run_completed` once
-   the run concludes — additively, touching no existing job and no
+1. Build the engine and its guard registry against the real
+   `workflows.desired.yaml` and `labels.yaml`, with every `owned_by` action
+   stubbed, as a standalone package with no production caller touched.
+2. **Follow-up change** (not this one): rewire one real caller
+   (`remote-implement.py`, the simplest — one event, one decision) onto the
+   engine, keeping every other caller on hold.
+3. **Follow-up change**: rewire the remaining callers (`carry.py`,
+   `dispatch-gate.py`, `land-dispatch.py`, `failed-checks.py`,
+   `autofix-guard.py`, `recover-loop-state.py`, `refresh-loop-state.py`) one
+   at a time, each its own task with its own test.
+4. **Follow-up change**: wire `claude-review.yml` to call the engine for the
+   `review` workflow, additively, touching no existing job and no
    `ci-green` dependency.
-5. No rollback step beyond reverting the change: every `owned_by` action is a
-   stub, so no production side effect depends on the engine being correct
-   yet, and nothing this change does is irreversible on its own.
+5. No rollback step beyond reverting this change: it touches nothing in
+   production, so there is nothing to roll back but the new package itself.
