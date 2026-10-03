@@ -114,6 +114,7 @@ ROLE_TABLE: list[tuple[str, str]] = [
     ("channels/**", "backend-developer"),
     ("gateways/**", "backend-developer"),
     ("runtimes/**", "backend-developer"),
+    ("tools/conveyor-engine/**", "backend-developer"),
 ]
 
 ROLE_CRITERIA_HEADING = "## Review criteria"

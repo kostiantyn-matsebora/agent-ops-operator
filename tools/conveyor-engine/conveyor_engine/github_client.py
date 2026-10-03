@@ -137,6 +137,16 @@ class GhCliClient(GitHubClient):
         repo = subject.repo or self.repo
         return ["--repo", repo] if repo else []
 
+    def _require_repo(self, subject: Subject) -> str:
+        """The `owner/name` a REST endpoint needs, never a literal `None`."""
+        repo = subject.repo or self.repo
+        if not repo:
+            raise ValueError(
+                f"no repository known for {subject}: set Subject.repo or "
+                "construct GhCliClient with one"
+            )
+        return repo
+
     def get_labels(self, subject: Subject) -> set[str]:
         kind = "issue" if subject.kind == "issue" else "pr"
         result = subprocess.run(
@@ -157,7 +167,7 @@ class GhCliClient(GitHubClient):
         return {label["name"] for label in data.get("labels", [])}
 
     def set_labels(self, subject: Subject, labels: set[str]) -> None:
-        endpoint = f"repos/{subject.repo or self.repo}/issues/{subject.number}"
+        endpoint = f"repos/{self._require_repo(subject)}/issues/{subject.number}"
         subprocess.run(
             ["gh", "api", endpoint, "-X", "PATCH", "--input", "-"],
             input=json.dumps({"labels": sorted(labels)}),
@@ -177,7 +187,7 @@ class GhCliClient(GitHubClient):
     # applying pull request says `Refs #<n>` instead, so that field would
     # silently miss the common case.
     def related_pull_requests(self, issue: Subject) -> list[Subject]:
-        repo = issue.repo or self.repo
+        repo = self._require_repo(issue)
         result = subprocess.run(
             [
                 "gh",
@@ -337,7 +347,8 @@ class GhCliClient(GitHubClient):
         return "success"
 
     def list_comments(self, subject: Subject) -> list[Comment]:
-        endpoint = f"repos/{subject.repo or self.repo}/issues/{subject.number}/comments"
+        repo = self._require_repo(subject)
+        endpoint = f"repos/{repo}/issues/{subject.number}/comments"
         result = subprocess.run(
             ["gh", "api", endpoint, "--method", "GET", "--paginate"],
             capture_output=True,

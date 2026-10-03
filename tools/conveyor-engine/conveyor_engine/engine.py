@@ -80,9 +80,11 @@ class Engine:
             _log_error(error)
             return EvaluationResult(moved=False, error=error)
 
-        current_state = self._current_state(workflow, subject)
+        current_state, state_error = self._current_state(workflow, subject)
         if current_state is None:
-            error = f"{subject} carries no recognizable {workflow_name!r} state"
+            error = state_error or (
+                f"{subject} carries no recognizable {workflow_name!r} state"
+            )
             _log_error(error)
             return EvaluationResult(moved=False, error=error)
 
@@ -117,7 +119,14 @@ class Engine:
         if transition.owned_by:
             action = self.action_registry.get(transition.owned_by)
             if action is None:
-                _log_error(f"no stub registered for action {transition.owned_by!r}")
+                error = f"no stub registered for action {transition.owned_by!r}"
+                _log_error(error)
+                return EvaluationResult(
+                    moved=True,
+                    from_state=current_state,
+                    to_state=transition.to,
+                    error=error,
+                )
             else:
                 action(workflow_name, subject, facts)
                 action_called = transition.owned_by
@@ -129,18 +138,20 @@ class Engine:
             action_called=action_called,
         )
 
-    def _current_state(self, workflow: Workflow, subject: Subject) -> Optional[str]:
+    def _current_state(
+        self, workflow: Workflow, subject: Subject
+    ) -> tuple[Optional[str], Optional[str]]:
+        """The subject's state, or None plus the specific reason it has none
+        (an unreadable label set, or several state labels at once)."""
         try:
             labels = self.client.get_labels(subject)
         except Exception as exc:  # noqa: BLE001
-            _log_error(f"failed to read labels on {subject}: {exc}")
-            return None
+            return None, f"failed to read labels on {subject}: {exc}"
 
         matches = labels & set(workflow.states.keys())
         if len(matches) > 1:
-            _log_error(
+            return None, (
                 f"{subject} carries more than one {workflow.name!r} state "
                 f"label: {sorted(matches)}"
             )
-            return None
-        return next(iter(matches), None)
+        return next(iter(matches), None), None
