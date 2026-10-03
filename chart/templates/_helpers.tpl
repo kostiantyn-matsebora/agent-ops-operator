@@ -922,18 +922,52 @@ this incident. If no thread is bound here, this instruction does nothing —
 leave ending the conversation to whatever invoked you.
 {{- end -}}
 
-{{- /* Appends the self-close instruction above to a profile's own prompt text,
-never discarding either half. Call with `(dict "text" <systemPrompt value>)`. */ -}}
+{{- /* THE MEMBER SCOPE INSTRUCTION — appended beside self-close, same reach
+(every bundle profile, both wiring modes, same object), same THREAD-PRESENCE
+branch selfCloseInstruction already uses, for the same reason: a
+Pipeline-addressed conversation has its own thread and a human typing into
+it, so "a reply confirms it" still holds exactly as each profile's own
+describe-and-stop text already says. A coordinator-mode MEMBER has none, so
+without the second branch the agent has no way to know a mutating action
+still needs somebody's sign-off beyond its own judgment — which is exactly
+what let it reload a healthy integration unasked (measured live,
+2026-10-03): it read "reload" as narrow and safe, nothing told it that
+narrow-and-safe is still not its call to make without a thread.
+
+findReusableMember (internal/chat/coordinate.go) is what makes "wait to be
+re-invoked" a real mechanism rather than a dead end: a live, unclosed member
+invoked again under the SAME (parent, entry) reattaches to this exact
+conversation, so the authorized follow-up arrives as an ordinary next input
+with every finding already in context — never a blank restart. */ -}}
+{{- define "agentops.memberScopeInstruction" -}}
+Your task names exactly what you may do. Asked to investigate or report,
+stay read-only — propose a fix, never perform it, even one you are certain
+is safe. Only a task that explicitly authorizes a specific change is your
+license to make it, and only that change, nothing broader it reminds you of
+along the way.
+
+If a thread is bound to this conversation, a reply there confirming it —
+"yes", "do it", "go ahead" — is that authorization. Do exactly what you
+described, once, and never ask twice.
+
+If no thread is bound, you have nobody to ask directly: describe what you
+would do and end your turn there. Whoever invoked you decides what happens
+next, and tells you so directly, as your next task, if they authorize it.
+Never read a later message as authorization unless it says so plainly.
+{{- end -}}
+
+{{- /* Appends the self-close instruction and the member-scope instruction
+above to a profile's own prompt text, never discarding any of the three.
+Call with `(dict "text" <systemPrompt value>)`. */ -}}
 {{- define "agentops.withSelfClose" -}}
 {{- $role := trim (.text | default "") -}}
 {{- $extra := trim (include "agentops.selfCloseInstruction" .) -}}
-{{- if and $role $extra -}}
-{{ printf "%s\n\n%s" $role $extra }}
-{{- else if $extra -}}
-{{ $extra }}
-{{- else -}}
-{{ $role }}
-{{- end -}}
+{{- $scope := trim (include "agentops.memberScopeInstruction" .) -}}
+{{- $pieces := list -}}
+{{- with $role }}{{ $pieces = append $pieces . }}{{ end -}}
+{{- with $extra }}{{ $pieces = append $pieces . }}{{ end -}}
+{{- with $scope }}{{ $pieces = append $pieces . }}{{ end -}}
+{{ join "\n\n" $pieces }}
 {{- end -}}
 
 {{- /* THE RELEASE-WIDE WIRING POSTURE (coordinator-deployment-mode): "pipelines"

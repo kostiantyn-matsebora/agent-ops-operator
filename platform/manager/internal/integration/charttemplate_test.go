@@ -1142,6 +1142,80 @@ func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 	}
 }
 
+// A local shell inside the agent's own already-running pod is narrower than
+// allowPodExecution's own grant (pods/exec into ANY pod, which already
+// exposes every cluster Secret through the kubelet), so the acting route
+// binds agentops-shell once that flag is accepted and never before.
+func TestAllowPodExecutionAddsShellToTheActingRouteOnly(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
+		"--set", "kubernetes.allowMutations=true")
+	if doc := bundlePipelines(out)["k8s-operate"]; strings.Contains(doc, "name: agentops-shell") {
+		t.Errorf("allowPodExecution unset must leave the acting route without agentops-shell:\n%s", doc)
+	}
+
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
+		"--set", "kubernetes.allowMutations=true",
+		"--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	doc := bundlePipelines(out)["k8s-operate"]
+	for _, needle := range []string{"name: k8s-admin", "name: agentops-websearch", "name: agentops-shell"} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("allowPodExecution=true must leave the acting route with %q:\n%s", needle, doc)
+		}
+	}
+
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
+		"--set", "kubernetes.allowMutations=false",
+		"--set", "kubernetes.pipelines.observe.enabled=true",
+		"--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	if doc := bundlePipelines(out)["k8s-observe"]; strings.Contains(doc, "name: agentops-shell") {
+		t.Errorf("the observing route must never bind agentops-shell, whatever allowPodExecution is:\n%s", doc)
+	}
+}
+
+// Under pipelines mode a bundle route claims the console's source and
+// channel (chart.md's "THE DEMO WIRES THE CONSOLE"). An AgentCapability
+// carries no subscription at all, so nothing claimed it under coordinator
+// mode — a known gap until now. The chart-rendered Coordinator claims it
+// directly, unconditional on demo mode or any bundle, since console.enabled
+// is true by default.
+func TestCoordinatorClaimsConsoleWhenEnabled(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.agentops.wiringMode=coordinator")
+	doc := findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if !strings.Contains(doc, "signalSourceRefs:") || !strings.Contains(doc, "- name: console") {
+		t.Errorf("the Coordinator must claim the console source by default:\n%s", doc)
+	}
+	if !strings.Contains(doc, "channelRefs:") {
+		t.Errorf("the Coordinator must bind the console channel for escalation by default:\n%s", doc)
+	}
+
+	out = helmTemplate(t, "--set", "global.agentops.wiringMode=coordinator",
+		"--set", "console.enabled=false",
+		"--set", "global.agentops.console.signalSource=",
+		"--set", "global.agentops.console.channel=")
+	doc = findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if strings.Contains(doc, "console") {
+		t.Errorf("console disabled must leave no console reference on the Coordinator:\n%s", doc)
+	}
+
+	// An operator's own coordinator.channels still renders, deduped against
+	// the console claim rather than doubled.
+	out = helmTemplate(t, "--set", "global.agentops.wiringMode=coordinator",
+		"--set", "coordinator.channels[0]=ops-alerts",
+		"--set", "coordinator.channels[1]=console")
+	doc = findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	_, channelsBlock, ok := strings.Cut(doc, "channelRefs:\n")
+	if !ok {
+		t.Fatalf("no channelRefs rendered:\n%s", doc)
+	}
+	channelsBlock, _, _ = strings.Cut(channelsBlock, "\n  agents:")
+	if strings.Count(channelsBlock, "- name: console") != 1 {
+		t.Errorf("the console claim must dedup against an operator's own channels list, got:\n%s", channelsBlock)
+	}
+	if !strings.Contains(channelsBlock, "- name: ops-alerts") {
+		t.Errorf("an operator's own channel must still render:\n%s", channelsBlock)
+	}
+}
+
 // Two Ready Pipelines on one source is a SUPPORTED shape — sources are
 // shareable and sourceConflicts was deleted. Failing the render here would be
 // that guard returning one layer up.
@@ -2129,11 +2203,11 @@ func TestHaAdminToolsetIsEnumeratedAndWithholdsTheDestructive(t *testing.T) {
 func TestHaOperatorPromptStatesAConfirmationGate(t *testing.T) {
 	out := helmTemplate(t, haArgs()...)
 	doc := haDoc(t, out, "AgentProfile", "ha-operator")
-	if !strings.Contains(doc, "confirming it") || !strings.Contains(doc, "the authorization") {
+	if !strings.Contains(doc, "confirming it") || !strings.Contains(doc, "is that authorization") {
 		t.Fatalf("the operator prompt must state that a reply in the thread is the authorization:\n%s", doc)
 	}
-	if !strings.Contains(doc, "Never ask") || !strings.Contains(doc, "never tell the person to run it themselves") {
-		t.Fatalf("the operator prompt must forbid asking again and deferring the action to the person:\n%s", doc)
+	if !strings.Contains(doc, "never ask twice") || !strings.Contains(doc, "Never read a later message as authorization") {
+		t.Fatalf("the operator prompt must forbid asking again and reading a later message as authorization:\n%s", doc)
 	}
 }
 

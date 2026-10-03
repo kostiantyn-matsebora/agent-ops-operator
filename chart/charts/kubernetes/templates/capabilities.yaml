@@ -41,6 +41,11 @@ the one built-in bucket scoped to it alone, never to the read-only route. */ -}}
 {{- if dig "builtinToolsets" "enabled" false $g }}
 {{- $writeTools = append $writeTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
 {{- end }}
+{{- /* Mirrors pipelines.yaml's own agentops-shell addition exactly — see its
+comment. This file's header already states the two must not drift apart. */ -}}
+{{- if and (dig "builtinToolsets" "enabled" false $g) (dig "agentops" "runtimeDefaults" "allowPodExecution" false $g) }}
+{{- $writeTools = append $writeTools (dig "builtinToolsets" "shell" "name" "agentops-shell" $g) }}
+{{- end }}
 {{- $caps := list }}
 {{- if include "kubernetes.observePipelineEnabled" . }}
 {{- $caps = append $caps (dict "name" $p.observe.name

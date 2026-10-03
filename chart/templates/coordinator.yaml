@@ -32,6 +32,25 @@ coordinating agent's own prompt so the instruction is not the description's to
 carry alone. */ -}}
 {{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs the hourly self-heal sweep: lists this Coordinator's own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the hourly self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
 {{- $sources = append $sources $r.source.name }}
+{{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
+"DEMO MODE'S CONSOLE WIRING DOES NOT CARRY OVER TO COORDINATOR MODE" gap).
+Under pipelines mode a bundle route claims it; an AgentCapability carries no
+subscription at all, so nothing claimed it here — until now. Gated on
+console.enabled alone, the flag `console.yaml` renders the object by,
+never on demo mode or any bundle. Dedup against a bundle's own
+chatSources contribution (home-assistant's, say), which may already have
+added it. */ -}}
+{{- /* The names come from the console's OWN values, never from the
+`global.agentops.console` duplicate: that copy is checked only under demo mode
+(console.yaml), so trusting it here could claim an object this release does
+not render. */ -}}
+{{- $channels := $c.channels | default list }}
+{{- if .Values.console.enabled }}
+{{- $cs := .Values.console.signalSourceName | default .Values.console.name }}
+{{- $cc := .Values.console.channelName | default .Values.console.name }}
+{{- if not (has $cs $sources) }}{{ $sources = append $sources $cs }}{{ end }}
+{{- if not (has $cc $channels) }}{{ $channels = append $channels $cc }}{{ end }}
+{{- end }}
 {{- /* Every ref below is emitted only when the object it names is rendered —
 same rule every bundle's own wiring component follows. */ -}}
 {{- $toolsets := list }}
@@ -72,6 +91,12 @@ spec:
     what arrived, and `invoke` it with a clear, specific task. Its result
     reaches you later as an ordinary input — read it, and decide whether to
     answer, invoke another entry, or `escalate` to a human.
+
+    A task is either read-only ("check", "investigate", "report") or a
+    change a human already confirmed ("they said yes: do X") — never both
+    in one sentence, like "check and repair". Find a change worth making?
+    Propose it in your own words and wait. Write the authorized task only
+    after a human says yes.
 
     ## The hourly self-heal signal
 
@@ -143,8 +168,9 @@ spec:
     - name: {{ . }}
     {{- end }}
   {{- end }}
-  {{- with $c.channels }}
+  {{- with $channels }}
   # ESCALATION ONLY — never bound at conversation creation (coordinator-model).
+  # Includes the console claim above, when console is enabled.
   channelRefs:
     {{- range . }}
     - name: {{ . }}
