@@ -350,12 +350,16 @@ class GhCliClient(GitHubClient):
         repo = self._require_repo(subject)
         endpoint = f"repos/{repo}/issues/{subject.number}/comments"
         result = subprocess.run(
-            ["gh", "api", endpoint, "--method", "GET", "--paginate"],
+            ["gh", "api", endpoint, "--method", "GET", "--paginate", "--jq", ".[]"],
             capture_output=True,
             text=True,
             check=True,
         )
-        data = json.loads(result.stdout)
+        # `--paginate` prints one JSON array per page, which is not one JSON
+        # document. `--jq '.[]'` flattens the pages to one object per line.
+        data = [
+            json.loads(line) for line in result.stdout.splitlines() if line.strip()
+        ]
         return [
             Comment(
                 created_at=item.get("created_at", ""),
