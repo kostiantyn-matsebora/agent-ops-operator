@@ -89,6 +89,12 @@ spec:
     reaches you later as an ordinary input — read it, and decide whether to
     answer, invoke another entry, or `escalate` to a human.
 
+    A task is either read-only ("check", "investigate", "report") or a
+    change a human already confirmed ("they said yes: do X") — never both
+    in one sentence, like "check and repair". Find a change worth making?
+    Propose it in your own words and wait. Write the authorized task only
+    after a human says yes.
+
     ## The hourly self-heal signal
 
     One of your claimed sources (`{{ $r.source.name }}`) fires on an hourly
