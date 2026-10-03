@@ -65,7 +65,9 @@ they have not read.
   `/<name> ` in the new-conversation composer), thread command chips
   (`/exit`, `/close`), and the last message's `choices[]` as chips. A row menu
   with mark unread/read, open in new tab, copy link, open incident, reopen,
-  exit runtime, close and delete.
+  exit runtime, close and delete — reduced, for a member row, to open in new
+  tab, copy link and open incident, since a member holds no channel binding
+  of its own to act through.
 - **Every bulk action kept, with its rule.** Page-scoped select-all, Mark
   read, Mark unread (new), Close… with the include-working modal, Delete only
   when the whole selection is closed, per-row Reopen with no bulk form, rows
@@ -77,14 +79,34 @@ they have not read.
   A root's thread is the incident timeline: coordinator turns, member start
   and result lines, an escalation divider, then ordinary chat. A member has no
   console thread, so it is never unread on its own — its result counts on the
-  root. Before escalation the root's pane is read-only. Closing a root closes
-  its members, and the confirmation says so. The header shows the parent
-  chain. **Dependency:** `coordinated-agents` (in flight) supplies
-  `causedBy` (the immediate PARENT, one hop, nesting to any depth),
-  `coordinatorRef`, `brief`, `closeReason`, `escalatedAt` and a per-level
-  `budget`. This change renders that tree and adds nothing to the API.
-- **Not breaking.** No CRD, contract or chart value changes. Every endpoint
-  the old pages used keeps working, and two gain fields.
+  root. Before escalation the root's pane is read-only. Closing or deleting a
+  root reaches its members too — see below — and the confirmation says so. The
+  header shows the parent chain. **Dependency:** `coordinated-agents`,
+  archived into `coordinator-model`, `conversation-provenance`,
+  `coordination-escalation` and `coordination-loop`, supplies `causedBy` (the
+  immediate PARENT, one hop, nesting to any depth), `coordinatorRef`, `brief`,
+  `closeReason`, `escalatedAt` and a per-level `budget`. This change renders
+  that tree and closes one gap those specs left open: closing or deleting a
+  root from a human surface — the only way a console operator ever acts on
+  one — cascades to every live descendant, below.
+- **Closing or deleting a root reaches every descendant, for every
+  originator.** Today only the coordinator's own MCP `close` verb cascades to
+  members — a human's `/close`, the console's bulk close (a fan-out of
+  `/close`), and the idle timer each close the ONE conversation they are
+  given and stop. `conversation-close`'s own invariant ("one implementation,
+  whatever ordered it") is widened to include the cascade: closing a
+  conversation closes every live conversation it caused, recursively, with no
+  reason required or threaded through unless a coordinator itself issued the
+  close. Deleting gains the matching cascade — closing already guarantees
+  every descendant is `Closed` by the time the root is, so deleting the root
+  deletes every descendant too, skipping any already gone. The confirmation
+  names the count for both actions, and a member reached directly (never
+  through its root) is refused, naming its parent.
+- **Not breaking.** No CRD or chart value changes. Every endpoint the old
+  pages used keeps working: two gain fields, the read verb gains the rewind
+  form, and the close and delete verbs gain a cascade through `causedBy` —
+  a behavior change to the `conversation-close` capability, not a new
+  endpoint or field.
 
 ## Capabilities
 
@@ -115,6 +137,17 @@ they have not read.
   gain the unread count and the last counted message, the unread scenario is
   restated by the new rule, and the detail's views become secondary views of
   one thread pane.
+- `conversation-close`: closing a conversation now cascades to every live
+  conversation it caused, recursively, for every originator — not only the
+  coordinator's own MCP verb. Deleting a `Closed` conversation cascades the
+  same way. No new field or endpoint: the existing `/close` command, the
+  idle timer and the delete verb all gain it.
+- `console-coordination-view`: superseded. Its requirements described the
+  list/detail pages this change deletes — the grouping toggle, the flat
+  default, the old transcript's parent link. `console-conversation-tree`
+  (new, below) carries the same substance forward as the one view's own
+  behavior, and this capability's delta marks that handoff explicitly rather
+  than leaving a published spec describing a page that no longer exists.
 
 ## Impact
 
@@ -129,8 +162,14 @@ they have not read.
 - `platform/console/` (Go): `conversations.go` (per-row unread count and last
   counted message from the merged transcript), `convapi.go` (filter and
   count-only by the rule, `mine`, `incidents`, tree grouping, mark-unread
-  handler), `adapter.go` (the rewind report), `transcript.go` (kind-aware
-  counting helper).
+  handler, member-in-selection skip for close AND delete), `adapter.go` (the
+  rewind report), `transcript.go` (kind-aware counting helper).
+- `platform/manager/internal/chat/router.go` and `coordinate.go`: the
+  ordinary close path (`closeConversation`, which `/close` and the console's
+  bulk close both reach) cascades through the same `cascadeCloseMembers`
+  helper the coordinator's own MCP verb already uses.
+- `platform/manager/internal/httpapi/server.go`: `handleConversationDelete`
+  cascades through `causedBy` before deleting the named conversation.
 - `platform/manager/internal/httpapi/channels.go` and `api/v1alpha1`: the
   read verb accepts a reader-scoped rewind. No CRD field changes.
 - `platform/console/ui/screenshots/fixture.ts` and `demo/story.ts`: the
@@ -141,14 +180,18 @@ they have not read.
 
 - `docs/console.md`: the Conversations, Unread ("no mark as unread", "nothing
   is persisted"), Closing, Reopening and Deleting sections, and "What the
-  browser keeps".
+  browser keeps". Closing and Deleting both state the cascade to members.
 - `docs/concepts.md`: the read-state section's "a thread is unread when"
-  paragraph gains the console's message-kind rule and the rewind.
+  paragraph gains the console's message-kind rule and the rewind. The
+  Closing and Deletion sections state that both now cascade through
+  `causedBy` for every originator, not only the coordinator's own verb.
 - `docs/contracts.md`: `POST /channel/read` gains the rewind form.
-- `docs/CHANGELOG.md`: the console image entry.
+- `docs/CHANGELOG.md`: the console image entry, plus a manager entry for the
+  close/delete cascade (a behavior change, not a new field).
 - `.claude/rules/structure.md`: the console section (the pages it holds).
 - `openspec/specs/console-unread`, `conversation-read-state`,
-  `console-live-runs`: folded at archive.
+  `console-live-runs`, `conversation-close`, `console-coordination-view`:
+  folded at archive.
 
 **Documents made untrue — adopter site**
 
@@ -161,15 +204,12 @@ they have not read.
 - `docs/getting-started.md`: the console-first walkthrough where it names the
   list, the unread switch or the detail tabs.
 
-**Coordination with `coordinated-agents`**
+**`coordinated-agents` already archived before this change was applied**
 
-- Its phase 5 (console, design D-G), tasks 5.3 and 5.4, and tasks 8a.3 and
-  8b.6 describe the incident view this change now owns. Once this change is
-  proposed, that change's console phase should shrink to the two watched
-  kinds and the inventory rows (5.1, 5.2), and point here for the view. That
-  edit belongs to that change's own update, not to this file.
-- Its `console-coordination-view` delta spec and this change's
-  `console-conversation-tree` describe one view. Whichever archives second
-  folds into the first, and the two are written to agree: grouped under the
-  uncaused root at any depth, a nested coordinator expanding in place, a
-  member naming its parent, and un-escalated closures marked.
+- It shipped tasks 5.3 and 5.4 in full — the incident view this proposal
+  once expected it to shrink away from — as the now-published
+  `console-coordination-view` capability, on the pages this change deletes.
+- `console-conversation-tree` (above) supersedes it rather than coordinating
+  with it. The `conversation-close` and `console-coordination-view` entries
+  under Modified Capabilities, and their delta specs once created, carry
+  that supersession explicitly.
