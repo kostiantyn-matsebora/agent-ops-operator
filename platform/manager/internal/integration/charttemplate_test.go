@@ -2203,11 +2203,11 @@ func TestHaAdminToolsetIsEnumeratedAndWithholdsTheDestructive(t *testing.T) {
 func TestHaOperatorPromptStatesAConfirmationGate(t *testing.T) {
 	out := helmTemplate(t, haArgs()...)
 	doc := haDoc(t, out, "AgentProfile", "ha-operator")
-	if !strings.Contains(doc, "confirming it") || !strings.Contains(doc, "the authorization") {
+	if !strings.Contains(doc, "confirming it") || !strings.Contains(doc, "is that authorization") {
 		t.Fatalf("the operator prompt must state that a reply in the thread is the authorization:\n%s", doc)
 	}
-	if !strings.Contains(doc, "Never ask") || !strings.Contains(doc, "never tell the person to run it themselves") {
-		t.Fatalf("the operator prompt must forbid asking again and deferring the action to the person:\n%s", doc)
+	if !strings.Contains(doc, "never ask twice") || !strings.Contains(doc, "Never read a later message as authorization") {
+		t.Fatalf("the operator prompt must forbid asking again and reading a later message as authorization:\n%s", doc)
 	}
 }
 
