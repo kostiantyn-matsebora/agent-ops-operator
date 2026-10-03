@@ -41,9 +41,10 @@ each message fresh and say so, and nothing else needs changing to match.
 | a `PersistentVolume` by label | `selector` | renders a claim carrying that selector |
 
 **Naming a volume is not enough on its own.** A claim binds to a pre-created
-volume only when it declines a storage class, and an absent `storageClassName`
-is filled in by the cluster's default — which provisions a second volume and
-leaves yours untouched. `-` is how a claim declines a class:
+volume only when it declines a storage class. An absent `storageClassName`
+is filled in by the cluster's default instead, provisioning a second volume.
+
+`-` is how a claim declines a class:
 
 | `storageClassName` | Renders |
 |---|---|
@@ -151,11 +152,10 @@ claude:
     paths: [".claude/projects/-data-workspace/**"]
 ```
 
-**Not in `global.agentops.runtimeDefaults`.** Those are what every runtime
-inherits, and an include list is one vendor's filesystem layout — running
-another backend means replacing the paths with its own, in the same section that
-carries its image and credential. Clearing them gives that runtime the volume
-mounted directly, exactly as before this existed.
+**Not in `global.agentops.runtimeDefaults`.** An include list is one vendor's
+filesystem layout, so another backend replaces the paths with its own, in the
+same section that carries its image and credential. Clearing them gives that
+runtime the volume mounted directly, as before this existed.
 
 **The cost, paid on every conversation.** `$HOME` is pod-local in this
 mode, so it is not only transcripts that live there — caches, tool state and
@@ -269,17 +269,28 @@ cannot do is run new code.
 cluster.** The grants are cluster-wide, so that is the scope.
 
 **Three walls move on that one value, and the third is what the agent is
-told.** The route account's rules and the kubernetes bundle's MCP server role
-are the two RBAC walls. Neither is visible from the agent's tool list — the
-server advertises the workload-patch tool whatever the gate says, and the API
-server refuses it one hop later — so with the gate off the bundle's
-`k8s-engineer` role also ends with a paragraph saying pod execution is
-withheld, which workload kinds it cannot edit, what it can still do, and that
-the operator makes the edit. Asked to change a Deployment, the agent declines
-with that reason instead of trying and reporting an RBAC refusal. The text is
-`kubernetes.profile.podExecutionWithheldPrompt`; set it to `""` to leave it
-out. One profile, not two: a profile picked by hand to match the value would
-drift the first time it was flipped.
+told.** The route account's rules and the kubernetes bundle's MCP server
+role are the two RBAC walls.
+
+Neither is visible from the agent's tool list. The server advertises the
+workload-patch tool whatever the gate says, and the API server refuses it
+one hop later.
+
+So with the gate off, the bundle's `k8s-engineer` role ends with a paragraph
+naming the withheld workload kinds and what it can still do, and suggesting
+that the operator makes the edit.
+
+Asked to change a Deployment, the agent declines with that reason instead of
+trying and reporting an RBAC refusal.
+
+The text is `kubernetes.profile.podExecutionWithheldPrompt`. Set it to `""`
+to leave it out. One profile, not two — a profile picked by hand to match
+the value would drift the first time it was flipped.
+
+**Turning it on also gives the `kubernetes` bundle's acting route a local
+shell** (`agentops-shell`), beside its `k8s-admin` and `agentops-websearch`
+toolsets — narrower than the `pods/exec` grant this flag already carries.
+The observing route never gets it, whatever this flag is set to.
 
 ### What the roles grant
 
@@ -394,12 +405,17 @@ A vendor with no bundle is a `runtimes:` entry with its own image, and
 whatever differs from the defaults.
 
 **`default` is what a route naming no `runtimeRef` resolves to, and the chart
-renders it as a copy of one runtime you declared.** Every runtime keeps its own
-name. Which one is copied is `default: true` on that runtime — on a bundle or a
-`runtimes:` entry — or, with none flagged, the first configured. Every runtime
-is optional: the `claude` bundle is the first shipped and on by default, so it
-is the default on a fresh install, and turning it off with another on moves the
-default there with no rename. **No runtime at all FAILS the render** when a
+renders it as a copy of one runtime you declared.** Every runtime keeps its
+own name.
+
+Which one is copied is `default: true` on that runtime — on a bundle or a
+`runtimes:` entry — or, with none flagged, the first configured.
+
+Every runtime is optional. The `claude` bundle is the first shipped and on
+by default, so it is the default on a fresh install, and turning it off with
+another on moves the default there with no rename.
+
+**No runtime at all FAILS the render** when a
 route still needs one, naming the routes — rather than leaving conversations in
 `Pending` forever with the reason in the manager's log. So do two flags.
 
@@ -483,8 +499,9 @@ is on
 [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/#egress-control).
 
 An agent that can run commands reaches a bound MCP server directly and calls
-whatever that server registers. `agentops-shell` is bound on ordinary routes, so
-this is the common case, not an exotic one.
+whatever that server registers. Routes you declare in `pipelines:` can bind
+`agentops-shell`, and the `kubernetes` acting route gets it when
+`allowPodExecution` is on, so this is the common case, not an exotic one.
 
 `global.agentops.runtimeDefaults.egressMediation.enabled` puts a proxy in the
 runtime pod that the agent's traffic cannot route around, and enforces the bound
