@@ -277,7 +277,8 @@ workload-patch tool whatever the gate says, and the API server refuses it
 one hop later.
 
 So with the gate off, the bundle's `k8s-engineer` role ends with a paragraph
-naming the withheld workload kinds and what it can still do.
+naming the withheld workload kinds and what it can still do, and suggesting
+that the operator makes the edit.
 
 Asked to change a Deployment, the agent declines with that reason instead of
 trying and reporting an RBAC refusal.
