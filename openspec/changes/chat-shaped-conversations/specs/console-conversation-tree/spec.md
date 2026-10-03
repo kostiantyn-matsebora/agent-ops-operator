@@ -85,14 +85,45 @@ The immediate parent SHALL be distinguishable from the rest of the chain.
 - **THEN** the header shows root, parent and member, and choosing the root opens the incident
 
 ### Requirement: Closing a root is shown as closing its members
-The confirmation for closing a selection containing a coordinator's root
-SHALL state how many descendants close with it, at every depth. A member
-SHALL NOT be closable on its own from this view, and the refusal SHALL name
-its parent.
+The manager cascades a close through every live descendant. The
+confirmation for closing a selection containing a coordinator's root SHALL
+state how many descendants close with it, at every depth.
+
+A member SHALL NOT be closable on its own from this view. The row menu
+SHALL NOT offer close for a member row, and a selection reaching one
+directly — never through its root — SHALL report it skipped, naming its
+parent.
 
 #### Scenario: The confirmation counts members
 - **WHEN** the operator closes a root with three members
 - **THEN** the confirmation says four conversations close
+
+#### Scenario: A member cannot be closed directly
+- **WHEN** a selection containing a member, with no ancestor of it also
+  selected, is closed
+- **THEN** the member's outcome is skipped, naming its parent, and every
+  other selected conversation closes normally
+
+### Requirement: Deleting a root is shown as deleting its members
+The manager cascades a delete through every already-closed descendant, the
+way it cascades a close through every live one. The confirmation for deleting a selection containing a
+coordinator's root SHALL state how many descendants delete with it, at
+every depth.
+
+A member SHALL NOT be deletable on its own from this view, on the same
+grounds as closing it. The row menu SHALL NOT offer delete for a member
+row, and a selection reaching one directly SHALL report it skipped, naming
+its parent.
+
+#### Scenario: The confirmation counts members
+- **WHEN** the operator deletes a root with three members
+- **THEN** the confirmation says four conversations delete
+
+#### Scenario: A member cannot be deleted directly
+- **WHEN** a selection containing a member is deleted
+- **THEN** the member's outcome is skipped, naming its parent, and a
+  selected closed root deletes normally, its cascade reaching every closed
+  descendant whether or not they were selected
 
 ### Requirement: An incident nobody was told about is visible
 A root closed by its coordinator without escalation SHALL appear in the
