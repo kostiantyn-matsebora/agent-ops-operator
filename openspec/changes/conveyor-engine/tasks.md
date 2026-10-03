@@ -22,22 +22,22 @@
 
 ## 3. Unit tests
 
-- [ ] 3.1 Run the engine's own test suite (tasks 1.1–1.8, 2.1–2.8) standalone, with no network and no real GitHub call (every guard's I/O boundary stubbed in its test), and verify every test passes
-- [ ] 3.2 Confirm `.github/tests/run.sh` needs no change and still passes unmodified: this package is not wired into it, since no file under `.github/` is touched or depends on `tools/conveyor-engine/`, and record that confirmation in this task
+- [x] 3.1 Run the engine's own test suite (tasks 1.1–1.8, 2.1–2.8) standalone, with no network and no real GitHub call (every guard's I/O boundary stubbed in its test), and verify every test passes — `python3 -m unittest discover -s tools/conveyor-engine`: 118 tests, 0.28s, OK
+- [x] 3.2 Confirm `.github/tests/run.sh` needs no change and still passes unmodified: this package is not wired into it, since no file under `.github/` is touched or depends on `tools/conveyor-engine/`, and record that confirmation in this task — ran it, `every script test passed`, exit 0, unmodified
 
 ## 4. E2E tests
 
-- [ ] 4.1 Nothing here is decided by a cluster. The engine reads GitHub API state and writes GitHub labels, invoked by nothing in production in this change. No kubelet, RBAC rule, informer, pod lifecycle, or context-continuity behavior is touched.
+- [x] 4.1 Nothing here is decided by a cluster. The engine reads GitHub API state and writes GitHub labels, invoked by nothing in production in this change. No kubelet, RBAC rule, informer, pod lifecycle, or context-continuity behavior is touched.
 
 ## 5. Documentation
 
 ### Reference docs
 
-- [ ] 5.1 Confirm `docs/CHANGELOG.md` needs no entry (the package ships unused by production in this change, so there is no upgrade step or behavior change for an adopter), and record that confirmation in this task
-- [ ] 5.2 Confirm `docs/concepts.md` and `docs/contracts.md` need no change (the conveyor is internal delivery tooling, not part of the published product contract), and record that confirmation in this task
-- [ ] 5.3 Confirm `docs/security.md`'s fixing-loop push-credential section needs no change (it describes `conveyor:fix` and `autofix-guard.py` as they exist today, and this change touches neither), and record that confirmation in this task
-- [ ] 5.4 Add a `.claude/rules/gotchas.md` or `structure.md` entry (whichever this repository's own convention points to for a new top-level tooling directory) naming `tools/conveyor-engine/` as the standalone, unwired home of the declarative conveyor engine, so the next reader does not assume it is live, and naming the follow-up change as where it gets wired in
+- [x] 5.1 Confirm `docs/CHANGELOG.md` needs no entry (the package ships unused by production in this change, so there is no upgrade step or behavior change for an adopter), and record that confirmation in this task — confirmed: it mentions `conveyor.py` only in historical entries describing its PRIOR introduction, none of which this change touches
+- [x] 5.2 Confirm `docs/concepts.md` and `docs/contracts.md` need no change (the conveyor is internal delivery tooling, not part of the published product contract), and record that confirmation in this task — confirmed: `grep -i conveyor` on both files returns nothing
+- [x] 5.3 Confirm `docs/security.md`'s fixing-loop push-credential section needs no change (it describes `conveyor:fix` and `autofix-guard.py` as they exist today, and this change touches neither), and record that confirmation in this task — confirmed: that section still reads true, since neither file it describes was edited
+- [x] 5.4 Add a `.claude/rules/gotchas.md` or `structure.md` entry (whichever this repository's own convention points to for a new top-level tooling directory) naming `tools/conveyor-engine/` as the standalone, unwired home of the declarative conveyor engine, so the next reader does not assume it is live, and naming the follow-up change as where it gets wired in — neither file was clean enough to extend without absorbing unrelated pre-existing violations (checked both against `.claude/scripts/rules_compliance.py` first), so this landed as its own new file, `.claude/rules/conveyor-engine.md`, per `authoring.md`'s own "a new topic is a new file" rule
 
 ### Adopter site
 
-- [ ] 5.5 Confirm the landing page, Introduction, Getting started, Installation page, and every guide under `docs/guides/` need no change (none describes the conveyor), and record that confirmation in this task
+- [x] 5.5 Confirm the landing page, Introduction, Getting started, Installation page, and every guide under `docs/guides/` need no change (none describes the conveyor), and record that confirmation in this task — confirmed: `grep -rli conveyor` across those pages and `docs/guides/` returns nothing
