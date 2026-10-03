@@ -36,6 +36,7 @@ class StateWriter:
         was written either way, and propagation re-derives from the live
         label on its own next trigger. Never raises.
         """
+        state_vocabulary = list(state_vocabulary)  # read twice below
         try:
             self._write_local(subject, state_vocabulary, new_state)
         except Exception as exc:  # noqa: BLE001 -- the whole point: never raise past here
@@ -43,7 +44,7 @@ class StateWriter:
             return False
 
         try:
-            self.propagate_label(subject, new_state)
+            self.propagate_label(subject, new_state, state_vocabulary)
         except Exception as exc:  # noqa: BLE001
             _log_error(f"failed to propagate {new_state!r} from {subject}: {exc}")
 
@@ -57,7 +58,12 @@ class StateWriter:
         desired = (current - vocabulary) | {new_state}
         self.client.set_labels(subject, desired)
 
-    def propagate_label(self, subject: Subject, label: str) -> None:
+    def propagate_label(
+        self,
+        subject: Subject,
+        label: str,
+        state_vocabulary: Iterable[str] = (),
+    ) -> None:
         """The reusable half of Decision 4b: write `label` onto every
         subject related to `subject`, crossing the issue/pull-request
         boundary, when and only when the label's own prefix is declared
@@ -73,15 +79,26 @@ class StateWriter:
         if prefix is None or prefix.propagation != "bidirectional":
             return
 
+        # Same-prefix labels in the caller's vocabulary are stale on the target.
+        stale = {
+            v for v in state_vocabulary if v.split(":", 1)[0] == prefix_name
+        } - {label}
+
         if subject.kind == "issue":
-            for pull_request in self.client.related_pull_requests(subject):
-                self._add_label(pull_request, label)
+            targets = list(self.client.related_pull_requests(subject))
         else:
             issue = self.client.related_issue(subject)
-            if issue is not None:
-                self._add_label(issue, label)
+            targets = [issue] if issue is not None else []
 
-    def _add_label(self, target: Subject, label: str) -> None:
+        # One target failing must not abort the rest.
+        for target in targets:
+            try:
+                self._set_on(target, label, stale)
+            except Exception as exc:  # noqa: BLE001
+                _log_error(f"failed to propagate {label!r} to {target}: {exc}")
+
+    def _set_on(self, target: Subject, label: str, stale: set) -> None:
         current = self.client.get_labels(target)
-        if label not in current:
-            self.client.set_labels(target, current | {label})
+        desired = (current - stale) | {label}
+        if desired != current:
+            self.client.set_labels(target, desired)
