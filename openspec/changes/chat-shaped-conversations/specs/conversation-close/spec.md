@@ -76,7 +76,7 @@ are not a way to close.
 
 ### Requirement: Deleting a conversation cascades to its already-closed descendants
 Deleting a `Closed` conversation SHALL first recursively delete every
-conversation in its `causedBy` subtree, at any depth, tolerating one that is
+conversation reachable from it by `causedBy`, at any depth, tolerating one that is
 already gone (`NotFound`). It SHALL do so before deleting the named
 conversation itself.
 

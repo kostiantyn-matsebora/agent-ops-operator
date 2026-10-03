@@ -121,9 +121,9 @@ its parent.
 
 #### Scenario: A member cannot be deleted directly
 - **WHEN** a selection containing a member is deleted
-- **THEN** the member's outcome is skipped, naming its parent, and the root
-  deletes normally when it and every descendant are also selected and
-  closed
+- **THEN** the member's outcome is skipped, naming its parent, and a
+  selected closed root deletes normally, its cascade reaching every closed
+  descendant whether or not they were selected
 
 ### Requirement: An incident nobody was told about is visible
 A root closed by its coordinator without escalation SHALL appear in the

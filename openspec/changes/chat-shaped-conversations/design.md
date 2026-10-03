@@ -245,7 +245,7 @@ from the prototype files and are written down nowhere else.
 - [`coordinated-agents` archived before this change was applied, shipping
   the full incident view on the OLD pages as `console-coordination-view`]
   → `console-conversation-tree` supersedes it. The delta spec marks
-  `console-coordination-view` MODIFIED, retiring its page-specific
+  `console-coordination-view` REMOVED, retiring its page-specific
   requirements in favor of the tree and the incident timeline this view
   now owns.
 - [Cascading close and delete widens what one `/close` or one delete call
