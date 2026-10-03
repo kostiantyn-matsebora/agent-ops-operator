@@ -94,9 +94,10 @@ sitting beside them would read as already wired in, when nothing calls it
 yet.
 
 `tools/` is a new top-level directory for this repository's own delivery
-tooling, parallel to `test/`'s own carve-out from component discovery. It
-carries no `Dockerfile` and no `go.mod`, so `.github/components.sh` never
-discovers it as a published component.
+tooling. Unlike `test/`, which `.github/components.sh` excludes by an
+explicit path rule, `tools/` needs no exclusion: it carries no `Dockerfile`
+and no `go.mod`, so `components.sh` never discovers it as a published
+component.
 
 **No dependency on `conveyor.py`, `conveyor_io.py`, or `load_script.py`.**
 The engine imports none of them. It reads the two merged model files under
