@@ -12,6 +12,21 @@ already proved a declarative YAML of this shape can be loaded and run.
 is ported, wrapped, or referenced from it. The engine is built fresh, and the
 YAML is its only source.
 
+**Scoped down from the original proposal, before implementation started.**
+This change builds and proves the engine as a standalone package, isolated
+from the production line.
+
+- No file under `.github/scripts/` or `.github/workflows/` is touched.
+- `conveyor.py` and `conveyor_io.py` are neither imported nor referenced.
+- The only thing it reads from `.github/` is the two already-merged model
+  files (`workflows.desired.yaml`, `labels.yaml`), as data.
+- Nothing in production changes behavior as a result of this change
+  landing.
+
+Rewiring the real callers onto this engine, and wiring `claude-review.yml`
+for the `review` workflow, are a follow-up change — proposed once this one
+proves the engine correct on its own.
+
 ## What Changes
 
 - **A new workflow engine loads `workflows.desired.yaml` and runs it for
@@ -47,32 +62,16 @@ YAML is its only source.
   State storage, trigger recognition, and guard evaluation are real and
   load-bearing. The side effects a transition's owner performs are not, in
   this change.
-- **A new, standalone `review` workflow tracks the code-review pipeline's own
-  lifecycle on its pull request** — `claude-review.yml`'s queue → read →
-  consolidate → reconcile run, and `review-dispatch.yml`'s fixing loop that
-  follows it — never the station/loop line a tracking issue drives.
-  `subject: pull_request`, trigger prefix `review:*`, state prefix `scan:*`
-  (`scan:none`, `scan:running`, `scan:clean`, `scan:found_issues`,
-  `scan:skipped`, `scan:failed`, cycling back to `scan:running` on every push).
-  It `invokes` nothing and is `invoked` by nothing — `conveyor.run` and
-  `ci-green` are unchanged by this workflow's existence, and a found-issues or
-  failed scan surfaces through branch protection's required conversation
-  resolution exactly as it does today, never through this machine failing a
-  check. Its two outcome-bearing transitions (`scan:found_issues`,
-  `scan:failed`) name stub actions (`notify_findings`, `notify_failure`),
-  stubbed in this change like every other `owned_by` action.
-- **The engine runs through the existing remote-session mechanism,
-  unchanged.** `conveyor:implement` and `conveyor:run` placed on an issue
-  already start a remote Claude session per the repository's own
-  `remote-session.md` rule. This change wires the engine into that same
-  path and invents no new one.
-- **`conveyor.py` is deleted, with no replacement reusing its shape.** Every
-  real caller that imported it (`carry.py`, `remote-implement.py`,
-  `dispatch-gate.py`, `land-dispatch.py`, `failed-checks.py`,
-  `autofix-guard.py`, `recover-loop-state.py`, `refresh-loop-state.py`) is
-  rewired onto the new engine as part of this change. **BREAKING**: these
-  scripts' internal shape changes. Their externally observed behavior does
-  not, except where this proposal says so.
+- **The `review` workflow's declared shape stands in `workflows.desired.yaml`
+  and `labels.yaml` already** (merged ahead of this change) — `subject:
+  pull_request`, trigger prefix `review:*`, state prefix `scan:*`. This
+  change wires nothing to call it. The engine runs it the same as every
+  other declared workflow, once something invokes `evaluate()` for it —
+  which is the follow-up change's job.
+- **`conveyor.py` stays exactly as it is, untouched.** No real caller is
+  rewired in this change. The engine is proven against the real
+  `workflows.desired.yaml` and `labels.yaml` through its own tests, with no
+  production code calling it yet.
 
 ## Capabilities
 
@@ -81,53 +80,27 @@ YAML is its only source.
 - `conveyor-engine`: the generic engine — loading a workflow YAML, mapping a
   real GitHub event to a trigger, evaluating a named guard against live
   state, writing the resulting state as a label, and the registry of
-  stubbed `owned_by:` actions.
-- `review-lifecycle`: the `review` workflow's own declared shape — its
-  `scan:*` states, its `review:*` triggers, and the guard predicates
-  (`review_run_succeeded`, `has_open_review_threads`, `review_run_skipped`)
-  that decide which outcome a completed run lands on. Standalone from
-  `conveyor-lifecycle`: it tracks the code-review pipeline on its pull
-  request, never a tracking issue's station or a fixing loop's round, and
-  nothing in `conveyor-lifecycle`'s grant-and-recheck rules applies to it.
+  stubbed `owned_by:` actions. Ships as a standalone package nothing in
+  production calls yet.
 
-### Modified Capabilities
-
-- `conveyor-lifecycle`: the mechanism deciding every station and loop
-  transition changes from a hardcoded Python table to the generic engine
-  reading `workflows.desired.yaml`. The station and loop vocabulary itself
-  grows to match the desired model (`ready`, `implementing`, `implemented`,
-  `ready_to_merge`, `merge_failed`, `fixing`, `hotfix_created`, `finalizing`,
-  `finalized`, and the rest), superseding the real, narrower vocabulary
-  `conveyor.py` used. The grant and re-check rules this capability already
-  publishes (a label is a grant only when a person placed it or a program
-  carried one, re-checked at every transition) are preserved, now enforced
-  by guard predicates rather than Python functions of the same name.
+No other capability is added or modified by this change. `review-lifecycle`
+and the `conveyor-lifecycle` modification described in the original
+proposal both depend on real callers invoking the engine, which this change
+does not do — they move to the follow-up change, where they will be true.
 
 ## Impact
 
-- **Code**: `.github/scripts/conveyor.py` stays deleted. A new engine module
-  under `.github/scripts/` (or a dedicated `.github/conveyor-engine/`
-  directory — settled in design.md) reads `.github/conveyor-model/
-  workflows.desired.yaml`. Every real caller listed above is rewritten
-  against the new engine's interface. `.github/workflows/remote-implement.yml`
-  and `.github/workflows/review-dispatch.yml` keep their trigger wiring
-  (`issues: labeled`, `workflow_run`, `issue_comment`, `workflow_dispatch`)
-  but call the new engine instead of the deleted file.
-- **Docs to re-check**: `docs/security.md`'s "fixing loop's push credential"
-  section describes `conveyor:fix` and the `autofix-guard.py` path, which
-  this change rewires. It is re-read against the engine in the
-  documentation task.
-- **`claude-review.yml` gains a call into the engine for the `review`
-  workflow**: a `pull_request` (`opened`/`synchronize`/`ready_for_review`)
-  firing `review:pr_pushed`, and the workflow's own conclusion (read by the
-  caller, never invented) firing `review:run_completed`. Neither edits the
-  workflow's existing jobs or `ci-green`'s `needs:` — the engine call is
-  additive, state-tracking only.
-- **Reference docs made untrue**: none yet — `conveyor.py` and its mechanism
-  were never documented in `docs/concepts.md` or `docs/contracts.md` (they are
-  internal tooling, not part of the published product contract), and
-  `docs/CHANGELOG.md` gets an entry once this change lands.
+- **Code**: `.github/scripts/conveyor.py` is untouched. A new, standalone
+  package at `tools/conveyor-engine/` (settled in design.md) reads
+  `.github/conveyor-model/workflows.desired.yaml` and `labels.yaml` as data.
+  Nothing under `.github/scripts/` or `.github/workflows/` changes.
+- **Docs to re-check**: none yet. `docs/security.md`'s fixing-loop section
+  describes `conveyor:fix` and `autofix-guard.py` as they exist today, and
+  this change does not touch either — it is re-read once the follow-up
+  change rewires them.
+- **Reference docs made untrue**: none — `conveyor.py` and its mechanism
+  were never documented in `docs/concepts.md` or `docs/contracts.md` (they
+  are internal tooling, not part of the published product contract).
+  `docs/CHANGELOG.md` needs no entry: nothing an adopter runs changes.
 - **Adopter site**: none. The conveyor is this repository's own delivery
-  tooling, not a capability an adopter installs or configures. No landing
-  page, Introduction, Getting started, Installation page or guide under
-  `docs/guides/` describes it or needs to change.
+  tooling, not a capability an adopter installs or configures.
