@@ -11,14 +11,14 @@
 
 ## 2. Guard predicates — backend-developer
 
-- [ ] 2.1 Implement `has_access`, reading the real actor's collaborator permission from the GitHub API via a thin `gh` wrapper owned by this package (not `conveyor_io.py`), failing closed (treated as no access) on an unreadable permission, and verify a unit test for granted, denied, and unreadable
-- [ ] 2.2 Implement `is_session_at_work`, reading whether a pull request is already open from the subject's own branch, failing closed (treated as a session already at work) on an unreadable pull request list, and verify a unit test for each case
-- [ ] 2.3 Implement `is_change_finished`, reading the bound change's tasks file and checking every task is ticked, failing closed (treated as not finished) on an unreadable file, and verify a unit test for finished, unfinished, and unreadable
-- [ ] 2.4 Implement `has_open_prs`, `all_prs_mergeable`, `pr_is_mergeable`, `all_prs_merged`, and `master_is_green`, each reading the real pull request and check-run state needed, each failing closed toward "not yet" rather than "proceed," and verify a unit test per predicate covering its true, false, and unreadable cases
-- [ ] 2.5 Implement `is_capped` and `reset`, reading the loop's own round count and cap against the same bound this repository's `conveyor-lifecycle` capability already publishes, and verify a unit test for under the cap, at the cap, and a granted reset
-- [ ] 2.6 Implement `proposal_pr_is_mergeable` and `hotfix_pr_is_created`/`all_checks_ran`, reading the specific pull requests `conveyor.propose` and `conveyor.fix` name, and verify a unit test per predicate
-- [ ] 2.7 Implement `review_run_succeeded`, `has_open_review_threads`, and `review_run_skipped` for the `review` workflow, reading the pull request's own review run conclusion, its open review-thread count, and the run's own skip condition (never re-derived — read from the run that already happened), each failing closed toward "not yet landed" rather than "clean," and verify a unit test per predicate covering its true, false, and unreadable cases
-- [ ] 2.8 Add a test asserting every bare predicate name referenced anywhere in `workflows.desired.yaml`'s guard strings resolves to a registered function, failing on a name with no implementation
+- [x] 2.1 Implement `has_access`, reading the real actor's collaborator permission from the GitHub API via a thin `gh` wrapper owned by this package (not `conveyor_io.py`), failing closed (treated as no access) on an unreadable permission, and verify a unit test for granted, denied, and unreadable
+- [x] 2.2 Implement `is_session_at_work`, reading whether a pull request is already open from the subject's own branch, failing closed (treated as a session already at work) on an unreadable pull request list, and verify a unit test for each case
+- [x] 2.3 Implement `is_change_finished`, reading the bound change's tasks file and checking every task is ticked, failing closed (treated as not finished) on an unreadable file, and verify a unit test for finished, unfinished, and unreadable
+- [x] 2.4 Implement `has_open_prs`, `all_prs_mergeable`, `pr_is_mergeable`, `all_prs_merged`, and `master_is_green`, each reading the real pull request and check-run state needed, each failing closed toward "not yet" rather than "proceed," and verify a unit test per predicate covering its true, false, and unreadable cases
+- [x] 2.5 Implement `is_capped` and `reset`, reading the loop's own round count and cap against the same bound this repository's `conveyor-lifecycle` capability already publishes, and verify a unit test for under the cap, at the cap, and a granted reset
+- [x] 2.6 Implement `proposal_pr_is_mergeable` and `hotfix_pr_is_created`/`all_checks_ran`, reading the specific pull requests `conveyor.propose` and `conveyor.fix` name, and verify a unit test per predicate
+- [x] 2.7 Implement `review_run_succeeded`, `has_open_review_threads`, and `review_run_skipped` for the `review` workflow, reading the pull request's own review run conclusion, its open review-thread count, and the run's own skip condition (never re-derived — read from the run that already happened), each failing closed toward "not yet landed" rather than "clean," and verify a unit test per predicate covering its true, false, and unreadable cases
+- [x] 2.8 Add a test asserting every bare predicate name referenced anywhere in `workflows.desired.yaml`'s guard strings resolves to a registered function, failing on a name with no implementation
 
 ## 3. Unit tests
 

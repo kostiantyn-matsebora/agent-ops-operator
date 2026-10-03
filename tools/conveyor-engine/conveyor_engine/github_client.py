@@ -40,6 +40,38 @@ class Subject:
         return f"{self.kind}#{self.number}{suffix}"
 
 
+@dataclasses.dataclass(frozen=True)
+class PullRequestInfo:
+    """A pull request's own state, as a guard predicate needs it.
+
+    `merge_state_status` is GitHub's own computed field, read verbatim
+    rather than the bare `mergeable` boolean -- `mergeable` answers only "no
+    merge conflict" and says nothing about a failing required check or an
+    open required review thread, both of which `mergeStateStatus` already
+    folds in. `"CLEAN"` is the one value that means "may merge now".
+
+    `checks_running` is true while any check run GitHub reports for the
+    head is still queued or in progress -- distinct from a conclusion,
+    which only a COMPLETED run has.
+    """
+
+    subject: Subject
+    state: str  # "OPEN" | "MERGED" | "CLOSED"
+    merged: bool
+    merge_state_status: str
+    checks_running: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class Comment:
+    """One comment on an issue or pull request, as a marker-counting guard
+    predicate needs it."""
+
+    created_at: str
+    body: str
+    is_bot: bool = False
+
+
 class GitHubClient(abc.ABC):
     """The boundary every caller above it is injected with, never imports
     directly. A test stub implements this with no network at all."""
@@ -59,6 +91,30 @@ class GitHubClient(abc.ABC):
     @abc.abstractmethod
     def related_issue(self, pull_request: Subject) -> Optional[Subject]:
         """The issue GitHub considers related to `pull_request`, if any."""
+
+    @abc.abstractmethod
+    def permission(self, repo: str, login: str) -> str:
+        """`login`'s own collaborator permission on `repo`, verbatim as
+        GitHub reports it (e.g. `"admin"`, `"write"`, `"read"`, `"none"`)."""
+
+    @abc.abstractmethod
+    def open_pull_request_branches(self, repo: str) -> list[str]:
+        """The head branch name of every currently OPEN pull request on
+        `repo`."""
+
+    @abc.abstractmethod
+    def pull_request_info(self, subject: Subject) -> PullRequestInfo:
+        """`subject`'s own state -- see `PullRequestInfo`."""
+
+    @abc.abstractmethod
+    def branch_check_conclusion(self, repo: str, branch: str) -> str:
+        """The aggregate conclusion of `branch`'s latest check runs:
+        `"success"`, `"failure"`, `"pending"` (still running), or `""` (no
+        check run found)."""
+
+    @abc.abstractmethod
+    def list_comments(self, subject: Subject) -> list[Comment]:
+        """Every comment on `subject`, oldest first."""
 
 
 class GhCliClient(GitHubClient):
@@ -158,3 +214,119 @@ class GhCliClient(GitHubClient):
         if not refs:
             return None
         return Subject(kind="issue", number=refs[0]["number"], repo=repo)
+
+    def permission(self, repo: str, login: str) -> str:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/collaborators/{login}/permission",
+                "--jq",
+                ".permission",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    def open_pull_request_branches(self, repo: str) -> list[str]:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                repo,
+                "--state",
+                "open",
+                "--json",
+                "headRefName",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        return [item["headRefName"] for item in data]
+
+    # Any of these states means the run has not yet settled, across both
+    # the Checks API's own vocabulary and the GraphQL `statusCheckRollup`
+    # one `gh pr view --json` reports -- there is no single shared name.
+    _RUNNING_STATUSES = frozenset(
+        {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED"}
+    )
+
+    def pull_request_info(self, subject: Subject) -> PullRequestInfo:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(subject.number),
+                *self._repo_args(subject),
+                "--json",
+                "state,merged,mergeStateStatus,statusCheckRollup",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        rollup = data.get("statusCheckRollup") or []
+        checks_running = any(
+            (item.get("status") or "").upper() in self._RUNNING_STATUSES
+            for item in rollup
+        )
+        return PullRequestInfo(
+            subject=subject,
+            state=data.get("state", ""),
+            merged=bool(data.get("merged", False)),
+            merge_state_status=data.get("mergeStateStatus", ""),
+            checks_running=checks_running,
+        )
+
+    def branch_check_conclusion(self, repo: str, branch: str) -> str:
+        # `-f`/`-F` on this endpoint are sent as a request BODY, which turns
+        # a bodied GET into a plain 404 rather than a permissions error --
+        # `--method GET` must be explicit (see this repository's own
+        # gotchas.md on `commits/<sha>/check-runs`).
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/commits/{branch}/check-runs",
+                "--method",
+                "GET",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        runs = data.get("check_runs") or []
+        if not runs:
+            return ""
+        if any(run.get("status") != "completed" for run in runs):
+            return "pending"
+        if any(run.get("conclusion") == "failure" for run in runs):
+            return "failure"
+        return "success"
+
+    def list_comments(self, subject: Subject) -> list[Comment]:
+        endpoint = f"repos/{subject.repo or self.repo}/issues/{subject.number}/comments"
+        result = subprocess.run(
+            ["gh", "api", endpoint, "--method", "GET", "--paginate"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        return [
+            Comment(
+                created_at=item.get("created_at", ""),
+                body=item.get("body", ""),
+                is_bot=(item.get("user") or {}).get("type") == "Bot",
+            )
+            for item in data
+        ]
