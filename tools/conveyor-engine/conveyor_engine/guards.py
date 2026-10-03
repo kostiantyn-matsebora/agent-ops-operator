@@ -76,33 +76,36 @@ class _GuardParser:
     def parse_expr(self) -> bool:
         return self._parse_or()
 
-    def _parse_or(self) -> bool:
-        result = self._parse_and()
+    # `evaluate` False means "parse only": the tokens are consumed and
+    # syntax errors still surface, but no predicate runs. That is what
+    # short-circuits an operand the left side has already decided.
+    def _parse_or(self, evaluate: bool = True) -> bool:
+        result = self._parse_and(evaluate)
         while self._peek() == "OR":
             self._advance()
-            result = self._parse_and() or result
+            result = self._parse_and(evaluate and not result) or result
         return result
 
-    def _parse_and(self) -> bool:
-        result = self._parse_not()
+    def _parse_and(self, evaluate: bool = True) -> bool:
+        result = self._parse_not(evaluate)
         while self._peek() == "AND":
             self._advance()
-            result = self._parse_not() and result
+            result = self._parse_not(evaluate and result) and result
         return result
 
-    def _parse_not(self) -> bool:
+    def _parse_not(self, evaluate: bool = True) -> bool:
         if self._peek() == "NOT":
             self._advance()
-            return not self._parse_not()
-        return self._parse_primary()
+            return not self._parse_not(evaluate)
+        return self._parse_primary(evaluate)
 
-    def _parse_primary(self) -> bool:
+    def _parse_primary(self, evaluate: bool = True) -> bool:
         token = self._peek()
         if token is None:
             raise GuardSyntaxError("guard expression ended unexpectedly")
         if token == "(":
             self._advance()
-            result = self.parse_expr()
+            result = self._parse_or(evaluate)
             if self._peek() != ")":
                 raise GuardSyntaxError("missing closing parenthesis in guard")
             self._advance()
@@ -112,4 +115,4 @@ class _GuardParser:
         self._advance()
         if token not in self.registry:
             raise UnknownPredicateError(token)
-        return bool(self.registry[token]())
+        return bool(self.registry[token]()) if evaluate else False

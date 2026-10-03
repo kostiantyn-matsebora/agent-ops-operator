@@ -216,7 +216,7 @@ class GhCliClient(GitHubClient):
     _REFERENCE_RE = re.compile(r"\b(?:Refs|Closes)\s+#(\d+)", re.I)
 
     def related_issue(self, pull_request: Subject) -> Optional[Subject]:
-        repo = pull_request.repo or self.repo
+        repo = self._require_repo(pull_request)
         result = subprocess.run(
             [
                 "gh",

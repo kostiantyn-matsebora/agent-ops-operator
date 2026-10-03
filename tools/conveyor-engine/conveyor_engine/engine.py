@@ -113,6 +113,7 @@ class Engine:
         wrote = self.state_writer.write_state(subject, vocabulary, transition.to)
         if not wrote:
             error = f"failed to write state {transition.to!r} on {subject}"
+            _log_error(error)
             return EvaluationResult(moved=False, from_state=current_state, error=error)
 
         action_called = None

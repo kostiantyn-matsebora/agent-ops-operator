@@ -8,6 +8,7 @@
 - [x] 1.6 Implement the `owned_by` stub registry: every action name referenced anywhere in `workflows.desired.yaml` resolves to a function that logs one structured line naming the action, the workflow, the subject, and the facts it was called with, and performs no other effect, and verify a unit test asserts no outbound API call happens when a stubbed action runs
 - [x] 1.7 Wire the five pieces into one `evaluate(workflow_name, subject, event_name, facts)` entry point that reads the current state, matches the trigger, evaluates the guard, writes the new state (with propagation) if permitted, and calls the `owned_by` stub, and verify a unit test drives a full transition end to end against `conveyor.implement`'s real declared shape
 - [x] 1.8 Add a test, run as part of the package's own suite, asserting consistency between `workflows.desired.yaml` and `labels.yaml`: every state and every event the workflow file declares has exactly one matching entry in the label mapping, and every entry's declared owning workflow(s) match the workflow file exactly, failing with the mismatch named
+- [x] 1.9 Handle `invokes` in the loader and `evaluate()`: the loader captures a state's `invokes`, and the parent's transitions fire only on events naming the invoked workflow's state entries, never on its internal transitions, and verify unit tests in `test_loader.py` and `test_engine.py` (`test_invoked_workflows_internal_transitions_are_invisible_to_the_parent`)
 
 ## 2. Guard predicates — backend-developer
 
