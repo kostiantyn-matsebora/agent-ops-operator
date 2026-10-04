@@ -101,10 +101,15 @@ describe('nothing is persisted', () => {
     const offenders: string[] = []
     for (const [path, raw] of Object.entries(sources)) {
       if (/\.test\.(ts|tsx)$/.test(path)) continue
-      // The theme switch is the ONE thing a viewer may keep, and it is a
+      // The theme switch is the first thing a viewer may keep, and it is a
       // preference rather than cluster state — so it is excluded by name
       // rather than by loosening the rule.
       if (path.includes('theme')) continue
+      // The chat view's pane widths and the inbox's collapsed state are the
+      // SECOND documented exception (design D-B, chat-shaped-conversations):
+      // layout, never conversation state. `readLayout`/`writeLayout` guard
+      // both directions themselves, which is what `layout.test.ts` pins.
+      if (path.includes('pages/chat/layout')) continue
       // Comments are stripped first: this file and queryClient.ts both SAY
       // localStorage in prose explaining why they do not use it, and a rule
       // its own reasoning trips is a rule people delete.

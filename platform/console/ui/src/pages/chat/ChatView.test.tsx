@@ -1,0 +1,116 @@
+import { describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { ChatView } from './ChatView'
+import type { ConversationSummary } from '../../api/types'
+
+function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
+  return {
+    name, title: name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    ageSeconds: 10, deleting: false, phase: 'Idle', ...over,
+  }
+}
+
+let items: ConversationSummary[] = [conv('a'), conv('b'), conv('c')]
+
+vi.mock('../../api/hooks', () => ({
+  useConversations: () => ({ data: { items, total: items.length, unreadTotal: 0, offset: 0, limit: 100, facets: {} }, isLoading: false, error: null }),
+  usePipelineIcon: () => () => undefined,
+  useSession: () => ({ data: { canWrite: true, identity: 'dana' } }),
+  useInboxCounts: () => ({ data: { items: [], total: items.length, unreadTotal: 0, offset: 0, limit: 0, facets: {}, scopes: {} } }),
+  useVocabulary: () => ({ data: { entries: [] } }),
+}))
+
+vi.mock('./ThreadPane', () => ({ ThreadPane: ({ name }: { name: string }) => <div data-testid="thread-pane">{name}</div> }))
+
+function renderAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/conversations" element={<ChatView />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+describe('both routes render the one view', () => {
+  it('shows the list with no conversation open', () => {
+    renderAt('/conversations')
+    expect(screen.getByLabelText('conversations')).toBeInTheDocument()
+    expect(screen.queryByTestId('thread-pane')).toBeNull()
+  })
+
+  it('shows the list AND the thread when a name is given', () => {
+    renderAt('/conversations/b')
+    expect(screen.getByLabelText('conversations')).toBeInTheDocument()
+    expect(screen.getByTestId('thread-pane')).toHaveTextContent('b')
+  })
+})
+
+describe('narrow windows show one column', () => {
+  it('hides the list once a conversation is open', () => {
+    window.innerWidth = 600
+    renderAt('/conversations/b')
+    expect(screen.queryByLabelText('conversations')).toBeNull()
+    expect(screen.getByTestId('thread-pane')).toBeInTheDocument()
+    window.innerWidth = 1440
+  })
+
+  it('shows the list alone with nothing open', () => {
+    window.innerWidth = 600
+    renderAt('/conversations')
+    expect(screen.getByLabelText('conversations')).toBeInTheDocument()
+    expect(screen.queryByTestId('thread-pane')).toBeNull()
+    window.innerWidth = 1440
+  })
+
+  it('follows a LIVE resize too, not only the width at mount', () => {
+    window.innerWidth = 1440
+    renderAt('/conversations/b')
+    expect(screen.getByLabelText('conversations')).toBeInTheDocument()
+    window.innerWidth = 600
+    act(() => window.dispatchEvent(new Event('resize')))
+    expect(screen.queryByLabelText('conversations')).toBeNull()
+    window.innerWidth = 1440
+    act(() => window.dispatchEvent(new Event('resize')))
+  })
+})
+
+describe('arrivals (console-thread-live-cues)', () => {
+  it('tags the new row and names its pipeline in a toast', () => {
+    const original = items
+    items = [conv('a'), conv('b'), conv('c')]
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/conversations']}>
+        <Routes>
+          <Route path="/conversations" element={<ChatView />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    items = [conv('fresh', { pipeline: 'alert-triage', title: 'a brand new incident' }), ...items]
+    rerender(
+      <MemoryRouter initialEntries={['/conversations']}>
+        <Routes>
+          <Route path="/conversations" element={<ChatView />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('new')).toBeInTheDocument()
+    expect(screen.getByText(/alert-triage opened a brand new incident/)).toBeInTheDocument()
+    items = original
+  })
+})
+
+describe('keyboard navigation', () => {
+  it('walks the rows with the arrow keys and opens the highlighted one on Enter', async () => {
+    renderAt('/conversations')
+    const view = screen.getByTestId('chat-view')
+    view.focus()
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-b')
+    await userEvent.keyboard('{Enter}')
+    expect(screen.getByTestId('thread-pane')).toHaveTextContent('b')
+  })
+})

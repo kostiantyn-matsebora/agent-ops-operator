@@ -46,6 +46,7 @@ export function DeleteSelectedModal({
   busy,
   onConfirm,
   onClose,
+  memberCount = 0,
 }: {
   isOpen: boolean
   names: string[]
@@ -54,6 +55,8 @@ export function DeleteSelectedModal({
   busy: boolean
   onConfirm: () => void
   onClose: () => void
+  /** Already-closed descendants the manager's cascade also deletes — console-conversation-tree. */
+  memberCount?: number
 }) {
   return (
     <Modal
@@ -63,7 +66,9 @@ export function DeleteSelectedModal({
       aria-label="delete conversations"
       data-testid="delete-modal"
     >
-      <ModalHeader title={result ? 'Delete finished' : `Delete ${names.length} conversation(s)?`} />
+      <ModalHeader
+        title={result ? 'Delete finished' : `Delete ${names.length + memberCount} conversation(s)?`}
+      />
       <ModalBody>
         {result ? (
           <>
@@ -90,10 +95,16 @@ export function DeleteSelectedModal({
         ) : (
           <>
             <p data-testid="delete-consequences">
-              {names.length} closed conversation(s) will be deleted. This removes{' '}
+              {names.length + memberCount} closed conversation(s) will be deleted. This removes{' '}
               <b>the recorded answers</b> — the only durable copy of what the agent said — and{' '}
               <b>the workspace on disk</b>. <b>This cannot be undone.</b>
             </p>
+            {memberCount > 0 && (
+              <p data-testid="delete-member-count">
+                {names.length} selected, reaching {memberCount} already-closed member
+                conversation(s) the manager's cascade deletes too.
+              </p>
+            )}
             <p>
               To keep the record and just tidy the list, close them instead: a closed conversation
               costs no runtime pod and no capacity, and can be reopened.

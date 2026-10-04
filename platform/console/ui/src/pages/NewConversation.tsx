@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert, Button, ClipboardCopy, Form, FormGroup, Label, Menu, MenuContent, MenuItem,
   MenuList, Modal, ModalBody, ModalFooter, ModalHeader, Popover, TextArea,
@@ -8,6 +8,7 @@ import { api, ApiError } from '../api/client'
 import { PlainText } from '../components/Text'
 import { ComposerHint } from '../components/ComposerHint'
 import { Icon } from '../components/Icon'
+import { useComposerIntent } from './chat/composerIntent'
 import type { VocabularyEntry } from '../api/types'
 
 // "New conversation".
@@ -86,6 +87,17 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   const [dismissed, setDismissed] = useState(false)
   const [cursor, setCursor] = useState(0)
   const taskRef = useRef<HTMLTextAreaElement>(null)
+
+  // A quick-start chip (design D-H) lives beside an open thread, not beside
+  // this button, so it reaches this one composer through the shared intent
+  // rather than mounting a second modal just to open it from there.
+  const requestedTask = useComposerIntent((s) => s.requestedTask)
+  useEffect(() => {
+    if (requestedTask === null) return
+    setTask(requestedTask)
+    setOpen(true)
+    useComposerIntent.getState().clear()
+  }, [requestedTask])
 
   // ONLY WHAT THIS SURFACE CAN ACTUALLY DO. The general-position set includes
   // the listing commands, whose whole result is a reply posted to a channel's

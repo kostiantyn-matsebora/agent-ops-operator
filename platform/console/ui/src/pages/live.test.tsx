@@ -282,8 +282,13 @@ describe('Configuration', () => {
 
 describe('the Conversations list', () => {
   it('shows a conversation appearing, changing phase and being deleted, in place', async () => {
-    const { ConversationsPage } = await import('./Conversations')
-    const { stop } = mount(<ConversationsPage />)
+    const { ChatView } = await import('./chat/ChatView')
+    const { stop } = mount(
+      <Routes>
+        <Route path="/conversations" element={<ChatView />} />
+      </Routes>,
+      '/conversations',
+    )
     await screen.findByText('disk pressure on node-3')
     const before = calls.conversations
 
@@ -300,7 +305,7 @@ describe('the Conversations list', () => {
       type: 'MODIFIED', kind: 'conversations', name: 'conv-2',
       conversationRow: summary({ name: 'conv-2', title: 'certificate expiring', phase: 'Closed', runs: undefined }),
     })
-    await screen.findByText('Closed')
+    await screen.findByText('closed · 1 run(s)')
     expect(loading()).toBeNull()
 
     // BEING DELETED.
@@ -315,10 +320,10 @@ describe('the Conversations list', () => {
 
 describe('one Conversation', () => {
   it('takes a message and a run advancing without blanking, and asks nothing', async () => {
-    const { ConversationPage } = await import('./Conversation')
+    const { ChatView } = await import('./chat/ChatView')
     const { stop } = mount(
       <Routes>
-        <Route path="/conversations/:name" element={<ConversationPage />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
       </Routes>,
       '/conversations/conv-1',
     )
@@ -349,10 +354,10 @@ describe('one Conversation', () => {
 
 describe('the composer', () => {
   it('sends and asks for nothing — the echo arrives on the stream', async () => {
-    const { ConversationPage } = await import('./Conversation')
+    const { ChatView } = await import('./chat/ChatView')
     const { stop } = mount(
       <Routes>
-        <Route path="/conversations/:name" element={<ConversationPage />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
       </Routes>,
       '/conversations/conv-1',
     )
@@ -379,10 +384,10 @@ describe('the composer', () => {
   // down nothing delivers it, and the bubble would sit unconfirmed until the
   // page was reloaded — so the read is conditioned, not removed.
   it('reads once after a send when the stream is down', async () => {
-    const { ConversationPage } = await import('./Conversation')
+    const { ChatView } = await import('./chat/ChatView')
     const { stop } = mount(
       <Routes>
-        <Route path="/conversations/:name" element={<ConversationPage />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
       </Routes>,
       '/conversations/conv-1',
     )
@@ -498,18 +503,27 @@ describe('after first paint, no event puts a page back into loading', () => {
     [
       'Conversations',
       async () => {
-        const { ConversationsPage } = await import('./Conversations')
-        return { ui: <ConversationsPage />, path: '/conversations', painted: 'disk pressure on node-3', stays: 'Conversations' }
+        const { ChatView } = await import('./chat/ChatView')
+        return {
+          ui: (
+            <Routes>
+              <Route path="/conversations" element={<ChatView />} />
+            </Routes>
+          ),
+          path: '/conversations',
+          painted: 'disk pressure on node-3',
+          stays: 'disk pressure on node-3',
+        }
       },
     ],
     [
       'Conversation',
       async () => {
-        const { ConversationPage } = await import('./Conversation')
+        const { ChatView } = await import('./chat/ChatView')
         return {
           ui: (
             <Routes>
-              <Route path="/conversations/:name" element={<ConversationPage />} />
+              <Route path="/conversations/:name" element={<ChatView />} />
             </Routes>
           ),
           path: '/conversations/conv-1',

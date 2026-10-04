@@ -20,8 +20,7 @@ import { OverviewPage } from './pages/Overview'
 import { QueuesPage } from './pages/Queues'
 import { ConfigPage, ConfigDetailPage, ConfigKindPage } from './pages/Config'
 import { TopologyPage } from './pages/Topology'
-import { ConversationsPage } from './pages/Conversations'
-import { ConversationPage } from './pages/Conversation'
+import { ChatView } from './pages/chat/ChatView'
 
 /**
  * An error boundary per route. A large graph or a malformed object must degrade
@@ -228,8 +227,11 @@ export function App() {
           <Route path="/config/:kind" element={<ConfigKindPage />} />
           <Route path="/config/:kind/:name" element={<ConfigDetailPage />} />
           <Route path="/topology" element={<TopologyPage />} />
-          <Route path="/conversations" element={<ConversationsPage />} />
-          <Route path="/conversations/:name" element={<ConversationPage />} />
+          {/* One view for both routes (design D-A) — `ChatView` reads the
+              optional `:name` param itself and renders the thread beside the
+              list rather than leaving for a second page. */}
+          <Route path="/conversations" element={<ChatView />} />
+          <Route path="/conversations/:name" element={<ChatView />} />
           <Route
             path="*"
             element={<Empty title="Not found">That page does not exist.</Empty>}

@@ -144,6 +144,64 @@ body {
 }
 
 /*
+ * The conversations view's own motion (console-thread-live-cues): a new row's
+ * fading tint, a presence dot's pulse, and the typing indicator's bob.
+ *
+ * Every keyframe below reads an `--ao-*` token rather than a literal colour,
+ * so this is NOT the multi-file token change `palette-and-mark.md` governs —
+ * nothing here states what a colour IS, only how it animates.
+ */
+@keyframes ao-arrive {
+  0% { background: var(--ao-brand-soft); }
+  100% { background: transparent; }
+}
+
+@keyframes ao-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ao-brand) 55%, transparent); }
+  100% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--ao-brand) 0%, transparent); }
+}
+
+@keyframes ao-bob {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-4px); }
+}
+
+.ao-row-arrive {
+  animation: ao-arrive 4s ease-out forwards;
+}
+
+.ao-typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ao-brand);
+  animation: ao-bob 1.2s infinite;
+}
+
+.ao-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ao-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* A reduced-motion viewer still gets the marker and the notice (the DOM
+   content), never the animation itself (console-thread-live-cues:
+   "rows and messages appear without animation"). */
+@media (prefers-reduced-motion: reduce) {
+  .ao-row-arrive {
+    animation: none;
+    background: transparent;
+  }
+
+  .ao-typing-dot {
+    animation: none;
+  }
+}
+
+/*
  * HIGHLIGHTED CODE.
  *
  * rehype-highlight emits highlight.js class names, and this maps the ones that

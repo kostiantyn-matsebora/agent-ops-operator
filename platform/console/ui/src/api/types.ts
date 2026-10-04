@@ -772,8 +772,10 @@ export interface SourcesResponse {
  * has never held one. What a message addresses is a PIPELINE.
  */
 export interface VocabularyEntry {
-  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline. */
-  kind: 'builtin' | 'pipeline'
+  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline,
+   * `coordinator` for an addressable Coordinator — the two share one name
+   * space and are addressed identically (manager's `chat/vocabulary.go`). */
+  kind: 'builtin' | 'pipeline' | 'coordinator'
   name: string
   /** Menu text. For a pipeline, the profile answering for it. */
   description?: string

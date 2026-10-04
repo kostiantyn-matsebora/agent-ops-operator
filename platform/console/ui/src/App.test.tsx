@@ -20,8 +20,7 @@ vi.mock('./pages/Overview', () => ({ OverviewPage: () => <div>overview page</div
 vi.mock('./pages/Queues', () => ({ QueuesPage: () => null }))
 vi.mock('./pages/Config', () => ({ ConfigPage: () => null, ConfigDetailPage: () => null, ConfigKindPage: () => null }))
 vi.mock('./pages/Topology', () => ({ TopologyPage: () => <div>topology page</div> }))
-vi.mock('./pages/Conversations', () => ({ ConversationsPage: () => null }))
-vi.mock('./pages/Conversation', () => ({ ConversationPage: () => null }))
+vi.mock('./pages/chat/ChatView', () => ({ ChatView: () => <div>chat view</div> }))
 vi.mock('./pages/Login', () => ({ LoginPage: () => null }))
 
 const shell = (path = '/topology') =>

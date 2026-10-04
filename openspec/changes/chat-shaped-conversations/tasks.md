@@ -21,28 +21,28 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 
 ## 3. The view (UI layout)
 
-- [ ] 3.1 `pages/chat/Splitter.tsx`: drag, double-click reset, keyboard steps, minimum widths per design D-B. Verify: `Splitter.test.tsx` covers drag clamp, reset and keyboard.
-- [ ] 3.2 `pages/chat/layout.ts`: the `agentops.console.layout` key, guarded read and write, defaults from `prototype/C-rail.html`. Verify: tests with storage present, throwing and absent.
-- [ ] 3.3 `pages/chat/ChatView.tsx` and `App.tsx`: both conversation routes render the view, the PatternFly sidebar collapses to icons on it, and the narrow-window mode shows one column. Verify: `ChatView.test.tsx` renders both routes and the narrow mode.
-- [ ] 3.4 `pages/chat/Inbox.tsx`: scopes in spec order with counts from the count-only form, the collapse control, and the collapsed strip with badges, PORTED from `C-rail.html` and `C-collapsed.html`. Verify: `Inbox.test.tsx` asserts order, counts and the collapsed badges.
-- [ ] 3.5 Keyboard: `↑`/`↓`, `Enter`, `⌘`-click, `Esc` per the layout spec. Verify: a test walks three rows and opens one.
+- [x] 3.1 `pages/chat/Splitter.tsx`: drag, double-click reset, keyboard steps, minimum widths per design D-B. Verify: `Splitter.test.tsx` covers drag clamp, reset and keyboard.
+- [x] 3.2 `pages/chat/layout.ts`: the `agentops.console.layout` key, guarded read and write, defaults from `prototype/C-rail.html`. Verify: tests with storage present, throwing and absent.
+- [x] 3.3 `pages/chat/ChatView.tsx` and `App.tsx`: both conversation routes render the view, the PatternFly sidebar collapses to icons on it, and the narrow-window mode shows one column. Verify: `ChatView.test.tsx` renders both routes and the narrow mode.
+- [x] 3.4 `pages/chat/Inbox.tsx`: scopes in spec order with counts from the count-only form, the collapse control, and the collapsed strip with badges, PORTED from `C-rail.html` and `C-collapsed.html`. Verify: `Inbox.test.tsx` asserts order, counts and the collapsed badges.
+- [x] 3.5 Keyboard: `↑`/`↓`, `Enter`, `⌘`-click, `Esc` per the layout spec. Verify: a test walks three rows and opens one.
 
 ## 4. The list (rows, tree, selection)
 
-- [ ] 4.1 `pages/chat/ConversationRow.tsx`: avatar with phase dot, title, time, snippet from `lastMessage`, count badge or tag, PORTED from `States.html`. Verify: `ConversationRow.test.tsx` covers every row state on that board.
-- [ ] 4.2 `pages/chat/tree.ts`: group by `causedBy.root`, depth from the parent chain, flatten toggle, root row extras (caret, member count, turn, deadline), the autosolved marker. Verify: `tree.test.ts` with a one-level and a two-level fixture.
-- [ ] 4.3 Arrival: a new row enters with the tint and the `new` marker, a toast names the pipeline, reduced motion honoured. Verify: a test asserts the marker and the toast, and no animation class under reduced motion.
-- [ ] 4.4 `pages/chat/SelectionBar.tsx` and the checkbox column: Select and `⌘`-click enter the mode, the bar offers Mark read, Mark unread, Close…, Delete with today's rules, rows held by a finalizer unselectable. A root's confirmation counts its members for BOTH Close and Delete, and a member reached directly by the selection reports `skipped` naming its parent rather than acting on it. Verify: the existing close and delete tests pass against the bar, plus a mark-unread test, a member-count test for both actions, and a member-in-selection skip test for both.
-- [ ] 4.5 `pages/chat/RowMenu.tsx`: the menu per the quick-actions spec, absent items rather than disabled ones. A member row offers only open in a new tab, copy link and open incident. Verify: `RowMenu.test.tsx` covers closed, member and working rows, asserting the member row carries none of mark unread/read, reopen, exit runtime, close or delete.
+- [x] 4.1 `pages/chat/ConversationRow.tsx`: avatar with phase dot, title, time, snippet from `lastMessage`, count badge or tag, PORTED from `States.html`. Verify: `ConversationRow.test.tsx` covers every row state on that board.
+- [x] 4.2 `pages/chat/tree.ts`: group by `causedBy.root`, depth from the parent chain, flatten toggle, root row extras (caret, member count, turn, deadline), the autosolved marker. Verify: `tree.test.ts` with a one-level and a two-level fixture.
+- [x] 4.3 Arrival: a new row enters with the tint and the `new` marker, a toast names the pipeline, reduced motion honoured. Verify: a test asserts the marker and the toast, and no animation class under reduced motion.
+- [x] 4.4 `pages/chat/SelectionBar.tsx` and the checkbox column: Select and `⌘`-click enter the mode, the bar offers Mark read, Mark unread, Close…, Delete with today's rules, rows held by a finalizer unselectable. A root's confirmation counts its members for BOTH Close and Delete, and a member reached directly by the selection reports `skipped` naming its parent rather than acting on it. Verify: the existing close and delete tests pass against the bar, plus a mark-unread test, a member-count test for both actions, and a member-in-selection skip test for both.
+- [x] 4.5 `pages/chat/RowMenu.tsx`: the menu per the quick-actions spec, absent items rather than disabled ones. A member row offers only open in a new tab, copy link and open incident. Verify: `RowMenu.test.tsx` covers closed, member and working rows, asserting the member row carries none of mark unread/read, reopen, exit runtime, close or delete.
 
 ## 5. The thread pane
 
-- [ ] 5.1 `pages/chat/ThreadPane.tsx`: header with title, presence chip, bound channels, the secondary views (Runs, Graph, Sequence, YAML) replacing the transcript in place. Verify: a test switches to Runs and back.
-- [ ] 5.2 `pages/chat/Timeline.tsx`: messages interleaved with run events from `detail.events`, folded per run, the activity gap marker, acks rendered as the presence row. Verify: `Timeline.test.tsx` asserts order, folding and that an ack is not a bubble.
-- [ ] 5.3 The new-messages divider above the first uncounted message, open scrolls to it, autoscroll only at the bottom, the jump pill with its count. Verify: tests for divider placement and for no scroll while scrolled up.
-- [ ] 5.4 Incident timeline on a root: invocation lines, result cards with transcript links, nested cards for a coordinating member, the escalation divider, read-only before escalation with the reason, the parent chain in a member's header, PORTED from `D-incident.html`. Verify: tests over a two-level fixture.
-- [ ] 5.5 `pages/chat/QuickChips.tsx`: start chips from the vocabulary opening `NewConversation` with `/<name> ` prefilled, thread command chips, choice chips. Absent when writes are off. Verify: `QuickChips.test.tsx` covers all three and the read-only case.
-- [ ] 5.6 Delete `pages/Conversations.tsx` and `pages/Conversation.tsx` and move their surviving tests. Verify: `npm run typecheck` and `npm test` pass with no reference to either file.
+- [x] 5.1 `pages/chat/ThreadPane.tsx`: header with title, presence chip, bound channels, the secondary views (Runs, Graph, Sequence, YAML) replacing the transcript in place. Verify: a test switches to Runs and back.
+- [x] 5.2 `pages/chat/Timeline.tsx`: messages interleaved with run events from `detail.events`, folded per run, the activity gap marker, acks rendered as the presence row. Verify: `Timeline.test.tsx` asserts order, folding and that an ack is not a bubble.
+- [x] 5.3 The new-messages divider above the first uncounted message, open scrolls to it, autoscroll only at the bottom, the jump pill with its count. Verify: tests for divider placement and for no scroll while scrolled up.
+- [x] 5.4 Incident timeline on a root: invocation lines, result cards with transcript links, nested cards for a coordinating member, the escalation divider, read-only before escalation with the reason, the parent chain in a member's header, PORTED from `D-incident.html`. Verify: tests over a two-level fixture.
+- [x] 5.5 `pages/chat/QuickChips.tsx`: start chips from the vocabulary opening `NewConversation` with `/<name> ` prefilled, thread command chips, choice chips. Absent when writes are off. Verify: `QuickChips.test.tsx` covers all three and the read-only case.
+- [x] 5.6 Delete `pages/Conversations.tsx` and `pages/Conversation.tsx` and move their surviving tests. Verify: `npm run typecheck` and `npm test` pass with no reference to either file.
 
 ## 6. Fixture and assets
 
