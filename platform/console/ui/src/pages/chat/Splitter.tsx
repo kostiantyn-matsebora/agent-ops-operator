@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from 'react'
 // resizable Drawer and no three-pane splitter, and a Drawer is the wrong
 // primitive for two independent handles in a row.
 //
-// `aria-orientation="vertical"` names the SEPARATOR's own orientation (a
-// vertical line), not the direction a drag moves it — the value the design
-// spells out verbatim.
+// The handle is a focusable, keyboard-operable value control, so it carries
+// the interactive `slider` role (a bare `separator` is non-interactive and may
+// not take listeners or a tabIndex). `aria-orientation="vertical"` is the
+// design's spelled-out value for the handle's own orientation.
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max)
@@ -71,7 +72,7 @@ export function Splitter({ width, min, max, defaultWidth, onChange, ariaLabel, s
 
   return (
     <div
-      role="separator"
+      role="slider"
       aria-orientation="vertical"
       aria-label={ariaLabel}
       aria-valuenow={Math.round(width)}

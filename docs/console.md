@@ -572,7 +572,7 @@ instead of shrinking all four past legibility.
 `⌘`/`Ctrl`-click adds to a multi-selection, `Esc` clears selection mode.
 
 Server-side filtering (phase, pipeline, profile, channel, errored, unread,
-search) backs every scope, with pagination bounded at 100 rows. An event
+search) backs every scope, with pagination in pages of 50 rows. An event
 storm makes thousands, and shipping them all so the browser can hide most is
 how a viewer becomes an API-server problem.
 

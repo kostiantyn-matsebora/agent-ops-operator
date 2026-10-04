@@ -79,6 +79,7 @@ Five views, one question each.
   The inbox counts **messages**, not lateness — a `signal`, an `agent` reply
   or a `relay`, never an ack or a run event. Every scope carries its own sum,
   and **Mark unread** reclaims a conversation you want to come back to.
+  Reading a conversation in another channel never clears the console's unread.
 
   The list renders as a **coordination tree** by default: a root and every
   conversation it caused nest together, indented by depth, the root carrying
