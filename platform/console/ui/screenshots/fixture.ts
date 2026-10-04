@@ -304,7 +304,7 @@ const INCIDENT_ROOT = 'incident-response-4a8f21'
 const INCIDENT_MITIGATE = `${INCIDENT_ROOT}-mitigate`
 
 const conversations: ConversationPage = {
-  total: 12,
+  total: 14,
   unreadTotal: 3,
   offset: 0,
   limit: 25,
@@ -325,7 +325,7 @@ const conversations: ConversationPage = {
         { channel: 'console', threadId: 'console/cluster-events-7c1d4e', readTracked: true },
         { channel: 'ops-chat', threadId: '2481', readTracked: true },
       ],
-      closing: false,
+      deleting: false,
     },
     {
       name: 'console-3f9a2b', title: 'Why is the payments deployment not rolling out?',
@@ -337,7 +337,7 @@ const conversations: ConversationPage = {
       unread: true, ageSeconds: 61, threads: [
         { channel: 'console', threadId: 'console/console-3f9a2b', readTracked: true },
       ],
-      closing: false,
+      deleting: false,
     },
     {
       name: 'prometheus-alerts-91b7fd', title: 'HighMemoryPressure on node-3',
@@ -345,7 +345,7 @@ const conversations: ConversationPage = {
       runCount: 0, lastActivity: ago(27), created: ago(27), queued: 1,
       joined: false, errored: false, unread: false, ageSeconds: 27,
       threads: [{ channel: 'ops-chat', threadId: '2483', readTracked: true }],
-      closing: false,
+      deleting: false,
     },
     {
       name: 'console-b48e10', title: 'Which namespaces have no resource quota?',
@@ -354,7 +354,7 @@ const conversations: ConversationPage = {
       joined: true, consoleThread: 'console/console-b48e10', errored: false,
       unread: false, readAt: ago(1800), ageSeconds: 2100,
       threads: [{ channel: 'console', threadId: 'console/console-b48e10', readTracked: true, readAt: ago(1800) }],
-      closing: false,
+      deleting: false,
     },
     {
       name: 'nightly-2f60c8', title: 'Nightly capacity report',
@@ -362,7 +362,7 @@ const conversations: ConversationPage = {
       runCount: 1, lastActivity: ago(35400), created: ago(35700), queued: 0,
       joined: false, errored: false, unread: false, ageSeconds: 35700,
       threads: [{ channel: 'ops-chat', threadId: '2477', readTracked: true }],
-      closing: false,
+      deleting: false,
     },
     {
       name: 'cluster-events-d902a3', title: 'ingress-nginx admission webhook timed out',
@@ -371,7 +371,40 @@ const conversations: ConversationPage = {
       joined: true, consoleThread: 'console/cluster-events-d902a3', errored: false,
       unread: false, readAt: ago(89000), ageSeconds: 93600,
       threads: [{ channel: 'console', threadId: 'console/cluster-events-d902a3', readTracked: true, readAt: ago(89000) }],
-      closing: false,
+      deleting: false,
+    },
+    // WORKING, READ (task 6.1 / ConversationRow.test.tsx's own fixture for the
+    // state): presence without an unread count, so the row carries the
+    // pulsing dot and the "is working…" snippet but no badge at all — the one
+    // state the pre-existing rows above never demonstrated on their own.
+    {
+      name: 'console-5a81cc', title: 'Is the ingress controller logging TLS handshake failures?',
+      profile: 'k8s-engineer', pipeline: 'k8s-observe', phase: 'Working',
+      inflight: { runId: 'run-16', dispatchedAt: ago(8) }, presence: true,
+      runCount: 2, runtimePod: 'agentops-conv-console-5a81cc',
+      lastActivity: ago(8), created: ago(640), queued: 0, joined: true,
+      consoleThread: 'console/console-5a81cc', errored: false,
+      unread: false, unreadCount: 0, readAt: ago(5), ageSeconds: 640,
+      lastMessage: { kind: 'agent', text: 'Checked the ingress logs — no TLS handshake failures in the last hour.' },
+      threads: [{ channel: 'console', threadId: 'console/console-5a81cc', readTracked: true, readAt: ago(5) }],
+      deleting: false,
+    },
+    // AUTOSOLVED: a Coordinator's own root that closed itself WITHOUT ever
+    // escalating — ConversationRow.test.tsx's "an autosolved incident shows
+    // its reason and that nobody was notified". No `causedBy` (it is a root,
+    // not a member), no `escalatedAt`, and never joined — the pre-escalation
+    // pane never opened a human thread, so there is no console thread to be
+    // read or unread on (console-conversation-tree: "a root's pane is
+    // read-only before escalation").
+    {
+      name: 'node-pressure-c81b4f', title: 'MemoryPressure on node-7',
+      profile: 'incident-lead', coordinator: 'node-remediation', phase: 'Closed',
+      brief: 'Watching node-7 after a MemoryPressure taint.',
+      budget: { maxAgents: 2, agentsInvoked: 1, maxTurns: 10, turns: 3 },
+      closeReason: 'evicted 2 pods, pressure cleared on its own — no mitigation needed',
+      runCount: 1, lastActivity: ago(11000), created: ago(11200), queued: 0,
+      joined: false, errored: false, unread: false, ageSeconds: 11200,
+      threads: [], deleting: false,
     },
     // The root: a Coordinator's own conversation, fanning out into agents[].
     {
