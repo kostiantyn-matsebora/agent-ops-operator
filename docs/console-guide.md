@@ -85,7 +85,7 @@ Five views, one question each.
   its member count, turn and deadline. Flatten it for the plain newest-first
   order instead.
 
-  ![The Conversations view: the inbox rail with its scopes and counts, a coordination tree with a two-level incident open, and the thread pane showing its transcript with an unread divider.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
+  ![The Conversations view with nothing open: the inbox rail with its scopes and counts, and a coordination tree — a two-level incident nested under its root, a closed root marked "nobody notified", a pending alert and a working chat conversation.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
 
   Opening a row switches the thread pane in place — the URL changes, the
   list does not move.
@@ -104,15 +104,18 @@ Five views, one question each.
   difference stated. It never offers a Pipeline: inside a conversation that text
   is input for the agent.
 
+  ![A conversation open: a signal, the agent's diagnosis with its root cause, evidence and fix, a relayed reply from ops-chat, and quick chips for the pipelines and commands this surface can reach.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
+
   **A Coordinator's root shows an incident timeline instead of a transcript.**
   It interleaves the root's own turns with every member's start, result and
-  closure, nesting a member that is itself coordinating in place.
+  closure, nesting a member that is itself coordinating in place. Before it
+  escalates, the pane is read-only and says so.
 
   A member opened directly shows its own run history, read-only, with a link
   back to the incident — it holds no channel of its own, so there is nothing
   to reply into from there.
 
-  ![A Coordinator's root conversation: the incident timeline with two member result cards, one of them a nested coordination, and the escalation divider.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
+  ![A Coordinator's root before escalation: agents invoked, turns and the deadline, two result cards from its members, and the read-only notice since nobody has been paged yet.]({{ '/assets/img/console/incident-light.png' | relative_url }})
 
 - **Queues** — What is waiting, and what is stuck?
 

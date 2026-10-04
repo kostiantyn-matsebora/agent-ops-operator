@@ -317,11 +317,16 @@ const conversations: ConversationPage = {
     {
       name: 'cluster-events-7c1d4e', title: 'checkout-api is restarting',
       profile: 'k8s-engineer', pipeline: 'k8s-observe', phase: 'Working',
-      inflight: { runId: 'run-4', dispatchedAt: ago(42) },
+      inflight: { runId: 'run-4', dispatchedAt: ago(42) }, presence: true,
       runCount: 3, runtimePod: 'agentops-conv-cluster-events-7c1d4e',
       lastActivity: ago(42), created: ago(96), queued: 0, joined: true,
       consoleThread: 'console/cluster-events-7c1d4e', errored: false,
-      unread: true, ageSeconds: 96, threads: [
+      // UNREAD + WORKING (ConversationRow.test.tsx's own board): a count and
+      // the row's badge, plus the last counted message — the relay below, the
+      // one this conversation's own transcript (m3) already carries.
+      unread: true, unreadCount: 2,
+      lastMessage: { kind: 'relay', sender: 'ops-chat/dana', text: 'Does the same setting affect the other two services in that namespace?' },
+      ageSeconds: 96, threads: [
         { channel: 'console', threadId: 'console/cluster-events-7c1d4e', readTracked: true },
         { channel: 'ops-chat', threadId: '2481', readTracked: true },
       ],
@@ -330,11 +335,13 @@ const conversations: ConversationPage = {
     {
       name: 'console-3f9a2b', title: 'Why is the payments deployment not rolling out?',
       profile: 'k8s-engineer', pipeline: 'k8s-observe', phase: 'Working',
-      inflight: { runId: 'run-2', dispatchedAt: ago(18) },
+      inflight: { runId: 'run-2', dispatchedAt: ago(18) }, presence: true,
       runCount: 1, runtimePod: 'agentops-conv-console-3f9a2b',
       lastActivity: ago(18), created: ago(61), queued: 1, joined: true,
       consoleThread: 'console/console-3f9a2b', errored: false,
-      unread: true, ageSeconds: 61, threads: [
+      unread: true, unreadCount: 1,
+      lastMessage: { kind: 'agent', text: 'Checking the rollout status for the payments deployment…' },
+      ageSeconds: 61, threads: [
         { channel: 'console', threadId: 'console/console-3f9a2b', readTracked: true },
       ],
       deleting: false,
@@ -410,13 +417,15 @@ const conversations: ConversationPage = {
     {
       name: INCIDENT_ROOT, title: 'Elevated 5xx rate on checkout-api',
       profile: 'incident-lead', coordinator: 'incident-response', phase: 'Working',
-      inflight: { runId: 'run-9', dispatchedAt: ago(20) },
+      inflight: { runId: 'run-9', dispatchedAt: ago(20) }, presence: true,
       runCount: 2, runtimePod: `agentops-conv-${INCIDENT_ROOT}`,
       brief: 'Coordinating triage and mitigation for the checkout-api 5xx spike.',
       budget: { maxAgents: 5, agentsInvoked: 3, maxTurns: 30, turns: 9, deadline: ago(-1200) },
       lastActivity: ago(20), created: ago(320), queued: 0, joined: true,
       consoleThread: `console/${INCIDENT_ROOT}`, errored: false,
-      unread: true, ageSeconds: 20,
+      // A root's badge still counts — the budget line replaces the SNIPPET,
+      // never the unread count (ConversationRow renders them side by side).
+      unread: true, unreadCount: 1, ageSeconds: 20,
       threads: [{ channel: 'console', threadId: `console/${INCIDENT_ROOT}`, readTracked: true }],
       deleting: false,
     },

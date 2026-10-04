@@ -46,8 +46,8 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 
 ## 6. Fixture and assets
 
-- [ ] 6.1 `screenshots/fixture.ts`: a working-and-read conversation, a two-level incident, an autosolved root, and a relay, so both assets show the rules. Verify: the fixture type-checks and the capture spec targets the view.
-- [ ] 6.2 `demo/story.ts`: the beats walk the new view (a conversation arrives, is opened in place, a reply, the answer). Verify: `npm run demo` produces frames in the worktree's `docs/assets/video/`.
+- [x] 6.1 `screenshots/fixture.ts`: a working-and-read conversation, a two-level incident, an autosolved root, and a relay, so both assets show the rules. Verify: the fixture type-checks and the capture spec targets the view.
+- [x] 6.2 `demo/story.ts`: the beats walk the new view (a conversation arrives, is opened in place, a reply, the answer). Verify: `npm run demo` produces frames in the worktree's `docs/assets/video/`.
 
 ## 7. Unit tests
 
@@ -74,7 +74,7 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 ### 9.2 Adopter site
 
 - [x] 9.2.1 `docs/console-guide.md`: the Conversations and Conversation tour entries describe the one view, the counting rule and the tree, with new captions.
-- [ ] 9.2.2 `cd platform/console/ui && npm run screenshots` regenerates `docs/assets/img/console/conversations-*.png` and `conversation-*.png` from the worktree, and both are checked by eye against `prototype/C-rail.html`.
-- [ ] 9.2.3 `cd platform/console/ui && npm run demo` regenerates the landing recording and poster under `docs/assets/video/` from the worktree.
+- [x] 9.2.2 `cd platform/console/ui && npm run screenshots` regenerates `docs/assets/img/console/conversations-*.png` and `conversation-*.png` from the worktree, and both are checked by eye against `prototype/C-rail.html`.
+- [x] 9.2.3 `cd platform/console/ui && npm run demo` regenerates the landing recording and poster under `docs/assets/video/` from the worktree.
 - [x] 9.2.4 `docs/getting-started.md`: every sentence naming the list, the unread switch or the detail tabs reads true against the new view.
 - [ ] 9.2.5 The site lint from `docs/CLAUDE.md` passes over every page touched, and the built site is looked at in both colour schemes.

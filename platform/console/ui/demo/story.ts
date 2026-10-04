@@ -69,7 +69,7 @@ export interface Beat {
   /** Seconds the recording rests here. */
   hold: number
   /** A person doing something, rather than something arriving. */
-  act?: 'reply' | 'yaml' | 'start'
+  act?: 'reply' | 'yaml' | 'start' | 'open'
   /** This beat's last frame stands in for the recording before it is played. */
   poster?: true
   /** What the server answers from here on. */
@@ -143,8 +143,12 @@ export const beats: Beat[] = [
     },
   },
   {
-    label: 'The thread it opened, and the agent already working',
-    path: `/conversations/${CONVERSATION}`,
+    // OPENED IN PLACE (design D-A): one view, not a second page. The previous
+    // beat already left the browser on `/conversations` with the row
+    // visible, so this beat clicks it rather than navigating — the list
+    // stays on screen beside the thread that opens next to it.
+    label: 'Opened in place — the thread sits beside the list, not on a second page',
+    act: 'open',
     ready: 'Signal from cluster-events',
     clock: 26,
     hold: 5,
