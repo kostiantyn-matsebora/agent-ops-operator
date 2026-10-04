@@ -51,10 +51,10 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 
 ## 7. Unit tests
 
-- [ ] 7.1 `cd platform/console && go test -count=1 -coverpkg=./... ./...` passes in the worktree.
-- [ ] 7.2 `cd platform/manager && go test -count=1 ./internal/httpapi/... ./internal/chat/...` passes in the worktree, with `KUBEBUILDER_ASSETS` set for the envtest cases in 2.1, 2.3 and 2.4.
-- [ ] 7.3 `cd platform/console/ui && npm run typecheck && npm test` passes in the worktree, with every test named in sections 1 to 5 present.
-- [ ] 7.4 `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` pass on the worktree, including `prototype/`.
+- [x] 7.1 `cd platform/console && go test -count=1 -coverpkg=./... ./...` passes in the worktree.
+- [x] 7.2 `cd platform/manager && go test -count=1 ./internal/httpapi/... ./internal/chat/...` passes in the worktree, with `KUBEBUILDER_ASSETS` set for the envtest cases in 2.1, 2.3 and 2.4.
+- [x] 7.3 `cd platform/console/ui && npm run typecheck && npm test` passes in the worktree, with every test named in sections 1 to 5 present.
+- [x] 7.4 `python3 .github/scripts/publication-guard.py` and `python3 .github/scripts/retired-vocabulary-guard.py` pass on the worktree, including `prototype/`.
 
 ## 8. E2E tests
 
@@ -77,4 +77,4 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 - [x] 9.2.2 `cd platform/console/ui && npm run screenshots` regenerates `docs/assets/img/console/conversations-*.png` and `conversation-*.png` from the worktree, and both are checked by eye against `prototype/C-rail.html`.
 - [x] 9.2.3 `cd platform/console/ui && npm run demo` regenerates the landing recording and poster under `docs/assets/video/` from the worktree.
 - [x] 9.2.4 `docs/getting-started.md`: every sentence naming the list, the unread switch or the detail tabs reads true against the new view.
-- [ ] 9.2.5 The site lint from `docs/CLAUDE.md` passes over every page touched, and the built site is looked at in both colour schemes.
+- [x] 9.2.5 The site lint from `docs/CLAUDE.md` passes over every page touched, and the built site is looked at in both colour schemes.
