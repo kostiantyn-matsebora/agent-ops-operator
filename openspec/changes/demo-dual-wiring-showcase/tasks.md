@@ -47,7 +47,7 @@
 
 ## 3. E2E tests
 
-- [ ] 3.1 Not applicable — ticked. This change is chart-template rendering
+- [x] 3.1 Not applicable — ticked. This change is chart-template rendering
   only. It adds no new kubelet, RBAC, informer, or pod-lifecycle behavior:
   the multi-claimant source fan-out and the chat choice-list for several
   claimants are pre-existing, already-covered cluster mechanisms this
