@@ -84,6 +84,14 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **Closing or deleting a conversation now cascades to every conversation it
+  caused**, for every originator — a human `/close`, the console's bulk
+  close, the idle timer, and a bulk delete — not only the coordinator's own
+  MCP `close` verb. Close reaches every live descendant recursively, through
+  the same helper that verb already used. Delete reaches every descendant,
+  already left `Closed` by that cascade. Neither widens who may close or
+  delete anything — both were already bounded exactly as any other close or
+  delete is.
 - **The fixing loop re-runs an unexplained red check once before asking, and
   its fixing step runs on branches that lag master.** A check the fixer finds
   nothing in the tree for gets one empty commit pushed, so CI judges the head

@@ -2085,6 +2085,16 @@ Without it the first upgrade presents every conversation in the namespace as
 new. The manager sets `readTracked` on every binding it creates from that point
 on, for every channel, so the rule stays one rule.
 
+**The console counts unread MESSAGES, not just lateness.** Its own rule —
+which kinds count, and the per-conversation `unreadCount` it derives from
+them — is [the console's own](console.md#unread), built on this watermark
+rather than replacing it.
+
+A reader may also RECLAIM a message as unread. `POST /channel/read` accepts
+`rewind` beside `readAt`, moving that reader's own watermark backward
+instead of forward, still named and still clamped — see
+[the rewind rule](contracts.md#post-channelread).
+
 ### Telemetry says where it lost the thread
 
 **The activity ring stays bounded, in-memory and lossy.**
@@ -2139,6 +2149,11 @@ nobody reached for it.
 **A reply typed into a closed thread is answered with "this conversation is
 closed" and creates nothing.** An input there would never dispatch.
 
+**Closing cascades through `causedBy`, for every originator.** A human
+`/close`, the console's bulk close, and the idle timer all close every LIVE
+descendant recursively, through the path the coordinator's own `close` verb
+already used for its members. A plain conversation closes as before.
+
 **Deletion is a second verb** with its own trigger, window and flag.
 
 - **`kubectl delete conversation` still works**, and the
@@ -2175,6 +2190,11 @@ gone and that a new message starts a new one.
   object is disappearing — and the finalizer's 2-minute grace releases
   regardless, because a deletion must never be wedged by an adapter that is
   down.
+
+**Deleting cascades through `causedBy` too**, for every originator: every
+conversation reachable from the deleted one is deleted first, recursively.
+Nothing is skipped as not-yet-closed, since the close cascade above already
+closed the whole subtree before any of it could be deleted.
 
 ### Reopening
 

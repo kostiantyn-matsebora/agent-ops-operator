@@ -167,10 +167,14 @@ anyone holding the CR. A key containing `@` is refused with 400.
 | Clamped | A watermark ahead of the manager's clock is written as its `now` |
 | Per entry | One `marked` / `skipped` / `failed` outcome per requested thread, with a reason for anything not marked, plus totals |
 | Mixed batch | Still 200, and one bad entry never stops the rest — an unknown thread is `failed` and its neighbours are still marked |
+| Rewind | `"rewind":true` sets the NAMED reader's own watermark to `readAt` even where that is earlier than what is stored — "mark unread". Still clamped to the manager's clock. Refused with no `reader`: there is no per-reader entry to rewind, and the channel-wide mark is never rewound, which would un-read the thread for every other reader too |
 
 Entries resolving to the same conversation are grouped into ONE status patch,
 and a report that would not advance the watermark writes nothing at all. So
 re-opening a quiet conversation costs no API write.
+
+A rewind is the one exception: it always writes, since moving the watermark
+backward is its whole purpose.
 
 See [Read state](concepts.md#read-state-per-thread) for the field and the
 backfill rule.
