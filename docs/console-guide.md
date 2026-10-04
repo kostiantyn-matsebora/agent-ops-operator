@@ -35,7 +35,7 @@ truth** — every view is the cluster, rendered.
 
 ## The tour
 
-Six views, one question each.
+Five views, one question each.
 
 {: .ao-tabs #console}
 - **Overview** — Is anything wrong right now?
@@ -69,25 +69,30 @@ Six views, one question each.
 
   ![The Infrastructure view: each pod boxed by the cluster node it runs on, the conversation pods among them, with the model and the external systems outside every box.]({{ '/assets/img/console/topology-infrastructure-light.png' | relative_url }})
 
-- **Conversations** — What has the fleet been asked, and what has nobody read?
+- **Conversations** — What has the fleet been asked, what has nobody read,
+  and what did one agent actually do?
 
-  Filter by phase, pipeline or profile. Unread is **per identity**, so clearing
-  it in Telegram never clears it here.
+  One view answers all three: an inbox of scopes, the list, and the open
+  conversation's thread pane, side by side — never a table you leave to read
+  a transcript.
 
-  **Group by root** nests each member directly under its immediate parent
-  in the coordination it belongs to, on the current page. A root closed without ever escalating
-  still lists, marked with its `closeReason` — "why was I not told" always
-  has an answer.
+  The inbox counts **messages**, not lateness — a `signal`, an `agent` reply
+  or a `relay`, never an ack or a run event. Every scope carries its own sum,
+  and **Mark unread** reclaims a conversation you want to come back to.
 
-  ![Six conversations with mixed phases — Working, Pending, Idle and Closed — two marked unread, each showing its pipeline, run count, queue depth and last activity.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
+  The list renders as a **coordination tree** by default: a root and every
+  conversation it caused nest together, indented by depth, the root carrying
+  its member count, turn and deadline. Flatten it for the plain newest-first
+  order instead.
 
-- **Conversation** — What did one agent actually do?
+  ![The Conversations view: the inbox rail with its scopes and counts, a coordination tree with a two-level incident open, and the thread pane showing its transcript with an unread divider.]({{ '/assets/img/console/conversations-light.png' | relative_url }})
 
-  The transcript, every run with its result, the graph opened on that
-  conversation's replay, and the object's YAML.
+  Opening a row switches the thread pane in place — the URL changes, the
+  list does not move.
 
-  The transcript reads from the **message that started it**, and rebuilds after
-  a reload or a restart. Only acks are lost.
+  The transcript reads from the **message that started it**, and rebuilds
+  after a reload or a restart. Only acks and notices are lost, shown as a
+  presence row while they last.
 
   A long answer opens with its **conclusion**. Named sections sit above the
   fold, and the detail behind a control you expand in place. That shape comes
@@ -99,15 +104,15 @@ Six views, one question each.
   difference stated. It never offers a Pipeline: inside a conversation that text
   is input for the agent.
 
-  **A Coordinator's root, or one of its members, gains an Incident tab.** One
-  timeline interleaves the root's own turns with every member's start, result
-  and closure.
+  **A Coordinator's root shows an incident timeline instead of a transcript.**
+  It interleaves the root's own turns with every member's start, result and
+  closure, nesting a member that is itself coordinating in place.
 
-  A member that is itself a nested Coordinator's root expands to its own
-  timeline in place, and its own page links back to the incident it belongs
-  to.
+  A member opened directly shows its own run history, read-only, with a link
+  back to the incident — it holds no channel of its own, so there is nothing
+  to reply into from there.
 
-  ![One conversation: the signal that started it, the agent's answer explaining an OOM-killed container, a reply relayed in from another channel, and a box to reply from.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
+  ![A Coordinator's root conversation: the incident timeline with two member result cards, one of them a nested coordination, and the escalation divider.]({{ '/assets/img/console/conversation-light.png' | relative_url }})
 
 - **Queues** — What is waiting, and what is stuck?
 

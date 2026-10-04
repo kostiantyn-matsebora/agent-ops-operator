@@ -169,7 +169,7 @@ identity, mediated egress and at-least-once delivery are already in it.
 > a channel too, so you answer the agent right there.
 >
 > - ships enabled
-> - six views
+> - five views
 > - [read-only on your cluster]({{ '/console/' | relative_url }})
 {: .ao-console-strip}
 

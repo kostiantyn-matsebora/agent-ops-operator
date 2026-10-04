@@ -12,6 +12,17 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- **The console's Conversations page is one chat-shaped view**, not a table
+  plus a separate detail page: an inbox of scopes, a list rendered as a
+  coordination tree, and a thread pane that switches in place. Replaces
+  `pages/Conversations.tsx` and `pages/Conversation.tsx`.
+  - Unread counts MESSAGES (`signal`/`agent`/`relay`) rather than lateness,
+    summed per scope, and a new **Mark unread** reclaims one as a
+    reader-scoped rewind on the read verb.
+  - Pane widths and the inbox collapse state persist under one guarded
+    `localStorage` key, `agentops.console.layout` — the one piece of browser
+    persistence beside the nav fold, and still no conversation state.
+  - See [console.md](console.md#conversations).
 - **Two new CRDs let a conversation's own agent invoke other agents.**
   `AgentCapability` extracts the six capability fields a Pipeline already
   carries inline (`profileRef`, `runtimeRef`, `serviceAccountName`,

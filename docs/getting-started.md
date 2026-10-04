@@ -9,7 +9,7 @@ next:
   eyebrow: Next
   title: The screen you are looking at
   body: >-
-    A tour of the console's six views, what each one answers, and the one
+    A tour of the console's five views, what each one answers, and the one
     decision to make before you let anyone else reach it.
   url: /agent-ops-operator/console/
 ---

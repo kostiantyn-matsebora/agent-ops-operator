@@ -64,17 +64,17 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 
 ### 9.1 Reference docs
 
-- [ ] 9.1.1 `docs/console.md`: the Conversations section (one view, the four columns, the splitters, the collapsed inbox, the secondary views), the Unread section (the counting rule by kind, the sum, mark unread as a reader-scoped rewind, and the "no mark as unread" paragraph removed), "What the browser keeps" (layout preferences persist, conversation state does not), the Closing and Deleting sections (closing cascades to every live descendant and deleting to every already-closed one, the selection bar and the row menu say so), the Reopening section, and the coordination tree.
-- [ ] 9.1.2 `docs/concepts.md`: the read-state section names the console's counting rule and the rewind form beside the thread rule. The Closing and Deletion sections state the cascade through `causedBy`, for every originator.
-- [ ] 9.1.3 `docs/contracts.md`: `POST /channel/read` documents `rewind`.
-- [ ] 9.1.4 `docs/CHANGELOG.md`: an Unreleased entry for the console image naming the new view, the counting rule, mark unread and the layout key, and a manager entry for the close/delete cascade.
-- [ ] 9.1.5 `.claude/rules/structure.md`: the console section names `pages/chat/` and the one browser-persisted key.
-- [ ] 9.1.6 `python3 .github/scripts/docs-generate.py --check` passes. No CRD or chart value changed, so this confirms nothing generated went stale.
+- [x] 9.1.1 `docs/console.md`: the Conversations section (one view, the four columns, the splitters, the collapsed inbox, the secondary views), the Unread section (the counting rule by kind, the sum, mark unread as a reader-scoped rewind, and the "no mark as unread" paragraph removed), "What the browser keeps" (layout preferences persist, conversation state does not), the Closing and Deleting sections (closing cascades to every live descendant and deleting to every already-closed one, the selection bar and the row menu say so), the Reopening section, and the coordination tree.
+- [x] 9.1.2 `docs/concepts.md`: the read-state section names the console's counting rule and the rewind form beside the thread rule. The Closing and Deletion sections state the cascade through `causedBy`, for every originator.
+- [x] 9.1.3 `docs/contracts.md`: `POST /channel/read` documents `rewind`.
+- [x] 9.1.4 `docs/CHANGELOG.md`: an Unreleased entry for the console image naming the new view, the counting rule, mark unread and the layout key, and a manager entry for the close/delete cascade.
+- [x] 9.1.5 `.claude/rules/structure.md`: the console section names `pages/chat/` and the one browser-persisted key.
+- [x] 9.1.6 `python3 .github/scripts/docs-generate.py --check` passes. No CRD or chart value changed, so this confirms nothing generated went stale.
 
 ### 9.2 Adopter site
 
-- [ ] 9.2.1 `docs/console-guide.md`: the Conversations and Conversation tour entries describe the one view, the counting rule and the tree, with new captions.
+- [x] 9.2.1 `docs/console-guide.md`: the Conversations and Conversation tour entries describe the one view, the counting rule and the tree, with new captions.
 - [ ] 9.2.2 `cd platform/console/ui && npm run screenshots` regenerates `docs/assets/img/console/conversations-*.png` and `conversation-*.png` from the worktree, and both are checked by eye against `prototype/C-rail.html`.
 - [ ] 9.2.3 `cd platform/console/ui && npm run demo` regenerates the landing recording and poster under `docs/assets/video/` from the worktree.
-- [ ] 9.2.4 `docs/getting-started.md`: every sentence naming the list, the unread switch or the detail tabs reads true against the new view.
+- [x] 9.2.4 `docs/getting-started.md`: every sentence naming the list, the unread switch or the detail tabs reads true against the new view.
 - [ ] 9.2.5 The site lint from `docs/CLAUDE.md` passes over every page touched, and the built site is looked at in both colour schemes.
