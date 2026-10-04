@@ -195,9 +195,13 @@ for the source and the reference material beside this file.
 
 1. **Apply the CRDs first** — `kubectl apply -f chart/crds/` — before
    `helm upgrade`. Helm never upgrades a CRD, and an old one silently prunes
-   `spec.externals` from every adapter CR. This step is also what INSTALLS
-   the two new kinds this release adds, `AgentCapability` and `Coordinator` —
-   Helm never creates a CRD it did not already own either.
+   `spec.externals` from every adapter CR, and `spec.coordinatorRef`,
+   `spec.causedBy` and the budget fields from every `Conversation` — the
+   coordination verbs then refuse every caller with "token does not match
+   the declared identity", since the field they authenticate against was
+   never written. This step is also what INSTALLS the two new kinds this
+   release adds, `AgentCapability` and `Coordinator` — Helm never creates a
+   CRD it did not already own either.
 2. `helm upgrade`. Nothing to restate — the check arrives with the manager
    image.
 3. A Pipeline already carrying a dangling `runtimeRef` turns `Ready=False`.

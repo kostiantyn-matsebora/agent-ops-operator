@@ -65,6 +65,14 @@ the one built-in bucket scoped to it alone, never to the read-only route. */ -}}
 {{- if dig "builtinToolsets" "enabled" false $g }}
 {{- $writeTools = append $writeTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
 {{- end }}
+{{- /* A local shell inside the agent's own already-running pod is narrower
+than allowPodExecution's own grant (pods/exec into ANY pod, which is how it
+already exposes every cluster Secret), so once an install has accepted that,
+withholding Bash on the one route trusted to act buys nothing. The read-only
+route never gets it, whatever this flag is. */ -}}
+{{- if and (dig "builtinToolsets" "enabled" false $g) (dig "agentops" "runtimeDefaults" "allowPodExecution" false $g) }}
+{{- $writeTools = append $writeTools (dig "builtinToolsets" "shell" "name" "agentops-shell" $g) }}
+{{- end }}
 {{- $routes := list }}
 {{- if include "kubernetes.observePipelineEnabled" . }}
 {{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "")
