@@ -345,6 +345,13 @@ func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alph
 // The teardown that used to ride on deletion — runtime pod, MCP ConfigMap,
 // close-topic ops, capacity — is the reconciler's, driven off the phase. Doing
 // it here as well would be a second implementation of it.
+//
+// RECURSIVELY closes every LIVE conversation this one directly caused, through
+// the SAME `cascadeCloseMembers` helper the coordinator's own MCP `close` verb
+// already uses (coordinate.go) — so `/close`, the console's bulk close (a
+// fan-out of `/close`) and the idle timer all reach a root's members exactly as
+// that verb does, with no reason required or threaded through: a plain human
+// close carries none, which `cascadeCloseMembers` already allows.
 func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, farewell string) error {
 	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		return nil // already closed: no second farewell
@@ -360,7 +367,10 @@ func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.C
 	now := metav1.Now()
 	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
 	conv.Status.ClosedAt = &now
-	return client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch))
+	if err := client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch)); err != nil {
+		return err
+	}
+	return r.cascadeCloseMembers(ctx, conv.Name, "")
 }
 
 // ReopenConversation brings a closed conversation back to Idle.

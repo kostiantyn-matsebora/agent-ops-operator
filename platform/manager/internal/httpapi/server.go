@@ -1048,6 +1048,11 @@ func (s *Server) handleConversationReopen(w http.ResponseWriter, r *http.Request
 // close-then-delete verb would let one call do the irreversible thing to a
 // conversation that was still working, with the confirmation naming only the
 // delete. Refusing makes the destructive step something ordered twice.
+//
+// Deleting now cascades to every conversation reachable from it by
+// causedBy, mirroring the close cascade (conversation-close): a
+// coordination's members must never be left orphaned, unreachable and
+// occupying the API after their root is gone.
 func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request) {
 	conv, ok := s.reachConversation(w, r)
 	if !ok {
@@ -1059,11 +1064,46 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 				"which are the only durable copy of what the agent answered", conv.Name, phaseOrOpen(conv))})
 		return
 	}
+	if err := s.cascadeDeleteMembers(r.Context(), conv.Name); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	if err := s.Client.Delete(r.Context(), conv); err != nil && !apierrors.IsNotFound(err) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, 202, map[string]bool{"ok": true})
+}
+
+// cascadeDeleteMembers recursively deletes every conversation reachable from
+// parentName by causedBy, BEFORE parentName itself is deleted — the same
+// label the close cascade filters on (`chat.cascadeCloseMembers`), confirmed
+// against causedBy.parent rather than trusted: the label is a HINT, the
+// field is the FACT.
+//
+// Every descendant this reaches is already Closed by the time its ancestor
+// is, because the close cascade closes a whole subtree before any of it can
+// be deleted — so there is no "not yet closed" case to refuse here, and
+// NotFound is tolerated: some other path may already have deleted it.
+func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) error {
+	var list agentopsv1alpha1.ConversationList
+	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
+		client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parentName}); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		member := &list.Items[i]
+		if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != parentName {
+			continue // the label is a hint; the field is the fact
+		}
+		if err := s.cascadeDeleteMembers(ctx, member.Name); err != nil {
+			return err
+		}
+		if err := s.Client.Delete(ctx, member); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func phaseOrOpen(conv *agentopsv1alpha1.Conversation) string {

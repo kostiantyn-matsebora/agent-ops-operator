@@ -34,6 +34,13 @@ type readEntry struct {
 	// transport with no reader identity can report — and is exactly the
 	// behaviour every adapter had before this field existed.
 	Reader string `json:"reader,omitempty"`
+	// Rewind asks for "mark unread" instead of the ordinary monotonic
+	// advance: the named reader's OWN entry is set to ReadAt even where that
+	// is earlier than what is stored. It never touches the channel-wide
+	// mark, and naming no reader is refused — there would be no per-reader
+	// entry to rewind, and rewinding the channel-wide mark would un-read a
+	// thread for every OTHER reader too.
+	Rewind bool `json:"rewind,omitempty"`
 }
 
 type readOutcome struct {
@@ -54,6 +61,7 @@ const (
 type readTarget struct {
 	reader  string
 	at      metav1.Time
+	rewind  bool
 	results []int
 }
 
@@ -131,6 +139,14 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 			results[i].Reason = "each read needs a threadId and a readAt"
 			continue
 		}
+		if e.Rewind && e.Reader == "" {
+			// The only watermark a rewind could move with no reader named is
+			// the channel-wide one, and a rewind is never allowed to move
+			// that — it would un-read the thread for every OTHER reader too.
+			results[i].Outcome = readFailed
+			results[i].Reason = "a rewind must name a reader"
+			continue
+		}
 		name, ok := byThread[e.ThreadID]
 		if !ok {
 			results[i].Outcome = readFailed
@@ -152,10 +168,11 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if target == nil {
-			target = &readTarget{reader: e.Reader, at: at}
+			target = &readTarget{reader: e.Reader, at: at, rewind: e.Rewind}
 			groups[name] = append(groups[name], target)
 		} else if at.Time.After(target.at.Time) {
 			target.at = at
+			target.rewind = target.rewind || e.Rewind
 		}
 		target.results = append(target.results, i)
 	}
@@ -214,9 +231,15 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 		advanced := false
 		pending := map[*readTarget]bool{}
 		for _, target := range targets {
-			// A reader with no entry inherits the channel-wide mark, so a report
-			// that would not pass THAT is not an advance for them either.
-			if cur := t.Watermark(target.reader); cur != nil && !target.at.Time.After(cur.Time) {
+			// A REWIND is exempt from the monotonic check by design — "mark
+			// unread" exists precisely to set a reader's own entry EARLIER
+			// than what is stored. It still names a reader (refused above
+			// otherwise), so it can never reach the channel-wide mark.
+			//
+			// A reader with no entry inherits the channel-wide mark, so an
+			// ORDINARY report that would not pass THAT is not an advance for
+			// them either.
+			if cur := t.Watermark(target.reader); !target.rewind && cur != nil && !target.at.Time.After(cur.Time) {
 				for _, i := range target.results {
 					results[i].Outcome, results[i].Reason = readSkipped, "the watermark would not advance"
 				}

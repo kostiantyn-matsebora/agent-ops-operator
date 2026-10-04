@@ -12,81 +12,98 @@ import (
 	"testing"
 )
 
-// Unread is a property of the thread THIS console holds. What these tests pin
-// is the derivation table, that the count is taken before the filter, and that
-// marking read reaches only as far as the console's own threads do.
-
-// convWithRead builds a conversation bound to the console with an explicit
-// watermark on its binding.
-func convWithRead(name, lastActivity, readAt string, tracked bool) *Object {
-	binding := `{"channel":"console","threadId":"console-uid-` + name + `"`
-	if readAt != "" {
-		binding += `,"readAt":"` + readAt + `"`
-	}
-	if tracked {
-		binding += `,"readTracked":true`
-	}
-	binding += `}`
-	status := `{"phase":"Idle","threads":[` + binding + `]`
-	if lastActivity != "" {
-		status += `,"lastActivity":"` + lastActivity + `"`
-	}
-	status += `}`
-	return obj("conversations", name, "1",
-		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`, status)
-}
+// Unread is a property of the MESSAGES on the thread THIS console holds, by
+// kind — never raw activity. These tests pin the derivation table, that the
+// count is taken before the filter, and that marking read reaches only as
+// far as the console's own threads do.
 
 const (
 	tEarly = "2026-08-13T10:00:00Z"
 	tLate  = "2026-08-13T11:00:00Z"
 )
 
-// The table in design decision 4, one case per row.
-func TestUnreadDerivation(t *testing.T) {
-	cases := []struct {
-		name string
-		obj  *Object
-		want bool
-	}{
-		{"untracked binding predates the mechanism", convWithRead("a", tLate, "", false), false},
-		{"tracked and never read", convWithRead("b", tLate, "", true), true},
-		{"activity after the watermark", convWithRead("c", tLate, tEarly, true), true},
-		{"read up to the latest activity", convWithRead("d", tEarly, tEarly, true), false},
-		{"watermark ahead of activity", convWithRead("e", tEarly, tLate, true), false},
+// convWithRuns builds a conversation bound to the console, its thread read up
+// to readAt ("" for never read), with one recorded run per {result, finishedAt}
+// pair — the durable half of the new counting rule.
+func convWithRuns(name, readAt string, results ...[2]string) *Object {
+	binding := `{"channel":"console","threadId":"console-uid-` + name + `","readTracked":true`
+	if readAt != "" {
+		binding += `,"readAt":"` + readAt + `"`
 	}
-	for _, tc := range cases {
-		if got := summarize(tc.obj, nil, nil, "console", "").Unread; got != tc.want {
-			t.Fatalf("%s: unread=%v, want %v", tc.name, got, tc.want)
-		}
+	binding += `}`
+	var runs []string
+	last := ""
+	for i, r := range results {
+		runs = append(runs, `{"runId":"r`+strconv.Itoa(i)+`","status":"succeeded","result":"`+r[0]+`","finishedAt":"`+r[1]+`"}`)
+		last = r[1]
+	}
+	status := `{"phase":"Idle","threads":[` + binding + `],"runs":[` + strings.Join(runs, ",") + `]`
+	if last != "" {
+		status += `,"lastActivity":"` + last + `"`
+	}
+	status += `}`
+	return obj("conversations", name, "1",
+		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`, status)
+}
+
+// A new answer marks its conversation unread, and the count tracks how many.
+func TestUnreadCountsAnswersByKind(t *testing.T) {
+	answered := convWithRuns("answered", tEarly, [2]string{"the fix", tLate})
+	s := summarize(answered, nil, nil, "console", "", nil)
+	if s.UnreadCount != 1 || !s.Unread {
+		t.Fatalf("a fresh answer must count once: %+v", s)
+	}
+	if s.LastMessage == nil || s.LastMessage.Kind != MsgAgent || s.LastMessage.Text != "the fix" {
+		t.Fatalf("lastMessage not the agent's answer: %+v", s.LastMessage)
 	}
 
-	// An OBSERVED conversation — no console thread — is never unread, however
-	// new it is. The console holds no watermark on it and no standing to call
-	// it new.
+	const tBefore = "2026-08-13T09:00:00Z"
+	two := convWithRuns("two-answers", tBefore, [2]string{"first", tEarly}, [2]string{"second", tLate})
+	if s := summarize(two, nil, nil, "console", "", nil); s.UnreadCount != 2 {
+		t.Fatalf("two answers after the watermark must count twice, got %d", s.UnreadCount)
+	}
+
+	read := convWithRuns("read", tLate, [2]string{"done", tLate})
+	if s := summarize(read, nil, nil, "console", "", nil); s.Unread || s.UnreadCount != 0 {
+		t.Fatalf("a conversation read up to its latest answer must not be unread: %+v", s)
+	}
+
+	never := convWithRuns("never-answered", "")
+	if s := summarize(never, nil, nil, "console", "", nil); s.Unread {
+		t.Fatal("a bound conversation with no counted message yet must not be unread")
+	}
+}
+
+// The acknowledgement never counts: it lives only in the live buffer, and its
+// KIND excludes it exactly as a console user's own words are.
+func TestUnreadExcludesTheAck(t *testing.T) {
+	conv := convWithRuns("acked", tEarly)
+	tr := NewTranscripts()
+	tr.AppendOp("ack1", "console-uid-acked", &OpMessage{Kind: "notice", Body: "🔧 On it…"}, "console")
+	if s := summarize(conv, nil, nil, "console", "", tr); s.Unread || s.UnreadCount != 0 {
+		t.Fatalf("an acknowledgement must never count: %+v", s)
+	}
+}
+
+// An observed conversation — no console thread — carries no count however
+// new its activity, and reading it on another channel never clears the
+// console: the watermark is per thread.
+func TestUnreadIsScopedToTheConsoleThread(t *testing.T) {
 	observed := obj("conversations", "observed", "1",
 		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"telegram"}]}`,
 		`{"threads":[{"channel":"telegram","threadId":"55","readTracked":true}],"lastActivity":"`+tLate+`"}`)
-	if summarize(observed, nil, nil, "console", "").Unread {
+	if s := summarize(observed, nil, nil, "console", "", nil); s.Unread || s.UnreadCount != 0 {
 		t.Fatal("a conversation with no console thread must never be unread")
 	}
-	// …and reading it on Telegram does not clear the console, nor the reverse:
-	// the watermark is per thread.
+
 	both := obj("conversations", "both", "1",
 		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"},{"name":"telegram"}]}`,
 		`{"threads":[{"channel":"telegram","threadId":"55","readTracked":true,"readAt":"`+tLate+`"},`+
-			`{"channel":"console","threadId":"console-uid-both","readTracked":true,"readAt":"`+tEarly+`"}],`+
+			`{"channel":"console","threadId":"console-uid-both","readTracked":true}],`+
+			`"runs":[{"runId":"r1","status":"succeeded","result":"hi","finishedAt":"`+tLate+`"}],`+
 			`"lastActivity":"`+tLate+`"}`)
-	if !summarize(both, nil, nil, "console", "").Unread {
+	if s := summarize(both, nil, nil, "console", "", nil); !s.Unread {
 		t.Fatal("reading a conversation on another channel must not clear the console's mark")
-	}
-
-	// A conversation that never ran has no lastActivity: unreadness falls back
-	// to creation, the same key the list sorts on, so the mark and the ordering
-	// cannot disagree.
-	never := convWithRead("never", "", "", true)
-	never.Metadata.CreationTimestamp = tLate
-	if !summarize(never, nil, nil, "console", "").Unread {
-		t.Fatal("a bound, never-read conversation must be unread even before its first run")
 	}
 }
 
@@ -112,12 +129,12 @@ func getList(t *testing.T, h http.Handler, path string) listResponse {
 // The filter narrows server-side; the COUNT is computed before it, so
 // narrowing the view never moves the badge.
 func TestUnreadFilterAndPreFilterCount(t *testing.T) {
-	closed := convWithRead("closed-unread", tLate, tEarly, true)
+	closed := convWithRuns("closed-unread", tEarly, [2]string{"result", tLate})
 	closed.Status = json.RawMessage(strings.Replace(string(closed.Status), `"phase":"Idle"`, `"phase":"Closed"`, 1))
 	api, _, _, _ := apiWithOptions(t, "tok", true,
-		convWithRead("unread-1", tLate, tEarly, true),
-		convWithRead("unread-2", tLate, "", true),
-		convWithRead("read-1", tEarly, tEarly, true),
+		convWithRuns("unread-1", tEarly, [2]string{"result", tLate}),
+		convWithRuns("unread-2", "", [2]string{"result", tLate}),
+		convWithRuns("read-1", tLate, [2]string{"result", tEarly}),
 		closed,
 	)
 	h := api.Handler(http.NotFoundHandler())
@@ -173,7 +190,7 @@ func TestMarkReadMarksTheSelection(t *testing.T) {
 		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"telegram"}]}`,
 		`{"threads":[{"channel":"telegram","threadId":"55"}],"lastActivity":"`+tLate+`"}`)
 	api, f, _, _ := apiWithOptions(t, "tok", true,
-		convWithRead("a", tLate, tEarly, true), observed, convWithRead("b", tLate, "", true))
+		convWithRuns("a", tEarly, [2]string{"result", tLate}), observed, convWithRuns("b", "", [2]string{"result", tLate}))
 	h := api.Handler(http.NotFoundHandler())
 
 	code, out := postRead(t, h, `{"names":["a","observed","b"]}`)
@@ -193,9 +210,10 @@ func TestMarkReadMarksTheSelection(t *testing.T) {
 		t.Fatalf("only joined conversations may be reported: %+v", reported)
 	}
 	for _, e := range reported {
-		// the watermark is the conversation's OWN activity, never a client now
+		// the watermark is the conversation's own latest counted message,
+		// never a client-generated "now"
 		if e.ReadAt != tLate {
-			t.Fatalf("reported watermark %q, want the conversation's last activity %q", e.ReadAt, tLate)
+			t.Fatalf("reported watermark %q, want the latest answer's time %q", e.ReadAt, tLate)
 		}
 	}
 
@@ -212,7 +230,7 @@ func TestMarkReadMarksTheSelection(t *testing.T) {
 
 // The batch is bounded server-side at one page, exactly as bulk close is.
 func TestMarkReadRefusesEmptyAndOversizedBatches(t *testing.T) {
-	api, _, _, _ := apiWithOptions(t, "tok", true, convWithRead("a", tLate, "", true))
+	api, _, _, _ := apiWithOptions(t, "tok", true, convWithRuns("a", "", [2]string{"result", tLate}))
 	h := api.Handler(http.NotFoundHandler())
 
 	if code, _ := postRead(t, h, `{"names":[]}`); code != http.StatusBadRequest {
@@ -231,7 +249,7 @@ func TestMarkReadRefusesEmptyAndOversizedBatches(t *testing.T) {
 // console that could show a backlog and never clear it would be broken in the
 // way the unread mark exists to fix.
 func TestMarkReadIsAuthenticatedButNotGatedByWrites(t *testing.T) {
-	api, f, _, _ := apiWithOptions(t, "tok", false, convWithRead("a", tLate, "", true))
+	api, f, _, _ := apiWithOptions(t, "tok", false, convWithRuns("a", "", [2]string{"result", tLate}))
 	h := api.Handler(http.NotFoundHandler())
 
 	w := httptest.NewRecorder()
@@ -292,9 +310,9 @@ func unreadFor(t *testing.T, h http.Handler, who string) int {
 	return out.UnreadTotal
 }
 
-// convWithReaders builds a conversation whose console binding already carries a
-// per-identity overlay.
-func convWithReaders(name, lastActivity string, readers map[string]string) *Object {
+// convWithReaders builds a conversation whose console binding already carries
+// a per-identity overlay, with one answer so there is something to count.
+func convWithReaders(name, answeredAt string, readers map[string]string) *Object {
 	entries := []string{}
 	for k, at := range readers {
 		entries = append(entries, `{"key":"`+k+`","readAt":"`+at+`"}`)
@@ -304,7 +322,8 @@ func convWithReaders(name, lastActivity string, readers map[string]string) *Obje
 		`"readers":[` + strings.Join(entries, ",") + `]}`
 	return obj("conversations", name, "1",
 		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`,
-		`{"phase":"Idle","threads":[`+binding+`],"lastActivity":"`+lastActivity+`"}`)
+		`{"phase":"Idle","threads":[`+binding+`],"runs":[{"runId":"r1","status":"succeeded","result":"hi",`+
+			`"finishedAt":"`+answeredAt+`"}],"lastActivity":"`+answeredAt+`"}`)
 }
 
 // One operator reading does not clear it for another.
@@ -378,7 +397,7 @@ func TestOverlayAnswersTheViewer(t *testing.T) {
 // With no salt projected, and under a shared token, everyone is one reader —
 // which is exactly the behaviour before per-identity marks existed.
 func TestDegradesToChannelWideMarks(t *testing.T) {
-	api, f, _, _ := apiWithOptions(t, "tok", true, convWithRead("c1", tLate, "", true))
+	api, f, _, _ := apiWithOptions(t, "tok", true, convWithRuns("c1", "", [2]string{"result", tLate}))
 	h := api.Handler(http.NotFoundHandler()) // no salt set
 
 	if key := api.adapter.ReaderKey("alice@example.com"); key != "" {

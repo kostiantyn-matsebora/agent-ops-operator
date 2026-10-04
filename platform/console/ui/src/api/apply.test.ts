@@ -18,7 +18,8 @@ function newClient() {
 
 const summary = (over: Partial<ConversationSummary> = {}): ConversationSummary => ({
   name: 'conv-1', phase: 'Running', runCount: 0, queued: 0, joined: true,
-  consoleThread: 'th-1', errored: false, unread: false, ageSeconds: 0, deleting: false,
+  consoleThread: 'th-1', errored: false, unread: false, unreadCount: 0, presence: false,
+  mine: false, ageSeconds: 0, deleting: false,
   ...over,
 })
 
@@ -78,6 +79,25 @@ describe('one event, every view holding that object', () => {
 
     expect(client.getQueryData<ConversationPage>(['conversations', params])!.items[0].phase).toBe('Closed')
     expect(client.getQueryData<ConversationDetail>(['conversation', 'conv-1'])!.conversation.phase).toBe('Closed')
+  })
+
+  it('moves a live row\'s unread count with no refetch', () => {
+    const client = newClient()
+    const [params, p] = page([summary({ unreadCount: 0, unread: false })])
+    client.setQueryData(['conversations', params], p)
+
+    applyDelta(client, {
+      type: 'MODIFIED', kind: 'conversations', name: 'conv-1',
+      conversationRow: summary({
+        unreadCount: 2, unread: true,
+        lastMessage: { kind: 'agent', text: 'done' },
+      }),
+    })
+
+    const row = client.getQueryData<ConversationPage>(['conversations', params])!.items[0]
+    expect(row.unreadCount).toBe(2)
+    expect(row.unread).toBe(true)
+    expect(row.lastMessage).toEqual({ kind: 'agent', text: 'done' })
   })
 
   it('inserts a new conversation where its place is unambiguous', () => {

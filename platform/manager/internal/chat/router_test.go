@@ -118,6 +118,64 @@ func TestCloseInThreadClosesAndSaysGoodbyeOnEveryChannel(t *testing.T) {
 	}
 }
 
+// Closing now cascades to every live descendant too — the same
+// cascadeCloseMembers helper the coordinator's own MCP close verb already
+// uses (coordinate.go), so a human's /close reaches a root's members and
+// their own members, recursively, exactly as that verb does. No reason is
+// required or threaded through for a plain human close.
+func TestCloseInThreadCascadesToMembersTwoLevelsDeep(t *testing.T) {
+	root := boundConv("root-1", "c1")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", testNS
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	grandchild := &agentopsv1alpha1.Conversation{}
+	grandchild.Name, grandchild.Namespace = "grandchild-1", testNS
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: member.Name, Entry: "helper"}
+	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: member.Name}
+
+	r, _, c := closeFixture(t, nsChannel("c1", "slack"), root, member, grandchild)
+
+	thread := "thread-c1"
+	if err := r.HandleMessage(context.Background(), nsChannel("c1", "slack"),
+		InboundMessage{ThreadID: &thread, Text: "/close"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"root-1", "member-1", "grandchild-1"} {
+		var got agentopsv1alpha1.Conversation
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, &got); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+			t.Fatalf("%s must close with its root, got phase %q", name, got.Status.Phase)
+		}
+		if got.Status.CloseReason != "" {
+			t.Fatalf("%s: a plain human close must carry no reason, got %q", name, got.Status.CloseReason)
+		}
+	}
+}
+
+// A plain conversation with no members closes exactly as before — the
+// cascade finds nothing labelled as its member and changes nothing else.
+func TestCloseInThreadWithNoMembersIsUnaffected(t *testing.T) {
+	conv := boundConv("conv-1", "c1")
+	r, _, c := closeFixture(t, nsChannel("c1", "slack"), conv)
+
+	thread := "thread-c1"
+	if err := r.HandleMessage(context.Background(), nsChannel("c1", "slack"),
+		InboundMessage{ThreadID: &thread, Text: "/close"}); err != nil {
+		t.Fatal(err)
+	}
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "conv-1"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatalf("phase must be Closed, got %q", got.Status.Phase)
+	}
+}
+
 func TestCloseIsNotHandedToTheAgent(t *testing.T) {
 	conv := boundConv("conv-1", "c1")
 	// nothing may be appended even though the reply path is what saw the text

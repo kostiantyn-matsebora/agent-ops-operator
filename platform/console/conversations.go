@@ -49,36 +49,6 @@ func (t ThreadBinding) watermark(reader string) string {
 	return t.ReadAt
 }
 
-// unread reports whether this binding has activity newer than the reader's
-// watermark. It mirrors ThreadBinding.Unread on the CRD type — the console
-// reads the CR over HTTP and holds no Go dependency on the operator module.
-func (t ThreadBinding) unread(lastActivity, reader string) bool {
-	if !t.ReadTracked {
-		return false
-	}
-	at := t.watermark(reader)
-	if at == "" {
-		return true
-	}
-	read, err := parseStamp(at)
-	if err != nil {
-		return false
-	}
-	act, err := parseStamp(lastActivity)
-	if err != nil {
-		return false
-	}
-	return act.After(read)
-}
-
-// parseStamp reads an API-server timestamp in either precision.
-func parseStamp(s string) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	return time.Parse(time.RFC3339Nano, s)
-}
-
 // Run is one completed agent run from status.runs[].
 type Run struct {
 	RunID      string `json:"runId"`
@@ -173,7 +143,16 @@ type convView struct {
 			SourceRef *Ref              `json:"sourceRef,omitempty"`
 			Labels    map[string]string `json:"labels,omitempty"`
 		} `json:"signal,omitempty"`
-		Title      string      `json:"title,omitempty"`
+		Title string `json:"title,omitempty"`
+		// OriginReader names whoever STARTED this conversation, in the opaque
+		// key space of the channel they started it from — what "Mine" reads,
+		// since the person who typed the request is the one case a watermark
+		// rule would otherwise get wrong (api/v1alpha1's own comment on the
+		// field).
+		OriginReader *struct {
+			Channel string `json:"channel"`
+			Key     string `json:"key"`
+		} `json:"originReader,omitempty"`
 		Toolsets   *refBinding `json:"toolsets,omitempty"`
 		MCPConfigs *refBinding `json:"mcpConfigs,omitempty"`
 		Inputs     []struct {
@@ -284,10 +263,28 @@ type ConversationSummary struct {
 	Toolsets   []string `json:"toolsets,omitempty"`
 	MCPConfigs []string `json:"mcpConfigs,omitempty"`
 
-	// Unread: the CONSOLE's own thread has activity newer than its watermark.
-	// An observed conversation — one with no console thread — is never unread:
-	// the console holds no watermark on it and has no standing to call it new.
+	// Unread: UnreadCount is above zero. An observed conversation — one with
+	// no console thread — is never unread: the console holds no watermark on
+	// it and has no standing to call it new.
 	Unread bool `json:"unread"`
+	// UnreadCount is the number of counted-kind messages (signal, agent,
+	// relay — see countedKinds) on the CONSOLE's own thread, after the
+	// reader's watermark. An ack, a notice, a console user's own words and a
+	// run event are never counted, whatever the watermark says.
+	UnreadCount int `json:"unreadCount"`
+	// LastMessage is the most recent counted-kind message on the console
+	// thread, read or not — the row's snippet, and never an ack: an ack is
+	// PRESENCE, shown as the pulsing dot below, not a line of transcript.
+	LastMessage *LastMessage `json:"lastMessage,omitempty"`
+	// Presence: a run is inflight right now. Drawn apart from Unread (design
+	// decision "Presence is drawn apart from unread") — a conversation can be
+	// both, either or neither.
+	Presence bool `json:"presence"`
+	// Mine: the requesting reader is who STARTED this conversation (its
+	// OriginReader, in this console's own channel's key space). The inbox's
+	// "Mine" scope. Always false with no reader resolved — there is no
+	// identity to compare against.
+	Mine bool `json:"mine"`
 	// ReadAt is the console thread's watermark, so the browser can report a
 	// read only when it would actually advance.
 	ReadAt string `json:"readAt,omitempty"`
@@ -316,6 +313,48 @@ type ConversationSummary struct {
 	// written by the agent — shown wherever a list would otherwise show only
 	// a name (design D-I).
 	Brief string `json:"brief,omitempty"`
+
+	// lastMessageAt is the newest counted message's own timestamp — never
+	// serialized, since the row needs only LastMessage's kind/sender/text.
+	// Kept server-side for the two computations that need the TIME rather
+	// than the text: the read report on open (design D-D) and mark unread's
+	// rewind target (design D-E), so neither re-derives it from the merged
+	// transcript a second time.
+	lastMessageAt string
+}
+
+// readReportTime is what reporting a conversation read sends: the newest
+// counted message's own time, or the conversation's activity time where that
+// is later (design D-D). Never a locally generated "now" — both halves are
+// read off the conversation's own state.
+//
+// Falls back to sortKey() when there is no counted message yet to read a
+// time from — the conversation predates a message, or carries none on this
+// console's thread at all — which is exactly what reporting read against
+// this conversation did before counted messages existed.
+func (s ConversationSummary) readReportTime() string {
+	newest, ok := parseAt(s.lastMessageAt)
+	if !ok {
+		return s.sortKey()
+	}
+	if act, ok := parseAt(s.LastActivity); ok && act.After(newest) {
+		return s.LastActivity
+	}
+	return s.lastMessageAt
+}
+
+// RewindTarget is what "mark unread" (design D-E) asks the manager to set the
+// reader's own watermark to: just before the newest counted message, so that
+// message counts again and nothing earlier does.
+//
+// Absent when there is no counted message to rewind to — mark unread has
+// nothing to offer a conversation nobody has to read yet.
+func (s ConversationSummary) RewindTarget() (string, bool) {
+	newest, ok := parseAt(s.lastMessageAt)
+	if !ok {
+		return "", false
+	}
+	return newest.Add(-time.Nanosecond).Format(time.RFC3339Nano), true
 }
 
 // summarize projects one Conversation for the browser. consoleChannel is the
@@ -335,7 +374,20 @@ type BlockedReason struct {
 	Storage bool `json:"storage"`
 }
 
-func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, reader string) ConversationSummary {
+// LastMessage is the most recent counted-kind message on a conversation's
+// console thread (see countedKinds) — the row's snippet, carried as a
+// kind/sender/text triple rather than a flattened string so the UI can draw
+// it the way it draws the thread itself.
+type LastMessage struct {
+	Kind   string `json:"kind"`
+	Sender string `json:"sender,omitempty"`
+	Text   string `json:"text"`
+}
+
+// summarize projects one Conversation for the browser. transcripts is nilable
+// so pure CR-derived fields stay testable with no live buffer at all — a row
+// with no console thread never reads it either.
+func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, reader string, transcripts *Transcripts) ConversationSummary {
 	v := conversationView(obj)
 	s := ConversationSummary{
 		Name: obj.Metadata.Name, UID: obj.Metadata.UID, Title: v.Spec.Title,
@@ -354,6 +406,9 @@ func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, r
 		EscalatedAt: v.Status.EscalatedAt,
 		CloseReason: v.Status.CloseReason,
 		Brief:       v.Status.Brief,
+		Presence:    v.Status.Inflight != nil,
+		Mine: reader != "" && v.Spec.OriginReader != nil &&
+			v.Spec.OriginReader.Channel == consoleChannel && v.Spec.OriginReader.Key == reader,
 	}
 	// RunCount is set HERE, not only on the list path: the detail view carries
 	// Runs too, and a summary that reported 0 runs beside a populated list was
@@ -377,11 +432,24 @@ func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, r
 				s.Joined = true
 				s.ConsoleThread = t.ThreadID
 				s.ReadAt = t.watermark(reader)
-				// sortKey(), not LastActivity, so the unread mark and the
-				// ordering can never disagree: unread rows are exactly a prefix
-				// of the list.
-				s.Unread = t.unread(s.sortKey(), reader)
 			}
+		}
+	}
+	// Unreadness is a property of the CONSOLE's own thread, and only of it: a
+	// conversation this console merely observes carries no watermark and has
+	// no standing to call anything new.
+	if s.Joined {
+		var live []Message
+		if transcripts != nil {
+			live = transcripts.Thread(s.ConsoleThread)
+		}
+		merged := mergeTranscript(s.ConsoleThread, consoleChannel, live, v.Status.Runs, s)
+		count, newest, hasNewest := countUnread(merged, s.ReadAt)
+		s.UnreadCount = count
+		s.Unread = count > 0
+		if hasNewest {
+			s.LastMessage = &LastMessage{Kind: newest.Kind, Sender: newest.Sender, Text: newest.Text}
+			s.lastMessageAt = newest.At
 		}
 	}
 	return s

@@ -422,6 +422,59 @@ func transcriptKind(m *OpMessage, ownChannel string) (kind, sender string) {
 	}
 }
 
+// countedKinds are the message kinds a person has to read on this console's
+// own thread — the signal that opened or advanced the conversation, an agent
+// answer, or a relayed message from somebody on another channel. Everything
+// else (an ack or notice, a console user's own words, a run event) is
+// excluded by its KIND, which `transcriptKind` already assigns — there is no
+// second rule layered on top that re-derives "is this the reader's own
+// message" from the sender.
+var countedKinds = map[string]bool{
+	MsgSignal: true,
+	MsgAgent:  true,
+	MsgRelay:  true,
+}
+
+// countUnread counts the counted-kind messages after watermark, and reports
+// the single most recent counted message regardless of watermark.
+//
+// That second value is read by TWO callers for two different reasons: the
+// row's snippet always wants the thread's latest meaningful moment, and
+// opening a conversation (design D-D) reports read up to exactly that time —
+// never a locally generated "now" — so both read the same computation rather
+// than agreeing on it by convention.
+//
+// watermark == "" counts everything: a thread never read has no watermark to
+// be after, and counting from "the beginning of time" is what "never read"
+// means.
+func countUnread(messages []Message, watermark string) (count int, newest Message, hasNewest bool) {
+	wm, hasWM := parseAt(watermark)
+	for _, m := range messages {
+		if !countedKinds[m.Kind] {
+			continue
+		}
+		at, ok := parseAt(m.At)
+		if !ok {
+			continue // an uncounted-kind message with no time is not evidence either way
+		}
+		if !hasNewest || at.After(mustParseAt(newest.At)) {
+			newest = m
+			hasNewest = true
+		}
+		if !hasWM || at.After(wm) {
+			count++
+		}
+	}
+	return count, newest, hasNewest
+}
+
+// mustParseAt reads a Message.At that countUnread already proved parses —
+// newest is only ever set from a message that passed parseAt above.
+func mustParseAt(s string) time.Time {
+	t, _ := parseAt(s)
+	return t
+}
+
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func olderThan(ts string, d time.Duration) bool {

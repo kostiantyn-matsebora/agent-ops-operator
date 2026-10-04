@@ -500,6 +500,9 @@ func (a *Adapter) ReaderKey(identity string) string {
 type ReadReport struct {
 	Conversation string
 	ReadAt       string
+	// Rewind asks the manager to set the acting reader's own watermark to
+	// ReadAt regardless of what is stored — "mark unread" (design D-E).
+	Rewind bool
 }
 
 // ReadResult is one conversation's outcome, named for the CONVERSATION rather
@@ -533,7 +536,7 @@ func (a *Adapter) ReportRead(ctx context.Context, reader string, reports []ReadR
 			continue
 		}
 		byThread[thread] = rep.Conversation
-		entries = append(entries, ReadEntry{ThreadID: thread, ReadAt: rep.ReadAt, Reader: reader})
+		entries = append(entries, ReadEntry{ThreadID: thread, ReadAt: rep.ReadAt, Reader: reader, Rewind: rep.Rewind})
 	}
 	if len(entries) == 0 {
 		return results, nil

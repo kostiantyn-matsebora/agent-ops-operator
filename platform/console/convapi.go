@@ -35,12 +35,19 @@ type ConversationFilter struct {
 	Profile  string
 	Channel  string
 	Errored  bool
-	// Unread narrows to conversations whose CONSOLE thread has activity newer
-	// than its watermark. Evaluated server-side like every other filter, so a
+	// Unread narrows to conversations whose console thread carries a
+	// counted-kind message (signal, agent, relay) after the reader's
+	// watermark. Evaluated server-side like every other filter, so a
 	// narrowed list still reports a correct total and pages correctly.
 	Unread bool
-	MaxAge float64 // seconds; 0 = no bound
-	Search string
+	// Mine narrows to conversations the requesting reader themselves started
+	// (ConversationSummary.Mine).
+	Mine bool
+	// Incidents narrows to conversations that are themselves a Coordinator's
+	// root (ConversationSummary.Coordinator set).
+	Incidents bool
+	MaxAge    float64 // seconds; 0 = no bound
+	Search    string
 }
 
 func (f ConversationFilter) matches(s ConversationSummary, now float64) bool {
@@ -71,6 +78,12 @@ func (f ConversationFilter) matches(s ConversationSummary, now float64) bool {
 	if f.Unread && !s.Unread {
 		return false
 	}
+	if f.Mine && !s.Mine {
+		return false
+	}
+	if f.Incidents && s.Coordinator == "" {
+		return false
+	}
 	if f.MaxAge > 0 && s.AgeSeconds > f.MaxAge {
 		return false
 	}
@@ -85,6 +98,8 @@ func parseFilter(r *http.Request) ConversationFilter {
 	}
 	f.Errored, _ = strconv.ParseBool(q.Get("errored"))
 	f.Unread, _ = strconv.ParseBool(q.Get("unread"))
+	f.Mine, _ = strconv.ParseBool(q.Get("mine"))
+	f.Incidents, _ = strconv.ParseBool(q.Get("incidents"))
 	if v, err := strconv.ParseFloat(q.Get("maxAgeSeconds"), 64); err == nil {
 		f.MaxAge = v
 	}
@@ -114,8 +129,9 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
 	unreadTotal := 0
+	scopes := map[string]int{}
 	for _, o := range a.cache.List("conversations") {
-		s := summarize(o, pipelines, coordinators, consoleChannel, reader)
+		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
 		s.RunCount = len(s.Runs)
 		// Run history is DROPPED from list rows: a result is a whole agent
 		// message, and thousands of them do not belong in a listing.
@@ -124,6 +140,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// view narrowed would let a filter hide a backlog without saying so.
 		if s.Unread {
 			unreadTotal++
+			accumulateScopeCounts(scopes, s)
 		}
 		if filter.matches(s, 0) {
 			all = append(all, s)
@@ -134,11 +151,13 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 
 	total := len(all)
 	// count-only: the navigation badge wants the number, not a page of rows it
-	// would immediately throw away.
+	// would immediately throw away. The inbox's per-scope badges ride along —
+	// same reasoning as unreadTotal: computed over every conversation, never
+	// narrowed by the filter this same request may also carry.
 	if ok, _ := strconv.ParseBool(r.URL.Query().Get("count")); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"items": []ConversationSummary{}, "total": total, "unreadTotal": unreadTotal,
-			"offset": 0, "limit": 0,
+			"offset": 0, "limit": 0, "scopes": scopes,
 		})
 		return
 	}
@@ -160,6 +179,33 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// from a hardcoded list that drifts from the cluster
 		"facets": a.conversationFacets(),
 	})
+}
+
+// accumulateScopeCounts folds one UNREAD row into the inbox's per-scope
+// badges: the fixed scopes the inbox always shows, plus one entry keyed by
+// name for every pipeline and coordinator a row attributes to — "the count
+// per scope SHALL be available for the inbox" (console-unread spec), read
+// the same way the badge itself is: unread, never total.
+func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
+	switch {
+	case strings.EqualFold(s.Phase, "Working"):
+		scopes["working"]++
+	case strings.EqualFold(s.Phase, "Closed"):
+		scopes["closed"]++
+	}
+	if s.Mine {
+		scopes["mine"]++
+	}
+	if s.Errored {
+		scopes["errored"]++
+	}
+	if s.Coordinator != "" {
+		scopes["incidents"]++
+		scopes[s.Coordinator]++
+	}
+	if s.Pipeline != "" {
+		scopes[s.Pipeline]++
+	}
 }
 
 func (a *API) conversationFacets() map[string][]string {
@@ -229,7 +275,7 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 // answer it produced arrives once, as a message, rather than again inside every
 // later delta.
 func (a *API) ConversationView(obj *Object, reader string) map[string]any {
-	summary := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader)
+	summary := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader, a.transcripts)
 	// Archived — "there is nothing here to reply to" — is read from the
 	// CONVERSATION's phase first, and only then from this console's own
 	// transcript state.
@@ -277,7 +323,7 @@ func (a *API) ConversationView(obj *Object, reader string) map[string]any {
 // agent message, and a delta that carried thousands of them per change would be
 // heavier than the re-fetch it replaces.
 func (a *API) ConversationRow(obj *Object, reader string) ConversationSummary {
-	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader)
+	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader, a.transcripts)
 	s.RunCount = len(s.Runs)
 	s.Runs = nil
 	return s
@@ -609,12 +655,12 @@ func (a *API) stampRead(r *http.Request, name string) {
 	if obj == nil {
 		return
 	}
-	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader)
+	s := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader, a.transcripts)
 	if s.ConsoleThread == "" {
 		return
 	}
 	if _, err := a.adapter.ReportRead(r.Context(), reader,
-		[]ReadReport{{Conversation: name, ReadAt: s.sortKey()}}); err != nil {
+		[]ReadReport{{Conversation: name, ReadAt: s.readReportTime()}}); err != nil {
 		log.Printf("stamp read %s: %v", name, err)
 	}
 }
@@ -779,8 +825,8 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 				Reason: "no such conversation"})
 			continue
 		}
-		s := summarize(obj, pipelines, coordinators, consoleChannel, reader)
-		reports = append(reports, ReadReport{Conversation: name, ReadAt: s.sortKey()})
+		s := summarize(obj, pipelines, coordinators, consoleChannel, reader, a.transcripts)
+		reports = append(reports, ReadReport{Conversation: name, ReadAt: s.readReportTime()})
 	}
 	if len(reports) > 0 {
 		out, err := a.adapter.ReportRead(r.Context(), reader, reports)
@@ -801,6 +847,87 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	// Attributed like every other action this console takes, and NOT behind the
 	// write gate: a watermark instructs no agent and starts no work.
 	log.Printf("console read: action=mark-read identity=%s conversations=%d", Identity(r), len(in.Names))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"results": results,
+		"marked":  totals["marked"], "skipped": totals[closeOutcomeSkipped], "failed": totals[closeOutcomeFailed],
+	})
+}
+
+// handleMarkUnread rewinds the selection's console-thread watermark for the
+// ACTING reader alone — design D-E's reader-scoped "mark unread". Bounded
+// and attributed exactly as mark read is, and mirrors its shape: names only,
+// the server reads each conversation's own state for the time to report.
+//
+// ABSENT a resolved reader (no salt projected, or an unidentified request)
+// there is no per-person watermark to rewind, and rewinding the
+// CHANNEL-WIDE one would un-read the thread for every other reader too — so
+// the whole request is refused rather than degrading to that, which is also
+// what makes the UI's own "mark unread is absent with no reader" rule a
+// server-enforced fact rather than a client courtesy.
+func (a *API) handleMarkUnread(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Names []string `json:"names"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"names":["…"]}`})
+		return
+	}
+	if len(in.Names) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "names is required"})
+		return
+	}
+	if len(in.Names) > conversationPageSize {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "an unread batch is limited to " + strconv.Itoa(conversationPageSize) + " conversations",
+		})
+		return
+	}
+	reader := a.adapter.ReaderKey(Identity(r))
+	if reader == "" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "this console has no reader salt projected, so there is no per-person mark to rewind",
+		})
+		return
+	}
+
+	consoleChannel := a.adapter.PrimaryChannel()
+	pipelines := a.cache.List("pipelines")
+	coordinators := a.cache.List("coordinators")
+	reports := make([]ReadReport, 0, len(in.Names))
+	results := make([]ReadResult, 0, len(in.Names))
+	for _, name := range in.Names {
+		obj := a.cache.Get("conversations", name)
+		if obj == nil {
+			results = append(results, ReadResult{Name: name, Outcome: closeOutcomeFailed,
+				Reason: "no such conversation"})
+			continue
+		}
+		s := summarize(obj, pipelines, coordinators, consoleChannel, reader, a.transcripts)
+		at, ok := s.RewindTarget()
+		if !ok {
+			results = append(results, ReadResult{Name: name, Outcome: closeOutcomeSkipped,
+				Reason: "nothing on this console thread has to be read yet"})
+			continue
+		}
+		reports = append(reports, ReadReport{Conversation: name, ReadAt: at, Rewind: true})
+	}
+	if len(reports) > 0 {
+		out, err := a.adapter.ReportRead(r.Context(), reader, reports)
+		if err != nil {
+			log.Printf("mark unread: %v", err)
+			for _, rep := range reports {
+				results = append(results, ReadResult{Name: rep.Conversation,
+					Outcome: closeOutcomeFailed, Reason: "marking unread failed"})
+			}
+		} else {
+			results = append(results, out...)
+		}
+	}
+	totals := map[string]int{}
+	for _, res := range results {
+		totals[res.Outcome]++
+	}
+	log.Printf("console read: action=mark-unread identity=%s conversations=%d", Identity(r), len(in.Names))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"results": results,
 		"marked":  totals["marked"], "skipped": totals[closeOutcomeSkipped], "failed": totals[closeOutcomeFailed],

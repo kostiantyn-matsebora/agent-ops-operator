@@ -455,6 +455,18 @@ export interface ConversationBudget {
   turns?: number
 }
 
+/**
+ * The most recent counted-kind message (signal, agent, relay — see
+ * `countedKinds` on the Go side) on a conversation's console thread — the
+ * row's snippet, read or not. Never an ack: an ack is PRESENCE, not a line
+ * of transcript.
+ */
+export interface LastMessage {
+  kind: string
+  sender?: string
+  text: string
+}
+
 export interface ConversationSummary {
   name: string
   uid?: string
@@ -483,9 +495,31 @@ export interface ConversationSummary {
    * merely queued — its pod could not come up, and this is the kubelet's own
    * reason for it. The 2026-08-20 outage showed a phase and nothing else. */
   blocked?: BlockedReason
-  /** The CONSOLE's own thread has activity newer than its watermark. Observed
-   * conversations — no console thread — are never unread. */
+  /** `unreadCount` is above zero. Observed conversations — no console thread
+   * — are never unread. */
   unread: boolean
+  /**
+   * The number of counted-kind messages (signal, agent, relay) on the
+   * CONSOLE's own thread, after the reader's watermark. An ack, a notice, a
+   * console user's own words and a run event are never counted.
+   *
+   * Optional here only because older fixtures in this tree predate it —
+   * the server always sends it, with no `omitempty` on its Go side.
+   */
+  unreadCount?: number
+  /** The most recent counted-kind message on the console thread, read or
+   * not — the row's snippet. Absent on a conversation with no console
+   * thread, or with no counted message yet. */
+  lastMessage?: LastMessage
+  /** A run is inflight right now. Drawn apart from `unread` — a conversation
+   * can be both, either or neither. Optional for the same fixture reason as
+   * `unreadCount`; always sent. */
+  presence?: boolean
+  /** The requesting reader is who STARTED this conversation (its
+   * `originReader`, in this console's own channel). The inbox's "Mine"
+   * scope. Always false with no reader resolved. Optional for the same
+   * fixture reason as `unreadCount`; always sent. */
+  mine?: boolean
   /** The console thread's watermark, so a read is reported only when it advances. */
   readAt?: string
   ageSeconds: number
@@ -572,6 +606,13 @@ export interface ConversationPage {
   offset: number
   limit: number
   facets: Record<string, string[]>
+  /**
+   * Present on the count-only form alone: the UNREAD count within each fixed
+   * inbox scope (`working`, `mine`, `errored`, `incidents`, `closed`), plus
+   * one entry keyed by name for every pipeline and coordinator a row
+   * attributes to — what the inbox's per-scope badges read.
+   */
+  scopes?: Record<string, number>
 }
 
 // ---- marking a batch read ----------------------------------------------------

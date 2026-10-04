@@ -417,6 +417,71 @@ func TestReaderKeyMustNotBeAnIdentity(t *testing.T) {
 	}
 }
 
+// A reader may rewind their OWN watermark earlier than it is stored — "mark
+// unread" — and the channel-wide mark never moves.
+func TestChannelReadRewind(t *testing.T) {
+	mkProfile(t, "read-prof-rewind")
+	mkChannel(t, "chan-rewind", "tg-rewind")
+	srv := apiServer()
+	at := time.Now().Add(-time.Hour)
+	mkBoundConv(t, "conv-rewind", "chan-rewind", "rw1", at)
+
+	later := at.Add(30 * time.Minute)
+	if out := postReaderRead(t, srv, "chan-rewind", "rw1", "sha256:rewinder", later); out.Marked != 1 {
+		t.Fatalf("seed: %+v", out)
+	}
+	earlier := at.Add(-10 * time.Minute)
+	code, out := postRead(t, srv, "chan-rewind", []map[string]any{
+		{"threadId": "rw1", "readAt": earlier.Format(time.RFC3339), "reader": "sha256:rewinder", "rewind": true},
+	}, "test-adapter-token")
+	if code != 200 || out.Marked != 1 || out.Results[0].Outcome != "marked" {
+		t.Fatalf("rewind: %d %+v", code, out)
+	}
+	got := threadOf(t, "conv-rewind", "chan-rewind")
+	var mark *metav1.Time
+	for _, r := range got.Readers {
+		if r.Key == "sha256:rewinder" {
+			mark = r.ReadAt
+		}
+	}
+	if mark == nil || !mark.Time.Before(later) {
+		t.Fatalf("rewind did not move the reader's watermark earlier: %v (was %v)", mark, later)
+	}
+	if got.ReadAt != nil {
+		t.Fatal("a rewind moved the CHANNEL-WIDE mark")
+	}
+
+	// unreadness follows: the rewound message counts again for this reader,
+	// and only for this reader.
+	var fresh agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "conv-rewind"}, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if !fresh.Status.UnreadFor("chan-rewind", "sha256:rewinder") {
+		t.Fatal("rewinding a reader's own mark must make the thread unread for them again")
+	}
+}
+
+// A rewind naming no reader is refused outright: the only watermark it could
+// move is the channel-wide one, which a rewind must never touch.
+func TestChannelReadRewindRequiresAReader(t *testing.T) {
+	mkProfile(t, "read-prof-rewind-nr")
+	mkChannel(t, "chan-rewind-nr", "tg-rewind-nr")
+	srv := apiServer()
+	at := time.Now().Add(-time.Hour)
+	mkBoundConv(t, "conv-rewind-nr", "chan-rewind-nr", "rwnr1", at)
+
+	code, out := postRead(t, srv, "chan-rewind-nr", []map[string]any{
+		{"threadId": "rwnr1", "readAt": at.Format(time.RFC3339), "rewind": true},
+	}, "test-adapter-token")
+	if code != 200 || out.Failed != 1 || out.Results[0].Outcome != "failed" {
+		t.Fatalf("a rewind with no reader must be refused: %d %+v", code, out)
+	}
+	if threadOf(t, "conv-rewind-nr", "chan-rewind-nr").ReadAt != nil {
+		t.Fatal("a refused rewind wrote the channel-wide mark")
+	}
+}
+
 // The person who STARTED a conversation has seen it: their own watermark is
 // stamped at the one moment their thread comes into existence, so it is never
 // presented back to them as unread before an answer could exist — and it stays

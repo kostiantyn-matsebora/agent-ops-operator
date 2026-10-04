@@ -316,6 +316,11 @@ type ReadEntry struct {
 	// identity. Empty reports the channel-wide mark, which is what a console
 	// with no salt projected falls back to.
 	Reader string `json:"reader,omitempty"`
+	// Rewind asks "mark unread" rather than the ordinary monotonic advance:
+	// the named Reader's own watermark is set to ReadAt even where that is
+	// earlier than what is stored. Always sent with a non-empty Reader — the
+	// manager refuses a rewind naming none.
+	Rewind bool `json:"rewind,omitempty"`
 }
 
 // ReadOutcome is the manager's per-thread verdict on a read report.
