@@ -76,6 +76,61 @@ export function budgetSummary(budget: ConversationBudget | undefined, memberCoun
   return parts.join(' · ')
 }
 
+function rowTint(row: ConversationSummary, isRoot: boolean): string {
+  if (row.errored) return 'var(--ao-danger)'
+  return isRoot ? 'var(--ao-accent)' : 'var(--ao-brand-strong)'
+}
+
+function tagColor(tag: string): 'red' | 'blue' | 'grey' {
+  if (tag === 'run failed') return 'red'
+  return tag === 'new' ? 'blue' : 'grey'
+}
+
+function RowBadges({
+  row, depth, parentMissing, isRoot, unread, tag,
+}: Readonly<{
+  row: ConversationSummary
+  depth: number
+  parentMissing: boolean
+  isRoot: boolean
+  unread: boolean
+  tag: string | undefined
+}>) {
+  return (
+    <>
+      {isRoot && <Label isCompact color="purple">coordinator</Label>}
+      {depth > 0 && row.causedBy && (
+        <Label isCompact color="purple">
+          <PlainText>{`via ${row.causedBy.entry}`}</PlainText>
+        </Label>
+      )}
+      {parentMissing && row.causedBy && (
+        <Label isCompact color="grey" title={`parent ${row.causedBy.parent} is not in view`}>
+          parent missing
+        </Label>
+      )}
+      {unread && (
+        <span
+          data-testid={`unread-${row.name}`}
+          aria-label={`${row.unreadCount} unread`}
+          style={{
+            minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--ao-brand)',
+            color: 'var(--ao-surface)', fontSize: '0.75em', fontWeight: 700, display: 'inline-flex',
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {row.unreadCount}
+        </span>
+      )}
+      {tag && (
+        <Label isCompact color={tagColor(tag)}>
+          {tag}
+        </Label>
+      )}
+    </>
+  )
+}
+
 export interface ConversationRowProps {
   row: ConversationSummary
   depth: number
@@ -108,7 +163,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
   const snippet = rowSnippet(row)
   const tag = rowTag(row, isNew)
   const isRoot = Boolean(row.coordinator)
-  const tint = row.errored ? 'var(--ao-danger)' : isRoot ? 'var(--ao-accent)' : 'var(--ao-brand-strong)'
+  const tint = rowTint(row, isRoot)
 
   return (
     <li
@@ -218,35 +273,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
               )}
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-              {isRoot && <Label isCompact color="purple">coordinator</Label>}
-              {depth > 0 && row.causedBy && (
-                <Label isCompact color="purple">
-                  <PlainText>{`via ${row.causedBy.entry}`}</PlainText>
-                </Label>
-              )}
-              {parentMissing && row.causedBy && (
-                <Label isCompact color="grey" title={`parent ${row.causedBy.parent} is not in view`}>
-                  parent missing
-                </Label>
-              )}
-              {unread && (
-                <span
-                  data-testid={`unread-${row.name}`}
-                  aria-label={`${row.unreadCount} unread`}
-                  style={{
-                    minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--ao-brand)',
-                    color: 'var(--ao-surface)', fontSize: '0.75em', fontWeight: 700, display: 'inline-flex',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  {row.unreadCount}
-                </span>
-              )}
-              {tag && (
-                <Label isCompact color={tag === 'run failed' ? 'red' : tag === 'new' ? 'blue' : 'grey'}>
-                  {tag}
-                </Label>
-              )}
+              <RowBadges row={row} depth={depth} parentMissing={parentMissing} isRoot={isRoot} unread={unread} tag={tag} />
             </span>
           </span>
         </span>

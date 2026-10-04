@@ -36,7 +36,7 @@ import type {
 
 type SecondaryView = 'transcript' | 'runs' | 'graph' | 'sequence' | 'yaml'
 
-export function ThreadPane({ name, onBack }: { name: string; onBack?: () => void }) {
+export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: () => void }>) {
   const { data, isLoading, error, refetch } = useConversation(name)
   const [view, setView] = useState<SecondaryView>('transcript')
   const markRead = useMarkRead()
@@ -86,7 +86,7 @@ export function ThreadPane({ name, onBack }: { name: string; onBack?: () => void
           </span>
           {c.presence && (
             <Label color="blue" icon={<Icon icon="aops:system" />}>
-              {`working${c.inflight ? ` · run ${c.inflight.runId}` : ''}`}
+              {c.inflight ? `working · run ${c.inflight.runId}` : 'working'}
             </Label>
           )}
           <Tooltip content="every channel a reply here also reaches">
@@ -123,20 +123,28 @@ export function ThreadPane({ name, onBack }: { name: string; onBack?: () => void
           </div>
         )}
         {view === 'transcript' && (
-          isRoot ? (
-            <IncidentBody rootName={c.name} />
-          ) : isMember ? (
-            <MemberOwnBody conversation={c} />
-          ) : (
-            <ConversationThread detail={data} onSentOffline={() => refetch()} />
-          )
+          <TranscriptBody isRoot={isRoot} isMember={isMember} conversation={c} detail={data} onSentOffline={() => refetch()} />
         )}
       </div>
     </div>
   )
 }
 
-function ViewButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TranscriptBody({
+  isRoot, isMember, conversation, detail, onSentOffline,
+}: Readonly<{
+  isRoot: boolean
+  isMember: boolean
+  conversation: ConversationSummary
+  detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  onSentOffline: () => void
+}>) {
+  if (isRoot) return <IncidentBody rootName={conversation.name} />
+  if (isMember) return <MemberOwnBody conversation={conversation} />
+  return <ConversationThread detail={detail} onSentOffline={onSentOffline} />
+}
+
+function ViewButton({ active, onClick, children }: Readonly<{ active: boolean; onClick: () => void; children: React.ReactNode }>) {
   return (
     <Button variant={active ? 'primary' : 'secondary'} size="sm" onClick={onClick}>
       {children}
@@ -145,7 +153,7 @@ function ViewButton({ active, onClick, children }: { active: boolean; onClick: (
 }
 
 /** The parent chain, the uncaused root through every parent to this conversation (console-conversation-tree). */
-function IncidentCrumb({ conversation }: { conversation: ConversationSummary }) {
+function IncidentCrumb({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
   const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
   const members = useConversations(membersParams)
   const items = members.data?.items ?? []
@@ -178,7 +186,7 @@ function IncidentCrumb({ conversation }: { conversation: ConversationSummary }) 
 }
 
 /** The root's incident timeline — fetches its own detail and the page's conversations to find members (design D-F). */
-function IncidentBody({ rootName }: { rootName: string }) {
+function IncidentBody({ rootName }: Readonly<{ rootName: string }>) {
   const root = useConversation(rootName)
   const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
   const members = useConversations(membersParams)
@@ -270,27 +278,37 @@ function CoordinatorTimeline({
           </div>
         )}
       </div>
-      {notEscalatedYet ? (
-        <div style={{ padding: '12px 24px', borderTop: '1px solid var(--ao-border)' }}>
-          <Alert variant="info" isInline title="Read-only — the coordinator has not asked for a person">
-            This root has no bound channel until it escalates. Replies cannot be sent yet.
-          </Alert>
-        </div>
-      ) : c.phase === 'Closed' ? (
-        <div style={{ padding: '12px 24px', borderTop: '1px solid var(--ao-border)' }}>
-          <Alert
-            variant="info"
-            isInline
-            title={c.escalatedAt ? 'This incident is closed' : 'Closed without escalating — nobody was notified'}
-          >
-            {c.closeReason && <PlainText>{c.closeReason}</PlainText>}
-          </Alert>
-        </div>
-      ) : (
-        <ConversationThread detail={rootDetail} onSentOffline={() => undefined} />
-      )}
+      <TimelineFooter c={c} notEscalatedYet={notEscalatedYet} rootDetail={rootDetail} />
     </div>
   )
+}
+
+function TimelineFooter({
+  c, notEscalatedYet, rootDetail,
+}: Readonly<{ c: ConversationSummary; notEscalatedYet: boolean; rootDetail: ConversationDetail }>) {
+  if (notEscalatedYet) {
+    return (
+      <div style={{ padding: '12px 24px', borderTop: '1px solid var(--ao-border)' }}>
+        <Alert variant="info" isInline title="Read-only — the coordinator has not asked for a person">
+          This root has no bound channel until it escalates. Replies cannot be sent yet.
+        </Alert>
+      </div>
+    )
+  }
+  if (c.phase === 'Closed') {
+    return (
+      <div style={{ padding: '12px 24px', borderTop: '1px solid var(--ao-border)' }}>
+        <Alert
+          variant="info"
+          isInline
+          title={c.escalatedAt ? 'This incident is closed' : 'Closed without escalating — nobody was notified'}
+        >
+          {c.closeReason && <PlainText>{c.closeReason}</PlainText>}
+        </Alert>
+      </div>
+    )
+  }
+  return <ConversationThread detail={rootDetail} onSentOffline={() => undefined} />
 }
 
 function RunEntry({ run }: Readonly<{ run: Run }>) {
@@ -364,7 +382,7 @@ function MemberEntry({
 }
 
 /** A member opened DIRECTLY (not via its root): its own runs, read-only, since it binds no human channel. */
-function MemberOwnBody({ conversation }: { conversation: ConversationSummary }) {
+function MemberOwnBody({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
   const detail = useConversation(conversation.name)
   if (detail.isLoading && !detail.data) return <Loading />
   if (detail.error || !detail.data) return <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
@@ -384,7 +402,7 @@ function MemberOwnBody({ conversation }: { conversation: ConversationSummary }) 
 /** The ordinary thread: transcript + composer + quick chips. */
 function ConversationThread({
   detail, onSentOffline,
-}: { detail: NonNullable<ReturnType<typeof useConversation>['data']>; onSentOffline: () => void }) {
+}: Readonly<{ detail: NonNullable<ReturnType<typeof useConversation>['data']>; onSentOffline: () => void }>) {
   const session = useSession()
   const sources = useSources()
   const connected = useStream((s) => s.connected)
@@ -438,7 +456,7 @@ function ConversationThread({
     () => mergeEvents(detail.events ?? [], eventsFor(detail.conversation.name, live)),
     [detail.events, detail.conversation.name, live],
   )
-  const choices = messages.length > 0 ? messages[messages.length - 1].choices : undefined
+  const choices = messages.at(-1)?.choices
 
   async function send() {
     setBusy(true)
@@ -542,7 +560,7 @@ function ConversationThread({
   )
 }
 
-function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConversation>['data']> }) {
+function RunTimeline({ detail }: Readonly<{ detail: NonNullable<ReturnType<typeof useConversation>['data']> }>) {
   const runs = detail.conversation.runs ?? []
   return (
     <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
@@ -592,7 +610,7 @@ function RunTimeline({ detail }: { detail: NonNullable<ReturnType<typeof useConv
   )
 }
 
-function ConversationGraphTab({ name }: { name: string }) {
+function ConversationGraphTab({ name }: Readonly<{ name: string }>) {
   const { data, isLoading, error } = useConversationGraph(name)
   const windowSeconds = useDisplay((s) => s.windowSeconds)
   const topology = useTopology(windowSeconds)
@@ -622,7 +640,11 @@ function ConversationGraphTab({ name }: { name: string }) {
   )
 }
 
-function Sequence({ events }: { events: ActivityEvent[] }) {
+function endpoint(ref: { kind: string; name: string } | undefined): string {
+  return ref ? `${ref.kind}/${ref.name}` : '∅'
+}
+
+function Sequence({ events }: Readonly<{ events: ActivityEvent[] }>) {
   if (events.length === 0) {
     return (
       <Empty title="No recorded hops for this conversation">
@@ -648,7 +670,7 @@ function Sequence({ events }: { events: ActivityEvent[] }) {
                       {e.status === 'error' && <Label status="danger">error</Label>}
                     </Td>
                     <Td dataLabel="From → To">
-                      <small><PlainText>{`${e.from ? `${e.from.kind}/${e.from.name}` : '∅'} → ${e.to ? `${e.to.kind}/${e.to.name}` : '∅'}`}</PlainText></small>
+                      <small><PlainText>{`${endpoint(e.from)} → ${endpoint(e.to)}`}</PlainText></small>
                     </Td>
                     <Td dataLabel="At">{`+${((at - start) / 1000).toFixed(1)}s`}</Td>
                     <Td dataLabel="Latency">{e.latencyMs ? `${(e.latencyMs / 1000).toFixed(2)}s` : '—'}</Td>

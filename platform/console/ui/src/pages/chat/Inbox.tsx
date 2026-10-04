@@ -41,7 +41,7 @@ interface InboxProps {
   onToggleCollapsed: () => void
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
   return (
     <>
       <div
@@ -59,14 +59,14 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 function Row({
   icon, label, count, active, onClick, mono,
-}: {
+}: Readonly<{
   icon: ReactNode
   label: string
   count?: number
   active: boolean
   onClick: () => void
   mono?: boolean
-}) {
+}>) {
   return (
     <button
       type="button"
@@ -93,7 +93,7 @@ function Row({
   )
 }
 
-export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed }: InboxProps) {
+export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed }: Readonly<InboxProps>) {
   const counts = useInboxCounts()
   const vocabulary = useVocabulary()
   const scopes = counts.data?.scopes ?? {}
@@ -124,7 +124,7 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         }}
       >
         {fixed.map((f) => (
-          <Tooltip key={scopeKey(f.scope)} content={`${f.label}${f.count ? ` · ${f.count}` : ''}`}>
+          <Tooltip key={scopeKey(f.scope)} content={f.count ? `${f.label} · ${f.count}` : f.label}>
             <IconButton active={sameScope(activeScope, f.scope)} onClick={() => onSelectScope(f.scope)} badge={f.count}>
               {f.icon}
             </IconButton>
@@ -132,7 +132,7 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         ))}
         <Divider />
         {pipelines.map((e) => (
-          <Tooltip key={e.name} content={`${e.name}${scopes[e.name] ? ` · ${scopes[e.name]} unread` : ''}`}>
+          <Tooltip key={e.name} content={scopes[e.name] ? `${e.name} · ${scopes[e.name]} unread` : e.name}>
             <IconButton
               active={sameScope(activeScope, { kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
               onClick={() => onSelectScope({ kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
@@ -248,12 +248,12 @@ function Divider() {
 
 function IconButton({
   active, onClick, badge, children,
-}: {
+}: Readonly<{
   active: boolean
   onClick: () => void
   badge?: number
   children: ReactNode
-}) {
+}>) {
   return (
     <button
       type="button"

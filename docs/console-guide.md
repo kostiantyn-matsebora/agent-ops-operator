@@ -91,8 +91,8 @@ Five views, one question each.
   list does not move.
 
   The transcript reads from the **message that started it**, and rebuilds
-  after a reload or a restart. Only acks and notices are lost, shown as a
-  presence row while they last.
+  after a reload or a restart. Acks and notices are not persisted. They show
+  as a presence row while they are live.
 
   A long answer opens with its **conclusion**. Named sections sit above the
   fold, and the detail behind a control you expand in place. That shape comes
@@ -111,9 +111,8 @@ Five views, one question each.
   closure, nesting a member that is itself coordinating in place. Before it
   escalates, the pane is read-only and says so.
 
-  A member opened directly shows its own run history, read-only, with a link
-  back to the incident — it holds no channel of its own, so there is nothing
-  to reply into from there.
+  A member opened directly is read-only and names its place in the tree. It
+  holds no channel of its own, so there is nothing to reply into from there.
 
   ![A Coordinator's root before escalation: agents invoked, turns and the deadline, two result cards from its members, and the read-only notice since nobody has been paged yet.]({{ '/assets/img/console/incident-light.png' | relative_url }})
 

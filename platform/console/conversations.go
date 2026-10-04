@@ -149,10 +149,7 @@ type convView struct {
 		// since the person who typed the request is the one case a watermark
 		// rule would otherwise get wrong (api/v1alpha1's own comment on the
 		// field).
-		OriginReader *struct {
-			Channel string `json:"channel"`
-			Key     string `json:"key"`
-		} `json:"originReader,omitempty"`
+		OriginReader *originReaderRef `json:"originReader,omitempty"`
 		Toolsets   *refBinding `json:"toolsets,omitempty"`
 		MCPConfigs *refBinding `json:"mcpConfigs,omitempty"`
 		Inputs     []struct {
@@ -183,6 +180,12 @@ type convView struct {
 			Message string `json:"message,omitempty"`
 		} `json:"conditions,omitempty"`
 	} `json:"status"`
+}
+
+// originReaderRef is spec.originReader as the console reads it.
+type originReaderRef struct {
+	Channel string `json:"channel"`
+	Key     string `json:"key"`
 }
 
 // conversationView parses a cached Conversation object.
@@ -417,42 +420,60 @@ func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, r
 	if n := len(v.Status.Runs); n > 0 && v.Status.Runs[n-1].Status != "succeeded" {
 		s.Errored = true
 	}
+	s.Blocked = blockedReason(v)
+	s.AgeSeconds = ageSeconds(time.Now(), s.sortKey())
+	s.joinConsoleThread(v, consoleChannel, reader)
+	// Unreadness is a property of the CONSOLE's own thread, and only of it: a
+	// conversation this console merely observes carries no watermark and has
+	// no standing to call anything new.
+	if s.Joined {
+		s.applyUnread(v, consoleChannel, transcripts)
+	}
+	return s
+}
+
+// blockedReason reads the RuntimeStarted=False condition, the last one wins.
+func blockedReason(v convView) *BlockedReason {
+	var blocked *BlockedReason
 	for _, c := range v.Status.Conditions {
 		if c.Type == "RuntimeStarted" && c.Status == "False" {
-			s.Blocked = &BlockedReason{
+			blocked = &BlockedReason{
 				Reason: c.Reason, Detail: c.Message,
 				Storage: c.Reason == "VolumeUnavailable" || c.Reason == "StorageUnavailable",
 			}
 		}
 	}
-	s.AgeSeconds = ageSeconds(time.Now(), s.sortKey())
-	if consoleChannel != "" {
-		for _, t := range v.Status.Threads {
-			if t.Channel == consoleChannel {
-				s.Joined = true
-				s.ConsoleThread = t.ThreadID
-				s.ReadAt = t.watermark(reader)
-			}
+	return blocked
+}
+
+// joinConsoleThread records the console's own thread binding, when there is one.
+func (s *ConversationSummary) joinConsoleThread(v convView, consoleChannel, reader string) {
+	if consoleChannel == "" {
+		return
+	}
+	for _, t := range v.Status.Threads {
+		if t.Channel == consoleChannel {
+			s.Joined = true
+			s.ConsoleThread = t.ThreadID
+			s.ReadAt = t.watermark(reader)
 		}
 	}
-	// Unreadness is a property of the CONSOLE's own thread, and only of it: a
-	// conversation this console merely observes carries no watermark and has
-	// no standing to call anything new.
-	if s.Joined {
-		var live []Message
-		if transcripts != nil {
-			live = transcripts.Thread(s.ConsoleThread)
-		}
-		merged := mergeTranscript(s.ConsoleThread, consoleChannel, live, v.Status.Runs, s)
-		count, newest, hasNewest := countUnread(merged, s.ReadAt)
-		s.UnreadCount = count
-		s.Unread = count > 0
-		if hasNewest {
-			s.LastMessage = &LastMessage{Kind: newest.Kind, Sender: newest.Sender, Text: newest.Text}
-			s.lastMessageAt = newest.At
-		}
+}
+
+// applyUnread counts what the console thread holds past the reader's watermark.
+func (s *ConversationSummary) applyUnread(v convView, consoleChannel string, transcripts *Transcripts) {
+	var live []Message
+	if transcripts != nil {
+		live = transcripts.Thread(s.ConsoleThread)
 	}
-	return s
+	merged := mergeTranscript(s.ConsoleThread, consoleChannel, live, v.Status.Runs, *s)
+	count, newest, hasNewest := countUnread(merged, s.ReadAt)
+	s.UnreadCount = count
+	s.Unread = count > 0
+	if hasNewest {
+		s.LastMessage = &LastMessage{Kind: newest.Kind, Sender: newest.Sender, Text: newest.Text}
+		s.lastMessageAt = newest.At
+	}
 }
 
 // sortKey orders the listing newest-activity-first. lastActivity is the field

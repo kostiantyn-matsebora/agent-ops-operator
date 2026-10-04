@@ -68,6 +68,67 @@ function visibleRows(
   })
 }
 
+type Toast = { id: string; title: string }
+
+function dropName(set: Set<string>, name: string): Set<string> {
+  if (!set.has(name)) return set
+  const next = new Set(set)
+  next.delete(name)
+  return next
+}
+
+// Arrivals move (console-thread-live-cues): a name the previous snapshot
+// did not have gets the tint, the "new" tag and a toast naming its
+// pipeline. `seenNames` starts `null` so the FIRST load never fires one.
+function useArrivals(
+  data: { items: ConversationSummary[] } | undefined,
+  setNewNames: React.Dispatch<React.SetStateAction<Set<string>>>,
+  setToasts: React.Dispatch<React.SetStateAction<Toast[]>>,
+) {
+  const seenNames = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    if (!data) return
+    const current = new Set(data.items.map((c) => c.name))
+    const prevSeen = seenNames.current
+    seenNames.current = current
+    if (prevSeen === null) return
+    const arrived = data.items.filter((c) => !prevSeen.has(c.name))
+    if (arrived.length === 0) return
+    setNewNames((prev) => new Set([...prev, ...arrived.map((c) => c.name)]))
+    setToasts((prev) => [
+      ...prev,
+      ...arrived.map((c) => ({
+        id: `${c.name}-${Date.now()}`,
+        title: `${c.pipeline || c.coordinator || 'A pipeline'} opened ${c.title || c.name}`,
+      })),
+    ])
+    for (const c of arrived) {
+      setTimeout(() => setNewNames((prev) => dropName(prev, c.name)), 4000)
+    }
+  }, [data, setNewNames, setToasts])
+}
+
+function ListBody({
+  isLoading, error, data, empty, children,
+}: Readonly<{
+  isLoading: boolean
+  error: unknown
+  data: { total: number } | undefined
+  empty: boolean
+  children: React.ReactNode
+}>) {
+  if (isLoading && !data) return <Loading />
+  if (error || !data) return <ErrorState title="Could not load conversations">{String(error)}</ErrorState>
+  if (empty) {
+    return (
+      <Empty title="No conversations match">
+        {data.total > 0 ? 'Every conversation was filtered out.' : 'Nothing has originated yet.'}
+      </Empty>
+    )
+  }
+  return <>{children}</>
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -80,9 +141,8 @@ export function ChatView() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [highlighted, setHighlighted] = useState<string | undefined>()
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set())
-  const [toasts, setToasts] = useState<{ id: string; title: string }[]>([])
+  const [toasts, setToasts] = useState<Toast[]>([])
   const [newNames, setNewNames] = useState<Set<string>>(new Set())
-  const seenNames = useRef<Set<string> | null>(null)
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
 
   const params = useMemo(() => scopeParams(scope, search), [scope, search])
@@ -98,44 +158,7 @@ export function ChatView() {
     return raw
   }, [data, scope])
 
-  // Arrivals move (console-thread-live-cues): a name the previous snapshot
-  // did not have gets the tint, the "new" tag and a toast naming its
-  // pipeline. `seenNames` starts `null` so the FIRST load never fires one.
-  useEffect(() => {
-    if (!data) return
-    const current = new Set(data.items.map((c) => c.name))
-    const prevSeen = seenNames.current
-    if (prevSeen === null) {
-      seenNames.current = current
-      return
-    }
-    const arrived = data.items.filter((c) => !prevSeen.has(c.name))
-    if (arrived.length > 0) {
-      setNewNames((prev) => {
-        const next = new Set(prev)
-        for (const c of arrived) next.add(c.name)
-        return next
-      })
-      setToasts((prev) => [
-        ...prev,
-        ...arrived.map((c) => ({
-          id: `${c.name}-${Date.now()}`,
-          title: `${c.pipeline || c.coordinator || 'A pipeline'} opened ${c.title || c.name}`,
-        })),
-      ])
-      for (const c of arrived) {
-        setTimeout(() => {
-          setNewNames((prev) => {
-            if (!prev.has(c.name)) return prev
-            const next = new Set(prev)
-            next.delete(c.name)
-            return next
-          })
-        }, 4000)
-      }
-    }
-    seenNames.current = current
-  }, [data])
+  useArrivals(data, setNewNames, setToasts)
 
   const tree = useMemo(() => buildTree(items, !flatten), [items, flatten])
   const rows = useMemo(() => visibleRows(tree, items, collapsedRoots), [tree, items, collapsedRoots])
@@ -149,12 +172,7 @@ export function ChatView() {
   }, [])
 
   function clearNew(rowName: string) {
-    setNewNames((prev) => {
-      if (!prev.has(rowName)) return prev
-      const next = new Set(prev)
-      next.delete(rowName)
-      return next
-    })
+    setNewNames((prev) => dropName(prev, rowName))
   }
 
   function toggleSelect(rowName: string, checked: boolean) {
@@ -173,7 +191,7 @@ export function ChatView() {
       return
     }
     clearNew(rowName)
-    navigate(`/conversations/${rowName}`)
+    void navigate(`/conversations/${rowName}`)
   }
 
   function onListKeyDown(e: React.KeyboardEvent) {
@@ -208,6 +226,8 @@ export function ChatView() {
   return (
     <div
       data-testid="chat-view"
+      role="group"
+      aria-label="conversations workspace"
       tabIndex={-1}
       onKeyDown={onListKeyDown}
       style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}
@@ -291,15 +311,7 @@ export function ChatView() {
               />
             )}
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              {isLoading && !data ? (
-                <Loading />
-              ) : error || !data ? (
-                <ErrorState title="Could not load conversations">{String(error)}</ErrorState>
-              ) : rows.length === 0 ? (
-                <Empty title="No conversations match">
-                  {data.total > 0 ? 'Every conversation was filtered out.' : 'Nothing has originated yet.'}
-                </Empty>
-              ) : (
+              <ListBody isLoading={isLoading} error={error} data={data} empty={rows.length === 0}>
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0 }} aria-label="conversations">
                   {rows.map(({ row, depth, memberCount, parentMissing }) => (
                     <ConversationRow
@@ -331,7 +343,7 @@ export function ChatView() {
                     />
                   ))}
                 </ul>
-              )}
+              </ListBody>
             </div>
           </div>
         </>

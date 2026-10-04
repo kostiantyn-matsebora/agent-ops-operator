@@ -26,7 +26,7 @@ export interface QuickChipsProps {
   onInsertCommand?: (text: string) => void
 }
 
-export function QuickChips({ canWrite, canStart, choices, onInsertCommand }: QuickChipsProps) {
+export function QuickChips({ canWrite, canStart, choices, onInsertCommand }: Readonly<QuickChipsProps>) {
   const vocabulary = useVocabulary()
   if (!canWrite) return null
   const entries = vocabulary.data?.entries ?? []

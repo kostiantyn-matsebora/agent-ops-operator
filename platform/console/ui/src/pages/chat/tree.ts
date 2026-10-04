@@ -69,7 +69,7 @@ export function partitionSelection(
   const skipped: SkippedMember[] = []
   for (const name of selected) {
     const row = names.get(name)
-    if (!row || !row.causedBy) {
+    if (!row?.causedBy) {
       send.push(name)
       continue
     }

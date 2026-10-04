@@ -31,7 +31,11 @@ function skippedResults(skipped: { name: string; parentName: string }[]) {
   }))
 }
 
-export function SelectionBar({ items, selected, canWrite, hasReader, onClear, onDone }: SelectionBarProps) {
+function countSuffix(n: number): string {
+  return n > 0 ? ` (${n})` : ''
+}
+
+export function SelectionBar({ items, selected, canWrite, hasReader, onClear, onDone }: Readonly<SelectionBarProps>) {
   const close = useCloseConversations()
   const del = useDeleteConversations()
   const markRead = useMarkRead()
@@ -134,7 +138,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           onClick={() => setCloseOpen(true)}
           data-testid="close-selected"
         >
-          {`Close…${names.length > 0 ? ` (${names.length})` : ''}`}
+          {`Close…${countSuffix(names.length)}`}
         </Button>
       )}
       {canWrite && (
@@ -146,7 +150,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           onClick={() => setDeleteOpen(true)}
           data-testid="delete-selected"
         >
-          {`Delete${names.length > 0 ? ` (${names.length})` : ''}`}
+          {`Delete${countSuffix(names.length)}`}
         </Button>
       )}
       <Button variant="link" size="sm" onClick={onClear} style={{ marginLeft: 'auto', color: 'var(--ao-surface)' }}>

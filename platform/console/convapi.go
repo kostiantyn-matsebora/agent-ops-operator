@@ -687,6 +687,8 @@ const (
 	closeOutcomeClosed  = "closed"
 	closeOutcomeSkipped = "skipped"
 	closeOutcomeFailed  = "failed"
+
+	errNoSuchConversation = "no such conversation"
 )
 
 // CloseResult is one conversation's outcome. A batch reports one of these per
@@ -822,7 +824,7 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		obj := a.cache.Get("conversations", name)
 		if obj == nil {
 			results = append(results, ReadResult{Name: name, Outcome: closeOutcomeFailed,
-				Reason: "no such conversation"})
+				Reason: errNoSuchConversation})
 			continue
 		}
 		s := summarize(obj, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -853,6 +855,38 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type markUnreadRequest struct {
+	Names []string `json:"names"`
+}
+
+// decodeMarkUnread validates a mark-unread request and resolves the acting
+// reader. It has written the refusal itself when it returns false.
+func (a *API) decodeMarkUnread(w http.ResponseWriter, r *http.Request) (markUnreadRequest, string, bool) {
+	var in markUnreadRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"names":["…"]}`})
+		return in, "", false
+	}
+	if len(in.Names) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "names is required"})
+		return in, "", false
+	}
+	if len(in.Names) > conversationPageSize {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "an unread batch is limited to " + strconv.Itoa(conversationPageSize) + " conversations",
+		})
+		return in, "", false
+	}
+	reader := a.adapter.ReaderKey(Identity(r))
+	if reader == "" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "this console has no reader salt projected, so there is no per-person mark to rewind",
+		})
+		return in, "", false
+	}
+	return in, reader, true
+}
+
 // handleMarkUnread rewinds the selection's console-thread watermark for the
 // ACTING reader alone — design D-E's reader-scoped "mark unread". Bounded
 // and attributed exactly as mark read is, and mirrors its shape: names only,
@@ -865,28 +899,8 @@ func (a *API) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 // what makes the UI's own "mark unread is absent with no reader" rule a
 // server-enforced fact rather than a client courtesy.
 func (a *API) handleMarkUnread(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Names []string `json:"names"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `need {"names":["…"]}`})
-		return
-	}
-	if len(in.Names) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "names is required"})
-		return
-	}
-	if len(in.Names) > conversationPageSize {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "an unread batch is limited to " + strconv.Itoa(conversationPageSize) + " conversations",
-		})
-		return
-	}
-	reader := a.adapter.ReaderKey(Identity(r))
-	if reader == "" {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "this console has no reader salt projected, so there is no per-person mark to rewind",
-		})
+	in, reader, ok := a.decodeMarkUnread(w, r)
+	if !ok {
 		return
 	}
 
@@ -899,7 +913,7 @@ func (a *API) handleMarkUnread(w http.ResponseWriter, r *http.Request) {
 		obj := a.cache.Get("conversations", name)
 		if obj == nil {
 			results = append(results, ReadResult{Name: name, Outcome: closeOutcomeFailed,
-				Reason: "no such conversation"})
+				Reason: errNoSuchConversation})
 			continue
 		}
 		s := summarize(obj, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -1112,7 +1126,7 @@ func (a *API) handleReopen(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	obj := a.cache.Get("conversations", name)
 	if obj == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such conversation"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": errNoSuchConversation})
 		return
 	}
 	if phase := conversationView(obj).Status.Phase; !strings.EqualFold(phase, "Closed") {

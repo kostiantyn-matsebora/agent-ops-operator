@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, type Ref } from 'react'
 import {
-  Divider, Dropdown, DropdownItem, DropdownList, MenuToggle,
+  Divider, Dropdown, DropdownItem, DropdownList, MenuToggle, type MenuToggleElement,
 } from '@patternfly/react-core'
 import { EllipsisVIcon } from '@patternfly/react-icons'
 import type { ConversationSummary } from '../../api/types'
@@ -25,7 +25,23 @@ export interface RowMenuProps {
   onDelete: () => void
 }
 
-export function RowMenu(props: RowMenuProps) {
+function renderToggle(title: string, open: boolean, onToggle: () => void) {
+  return function MenuToggleFor(toggleRef: Ref<MenuToggleElement>) {
+    return (
+      <MenuToggle
+        ref={toggleRef}
+        variant="plain"
+        aria-label={`actions for ${title}`}
+        onClick={onToggle}
+        isExpanded={open}
+      >
+        <EllipsisVIcon />
+      </MenuToggle>
+    )
+  }
+}
+
+export function RowMenu(props: Readonly<RowMenuProps>) {
   const { row, canWrite, hasReader } = props
   const [open, setOpen] = useState(false)
   const title = row.title || row.name
@@ -79,17 +95,7 @@ export function RowMenu(props: RowMenuProps) {
     <Dropdown
       isOpen={open}
       onOpenChange={setOpen}
-      toggle={(toggleRef) => (
-        <MenuToggle
-          ref={toggleRef}
-          variant="plain"
-          aria-label={`actions for ${title}`}
-          onClick={() => setOpen((v) => !v)}
-          isExpanded={open}
-        >
-          <EllipsisVIcon />
-        </MenuToggle>
-      )}
+      toggle={renderToggle(title, open, () => setOpen((v) => !v))}
       popperProps={{ position: 'right' }}
     >
       <DropdownList>{items}</DropdownList>

@@ -43,7 +43,7 @@ function speakerStyle(kind: string) {
   return SPEAKER_STYLE[kind] ?? { icon: 'aops:system', tint: 'var(--ao-text)' }
 }
 
-function Avatar({ kind, icon }: { kind: string; icon?: string }) {
+function Avatar({ kind, icon }: Readonly<{ kind: string; icon?: string }>) {
   const style = speakerStyle(kind)
   return (
     <span
@@ -81,7 +81,7 @@ function groupRunEvents(events: ActivityEvent[]): RunGroup[] {
   return order.map((k) => groups.get(k)!)
 }
 
-function RunEventLine({ group }: { group: RunGroup }) {
+function RunEventLine({ group }: Readonly<{ group: RunGroup }>) {
   const [expanded, setExpanded] = useState(false)
   const summary = group.events.map((e) => RUN_EVENT_KINDS[e.kind] || e.kind).join(' · ')
   return (
@@ -120,7 +120,7 @@ export interface TimelineProps {
   activityGap?: boolean
 }
 
-export function Timeline({ messages, events, presence, readAt, pipelineIcon, pipelineName, activityGap }: TimelineProps) {
+export function Timeline({ messages, events, presence, readAt, pipelineIcon, pipelineName, activityGap }: Readonly<TimelineProps>) {
   const bodyMessages = messages.filter((m) => m.kind !== 'ack')
   const runGroups = useMemo(() => groupRunEvents(events), [events])
   const watermark = readAt ? Date.parse(readAt) : undefined
@@ -199,10 +199,10 @@ export function Timeline({ messages, events, presence, readAt, pipelineIcon, pip
           <Empty title="No messages on the console thread yet" />
         ) : (
           items.map((item, i) => {
-            if (item.events) return <RunEventLine key={`events-${i}`} group={item.events} />
+            if (item.events) return <RunEventLine key={`events-${item.events.events[0].cursor}`} group={item.events} />
             const m = item.message!
             const prev = items[i - 1]?.message
-            const sameSpeaker = prev && prev.kind === m.kind && (prev.sender ?? '') === (m.sender ?? '')
+            const sameSpeaker = prev?.kind === m.kind && (prev.sender ?? '') === (m.sender ?? '')
             const within = prev && Date.parse(m.at) - Date.parse(prev.at) < 60_000
             const startsGroup = !sameSpeaker || !within
             return (
@@ -213,7 +213,7 @@ export function Timeline({ messages, events, presence, readAt, pipelineIcon, pip
                     style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, margin: '8px 0 4px', color: 'var(--ao-brand-strong)', fontSize: '0.8em', fontWeight: 700 }}
                   >
                     <span aria-hidden style={{ flex: 1, height: 1, background: 'var(--ao-brand)' }} />
-                    New messages
+                    <span>New messages</span>
                     <span aria-hidden style={{ flex: 1, height: 1, background: 'var(--ao-brand)' }} />
                   </div>
                 )}

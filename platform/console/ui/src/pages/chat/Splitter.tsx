@@ -24,7 +24,7 @@ export interface SplitterProps {
   step?: number
 }
 
-export function Splitter({ width, min, max, defaultWidth, onChange, ariaLabel, step = 16 }: SplitterProps) {
+export function Splitter({ width, min, max, defaultWidth, onChange, ariaLabel, step = 16 }: Readonly<SplitterProps>) {
   const [dragging, setDragging] = useState(false)
   const start = useRef<{ x: number; width: number } | null>(null)
   const ceiling = max ?? Infinity
