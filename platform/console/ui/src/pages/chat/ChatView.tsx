@@ -194,7 +194,17 @@ export function ChatView() {
     void navigate(`/conversations/${rowName}`)
   }
 
-  function onListKeyDown(e: React.KeyboardEvent) {
+  // Attached natively: the workspace is a landmark, not a widget, and the
+  // arrow-key list navigation is a shortcut layer over its rows.
+  const workspaceRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = workspaceRef.current
+    if (!el) return
+    el.addEventListener('keydown', onListKeyDown)
+    return () => el.removeEventListener('keydown', onListKeyDown)
+  })
+
+  function onListKeyDown(e: Pick<KeyboardEvent, 'key' | 'preventDefault'>) {
     if (e.key === 'Escape') {
       setSelected(new Set())
       setSelectionMode(false)
@@ -224,12 +234,11 @@ export function ChatView() {
   const inboxWidth = layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
 
   return (
-    <div
+    <section
+      ref={workspaceRef}
       data-testid="chat-view"
-      role="group"
       aria-label="conversations workspace"
       tabIndex={-1}
-      onKeyDown={onListKeyDown}
       style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}
     >
       <AlertGroup isToast isLiveRegion>
@@ -367,6 +376,6 @@ export function ChatView() {
           </div>
         )
       ))}
-    </div>
+    </section>
   )
 }
