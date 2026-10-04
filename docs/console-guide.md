@@ -91,6 +91,9 @@ Five views, one question each.
   Opening a row switches the thread pane in place — the URL changes, the
   list does not move.
 
+  **Runs**, **Graph**, **Sequence** and **YAML** are secondary views of the
+  open conversation, reached from the thread header.
+
   The transcript reads from the **message that started it**, and rebuilds
   after a reload or a restart. Acks and notices are not persisted. They show
   as a presence row while they are live.
