@@ -150,6 +150,18 @@ function neighbourName(names: string[], current: string | undefined, down: boole
   return names[Math.max(next, 0)]
 }
 
+type ListKeyAction = 'clear' | 'open' | 'down' | 'up' | 'none'
+
+/** What a key does on the list: Escape clears, arrows move, Enter opens the highlighted row. */
+export function listKeyAction(key: string, rowCount: number, highlighted: string | undefined): ListKeyAction {
+  if (key === 'Escape') return 'clear'
+  if (rowCount === 0) return 'none'
+  if (key === 'Enter') return highlighted ? 'open' : 'none'
+  if (key === 'ArrowDown') return 'down'
+  if (key === 'ArrowUp') return 'up'
+  return 'none'
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -231,22 +243,22 @@ export function ChatView() {
   })
 
   function onListKeyDown(e: Pick<KeyboardEvent, 'key' | 'preventDefault'>) {
-    if (e.key === 'Escape') {
+    const action = listKeyAction(e.key, rows.length, highlighted)
+    if (action === 'clear') {
       setSelected(new Set())
       setSelectionMode(false)
-      return
+    } else if (action === 'open') {
+      openRow(highlighted as string)
+    } else if (action === 'down' || action === 'up') {
+      e.preventDefault()
+      const nextName = neighbourName(
+        rows.map((r) => r.row.name),
+        highlighted,
+        action === 'down',
+      )
+      setHighlighted(nextName)
+      rowRefs.current.get(nextName)?.focus()
     }
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
-    const names = rows.map((r) => r.row.name)
-    if (names.length === 0) return
-    if (e.key === 'Enter') {
-      if (highlighted) openRow(highlighted)
-      return
-    }
-    e.preventDefault()
-    const nextName = neighbourName(names, highlighted, e.key === 'ArrowDown')
-    setHighlighted(nextName)
-    rowRefs.current.get(nextName)?.focus()
   }
 
   const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
