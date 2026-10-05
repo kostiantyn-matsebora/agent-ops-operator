@@ -217,6 +217,15 @@ export function App() {
       sidebar={sidebar}
       className={navCollapsed ? 'ao-nav-collapsed' : undefined}
       onPageResize={() => setNavOpen(true)}
+      // Without this, PatternFly's `.pf-v6-c-page__main-container` keeps its
+      // default `align-self: start` and sizes to its CHILDREN's content
+      // height instead of stretching to the grid row PatternFly already sized
+      // to the full viewport height below the masthead — which is what let
+      // the chat view's content area stop partway down the screen with empty
+      // space below it, or visibly resize as its own content changed, instead
+      // of staying pinned to the viewport the way `ChatView`'s `flex: 1,
+      // minHeight: 0` chain assumes its ancestors already are.
+      isContentFilled
     >
       <Boundary>
         <Routes>

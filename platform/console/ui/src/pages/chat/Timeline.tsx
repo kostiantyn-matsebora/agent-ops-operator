@@ -108,6 +108,17 @@ function RunEventLine({ group }: Readonly<{ group: RunGroup }>) {
   )
 }
 
+/** One row to interleave into the transcript by time, alongside messages and
+ * run-event groups — currently a Coordinator root's member-invocation blocks
+ * (console-conversation-tree: these belong IN the transcript, not a separate
+ * structural view). Timeline places it by `at` and renders `node` full-width,
+ * without knowing anything about what it is. */
+export interface TimelineExtraItem {
+  key: string
+  at: number
+  node: React.ReactNode
+}
+
 export interface TimelineProps {
   messages: Message[]
   events: ActivityEvent[]
@@ -118,9 +129,12 @@ export interface TimelineProps {
   pipelineName?: string
   /** A gap in the activity buffer — console-thread-live-cues: "Lost history is marked". */
   activityGap?: boolean
+  extraItems?: TimelineExtraItem[]
 }
 
-export function Timeline({ messages, events, presence, readAt, pipelineIcon, pipelineName, activityGap }: Readonly<TimelineProps>) {
+export function Timeline({
+  messages, events, presence, readAt, pipelineIcon, pipelineName, activityGap, extraItems,
+}: Readonly<TimelineProps>) {
   const bodyMessages = messages.filter((m) => m.kind !== 'ack')
   const runGroups = useMemo(() => groupRunEvents(events), [events])
   const watermark = readAt ? Date.parse(readAt) : undefined
@@ -180,11 +194,13 @@ export function Timeline({ messages, events, presence, readAt, pipelineIcon, pip
     setAtBottom(true)
   }
 
-  // Interleave messages and run-event groups by time — design D-G.
-  type Item = { at: number; message?: Message; events?: RunGroup }
+  // Interleave messages, run-event groups and any extra (invocation) rows by
+  // time — design D-G.
+  type Item = { at: number; message?: Message; events?: RunGroup; extra?: TimelineExtraItem }
   const items: Item[] = [
     ...bodyMessages.map((m) => ({ at: Date.parse(m.at) || 0, message: m })),
     ...runGroups.map((g) => ({ at: g.at, events: g })),
+    ...(extraItems ?? []).map((e) => ({ at: e.at, extra: e })),
   ].sort((a, b) => a.at - b.at)
 
   return (
@@ -200,6 +216,7 @@ export function Timeline({ messages, events, presence, readAt, pipelineIcon, pip
         ) : (
           items.map((item, i) => {
             if (item.events) return <RunEventLine key={`events-${item.events.events[0].cursor}`} group={item.events} />
+            if (item.extra) return <div key={item.extra.key} style={{ padding: '0.5em 0' }}>{item.extra.node}</div>
             const m = item.message!
             const prev = items[i - 1]?.message
             const sameSpeaker = prev?.kind === m.kind && (prev.sender ?? '') === (m.sender ?? '')

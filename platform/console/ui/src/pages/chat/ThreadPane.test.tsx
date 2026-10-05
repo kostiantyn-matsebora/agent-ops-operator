@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -25,23 +25,67 @@ function detailFor(summary: ConversationSummary, over: Partial<ConversationDetai
   }
 }
 
+// No bound channel — `joined` explicit rather than the helper's default
+// `true`, since the two are independent fields here and a root with no
+// console thread is exactly the "genuinely no bound channel" case (item 6).
 const ROOT = conv('root-1', {
-  coordinator: 'root-1', escalatedAt: '2024-01-01T00:02:00Z',
-  budget: { maxTurns: 6, turns: 2 }, runs: [{ runId: 'run-1', status: 'succeeded', startedAt: '2024-01-01T00:00:00Z' }],
+  coordinator: 'root-1', budget: { maxTurns: 6, turns: 2 }, threads: [], joined: false,
 })
-const MID = conv('mid-1', { causedBy: { parent: 'root-1', entry: 'diagnose' }, coordinator: 'mid-1', created: '2024-01-01T00:00:30Z' })
-const LEAF = conv('leaf-1', { causedBy: { parent: 'mid-1', entry: 'logs' }, phase: 'Closed', created: '2024-01-01T00:00:40Z' })
+// A direct member of the root, invoked as "diagnose" — its own task and
+// result live on ITS OWN runs[], never on the root's.
+const MID = conv('mid-1', {
+  causedBy: { parent: 'root-1', entry: 'diagnose' }, created: '2024-01-01T00:00:30Z', phase: 'Closed', threads: [],
+  runs: [{
+    runId: 'run-mid', status: 'succeeded', finishedAt: '2024-01-01T00:01:00Z',
+    inputs: [{ id: 'in-1', text: 'investigate the disk pressure on node-3', receivedAt: '2024-01-01T00:00:31Z' }],
+    result: 'disk pressure cleared on node-3',
+  }],
+})
 const PLAIN = conv('plain-1', {
   title: 'ordinary conversation',
-  runs: [{ runId: 'plain-run-1', status: 'succeeded', finishedAt: '2024-01-01T00:01:00Z' }],
+  runs: [{
+    runId: 'run-plain', status: 'succeeded', finishedAt: '2024-01-01T00:02:00Z',
+    result: 'plain result text with no turns or tool calls',
+  }],
+})
+// A run carrying both arrays the backend may now report (item 16) — one
+// turn, and two tool calls, one of them a built-in (empty `server`).
+const RICH = conv('rich-1', {
+  title: 'rich conversation',
+  runs: [{
+    runId: 'run-rich', status: 'succeeded', finishedAt: '2024-01-01T00:03:00Z',
+    result: 'rich result text',
+    turns: [
+      { model: 'claude-5', tokensIn: 1200, tokensOut: 340, cacheReadTokens: 800, stopReason: 'end_turn' },
+    ],
+    toolCalls: [
+      { tool: 'Read', server: '', durationMs: 410, resultBytes: 1234 },
+      { tool: 'mcp__k8s__get_pods', server: 'kubernetes', durationMs: 1500, resultBytes: 2_500_000 },
+    ],
+  }],
 })
 
-const ALL = [ROOT, MID, LEAF, PLAIN]
+// A root whose Coordinator's channelRefs are already bound (item 6):
+// `joined: true` is exactly what `coordination-escalation`'s unconditional
+// creation-time binding produces, with no escalation needed.
+const ROOT_JOINED = conv('root-joined', {
+  coordinator: 'root-joined', budget: { maxTurns: 4, turns: 1 },
+  threads: [{ channel: 'console', threadId: 't-root' }], joined: true,
+})
+
+const ALL = [ROOT, MID, PLAIN, RICH, ROOT_JOINED]
 const DETAILS: Record<string, ConversationDetail> = {
-  'root-1': detailFor(ROOT),
+  'root-1': detailFor(ROOT, {
+    transcript: [
+      { id: 'sig-1', thread: 'root-1', kind: 'signal', text: 'Disk pressure on node-3', at: '2024-01-01T00:00:00Z' },
+      { id: 'reason-1', thread: 'root-1', kind: 'agent', text: 'Investigating node-3 for disk pressure causes', at: '2024-01-01T00:00:10Z' },
+      { id: 'reason-2', thread: 'root-1', kind: 'agent', text: 'Node-3 disk pressure resolved after eviction', at: '2024-01-01T00:00:50Z' },
+    ],
+  }),
   'mid-1': detailFor(MID),
-  'leaf-1': detailFor(LEAF),
   'plain-1': detailFor(PLAIN, { transcript: [{ id: 'm1', thread: 't', kind: 'agent', text: 'hello', at: '2024-01-01T00:00:00Z' }] }),
+  'rich-1': detailFor(RICH),
+  'root-joined': detailFor(ROOT_JOINED),
 }
 
 vi.mock('../../api/hooks', () => ({
@@ -63,6 +107,17 @@ vi.mock('../../api/stream', () => ({
 vi.mock('../../graph/Graph', () => ({ Graph: () => <div data-testid="graph-stub" /> }))
 vi.mock('../../graph/display', () => ({ useDisplay: () => 60 }))
 
+const sendSpy = vi.fn().mockResolvedValue({ id: 'sent' })
+vi.mock('../../api/client', () => ({
+  api: { send: (...args: unknown[]) => sendSpy(...args) },
+  ApiError: class ApiError extends Error {},
+}))
+
+beforeEach(() => {
+  sendSpy.mockClear()
+  localStorage.clear()
+})
+
 function renderPane(name: string) {
   return render(
     <MemoryRouter>
@@ -72,36 +127,164 @@ function renderPane(name: string) {
 }
 
 describe('secondary views replace the transcript in place', () => {
-  it('switches to Runs and back', async () => {
+  it('switches to Runs and back — a plain pipeline conversation is unchanged', async () => {
     renderPane('plain-1')
     expect(screen.getByText('hello')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Runs' }))
     expect(screen.queryByText('hello')).toBeNull()
-    expect(screen.getByText('plain-run-1')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Back to transcript' }))
     expect(screen.getByText('hello')).toBeInTheDocument()
   })
 })
 
-describe('the incident timeline, two levels deep', () => {
-  it('reads as one column — the run, then the member, in time order', () => {
+describe('a coordinator root gets a real transcript, not a structural view (item 15)', () => {
+  it('shows the budget summary and an invocation collapsed by default', () => {
     renderPane('root-1')
-    const body = document.body.textContent ?? ''
-    expect(body.indexOf('run-1')).toBeLessThan(body.indexOf('mid-1'))
+    expect(screen.getByText('Agents invoked')).toBeInTheDocument()
+    expect(screen.getByText('2 of 6')).toBeInTheDocument()
+    expect(screen.getByText('diagnose')).toBeInTheDocument()
+    expect(screen.getByText('mid-1')).toBeInTheDocument()
+    // Collapsed: neither the task nor the result is on screen yet.
+    expect(screen.queryByText(/investigate the disk pressure/)).toBeNull()
+    expect(screen.queryByText(/disk pressure cleared/)).toBeNull()
   })
 
-  it('nests a coordinating member one level deeper when expanded', async () => {
+  it('expanding the invocation reveals both the task sent and the response', async () => {
     renderPane('root-1')
-    await userEvent.click(screen.getByText('mid-1'))
-    // leaf-1 is mid-1's own member, found only once mid-1 is expanded
-    expect(screen.getAllByText(/leaf-1/).length).toBeGreaterThan(0)
+    await userEvent.click(screen.getByText('diagnose'))
+    expect(screen.getByText('Task sent')).toBeInTheDocument()
+    expect(screen.getByText(/investigate the disk pressure on node-3/)).toBeInTheDocument()
+    expect(screen.getByText(/responded/)).toBeInTheDocument()
+    expect(screen.getByText(/disk pressure cleared on node-3/)).toBeInTheDocument()
+  })
+
+  it('interleaves its own signal and reasoning turns with the invocation card, in time order', () => {
+    // root-1's transcript carries a signal at :00, a reasoning turn at :10,
+    // the diagnose invocation at :30 (MID's `created`), then a second
+    // reasoning turn at :50 — ONE column, not a status log beside it.
+    renderPane('root-1')
+    const timeline = screen.getByTestId('timeline')
+    const text = timeline.textContent ?? ''
+    expect(text.indexOf('Disk pressure on node-3')).toBeLessThan(text.indexOf('Investigating node-3'))
+    expect(text.indexOf('Investigating node-3')).toBeLessThan(text.indexOf('invoked'))
+    expect(text.indexOf('invoked')).toBeLessThan(text.indexOf('resolved after eviction'))
   })
 })
 
-describe('a member opened directly', () => {
-  it('is read-only and points at its incident rather than showing a composer', () => {
-    renderPane('leaf-1')
+describe('a member opened directly (item 15)', () => {
+  it('shows its task and result as read-only messages, with no composer', () => {
+    renderPane('mid-1')
     expect(screen.getByText(/holds no channel of its own/)).toBeInTheDocument()
+    expect(screen.getByText(/investigate the disk pressure on node-3/)).toBeInTheDocument()
+    expect(screen.getByText(/disk pressure cleared on node-3/)).toBeInTheDocument()
     expect(screen.queryByLabelText('message')).toBeNull()
+  })
+
+  it('names the coordinator it belongs to in the breadcrumb, never an "Incident" noun (item 14, item 26)', () => {
+    renderPane('mid-1')
+    expect(screen.queryByText('Incident')).not.toBeInTheDocument()
+    // The uncaused root's own coordinator name leads the crumb, and the
+    // parent trail names the same root — both read "root-1" in this fixture.
+    expect(screen.getAllByText('root-1').length).toBeGreaterThan(0)
+  })
+})
+
+describe('a run\'s turns and tool calls, in the Runs view (item 16)', () => {
+  it('shows the raw text and no tables when a run reports neither', async () => {
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }))
+    expect(screen.getByText('plain result text with no turns or tool calls')).toBeInTheDocument()
+    expect(screen.queryByText(/turns —/)).toBeNull()
+    expect(screen.queryByText(/tool calls —/)).toBeNull()
+  })
+
+  it('renders both tables with the reported values when a run has both', async () => {
+    renderPane('rich-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }))
+    expect(screen.getByText('rich result text')).toBeInTheDocument()
+
+    expect(screen.getByText('turns — 1 model call')).toBeInTheDocument()
+    expect(screen.getByText('claude-5')).toBeInTheDocument()
+    expect(screen.getByText('1200')).toBeInTheDocument()
+    expect(screen.getByText(/800 cached/)).toBeInTheDocument()
+    expect(screen.getByText('340')).toBeInTheDocument()
+    expect(screen.getByText('end_turn')).toBeInTheDocument()
+
+    expect(screen.getByText('tool calls — 2')).toBeInTheDocument()
+    expect(screen.getByText('Read')).toBeInTheDocument()
+    expect(screen.getByText('410ms')).toBeInTheDocument()
+    expect(screen.getByText('1.2 KB')).toBeInTheDocument()
+    expect(screen.getByText('mcp__k8s__get_pods')).toBeInTheDocument()
+    expect(screen.getByText('kubernetes')).toBeInTheDocument()
+    expect(screen.getByText('1.5s')).toBeInTheDocument()
+    expect(screen.getByText('2.4 MB')).toBeInTheDocument()
+  })
+
+  it('names an empty server "built-in" rather than leaving a blank cell', async () => {
+    renderPane('rich-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }))
+    expect(screen.getByText('built-in')).toBeInTheDocument()
+  })
+})
+
+describe('the composer follows channel binding, not escalation (item 6)', () => {
+  it('is live on a coordinator root that has never escalated, once its channel is bound', () => {
+    renderPane('root-joined')
+    expect(screen.getByLabelText('message')).toBeInTheDocument()
+  })
+
+  it('stays read-only on a root with no bound channel — the spec\'s other permitted case', () => {
+    renderPane('root-1')
+    expect(screen.queryByLabelText('message')).toBeNull()
+  })
+})
+
+describe('closing from the composer asks first (item 22)', () => {
+  it('typing /close and sending opens a confirm dialog instead of sending at once', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/close')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(screen.getByTestId('close-confirm-modal')).toBeInTheDocument()
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('cancelling sends nothing and leaves the composer as it was', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/close')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTestId('close-confirm-modal')).toBeNull()
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('confirming sends the command', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/close')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await userEvent.click(screen.getByTestId('close-confirm-ok'))
+    expect(sendSpy).toHaveBeenCalledWith('plain-1', '/close')
+  })
+
+  it('"don\'t ask again" is remembered — a later /close sends straight away', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/close')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await userEvent.click(screen.getByLabelText('Don\'t ask again'))
+    await userEvent.click(screen.getByTestId('close-confirm-ok'))
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+
+    sendSpy.mockClear()
+    await userEvent.type(screen.getByLabelText('message'), '/close now')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(screen.queryByTestId('close-confirm-modal')).toBeNull()
+    expect(sendSpy).toHaveBeenCalledWith('plain-1', '/close now')
+  })
+
+  it('/exit needs no confirmation at all — it only releases the runtime', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/exit')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(screen.queryByTestId('close-confirm-modal')).toBeNull()
+    expect(sendSpy).toHaveBeenCalledWith('plain-1', '/exit')
   })
 })

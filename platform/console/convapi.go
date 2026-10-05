@@ -43,10 +43,7 @@ type ConversationFilter struct {
 	// Mine narrows to conversations the requesting reader themselves started
 	// (ConversationSummary.Mine).
 	Mine bool
-	// Incidents narrows to conversations that are themselves a Coordinator's
-	// root (ConversationSummary.Coordinator set).
-	Incidents bool
-	MaxAge    float64 // seconds; 0 = no bound
+	MaxAge float64 // seconds; 0 = no bound
 	Search    string
 }
 
@@ -81,9 +78,6 @@ func (f ConversationFilter) matches(s ConversationSummary, now float64) bool {
 	if f.Mine && !s.Mine {
 		return false
 	}
-	if f.Incidents && s.Coordinator == "" {
-		return false
-	}
 	if f.MaxAge > 0 && s.AgeSeconds > f.MaxAge {
 		return false
 	}
@@ -99,7 +93,6 @@ func parseFilter(r *http.Request) ConversationFilter {
 	f.Errored, _ = strconv.ParseBool(q.Get("errored"))
 	f.Unread, _ = strconv.ParseBool(q.Get("unread"))
 	f.Mine, _ = strconv.ParseBool(q.Get("mine"))
-	f.Incidents, _ = strconv.ParseBool(q.Get("incidents"))
 	if v, err := strconv.ParseFloat(q.Get("maxAgeSeconds"), 64); err == nil {
 		f.MaxAge = v
 	}
@@ -200,7 +193,6 @@ func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
 		scopes["errored"]++
 	}
 	if s.Coordinator != "" {
-		scopes["incidents"]++
 		scopes[s.Coordinator]++
 	}
 	if s.Pipeline != "" {
@@ -250,18 +242,27 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	out := a.ConversationView(obj, a.adapter.ReaderKey(Identity(r)))
 	summary := out["conversation"].(ConversationSummary)
+	// Same activity window ConversationView already derived the runs' turns/
+	// toolCalls from, re-fetched here only because "events" is also a top-level
+	// field of this response.
+	events := a.activity.ForConversation(name)
 	var messages []Message
 	if summary.ConsoleThread != "" {
 		messages = a.transcripts.Thread(summary.ConsoleThread)
-		// MERGE with the durable record, always — never only when the buffer
-		// looks empty. Conditioning on emptiness broke the moment a reader
-		// typed a reply: their own message made the buffer non-empty, the
-		// durable answers stopped being served, and the history vanished
-		// mid-conversation.
-		messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs, summary)
 	}
+	// MERGE with the durable record, ALWAYS — never gated on having a console
+	// thread. A Coordinator's own channelRefs now bind into its root
+	// unconditionally at creation (claimant.go), same as a Pipeline's, but an
+	// install's wiring may still declare no console channel at all — so
+	// gating this on ConsoleThread left that root's transcript permanently
+	// empty whenever this console wasn't one of the bound channels: the
+	// triggering signal and its own reasoning turns exist only in
+	// `summary.Runs`, and mergeTranscript derives them from there with no
+	// live buffer needed. This was item #15 — a coordinator's transcript
+	// showed nothing but member-invocation cards.
+	messages = mergeTranscript(summary.ConsoleThread, a.adapter.PrimaryChannel(), messages, summary.Runs, summary)
 	out["transcript"] = messages
-	out["events"] = a.activity.ForConversation(name)
+	out["events"] = events
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -276,6 +277,13 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 // later delta.
 func (a *API) ConversationView(obj *Object, reader string) map[string]any {
 	summary := summarize(obj, a.cache.List("pipelines"), a.cache.List("coordinators"), a.adapter.PrimaryChannel(), reader, a.transcripts)
+	// Per-run model/tool-call diagnostics, derived here so the STREAMED view
+	// carries them exactly as the REST snapshot does. This used to run only in
+	// handleConversation, so the moment any delta touched an open
+	// conversation — the ordinary mark-read on first open included — the
+	// browser's merge (`{...prev, ...view}`) replaced the correct REST-fetched
+	// turns/toolCalls with nothing.
+	summary.Runs = attachRunCalls(summary.Runs, a.activity.ForConversation(obj.Metadata.Name))
 	// Archived — "there is nothing here to reply to" — is read from the
 	// CONVERSATION's phase first, and only then from this console's own
 	// transcript state.
@@ -336,6 +344,13 @@ func (a *API) joinHint(s ConversationSummary) map[string]string {
 		return map[string]string{
 			"reason": "this console serves no Channel, so it can hold no thread",
 			"fix":    "create a Channel with spec.adapter: " + a.adapterName,
+		}
+	}
+	if s.Coordinator != "" {
+		return map[string]string{
+			"reason": "this console channel is not in the Coordinator's channelRefs, so no console thread was bound for this root",
+			"fix":    "add " + consoleChannel + " to the channelRefs of the Coordinator " + s.Coordinator,
+			"note":   "this affects NEW roots only — channels are snapshotted at creation",
 		}
 	}
 	if s.Pipeline == "" {

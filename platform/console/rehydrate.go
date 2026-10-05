@@ -190,6 +190,9 @@ func recordedSignalCard(conv ConversationSummary) string {
 	if conv.Pipeline != "" {
 		from = append(from, "**Pipeline** `"+conv.Pipeline+"`")
 	}
+	if conv.Coordinator != "" {
+		from = append(from, "**Coordinator** `"+conv.Coordinator+"`")
+	}
 	if len(from) > 0 {
 		parts = append(parts, strings.Join(from, " · "))
 	}

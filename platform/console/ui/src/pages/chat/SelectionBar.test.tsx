@@ -36,6 +36,16 @@ function renderBar(items: ConversationSummary[], selected: Set<string>, over: Pa
   )
 }
 
+describe('contrast (item 10)', () => {
+  it('uses a surface tint that does not invert between themes, never --ao-brand-strong', () => {
+    const items = [conv('a')]
+    renderBar(items, new Set(['a']))
+    const bar = screen.getByTestId('selection-bar')
+    expect(bar.style.background).toContain('--ao-brand-soft')
+    expect(bar.style.background).not.toContain('--ao-brand-strong')
+  })
+})
+
 describe('ordinary close and delete', () => {
   it('sends the selected names, exactly as the old toolbar did', async () => {
     const items = [conv('a'), conv('b')]

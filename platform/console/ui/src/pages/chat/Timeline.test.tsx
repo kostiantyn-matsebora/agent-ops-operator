@@ -33,6 +33,42 @@ describe('ordering and folding (design D-G)', () => {
   })
 })
 
+describe('a coordinator root interleaves extraItems with its own messages by time (item 15)', () => {
+  it('renders signal, reasoning-1, invoke-card, reasoning-2 in time order — one transcript, not a separate status log', () => {
+    const messages = [
+      msg('sig-1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure on node-3' }),
+      msg('reason-1', 'agent', '2024-01-01T00:00:10Z', { text: 'Investigating node-3 for disk pressure causes' }),
+      msg('reason-2', 'agent', '2024-01-01T00:00:50Z', { text: 'Node-3 disk pressure resolved after eviction' }),
+    ]
+    const extraItems = [
+      { key: 'invoke-mid-1', at: Date.parse('2024-01-01T00:00:30Z'), node: <div>invoked diagnose</div> },
+    ]
+    render(<Timeline messages={messages} events={[]} presence={false} extraItems={extraItems} />)
+    const timeline = screen.getByTestId('timeline')
+    const text = timeline.textContent ?? ''
+    expect(text.indexOf('Disk pressure on node-3')).toBeLessThan(text.indexOf('Investigating node-3'))
+    expect(text.indexOf('Investigating node-3')).toBeLessThan(text.indexOf('invoked diagnose'))
+    expect(text.indexOf('invoked diagnose')).toBeLessThan(text.indexOf('resolved after eviction'))
+  })
+
+  it('renders the signal as a real card — not raw JSON — and the reasoning turns as ordinary agent text', () => {
+    const messages = [
+      msg('sig-1', 'signal', '2024-01-01T00:00:00Z', {
+        text: '📣 **Disk pressure**\n\n**Source** `node-3` · **Coordinator** `agentops-coordinator`',
+        payload: '{"raw":"event document"}',
+      }),
+      msg('reason-1', 'agent', '2024-01-01T00:00:10Z', { text: 'Investigating node-3 for disk pressure causes' }),
+    ]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    // The card's own fields render as text, never as a JSON blob on screen.
+    expect(screen.getByText('Disk pressure')).toBeInTheDocument()
+    expect(screen.queryByText(/"raw":"event document"/)).toBeNull()
+    // The payload is foldable, not inline.
+    expect(screen.getByText(/Payload/)).toBeInTheDocument()
+    expect(screen.getByText('Investigating node-3 for disk pressure causes')).toBeInTheDocument()
+  })
+})
+
 describe('an ack is presence, never a bubble', () => {
   it('drops the ack from the transcript and shows the typing row instead', () => {
     const messages = [msg('m1', 'agent', '2024-01-01T00:00:00Z'), msg('m2', 'ack', '2024-01-01T00:00:01Z', { text: 'On it…' })]

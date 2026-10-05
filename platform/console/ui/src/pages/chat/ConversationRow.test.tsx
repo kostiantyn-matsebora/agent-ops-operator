@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { ConversationRow, phaseDot, rowSnippet, rowTag } from './ConversationRow'
+import {
+  ConversationRow, phaseDot, rowSnippet, rowTag, stripNamePrefix,
+} from './ConversationRow'
 import type { ConversationSummary } from '../../api/types'
 
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
@@ -62,9 +64,10 @@ describe('row states (prototype/States.html)', () => {
     expect(rowSnippet(row)).toContain('pending')
   })
 
-  it('OBSERVED with nothing else to say falls back to the word itself', () => {
+  it('OBSERVED with nothing else to say falls through to the empty snippet — "observed" lives only in the chip', () => {
     const row = conv('watched', { joined: false, phase: 'Idle' })
-    expect(rowSnippet(row)).toBe('observed')
+    expect(rowSnippet(row)).toBe('')
+    expect(rowTag(row, false)).toBe('observed')
   })
 
   it('ERRORED — failed dot and the run-failed tag, still unread', () => {
@@ -141,5 +144,85 @@ describe('coordination extras', () => {
     const row = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } })
     renderRow(row, { depth: 1 })
     expect(screen.getByText('via diagnose')).toBeInTheDocument()
+  })
+})
+
+describe('stripNamePrefix — the title must not repeat the chip', () => {
+  it('strips "<name>: " when it is exactly the chip name', () => {
+    expect(stripNamePrefix('agentops-coordinator: Check status of ha restart', 'agentops-coordinator'))
+      .toBe('Check status of ha restart')
+    expect(stripNamePrefix('ha-control: Check the current status of Home Assistant', 'ha-control'))
+      .toBe('Check the current status of Home Assistant')
+  })
+
+  it('never strips a colon-prefix unrelated to the chip name', () => {
+    expect(stripNamePrefix('esphome: tion-4s-bedroom lost its connection', 'ha-control'))
+      .toBe('esphome: tion-4s-bedroom lost its connection')
+    expect(stripNamePrefix('homeassistant: config_entry_reauth', 'ha-control'))
+      .toBe('homeassistant: config_entry_reauth')
+  })
+
+  it('is a no-op with no name to compare against', () => {
+    expect(stripNamePrefix('esphome: tion-4s-bedroom lost its connection', undefined))
+      .toBe('esphome: tion-4s-bedroom lost its connection')
+  })
+
+  it('leaves a title with no matching prefix exactly as it is', () => {
+    expect(stripNamePrefix('Check status of ha restart', 'agentops-coordinator'))
+      .toBe('Check status of ha restart')
+  })
+
+  // Item 1's acceptance criteria, verbatim.
+  it('(a) strips "esphome: " for the esphome pipeline, exact match', () => {
+    expect(stripNamePrefix('esphome: light is on', 'esphome')).toBe('light is on')
+  })
+
+  it('(b) leaves "esphome:light is on" untouched — no space is not the stripped form', () => {
+    expect(stripNamePrefix('esphome:light is on', 'esphome')).toBe('esphome:light is on')
+  })
+
+  it('(c) leaves an unrelated "something: else" untouched when the chip names a different pipeline', () => {
+    expect(stripNamePrefix('something: else', 'other-pipeline')).toBe('something: else')
+  })
+})
+
+describe('the row title no longer repeats its own chip', () => {
+  it('strips the coordinator prefix for a root', () => {
+    const row = conv('root-1', { coordinator: 'agentops-coordinator', title: 'agentops-coordinator: Check status of ha restart' })
+    renderRow(row)
+    expect(screen.getByText('Check status of ha restart')).toBeInTheDocument()
+    expect(screen.queryByText('agentops-coordinator: Check status of ha restart')).not.toBeInTheDocument()
+  })
+
+  it('strips the pipeline prefix for an ordinary row', () => {
+    const row = conv('job-1', { pipeline: 'ha-control', title: 'ha-control: Check the current status of Home Assistant' })
+    renderRow(row)
+    expect(screen.getByText('Check the current status of Home Assistant')).toBeInTheDocument()
+  })
+
+  it('leaves an unrelated colon-prefixed title untouched', () => {
+    const row = conv('job-2', { pipeline: 'ha-control', title: 'esphome: tion-4s-bedroom lost its connection' })
+    renderRow(row)
+    expect(screen.getByText('esphome: tion-4s-bedroom lost its connection')).toBeInTheDocument()
+  })
+})
+
+describe('every row names what answers it', () => {
+  it('a root chip names the coordinator, not just "coordinator"', () => {
+    const row = conv('root-1', { coordinator: 'agentops-coordinator' })
+    renderRow(row)
+    expect(screen.getByText('agentops-coordinator')).toBeInTheDocument()
+  })
+
+  it('an ordinary row chips its pipeline', () => {
+    const row = conv('job-1', { pipeline: 'k8s-observe' })
+    renderRow(row)
+    expect(screen.getByText('k8s-observe')).toBeInTheDocument()
+  })
+
+  it('a member row chips neither its parent coordinator nor a pipeline', () => {
+    const row = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' }, pipeline: 'k8s-observe' })
+    renderRow(row, { depth: 1 })
+    expect(screen.queryByText('k8s-observe')).not.toBeInTheDocument()
   })
 })

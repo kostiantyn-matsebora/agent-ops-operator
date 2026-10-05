@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, DescriptionList,
+  Alert, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopy, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, Label,
-  TextArea, Tooltip,
+  Modal, ModalBody, ModalFooter, ModalHeader, TextArea, Tooltip,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
@@ -24,9 +24,15 @@ import { Yaml } from '../../components/Yaml'
 import { MetadataCard } from '../../components/Metadata'
 import { matchEntries } from '../NewConversation'
 import { Timeline } from './Timeline'
+import type { TimelineExtraItem } from './Timeline'
 import { QuickChips } from './QuickChips'
+import { formatBytes, formatDuration } from './format'
+import { isCloseCommand, skipCloseConfirm, writeSkipCloseConfirm } from './closeConfirm'
+import { Blocks } from '../../components/Blocks'
+import { parse } from '../../api/blocks'
 import type {
-  ActivityEvent, ConversationDetail, ConversationSummary, Run, VocabularyEntry,
+  ActivityEvent, ConversationDetail, ConversationSummary, Message, RecordedInput, Run, RunToolCall, RunTurn,
+  VocabularyEntry,
 } from '../../api/types'
 
 // `console-chat-layout` (secondary views) + `console-conversation-tree` (the
@@ -74,7 +80,10 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
   return (
     <div style={{ flex: 1, minWidth: 0, background: 'var(--ao-surface)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '12px 24px 10px', borderBottom: '1px solid var(--ao-border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {(isRoot || isMember) && <IncidentCrumb conversation={c} />}
+        {/* A root's own ancestor chain is always empty — see `MemberCrumb` —
+            so showing it there would be one static label pointing at
+            nothing. Only a member, which HAS ancestors, gets the crumb. */}
+        {isMember && <MemberCrumb conversation={c} />}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {onBack && (
             <Button variant="plain" aria-label="back to the list" onClick={onBack}>
@@ -139,7 +148,7 @@ function TranscriptBody({
   detail: NonNullable<ReturnType<typeof useConversation>['data']>
   onSentOffline: () => void
 }>) {
-  if (isRoot) return <IncidentBody rootName={conversation.name} />
+  if (isRoot) return <CoordinatorBody conversation={conversation} detail={detail} onSentOffline={onSentOffline} />
   if (isMember) return <MemberOwnBody conversation={conversation} />
   return <ConversationThread detail={detail} onSentOffline={onSentOffline} />
 }
@@ -152,8 +161,13 @@ function ViewButton({ active, onClick, children }: Readonly<{ active: boolean; o
   )
 }
 
-/** The parent chain, the uncaused root through every parent to this conversation (console-conversation-tree). */
-function IncidentCrumb({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
+/**
+ * The parent chain, the uncaused root through every parent ABOVE this
+ * conversation (console-conversation-tree). There is no "incident" entity in
+ * this domain — the leading label names the Coordinator the chain belongs
+ * to (the uncaused root's own `coordinator` field), never an invented noun.
+ */
+function MemberCrumb({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
   const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
   const members = useConversations(membersParams)
   const items = members.data?.items ?? []
@@ -167,15 +181,25 @@ function IncidentCrumb({ conversation }: Readonly<{ conversation: ConversationSu
     seen.add(cur.name)
     cur = byName.get(cur.causedBy.parent)
   }
+  // The conversation itself is never part of its OWN breadcrumb — its title
+  // is already the pane's heading, one line below this. Showing it twice is
+  // what made the crumb read as a second heading rather than a trail.
+  const ancestors = chain.slice(0, -1)
+  const coordinatorName = chain[0]?.coordinator
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: '0.85em', color: 'var(--ao-text-subtle)' }}>
-      <Icon icon="aops:agent" /> <strong style={{ color: 'var(--ao-accent)' }}>Incident</strong>
-      {chain.map((step, i) => (
+      <Icon icon="aops:agent" />
+      {coordinatorName && (
+        <strong style={{ color: 'var(--ao-accent)' }}>
+          <PlainText>{coordinatorName}</PlainText>
+        </strong>
+      )}
+      {ancestors.map((step, i) => (
         <span key={step.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span aria-hidden>›</span>
           <Link
             to={`/conversations/${step.name}`}
-            style={i === chain.length - 2 ? { fontWeight: 700, color: 'var(--ao-text)' } : undefined}
+            style={i === ancestors.length - 1 ? { fontWeight: 700, color: 'var(--ao-text)' } : undefined}
           >
             <PlainText>{step.causedBy?.entry ?? stripLeadingIcon(step.title || step.name)}</PlainText>
           </Link>
@@ -185,55 +209,164 @@ function IncidentCrumb({ conversation }: Readonly<{ conversation: ConversationSu
   )
 }
 
-/** The root's incident timeline — fetches its own detail and the page's conversations to find members (design D-F). */
-function IncidentBody({ rootName }: Readonly<{ rootName: string }>) {
-  const root = useConversation(rootName)
+/** Every input any of `runs` recorded a non-empty text for, oldest first — the
+ * durable half of a conversation's questions (`Run.inputs`, invariants.md: "A
+ * CONVERSATION'S MESSAGES ARE KUBERNETES-API STATE"). */
+function recordedInputs(runs: Run[] | undefined): RecordedInput[] {
+  return (runs ?? []).flatMap((r) => (r.inputs ?? []).filter((i) => i.text))
+}
+
+/** The text a conversation was actually given — its first recorded input.
+ * For a member this IS its task: `invoke` addresses no human channel, so this
+ * is the only place that text lives (see `RecordedInput.surface`). */
+function firstTaskInput(runs: Run[] | undefined): RecordedInput | undefined {
+  return recordedInputs(runs)[0]
+}
+
+/** The most recent run that actually answered, oldest-finished-last. */
+function lastResult(runs: Run[] | undefined): { text: string; at?: string } | undefined {
+  const withResult = (runs ?? []).filter((r) => r.result)
+  const r = withResult.at(-1)
+  return r ? { text: r.result!, at: r.finishedAt || r.startedAt } : undefined
+}
+
+/** `text`, parsed and rendered exactly as an agent's own message would be
+ * (`Timeline`'s `agentText` branch) — the same characters, the same renderer,
+ * whether this is a coordinator's task handoff or a member's answer. */
+function AgentText({ text }: Readonly<{ text: string }>) {
+  return <Blocks blocks={parse(text)} />
+}
+
+/**
+ * One member a coordinator root invoked, inline in its own transcript —
+ * collapsed by default (console-conversation-tree), expanding to the task it
+ * was actually given and what it answered, each a full-width block at
+ * ordinary message type scale rather than a cramped side-card (the
+ * transcript-concept mockup).
+ */
+function MemberInvocation({ member }: Readonly<{ member: ConversationSummary }>) {
+  const [expanded, setExpanded] = useState(false)
+  const detail = useConversation(member.name, expanded)
+  const entry = member.causedBy?.entry ?? member.name
+  const done = member.phase === 'Closed'
+  return (
+    <details
+      style={{
+        background: 'var(--ao-surface-alt)', border: '1px solid var(--ao-border)', borderRadius: 8,
+        padding: '8px 14px',
+      }}
+      onToggle={(e) => setExpanded((e.target as HTMLDetailsElement).open)}
+    >
+      <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Icon icon="aops:agent" />
+        <span>
+          {'↳ invoked '}
+          <strong><PlainText>{entry}</PlainText></strong>
+          {' as '}
+          <code><PlainText>{member.name}</PlainText></code>
+        </span>
+        <Label isCompact color={done ? 'grey' : 'blue'}>
+          <PlainText>{done ? 'done' : member.phase || 'working'}</PlainText>
+        </Label>
+        {member.errored && <Label isCompact color="red">run failed</Label>}
+      </summary>
+      <div style={{ padding: '10px 2px 2px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {expanded && <ExpandedInvocation detail={detail} entry={entry} />}
+        <div>
+          <Link to={`/conversations/${member.name}`}>Open {member.name} on its own →</Link>
+        </div>
+      </div>
+    </details>
+  )
+}
+
+/** The expanded half of one `MemberInvocation` — its own loading/error states,
+ * kept apart so the collapsed summary above never pays for them. */
+function ExpandedInvocation({ detail, entry }: Readonly<{ detail: ReturnType<typeof useConversation>; entry: string }>) {
+  if (detail.isLoading && !detail.data) return <Loading />
+  if (detail.error || !detail.data) return <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
+  return <MemberInvocationExchange detail={detail.data} entry={entry} />
+}
+
+/** The two labelled sub-blocks a member invocation expands to. */
+function MemberInvocationExchange({ detail, entry }: Readonly<{ detail: ConversationDetail; entry: string }>) {
+  const task = firstTaskInput(detail.conversation.runs)
+  const result = lastResult(detail.conversation.runs)
+  return (
+    <>
+      <div>
+        <div style={{ fontSize: '0.78em', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ao-text-subtle)', marginBottom: 4 }}>
+          Task sent
+        </div>
+        {task?.text ? <AgentText text={task.text} /> : <small style={{ color: 'var(--ao-text-subtle)' }}>No recorded input</small>}
+      </div>
+      <div>
+        <div style={{ fontSize: '0.78em', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ao-text-subtle)', marginBottom: 4 }}>
+          <PlainText>{entry}</PlainText> responded
+        </div>
+        {result?.text ? <AgentText text={result.text} /> : <small style={{ color: 'var(--ao-text-subtle)' }}>No result yet</small>}
+      </div>
+    </>
+  )
+}
+
+/**
+ * A Coordinator root's own transcript — the SAME `ConversationThread` an
+ * ordinary pipeline conversation gets (its own messages, composer and
+ * QuickChips, never a separate structural view by default), with each direct
+ * member it invoked woven in as a collapsed, expandable exchange at the time
+ * it was invoked (console-conversation-tree, the transcript-concept mockup).
+ *
+ * No `channelBound` override here (item 6): `console-conversation-tree`'s
+ * "the composer follows channel binding, not escalation" is satisfied by
+ * `detail.conversation.joined` ALONE, now that `coordination-escalation`
+ * binds the Coordinator's `channelRefs` into the root unconditionally at
+ * creation (`platform/manager/internal/chat/claimant.go`'s
+ * `coordinatorClaimant.BoundChannelRefs`) — the same materialization a
+ * Pipeline's own channels get. `joined` already means exactly "the console
+ * channel holds a thread binding", so it goes live the moment that binding
+ * is reconciled rather than waiting for `escalate`. A root predating that
+ * binding, or one whose Coordinator never named the console at all, stays
+ * read-only — spec's other permitted case, not a bug.
+ */
+function CoordinatorBody({
+  conversation, detail, onSentOffline,
+}: Readonly<{
+  conversation: ConversationSummary
+  detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  onSentOffline: () => void
+}>) {
   const membersParams = useMemo(() => new URLSearchParams({ limit: '200' }), [])
   const members = useConversations(membersParams)
-  if ((root.isLoading && !root.data) || (members.isLoading && !members.data)) return <Loading />
-  if (root.error || !root.data) return <ErrorState title="Could not load this conversation">{String(root.error)}</ErrorState>
+  const budget = conversation.budget
+  if (members.isLoading && !members.data) return <Loading />
   if (members.error || !members.data) return <ErrorState title="Could not load member conversations">{String(members.error)}</ErrorState>
-  return <CoordinatorTimeline rootDetail={root.data} allConversations={members.data.items} depth={0} />
-}
 
-interface TimelineEntry {
-  at: number
-  run?: Run
-  member?: ConversationSummary
-}
-
-function buildIncidentTimeline(rootDetail: ConversationDetail, allConversations: ConversationSummary[]): TimelineEntry[] {
-  const rootName = rootDetail.conversation.name
-  const entries: TimelineEntry[] = (rootDetail.conversation.runs ?? []).map((run) => ({
-    at: Date.parse(run.startedAt || run.finishedAt || '') || 0,
-    run,
+  const directMembers = members.data.items.filter((m) => m.causedBy?.parent === conversation.name)
+  const extraItems = directMembers.map((m) => ({
+    key: `invoke-${m.name}`,
+    at: Date.parse(m.created || '') || 0,
+    node: <MemberInvocation member={m} />,
   }))
-  for (const member of allConversations) {
-    if (member.causedBy?.parent === rootName) {
-      entries.push({ at: Date.parse(member.created || '') || 0, member })
-    }
+  if (conversation.escalatedAt) {
+    extraItems.push({
+      key: 'escalated',
+      at: Date.parse(conversation.escalatedAt) || 0,
+      node: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'var(--ao-accent)', fontSize: '0.8em', fontWeight: 700 }}>
+          <span aria-hidden style={{ flex: 1, height: 1, background: 'var(--ao-accent)' }} />
+          {`Escalated · ${new Date(conversation.escalatedAt).toLocaleString()}`}
+          <span aria-hidden style={{ flex: 1, height: 1, background: 'var(--ao-accent)' }} />
+        </div>
+      ),
+    })
   }
-  entries.sort((a, b) => a.at - b.at)
-  return entries
-}
 
-function counted(used: number | undefined, max: number | undefined): string {
-  const count = used ?? 0
-  return max ? `${count} of ${max}` : String(count)
-}
-
-function CoordinatorTimeline({
-  rootDetail, allConversations, depth,
-}: Readonly<{ rootDetail: ConversationDetail; allConversations: ConversationSummary[]; depth: number }>) {
-  const entries = useMemo(() => buildIncidentTimeline(rootDetail, allConversations), [rootDetail, allConversations])
-  const c = rootDetail.conversation
-  const budget = c.budget
-  const notEscalatedYet = !c.escalatedAt && c.phase !== 'Closed'
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '12px 24px', overflowY: 'auto', flex: 1 }}>
-        {budget && (
-          <DescriptionList isCompact isHorizontal style={{ marginBottom: 12 }}>
+      {budget && (
+        <div style={{ padding: '8px 24px 0' }}>
+          <DescriptionList isCompact isHorizontal>
             <DescriptionListGroup>
               <DescriptionListTerm>Agents invoked</DescriptionListTerm>
               <DescriptionListDescription>{counted(budget.agentsInvoked, budget.maxAgents)}</DescriptionListDescription>
@@ -249,160 +382,64 @@ function CoordinatorTimeline({
               </DescriptionListGroup>
             )}
           </DescriptionList>
-        )}
-        {entries.length === 0 ? (
-          <Empty title="Nothing has happened on this incident yet" />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {entries.map((e) => {
-              if (e.run) return <RunEntry key={`run-${e.run.runId}`} run={e.run} />
-              if (e.member) {
-                return (
-                  <MemberEntry
-                    key={`member-${e.member.name}`}
-                    member={e.member}
-                    allConversations={allConversations}
-                    depth={depth}
-                  />
-                )
-              }
-              return null
-            })}
-            {c.escalatedAt && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '8px 0 0', color: 'var(--ao-accent)', fontSize: '0.8em', fontWeight: 700 }}>
-                <span aria-hidden style={{ flex: 1, height: 1, background: 'var(--ao-accent)' }} />
-                {`Escalated · ${new Date(c.escalatedAt).toLocaleString()}`}
-                <span aria-hidden style={{ flex: 1, height: 1, background: 'var(--ao-accent)' }} />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      <TimelineFooter c={c} notEscalatedYet={notEscalatedYet} rootDetail={rootDetail} />
-    </div>
-  )
-}
-
-function TimelineFooter({
-  c, notEscalatedYet, rootDetail,
-}: Readonly<{ c: ConversationSummary; notEscalatedYet: boolean; rootDetail: ConversationDetail }>) {
-  if (notEscalatedYet) {
-    return (
-      <div style={{ padding: '12px 24px', borderTop: '1px solid var(--ao-border)' }}>
-        <Alert variant="info" isInline title="Read-only — the coordinator has not asked for a person">
-          This root has no bound channel until it escalates. Replies cannot be sent yet.
-        </Alert>
-      </div>
-    )
-  }
-  if (c.phase === 'Closed') {
-    return (
-      <div style={{ padding: '12px 24px', borderTop: '1px solid var(--ao-border)' }}>
-        <Alert
-          variant="info"
-          isInline
-          title={c.escalatedAt ? 'This incident is closed' : 'Closed without escalating — nobody was notified'}
-        >
-          {c.closeReason && <PlainText>{c.closeReason}</PlainText>}
-        </Alert>
-      </div>
-    )
-  }
-  return <ConversationThread detail={rootDetail} onSentOffline={() => undefined} />
-}
-
-function RunEntry({ run }: Readonly<{ run: Run }>) {
-  const when = run.finishedAt || run.startedAt
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5em', padding: '0.35em 0' }}>
-      <Label isCompact color="grey" icon={<Icon icon="aops:observe" />}>run</Label>
-      <PlainText>{run.runId}</PlainText>
-      <Label isCompact status={run.status === 'succeeded' ? 'success' : 'danger'}>
-        <PlainText>{run.status}</PlainText>
-      </Label>
-      <small style={{ color: 'var(--ao-text-subtle)' }}>{when ? new Date(when).toLocaleString() : ''}</small>
-    </div>
-  )
-}
-
-function MemberBody({
-  loading, error, data, allConversations, depth,
-}: Readonly<{ loading: boolean; error: unknown; data: ConversationDetail | undefined; allConversations: ConversationSummary[]; depth: number }>) {
-  if (loading && !data) return <Loading />
-  if (error || !data) return <ErrorState title="Could not load this member">{String(error)}</ErrorState>
-  if (data.conversation.coordinator) {
-    return <CoordinatorTimeline rootDetail={data} allConversations={allConversations} depth={depth + 1} />
-  }
-  const runs = data.conversation.runs ?? []
-  if (runs.length === 0) return <Empty title="No completed runs" />
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {runs.map((r) => <RunEntry key={r.runId} run={r} />)}
-    </div>
-  )
-}
-
-/** One member, expandable and collapsed by default — a nested card (console-conversation-tree). */
-function MemberEntry({
-  member, allConversations, depth,
-}: Readonly<{ member: ConversationSummary; allConversations: ConversationSummary[]; depth: number }>) {
-  const [expanded, setExpanded] = useState(false)
-  const detail = useConversation(member.name, expanded)
-  const isEscalation = Boolean(member.coordinator && member.phase === 'Closed' && member.escalatedAt)
-  return (
-    <details
-      style={{
-        marginLeft: depth * 20, borderLeft: depth ? '3px solid var(--ao-accent)' : '3px solid var(--ao-accent-soft)',
-        paddingLeft: '0.75em', background: 'var(--ao-surface-alt)', borderRadius: 6, padding: '6px 0.75em',
-      }}
-      onToggle={(e) => setExpanded((e.target as HTMLDetailsElement).open)}
-    >
-      <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: '0.5em', flexWrap: 'wrap' }}>
-        <Icon icon="aops:agent" />
-        <strong>{stripLeadingIcon(member.brief || member.title || member.name)}</strong>
-        {member.causedBy?.entry && (
-          <Label isCompact color="purple"><PlainText>{member.causedBy.entry}</PlainText></Label>
-        )}
-        <Label isCompact color={member.phase === 'Closed' ? 'grey' : 'blue'}>
-          <PlainText>{member.phase}</PlainText>
-        </Label>
-        {isEscalation && <Label isCompact color="purple">escalation</Label>}
-        {member.coordinator && <Label isCompact color="teal">coordinates its own</Label>}
-      </summary>
-      <div style={{ padding: '0.5em 0 0.75em 1.75em' }}>
-        {expanded && (
-          <MemberBody loading={detail.isLoading} error={detail.error} data={detail.data} allConversations={allConversations} depth={depth} />
-        )}
-        <div style={{ marginTop: '0.5em' }}>
-          <Link to={`/conversations/${member.name}`}>Open full transcript →</Link>
         </div>
-      </div>
-    </details>
+      )}
+      <ConversationThread detail={detail} onSentOffline={onSentOffline} extraItems={extraItems} />
+    </div>
   )
 }
 
-/** A member opened DIRECTLY (not via its root): its own runs, read-only, since it binds no human channel. */
+function counted(used: number | undefined, max: number | undefined): string {
+  const count = used ?? 0
+  return max ? `${count} of ${max}` : String(count)
+}
+
+/**
+ * A member opened DIRECTLY (not through its root): the SAME kind of real
+ * transcript — the task it was given, then its result, ordinary-looking
+ * messages — just with no composer, since it binds no human channel of its
+ * own (invariants.md: "A CAUSED CONVERSATION BINDS NO HUMAN CHANNEL").
+ */
 function MemberOwnBody({ conversation }: Readonly<{ conversation: ConversationSummary }>) {
   const detail = useConversation(conversation.name)
   if (detail.isLoading && !detail.data) return <Loading />
   if (detail.error || !detail.data) return <ErrorState title="Could not load this member">{String(detail.error)}</ErrorState>
+  const runs = detail.data.conversation.runs
+  const task = firstTaskInput(runs)
+  const result = lastResult(runs)
+  const messages: Message[] = []
+  if (task?.text) {
+    messages.push({
+      id: 'task', thread: conversation.name, kind: 'signal', text: task.text,
+      at: task.receivedAt || conversation.created || '',
+    })
+  }
+  if (result?.text) {
+    messages.push({ id: 'result', thread: conversation.name, kind: 'agent', text: result.text, at: result.at || '' })
+  }
   return (
-    <div style={{ padding: '12px 24px', overflowY: 'auto', flex: 1 }}>
-      <Alert variant="info" isInline title="A member holds no channel of its own">
-        Its result reaches the root as an input and is never unread on its own. Open{' '}
-        <Link to={`/conversations/${conversation.causedBy?.parent}`}>the incident</Link> for the full timeline.
-      </Alert>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {(detail.data.conversation.runs ?? []).map((r) => <RunEntry key={r.runId} run={r} />)}
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '8px 24px 0' }}>
+        <Alert variant="info" isInline title="A member holds no channel of its own">
+          Its result reaches its parent as an input. This transcript is read-only.
+        </Alert>
       </div>
+      <Timeline messages={messages} events={[]} presence={Boolean(conversation.presence)} />
     </div>
   )
 }
 
-/** The ordinary thread: transcript + composer + quick chips. */
+/** The ordinary thread: transcript + composer + quick chips — reused for a
+ * plain pipeline conversation AND a Coordinator root's own transcript. */
 function ConversationThread({
-  detail, onSentOffline,
-}: Readonly<{ detail: NonNullable<ReturnType<typeof useConversation>['data']>; onSentOffline: () => void }>) {
+  detail, onSentOffline, extraItems,
+}: Readonly<{
+  detail: NonNullable<ReturnType<typeof useConversation>['data']>
+  onSentOffline: () => void
+  /** Rows to interleave into the transcript by time — a root's member
+   * invocations. Absent for an ordinary pipeline conversation. */
+  extraItems?: TimelineExtraItem[]
+}>) {
   const session = useSession()
   const sources = useSources()
   const connected = useStream((s) => s.connected)
@@ -416,6 +453,9 @@ function ConversationThread({
   const activeCommand = commands ? Math.min(cursor, commands.length - 1) : 0
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  // `/close` gets a confirm dialog (item 22) — `/exit` never does, since it
+  // only releases the runtime and nothing about the conversation is lost.
+  const [confirmingClose, setConfirmingClose] = useState(false)
 
   function chooseCommand(entry: VocabularyEntry) {
     const next = '/' + entry.name
@@ -458,11 +498,11 @@ function ConversationThread({
   )
   const choices = messages.at(-1)?.choices
 
-  async function send() {
+  async function postMessage(toSend: string) {
     setBusy(true)
     setError(undefined)
     try {
-      await api.send(detail.conversation.name, text)
+      await api.send(detail.conversation.name, toSend)
       setText('')
       if (!connected) onSentOffline()
     } catch (e) {
@@ -472,8 +512,29 @@ function ConversationThread({
     }
   }
 
+  // `/close` can be destructive once the retention window has run
+  // (invariants.md: "`/exit` RELEASES THE RUNTIME — `/close` ENDS THE
+  // CONVERSATION"), so it gets an ordinary confirm dialog first — unless the
+  // operator already opted out. `/exit` and every ordinary reply send at once.
+  async function send() {
+    if (isCloseCommand(text) && !skipCloseConfirm()) {
+      setConfirmingClose(true)
+      return
+    }
+    await postMessage(text)
+  }
+
+  function confirmClose(dontAskAgain: boolean) {
+    writeSkipCloseConfirm(dontAskAgain)
+    setConfirmingClose(false)
+    void postMessage(text)
+  }
+
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {confirmingClose && (
+        <CloseConfirmModal onConfirm={confirmClose} onCancel={() => setConfirmingClose(false)} />
+      )}
       {detail.joinHint && (
         <div style={{ padding: '8px 24px' }}>
           <Alert variant="info" isInline title="This conversation has no console thread">
@@ -496,6 +557,7 @@ function ConversationThread({
         readAt={detail.conversation.readAt}
         pipelineIcon={pipelineIcon}
         pipelineName={detail.conversation.pipeline}
+        extraItems={extraItems}
       />
       {canWrite && (
         <div style={{ padding: '10px 24px 14px', borderTop: '1px solid var(--ao-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -560,34 +622,164 @@ function ConversationThread({
   )
 }
 
+/**
+ * An ordinary confirm dialog for `/close` (item 22) — never `/exit`, which is
+ * fully recoverable and needs no gate. The "don't ask again" box is a
+ * per-browser convenience (`closeConfirm.ts`), re-defaulted unchecked every
+ * time the dialog opens: an opt-in that remembers itself is not one — the
+ * same rule `CloseSelectedModal`'s "include working" switch follows.
+ */
+function CloseConfirmModal({
+  onConfirm, onCancel,
+}: Readonly<{ onConfirm: (dontAskAgain: boolean) => void; onCancel: () => void }>) {
+  const [dontAskAgain, setDontAskAgain] = useState(false)
+  return (
+    <Modal isOpen onClose={onCancel} variant="small" aria-label="confirm close" data-testid="close-confirm-modal">
+      <ModalHeader title="Close this conversation?" />
+      <ModalBody>
+        <p>
+          The agent says goodbye and the thread is archived. The conversation itself stays — its
+          answers and its workspace are kept — and it can be reopened.
+        </p>
+        <Checkbox
+          id="close-confirm-skip"
+          label="Don't ask again"
+          isChecked={dontAskAgain}
+          onChange={(_e, v) => setDontAskAgain(v)}
+        />
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="danger" onClick={() => onConfirm(dontAskAgain)} data-testid="close-confirm-ok">
+          Close
+        </Button>
+        <Button variant="link" onClick={onCancel}>Cancel</Button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
+function SubTableLabel({ children }: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <div style={{ fontSize: '0.78em', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ao-text-subtle)' }}>
+      {children}
+    </div>
+  )
+}
+
+function TurnsTable({ turns }: Readonly<{ turns: RunTurn[] }>) {
+  return (
+    <div>
+      <SubTableLabel>{`turns — ${turns.length} model call${turns.length === 1 ? '' : 's'}`}</SubTableLabel>
+      <Table variant="compact" aria-label="turns">
+        <Thead>
+          <Tr><Th>Model</Th><Th>Tokens in</Th><Th>Tokens out</Th><Th>Stop reason</Th></Tr>
+        </Thead>
+        <Tbody>
+          {turns.map((t, i) => (
+            <Tr key={i}>
+              <Td dataLabel="Model"><PlainText>{t.model || '—'}</PlainText></Td>
+              <Td dataLabel="Tokens in">
+                {t.tokensIn ?? '—'}
+                {t.cacheReadTokens !== undefined && (
+                  <span style={{ color: 'var(--ao-text-subtle)' }}> ({t.cacheReadTokens} cached)</span>
+                )}
+              </Td>
+              <Td dataLabel="Tokens out">{t.tokensOut ?? '—'}</Td>
+              <Td dataLabel="Stop reason"><PlainText>{t.stopReason || '—'}</PlainText></Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </Table>
+    </div>
+  )
+}
+
+function ToolCallsTable({ calls }: Readonly<{ calls: RunToolCall[] }>) {
+  return (
+    <div>
+      <SubTableLabel>{`tool calls — ${calls.length}`}</SubTableLabel>
+      <Table variant="compact" aria-label="tool calls">
+        <Thead>
+          <Tr><Th>Tool</Th><Th>Server</Th><Th>Duration</Th><Th>Result size</Th></Tr>
+        </Thead>
+        <Tbody>
+          {calls.map((c, i) => (
+            <Tr key={i}>
+              <Td dataLabel="Tool"><PlainText>{c.tool || '—'}</PlainText></Td>
+              <Td dataLabel="Server">
+                {/* Empty means a built-in tool, never missing data — say so rather
+                    than leave a blank cell. */}
+                <PlainText>{c.server || 'built-in'}</PlainText>
+              </Td>
+              <Td dataLabel="Duration">{formatDuration(c.durationMs)}</Td>
+              <Td dataLabel="Result size">{formatBytes(c.resultBytes)}</Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </Table>
+    </div>
+  )
+}
+
+/**
+ * One run: its facts, its raw result text kept exactly as it was before this
+ * change (QA finding: "keep the raw input/output exactly as it is today —
+ * that's what makes investigating a prompt-engineering issue possible"),
+ * then the turns and tool-calls tables the runtime may additionally report.
+ *
+ * Each run is its own full-width block rather than a row of a shared table:
+ * a `turns`/`toolCalls` table needs more columns than a "Result" table
+ * column can give it without clipping, and a Card's body is the width the
+ * mockup's layout assumes. Either sub-section is omitted entirely when its
+ * array is absent or empty, never rendered as an empty table.
+ */
+function RunEntry({ run }: Readonly<{ run: Run }>) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <DescriptionList isCompact isHorizontal>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Run</DescriptionListTerm>
+          <DescriptionListDescription><PlainText>{run.runId}</PlainText></DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Status</DescriptionListTerm>
+          <DescriptionListDescription>
+            <Label status={run.status === 'succeeded' ? 'success' : 'danger'}><PlainText>{run.status}</PlainText></Label>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Exit</DescriptionListTerm>
+          <DescriptionListDescription>{run.exitCode ?? '—'}</DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Finished</DescriptionListTerm>
+          <DescriptionListDescription>{run.finishedAt ? new Date(run.finishedAt).toLocaleString() : '—'}</DescriptionListDescription>
+        </DescriptionListGroup>
+      </DescriptionList>
+      {run.result ? <RawText>{run.result}</RawText> : <small>—</small>}
+      {run.turns && run.turns.length > 0 && <TurnsTable turns={run.turns} />}
+      {run.toolCalls && run.toolCalls.length > 0 && <ToolCallsTable calls={run.toolCalls} />}
+    </div>
+  )
+}
+
 function RunTimeline({ detail }: Readonly<{ detail: NonNullable<ReturnType<typeof useConversation>['data']> }>) {
   const runs = detail.conversation.runs ?? []
   return (
-    <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
+    <div data-testid="runs-view" style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
       <Card>
         <CardTitle>Runs</CardTitle>
         <CardBody>
           {runs.length === 0 ? (
             <Empty title="No completed runs" />
           ) : (
-            <Table variant="compact" aria-label="runs">
-              <Thead>
-                <Tr><Th>Run</Th><Th>Status</Th><Th>Exit</Th><Th>Finished</Th><Th>Result</Th></Tr>
-              </Thead>
-              <Tbody>
-                {runs.map((r) => (
-                  <Tr key={r.runId}>
-                    <Td dataLabel="Run"><PlainText>{r.runId}</PlainText></Td>
-                    <Td dataLabel="Status">
-                      <Label status={r.status === 'succeeded' ? 'success' : 'danger'}><PlainText>{r.status}</PlainText></Label>
-                    </Td>
-                    <Td dataLabel="Exit">{r.exitCode ?? '—'}</Td>
-                    <Td dataLabel="Finished">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '—'}</Td>
-                    <Td dataLabel="Result">{r.result ? <RawText>{r.result}</RawText> : <small>—</small>}</Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {runs.map((r, i) => (
+                <div key={r.runId} style={i > 0 ? { borderTop: '1px solid var(--ao-border)', paddingTop: 20 } : undefined}>
+                  <RunEntry run={r} />
+                </div>
+              ))}
+            </div>
           )}
         </CardBody>
       </Card>

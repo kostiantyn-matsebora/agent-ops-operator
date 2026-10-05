@@ -32,6 +32,12 @@ describe('start chips', () => {
     expect(screen.getByText('rollout-coordinator')).toBeInTheDocument()
   })
 
+  it('marks every starter with a "+" — it starts something new (item 20)', () => {
+    render(<QuickChips canWrite canStart onInsertCommand={vi.fn()} />)
+    const starter = screen.getByText('k8s-observe').closest('button')
+    expect(starter).toHaveTextContent('+k8s-observe')
+  })
+
   it('is absent when origination is unavailable', () => {
     render(<QuickChips canWrite canStart={false} onInsertCommand={vi.fn()} />)
     expect(screen.queryByText('k8s-observe')).toBeNull()

@@ -18,7 +18,6 @@ export interface RowMenuProps {
   onMarkUnread: () => void
   onOpenNewTab: () => void
   onCopyLink: () => void
-  onOpenIncident: () => void
   onReopen: () => void
   onExitRuntime: () => void
   onClose: () => void
@@ -63,7 +62,6 @@ export function RowMenu(props: Readonly<RowMenuProps>) {
     ? [
         <DropdownItem key="new-tab" onClick={act(props.onOpenNewTab)}>Open in new tab</DropdownItem>,
         <DropdownItem key="copy-link" onClick={act(props.onCopyLink)}>Copy link</DropdownItem>,
-        <DropdownItem key="incident" onClick={act(props.onOpenIncident)}>Open incident</DropdownItem>,
       ]
     : [
         isUnread ? (

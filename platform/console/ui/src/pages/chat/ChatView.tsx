@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Alert, AlertGroup, Button, SearchInput } from '@patternfly/react-core'
-import { useConversations, usePipelineIcon, useSession } from '../../api/hooks'
+import { Button, Checkbox, SearchInput } from '@patternfly/react-core'
+import { useConversations, usePipelineIcon, useSession, useSources } from '../../api/hooks'
 import { useShell } from '../../shell'
 import { Empty, ErrorState, Loading } from '../../components/States'
 import {
@@ -12,6 +12,7 @@ import { Inbox, sameScope, type Scope } from './Inbox'
 import { ConversationRow } from './ConversationRow'
 import { SelectionBar } from './SelectionBar'
 import { ThreadPane } from './ThreadPane'
+import { QuickChips } from './QuickChips'
 import { buildTree } from './tree'
 import type { ConversationSummary } from '../../api/types'
 
@@ -28,7 +29,6 @@ function scopeParams(scope: Scope, search: string): URLSearchParams {
   else if (scope.kind === 'working') p.set('phase', 'Working')
   else if (scope.kind === 'mine') p.set('mine', 'true')
   else if (scope.kind === 'errored') p.set('errored', 'true')
-  else if (scope.kind === 'incidents') p.set('incidents', 'true')
   else if (scope.kind === 'closed') p.set('phase', 'Closed')
   else if (scope.kind === 'pipeline') p.set('pipeline', scope.name)
   // A Coordinator scope has no server-side filter param (the backend tracks
@@ -68,8 +68,6 @@ function visibleRows(
   })
 }
 
-type Toast = { id: string; title: string }
-
 function dropName(set: Set<string>, name: string): Set<string> {
   if (!set.has(name)) return set
   const next = new Set(set)
@@ -77,13 +75,15 @@ function dropName(set: Set<string>, name: string): Set<string> {
   return next
 }
 
-// Arrivals move (console-thread-live-cues): a name the previous snapshot
-// did not have gets the tint, the "new" tag and a toast naming its
-// pipeline. `seenNames` starts `null` so the FIRST load never fires one.
+// Arrivals move (console-thread-live-cues): a name the previous snapshot did
+// not have gets the tint and the "new" tag — the row itself, plus the inbox's
+// own unread badges, are the whole of the signal. A popup for every arrival
+// was removed: it fired once per row on every page that happened to be open,
+// which is spam rather than a cue. `seenNames` starts `null` so the FIRST
+// load never fires one.
 function useArrivals(
   data: { items: ConversationSummary[] } | undefined,
   setNewNames: React.Dispatch<React.SetStateAction<Set<string>>>,
-  setToasts: React.Dispatch<React.SetStateAction<Toast[]>>,
 ) {
   const seenNames = useRef<Set<string> | null>(null)
   useEffect(() => {
@@ -95,17 +95,10 @@ function useArrivals(
     const arrived = data.items.filter((c) => !prevSeen.has(c.name))
     if (arrived.length === 0) return
     setNewNames((prev) => new Set([...prev, ...arrived.map((c) => c.name)]))
-    setToasts((prev) => [
-      ...prev,
-      ...arrived.map((c) => ({
-        id: `${c.name}-${Date.now()}`,
-        title: `${c.pipeline || c.coordinator || 'A pipeline'} opened ${c.title || c.name}`,
-      })),
-    ])
     for (const c of arrived) {
       setTimeout(() => setNewNames((prev) => dropName(prev, c.name)), 4000)
     }
-  }, [data, setNewNames, setToasts])
+  }, [data, setNewNames])
 }
 
 function ListBody({
@@ -137,31 +130,49 @@ export function ChatView() {
   const [scope, setScope] = useState<Scope>({ kind: 'all' })
   const [search, setSearch] = useState('')
   const [flatten, setFlatten] = useState(false)
+  // No existing layout preference carries a per-scope toggle like this one,
+  // so it is plain component state rather than a new persistence mechanism —
+  // `layout.ts` owns only pane widths and the inbox's collapsed state.
+  const [showClosed, setShowClosed] = useState(false)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [highlighted, setHighlighted] = useState<string | undefined>()
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set())
-  const [toasts, setToasts] = useState<Toast[]>([])
   const [newNames, setNewNames] = useState<Set<string>>(new Set())
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
 
   const params = useMemo(() => scopeParams(scope, search), [scope, search])
   const { data, isLoading, error } = useConversations(params)
   const session = useSession()
+  const sources = useSources()
   const iconFor = usePipelineIcon()
+  // Same gates `NewConversation.tsx` uses to decide whether its own button is
+  // live — a starter chip here must offer nothing a conversation could not
+  // actually be started from.
+  const canWriteHere = session.data?.canWrite ?? false
+  const canStartHere = Boolean(session.data?.canOriginate) && (sources.data?.sources ?? []).some((s) => s.wired)
 
   const items = useMemo(() => {
-    const raw = data?.items ?? []
+    let raw = data?.items ?? []
     if (scope.kind === 'coordinator') {
-      return raw.filter((c) => c.coordinator === scope.name || c.causedBy)
+      raw = raw.filter((c) => c.coordinator === scope.name || c.causedBy)
+    }
+    // Closed conversations are hidden by default everywhere except the
+    // dedicated Closed scope, where showing them is the whole point —
+    // narrowed CLIENT-SIDE, like the coordinator scope above, since there is
+    // no server-side "exclude closed" param to ask for instead.
+    if (!showClosed && scope.kind !== 'closed') {
+      raw = raw.filter((c) => c.phase !== 'Closed')
     }
     return raw
-  }, [data, scope])
+  }, [data, scope, showClosed])
 
-  useArrivals(data, setNewNames, setToasts)
+  useArrivals(data, setNewNames)
 
   const tree = useMemo(() => buildTree(items, !flatten), [items, flatten])
   const rows = useMemo(() => visibleRows(tree, items, collapsedRoots), [tree, items, collapsedRoots])
+  const collapsibleNames = useMemo(() => tree.filter((t) => t.memberCount > 0).map((t) => t.row.name), [tree])
+  const anyCollapsed = collapsibleNames.some((n) => collapsedRoots.has(n))
 
   // The PatternFly sidebar collapses to icons on this view (design D-J),
   // restored to whatever it was on leaving.
@@ -241,17 +252,6 @@ export function ChatView() {
       tabIndex={-1}
       style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}
     >
-      <AlertGroup isToast isLiveRegion>
-        {toasts.slice(-3).map((t) => (
-          <Alert
-            key={t.id}
-            variant="info"
-            title={t.title}
-            timeout={5000}
-            onTimeout={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-          />
-        ))}
-      </AlertGroup>
       {showingList && (
         <>
           <div style={{ width: inboxWidth, flex: 'none', overflow: 'hidden', borderRight: '1px solid var(--ao-border)' }}>
@@ -289,6 +289,15 @@ export function ChatView() {
               <Button variant="link" isInline onClick={() => setFlatten((v) => !v)}>
                 {flatten ? 'group by incident' : 'flatten'}
               </Button>
+              {collapsibleNames.length > 0 && (
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={() => setCollapsedRoots(anyCollapsed ? new Set() : new Set(collapsibleNames))}
+                >
+                  {anyCollapsed ? 'Expand all' : 'Collapse all'}
+                </Button>
+              )}
               <Button
                 variant="link"
                 isInline
@@ -307,6 +316,14 @@ export function ChatView() {
                 >
                   {allSelected ? 'Clear all' : 'Select all'}
                 </Button>
+              )}
+              {scope.kind !== 'closed' && (
+                <Checkbox
+                  id="show-closed"
+                  label="Show closed"
+                  isChecked={showClosed}
+                  onChange={(_e, checked) => setShowClosed(checked)}
+                />
               )}
             </div>
             {selectionMode && (
@@ -371,8 +388,13 @@ export function ChatView() {
         <ThreadPane name={name} onBack={narrow ? () => navigate('/conversations') : undefined} />
       ) : (
         !narrow && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
             <Empty title="Select a conversation">Choose one from the list, or start a new one.</Empty>
+            {/* No thread is open yet, so there is nothing to insert a thread
+                command into — only the starter chips apply, and choosing one
+                opens the composer through the shared composer intent
+                (`NewConversation.tsx` is the one place that listens). */}
+            <QuickChips canWrite={canWriteHere} canStart={canStartHere} />
           </div>
         )
       ))}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -63,6 +64,111 @@ type Run struct {
 	// runs recorded before the manager kept them, which is why a thread from
 	// before this change still reads as answers alone.
 	Inputs []RecordedInput `json:"inputs,omitempty"`
+	// Turns and ToolCalls are this run's own model/tool call diagnostics,
+	// DERIVED by attachRunCalls from the activity feed's `model.call` /
+	// `tool.call` hops for this RunID — never read off the Conversation. The
+	// manager's own work contract is explicit that it writes neither to the
+	// Conversation (docs/contracts.md, "What the run did: turns[] and
+	// toolCalls[]"): that telemetry is recorded as activity hops only. Both
+	// are absent on a run whose runtime reported neither, or one outside the
+	// activity window.
+	Turns     []RunTurn     `json:"turns,omitempty"`
+	ToolCalls []RunToolCall `json:"toolCalls,omitempty"`
+}
+
+// RunTurn is one model call a run made, read off a `model.call` activity hop.
+// Field names match the work contract's own `turns[]` exactly
+// (docs/contracts.md).
+type RunTurn struct {
+	Model           string `json:"model,omitempty"`
+	TokensIn        *int64 `json:"tokensIn,omitempty"`
+	TokensOut       *int64 `json:"tokensOut,omitempty"`
+	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
+	StopReason      string `json:"stopReason,omitempty"`
+}
+
+// RunToolCall is one tool call a run made, read off a `tool.call` activity
+// hop. Field names match the work contract's own `toolCalls[]` exactly
+// (docs/contracts.md).
+type RunToolCall struct {
+	Tool        string `json:"tool,omitempty"`
+	Server      string `json:"server,omitempty"`
+	DurationMs  *int64 `json:"durationMs,omitempty"`
+	ResultBytes *int64 `json:"resultBytes,omitempty"`
+}
+
+// attachRunCalls groups one conversation's `model.call` / `tool.call`
+// activity hops by RunID and layers them onto the matching Run — the one
+// place this telemetry reaches the browser as a PER-RUN diagnostic rather
+// than loose hops on the activity stream. It reads the SAME events array the
+// detail view already fetches for its own "events" field, never a second
+// activity read.
+//
+// A run with no matching hops (a runtime that reported neither, or a run
+// older than the activity window) keeps both fields absent — exactly the
+// shape the work contract itself allows.
+func attachRunCalls(runs []Run, events []ActivityEvent) []Run {
+	if len(runs) == 0 || len(events) == 0 {
+		return runs
+	}
+	turns := map[string][]RunTurn{}
+	toolCalls := map[string][]RunToolCall{}
+	for _, e := range events {
+		if e.RunID == "" {
+			continue
+		}
+		switch e.Kind {
+		case "model.call":
+			turns[e.RunID] = append(turns[e.RunID], RunTurn{
+				Model: e.Data["model"], StopReason: e.Data["stopReason"],
+				TokensIn: reportedCount(e.Data, "tokensIn"), TokensOut: reportedCount(e.Data, "tokensOut"),
+				CacheReadTokens: reportedCount(e.Data, "cacheReadTokens"),
+			})
+		case "tool.call":
+			toolCalls[e.RunID] = append(toolCalls[e.RunID], RunToolCall{
+				Tool: e.Data["tool"], Server: e.Data["server"],
+				ResultBytes: reportedCount(e.Data, "resultBytes"), DurationMs: reportedLatency(e.LatencyMs),
+			})
+		}
+	}
+	if len(turns) == 0 && len(toolCalls) == 0 {
+		return runs
+	}
+	out := make([]Run, len(runs))
+	for i, r := range runs {
+		r.Turns = turns[r.RunID]
+		r.ToolCalls = toolCalls[r.RunID]
+		out[i] = r
+	}
+	return out
+}
+
+// reportedCount reads a bounded telemetry count out of an activity hop's
+// string data map, or nil when the key is absent or not a clean
+// non-negative integer. The manager OMITS a fact it cannot determine rather
+// than reporting it as zero (docs/contracts.md: "A fact the runtime cannot
+// determine is OMITTED, never sent as zero"), and a value that fails to
+// parse across this boundary is treated the same way rather than trusted.
+func reportedCount(data map[string]string, key string) *int64 {
+	v, ok := data[key]
+	if !ok {
+		return nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return nil
+	}
+	return &n
+}
+
+// reportedLatency mirrors Edges' own treatment of an activity hop's
+// LatencyMs: the wire's `omitempty` already makes zero and "not reported"
+// indistinguishable, so zero reads as absent here too, consistently.
+func reportedLatency(ms int64) *int64 {
+	if ms <= 0 {
+		return nil
+	}
+	return &ms
 }
 
 // RecordedInput is one message a run consumed, as the Conversation records it.

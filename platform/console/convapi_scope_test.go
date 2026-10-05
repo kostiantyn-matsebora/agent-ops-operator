@@ -25,9 +25,12 @@ func withCoordinatorRef(o *Object, coordinator string) *Object {
 	return o
 }
 
-// Mine narrows to conversations the requesting reader themselves started,
-// and Incidents to conversations that are a Coordinator's own root.
-func TestMineAndIncidentsFilters(t *testing.T) {
+// Mine narrows to conversations the requesting reader themselves started.
+// There is no "Incidents" filter or scope — that concept was removed outright
+// (item #26): a Coordinator's root is reached by clicking the Coordinator
+// itself under PIPELINES & COORDINATORS, counted below by its OWN name
+// (scopes[coordinator name]), which is the one count that survives.
+func TestMineFilterAndPerCoordinatorScopeCount(t *testing.T) {
 	// the reader key is a pure function of the salt, so it is computable
 	// before the fixture that must carry it exists.
 	keyer := NewAdapter(nil, nil, nil, "console")
@@ -37,8 +40,8 @@ func TestMineAndIncidentsFilters(t *testing.T) {
 	api, _, _, _ := apiWithOptions(t, "tok", true,
 		withOriginReader(convWithRuns("started-by-alice", "", [2]string{"r", tLate}), "console", aliceKey),
 		convWithRuns("started-by-nobody-in-particular", "", [2]string{"r", tLate}),
-		withCoordinatorRef(convWithRuns("an-incident", "", [2]string{"r", tLate}), "inc-1"),
-		obj("coordinators", "inc-1", "1", "{}", "{}"),
+		withCoordinatorRef(convWithRuns("a-coordinator-root", "", [2]string{"r", tLate}), "triage"),
+		obj("coordinators", "triage", "1", "{}", "{}"),
 	)
 	withSalt(api.adapter, "pepper")
 	h := api.Handler(http.NotFoundHandler())
@@ -49,11 +52,6 @@ func TestMineAndIncidentsFilters(t *testing.T) {
 	}
 	if !mine.Items[0].Mine {
 		t.Fatalf("the row itself must report mine=true: %+v", mine.Items[0])
-	}
-
-	incidents := getListAs(t, h, "/api/conversations?incidents=true", "alice@example.com")
-	if incidents.Total != 1 || len(incidents.Items) != 1 || incidents.Items[0].Name != "an-incident" {
-		t.Fatalf("incidents filter: %+v", incidents)
 	}
 
 	// scope counts ride the count-only form, unread within each scope
@@ -70,8 +68,11 @@ func TestMineAndIncidentsFilters(t *testing.T) {
 	if scoped.Scopes["mine"] != 1 {
 		t.Fatalf("scope count for mine: %+v", scoped.Scopes)
 	}
-	if scoped.Scopes["incidents"] != 1 || scoped.Scopes["inc-1"] != 1 {
-		t.Fatalf("scope count for incidents: %+v", scoped.Scopes)
+	if _, stillThere := scoped.Scopes["incidents"]; stillThere {
+		t.Fatalf("the retired 'incidents' scope must not be computed at all: %+v", scoped.Scopes)
+	}
+	if scoped.Scopes["triage"] != 1 {
+		t.Fatalf("scope count for the Coordinator's own name: %+v", scoped.Scopes)
 	}
 }
 

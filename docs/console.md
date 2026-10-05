@@ -553,7 +553,7 @@ thread pane in place — there is no navigation away from the list.
 | Column | Shows |
 |---|---|
 | Icon rail | the app's own sidebar, collapsed to icons on this view |
-| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, Incidents, then every Ready Pipeline and Coordinator, then the manager's commands, then Closed — each with its own unread count |
+| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with its own unread count |
 | List | the rows in the active scope, as a coordination tree by default |
 | Thread pane | the open conversation |
 
@@ -636,7 +636,9 @@ row above it:
 
 - **Runs** — `status.runs[]` with status, exit code, result and the messages
   each run consumed, plus the bindings the conversation materialized and its
-  runtime pod.
+  runtime pod. Each run also carries its own `turns`/`toolCalls`, the API
+  server's DERIVED view of that run's `model.call`/`tool.call` activity hops
+  — the manager itself writes neither to the Conversation (docs/contracts.md).
 - **Graph** — the install's topology, **opened on this conversation's
   replay**, with every element its run did not touch dimmed. The three views,
   the hop feed and the content panel are the Topology page's own.
@@ -651,9 +653,12 @@ row above it:
 
 **On a Coordinator's root**, the transcript is instead an incident timeline:
 invocation lines, result cards linking each member's own transcript, nested
-cards for a member that is itself coordinating, and the escalation divider at
-`status.escalatedAt`. Before escalation the pane is read-only, with the
-reason named.
+cards for a member that is itself coordinating, and (once it happens) the
+escalation divider at `status.escalatedAt`.
+
+The composer follows the same rule as any other conversation — live once the
+console channel holds a thread. For a root that is from the moment it is
+created, whether or not its agent ever escalates.
 
 ### Unread
 
@@ -669,9 +674,12 @@ console thread and so no count of its own.
 Its result arrives on its root as an input, and is counted there instead.
 
 Every scope in the inbox carries its own unread sum — the fixed scopes
-(Unread, Working, Mine, Errored, Incidents, Closed), and one per Pipeline or
-Coordinator. The **Unread** scope narrows the list to conversations with a
-count.
+(Unread, Working, Mine, Errored, Closed), and one per Pipeline or Coordinator.
+
+A Coordinator's own root conversations are reached through ITS scope, same as
+any pipeline's. There is no separate "Incidents" scope.
+
+The **Unread** scope narrows the list to conversations with a count.
 
 Every sum is computed before any filter, so narrowing the view never moves
 it.

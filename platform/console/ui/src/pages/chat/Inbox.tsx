@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Badge, Tooltip } from '@patternfly/react-core'
 import {
-  ArchiveIcon, BellIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, SitemapIcon, UserIcon,
+  ArchiveIcon, BellIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, UserIcon,
 } from '@patternfly/react-icons'
 import { useInboxCounts, useVocabulary } from '../../api/hooks'
 import { Icon } from '../../components/Icon'
@@ -12,8 +12,8 @@ import { INBOX_COLLAPSED_WIDTH } from './layout'
 // (the icon strip) — scope order and wording read from there.
 //
 // `console-chat-layout` spec: "the inbox column SHALL list, in this order:
-// the filters All, Unread, Working, Mine, Errored and Incidents, then every
-// Ready Pipeline and Coordinator, then the manager's commands, then Closed."
+// the filters All, Unread, Working, Mine and Errored, then every Ready
+// Pipeline and Coordinator, then Closed."
 
 export type Scope =
   | { kind: 'all' }
@@ -21,9 +21,7 @@ export type Scope =
   | { kind: 'working' }
   | { kind: 'mine' }
   | { kind: 'errored' }
-  | { kind: 'incidents' }
   | { kind: 'pipeline' | 'coordinator'; name: string }
-  | { kind: 'command'; name: string }
   | { kind: 'closed' }
 
 export function scopeKey(s: Scope): string {
@@ -58,7 +56,7 @@ function Section({ title, children }: Readonly<{ title: string; children: ReactN
 }
 
 function Row({
-  icon, label, count, active, onClick, mono,
+  icon, label, count, active, onClick, mono, countTooltip,
 }: Readonly<{
   icon: ReactNode
   label: string
@@ -66,7 +64,17 @@ function Row({
   active: boolean
   onClick: () => void
   mono?: boolean
+  /** Explains a count the row BELOW it will not visibly match (item 24) — the
+   * server computes `total`/`scopes` over every conversation before any
+   * filter, so a badge can read higher than the rows a reader sees without
+   * scrolling or un-hiding closed ones. */
+  countTooltip?: string
 }>) {
+  const badge = typeof count === 'number' && count > 0 && (
+    <span style={{ marginLeft: 'auto' }}>
+      <Badge isRead={!active}>{count}</Badge>
+    </span>
+  )
   return (
     <button
       type="button"
@@ -84,11 +92,7 @@ function Row({
     >
       <span aria-hidden style={{ display: 'flex', flex: 'none' }}>{icon}</span>
       <PlainText>{label}</PlainText>
-      {typeof count === 'number' && count > 0 && (
-        <span style={{ marginLeft: 'auto' }}>
-          <Badge isRead={!active}>{count}</Badge>
-        </span>
-      )}
+      {badge && (countTooltip ? <Tooltip content={countTooltip}>{badge}</Tooltip> : badge)}
     </button>
   )
 }
@@ -99,18 +103,21 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
   const scopes = counts.data?.scopes ?? {}
   const entries = vocabulary.data?.entries ?? []
   const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
-  // `help`/`pipelines` are the manager's LISTING commands — see `/help` in
-  // the prototype. `exit`/`close` are thread-position and have nothing to
-  // list from the inbox.
-  const commands = entries.filter((e) => e.kind === 'builtin' && e.position === 'general')
 
-  const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number }[] = [
-    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.total },
+  // Item 24: "All"'s count is the server's total BEFORE any filter — every
+  // conversation, closed ones and invoked members included — while the list
+  // beneath it hides closed conversations by default (the "Show closed"
+  // checkbox) and may have roots collapsed. The gap is real, not a bug in
+  // the count, so it is named rather than silently narrowed: narrowing it to
+  // "visible rows" would drift the moment paging, search or another scope
+  // changes what is on screen.
+  const ALL_COUNT_TOOLTIP = 'Every conversation, including closed ones and invoked members — not all are visible in the list below by default.'
+  const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number; countTooltip?: string }[] = [
+    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.total, countTooltip: ALL_COUNT_TOOLTIP },
     { scope: { kind: 'unread' }, icon: <BellIcon />, label: 'Unread', count: counts.data?.unreadTotal },
     { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, icon: <UserIcon />, label: 'Mine', count: scopes.mine },
     { scope: { kind: 'errored' }, icon: <ExclamationCircleIcon />, label: 'Errored', count: scopes.errored },
-    { scope: { kind: 'incidents' }, icon: <SitemapIcon />, label: 'Incidents', count: scopes.incidents },
   ]
 
   if (collapsed) {
@@ -124,7 +131,10 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         }}
       >
         {fixed.map((f) => (
-          <Tooltip key={scopeKey(f.scope)} content={f.count ? `${f.label} · ${f.count}` : f.label}>
+          <Tooltip
+            key={scopeKey(f.scope)}
+            content={f.countTooltip ?? (f.count ? `${f.label} · ${f.count}` : f.label)}
+          >
             <IconButton active={sameScope(activeScope, f.scope)} onClick={() => onSelectScope(f.scope)} badge={f.count}>
               {f.icon}
             </IconButton>
@@ -180,13 +190,14 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
             icon={f.icon}
             label={f.label}
             count={f.count}
+            countTooltip={f.countTooltip}
             active={sameScope(activeScope, f.scope)}
             onClick={() => onSelectScope(f.scope)}
           />
         ))}
       </Section>
       {pipelines.length > 0 && (
-        <Section title="PIPELINES">
+        <Section title="PIPELINES & COORDINATORS">
           {pipelines.map((e) => (
             <Row
               key={e.name}
@@ -195,20 +206,6 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
               count={scopes[e.name]}
               active={sameScope(activeScope, { kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
               onClick={() => onSelectScope({ kind: e.kind as 'pipeline' | 'coordinator', name: e.name })}
-            />
-          ))}
-        </Section>
-      )}
-      {commands.length > 0 && (
-        <Section title="COMMANDS">
-          {commands.map((e) => (
-            <Row
-              key={e.name}
-              icon={null}
-              mono
-              label={`/${e.name}`}
-              active={sameScope(activeScope, { kind: 'command', name: e.name })}
-              onClick={() => onSelectScope({ kind: 'command', name: e.name })}
             />
           ))}
         </Section>

@@ -53,6 +53,11 @@ export function QuickChips({ canWrite, canStart, choices, onInsertCommand }: Rea
           icon={e.icon ? <Icon icon={e.icon} /> : undefined}
           onClick={() => useComposerIntent.getState().openWith(`/${e.name} `)}
         >
+          {/* The "+" marks "starts something new" — distinct from a thread
+              command (raw `/name`, mono) and an offered choice (no marker at
+              all). A separate span so the visible name stays an exact text
+              match for anything already asserting on it. */}
+          <span aria-hidden style={{ fontWeight: 700, marginRight: 4 }}>+</span>
           <PlainText>{e.name}</PlainText>
         </Button>
       ))}

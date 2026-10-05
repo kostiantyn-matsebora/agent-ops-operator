@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { Inbox } from './Inbox'
 
 vi.mock('../../api/hooks', () => ({
   useInboxCounts: () => ({
     data: {
       items: [], total: 7, unreadTotal: 2, offset: 0, limit: 0, facets: {},
-      scopes: { working: 2, mine: 1, errored: 1, incidents: 1, 'rollout-coordinator': 1, 'alert-triage': 1 },
+      scopes: { working: 2, mine: 1, errored: 1, 'rollout-coordinator': 1, 'alert-triage': 1 },
     },
   }),
   useVocabulary: () => ({
@@ -29,7 +30,7 @@ function order() {
 }
 
 describe('the inbox, expanded', () => {
-  it('lists the fixed scopes, then pipelines and coordinators, then commands, then Closed, in spec order', () => {
+  it('lists the fixed scopes, then pipelines and coordinators, then Closed, in spec order', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} />)
     const labels = order()
     const index = (s: string) => labels.findIndex((l) => l?.includes(s))
@@ -37,13 +38,14 @@ describe('the inbox, expanded', () => {
     expect(index('Unread')).toBeLessThan(index('Working'))
     expect(index('Working')).toBeLessThan(index('Mine'))
     expect(index('Mine')).toBeLessThan(index('Errored'))
-    expect(index('Errored')).toBeLessThan(index('Incidents'))
-    expect(index('Incidents')).toBeLessThan(index('k8s-observe'))
-    expect(index('alert-triage')).toBeLessThan(index('/pipelines'))
-    expect(index('/pipelines')).toBeLessThan(index('/help'))
-    expect(index('/help')).toBeLessThan(index('Archive'))
-    // thread-position commands never show in the general inbox
+    expect(index('Errored')).toBeLessThan(index('k8s-observe'))
+    expect(index('alert-triage')).toBeLessThan(index('Archive'))
+    // Item 23 — there is no COMMANDS section any more, in any position.
+    expect(labels.some((l) => l?.includes('/pipelines'))).toBe(false)
+    expect(labels.some((l) => l?.includes('/help'))).toBe(false)
     expect(labels.some((l) => l?.includes('/exit'))).toBe(false)
+    // Item 26 — there is no Incidents scope any more.
+    expect(labels.some((l) => l?.includes('Incidents'))).toBe(false)
   })
 
   it('shows each scope its own unread count', () => {
@@ -59,6 +61,33 @@ describe('the inbox, expanded', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={onSelectScope} collapsed={false} onToggleCollapsed={vi.fn()} />)
     screen.getByTestId('scope-k8s-observe').click()
     expect(onSelectScope).toHaveBeenCalledWith({ kind: 'pipeline', name: 'k8s-observe' })
+  })
+})
+
+describe('the "All" count explains the gap to visible rows (item 24)', () => {
+  it('names closed conversations and invoked members on hover, never a bare number with no explanation', async () => {
+    render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} />)
+    await userEvent.hover(screen.getByTestId('scope-All').querySelector('.pf-v6-c-badge')!)
+    await waitFor(() => {
+      expect(screen.getByText(/closed ones and invoked members/)).toBeInTheDocument()
+    })
+  })
+
+  it('carries no such explanation on an ordinary scope — that count really does match its rows', async () => {
+    render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} />)
+    await userEvent.hover(screen.getByTestId('scope-Working').querySelector('.pf-v6-c-badge')!)
+    // No tooltip at all is wired to an ordinary scope's badge in the expanded
+    // list — unlike the collapsed icon strip below, which tips every entry.
+    expect(screen.queryByText(/closed ones and invoked members/)).not.toBeInTheDocument()
+  })
+
+  it('still names the gap on the collapsed icon strip, beside its own label · count tip', async () => {
+    render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed onToggleCollapsed={vi.fn()} />)
+    const strip = screen.getByTestId('inbox-collapsed')
+    await userEvent.hover(strip.querySelectorAll('button')[0])
+    await waitFor(() => {
+      expect(screen.getByText(/closed ones and invoked members/)).toBeInTheDocument()
+    })
   })
 })
 

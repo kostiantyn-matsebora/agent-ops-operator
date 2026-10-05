@@ -24,6 +24,13 @@
   --ao-brand-soft: #d3ece9;
   --ao-accent: #6b4bd6;
   --ao-accent-soft: #e9e3fb;
+  /* The text/icon colour a Label needs ON TOP of `--ao-brand`/`--ao-accent`
+     when used as its background (`color="blue"`/`color="purple"`) — see the
+     PatternFly mapping block below. Both are saturated/dark in this theme,
+     so the readable pairing is light text, not this theme's ordinary
+     near-black `--ao-text`. */
+  --ao-on-brand: var(--ao-surface);
+  --ao-on-accent: var(--ao-surface);
 
   --ao-success: #1f7a4d;
   --ao-warning: #a86400;
@@ -62,6 +69,11 @@
   --ao-brand-soft: #123b39;
   --ao-accent: #a996f5;
   --ao-accent-soft: #2a2350;
+  /* `--ao-brand`/`--ao-accent` INVERT to pale, light colours in this theme,
+     so the readable Label pairing inverts too — dark text, not this theme's
+     ordinary near-white `--ao-text`. */
+  --ao-on-brand: var(--ao-canvas);
+  --ao-on-accent: var(--ao-canvas);
 
   --ao-success: #55c98a;
   --ao-warning: #e0a63c;
@@ -110,6 +122,34 @@
   --pf-t--global--color--nonstatus--blue--default: var(--ao-brand);
   --pf-t--global--color--nonstatus--teal--default: var(--ao-brand);
   --pf-t--global--color--nonstatus--purple--default: var(--ao-accent);
+
+  /*
+   * PatternFly pairs each nonstatus background with its own matched
+   * foreground token (`...text--color--nonstatus--on-<color>--default`,
+   * `on-<color>--hover`, `on-<color>--clicked`, plus the icon equivalents).
+   * Overriding only the BACKGROUND above, as this file long did, orphans
+   * that pairing: PatternFly's stock on-blue/on-purple foreground is a
+   * fixed near-black (light theme) or near-white (dark theme) calibrated
+   * for PATTERNFLY's OWN blue/purple, not `--ao-brand`/`--ao-accent` — which
+   * is exactly backwards in both themes here, since this palette's brand and
+   * accent invert from dark-on-light to light-on-dark between them. A
+   * `<Label color="purple">` read near-black text on the medium-purple
+   * `--ao-accent` background in light mode (contrast ~3:1, below the ~4.5:1
+   * small text needs) until these were added.
+   */
+  --pf-t--global--text--color--nonstatus--on-blue--default: var(--ao-on-brand);
+  --pf-t--global--text--color--nonstatus--on-blue--hover: var(--ao-on-brand);
+  --pf-t--global--text--color--nonstatus--on-blue--clicked: var(--ao-on-brand);
+  --pf-t--global--icon--color--nonstatus--on-blue--default: var(--ao-on-brand);
+  --pf-t--global--icon--color--nonstatus--on-blue--hover: var(--ao-on-brand);
+  --pf-t--global--icon--color--nonstatus--on-blue--clicked: var(--ao-on-brand);
+
+  --pf-t--global--text--color--nonstatus--on-purple--default: var(--ao-on-accent);
+  --pf-t--global--text--color--nonstatus--on-purple--hover: var(--ao-on-accent);
+  --pf-t--global--text--color--nonstatus--on-purple--clicked: var(--ao-on-accent);
+  --pf-t--global--icon--color--nonstatus--on-purple--default: var(--ao-on-accent);
+  --pf-t--global--icon--color--nonstatus--on-purple--hover: var(--ao-on-accent);
+  --pf-t--global--icon--color--nonstatus--on-purple--clicked: var(--ao-on-accent);
 
   --pf-t--global--background--color--primary--default: var(--ao-surface);
   --pf-t--global--background--color--secondary--default: var(--ao-surface-alt);

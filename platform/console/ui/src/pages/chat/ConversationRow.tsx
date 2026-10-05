@@ -11,13 +11,25 @@ import type { ConversationBudget, ConversationSummary } from '../../api/types'
 // wording read from there, behaviour from the `console-unread` and
 // `console-conversation-tree` specs.
 
+/**
+ * Strips a leading "`<name>`: " from a title, ONLY when `<name>` is exactly
+ * the name the row's own chip already shows (`RowBadges` above) — the
+ * coordinator for a root, the pipeline otherwise. Any other colon-prefixed
+ * text (an agent's own "esphome: ...", "homeassistant: ...") is content and
+ * stays untouched: this never strips a prefix it cannot attribute to the chip.
+ */
+export function stripNamePrefix(title: string, name: string | undefined): string {
+  if (!name) return title
+  const prefix = `${name}: `
+  return title.startsWith(prefix) ? title.slice(prefix.length) : title
+}
+
 /** The snippet line: the last counted message, or why the row has no message yet. */
 export function rowSnippet(row: ConversationSummary): string {
   if (row.deleting) return 'deleting'
   if (row.phase === 'Closed') return row.closeReason ? `closed · ${row.closeReason}` : `closed · ${row.runCount} run(s)`
   if (row.blocked) return `${row.blocked.storage ? 'storage' : 'blocked'}: ${row.blocked.reason}`
   if (row.phase === 'Pending') return 'pending · waiting for a slot'
-  if (!row.joined) return 'observed'
   if (row.lastMessage) {
     const who = row.lastMessage.sender ? `${row.lastMessage.sender}: ` : ''
     return row.presence ? `working · ${who}${row.lastMessage.text}` : `${who}${row.lastMessage.text}`
@@ -31,9 +43,9 @@ export function rowTag(row: ConversationSummary, isNew: boolean): string | undef
   if (isNew) return 'new'
   if (row.errored) return 'run failed'
   if (row.phase === 'Closed') {
-    // An incident its coordinator closed WITHOUT escalating is visible and
-    // distinct (console-conversation-tree: "An incident nobody was told
-    // about is visible") — never confused with an ordinary closed thread.
+    // A coordinator's root closed WITHOUT escalating is visible and distinct
+    // (console-conversation-tree: "An incident nobody was told about is
+    // visible") — never confused with an ordinary closed thread.
     if (row.coordinator && !row.escalatedAt && row.closeReason) return 'nobody notified'
     return 'closed'
   }
@@ -96,12 +108,27 @@ function RowBadges({
   unread: boolean
   tag: string | undefined
 }>) {
+  // Every row names what answers it: the coordinator by name for a root, the
+  // addressed entry for a member (already carried by `causedBy.entry`), and
+  // the pipeline by name for an ordinary conversation — previously only an
+  // icon, with nothing to read if the icon didn't say enough on its own.
+  const plainPipeline = !isRoot && !(depth > 0 && row.causedBy) && row.pipeline
+
   return (
     <>
-      {isRoot && <Label isCompact color="purple">coordinator</Label>}
+      {isRoot && (
+        <Label isCompact color="purple">
+          <PlainText>{row.coordinator}</PlainText>
+        </Label>
+      )}
       {depth > 0 && row.causedBy && (
         <Label isCompact color="purple">
           <PlainText>{`via ${row.causedBy.entry}`}</PlainText>
+        </Label>
+      )}
+      {plainPipeline && (
+        <Label isCompact color="grey">
+          <PlainText>{row.pipeline}</PlainText>
         </Label>
       )}
       {parentMissing && row.causedBy && (
@@ -157,12 +184,12 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
   },
   ref,
 ) {
-  const title = stripLeadingIcon(row.title || row.name)
+  const isRoot = Boolean(row.coordinator)
+  const title = stripNamePrefix(stripLeadingIcon(row.title || row.name), isRoot ? row.coordinator : row.pipeline)
   const unread = (row.unreadCount ?? 0) > 0
   const dot = phaseDot(row)
   const snippet = rowSnippet(row)
   const tag = rowTag(row, isNew)
-  const isRoot = Boolean(row.coordinator)
   const tint = rowTint(row, isRoot)
 
   return (

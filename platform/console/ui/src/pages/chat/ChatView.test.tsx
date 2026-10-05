@@ -17,7 +17,8 @@ let items: ConversationSummary[] = [conv('a'), conv('b'), conv('c')]
 vi.mock('../../api/hooks', () => ({
   useConversations: () => ({ data: { items, total: items.length, unreadTotal: 0, offset: 0, limit: 100, facets: {} }, isLoading: false, error: null }),
   usePipelineIcon: () => () => undefined,
-  useSession: () => ({ data: { canWrite: true, identity: 'dana' } }),
+  useSession: () => ({ data: { canWrite: true, identity: 'dana', canOriginate: true } }),
+  useSources: () => ({ data: { sources: [] } }),
   useInboxCounts: () => ({ data: { items: [], total: items.length, unreadTotal: 0, offset: 0, limit: 0, facets: {}, scopes: {} } }),
   useVocabulary: () => ({ data: { entries: [] } }),
 }))
@@ -79,7 +80,9 @@ describe('narrow windows show one column', () => {
 })
 
 describe('arrivals (console-thread-live-cues)', () => {
-  it('tags the new row and names its pipeline in a toast', () => {
+  // The toast popup is gone (item 9) — the tinted row and its "new" tag are
+  // the whole of the signal now, never a popup naming the pipeline.
+  it('tags the new row, and raises no toast', () => {
     const original = items
     items = [conv('a'), conv('b'), conv('c')]
     const { rerender } = render(
@@ -98,7 +101,41 @@ describe('arrivals (console-thread-live-cues)', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('new')).toBeInTheDocument()
-    expect(screen.getByText(/alert-triage opened a brand new incident/)).toBeInTheDocument()
+    expect(screen.queryByText(/alert-triage opened a brand new incident/)).not.toBeInTheDocument()
+    items = original
+  })
+})
+
+describe('expand all / collapse all (item 2)', () => {
+  it('is absent with nothing collapsible to toggle', () => {
+    renderAt('/conversations')
+    expect(screen.queryByText('Expand all')).not.toBeInTheDocument()
+    expect(screen.queryByText('Collapse all')).not.toBeInTheDocument()
+  })
+
+  it('collapses every root with members, then expands them again', async () => {
+    const original = items
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByText('Collapse all'))
+    expect(screen.queryByTestId('row-member-1')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText('Expand all'))
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    items = original
+  })
+})
+
+describe('show closed (item 8)', () => {
+  it('hides closed conversations by default, and reveals them when checked', async () => {
+    const original = items
+    items = [conv('a'), conv('b', { phase: 'Closed' })]
+    renderAt('/conversations')
+    expect(screen.queryByTestId('row-b')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('Show closed'))
+    expect(screen.getByTestId('row-b')).toBeInTheDocument()
     items = original
   })
 })

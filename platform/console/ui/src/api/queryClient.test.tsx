@@ -110,6 +110,11 @@ describe('nothing is persisted', () => {
       // layout, never conversation state. `readLayout`/`writeLayout` guard
       // both directions themselves, which is what `layout.test.ts` pins.
       if (path.includes('pages/chat/layout')) continue
+      // The "don't ask again" box on the `/close` confirm dialog is the
+      // THIRD exception, on the same footing as layout: a per-browser
+      // convenience, never conversation state (item 22). Guarded both
+      // directions the same way in `closeConfirm.ts`.
+      if (path.includes('pages/chat/closeConfirm')) continue
       // Comments are stripped first: this file and queryClient.ts both SAY
       // localStorage in prose explaining why they do not use it, and a rule
       // its own reasoning trips is a rule people delete.

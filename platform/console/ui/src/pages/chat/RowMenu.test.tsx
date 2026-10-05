@@ -21,7 +21,6 @@ function renderMenu(row: ConversationSummary, over: Partial<React.ComponentProps
       onMarkUnread={vi.fn()}
       onOpenNewTab={vi.fn()}
       onCopyLink={vi.fn()}
-      onOpenIncident={vi.fn()}
       onReopen={vi.fn()}
       onExitRuntime={vi.fn()}
       onClose={vi.fn()}
@@ -74,12 +73,11 @@ describe('a closed row', () => {
 })
 
 describe('a member row', () => {
-  it('offers only navigation and the incident — none of the conversation-scoped actions', async () => {
+  it('offers only navigation — none of the conversation-scoped actions', async () => {
     renderMenu(conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }))
     await open('member-1')
     expect(screen.getByText('Open in new tab')).toBeInTheDocument()
     expect(screen.getByText('Copy link')).toBeInTheDocument()
-    expect(screen.getByText('Open incident')).toBeInTheDocument()
     expect(screen.queryByText('Mark unread')).toBeNull()
     expect(screen.queryByText('Mark read')).toBeNull()
     expect(screen.queryByText('Reopen')).toBeNull()

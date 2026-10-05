@@ -105,7 +105,18 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
       data-testid="selection-bar"
       style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexWrap: 'wrap',
-        background: 'var(--ao-brand-strong)', color: 'var(--ao-surface)',
+        // `--ao-brand-strong` INVERTS lightness between the two themes (a dark
+        // teal in light mode, a light teal in dark mode), which is exactly
+        // what broke PatternFly's own `Button` text colour here: those
+        // buttons read their colour from the ordinary page tokens
+        // (`--ao-text` on `--ao-surface`), never from this div's `color`, so
+        // they kept assuming a normal-surface background underneath them and
+        // went unreadable the moment the real background inverted instead.
+        // `--ao-brand-soft` is a TINT of the surface in EITHER theme — close
+        // in lightness to `--ao-surface`/`--ao-canvas` on both sides — so the
+        // buttons' own text colour stays legible with no per-button override.
+        background: 'var(--ao-brand-soft)', color: 'var(--ao-text)',
+        borderBottom: '1px solid var(--ao-border)',
       }}
     >
       <strong>{names.length} selected</strong>
@@ -153,7 +164,7 @@ export function SelectionBar({ items, selected, canWrite, hasReader, onClear, on
           {`Delete${countSuffix(names.length)}`}
         </Button>
       )}
-      <Button variant="link" size="sm" onClick={onClear} style={{ marginLeft: 'auto', color: 'var(--ao-surface)' }}>
+      <Button variant="link" size="sm" onClick={onClear} style={{ marginLeft: 'auto' }}>
         Clear
       </Button>
       {closeOpen && (

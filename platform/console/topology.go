@@ -872,15 +872,17 @@ func AttributePipeline(conv *Object, pipelines []*Object) string {
 // No fallback: every Coordinator-rooted conversation records
 // spec.coordinatorRef at creation (there is no predating generation to infer
 // for, unlike AttributePipeline), so this is a direct read.
+//
+// It does NOT check the live Coordinator list. coordinatorRef is provenance,
+// snapshotted once, and SHALL survive the Coordinator being edited or
+// deleted — the same guarantee escalate() and the budget snapshot already
+// have. Requiring the Coordinator to still exist silently wiped attribution
+// for a perfectly ordinary case: a Coordinator removed or renamed after it
+// opened conversations that are still running or still worth reading.
 func AttributeCoordinator(conv *Object, coordinators []*Object) string {
 	ref := conversationView(conv).Spec.CoordinatorRef
 	if ref == nil || ref.Name == "" {
 		return ""
 	}
-	for _, co := range coordinators {
-		if co.Metadata.Name == ref.Name {
-			return ref.Name
-		}
-	}
-	return ""
+	return ref.Name
 }

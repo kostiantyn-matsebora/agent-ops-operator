@@ -292,6 +292,11 @@ describe('the Conversations list', () => {
     await screen.findByText('disk pressure on node-3')
     const before = calls.conversations
 
+    // Closed conversations are hidden by default now (item 8) — this test is
+    // about live delta application, not that toggle, so switch it on up
+    // front and keep testing the phase transition in place.
+    await userEvent.click(screen.getByLabelText('Show closed'))
+
     // APPEARING: newest first, no filter — its place is unambiguous.
     emit('delta', {
       type: 'ADDED', kind: 'conversations', name: 'conv-2',

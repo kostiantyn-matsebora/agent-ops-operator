@@ -22,12 +22,12 @@ conversation selected and the list beside it.
 
 ### Requirement: The inbox column lists scopes, each with its count
 The inbox column SHALL list, in this order: the filters All, Unread, Working,
-Mine, Errored and Incidents, then every Ready Pipeline and Coordinator, then
-the manager's commands, then Closed. Each scope SHALL show its unread count
-where one is non-zero, computed by the console-unread rule.
+Mine and Errored, then every Ready Pipeline and Coordinator, then Closed.
+Each scope SHALL show its unread count where one is non-zero, computed by
+the console-unread rule.
 
 Mine SHALL mean conversations the viewer's own identity started or replied
-in. Incidents SHALL mean root conversations that have members.
+in.
 
 #### Scenario: A pipeline scope narrows the list
 - **WHEN** the operator selects a Pipeline in the inbox

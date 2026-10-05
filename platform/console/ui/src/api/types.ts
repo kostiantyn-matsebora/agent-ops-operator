@@ -410,6 +410,26 @@ export interface ThreadBinding {
   readTracked?: boolean
 }
 
+/**
+ * One message a run consumed, as the Conversation records it — the DURABLE
+ * half of a conversation's questions, kept beside the run's own answer.
+ * Absent on a run recorded before the manager kept them (`Run.inputs`,
+ * `omitempty` on the console's own wire).
+ */
+export interface RecordedInput {
+  id: string
+  type?: string
+  text?: string
+  /** `text` is the beginning of a larger payload, not the whole of it. */
+  truncated?: boolean
+  /** The channel the message was typed on. Empty when no surface displayed
+   * it — an alert, a job tick, a posted task, or a Coordinator's own
+   * `invoke` (which addresses no human channel at all). */
+  surface?: string
+  sender?: string
+  receivedAt?: string
+}
+
 export interface Run {
   runId: string
   jobKind?: string
@@ -418,6 +438,34 @@ export interface Run {
   result?: string
   startedAt?: string
   finishedAt?: string
+  /** The messages THIS run consumed — already on the wire
+   * (`platform/console/conversations.go`'s `Run.Inputs`), not previously
+   * modelled here. A member conversation's own task is recorded exactly
+   * this way: it binds no human channel, so this is the only place its task
+   * text lives. */
+  inputs?: RecordedInput[]
+  /** One entry per model call this run made. Absent — never an empty array —
+   * when the runtime did not report this data for the run. */
+  turns?: RunTurn[]
+  /** One entry per tool invocation this run made, same absence rule as
+   * `turns`. */
+  toolCalls?: RunToolCall[]
+}
+
+export interface RunTurn {
+  model?: string
+  tokensIn?: number
+  tokensOut?: number
+  cacheReadTokens?: number
+  stopReason?: string
+}
+
+export interface RunToolCall {
+  tool?: string
+  /** Empty means a BUILT-IN tool, never "missing data" — render accordingly. */
+  server?: string
+  durationMs?: number
+  resultBytes?: number
 }
 
 export interface BlockedReason {
