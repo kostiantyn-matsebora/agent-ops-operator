@@ -656,9 +656,8 @@ invocation lines, result cards linking each member's own transcript, nested
 cards for a member that is itself coordinating, and (once it happens) the
 escalation divider at `status.escalatedAt`.
 
-The composer follows the same rule as any other conversation — live once the
-console channel holds a thread. For a root that is from the moment it is
-created, whether or not its agent ever escalates.
+A root's composer is live from creation, unconditionally. It does not wait for
+the agent to escalate.
 
 ### Unread
 

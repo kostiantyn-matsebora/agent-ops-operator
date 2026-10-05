@@ -173,7 +173,7 @@ export function ChatView() {
   const canWriteHere = session.data?.canWrite ?? false
   const canStartHere = Boolean(session.data?.canOriginate) && (sources.data?.sources ?? []).some((s) => s.wired)
 
-  const items = useMemo(() => narrowItems(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
+  const items = useMemo(() => narrowItems<ConversationSummary>(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
 
   useArrivals(data, setNewNames)
 
