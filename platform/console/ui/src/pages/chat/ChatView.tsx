@@ -162,6 +162,11 @@ export function listKeyAction(key: string, rowCount: number, highlighted: string
   return 'none'
 }
 
+/** Whether a conversation could actually be started: the session may originate and some source is wired. */
+function canStartConversation(canOriginate: boolean | undefined, sources: { wired?: boolean }[] | undefined): boolean {
+  return Boolean(canOriginate) && (sources ?? []).some((s) => s.wired)
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -190,7 +195,7 @@ export function ChatView() {
   // live — a starter chip here must offer nothing a conversation could not
   // actually be started from.
   const canWriteHere = session.data?.canWrite ?? false
-  const canStartHere = Boolean(session.data?.canOriginate) && (sources.data?.sources ?? []).some((s) => s.wired)
+  const canStartHere = canStartConversation(session.data?.canOriginate, sources.data?.sources)
 
   const items = useMemo(() => narrowItems<ConversationSummary>(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
 
