@@ -178,6 +178,14 @@ function trackRowRef(refs: Map<string, HTMLButtonElement>, rowName: string, el: 
   else refs.delete(rowName)
 }
 
+/** A copy of the set with the name added when absent, removed when present. */
+function toggleName(names: Set<string>, rowName: string): Set<string> {
+  const next = new Set(names)
+  if (next.has(rowName)) next.delete(rowName)
+  else next.add(rowName)
+  return next
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -396,14 +404,7 @@ export function ChatView() {
                       onOpen={(e) => openRow(row.name, e)}
                       pipelineIcon={iconFor(row.pipeline)}
                       collapsed={collapsedRoots.has(row.name)}
-                      onToggleCollapse={() =>
-                        setCollapsedRoots((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(row.name)) next.delete(row.name)
-                          else next.add(row.name)
-                          return next
-                        })
-                      }
+                      onToggleCollapse={() => setCollapsedRoots((prev) => toggleName(prev, row.name))}
                     />
                   ))}
                 </ul>
