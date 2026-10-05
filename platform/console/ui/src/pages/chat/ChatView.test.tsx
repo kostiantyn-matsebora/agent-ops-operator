@@ -21,6 +21,10 @@ vi.mock('../../api/hooks', () => ({
   useSources: () => ({ data: { sources: [] } }),
   useInboxCounts: () => ({ data: { items: [], total: items.length, unreadTotal: 0, offset: 0, limit: 0, facets: {}, scopes: {} } }),
   useVocabulary: () => ({ data: { entries: [] } }),
+  useCloseConversations: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useDeleteConversations: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useMarkRead: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useMarkUnread: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
 }))
 
 vi.mock('./ThreadPane', () => ({ ThreadPane: ({ name }: { name: string }) => <div data-testid="thread-pane">{name}</div> }))
