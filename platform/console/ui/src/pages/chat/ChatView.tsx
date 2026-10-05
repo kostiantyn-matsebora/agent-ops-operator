@@ -172,6 +172,12 @@ function isMultiSelectClick(e: React.MouseEvent | undefined): boolean {
   return Boolean(e && (e.metaKey || e.ctrlKey))
 }
 
+/** Keeps the name → button map in step with mounting and unmounting rows. */
+function trackRowRef(refs: Map<string, HTMLButtonElement>, rowName: string, el: HTMLButtonElement | null) {
+  if (el) refs.set(rowName, el)
+  else refs.delete(rowName)
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -377,10 +383,7 @@ export function ChatView() {
                   {rows.map(({ row, depth, memberCount, parentMissing }) => (
                     <ConversationRow
                       key={row.name}
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(row.name, el)
-                        else rowRefs.current.delete(row.name)
-                      }}
+                      ref={(el) => trackRowRef(rowRefs.current, row.name, el)}
                       row={row}
                       depth={depth}
                       memberCount={memberCount}
