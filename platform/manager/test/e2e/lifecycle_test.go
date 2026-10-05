@@ -51,7 +51,18 @@ func consoleStartAndFindConversation(t *testing.T, ctx context.Context, e *Env, 
 	t.Helper()
 	start := time.Now().Add(-5 * time.Second)
 	task := "echo console " + stamp
-	code, out := e.ConsoleStart(t, task)
+	// Retried, not a single call: right after a reused install's manager and
+	// adapters are restarted (resetReusedInstall), the console Channel's own
+	// `Served` condition takes a reconcile pass to come back, which this test
+	// hitting the console FIRST — before anything else has incidentally
+	// warmed it up — can otherwise race, exactly as the alertmanager lane's
+	// own webhook retries the same class of transient condition.
+	var code int
+	var out string
+	waitFor(t, "the console to accept a start (its Channel served again)", time.Minute, func() (bool, error) {
+		code, out = e.ConsoleStart(t, task)
+		return code/100 == 2, nil
+	})
 	if code/100 != 2 {
 		t.Fatalf("start: %d %s", code, out)
 	}
@@ -158,6 +169,127 @@ func assertCloseThenDelete(t *testing.T, ctx context.Context, e *Env, name strin
 		_, err := e.K.Conversation(ctx, name)
 		return err != nil, nil
 	})
+}
+
+// 9.3.1 The SAME bulk close/delete surface the coordinator cascade test
+// (TestCoordinatorCloseAndDeleteCascadeThroughConsole) exercises — proven
+// here against an ORDINARY pipeline conversation, so both kinds are shown to
+// behave identically where they are supposed to. This is the gap the QA pass
+// actually found (table item #12): the console's new surface had only ever
+// been exercised against a live coordinator.
+func TestConsolePlainConversationBulkCloseAndDelete(t *testing.T) {
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+
+	name := consoleStartAndFindConversation(t, ctx, e, stamp)
+	assertConsoleFirstRunDelivered(t, e, name, stamp)
+	body, _ := json.Marshal(map[string]any{"names": []string{name}})
+
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/close", body, "Bearer "+e.Values.UIToken); code/100 != 2 || !strings.Contains(out, `"closed":1`) {
+		t.Fatalf("bulk close: %d %s", code, out)
+	}
+	waitFor(t, "phase Closed", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, name)
+		return err == nil && c.Status.Phase == "Closed", err
+	})
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete", body, "Bearer "+e.Values.UIToken); code/100 != 2 || !strings.Contains(out, `"deleted":1`) {
+		t.Fatalf("bulk delete: %d %s", code, out)
+	}
+	waitFor(t, "the object gone", 3*time.Minute, func() (bool, error) {
+		_, err := e.K.Conversation(ctx, name)
+		return err != nil, nil
+	})
+}
+
+// 9.3.2 The console's mark-unread rewind (design D-E), against a REAL
+// manager and a REAL console reading its own live activity feed.
+//
+// THIS TEST PINNED A CONFIRMED PRODUCTION DEFECT THIS E2E PASS FOUND, AND IS
+// NOW THE FIX'S OWN ACCEPTANCE CHECK.
+//
+// `ThreadBinding.ReadAt` / `ReaderMark.ReadAt` were `*metav1.Time`
+// (api/v1alpha1/conversation_types.go), which the Kubernetes API serializes
+// at SECOND granularity — any sub-second component was silently dropped on
+// write. `conversations.go`'s `readReportTime()` reports the newest counted
+// message's OWN timestamp verbatim, read off the console's LIVE transcript
+// buffer (nanosecond precision). The stored watermark was therefore always
+// the FLOOR of that message's real timestamp, strictly EARLIER than it
+// whenever the message's nanosecond component was nonzero — and
+// `countUnread`'s strict `at.After(wm)` then counted that SAME message as
+// unread forever, for as long as the console process kept it in its live
+// buffer (unbounded in practice: `transcript.go`'s buffer evicts by LRU
+// across THREADS, not by message age). Marking a conversation read did not
+// reliably clear its own unread flag in ordinary, continuous operation.
+//
+// FIXED by widening both fields to a plain `*string` (RFC3339Nano) — the
+// shape the console's own types already used everywhere else — so the
+// watermark round-trips at full precision and no longer loses to the
+// message it was meant to cover.
+func TestConsoleMarkReadThenUnreadRewind(t *testing.T) {
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+
+	name := consoleStartAndFindConversation(t, ctx, e, stamp)
+	assertConsoleFirstRunDelivered(t, e, name, stamp)
+	body, _ := json.Marshal(map[string]any{"names": []string{name}})
+
+	// Mark read first, so the rewind below has something to prove. The
+	// console projects state from its OWN informer-fed cache, not from this
+	// write, so — exactly like every other console-driven assertion in this
+	// pack — the result is polled rather than read once immediately after.
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/read", body, "Bearer "+e.Values.UIToken); code/100 != 2 {
+		t.Fatalf("mark read: %d %s", code, out)
+	}
+	var readAt string
+	waitFor(t, "the conversation to read as read, with a stamped watermark", 20*time.Second, func() (bool, error) {
+		unread, at := consoleConversationReadState(t, e, name)
+		readAt = at
+		return !unread && at != "", nil
+	})
+
+	// Rewind it ("mark unread"): the manager SETS the reader's own watermark
+	// to just before the newest counted message, earlier than what is stored.
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/unread", body, "Bearer "+e.Values.UIToken); code/100 != 2 || !strings.Contains(out, `"marked":1`) {
+		t.Fatalf("mark unread: %d %s", code, out)
+	}
+	var rewoundReadAt string
+	waitFor(t, "the rewind to take: the thread reads unread again", time.Minute, func() (bool, error) {
+		unread, at := consoleConversationReadState(t, e, name)
+		rewoundReadAt = at
+		return unread, nil
+	})
+	if rewoundReadAt == readAt {
+		t.Fatalf("mark-unread must actually MOVE the watermark earlier, not merely flip a flag: before=%q after=%q", readAt, rewoundReadAt)
+	}
+
+	// A LATER OPEN must not silently re-advance past the rewind: the detail
+	// view (handleConversation) is a pure read — it calls no ReportRead — so
+	// viewing the conversation again must leave the rewound watermark intact.
+	_ = e.ConsoleTranscript(t, name) // "opens" the conversation, as the console's detail view does
+	unreadAfterOpen, readAtAfterOpen := consoleConversationReadState(t, e, name)
+	if !unreadAfterOpen || readAtAfterOpen != rewoundReadAt {
+		t.Fatalf("a later open must not silently re-advance the rewound watermark: rewound=%q afterOpen=%q (unread=%v)",
+			rewoundReadAt, readAtAfterOpen, unreadAfterOpen)
+	}
+}
+
+// consoleConversationReadState reads a conversation's console-thread
+// unread/readAt projection straight off the detail endpoint's own JSON.
+func consoleConversationReadState(t *testing.T, e *Env, name string) (bool, string) {
+	t.Helper()
+	out := e.ConsoleTranscript(t, name)
+	var parsed struct {
+		Conversation struct {
+			Unread bool   `json:"unread"`
+			ReadAt string `json:"readAt"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("parsing conversation detail: %v (%s)", err, out)
+	}
+	return parsed.Conversation.Unread, parsed.Conversation.ReadAt
 }
 
 // 9.4 Multi-channel fan-out: console plus the Telegram lane bound to one

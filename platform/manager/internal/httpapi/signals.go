@@ -720,8 +720,10 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 	}
 	// Provenance names EXACTLY one originating wiring object (design D-B):
 	// a Pipeline names PipelineRef, a Coordinator names CoordinatorRef and
-	// snapshots its OWN escalation channels — never bound at creation,
-	// reached only through `escalate` (design D-D).
+	// snapshots its OWN declared channels as EscalationChannelRefs too —
+	// already bound into ChannelRefs above via BoundChannelRefs
+	// (coordinator-unconditional-channels: a coordinator root is reachable
+	// from creation, exactly like a Pipeline's).
 	nodeKind := activity.NodePipeline
 	if claimant.ClaimantKind() == chat.ClaimantCoordinator {
 		nodeKind = activity.NodeCoordinator

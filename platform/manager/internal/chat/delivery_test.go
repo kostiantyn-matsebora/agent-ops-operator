@@ -12,11 +12,13 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
 
-// DeliverInputs fences an escalation channel on Status.EscalatedAt (design
-// D-D, coordinated-agents task 3.2): `escalate` binds the channel precisely so
-// the digest can be the thread's first post, so anything still queued from
-// before that moment must not retroactively flood it.
-func TestDeliverInputsFencesAnEscalationChannelOnEscalatedAt(t *testing.T) {
+// DeliverInputs no longer fences an escalation channel on Status.EscalatedAt
+// (coordinator-unconditional-channels, superseding design D-D's fence): a
+// Coordinator root's channel is bound at CREATION, so its thread already
+// exists before any `escalate` call, and nothing queued before that call is
+// a "backlog" any more — both a pre- and a post-escalation input reach it,
+// exactly as any other bound channel's would.
+func TestDeliverInputsNeverFencesOnEscalatedAt(t *testing.T) {
 	escalatedAt := metav1.NewTime(time.Now())
 	before := metav1.NewTime(escalatedAt.Add(-time.Minute))
 	after := metav1.NewTime(escalatedAt.Add(time.Minute))
@@ -45,17 +47,19 @@ func TestDeliverInputsFencesAnEscalationChannelOnEscalatedAt(t *testing.T) {
 	DeliverInputs(context.Background(), c, q, conv)
 
 	ops := drain(q, "esc-ta")
-	if len(ops) != 1 {
-		t.Fatalf("want exactly the post-escalation input delivered, got %d ops: %+v", len(ops), ops)
+	if len(ops) != 2 {
+		t.Fatalf("want BOTH inputs delivered, got %d ops: %+v", len(ops), ops)
 	}
-	if got := opBody(ops[0]); !strings.Contains(got, "arrived after escalation") || strings.Contains(got, "queued before escalation") {
-		t.Fatalf("delivered the wrong input: %q", got)
+	bodies := opBody(ops[0]) + opBody(ops[1])
+	if !strings.Contains(bodies, "queued before escalation") || !strings.Contains(bodies, "arrived after escalation") {
+		t.Fatalf("both inputs must reach the already-bound thread, got %q", bodies)
 	}
 }
 
-// A channel bound OUTSIDE escalation (an ordinary Pipeline-driven conversation)
-// carries no such moment and is never fenced, whatever EscalatedAt says —
-// fencing is scoped to EscalationChannelRefs, not to "any escalated conversation".
+// An ordinary channel (one never named in EscalationChannelRefs) was never
+// fenced even under the old design, and still is not — delivery never reads
+// EscalatedAt at all any more, so this stays green on the same grounds the
+// test above now does.
 func TestDeliverInputsNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing.T) {
 	escalatedAt := metav1.NewTime(time.Now())
 	before := metav1.NewTime(escalatedAt.Add(-time.Minute))

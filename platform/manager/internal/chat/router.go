@@ -448,12 +448,10 @@ func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.
 // boundChannels resolves the channel set a new conversation binds to, with the
 // originating channel guaranteed included (it is where the user is looking).
 //
-// A Pipeline's BoundChannelRefs is its own `spec.channelRefs`, so an addressed
-// Pipeline conversation binds its WHOLE channel set — full mirroring, as
-// before this kind existed. A Coordinator's is always empty (design D-D): its
-// `channelRefs` are escalation targets, never bound at creation, so an
-// addressed Coordinator conversation binds EXACTLY the one surface it was
-// addressed from (chat-addressing-discovery, chat-signal-origination).
+// Both kinds' BoundChannelRefs is now their own `spec.channelRefs`
+// (coordinator-unconditional-channels), so an addressed Pipeline OR
+// Coordinator conversation binds its WHOLE declared channel set, plus the
+// addressing channel when that is not already one of them.
 func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
 	if origin == nil {
 		return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
@@ -640,8 +638,10 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// scoping, never to resolve wiring. An addressed command is the one
 		// origination that names its claimant outright, so this ref is exact
 		// rather than inferred. Exactly one of the two is ever set (design
-		// D-B): a Coordinator also snapshots its OWN escalation channels,
-		// never bound at creation.
+		// D-B): a Coordinator also snapshots its OWN declared channels as
+		// EscalationChannelRefs — already bound into ChannelRefs above via
+		// BoundChannelRefs (coordinator-unconditional-channels), this is kept
+		// as separate provenance of the Coordinator's own declared set.
 		if origin.ClaimantKind() == ClaimantCoordinator {
 			nodeKind = activity.NodeCoordinator
 			conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}

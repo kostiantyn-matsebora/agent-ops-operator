@@ -1007,10 +1007,12 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 }
 
 // deliverEscalation posts the digest an `escalate` call snapshotted
-// (status.escalationMessage) as the opening message of every escalation
-// channel that now has a thread. A conversation that never escalated, or
-// whose escalation channels have no thread yet, gets nothing — Ops itself is
-// what makes a second delivery a no-op.
+// (status.escalationMessage) into every bound channel's already-open thread
+// (coordinator-unconditional-channels: a coordinator root's channels are
+// bound at creation, so this is no longer a thread's opening post, merely
+// the decision made visible on one already running). A conversation that
+// never escalated, or whose threads are not established yet, gets nothing —
+// Ops itself is what makes a second delivery a no-op.
 func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
 	if conv.Status.EscalatedAt == nil || r.Ops == nil {
 		return

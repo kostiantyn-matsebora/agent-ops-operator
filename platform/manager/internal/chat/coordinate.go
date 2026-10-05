@@ -685,12 +685,14 @@ func (r *Router) closeConversationReason(ctx context.Context, conv *agentopsv1al
 }
 
 // Escalate is the MCP `escalate(message)` verb (design D-D,
-// coordination-escalation): an UNCAUSED conversation binds its snapshotted
-// escalation channels and opens a human thread with message as the first
-// post; a CAUSED one opens no thread at all — it closes with message as its
-// reason and its result, which reaches its OWN parent as an ordinary
-// member-result input, bubbling one hop at a time until a call reaches the
-// uncaused root.
+// coordination-escalation, superseded by coordinator-unconditional-channels):
+// an UNCAUSED conversation already has its channels bound — at creation, same
+// as a Pipeline's — so escalating no longer BINDS anything. It posts message
+// as a notice into every thread already open, and stamps `status.escalatedAt`
+// so the agent's decision is recorded. A CAUSED one still opens no thread at
+// all — it closes with message as its reason and its result, which reaches
+// its OWN parent as an ordinary member-result input, bubbling one hop at a
+// time until a call reaches the uncaused root.
 func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversation, message string) error {
 	if conv.Spec.CausedBy != nil {
 		if err := r.closeConversationReason(ctx, conv, message); err != nil {
@@ -700,18 +702,13 @@ func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversati
 			"escalate:"+conv.Name+":"+strconv.FormatInt(time.Now().UnixNano(), 36), message)
 	}
 	if conv.Status.EscalatedAt != nil {
-		return nil // already escalated: no second binding, no replayed digest
+		return nil // already escalated: no replayed digest
 	}
 	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Spec.ChannelRefs = append([]agentopsv1alpha1.ObjectRef{}, conv.Spec.EscalationChannelRefs...)
-	if err := r.Client.Patch(ctx, conv, patch); err != nil {
-		return err
-	}
-	statusPatch := client.MergeFrom(conv.DeepCopy())
 	now := metav1.Now()
 	conv.Status.EscalatedAt = &now
 	conv.Status.EscalationMessage = boundedString(message, 2000)
-	return r.Client.Status().Patch(ctx, conv, statusPatch)
+	return r.Client.Status().Patch(ctx, conv, patch)
 }
 
 // memberTitle names a member conversation from the entry it was invoked as,

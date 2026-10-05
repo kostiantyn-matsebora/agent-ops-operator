@@ -230,6 +230,11 @@ func TestCoordinateCloseCascadesThroughTheRealAPI(t *testing.T) {
 	}
 }
 
+// TestCoordinateEscalateDeliversTheDigestThroughARealReconcile pins
+// coordinator-unconditional-channels at the full-stack level: the root's
+// channel is ALREADY bound before any `escalate` call (exactly as creation
+// now binds it), so its topic exists and the digest posts into that
+// already-open thread — escalate never (re)binds `ChannelRefs`.
 func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) {
 	mkProfile(t, "prof-esc-co")
 	mkChannel(t, "esc-desk", "esc-ta")
@@ -240,12 +245,28 @@ func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) 
 	root.Name, root.Namespace = "co-esc-root", ns
 	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-esc-co"}
 	root.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-esc"}
+	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "esc-desk"}}
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "esc-desk"}}
 	if err := k8sClient.Create(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
 
 	srv := apiServer()
+
+	// The topic exists BEFORE any escalate call — the channel was bound at
+	// creation, not by escalating.
+	reconcileConversation(t, srv, root.Name)
+	opRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=2&wait=0", nil, srv.AdapterToken)
+	var topicOp chat.Op
+	if err := json.Unmarshal(opRec.Body.Bytes(), &topicOp); err != nil || topicOp.Kind != chat.OpEnsureTopic {
+		t.Fatalf("want an ensure-topic op before any escalation, got %d %s", opRec.Code, opRec.Body.String())
+	}
+	doneRec := adapterReq(srv, "POST", "/channel/ops/"+topicOp.ID+"/done",
+		map[string]any{"threadId": "esc-thread-1"}, srv.AdapterToken)
+	if doneRec.Code != 200 {
+		t.Fatalf("completing ensure-topic: %d %s", doneRec.Code, doneRec.Body.String())
+	}
+
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-esc", root.Name)
 	rec := postCoordinateReq(t, srv, "/coordinate/escalate", token,
 		map[string]any{"conversation": root.Name, "message": "three members failed, see the tree"})
@@ -257,22 +278,11 @@ func TestCoordinateEscalateDeliversTheDigestThroughARealReconcile(t *testing.T) 
 		t.Fatalf("escalate must stamp the digest, admitted by the real schema: %+v", got.Status)
 	}
 	if len(got.Spec.ChannelRefs) != 1 || got.Spec.ChannelRefs[0].Name != "esc-desk" {
-		t.Fatalf("escalate must bind the snapshotted channel, got %v", got.Spec.ChannelRefs)
+		t.Fatalf("escalate must leave the already-bound channel exactly as it was, got %v", got.Spec.ChannelRefs)
 	}
 
-	// The reconciler creates the topic, and once the adapter reports a thread
-	// id the digest is queued as the opening message.
-	reconcileConversation(t, srv, root.Name)
-	opRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=2&wait=0", nil, srv.AdapterToken)
-	var topicOp chat.Op
-	if err := json.Unmarshal(opRec.Body.Bytes(), &topicOp); err != nil || topicOp.Kind != chat.OpEnsureTopic {
-		t.Fatalf("want an ensure-topic op, got %d %s", opRec.Code, opRec.Body.String())
-	}
-	doneRec := adapterReq(srv, "POST", "/channel/ops/"+topicOp.ID+"/done",
-		map[string]any{"threadId": "esc-thread-1"}, srv.AdapterToken)
-	if doneRec.Code != 200 {
-		t.Fatalf("completing ensure-topic: %d %s", doneRec.Code, doneRec.Body.String())
-	}
+	// The thread already existed, so the digest is queued as an ordinary send
+	// op into it — never a second ensure-topic.
 	reconcileConversation(t, srv, root.Name)
 	msgRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc-ta&contract=2&wait=0", nil, srv.AdapterToken)
 	var msgOp chat.Op
@@ -353,44 +363,47 @@ func TestCoordinateFutureDeadlineCapsTheReconcileRequeue(t *testing.T) {
 	}
 }
 
-// TestCoordinateEscalationFencesEarlierInputsAndDeliversLaterOnes is task
-// 3.4's fake-chat integration coverage beyond the digest itself (already
-// covered above): a member result that lands on the root AFTER escalation
-// must reach the newly opened thread, and a person's reply on that thread
-// must land as an ordinary root input — through the real API and reconciler,
-// not the fake client internal/chat's own unit tests use.
-func TestCoordinateEscalationFencesEarlierInputsAndDeliversLaterOnes(t *testing.T) {
+// TestCoordinateMemberResultsReachTheAlreadyBoundThreadBeforeAndAfterEscalation
+// is task 3.4's fake-chat integration coverage beyond the digest itself
+// (already covered above), REWRITTEN for coordinator-unconditional-channels:
+// the root's channel is bound and its thread open from the START, so a
+// member result delivered BEFORE any `escalate` call reaches it immediately
+// — there is no backlog left for a fence to hold back — and `escalate`'s own
+// digest, and a later member result, land in that same thread afterwards. A
+// person's reply on the thread still lands as an ordinary root input, through
+// the real API and reconciler, not the fake client internal/chat's own unit
+// tests use.
+func TestCoordinateMemberResultsReachTheAlreadyBoundThreadBeforeAndAfterEscalation(t *testing.T) {
 	root := mkEsc3Root(t)
 	srv := apiServer()
 	token := chat.DeriveCoordinatorToken(srv.AdapterToken, "co-esc3", root.Name)
 
-	// Invoke and finish BEFORE escalation: this member's result lands on the
-	// root while it still has no bound channel, so it sits in the queue with
-	// nowhere to go — exactly the case the fence exists for.
+	// The thread already exists before anything else happens — bound at
+	// creation, not by escalating.
+	openEsc3Thread(t, srv, root.Name)
+
+	// Invoke and finish BEFORE any escalate call: this member's result must
+	// reach the thread right away, with no fence to hold it.
 	rec := postCoordinateReq(t, srv, "/coordinate/invoke", token,
 		map[string]any{"conversation": root.Name, "agent": "worker", "task": "look into the disk usage"})
 	member := decodeCoordinateInvokeResponse(t, rec)["member"]
-	finishMemberRun(t, srv, member, "r1", "early result, must not flood the thread")
-
-	// Backdate it: the real API server's second-resolution timestamps would
-	// otherwise land this and EscalatedAt in the same second, and "before" is
-	// the whole thing under test.
-	gotRoot := getConv(t, root.Name)
-	if len(gotRoot.Spec.Inputs) != 1 {
-		t.Fatalf("want the early member result queued on the root, got %+v", gotRoot.Spec.Inputs)
+	finishMemberRun(t, srv, member, "r1", "early result, delivered at once")
+	reconcileConversation(t, srv, root.Name)
+	earlyOp := nextEsc3SendOp(t, srv, "the early member result to reach the thread immediately")
+	if !strings.Contains(earlyOp.Message.Body, "early result, delivered at once") {
+		t.Fatalf("the send op must carry the early member result, got %+v", earlyOp.Message)
 	}
-	gotRoot.Spec.Inputs[0].ReceivedAt = metav1.NewTime(metav1.Now().Add(-time.Minute))
-	if err := k8sClient.Update(context.Background(), gotRoot); err != nil {
-		t.Fatal(err)
+	if rec := adapterReq(srv, "POST", "/channel/ops/"+earlyOp.ID+"/done", nil, srv.AdapterToken); rec.Code != 200 {
+		t.Fatalf("completing the early result send: %d %s", rec.Code, rec.Body.String())
 	}
 
+	// escalate posts its digest into the SAME thread — no second ensure-topic.
 	rec = postCoordinateReq(t, srv, "/coordinate/escalate", token,
 		map[string]any{"conversation": root.Name, "message": "three members failed, see the tree"})
 	if rec.Code != 200 {
 		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
 	}
-
-	openEsc3Thread(t, srv, root.Name)
+	reconcileConversation(t, srv, root.Name)
 	digestOp := nextEsc3SendOp(t, srv, "the digest queued as a send op")
 	if !strings.Contains(digestOp.Message.Body, "three members failed") {
 		t.Fatalf("the digest itself must carry the escalate message, got %+v", digestOp.Message)
@@ -399,24 +412,13 @@ func TestCoordinateEscalationFencesEarlierInputsAndDeliversLaterOnes(t *testing.
 		t.Fatalf("completing the digest send: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// The fence: another reconcile must NOT surface the early result now that
-	// the thread finally exists — the digest must stay the thread's first post.
-	reconcileConversation(t, srv, root.Name)
-	fencedRec := adapterReq(srv, "GET", "/channel/ops?adapter=esc3-ta&contract=2&wait=0", nil, srv.AdapterToken)
-	if fencedRec.Code != 204 {
-		t.Fatalf("the early result must stay fenced, got %d %s", fencedRec.Code, fencedRec.Body.String())
-	}
-
-	// The member finishes a SECOND run AFTER the thread exists: this result's
-	// ReceivedAt is after EscalatedAt, so it must reach the thread.
+	// A second member run, AFTER escalation, reaches the thread exactly as
+	// the first one did — escalating changed nothing about delivery.
 	finishMemberRun(t, srv, member, "r2", "disk is at 90%, needs attention")
 	reconcileConversation(t, srv, root.Name)
 	resultOp := nextEsc3SendOp(t, srv, "the later member result to reach the thread")
 	if !strings.Contains(resultOp.Message.Body, "disk is at 90%") {
 		t.Fatalf("the send op must carry the member's later result, got %+v", resultOp.Message)
-	}
-	if strings.Contains(resultOp.Message.Body, "must not flood") {
-		t.Fatalf("the fenced early result must never surface, got %+v", resultOp.Message)
 	}
 
 	// A person's reply on that thread is an ordinary root input.
@@ -429,7 +431,7 @@ func TestCoordinateEscalationFencesEarlierInputsAndDeliversLaterOnes(t *testing.
 }
 
 // mkEsc3Root builds the coordinator, its one member capability and the root
-// conversation the escalation-fence test drives.
+// conversation the member-result-delivery test drives.
 func mkEsc3Root(t *testing.T) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	mkProfile(t, "prof-esc3-co")
@@ -458,6 +460,7 @@ func mkEsc3Root(t *testing.T) *agentopsv1alpha1.Conversation {
 	root.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-esc3-co"}
 	root.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-esc3"}
 	root.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: "esc3-rt"}
+	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "esc3-desk"}}
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "esc3-desk"}}
 	if err := k8sClient.Create(context.Background(), root); err != nil {
 		t.Fatal(err)

@@ -460,9 +460,11 @@ func TestListingOffersEachCoordinatorAsAChoiceToo(t *testing.T) {
 	}
 }
 
-// Addressing a Coordinator opens a root bound to ONLY the origin surface,
-// with its limits and escalation channels snapshotted (design D-B, D-D, D-E).
-func TestAddressingACoordinatorBindsOriginSurfaceOnly(t *testing.T) {
+// Addressing a Coordinator opens a root bound to its OWN declared channels
+// PLUS the origin surface (coordinator-unconditional-channels: a Coordinator
+// now binds channels at creation exactly like a Pipeline), with its limits
+// and escalation channels snapshotted (design D-B, D-E).
+func TestAddressingACoordinatorBindsItsOwnChannelsPlusTheOriginSurface(t *testing.T) {
 	co := coordinator("incident-coordinator", "responder", true)
 	co.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "escalation-channel"}}
 	co.Spec.Limits = &agentopsv1alpha1.CoordinatorLimits{MaxAgents: 4}
@@ -485,8 +487,13 @@ func TestAddressingACoordinatorBindsOriginSurfaceOnly(t *testing.T) {
 	if conv.Spec.PipelineRef != nil {
 		t.Fatalf("only one of the two refs may be set: %+v", conv.Spec.PipelineRef)
 	}
-	if len(conv.Spec.ChannelRefs) != 1 || conv.Spec.ChannelRefs[0].Name != "c1" {
-		t.Fatalf("an addressed Coordinator conversation binds ONLY the origin surface: %+v", conv.Spec.ChannelRefs)
+	gotChannels := map[string]bool{}
+	for _, ref := range conv.Spec.ChannelRefs {
+		gotChannels[ref.Name] = true
+	}
+	if len(gotChannels) != 2 || !gotChannels["escalation-channel"] || !gotChannels["c1"] {
+		t.Fatalf("an addressed Coordinator conversation binds its OWN channels plus the origin surface: %+v",
+			conv.Spec.ChannelRefs)
 	}
 	if len(conv.Spec.EscalationChannelRefs) != 1 || conv.Spec.EscalationChannelRefs[0].Name != "escalation-channel" {
 		t.Fatalf("escalationChannelRefs must snapshot the Coordinator's own channelRefs: %+v",

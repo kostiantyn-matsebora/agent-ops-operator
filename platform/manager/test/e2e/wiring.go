@@ -218,6 +218,34 @@ func (e *Env) ConsoleTranscript(t *testing.T, name string) string {
 	return out
 }
 
+// consoleAttribution is the subset of the console's own
+// `GET /api/conversations/<name>` response this pack cross-checks
+// attribution against — never the raw CRD. Reading the CRD directly is
+// exactly the gap that let AttributeCoordinator ship broken: it dropped a
+// conversation's coordinator attribution the moment its Coordinator CR was
+// deleted, and nothing caught it because every channel-binding assertion
+// here read the object instead of what the console actually serves.
+type consoleAttribution struct {
+	Coordinator string `json:"coordinator"`
+	Threads     []struct {
+		Channel string `json:"channel"`
+	} `json:"threads"`
+}
+
+// consoleConversationAttribution reads a conversation through the console's
+// own HTTP API and decodes just the attribution fields.
+func consoleConversationAttribution(t *testing.T, e *Env, name string) consoleAttribution {
+	t.Helper()
+	body := e.ConsoleTranscript(t, name)
+	var out struct {
+		Conversation consoleAttribution `json:"conversation"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decoding console conversation %s: %v\nbody: %s", name, err, body)
+	}
+	return out.Conversation
+}
+
 // BotCalls reads the fake Bot API's recorded calls.
 func (e *Env) BotCalls(t *testing.T, method string) []map[string]any {
 	t.Helper()

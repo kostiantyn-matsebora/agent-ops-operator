@@ -1781,7 +1781,8 @@ func (in *ReaderMark) DeepCopyInto(out *ReaderMark) {
 	*out = *in
 	if in.ReadAt != nil {
 		in, out := &in.ReadAt, &out.ReadAt
-		*out = (*in).DeepCopy()
+		*out = new(string)
+		**out = **in
 	}
 }
 
@@ -2181,7 +2182,8 @@ func (in *ThreadBinding) DeepCopyInto(out *ThreadBinding) {
 	*out = *in
 	if in.ReadAt != nil {
 		in, out := &in.ReadAt, &out.ReadAt
-		*out = (*in).DeepCopy()
+		*out = new(string)
+		**out = **in
 	}
 	if in.Readers != nil {
 		in, out := &in.Readers, &out.Readers

@@ -139,7 +139,7 @@ func TestChannelReadIsMonotonic(t *testing.T) {
 		[]map[string]any{{"threadId": "10", "readAt": t2.Format(time.RFC3339)}}, "test-adapter-token"); code != 200 || out.Marked != 1 {
 		t.Fatalf("first report: %d %+v", code, out)
 	}
-	stored := threadOf(t, "conv-mono", "chan-mono").ReadAt.DeepCopy()
+	stored := *threadOf(t, "conv-mono", "chan-mono").ReadAt
 
 	// an earlier watermark from a stale view
 	code, out := postRead(t, srv, "chan-mono",
@@ -152,7 +152,7 @@ func TestChannelReadIsMonotonic(t *testing.T) {
 		[]map[string]any{{"threadId": "10", "readAt": t2.Format(time.RFC3339)}}, "test-adapter-token"); out.Skipped != 1 {
 		t.Fatalf("unchanged watermark must skip: %+v", out)
 	}
-	if now := threadOf(t, "conv-mono", "chan-mono").ReadAt; !now.Time.Equal(stored.Time) {
+	if now := threadOf(t, "conv-mono", "chan-mono").ReadAt; now == nil || *now != stored {
 		t.Fatalf("watermark moved backwards: %v -> %v", stored, now)
 	}
 }
@@ -171,7 +171,11 @@ func TestChannelReadClampsTheFuture(t *testing.T) {
 		t.Fatalf("clamped report: %d %+v", code, out)
 	}
 	got := threadOf(t, "conv-clamp", "chan-clamp")
-	if got.ReadAt == nil || !got.ReadAt.Time.Before(future.Add(-time.Hour)) {
+	if got.ReadAt == nil {
+		t.Fatal("clamped report did not write a watermark")
+	}
+	parsed, ok := agentopsv1alpha1.ParseWatermark(*got.ReadAt)
+	if !ok || !parsed.Before(future.Add(-time.Hour)) {
 		t.Fatalf("future watermark was not clamped to the manager's clock: %v", got.ReadAt)
 	}
 }
@@ -438,13 +442,17 @@ func TestChannelReadRewind(t *testing.T) {
 		t.Fatalf("rewind: %d %+v", code, out)
 	}
 	got := threadOf(t, "conv-rewind", "chan-rewind")
-	var mark *metav1.Time
+	var mark *string
 	for _, r := range got.Readers {
 		if r.Key == "sha256:rewinder" {
 			mark = r.ReadAt
 		}
 	}
-	if mark == nil || !mark.Time.Before(later) {
+	if mark == nil {
+		t.Fatal("rewind did not write a watermark")
+	}
+	parsed, ok := agentopsv1alpha1.ParseWatermark(*mark)
+	if !ok || !parsed.Before(later) {
 		t.Fatalf("rewind did not move the reader's watermark earlier: %v (was %v)", mark, later)
 	}
 	if got.ReadAt != nil {

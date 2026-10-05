@@ -1284,7 +1284,8 @@ name, and never anything its own `agents[]` does not list.
 | the parent's next run | includes that input, attributed to the member's entry name |
 
 **A member binds no channel at creation.** Its inputs and results reach no
-surface — a coordinator reaches people only by escalating.
+surface directly — only its UNCAUSED root's own bound channels ever show a
+human anything, whether that root's agent escalates or not (see below).
 
 **A conversation never receives its own output as input.** `/channel/inbound`
 refuses an inbound message whose origin surface is its own target
@@ -1293,31 +1294,34 @@ conversation.
 **A member reporting after its parent is `Closed` is dropped.** No input is
 appended, and the result stays on the member's own record.
 
-### Escalation: only the uncaused root ever opens a human thread
+### Escalation: a decision posted into a thread already open
 
-**Escalation is a decision, not an arrival.** A Coordinator's `channelRefs`
-bind nothing at creation. They are snapshotted onto the UNCAUSED root as
-`spec.escalationChannelRefs`, and nothing opens a thread on them until the
-agent calls `escalate(message)`.
+**An uncaused root's channels bind at creation, unconditionally** — the same
+moment a Pipeline's own `channelRefs` bind, and whether or not its agent ever
+calls `escalate`. Any open coordinator root is reachable by a human from the
+start.
+
+This replaced an earlier design where a Coordinator's `channelRefs` bound
+nothing until `escalate(message)` ran. That design is gone: an unescalated
+root used to run unseen, and now it does not.
 
 | Caller | `escalate` does |
 |---|---|
-| the uncaused root (no `causedBy`) | binds the snapshotted channels, opens a thread on each with `message` as its first post |
+| the uncaused root (no `causedBy`) | posts `message` as a notice into every already-bound channel's thread, and stamps `status.escalatedAt` |
 | a nested member (carries `causedBy`) | opens **no** thread — closes itself with `message` as `closeReason` and result, landing on its own parent as an ordinary member-result input |
 
-**The bubble repeats.** A parent receiving that report may itself be nested,
-and calling `escalate` again closes it the same way, one hop up, until a call
-reaches the uncaused root.
+**The bubble repeats for a member.** A parent receiving that report may
+itself be nested, and calling `escalate` again closes it the same way, one
+hop up, until a call reaches the uncaused root — where it posts into the
+already-open thread rather than closing anything.
 
-**Escalating reads no Coordinator.** It works even after the Coordinator is
-edited or deleted, because the channels were already snapshotted.
+**A second call is a no-op.** `status.escalatedAt` is set once. A later
+`escalate` on the same root replays no digest.
 
-**Prior inputs are never replayed into a late thread.** `DeliverInputs` fences
-on `status.escalatedAt` — nothing that arrived earlier is delivered to the
-channels escalation just bound.
-
-**After escalation the root is an ordinary multi-channel conversation.** A
-person's reply is an input, delivered to every other bound channel as usual.
+**The root was already an ordinary multi-channel conversation, and stays
+one.** A person's reply is an input, delivered to every other bound channel
+as usual. Nothing about delivery changes at the moment of escalation, because
+nothing was ever fenced on it.
 
 **Close and drop record why.** `status.closeReason` is stamped beside
 `closedAt`. The MCP `close` verb requires one. `/close` from a surface does
