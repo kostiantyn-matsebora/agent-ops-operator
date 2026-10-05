@@ -150,4 +150,31 @@ describe('keyboard navigation', () => {
     await userEvent.keyboard('{Enter}')
     expect(screen.getByTestId('thread-pane')).toHaveTextContent('b')
   })
+
+  it('clamps at both ends of the list', async () => {
+    renderAt('/conversations')
+    screen.getByTestId('chat-view').focus()
+    await userEvent.keyboard('{ArrowUp}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-a')
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-c')
+    await userEvent.keyboard('{ArrowUp}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-b')
+  })
+
+  it('ignores Enter with nothing highlighted and other keys entirely', async () => {
+    renderAt('/conversations')
+    screen.getByTestId('chat-view').focus()
+    await userEvent.keyboard('{Enter}x')
+    expect(screen.queryByTestId('thread-pane')).toBeNull()
+  })
+
+  it('Escape leaves selection mode', async () => {
+    renderAt('/conversations')
+    await userEvent.click(screen.getByText('Select'))
+    expect(screen.getByText('Done selecting')).toBeInTheDocument()
+    screen.getByTestId('chat-view').focus()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.getByText('Select')).toBeInTheDocument()
+  })
 })

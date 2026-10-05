@@ -106,7 +106,7 @@ export async function waitFor<T>(
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs
   let lastErr: unknown
-  for (;;) {
+  const attempt = async (): Promise<T> => {
     try {
       const found = find()
       if (found !== undefined) return found
@@ -114,12 +114,16 @@ export async function waitFor<T>(
       lastErr = e
     }
     if (Date.now() > deadline) {
-      const cause = lastErr instanceof Error ? lastErr.message : String(lastErr ?? '')
+      let cause = ''
+      if (lastErr instanceof Error) cause = lastErr.message
+      else if (lastErr !== undefined) cause = JSON.stringify(lastErr)
       const suffix = cause ? `: ${cause}` : ''
       throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}${suffix}`)
     }
     await new Promise((r) => setTimeout(r, intervalMs))
+    return attempt()
   }
+  return attempt()
 }
 
 /**

@@ -143,6 +143,13 @@ function narrowItems<T extends { coordinator?: string; causedBy?: unknown; phase
   return raw
 }
 
+/** The row an arrow key lands on, clamped to the list's ends. */
+function neighbourName(names: string[], current: string | undefined, down: boolean): string {
+  const idx = current ? names.indexOf(current) : -1
+  const next = down ? Math.min(idx + 1, names.length - 1) : Math.max(idx - 1, 0)
+  return names[Math.max(next, 0)]
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -237,9 +244,7 @@ export function ChatView() {
       return
     }
     e.preventDefault()
-    const idx = highlighted ? names.indexOf(highlighted) : -1
-    const next = e.key === 'ArrowDown' ? Math.min(idx + 1, names.length - 1) : Math.max(idx - 1, 0)
-    const nextName = names[Math.max(next, 0)]
+    const nextName = neighbourName(names, highlighted, e.key === 'ArrowDown')
     setHighlighted(nextName)
     rowRefs.current.get(nextName)?.focus()
   }
