@@ -128,7 +128,7 @@ function ListBody({
  * Closed scope, where showing them is the whole point — narrowed CLIENT-SIDE
  * since there is no server-side "exclude closed" param to ask for instead.
  */
-function narrowItems<T extends { coordinator?: string; causedBy?: string; phase?: string }>(
+function narrowItems<T extends { coordinator?: string; causedBy?: unknown; phase?: string }>(
   items: T[],
   scope: Scope,
   showClosed: boolean,
