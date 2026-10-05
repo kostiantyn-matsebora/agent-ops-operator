@@ -173,8 +173,8 @@ test('#15 a coordinator root renders its OWN exchange as ordinary message bubble
     // somehow rendering AT LEAST as large as an ordinary message bubble,
     // which would mean it had stopped being visually subordinate. The real
     // proof is the screenshot below, read by a human.
-    expect(parseFloat(lifecycleFontSize), `lifecycle line font-size ${lifecycleFontSize} vs bubble ${bubbleFontSize}`)
-      .toBeLessThanOrEqual(parseFloat(bubbleFontSize))
+    expect(Number.parseFloat(lifecycleFontSize), `lifecycle line font-size ${lifecycleFontSize} vs bubble ${bubbleFontSize}`)
+      .toBeLessThanOrEqual(Number.parseFloat(bubbleFontSize))
   }
 
   // The proof screenshot, at the point the strongest assertions above just

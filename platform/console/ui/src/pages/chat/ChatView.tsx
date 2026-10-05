@@ -122,6 +122,27 @@ function ListBody({
   return <>{children}</>
 }
 
+/**
+ * The list's client-side narrowing. The coordinator scope keeps its own
+ * members. Closed conversations are hidden everywhere except the dedicated
+ * Closed scope, where showing them is the whole point — narrowed CLIENT-SIDE
+ * since there is no server-side "exclude closed" param to ask for instead.
+ */
+function narrowItems<T extends { coordinator?: string; causedBy?: string; phase?: string }>(
+  items: T[],
+  scope: Scope,
+  showClosed: boolean,
+): T[] {
+  let raw = items
+  if (scope.kind === 'coordinator') {
+    raw = raw.filter((c) => c.coordinator === scope.name || c.causedBy)
+  }
+  if (!showClosed && scope.kind !== 'closed') {
+    raw = raw.filter((c) => c.phase !== 'Closed')
+  }
+  return raw
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -152,20 +173,7 @@ export function ChatView() {
   const canWriteHere = session.data?.canWrite ?? false
   const canStartHere = Boolean(session.data?.canOriginate) && (sources.data?.sources ?? []).some((s) => s.wired)
 
-  const items = useMemo(() => {
-    let raw = data?.items ?? []
-    if (scope.kind === 'coordinator') {
-      raw = raw.filter((c) => c.coordinator === scope.name || c.causedBy)
-    }
-    // Closed conversations are hidden by default everywhere except the
-    // dedicated Closed scope, where showing them is the whole point —
-    // narrowed CLIENT-SIDE, like the coordinator scope above, since there is
-    // no server-side "exclude closed" param to ask for instead.
-    if (!showClosed && scope.kind !== 'closed') {
-      raw = raw.filter((c) => c.phase !== 'Closed')
-    }
-    return raw
-  }, [data, scope, showClosed])
+  const items = useMemo(() => narrowItems(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
 
   useArrivals(data, setNewNames)
 

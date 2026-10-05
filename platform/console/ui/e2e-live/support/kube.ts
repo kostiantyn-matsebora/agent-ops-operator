@@ -6,6 +6,31 @@
 // E2E_LIVE_KUBE_CONTEXT names.
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { accessSync, constants } from 'node:fs'
+import path from 'node:path'
+
+/**
+ * kubectl resolved ONCE to an absolute path, searching only the absolute
+ * entries of PATH, so a relative or empty PATH entry (the current directory)
+ * can never supply the binary. `E2E_LIVE_KUBECTL` overrides the search.
+ */
+function resolveKubectl(): string {
+  const override = process.env.E2E_LIVE_KUBECTL
+  if (override) return override
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!path.isAbsolute(dir)) continue
+    const candidate = path.join(dir, 'kubectl')
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // not in this directory
+    }
+  }
+  throw new Error('kubectl not found in an absolute PATH entry (set E2E_LIVE_KUBECTL to its full path)')
+}
+
+const KUBECTL = resolveKubectl()
 
 export const KUBE_CONTEXT = process.env.E2E_LIVE_KUBE_CONTEXT ?? 'k3d-agentops-e2e'
 export const NAMESPACE = process.env.E2E_LIVE_NAMESPACE ?? 'agent-ops'
@@ -17,7 +42,7 @@ function kubectlBaseArgs(): string[] {
 /** Runs kubectl, returns stdout. Throws with stderr attached on failure. */
 export function kubectl(args: string[], input?: string): string {
   try {
-    return execFileSync('kubectl', [...kubectlBaseArgs(), ...args], {
+    return execFileSync(KUBECTL,[...kubectlBaseArgs(), ...args], {
       input,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
@@ -89,7 +114,9 @@ export async function waitFor<T>(
       lastErr = e
     }
     if (Date.now() > deadline) {
-      throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}${lastErr ? `: ${String(lastErr)}` : ''}`)
+      const cause = lastErr instanceof Error ? lastErr.message : String(lastErr ?? '')
+      const suffix = cause ? `: ${cause}` : ''
+      throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}${suffix}`)
     }
     await new Promise((r) => setTimeout(r, intervalMs))
   }
@@ -141,7 +168,7 @@ export interface Forward {
 
 export async function portForward(service: string, targetPort: number): Promise<Forward> {
   const child: ChildProcess = spawn(
-    'kubectl',
+    KUBECTL,
     [...kubectlBaseArgs(), 'port-forward', `svc/${service}`, `:${targetPort}`],
     { stdio: ['ignore', 'pipe', 'pipe'] },
   )
@@ -150,7 +177,7 @@ export async function portForward(service: string, targetPort: number): Promise<
     const onData = (chunk: Buffer) => {
       buf += chunk.toString()
       // "Forwarding from 127.0.0.1:XXXXX -> 8080"
-      const m = buf.match(/Forwarding from 127\.0\.0\.1:(\d+)/)
+      const m = /Forwarding from 127\.0\.0\.1:(\d+)/.exec(buf)
       if (m) {
         child.stdout?.off('data', onData)
         resolve(Number(m[1]))

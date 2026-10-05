@@ -26,15 +26,21 @@ inline or by `capabilityRef` with the same exclusivity a Pipeline has.
 - **THEN** a thread is created on each of its `channelRefs` at once
 - **AND** a human reply there is an ordinary input before the agent ever escalates
 
-### Requirement: `spec.escalationChannelRefs` names the root's bound channels
+### Requirement: Limits and escalation channels are snapshotted onto the conversation opened
 
-The Coordinator's `channelRefs` SHALL be snapshotted as
+The Coordinator's limits SHALL be snapshotted onto every conversation it
+opens. Its `channelRefs` SHALL be snapshotted as
 `spec.escalationChannelRefs` onto an UNCAUSED root only. A member never
 binds it (coordination-escalation).
 
-This snapshot IS the root's bound channel set — it is read once, at
-creation, so editing the Coordinator afterward changes neither the budget
-nor the channels of an incident already in flight.
+The field keeps its `escalation` name because it is the stored field the
+snapshot rule and `escalate` already read, and renaming it would strand
+every open incident. Its meaning has widened: it IS the root's bound
+channel set, not only the channels an escalation opens.
+
+The snapshot is read once, at creation, so editing the Coordinator
+afterward changes neither the budget nor the channels of an incident
+already in flight.
 
 A nested Coordinator's budget snapshot is its own, independent of any
 ancestor's.

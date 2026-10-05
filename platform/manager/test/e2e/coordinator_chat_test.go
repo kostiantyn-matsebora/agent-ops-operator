@@ -24,6 +24,42 @@ import (
 // FULL TIER: two real conversation pods (the root, then an invoked member)
 // across several dispatch cycles.
 
+// boundToConsoleAndTelegram reports whether the attribution shows exactly the
+// console thread and the Telegram thread.
+func boundToConsoleAndTelegram(attr consoleAttribution) bool {
+	seen := map[string]bool{}
+	for _, th := range attr.Threads {
+		seen[th.Channel] = true
+	}
+	return len(attr.Threads) == 2 && seen[ChannelConsole] && seen[ChannelTelegram]
+}
+
+// botSentContaining reports whether any sendMessage the fake Bot API saw
+// carried the text.
+func botSentContaining(t *testing.T, e *Env, text string) bool {
+	t.Helper()
+	for _, c := range e.BotCalls(t, "sendMessage") {
+		b, _ := json.Marshal(c["body"])
+		if strings.Contains(string(b), text) {
+			return true
+		}
+	}
+	return false
+}
+
+// runsRecordInput reports whether any run of the conversation recorded an
+// input containing the text.
+func runsRecordInput(c *agentopsv1alpha1.Conversation, text string) bool {
+	for _, r := range c.Status.Runs {
+		for _, in := range r.Inputs {
+			if strings.Contains(in.Text, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // 1. A coordinator conversation is addressable from chat, end to end
 //    (coordinator-unconditional-channels): `/<coordinator-name> <task>` on a
 //    chat-capable source opens a ROOT whose `spec.channelRefs` already carry
@@ -92,23 +128,12 @@ func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.
 	var attr consoleAttribution
 	waitFor(t, "the console attributes the root to its coordinator with both channels bound", 30*time.Second, func() (bool, error) {
 		attr = consoleConversationAttribution(t, e, root.Name)
-		if attr.Coordinator != coordName {
-			return false, nil
-		}
-		seen := map[string]bool{}
-		for _, th := range attr.Threads {
-			seen[th.Channel] = true
-		}
-		return len(attr.Threads) == 2 && seen[ChannelConsole] && seen[ChannelTelegram], nil
+		return attr.Coordinator == coordName && boundToConsoleAndTelegram(attr), nil
 	})
 	if attr.Coordinator != coordName {
 		t.Fatalf("the console must attribute the root to its coordinator by name, got %q want %q", attr.Coordinator, coordName)
 	}
-	seen := map[string]bool{}
-	for _, th := range attr.Threads {
-		seen[th.Channel] = true
-	}
-	if len(attr.Threads) != 2 || !seen[ChannelConsole] || !seen[ChannelTelegram] {
+	if !boundToConsoleAndTelegram(attr) {
 		t.Fatalf("the console must show the root bound to the Coordinator's own declared channel (%s) PLUS the "+
 			"addressing channel (%s) at CREATION, with no wait for escalate — got %+v",
 			ChannelConsole, ChannelTelegram, attr.Threads)
@@ -127,13 +152,7 @@ func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.
 		return strings.Contains(e.ConsoleTranscript(t, root.Name), "coordchat-"+stamp), nil
 	})
 	waitFor(t, "the answer sent to Telegram, with no escalate call", 2*time.Minute, func() (bool, error) {
-		for _, c := range e.BotCalls(t, "sendMessage") {
-			b, _ := json.Marshal(c["body"])
-			if strings.Contains(string(b), "coordchat-"+stamp) {
-				return true, nil
-			}
-		}
-		return false, nil
+		return botSentContaining(t, e, "coordchat-"+stamp), nil
 	})
 
 	// The other half of the same fix: a reply landing BEFORE anything
@@ -168,13 +187,7 @@ func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.
 		return strings.Contains(e.ConsoleTranscript(t, root.Name), "escalating-"+stamp), nil
 	})
 	waitFor(t, "the escalate digest delivered to Telegram too — the SAME thread set", 2*time.Minute, func() (bool, error) {
-		for _, c := range e.BotCalls(t, "sendMessage") {
-			b, _ := json.Marshal(c["body"])
-			if strings.Contains(string(b), "escalating-"+stamp) {
-				return true, nil
-			}
-		}
-		return false, nil
+		return botSentContaining(t, e, "escalating-"+stamp), nil
 	})
 	if got := len(e.BotCalls(t, "createForumTopic")); got != topicsBeforeEscalate {
 		t.Fatalf("escalate must post into the EXISTING Telegram topic, never open a new one: "+
@@ -186,15 +199,7 @@ func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.
 	member := e.invokeMember(t, coordName, root.Name, "domain", "echo postescalate-"+stamp)
 	e.WaitRun(t, member, 1, 3*time.Minute)
 	root = e.WaitRun(t, root.Name, 3, 3*time.Minute)
-	foundRouted := false
-	for _, r := range root.Status.Runs {
-		for _, in := range r.Inputs {
-			if strings.Contains(in.Text, "postescalate-"+stamp) {
-				foundRouted = true
-			}
-		}
-	}
-	if !foundRouted {
+	if !runsRecordInput(root, "postescalate-"+stamp) {
 		t.Fatalf("a member result delivered AFTER escalate must still reach the root as an "+
 			"ordinary routed input, root runs: %+v", root.Status.Runs)
 	}

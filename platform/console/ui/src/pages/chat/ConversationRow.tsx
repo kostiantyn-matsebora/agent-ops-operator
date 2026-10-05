@@ -177,6 +177,32 @@ export interface ConversationRowProps {
   onToggleCollapse?: () => void
 }
 
+/** The expand/collapse chevron of a root, or the spacer a top-level leaf keeps. */
+function CollapseToggle({
+  memberCount, depth, title, collapsed, onToggleCollapse,
+}: Readonly<{
+  memberCount: number
+  depth: number
+  title: string
+  collapsed?: boolean
+  onToggleCollapse?: () => void
+}>) {
+  if (memberCount > 0) {
+    return (
+      <button
+        type="button"
+        aria-label={collapsed ? `expand ${title}` : `collapse ${title}`}
+        aria-expanded={!collapsed}
+        onClick={onToggleCollapse}
+        style={{ all: 'unset', cursor: 'pointer', color: 'var(--ao-text-subtle)', fontSize: 11, paddingTop: 10 }}
+      >
+        {collapsed ? '▸' : '▾'}
+      </button>
+    )
+  }
+  return depth === 0 ? <span aria-hidden style={{ width: 11 }} /> : null
+}
+
 export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProps>(function ConversationRow(
   {
     row, depth, memberCount, parentMissing, isNew, selectionMode, selected, highlighted,
@@ -222,19 +248,13 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
           onChange={(_e, checked) => onSelect(checked)}
         />
       )}
-      {memberCount > 0 ? (
-        <button
-          type="button"
-          aria-label={collapsed ? `expand ${title}` : `collapse ${title}`}
-          aria-expanded={!collapsed}
-          onClick={onToggleCollapse}
-          style={{ all: 'unset', cursor: 'pointer', color: 'var(--ao-text-subtle)', fontSize: 11, paddingTop: 10 }}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
-      ) : (
-        depth === 0 && <span aria-hidden style={{ width: 11 }} />
-      )}
+      <CollapseToggle
+        memberCount={memberCount}
+        depth={depth}
+        title={title}
+        collapsed={collapsed}
+        onToggleCollapse={onToggleCollapse}
+      />
       <button
         ref={ref}
         type="button"

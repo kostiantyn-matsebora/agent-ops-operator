@@ -19,7 +19,7 @@ test('#19 an unjoined coordinator root is told to bind the COORDINATOR, never "t
   // PatternFly's `ClipboardCopy` renders it as a readonly `<input>`'s VALUE,
   // which never becomes a text NODE `getByText` would match, so this reads
   // the input's value directly instead.
-  await expect(page.locator('input[readonly]')).toHaveValue(new RegExp(`Coordinator ${f.coordinators.unjoined}\\b`))
+  await expect(page.locator('input[readonly]')).toHaveValue(new RegExp(String.raw`Coordinator ${f.coordinators.unjoined}\b`))
   // The retired wording, which only ever applied to an unattributable
   // PIPELINE conversation, must never leak onto a Coordinator root.
   await expect(page.getByText('the Pipeline that originated it')).toHaveCount(0)

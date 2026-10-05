@@ -19,7 +19,7 @@ function relativeLuminance([r, g, b]: [number, number, number]): number {
 }
 
 function parseRgb(css: string): [number, number, number] {
-  const m = css.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/)
+  const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(css)
   if (!m) throw new Error(`could not parse colour: ${css}`)
   return [Number(m[1]), Number(m[2]), Number(m[3])]
 }
