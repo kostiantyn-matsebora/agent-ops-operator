@@ -194,6 +194,18 @@ function withMembership(names: Set<string>, rowName: string, present: boolean): 
   return next
 }
 
+/** The rows a bulk action may touch, and whether every one is selected. */
+function selectionState(items: ConversationSummary[], selected: Set<string>) {
+  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
+  const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
+  return { selectableRows, allSelected }
+}
+
+/** The inbox pane's width, the narrow strip when it is collapsed. */
+function inboxPaneWidth(layout: { inboxCollapsed: boolean; inboxWidth: number }): number {
+  return layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -288,13 +300,12 @@ export function ChatView() {
     }
   }
 
-  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
-  const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
+  const { selectableRows, allSelected } = selectionState(items, selected)
 
   const showingList = !narrow || !name
   const showingThread = !narrow || Boolean(name)
   const listWidth = layout.listWidth
-  const inboxWidth = layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
+  const inboxWidth = inboxPaneWidth(layout)
 
   return (
     <section
