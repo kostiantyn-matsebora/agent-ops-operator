@@ -186,6 +186,14 @@ function toggleName(names: Set<string>, rowName: string): Set<string> {
   return next
 }
 
+/** A copy of the set with the name present or absent, as asked. */
+function withMembership(names: Set<string>, rowName: string, present: boolean): Set<string> {
+  const next = new Set(names)
+  if (present) next.add(rowName)
+  else next.delete(rowName)
+  return next
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -238,12 +246,7 @@ export function ChatView() {
   }
 
   function toggleSelect(rowName: string, checked: boolean) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(rowName)
-      else next.delete(rowName)
-      return next
-    })
+    setSelected((prev) => withMembership(prev, rowName, checked))
   }
 
   function openRow(rowName: string, e?: React.MouseEvent) {
