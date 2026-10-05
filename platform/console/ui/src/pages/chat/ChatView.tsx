@@ -167,6 +167,11 @@ function canStartConversation(canOriginate: boolean | undefined, sources: { wire
   return Boolean(canOriginate) && (sources ?? []).some((s) => s.wired)
 }
 
+/** A modifier-click on a row toggles its selection instead of opening it. */
+function isMultiSelectClick(e: React.MouseEvent | undefined): boolean {
+  return Boolean(e && (e.metaKey || e.ctrlKey))
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -228,7 +233,7 @@ export function ChatView() {
   }
 
   function openRow(rowName: string, e?: React.MouseEvent) {
-    if (e && (e.metaKey || e.ctrlKey)) {
+    if (isMultiSelectClick(e)) {
       setSelectionMode(true)
       toggleSelect(rowName, !selected.has(rowName))
       return
