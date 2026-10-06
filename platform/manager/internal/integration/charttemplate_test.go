@@ -2504,26 +2504,9 @@ func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
 	// template validates no schema, so the first live install of the
 	// purpose-shaped texts failed at the API server on two of them under the
 	// old 512-byte cap. Bytes, not runes: an em dash is three.
-	for name, d := range descs {
-		if len(d) > 2048 {
-			t.Errorf("%s's description is %d bytes, over the CRD's 2048:\n%s", name, len(d), d)
-		}
-	}
+	assertDescriptionsUnderCap(t, descs, 2048)
 	for name, phrases := range must {
-		d := descs[name]
-		for _, opening := range retiredOpenings {
-			if strings.HasPrefix(d, opening) {
-				t.Errorf("%s's description is the retired trigger %q again:\n%s", name, opening, d)
-			}
-		}
-		for _, phrase := range phrases {
-			if !strings.Contains(d, phrase) {
-				t.Errorf("%s's description lacks %q:\n%s", name, phrase, d)
-			}
-		}
-		if strings.Contains(d, "once the cause is known") {
-			t.Errorf("%s's description still gates itself on a moment rather than stating a purpose:\n%s", name, d)
-		}
+		assertPurposeDescription(t, name, descs[name], retiredOpenings, phrases)
 	}
 	// ha-control USES the house (profiles.user.systemPrompt) — it was described
 	// as read-only, which was simply false.
@@ -2533,6 +2516,35 @@ func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
 	// The reaper keeps its instruction-shaped description, naming its source.
 	if !strings.Contains(descs["reaper"], "ONLY in response to the hourly self-heal signal from source \"reaper-sweep\"") {
 		t.Errorf("the reaper's description must stay trigger-shaped and name its source:\n%s", descs["reaper"])
+	}
+}
+
+// assertPurposeDescription checks one entry's description states a purpose:
+// no retired trigger opening, every required phrase, no moment-gating.
+func assertPurposeDescription(t *testing.T, name, d string, retiredOpenings, phrases []string) {
+	t.Helper()
+	for _, opening := range retiredOpenings {
+		if strings.HasPrefix(d, opening) {
+			t.Errorf("%s's description is the retired trigger %q again:\n%s", name, opening, d)
+		}
+	}
+	for _, phrase := range phrases {
+		if !strings.Contains(d, phrase) {
+			t.Errorf("%s's description lacks %q:\n%s", name, phrase, d)
+		}
+	}
+	if strings.Contains(d, "once the cause is known") {
+		t.Errorf("%s's description still gates itself on a moment rather than stating a purpose:\n%s", name, d)
+	}
+}
+
+// assertDescriptionsUnderCap fails for every description over the byte cap.
+func assertDescriptionsUnderCap(t *testing.T, descs map[string]string, limit int) {
+	t.Helper()
+	for name, d := range descs {
+		if len(d) > limit {
+			t.Errorf("%s's description is %d bytes, over the CRD's %d:\n%s", name, len(d), limit, d)
+		}
 	}
 }
 
