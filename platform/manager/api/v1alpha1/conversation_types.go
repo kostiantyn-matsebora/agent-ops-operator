@@ -569,6 +569,17 @@ type RecordedInput struct {
 	// Sender is who typed it, when a sender was named. Attribution only.
 	// +optional
 	Sender string `json:"sender,omitempty"`
+	// Origin is this input's OriginKind, carried into the durable record so a
+	// reader rehydrating a thread from `status.runs[]` alone can tell a
+	// coordination-internal input (OriginMember — a task `invoke` handed down,
+	// or a member's result routed back up) from an ordinary one, WITHOUT
+	// re-deriving it from Surface: both an OriginMember input and a genuine
+	// surfaceless signal (an alert, a job tick) record Surface as "", so Surface
+	// alone cannot tell them apart. Absent on an input recorded before this
+	// field existed, which reads as neither kind and renders exactly as it
+	// always has.
+	// +optional
+	Origin OriginKind `json:"origin,omitempty"`
 	// +optional
 	ReceivedAt *metav1.Time `json:"receivedAt,omitempty"`
 }
@@ -583,6 +594,9 @@ func (i *InputItem) Record(text string, labels map[string]string) RecordedInput 
 	rec := RecordedInput{
 		ID: i.ID, Type: i.Type, PayloadRef: i.PayloadRef,
 		Surface: i.OriginSurface(labels), Sender: i.OriginSender(labels),
+	}
+	if i.Origin != nil {
+		rec.Origin = i.Origin.Kind
 	}
 	if !i.ReceivedAt.IsZero() {
 		at := i.ReceivedAt

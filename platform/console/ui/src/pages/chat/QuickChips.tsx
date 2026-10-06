@@ -1,76 +1,69 @@
+import type { ReactNode } from 'react'
 import { Button, Tooltip } from '@patternfly/react-core'
+import { ArchiveIcon, SignOutAltIcon } from '@patternfly/react-icons'
 import { useVocabulary } from '../../api/hooks'
-import { Icon } from '../../components/Icon'
 import { PlainText } from '../../components/Text'
-import { useComposerIntent } from './composerIntent'
 import type { Choice } from '../../api/types'
 
-// Ported from `prototype/States.html` ("Quick chips: Ready pipelines to
-// start with, thread commands, and the last message's choices[]") and
-// `D-incident.html`'s chip row — one row, three sources, read from the
-// `console-quick-actions` spec.
+// Ported from `prototype/States.html`'s chip row, with ONE explicit
+// deviation from it: the user instructed directly, more than once, that
+// thread commands are icons the user RUNS, never raw "/name" text the user
+// has to insert and then send — overriding the prototype's own mono-text
+// rendering of `/exit`/`/close`. Pipeline/coordinator "starter" chips are
+// REMOVED from inside an open conversation entirely (also by direct
+// instruction): offering to start a redundant new conversation with a
+// pipeline/coordinator you are already talking to was confusing, not useful.
+// Starting a new conversation is the "New conversation" modal's job now.
 
 const COMMAND_HINT: Record<string, string> = {
   exit: 'release this conversation’s runtime, keep the conversation',
   close: 'end this conversation and archive its thread',
 }
 
+const COMMAND_ICON: Record<string, ReactNode> = {
+  exit: <SignOutAltIcon />,
+  close: <ArchiveIcon />,
+}
+
 export interface QuickChipsProps {
   /** Writes are off entirely — console-quick-actions: "no start chip is shown". */
   canWrite: boolean
-  /** A Ready Pipeline or Coordinator claims a source this console can originate from. */
-  canStart: boolean
   /** The latest message's offered choices, if any. */
   choices?: Choice[]
-  /** Inserts text into the OPEN conversation's composer — absent when none is open. */
+  /** Runs a thread command (`/exit`, `/close`) immediately — never inserted
+   * into the composer for the user to send themselves. `/close`'s own
+   * confirmation gate lives in the sender, not here. */
+  onRunCommand?: (text: string) => void
+  /** Inserts text into the OPEN conversation's composer, for an offered choice
+   * — absent when none is open. */
   onInsertCommand?: (text: string) => void
 }
 
-export function QuickChips({ canWrite, canStart, choices, onInsertCommand }: Readonly<QuickChipsProps>) {
+export function QuickChips({ canWrite, choices, onRunCommand, onInsertCommand }: Readonly<QuickChipsProps>) {
   const vocabulary = useVocabulary()
   if (!canWrite) return null
   const entries = vocabulary.data?.entries ?? []
-  const starters = canStart
-    ? entries.filter((e) => (e.kind === 'pipeline' || e.kind === 'coordinator') && e.position === 'general')
-    : []
-  const threadCommands = onInsertCommand
+  const threadCommands = onRunCommand
     ? entries.filter((e) => e.kind === 'builtin' && e.position === 'thread')
     : []
   const offered = choices ?? []
 
-  if (starters.length === 0 && threadCommands.length === 0 && offered.length === 0) return null
+  if (threadCommands.length === 0 && offered.length === 0) return null
 
   return (
     <div
       data-testid="quick-chips"
       style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}
     >
-      {starters.map((e) => (
-        <Button
-          key={`start-${e.name}`}
-          variant="secondary"
-          size="sm"
-          icon={e.icon ? <Icon icon={e.icon} /> : undefined}
-          onClick={() => useComposerIntent.getState().openWith(`/${e.name} `)}
-        >
-          {/* The "+" marks "starts something new" — distinct from a thread
-              command (raw `/name`, mono) and an offered choice (no marker at
-              all). A separate span so the visible name stays an exact text
-              match for anything already asserting on it. */}
-          <span aria-hidden style={{ fontWeight: 700, marginRight: 4 }}>+</span>
-          <PlainText>{e.name}</PlainText>
-        </Button>
-      ))}
       {threadCommands.map((e) => (
         <Tooltip key={`cmd-${e.name}`} content={e.description || COMMAND_HINT[e.name] || e.name}>
           <Button
-            variant="secondary"
+            variant="plain"
             size="sm"
-            style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}
-            onClick={() => onInsertCommand?.(`/${e.name}`)}
-          >
-            {`/${e.name}`}
-          </Button>
+            aria-label={`/${e.name}`}
+            icon={COMMAND_ICON[e.name]}
+            onClick={() => onRunCommand?.(`/${e.name}`)}
+          />
         </Tooltip>
       ))}
       {offered.map((c) => (

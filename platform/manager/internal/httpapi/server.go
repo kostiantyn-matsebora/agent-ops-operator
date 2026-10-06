@@ -570,8 +570,17 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// allowed to prune the queue entry — a crash between the two would otherwise
 	// lose what a person said, permanently and silently.
 	var recorded []agentopsv1alpha1.RecordedInput
+	// Carried out of Inflight before it is cleared below — the only place this
+	// run's true start time is ever recorded. A coordinator's member is
+	// created mid-run, as soon as `invoke` is called, well before the run
+	// that invoked it finishes and writes its own RunStatus entry; the
+	// console anchors the member's transcript position to this run's window
+	// (item #15 QA) and needs a real StartedAt to do it, not the run's own
+	// finish time standing in for both ends.
+	var startedAt *metav1.Time
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
 		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
+		startedAt = &conv.Status.Inflight.DispatchedAt
 		if !hold {
 			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
 			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
@@ -647,7 +656,8 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		result = result[:2000]
 	}
 	conv.Status.Runs = append(conv.Status.Runs, agentopsv1alpha1.RunStatus{
-		RunID: d.RunID, Status: d.Status, ExitCode: d.ExitCode, Result: result, FinishedAt: &now,
+		RunID: d.RunID, Status: d.Status, ExitCode: d.ExitCode, Result: result,
+		StartedAt: startedAt, FinishedAt: &now,
 		// This manager owes the reply to every bound thread. Recorded on the run
 		// itself so the obligation survives the process that took it on.
 		DeliveryTracked: true,

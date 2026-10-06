@@ -404,9 +404,11 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 		}
 		// Addressed input: /agents and friends answer in place;
 		// /<pipeline> <task> still opens a conversation, on the pipeline it
-		// names rather than the one claiming the source.
+		// names rather than the one claiming the source. sig.Reader rides
+		// along exactly as it does for the bare chat lane below — an
+		// addressed command is equally a person originating a conversation.
 		if err := s.Router.HandleCommand(ctx, ch, cmd,
-			sig.Labels[LabelChatSender], sig.Labels[LabelChatMessage]); err != nil {
+			sig.Labels[LabelChatSender], sig.Labels[LabelChatMessage], sig.Reader); err != nil {
 			return 0, 0, "", err
 		}
 		answered++

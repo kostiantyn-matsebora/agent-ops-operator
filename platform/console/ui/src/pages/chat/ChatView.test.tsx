@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -12,7 +12,17 @@ function conv(name: string, over: Partial<ConversationSummary> = {}): Conversati
   }
 }
 
-let items: ConversationSummary[] = [conv('a'), conv('b'), conv('c')]
+const DEFAULT_ITEMS: ConversationSummary[] = [conv('a'), conv('b'), conv('c')]
+let items: ConversationSummary[] = DEFAULT_ITEMS
+
+// A manual `items = original` at the END of a test body never runs if an
+// assertion earlier in that SAME test throws — which leaks that test's
+// fixture into every test that runs after it in this file, as happened here
+// (one failing assertion cascaded into two unrelated, previously-passing
+// tests). Restoring in `afterEach` runs regardless of how the test ended.
+afterEach(() => {
+  items = DEFAULT_ITEMS
+})
 
 vi.mock('../../api/hooks', () => ({
   useConversations: () => ({ data: { items, total: items.length, unreadTotal: 0, offset: 0, limit: 100, facets: {} }, isLoading: false, error: null }),
@@ -21,7 +31,12 @@ vi.mock('../../api/hooks', () => ({
   useSources: () => ({ data: { sources: [] } }),
   useInboxCounts: () => ({ data: { items: [], total: items.length, unreadTotal: 0, offset: 0, limit: 0, facets: {}, scopes: {} } }),
   useVocabulary: () => ({ data: { entries: [] } }),
+  useMarkRead: () => ({ mutate: vi.fn() }),
+  useMarkUnread: () => ({ mutate: vi.fn() }),
+  useReopenConversation: () => ({ mutate: vi.fn() }),
 }))
+
+vi.mock('../../api/client', () => ({ api: { send: vi.fn() } }))
 
 vi.mock('./ThreadPane', () => ({ ThreadPane: ({ name }: { name: string }) => <div data-testid="thread-pane">{name}</div> }))
 
@@ -79,6 +94,46 @@ describe('narrow windows show one column', () => {
   })
 })
 
+describe('a phone width turns the Inbox into a drawer, never a squeezed column', () => {
+  // Measured live at 375px: the Inbox panel (min 200px) rendered as a fixed
+  // column beside the list (min 280px) overflowed the viewport, and the
+  // Inbox's own text bled behind the list rather than being hidden.
+  it('does not render the Inbox column inline below the mobile breakpoint', () => {
+    window.innerWidth = 375
+    act(() => window.dispatchEvent(new Event('resize')))
+    renderAt('/conversations')
+    expect(screen.queryByTestId('inbox')).toBeNull()
+    expect(screen.getByRole('button', { name: 'conversation filters' })).toBeInTheDocument()
+    window.innerWidth = 1440
+    act(() => window.dispatchEvent(new Event('resize')))
+  })
+
+  it('opens the Inbox full-screen on request, and returns to the list once a scope is picked', async () => {
+    window.innerWidth = 375
+    act(() => window.dispatchEvent(new Event('resize')))
+    renderAt('/conversations')
+    await userEvent.click(screen.getByRole('button', { name: 'conversation filters' }))
+    expect(screen.getByTestId('inbox')).toBeInTheDocument()
+    // The list is replaced, not merely covered — nothing of it renders either.
+    expect(screen.queryByRole('button', { name: 'conversation filters' })).toBeNull()
+    await userEvent.click(screen.getByTestId('scope-Unread'))
+    expect(screen.queryByTestId('inbox')).toBeNull()
+    expect(screen.getByRole('button', { name: 'conversation filters' })).toBeInTheDocument()
+    window.innerWidth = 1440
+    act(() => window.dispatchEvent(new Event('resize')))
+  })
+
+  it('still renders the Inbox as an ordinary column above the mobile breakpoint', () => {
+    window.innerWidth = 700
+    act(() => window.dispatchEvent(new Event('resize')))
+    renderAt('/conversations')
+    expect(screen.getByTestId('inbox')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'conversation filters' })).toBeNull()
+    window.innerWidth = 1440
+    act(() => window.dispatchEvent(new Event('resize')))
+  })
+})
+
 describe('arrivals (console-thread-live-cues)', () => {
   // The toast popup is gone (item 9) — the tinted row and its "new" tag are
   // the whole of the signal now, never a popup naming the pipeline.
@@ -103,6 +158,78 @@ describe('arrivals (console-thread-live-cues)', () => {
     expect(screen.getByText('new')).toBeInTheDocument()
     expect(screen.queryByText(/alert-triage opened a brand new incident/)).not.toBeInTheDocument()
     items = original
+  })
+
+  // Switching scope used to look exactly like a batch of real arrivals: the
+  // "seen" set was shared across every scope, so moving from a narrow one
+  // (a few rows) to a wider one (e.g. All) compared the wide list against
+  // the narrow scope's small set and tagged everything the narrow scope
+  // never had as "new" — even though nothing had actually arrived.
+  it('does not tag every row as new just from switching to a wider scope', async () => {
+    items = [conv('a', { unread: true }), conv('b'), conv('c'), conv('d'), conv('e')]
+    renderAt('/conversations')
+    // Narrow the view first (Unread: only 'a' qualifies), establishing a
+    // small "seen" set for that scope.
+    await userEvent.click(screen.getByTestId('scope-Unread'))
+    expect(screen.getByTestId('row-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('row-b')).not.toBeInTheDocument()
+    // Now open the wide scope. None of b/c/d/e actually just arrived — they
+    // existed the whole time, just outside the narrow scope's own set.
+    await userEvent.click(screen.getByTestId('scope-All'))
+    expect(screen.getByTestId('row-b')).toBeInTheDocument()
+    // The real claim: nothing is tagged "new" just from the scope widening.
+    expect(screen.queryByText('new')).not.toBeInTheDocument()
+  })
+})
+
+describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored)', () => {
+  // Each of these used to be an independent per-row filter: a member is
+  // never literally "mine" (it was invoked, never originated), never
+  // literally "errored" just because its root is, and so on — so opening
+  // one of these scopes on a root whose MEMBER is what actually qualifies
+  // (or vice versa) used to show only the one row that matched, with
+  // nothing for the tree to attach to.
+  it('Mine: a root the reader started keeps its member, even though the member itself is never "mine"', async () => {
+    items = [
+      conv('root-1', { coordinator: 'root-1', mine: true }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' }, mine: false }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByTestId('scope-Mine'))
+    expect(screen.getByTestId('row-root-1')).toBeInTheDocument()
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+  })
+
+  it('Unread: a root with nothing new of its own still shows, because its member has an unread message', async () => {
+    items = [
+      conv('root-2', { coordinator: 'root-2', unread: false }),
+      conv('member-2', { causedBy: { parent: 'root-2', entry: 'diagnose' }, unread: true, unreadCount: 1 }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByTestId('scope-Unread'))
+    expect(screen.getByTestId('row-root-2')).toBeInTheDocument()
+    expect(screen.getByTestId('row-member-2')).toBeInTheDocument()
+    // The root itself must still render as read — the tree qualifying is not
+    // the same claim as every row in it being unread.
+    expect(screen.queryByTestId('unread-root-2')).not.toBeInTheDocument()
+    expect(screen.getByTestId('unread-member-2')).toBeInTheDocument()
+  })
+
+  it('a tree with no match anywhere is excluded entirely', async () => {
+    items = [
+      conv('root-3', { coordinator: 'root-3', mine: false, unread: false, errored: false }),
+      conv('member-3', { causedBy: { parent: 'root-3', entry: 'diagnose' }, mine: false, unread: false, errored: false }),
+      // A control row so "Mine" isn't vacuously the only scope with zero
+      // rows for an unrelated reason (e.g. the scope itself failing to
+      // render) — if this one disappeared too, the test would be broken in
+      // a way that could hide a real regression.
+      conv('root-4', { coordinator: 'root-4', mine: true }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByTestId('scope-Mine'))
+    expect(screen.getByTestId('row-root-4')).toBeInTheDocument()
+    expect(screen.queryByTestId('row-root-3')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('row-member-3')).not.toBeInTheDocument()
   })
 })
 

@@ -57,14 +57,16 @@ test('#4 the filter box narrows the visible cards without ever blanking the list
   expect(after).toBeLessThan(before)
 })
 
-test('#5 the empty "Select a conversation" state offers one-click start chips for a Pipeline AND a Coordinator', async ({ page }) => {
-  // No conversation is open — the thread pane shows the empty state beside the list.
+test('#5 the empty "Select a conversation" state offers no starter chips — by direct instruction, overriding item #5\'s own original shape', async ({ page }) => {
+  // Pipeline/coordinator "starter" chips were REMOVED from the empty state
+  // (and from inside an open conversation) entirely: offering to start a
+  // new conversation with a pipeline/coordinator from a chip beside the
+  // list was confusing, never useful, once the "New conversation" modal
+  // (#4, above) already lists every Ready destination as its own card the
+  // instant it opens. There is nothing left to start FROM here.
   await expect(page.getByText('Select a conversation')).toBeVisible()
-  const chips = page.getByTestId('quick-chips')
-  await expect(chips).toBeVisible()
-  await expect(chips.getByRole('button', { name: f.coordinators.open, exact: true })).toBeVisible()
-  await expect(chips.getByRole('button', { name: 'e2e-console', exact: true })).toBeVisible()
-  await page.screenshot({ path: 'e2e-live/proofs/05-empty-state-chips.png', fullPage: true })
+  await expect(page.getByTestId('quick-chips')).toHaveCount(0)
+  await page.screenshot({ path: 'e2e-live/proofs/05-empty-state-no-chips.png', fullPage: true })
 })
 
 test('#4/#5 picking a card, typing a task, and Start really creates a conversation against the real backend', async ({ page }) => {

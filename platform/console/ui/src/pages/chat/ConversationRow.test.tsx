@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import {
   ConversationRow, phaseDot, rowSnippet, rowTag, stripNamePrefix,
 } from './ConversationRow'
@@ -26,6 +27,14 @@ function renderRow(row: ConversationSummary, over: Partial<React.ComponentProps<
         highlighted={false}
         onSelect={vi.fn()}
         onOpen={vi.fn()}
+        canWrite
+        hasReader
+        onMarkRead={vi.fn()}
+        onMarkUnread={vi.fn()}
+        onReopen={vi.fn()}
+        onExitRuntime={vi.fn()}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
         {...over}
       />
     </ul>,
@@ -205,6 +214,39 @@ describe('the row title no longer repeats its own chip', () => {
     renderRow(row)
     expect(screen.getByText('esphome: tion-4s-bedroom lost its connection')).toBeInTheDocument()
   })
+
+  // Bug: a member's `row.pipeline` is unset, so comparing against it (as a
+  // root does against `coordinator`) left the prefix in place. The
+  // comparison name for a member is `causedBy.entry` instead.
+  it('strips the entry prefix for a member, exact match against causedBy.entry', () => {
+    const row = conv('member-1', {
+      causedBy: { parent: 'root-1', entry: 'ha-control' },
+      title: 'ha-control: Read-only triage of a Home Assistant alert',
+    })
+    renderRow(row, { depth: 1 })
+    expect(screen.getByText('Read-only triage of a Home Assistant alert')).toBeInTheDocument()
+    expect(screen.queryByText('ha-control: Read-only triage of a Home Assistant alert')).not.toBeInTheDocument()
+  })
+
+  // The manager writes a member's title as `"🤝 " + entry + ": " + ...`
+  // (coordinate.go) — the live-data shape, as opposed to the plain one above.
+  it('strips both the 🤝 lane icon and the entry prefix for a real member title', () => {
+    const row = conv('member-2a', {
+      causedBy: { parent: 'root-1', entry: 'ha-control' },
+      title: '🤝 ha-control: Read-only triage of a Home Assistant/ESPHome alert',
+    })
+    renderRow(row, { depth: 1 })
+    expect(screen.getByText('Read-only triage of a Home Assistant/ESPHome alert')).toBeInTheDocument()
+  })
+
+  it('leaves a member title untouched when it does not match causedBy.entry', () => {
+    const row = conv('member-2', {
+      causedBy: { parent: 'root-1', entry: 'ha-control' },
+      title: 'esphome: tion-4s-bedroom lost its connection',
+    })
+    renderRow(row, { depth: 1 })
+    expect(screen.getByText('esphome: tion-4s-bedroom lost its connection')).toBeInTheDocument()
+  })
 })
 
 describe('every row names what answers it', () => {
@@ -224,5 +266,23 @@ describe('every row names what answers it', () => {
     const row = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' }, pipeline: 'k8s-observe' })
     renderRow(row, { depth: 1 })
     expect(screen.queryByText('k8s-observe')).not.toBeInTheDocument()
+  })
+})
+
+describe('the row menu (regression: Reopen was built but never rendered)', () => {
+  it('a closed root offers a working Reopen action, through the real row menu', async () => {
+    const onReopen = vi.fn()
+    const row = conv('webhook-timeout', { phase: 'Closed', runCount: 4 })
+    renderRow(row, { onReopen })
+    await userEvent.click(screen.getByLabelText(`actions for ${row.title || row.name}`))
+    await userEvent.click(screen.getByText('Reopen'))
+    expect(onReopen).toHaveBeenCalledTimes(1)
+  })
+
+  it('a member row never offers Reopen, even once closed', async () => {
+    const row = conv('member-1', { phase: 'Closed', causedBy: { parent: 'root-1', entry: 'diagnose' } })
+    renderRow(row, { depth: 1 })
+    await userEvent.click(screen.getByLabelText(`actions for ${row.title || row.name}`))
+    expect(screen.queryByText('Reopen')).toBeNull()
   })
 })

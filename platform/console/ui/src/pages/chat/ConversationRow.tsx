@@ -4,6 +4,7 @@ import { Icon, stripLeadingIcon } from '../../components/Icon'
 import { PlainText } from '../../components/Text'
 import { relativeAge } from './format'
 import { prefersReducedMotion } from './motion'
+import { RowMenu } from './RowMenu'
 import type { ConversationBudget, ConversationSummary } from '../../api/types'
 
 // Ported from `prototype/States.html` (row states) and `C-rail.html` /
@@ -175,22 +176,48 @@ export interface ConversationRowProps {
   pipelineIcon?: string
   collapsed?: boolean
   onToggleCollapse?: () => void
+  /** Whether the viewer may write at all — RowMenu omits every write action otherwise. */
+  canWrite: boolean
+  /** A per-person watermark exists to rewind — absent under a shared token (RowMenu, design D-E). */
+  hasReader: boolean
+  onMarkRead: () => void
+  onMarkUnread: () => void
+  onReopen: () => void
+  onExitRuntime: () => void
+  onClose: () => void
+  onDelete: () => void
 }
 
 export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProps>(function ConversationRow(
   {
     row, depth, memberCount, parentMissing, isNew, selectionMode, selected, highlighted,
     onSelect, onOpen, pipelineIcon, collapsed, onToggleCollapse,
+    canWrite, hasReader, onMarkRead, onMarkUnread, onReopen, onExitRuntime, onClose, onDelete,
   },
   ref,
 ) {
   const isRoot = Boolean(row.coordinator)
-  const title = stripNamePrefix(stripLeadingIcon(row.title || row.name), isRoot ? row.coordinator : row.pipeline)
+  const isMember = Boolean(row.causedBy)
+  // A root is attributed by its coordinator, a member by the entry it was
+  // invoked as (`causedBy.entry` — `row.pipeline` is unset on a member, so
+  // comparing against it left the prefix in place), and everything else by
+  // its pipeline.
+  const nameForStrip = isRoot ? row.coordinator : isMember ? row.causedBy?.entry : row.pipeline
+  const title = stripNamePrefix(stripLeadingIcon(row.title || row.name), nameForStrip)
   const unread = (row.unreadCount ?? 0) > 0
   const dot = phaseDot(row)
   const snippet = rowSnippet(row)
   const tag = rowTag(row, isNew)
   const tint = rowTint(row, isRoot)
+
+  // Pure navigation, derived from the row's own name — no mutation, so no
+  // hook and no prop from the caller (prototype/States.html's "Row menu").
+  function openInNewTab() {
+    window.open(`${window.location.origin}/conversations/${row.name}`, '_blank', 'noopener')
+  }
+  function copyLink() {
+    void navigator.clipboard?.writeText(`${window.location.origin}/conversations/${row.name}`)
+  }
 
   return (
     <li
@@ -203,7 +230,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
       data-testid={`row-${row.name}`}
       style={{
         display: 'grid',
-        gridTemplateColumns: selectionMode ? 'auto auto 1fr' : 'auto 1fr',
+        gridTemplateColumns: selectionMode ? 'auto auto 1fr auto' : 'auto 1fr auto',
         alignItems: 'start',
         gap: 10,
         padding: '10px 12px',
@@ -305,6 +332,21 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
           </span>
         </span>
       </button>
+      <span style={{ paddingTop: 4 }}>
+        <RowMenu
+          row={row}
+          canWrite={canWrite}
+          hasReader={hasReader}
+          onMarkRead={onMarkRead}
+          onMarkUnread={onMarkUnread}
+          onOpenNewTab={openInNewTab}
+          onCopyLink={copyLink}
+          onReopen={onReopen}
+          onExitRuntime={onExitRuntime}
+          onClose={onClose}
+          onDelete={onDelete}
+        />
+      </span>
     </li>
   )
 })

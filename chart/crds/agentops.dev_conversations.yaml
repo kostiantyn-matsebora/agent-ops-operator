@@ -858,6 +858,22 @@ spec:
                             description: ID is the input's id, the same one runs[].inputIds
                               names.
                             type: string
+                          origin:
+                            description: |-
+                              Origin is this input's OriginKind, carried into the durable record so a
+                              reader rehydrating a thread from `status.runs[]` alone can tell a
+                              coordination-internal input (OriginMember — a task `invoke` handed down,
+                              or a member's result routed back up) from an ordinary one, WITHOUT
+                              re-deriving it from Surface: both an OriginMember input and a genuine
+                              surfaceless signal (an alert, a job tick) record Surface as "", so Surface
+                              alone cannot tell them apart. Absent on an input recorded before this
+                              field existed, which reads as neither kind and renders exactly as it
+                              always has.
+                            enum:
+                            - signal
+                            - channel
+                            - member
+                            type: string
                           payloadRef:
                             description: |-
                               PayloadRef names the ConversationInput the full text was read from, when

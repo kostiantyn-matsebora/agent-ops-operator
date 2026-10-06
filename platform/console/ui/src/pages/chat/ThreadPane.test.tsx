@@ -39,6 +39,11 @@ const MID = conv('mid-1', {
     runId: 'run-mid', status: 'succeeded', finishedAt: '2024-01-01T00:01:00Z',
     inputs: [{ id: 'in-1', text: 'investigate the disk pressure on node-3', receivedAt: '2024-01-01T00:00:31Z' }],
     result: 'disk pressure cleared on node-3',
+    // A member's own turns/tool calls — item 16 QA: the backend always
+    // recorded these for a member exactly as for a root, but no tab ever
+    // showed them. Shaped on the real data measured live on member-xw4h5.
+    turns: [{ model: 'claude-5', tokensIn: 900, tokensOut: 120, stopReason: 'end_turn' }],
+    toolCalls: [{ tool: 'mcp__ha__get_states', server: 'ha', durationMs: 220, resultBytes: 4096 }],
   }],
 })
 const PLAIN = conv('plain-1', {
@@ -73,7 +78,51 @@ const ROOT_JOINED = conv('root-joined', {
   threads: [{ channel: 'console', threadId: 't-root' }], joined: true,
 })
 
-const ALL = [ROOT, MID, PLAIN, RICH, ROOT_JOINED]
+// Item #15 QA, bug 1: a member created 35 SECONDS into its invoking run,
+// which does not finish — and record its own reasoning — for almost two more
+// minutes. Shaped on the real timestamps measured live on task-mcvfd: a
+// member created at 19:05:33, its invoking run started 19:04:58 and finished
+// 19:07:04. Sorting the invoke card by `member.created` alone would place it
+// BEFORE its own run's reasoning text, reversing decide-then-act.
+const ROOT_INVOKE_ORDER = conv('root-invoke-order', {
+  coordinator: 'root-invoke-order', threads: [], joined: false,
+  runs: [{
+    runId: 'r0', status: 'succeeded',
+    startedAt: '2024-01-01T19:04:58Z', finishedAt: '2024-01-01T19:07:04Z',
+    result: 'deciding to check on ha',
+  }],
+})
+const MID_INVOKE_ORDER = conv('mid-invoke-order', {
+  causedBy: { parent: 'root-invoke-order', entry: 'ha-ops' },
+  created: '2024-01-01T19:05:33Z', phase: 'Closed', threads: [],
+  runs: [{
+    runId: 'run-ha', status: 'succeeded', finishedAt: '2024-01-01T19:06:00Z',
+    inputs: [{ id: 'in-ha', text: 'what is the status of ha?', receivedAt: '2024-01-01T19:05:34Z' }],
+    result: 'ha is healthy',
+  }],
+})
+
+// Measured live on task-58qx8 (2026-10-05): `run.finishedAt` (the manager's
+// own recorded stamp, 21:19:10) and the reasoning message's own `at` (the
+// console's live buffer, timestamped at RECEIPT — 21:19:12, two real seconds
+// later) are two different clocks. Anchoring the invoke card to
+// `run.finishedAt` therefore still sorted it BEFORE the reasoning even once
+// both were populated — this fixture pins that exact mismatch rather than
+// the coincidental case above where the two happened to already agree.
+const ROOT_CLOCK_SKEW = conv('root-clock-skew', {
+  coordinator: 'root-clock-skew', threads: [], joined: false,
+  runs: [{
+    runId: 'r0', status: 'succeeded',
+    startedAt: '2026-10-05T21:18:38Z', finishedAt: '2026-10-05T21:19:10Z',
+    result: 'request sent to ha-control',
+  }],
+})
+const MID_CLOCK_SKEW = conv('mid-clock-skew', {
+  causedBy: { parent: 'root-clock-skew', entry: 'ha-control' },
+  created: '2026-10-05T21:19:04Z', threads: [],
+})
+
+const ALL = [ROOT, MID, PLAIN, RICH, ROOT_JOINED, ROOT_INVOKE_ORDER, MID_INVOKE_ORDER, ROOT_CLOCK_SKEW, MID_CLOCK_SKEW]
 const DETAILS: Record<string, ConversationDetail> = {
   'root-1': detailFor(ROOT, {
     transcript: [
@@ -86,6 +135,18 @@ const DETAILS: Record<string, ConversationDetail> = {
   'plain-1': detailFor(PLAIN, { transcript: [{ id: 'm1', thread: 't', kind: 'agent', text: 'hello', at: '2024-01-01T00:00:00Z' }] }),
   'rich-1': detailFor(RICH),
   'root-joined': detailFor(ROOT_JOINED),
+  'root-invoke-order': detailFor(ROOT_INVOKE_ORDER, {
+    transcript: [
+      { id: 'run:r0', thread: 'root-invoke-order', kind: 'agent', text: 'deciding to check on ha', at: '2024-01-01T19:07:04Z' },
+    ],
+  }),
+  'mid-invoke-order': detailFor(MID_INVOKE_ORDER),
+  'root-clock-skew': detailFor(ROOT_CLOCK_SKEW, {
+    transcript: [
+      { id: 'run:r0', thread: 'root-clock-skew', kind: 'agent', text: 'request sent to ha-control', at: '2026-10-05T21:19:12Z' },
+    ],
+  }),
+  'mid-clock-skew': detailFor(MID_CLOCK_SKEW),
 }
 
 vi.mock('../../api/hooks', () => ({
@@ -169,6 +230,31 @@ describe('a coordinator root gets a real transcript, not a structural view (item
     expect(text.indexOf('Investigating node-3')).toBeLessThan(text.indexOf('invoked'))
     expect(text.indexOf('invoked')).toBeLessThan(text.indexOf('resolved after eviction'))
   })
+
+  it('places the invoke card AFTER the reasoning of the run that invoked it, not before (item 15, bug 1)', () => {
+    // The member was created 35s into its invoking run, which does not
+    // record its own reasoning until it finishes almost two minutes later —
+    // sorting by `member.created` alone would put the card first.
+    renderPane('root-invoke-order')
+    const timeline = screen.getByTestId('timeline')
+    const text = timeline.textContent ?? ''
+    expect(text).toContain('deciding to check on ha')
+    expect(text).toContain('ha-ops')
+    expect(text.indexOf('deciding to check on ha')).toBeLessThan(text.indexOf('ha-ops'))
+  })
+
+  it('still orders reasoning before the invoke card when run.finishedAt does not match the reasoning message\'s own timestamp', () => {
+    // root-clock-skew: run.finishedAt is 21:19:10, but the reasoning message
+    // that run actually produced renders at 21:19:12 (the console's live
+    // buffer stamp). Anchoring to run.finishedAt directly would place the
+    // invoke card BETWEEN those two times — still ahead of the reasoning.
+    renderPane('root-clock-skew')
+    const timeline = screen.getByTestId('timeline')
+    const text = timeline.textContent ?? ''
+    expect(text).toContain('request sent to ha-control')
+    expect(text).toContain('invoked')
+    expect(text.indexOf('request sent to ha-control')).toBeLessThan(text.indexOf('invoked'))
+  })
 })
 
 describe('a member opened directly (item 15)', () => {
@@ -186,6 +272,21 @@ describe('a member opened directly (item 15)', () => {
     // The uncaused root's own coordinator name leads the crumb, and the
     // parent trail names the same root — both read "root-1" in this fixture.
     expect(screen.getAllByText('root-1').length).toBeGreaterThan(0)
+  })
+
+  it('has its own Runs tab, showing its own turns and tool calls (item 16 QA)', async () => {
+    renderPane('mid-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }))
+    expect(screen.getByTestId('runs-view')).toBeInTheDocument()
+    expect(screen.getByText('claude-5')).toBeInTheDocument()
+    expect(screen.getByText('end_turn')).toBeInTheDocument()
+    expect(screen.getByText('mcp__ha__get_states')).toBeInTheDocument()
+  })
+
+  it('offers no Graph or Sequence tab — those read a conversation\'s own topology, which for a member is one node its parent already shows in context', () => {
+    renderPane('mid-1')
+    expect(screen.queryByRole('button', { name: 'Graph' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sequence' })).not.toBeInTheDocument()
   })
 })
 

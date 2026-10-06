@@ -67,6 +67,15 @@ type OpMessage struct {
 	Title    string            `json:"title,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
 	InputRef string            `json:"inputRef,omitempty"`
+	// OriginKind is this signal's v1alpha1.OriginKind ("signal" | "channel" |
+	// "member"), matching the manager's own OpMessage.OriginKind field name
+	// exactly (internal/chat/message.go). "member" is the one value this
+	// console acts on: a member's result bubbling to its parent
+	// (coordination-loop), already shown in full by the invoke card
+	// console-conversation-tree builds straight from that member's own
+	// conversation — rendering it again as a generic card duplicated a
+	// member's result on the page it was invoked from (item #15 QA, bug 2).
+	OriginKind string `json:"originKind,omitempty"`
 
 	Origin string `json:"origin,omitempty"`
 	Sender string `json:"sender,omitempty"`

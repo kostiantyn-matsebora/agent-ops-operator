@@ -239,7 +239,7 @@ func TestCloseOnGeneralSurfaceAnswersWithUsage(t *testing.T) {
 	if !ok {
 		t.Fatal("parse")
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -334,7 +334,7 @@ func listingBody(t *testing.T, r *Router, q *OpQueue, text string) string {
 	if !ok {
 		t.Fatalf("parse %q", text)
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -387,7 +387,7 @@ func TestListingOffersEachPipelineAsAChoice(t *testing.T) {
 		pipeline("half-wired", "nobody", false),
 	)
 	cmd, _ := addressing.Parse("/" + ListCommand)
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -447,7 +447,7 @@ func TestListingOffersEachCoordinatorAsAChoiceToo(t *testing.T) {
 		coordinator("incident-coordinator", "responder", true),
 	)
 	cmd, _ := addressing.Parse("/" + ListCommand)
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -470,7 +470,7 @@ func TestAddressingACoordinatorBindsItsOwnChannelsPlusTheOriginSurface(t *testin
 	co.Spec.Limits = &agentopsv1alpha1.CoordinatorLimits{MaxAgents: 4}
 	r, _, c := closeFixture(t, co)
 	cmd, _ := addressing.Parse("/incident-coordinator investigate api latency")
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "someone", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "someone", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var list agentopsv1alpha1.ConversationList
@@ -513,7 +513,7 @@ func TestPipelineResolvesBeforeCoordinatorOnASharedName(t *testing.T) {
 		coordinator("shared-name", "co-profile", true),
 	)
 	cmd, _ := addressing.Parse("/shared-name do a thing")
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var list agentopsv1alpha1.ConversationList

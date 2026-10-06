@@ -270,6 +270,45 @@ func TestTruncatedRecordSaysSo(t *testing.T) {
 	}
 }
 
+// A member's result reaching its parent as an input (coordination-loop) must
+// never render as a generic signal card — item #15 QA, bug 2. The invoke
+// card ThreadPane.tsx's CoordinatorBody builds, straight from the member's
+// own conversation, already shows the exchange in full; rendering it again
+// here duplicated a member's result on the page that invoked it, and a THIRD
+// copy arrived from the live buffer (fixed separately: inputIDOf's colon
+// handling).
+func TestMemberResultInputIsNotRenderedAsASignalCard(t *testing.T) {
+	runs := []Run{{
+		RunID: "r1", Result: "deciding what to do next", FinishedAt: "2026-08-21T06:00:05Z",
+		Inputs: []RecordedInput{{
+			ID: "member:member-xw4h5:r0", Text: "the ha report", Origin: originMember,
+			ReceivedAt: "2026-08-21T06:00:00Z",
+		}},
+	}}
+	conv := ConversationSummary{Title: "What is the status of ha?", Coordinator: "agentops-coordinator"}
+	got := mergeTranscript("c1", "console", nil, runs, conv)
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want only the coordinator's own reasoning: %+v", len(got), got)
+	}
+	if got[0].Text != "deciding what to do next" {
+		t.Fatalf("the surviving message must be the coordinator's own run result: %+v", got[0])
+	}
+}
+
+// An input predating the Origin field (no "origin" key in the stored record)
+// must render exactly as it always has — only the literal value "member"
+// suppresses rendering.
+func TestRecordedInputWithNoOriginStillRendersAsASignal(t *testing.T) {
+	runs := []Run{{
+		RunID: "r1", Result: "handled", FinishedAt: "2026-08-21T06:00:05Z",
+		Inputs: []RecordedInput{{ID: "in-1", Text: "disk at 99%", ReceivedAt: "2026-08-21T06:00:00Z"}},
+	}}
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
+	if len(got) != 2 || got[0].Kind != MsgSignal {
+		t.Fatalf("an input with no recorded origin must still render as a signal: %+v", got)
+	}
+}
+
 // A REBUILT SIGNAL IS STILL A CARD.
 //
 // The record keeps only the payload text, so a reopened conversation showed a

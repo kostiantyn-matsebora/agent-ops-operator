@@ -87,3 +87,40 @@ func TestDeliverInputsNeverFencesAChannelThatIsNotAnEscalationChannel(t *testing
 		t.Fatalf("an unrelated channel must never be fenced, got %d ops", len(ops))
 	}
 }
+
+// A member's result reaching its parent (coordination-loop) is delivered to
+// every bound channel exactly like any other input — coordinator-
+// unconditional-channels established that, and TestDeliverInputsNeverFencesOnEscalatedAt
+// above already pins it for the escalation fence specifically. What this test
+// pins is the ADDITIONAL fact item #15 QA's bug 2 needed: the composed signal
+// card carries its OriginKind, which is what lets ONE adapter — the console,
+// which ALSO builds a richer invoke-card view of the same exchange — choose
+// not to render a second, generic copy of it, without changing what any other
+// adapter (which has no such view) receives or shows.
+func TestDeliverInputsCarriesOriginKindOnTheComposedSignal(t *testing.T) {
+	conv := testConv("coord-root")
+	conv.Namespace = testNS
+	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "console"}}
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "console", ThreadID: "t1"}}
+	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{
+		{
+			ID: "member:member-xw4h5:r0", Type: agentopsv1alpha1.InputTask, Payload: "the ha report",
+			ReceivedAt: metav1.Now(),
+			Origin:     &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "member-xw4h5", Entry: "ha-ops"},
+		},
+	}
+
+	ch := nsChannel("console", "console-ta")
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).WithObjects(ch).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	DeliverInputs(context.Background(), c, q, conv)
+
+	ops := drain(q, "console-ta")
+	if len(ops) != 1 {
+		t.Fatalf("want the member-result still delivered, got %d ops: %+v", len(ops), ops)
+	}
+	if ops[0].Message == nil || ops[0].Message.OriginKind != agentopsv1alpha1.OriginMember {
+		t.Fatalf("want OriginKind = %q on the composed card, got %+v", agentopsv1alpha1.OriginMember, ops[0].Message)
+	}
+}

@@ -180,10 +180,28 @@ type RecordedInput struct {
 	Truncated bool `json:"truncated,omitempty"`
 	// Surface is the channel the message was typed on, empty when no surface
 	// displayed it — an alert, a job tick, a posted task.
-	Surface    string `json:"surface,omitempty"`
-	Sender     string `json:"sender,omitempty"`
+	Surface string `json:"surface,omitempty"`
+	Sender  string `json:"sender,omitempty"`
+	// Origin is the input's OriginKind ("signal" | "channel" | "member"), the
+	// field name matching the manager's own API exactly
+	// (api/v1alpha1.RecordedInput). "member" is the one value this console
+	// acts on: a task `invoke` handed down, or a member's result routed back
+	// up (coordination-loop) — both coordination-internal, never a human-facing
+	// card. A genuine surfaceless signal (an alert, a job tick) also records
+	// Surface as "", so Surface alone cannot tell the two apart — this is the
+	// field that can. Empty on an input recorded before this field existed.
+	Origin     string `json:"origin,omitempty"`
 	ReceivedAt string `json:"receivedAt,omitempty"`
 }
+
+// originMember is recordedSignalCard's sibling fact: an input whose Origin is
+// this is coordination plumbing between a conversation and its own causedBy
+// member — already shown in full by the invoke card console-conversation-tree
+// builds straight from that member's own transcript (ThreadPane.tsx,
+// MemberInvocationExchange). Rendering it AGAIN here, as a generic signal
+// card, duplicated a member's result on the page it was invoked from (item
+// #15 QA, bug 2) — matches api/v1alpha1.OriginMember exactly.
+const originMember = "member"
 
 // Inflight is the unit currently dispatched to a runtime.
 type Inflight struct {

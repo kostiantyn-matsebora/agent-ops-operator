@@ -530,7 +530,12 @@ func (r *Router) resolveClaimant(ctx context.Context, name string) (Claimant, er
 // It is carried because an addressed command is a MESSAGE like any other: it is
 // delivered to every surface that did not display it, and one with no sender
 // arrives there anonymous.
-func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID string) error {
+//
+// reader is the opaque per-channel key of the person who typed it, exactly as
+// the bare chat lane carries — an addressed command is equally a person
+// deliberately originating a conversation, so it is owed the same read-mark
+// treatment on the thread it opens.
+func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID, reader string) error {
 	if isListCommand(cmd.Pipeline) {
 		return r.handleListPipelines(ctx, ch)
 	}
@@ -582,7 +587,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if err != nil {
 		return fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
 	}
-	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, claimant, capability)
+	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, reader, claimant, capability)
 	return err
 }
 
@@ -593,7 +598,11 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // conversation — capabilities come from the wiring that originated it, never
 // from the profile. capability is the origin's ALREADY RESOLVED capability
 // (see dispatch.ResolveCapability), ignored when origin is nil.
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender string,
+//
+// reader is the opaque per-channel key of whoever typed the addressing
+// command, mirrored onto OriginReader exactly as the bare chat lane's does
+// (internal/httpapi/signals.go) — empty when the adapter named none.
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender, reader string,
 	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if profile != "" {
@@ -619,6 +628,13 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 				Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name, Sender: sender,
 			},
 		}},
+	}
+	// The person who typed the addressing command has, by definition,
+	// already seen their own request — same rule the bare chat lane
+	// applies in internal/httpapi/signals.go, carried here because an
+	// addressed command is the OTHER origination a chat surface owns.
+	if reader != "" {
+		conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{Channel: ch.Name, Key: reader}
 	}
 	nodeKind := activity.NodePipeline
 	if origin != nil {

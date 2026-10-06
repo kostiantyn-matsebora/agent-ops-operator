@@ -165,6 +165,19 @@ func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage, ownChannel str
 	t.mu.Unlock()
 
 	kind, sender := transcriptKind(m, ownChannel)
+	if kind == MsgSignal && m.OriginKind == originMember {
+		// Coordination plumbing — a member's result reaching its parent, or
+		// the task `invoke` handed down (coordination-loop) — never a card
+		// for a human here: this console builds a RICHER view of the exact
+		// same exchange, the invoke card straight from the member's own
+		// conversation (ThreadPane.tsx, MemberInvocationExchange), so a
+		// second, generic card would duplicate content a reader already sees
+		// (item #15 QA, bug 2). Every OTHER adapter has no such view and
+		// renders this card as it always has — OriginKind is read nowhere
+		// else. The op is already marked seen above and the caller completes
+		// it normally, so delivery bookkeeping is unaffected.
+		return true
+	}
 	text := m.Render()
 	record := inputIDOf(opID)
 	if kind == MsgLocal {
@@ -222,23 +235,46 @@ func (t *Transcripts) confirmLocal(thread, sender, record string) (*Message, boo
 // The correlation between the buffer and the record is an ID, not a string
 // comparison — which is the difference between a merge that is right and one
 // that is usually right.
+//
+// NEITHER <conversation> NOR <channel> CAN CONTAIN ':' — both are Kubernetes
+// object names — but <input> CAN: a coordination dedup id is itself
+// colon-delimited ("member:<conversation>:<runId>",
+// "escalate:<conversation>:<nanotime>", internal/chat/coordinate.go). Splitting
+// on every ':' and demanding exactly 4 parts silently returned "" for such an
+// id, which broke the live/record merge for a member's result delivered to its
+// parent: the SAME input rendered once from the live buffer (recordID "") and
+// once again from the durable record (item #15 QA, bug 2). Only the FIRST and
+// LAST ':' in the remainder after the "input:" prefix are structural, so they
+// are what bound the slice — everything between them is the input id,
+// whatever it contains.
+func inputIDOf(opID string) string {
+	const prefix = "input:"
+	rest, ok := strings.CutPrefix(opID, prefix)
+	if !ok {
+		return ""
+	}
+	first := strings.Index(rest, ":")
+	last := strings.LastIndex(rest, ":")
+	if first < 0 || last <= first {
+		return ""
+	}
+	return rest[first+1 : last]
+}
+
 // runIDOf reads the run out of a reply op id (`send:<conv>:<channel>:<runId>`),
 // which is what lets the merge tell a buffered answer from the durable record
 // of the SAME run without comparing a single character of either.
+//
+// <runId> is the LAST segment and, unlike <input> above, is never known to
+// contain ':' today — but the manager's own ParseRunReplyOpID already treats it
+// as the REMAINDER after the third ':' rather than assuming a 4-way split, and
+// this mirrors that rather than drifting from it.
 func runIDOf(opID string) string {
-	parts := strings.Split(opID, ":")
+	parts := strings.SplitN(opID, ":", 4)
 	if len(parts) != 4 || parts[0] != "send" {
 		return ""
 	}
 	return parts[3]
-}
-
-func inputIDOf(opID string) string {
-	parts := strings.Split(opID, ":")
-	if len(parts) != 4 || parts[0] != "input" {
-		return ""
-	}
-	return parts[2]
 }
 
 // AppendLocal records a message typed in this console as pending. It is NEVER

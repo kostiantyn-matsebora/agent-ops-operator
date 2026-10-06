@@ -9,7 +9,7 @@ import { Link } from 'react-router-dom'
 import { Empty, ErrorState, Loading } from '../../components/States'
 import {
   useConversation, useConversationGraph, useConversations, useMarkRead, useSession,
-  useSources, useTopology, useVocabulary,
+  useTopology, useVocabulary,
 } from '../../api/hooks'
 import { eventsFor, useStream } from '../../api/stream'
 import { mergeEvents } from '../../graph/hops'
@@ -90,7 +90,16 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
               ←
             </Button>
           )}
-          <span style={{ fontSize: '1.1em', fontWeight: 700, flex: 1, minWidth: 0 }}>
+          {/* `display: block` + the truncation trio: a bare flex-child <span>
+              still wraps at word boundaries when too narrow for its content
+              (measured live at 375px — a long title wrapped one WORD per
+              line, seven lines tall), since text-overflow only engages on a
+              block-level box with a constrained width. */}
+          <span style={{
+            fontSize: '1.1em', fontWeight: 700, flex: 1, minWidth: 0,
+            display: 'block', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+          }}
+          >
             <Icon icon={pipelineIcon} /> <PlainText>{title}</PlainText>
           </span>
           {c.presence && (
@@ -103,9 +112,17 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
               <PlainText>{(c.threads ?? []).map((t) => t.channel).join(' · ') || 'no bound channel'}</PlainText>
             </Label>
           </Tooltip>
+          {/* Runs shows a member its OWN turns/tool calls/stop reason — the
+              same `RunTimeline` a root gets, reading the same `detail.
+              conversation.runs` field, which the detail endpoint populates
+              for a member exactly as it does for a root (item 16 QA: the
+              backend always recorded this, the tab was the gap). Graph and
+              Sequence stay root-only: both read the CONVERSATION's own
+              topology/activity, which for a member is a single node a click
+              into its parent's view already reaches with more context. */}
+          <ViewButton active={view === 'runs'} onClick={() => setView('runs')}>Runs</ViewButton>
           {!isMember && (
             <>
-              <ViewButton active={view === 'runs'} onClick={() => setView('runs')}>Runs</ViewButton>
               <ViewButton active={view === 'graph'} onClick={() => setView('graph')}>Graph</ViewButton>
               <ViewButton active={view === 'sequence'} onClick={() => setView('sequence')}>Sequence</ViewButton>
             </>
@@ -311,6 +328,72 @@ function MemberInvocationExchange({ detail, entry }: Readonly<{ detail: Conversa
 }
 
 /**
+ * The coordinator's OWN run that was executing when it invoked a member.
+ * `invoke` is a synchronous tool call made mid-run, and runs are strictly
+ * serial (invariants.md: "Strictly serial per conversation"), so at most one
+ * of the coordinator's own runs can have been in flight at the member's
+ * creation instant.
+ */
+function invokingRun(runs: Run[] | undefined, memberCreatedAt: number): Run | undefined {
+  if (!memberCreatedAt) return undefined
+  return (runs ?? []).find((r) => {
+    const start = Date.parse(r.startedAt || '') || 0
+    if (!start || memberCreatedAt < start) return false
+    if (!r.finishedAt) return true // still running when this member was created
+    return memberCreatedAt <= (Date.parse(r.finishedAt) || 0)
+  })
+}
+
+/**
+ * Where a member's invoke card belongs in transcript time order (item #15 QA,
+ * bug 1). `member.created` is when the MEMBER OBJECT was created — which
+ * happens mid-run, as soon as `invoke` is called — well before the
+ * coordinator's OWN reasoning for that same run is recorded
+ * (`status.runs[].result`, written only once the whole run finishes).
+ * Sorting the card by its own creation time therefore always placed it
+ * BEFORE the reasoning that explains it, reversing the mockup's
+ * decide-then-act order: measured live, a member created 90 seconds into a
+ * two-minute run sorted ahead of that run's own reasoning text by over a
+ * minute.
+ *
+ * A first attempt anchored the card to `run.finishedAt` on the theory that it
+ * is "the same clock the reasoning text sorts by" — it is NOT. Measured
+ * live: `run.finishedAt` (the manager's own recorded stamp) and the
+ * reasoning message's own `at` (timestamped by the console's live buffer at
+ * RECEIPT, which this conversation's transcript keeps using even on a fresh
+ * reload, since the buffer lives in the console's own process, not the
+ * browser) differed by two real seconds on an otherwise ordinary run —
+ * `run.finishedAt` sorted the invoke card BEFORE the very reasoning message
+ * it was supposed to tie with.
+ *
+ * The fix anchors to the reasoning message's OWN rendered timestamp
+ * directly, not a second computation of it: the first `agent`-kind
+ * transcript message at or after this run's `startedAt` is that run's own
+ * result, by the strictly-serial-runs invariant above, so there is exactly
+ * one candidate and no guessing which one it is.
+ *
+ * Falls back to the run's own `finishedAt`/`startedAt`, then to the member's
+ * own creation time, when no run's window covers it — `status.runs[]` keeps
+ * only the last 10 (api/v1alpha1/conversation_types.go), so an old member's
+ * invoking run may have scrolled out of both the run list and the
+ * transcript's live buffer alike.
+ */
+function invokeCardAt(runs: Run[] | undefined, member: ConversationSummary, transcript: Message[] | null | undefined): number {
+  const createdAt = Date.parse(member.created || '') || 0
+  const run = invokingRun(runs, createdAt)
+  if (!run) return createdAt
+  const startedAt = Date.parse(run.startedAt || '') || 0
+  const fallback = Date.parse(run.finishedAt || run.startedAt || '') || createdAt
+  if (!startedAt) return fallback
+  const reasoningAt = (transcript ?? [])
+    .filter((m) => m.kind === 'agent')
+    .map((m) => Date.parse(m.at) || 0)
+    .filter((at) => at >= startedAt)
+    .sort((a, b) => a - b)[0]
+  return reasoningAt ?? fallback
+}
+
+/**
  * A Coordinator root's own transcript — the SAME `ConversationThread` an
  * ordinary pipeline conversation gets (its own messages, composer and
  * QuickChips, never a separate structural view by default), with each direct
@@ -345,7 +428,7 @@ function CoordinatorBody({
   const directMembers = members.data.items.filter((m) => m.causedBy?.parent === conversation.name)
   const extraItems = directMembers.map((m) => ({
     key: `invoke-${m.name}`,
-    at: Date.parse(m.created || '') || 0,
+    at: invokeCardAt(conversation.runs, m, detail.transcript),
     node: <MemberInvocation member={m} />,
   }))
   if (conversation.escalatedAt) {
@@ -441,7 +524,6 @@ function ConversationThread({
   extraItems?: TimelineExtraItem[]
 }>) {
   const session = useSession()
-  const sources = useSources()
   const connected = useStream((s) => s.connected)
   const live = useStream((s) => s.events)
   const [text, setText] = useState('')
@@ -467,7 +549,7 @@ function ConversationThread({
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault()
-      if (!busy && text.trim()) void send()
+      if (!busy && text.trim()) void send(text)
       return
     }
     if (!commands) return
@@ -487,7 +569,6 @@ function ConversationThread({
   }
 
   const canWrite = (session.data?.canWrite ?? false) && detail.conversation.joined && !detail.archived
-  const canStart = Boolean(session.data?.canOriginate) && (sources.data?.sources ?? []).some((s) => s.wired)
   const messages = detail.transcript ?? []
   const pipelineIcon = vocabulary.data?.entries.find(
     (e) => e.kind === 'pipeline' && e.name === detail.conversation.pipeline,
@@ -516,18 +597,27 @@ function ConversationThread({
   // (invariants.md: "`/exit` RELEASES THE RUNTIME — `/close` ENDS THE
   // CONVERSATION"), so it gets an ordinary confirm dialog first — unless the
   // operator already opted out. `/exit` and every ordinary reply send at once.
-  async function send() {
-    if (isCloseCommand(text) && !skipCloseConfirm()) {
+  //
+  // `toSend` is explicit rather than read off `text`, because a thread
+  // command chip (QuickChips' `onRunCommand`) runs `/exit`/`/close`
+  // DIRECTLY — never by writing into the composer for the user to send
+  // themselves — and must not pick up whatever unrelated draft happens to be
+  // sitting in the box at the time.
+  const [pendingSend, setPendingSend] = useState('')
+
+  async function send(toSend: string) {
+    if (isCloseCommand(toSend) && !skipCloseConfirm()) {
+      setPendingSend(toSend)
       setConfirmingClose(true)
       return
     }
-    await postMessage(text)
+    await postMessage(toSend)
   }
 
   function confirmClose(dontAskAgain: boolean) {
     writeSkipCloseConfirm(dontAskAgain)
     setConfirmingClose(false)
-    void postMessage(text)
+    void postMessage(pendingSend)
   }
 
   return (
@@ -563,8 +653,8 @@ function ConversationThread({
         <div style={{ padding: '10px 24px 14px', borderTop: '1px solid var(--ao-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <QuickChips
             canWrite={canWrite}
-            canStart={canStart}
             choices={choices}
+            onRunCommand={(cmd) => void send(cmd)}
             onInsertCommand={(cmd) => {
               setText(cmd)
               requestAnimationFrame(() => textRef.current?.focus())
@@ -614,7 +704,7 @@ function ConversationThread({
           {error && <Alert variant="danger" isInline title={error} />}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <ComposerHint shortcuts={[{ keys: ['/'], does: 'commands' }, { keys: ['Shift', 'Enter'], does: 'send' }]} />
-            <Button onClick={send} isDisabled={busy || !text.trim()}>Send</Button>
+            <Button onClick={() => void send(text)} isDisabled={busy || !text.trim()}>Send</Button>
           </div>
         </div>
       )}

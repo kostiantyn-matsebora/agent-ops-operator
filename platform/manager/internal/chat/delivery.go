@@ -90,7 +90,7 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 				}
 				resolved = true
 			}
-			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body)
+			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body, item.Origin.Kind)
 		}
 		for _, ref := range conv.Spec.ChannelRefs {
 			if !item.DeliverTo(ref.Name, surface, surfaceEchoes) {

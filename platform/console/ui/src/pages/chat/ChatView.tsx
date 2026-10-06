@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Checkbox, SearchInput } from '@patternfly/react-core'
-import { useConversations, usePipelineIcon, useSession, useSources } from '../../api/hooks'
+import { BarsIcon } from '@patternfly/react-icons'
+import {
+  useConversations, useMarkRead, useMarkUnread, usePipelineIcon, useReopenConversation, useSession,
+} from '../../api/hooks'
+import { api } from '../../api/client'
 import { useShell } from '../../shell'
 import { Empty, ErrorState, Loading } from '../../components/States'
 import {
   DEFAULT_LAYOUT, INBOX_COLLAPSED_WIDTH, MIN_INBOX_WIDTH, MIN_LIST_WIDTH, MIN_THREAD_WIDTH, useLayout,
 } from './layout'
 import { Splitter } from './Splitter'
-import { Inbox, sameScope, type Scope } from './Inbox'
+import { Inbox, sameScope, scopeKey, type Scope } from './Inbox'
 import { ConversationRow } from './ConversationRow'
 import { SelectionBar } from './SelectionBar'
 import { ThreadPane } from './ThreadPane'
-import { QuickChips } from './QuickChips'
 import { buildTree } from './tree'
 import type { ConversationSummary } from '../../api/types'
 
@@ -21,34 +24,87 @@ import type { ConversationSummary } from '../../api/types'
 
 /** Below this the view shows one column at a time (console-chat-layout: "The view fits narrow windows"). */
 const NARROW_WIDTH = 900
+/** Below this even the Inbox panel (MIN_INBOX_WIDTH) no longer fits beside the
+ * list (MIN_LIST_WIDTH) inside the remaining width once the app shell's own
+ * rail is accounted for — a true phone width, not merely a narrowed window. */
+const MOBILE_WIDTH = 560
 const PAGE_SIZE = 100
 
 function scopeParams(scope: Scope, search: string): URLSearchParams {
   const p = new URLSearchParams()
-  if (scope.kind === 'unread') p.set('unread', 'true')
-  else if (scope.kind === 'working') p.set('phase', 'Working')
-  else if (scope.kind === 'mine') p.set('mine', 'true')
-  else if (scope.kind === 'errored') p.set('errored', 'true')
-  else if (scope.kind === 'closed') p.set('phase', 'Closed')
+  if (scope.kind === 'closed') p.set('phase', 'Closed')
   else if (scope.kind === 'pipeline') p.set('pipeline', scope.name)
   // A Coordinator scope has no server-side filter param (the backend tracks
   // it only as a `scopes` count, console.go/convapi.go — not mine to add):
   // narrowed CLIENT-SIDE below instead of widening the request shape here.
+  //
+  // Unread, Working, Errored and Mine are the SAME shape of problem: each is
+  // an independent per-row predicate server-side (convapi.go's `matches`),
+  // with no tree awareness at all. `?mine=true` kept a root but dropped every
+  // member (a member is never Mine — it was invoked, never originated, so it
+  // carries no OriginReader). `?unread=true` would just as readily keep an
+  // unread MEMBER while dropping its own root, or the reverse — either way
+  // the tree has nothing to attach to. All four are narrowed CLIENT-SIDE
+  // below instead: if anything anywhere in a tree matches, the WHOLE tree
+  // shows, each row rendering its own real status regardless of why the tree
+  // qualified (a root can show up already read, because the member beside it
+  // is what made the tree match).
   if (search) p.set('q', search)
   p.set('limit', String(PAGE_SIZE))
   return p
 }
 
-function useNarrow(): boolean {
-  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < NARROW_WIDTH)
+function useBelowWidth(px: number): boolean {
+  const [below, setBelow] = useState(() => typeof window !== 'undefined' && window.innerWidth < px)
   useEffect(() => {
     function onResize() {
-      setNarrow(window.innerWidth < NARROW_WIDTH)
+      setBelow(window.innerWidth < px)
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
-  return narrow
+  }, [px])
+  return below
+}
+
+function useNarrow(): boolean {
+  return useBelowWidth(NARROW_WIDTH)
+}
+
+/** Below this the Inbox panel can no longer fit beside the list at all —
+ * measured live at 375px, where rendering both overflowed the viewport and
+ * left the Inbox's own text bleeding behind the list. It becomes a
+ * full-screen drawer instead of a column. */
+function useMobile(): boolean {
+  return useBelowWidth(MOBILE_WIDTH)
+}
+
+/**
+ * Expands a per-row predicate into a per-TREE one: if anything anywhere in a
+ * tree matches, every row of that tree is kept — never just the matching row
+ * in isolation, which is what left a "Mine" root with none of its own
+ * members, and would do the same to Unread/Working/Errored. Each kept row
+ * still renders its own real status; this only decides whether the tree
+ * shows at all.
+ */
+function withTreeContext(
+  raw: ConversationSummary[],
+  matches: (c: ConversationSummary) => boolean,
+): ConversationSummary[] {
+  const byName = new Map(raw.map((c) => [c.name, c]))
+  const rootNameOf = (c: ConversationSummary): string => {
+    let cur = c
+    for (let hop = 0; cur.causedBy && hop < 64; hop++) {
+      const parent = byName.get(cur.causedBy.parent)
+      if (!parent) break
+      cur = parent
+    }
+    return cur.name
+  }
+  const qualifyingRoots = new Set<string>()
+  for (const c of raw) {
+    if (matches(c)) qualifyingRoots.add(rootNameOf(c))
+  }
+  return raw.filter((c) => qualifyingRoots.has(rootNameOf(c)))
 }
 
 /** Rows whose ancestor chain passes through a collapsed root are hidden — the caret, not a filter. */
@@ -81,13 +137,25 @@ function dropName(set: Set<string>, name: string): Set<string> {
 // was removed: it fired once per row on every page that happened to be open,
 // which is spam rather than a cue. `seenNames` starts `null` so the FIRST
 // load never fires one.
+//
+// `scopeKey` resets that "first load" state per SCOPE. Without it, switching
+// from a narrow scope (a few rows) to a wider one (e.g. "All") compared the
+// wider scope's full list against the narrow scope's small `seenNames` set —
+// every row the narrow scope never had looked like a fresh arrival, so
+// opening "All" tagged the entire list "new" even though nothing had.
 function useArrivals(
   data: { items: ConversationSummary[] } | undefined,
   setNewNames: React.Dispatch<React.SetStateAction<Set<string>>>,
+  scopeKey: string,
 ) {
   const seenNames = useRef<Set<string> | null>(null)
+  const seenScope = useRef<string | null>(null)
   useEffect(() => {
     if (!data) return
+    if (seenScope.current !== scopeKey) {
+      seenScope.current = scopeKey
+      seenNames.current = null
+    }
     const current = new Set(data.items.map((c) => c.name))
     const prevSeen = seenNames.current
     seenNames.current = current
@@ -98,7 +166,7 @@ function useArrivals(
     for (const c of arrived) {
       setTimeout(() => setNewNames((prev) => dropName(prev, c.name)), 4000)
     }
-  }, [data, setNewNames])
+  }, [data, setNewNames, scopeKey])
 }
 
 function ListBody({
@@ -128,6 +196,15 @@ export function ChatView() {
   const narrow = useNarrow()
   const [layout, updateLayout] = useLayout()
   const [scope, setScope] = useState<Scope>({ kind: 'all' })
+  // The Inbox panel is its own fixed-width column ALWAYS, which fits beside a
+  // narrowed list down to the 900px breakpoint but not below it: at an actual
+  // phone width the Inbox and the list cannot both fit, and rendering both
+  // anyway overflowed the viewport and left the Inbox's own text bleeding
+  // behind the list (measured live at 375px). Below a second, narrower
+  // breakpoint the Inbox becomes a full-screen drawer instead of a column,
+  // opened by one button and closed the moment a scope is picked.
+  const mobile = useMobile()
+  const [mobileInboxOpen, setMobileInboxOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [flatten, setFlatten] = useState(false)
   // No existing layout preference carries a per-scope toggle like this one,
@@ -144,18 +221,27 @@ export function ChatView() {
   const params = useMemo(() => scopeParams(scope, search), [scope, search])
   const { data, isLoading, error } = useConversations(params)
   const session = useSession()
-  const sources = useSources()
   const iconFor = usePipelineIcon()
-  // Same gates `NewConversation.tsx` uses to decide whether its own button is
-  // live — a starter chip here must offer nothing a conversation could not
-  // actually be started from.
-  const canWriteHere = session.data?.canWrite ?? false
-  const canStartHere = Boolean(session.data?.canOriginate) && (sources.data?.sources ?? []).some((s) => s.wired)
+  const canWrite = session.data?.canWrite ?? false
+  const hasReader = Boolean(session.data?.identity)
+  const reopen = useReopenConversation()
+  const markRead = useMarkRead()
+  const markUnread = useMarkUnread()
 
   const items = useMemo(() => {
     let raw = data?.items ?? []
     if (scope.kind === 'coordinator') {
       raw = raw.filter((c) => c.coordinator === scope.name || c.causedBy)
+    }
+    const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
+      unread: (c) => Boolean(c.unread),
+      working: (c) => c.phase === 'Working',
+      errored: (c) => Boolean(c.errored),
+      mine: (c) => Boolean(c.mine),
+    }
+    const predicate = TREE_PREDICATE[scope.kind]
+    if (predicate) {
+      raw = withTreeContext(raw, predicate)
     }
     // Closed conversations are hidden by default everywhere except the
     // dedicated Closed scope, where showing them is the whole point —
@@ -167,7 +253,7 @@ export function ChatView() {
     return raw
   }, [data, scope, showClosed])
 
-  useArrivals(data, setNewNames)
+  useArrivals(data, setNewNames, scopeKey(scope))
 
   const tree = useMemo(() => buildTree(items, !flatten), [items, flatten])
   const rows = useMemo(() => visibleRows(tree, items, collapsedRoots), [tree, items, collapsedRoots])
@@ -203,6 +289,27 @@ export function ChatView() {
     }
     clearNew(rowName)
     void navigate(`/conversations/${rowName}`)
+  }
+
+  // `/exit` is fully recoverable (invariants.md: "`/exit` RELEASES THE
+  // RUNTIME") so it needs no confirmation and runs the same way a thread
+  // command chip does — an ordinary message, never a dedicated endpoint.
+  function exitRuntime(rowName: string) {
+    void api.send(rowName, '/exit')
+  }
+
+  // `/close` and Delete are both destructive and already have a full,
+  // confirmed flow in SelectionBar's own modals — this hands the row to that
+  // SAME flow (select it, enter selection mode) rather than building a
+  // second confirmation here.
+  function closeRow(rowName: string) {
+    setSelectionMode(true)
+    setSelected(new Set([rowName]))
+  }
+
+  function deleteRow(rowName: string) {
+    setSelectionMode(true)
+    setSelected(new Set([rowName]))
   }
 
   // Attached natively: the workspace is a landmark, not a widget, and the
@@ -252,24 +359,41 @@ export function ChatView() {
       tabIndex={-1}
       style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}
     >
-      {showingList && (
+      {showingList && mobile && mobileInboxOpen && (
+        <div data-testid="mobile-inbox-drawer" style={{ width: '100%', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <Inbox
+            activeScope={scope}
+            onSelectScope={(s) => {
+              setScope(s)
+              setMobileInboxOpen(false)
+            }}
+            collapsed={false}
+            onToggleCollapsed={() => undefined}
+          />
+        </div>
+      )}
+      {showingList && !(mobile && mobileInboxOpen) && (
         <>
-          <div style={{ width: inboxWidth, flex: 'none', overflow: 'hidden', borderRight: '1px solid var(--ao-border)' }}>
-            <Inbox
-              activeScope={scope}
-              onSelectScope={setScope}
-              collapsed={layout.inboxCollapsed}
-              onToggleCollapsed={() => updateLayout({ inboxCollapsed: !layout.inboxCollapsed })}
-            />
-          </div>
-          {!narrow && (
-            <Splitter
-              width={inboxWidth}
-              min={MIN_INBOX_WIDTH}
-              defaultWidth={DEFAULT_LAYOUT.inboxWidth}
-              ariaLabel="resize the inbox"
-              onChange={(w) => updateLayout({ inboxWidth: w, inboxCollapsed: false })}
-            />
+          {!mobile && (
+            <>
+              <div style={{ width: inboxWidth, flex: 'none', overflow: 'hidden', borderRight: '1px solid var(--ao-border)' }}>
+                <Inbox
+                  activeScope={scope}
+                  onSelectScope={setScope}
+                  collapsed={layout.inboxCollapsed}
+                  onToggleCollapsed={() => updateLayout({ inboxCollapsed: !layout.inboxCollapsed })}
+                />
+              </div>
+              {!narrow && (
+                <Splitter
+                  width={inboxWidth}
+                  min={MIN_INBOX_WIDTH}
+                  defaultWidth={DEFAULT_LAYOUT.inboxWidth}
+                  ariaLabel="resize the inbox"
+                  onChange={(w) => updateLayout({ inboxWidth: w, inboxCollapsed: false })}
+                />
+              )}
+            </>
           )}
           <div
             style={{
@@ -278,6 +402,11 @@ export function ChatView() {
             }}
           >
             <div style={{ padding: '12px 12px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderBottom: '1px solid var(--ao-border)', flexWrap: 'wrap' }}>
+              {mobile && (
+                <Button variant="plain" aria-label="conversation filters" onClick={() => setMobileInboxOpen(true)}>
+                  <BarsIcon />
+                </Button>
+              )}
               <strong>{sameScope(scope, { kind: 'all' }) ? 'All conversations' : 'Conversations'}</strong>
               <SearchInput
                 aria-label="search conversations"
@@ -330,8 +459,8 @@ export function ChatView() {
               <SelectionBar
                 items={items}
                 selected={selected}
-                canWrite={session.data?.canWrite ?? false}
-                hasReader={Boolean(session.data?.identity)}
+                canWrite={canWrite}
+                hasReader={hasReader}
                 onClear={() => setSelected(new Set())}
                 onDone={() => setSelected(new Set())}
               />
@@ -357,6 +486,14 @@ export function ChatView() {
                       onSelect={(checked) => toggleSelect(row.name, checked)}
                       onOpen={(e) => openRow(row.name, e)}
                       pipelineIcon={iconFor(row.pipeline)}
+                      canWrite={canWrite}
+                      hasReader={hasReader}
+                      onMarkRead={() => markRead.mutate({ names: [row.name] })}
+                      onMarkUnread={() => markUnread.mutate({ names: [row.name] })}
+                      onReopen={() => reopen.mutate(row.name)}
+                      onExitRuntime={() => exitRuntime(row.name)}
+                      onClose={() => closeRow(row.name)}
+                      onDelete={() => deleteRow(row.name)}
                       collapsed={collapsedRoots.has(row.name)}
                       onToggleCollapse={() =>
                         setCollapsedRoots((prev) => {
@@ -390,11 +527,6 @@ export function ChatView() {
         !narrow && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
             <Empty title="Select a conversation">Choose one from the list, or start a new one.</Empty>
-            {/* No thread is open yet, so there is nothing to insert a thread
-                command into — only the starter chips apply, and choosing one
-                opens the composer through the shared composer intent
-                (`NewConversation.tsx` is the one place that listens). */}
-            <QuickChips canWrite={canWriteHere} canStart={canStartHere} />
           </div>
         )
       ))}
