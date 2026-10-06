@@ -29,7 +29,14 @@ is deliberately an INSTRUCTION ("invoke this ONLY in response to...") rather
 than a job label, because — unlike a domain entry a signal's content decides —
 this one is chosen by RECOGNIZING a specific trigger, named again below in the
 coordinating agent's own prompt so the instruction is not the description's to
-carry alone. */ -}}
+carry alone.
+
+IT IS THE ONE TRIGGER-SHAPED DESCRIPTION. Every domain entry's description
+(each bundle's `pipelines.<route>.description`) states the agent's PURPOSE and
+REACH — what it is, what it can do, what it cannot, what to hand it — so that a
+person's instruction matches it as readily as a signal does. A description
+that names only the moment to invoke ("once the cause is known") matches no
+instruction, and the coordinating agent then reports it has nothing. */ -}}
 {{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs the hourly self-heal sweep: lists this Coordinator's own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the hourly self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
 {{- $sources = append $sources $r.source.name }}
 {{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
@@ -72,31 +79,68 @@ metadata:
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 spec:
   maxTurns: {{ $c.maxTurns }}
-  # Behaviour only — no repository, no capabilities. GENERATED: the routing
-  # instructions below are built from the SAME aggregation that fills this
-  # Coordinator's own `agents[]`, so the reaper's name always matches what the
-  # agent is told to invoke for the hourly signal (design D-E, task 2.5).
+  # Behaviour only — no repository, no capabilities. The role below is an
+  # ORCHESTRATOR's, not a dispatcher's: it analyses what arrived, delegates to
+  # the agents by their described purpose, reads results and iterates. It names
+  # no domain entry — bundles vary per install, and the agent reads them from
+  # `list_agents`. GENERATED: the self-heal paragraph is built from the SAME
+  # aggregation that fills this Coordinator's own `agents[]`, so the reaper's
+  # name always matches what the agent is told to invoke for the hourly signal
+  # (design D-E, task 2.5).
+  #
+  # It used to read "your only job is reading what started the conversation
+  # and routing it" and "pick the one whose description matches what arrived".
+  # That is a lookup, and a lookup with no hit returns nothing: asked directly
+  # to restart a pod, the agent answered that it had no tools, while an acting
+  # entry sat in `agents[]`.
   systemPrompt: |
     {{- with $c.systemPromptPrefix }}
-{{ . | trim | indent 4 }}
+{{ . | trim | indent 4 }}{{ "\n" }}
+{{- end }}
+    You are the coordinating agent for this install — an orchestrator, not a
+    specialist. A conversation of yours opens when a signal arrives on a
+    source you claim, or when a person addresses you by name with a question
+    or an instruction.
 
-    {{- end }}
-    You are the coordinating agent for this install. A conversation of yours
-    opens whenever a signal arrives on a source you claim, or when someone
-    addresses you by name. You answer nothing domain-specific yourself — your
-    only job is reading what started the conversation and routing it.
+    YOUR TOOLS ARE THE AGENTS. `list_agents` returns every agent you may
+    invoke, each with a description of what it is, what it can do, what it
+    cannot, and what to hand it. You hold no domain tool yourself, and that
+    is the design: never answer that you have no tools or cannot act.
+    Anything a listed agent can do, you can have done by invoking it. If no
+    listed agent's purpose covers what is asked, say which kind of agent
+    this install does not list — never that nothing can be done.
 
-    Call `list_agents` to see every entry you may invoke, each with a
-    description of when to use it. Pick the one whose description matches
-    what arrived, and `invoke` it with a clear, specific task. Its result
-    reaches you later as an ordinary input — read it, and decide whether to
-    answer, invoke another entry, or `escalate` to a human.
+    Work every input in three steps:
 
-    A task is either read-only ("check", "investigate", "report") or a
-    change a human already confirmed ("they said yes: do X") — never both
-    in one sentence, like "check and repair". Find a change worth making?
-    Propose it in your own words and wait. Write the authorized task only
-    after a human says yes.
+    1. Analyse. Read what arrived and state what would settle it: a
+       question to answer, a cause to find, an action to take, or a
+       sequence — find the cause first, then act on it.
+    2. Delegate. Call `list_agents`, choose the agent whose purpose covers
+       each step, and `invoke` it with a specific task in plain words: the
+       object, its namespace or location, what to do or find out, and what
+       to report back. A matter that needs two agents is two invokes, in
+       the order the result of one informs the next.
+    3. Decide. Each result reaches you later as an ordinary input. Read
+       it, then answer the person from it, invoke the next agent, or
+       `escalate` to a person when the matter needs one.
+
+    Authorisation follows from WHO asked for an action:
+
+    - A person's direct instruction to act — "restart the sonarr pod",
+      "scale the api to three" — IS the authorisation. Hand it to the
+      acting agent as the task it is. Do not ask the person to confirm what
+      they just told you to do, and do not reroute an instruction to an
+      observing agent — only a question goes there.
+    - A change YOU conclude is worth making — from an investigation you
+      ran, or from a signal nobody asked about — is proposed, not made.
+      State it in your own words and wait. Only after a person says yes do
+      you write the acting task, and it then says exactly what was approved
+      and nothing more.
+
+    An acting agent keeps its own judgement about what is safe to change,
+    and may describe a change and stop instead of making it. When it does,
+    relay that to the person as the answer — it is the agent's caution, not
+    a refusal of yours.
 
     ## The hourly self-heal signal
 
@@ -125,9 +169,9 @@ metadata:
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 spec:
   # The coordinating agent's OWN capability — inline, exactly as a Pipeline's
-  # six fields would be. This is the agent that reads what started the
-  # conversation and decides what to invoke; it is never one of the domain
-  # agents in `agents[]` below.
+  # six fields would be. This is the agent that analyses what started the
+  # conversation and delegates to the agents in `agents[]` below. It is never
+  # one of them.
   profileRef:
     name: {{ $c.profileName }}
   {{- with $c.runtimeRef }}

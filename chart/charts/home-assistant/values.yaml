@@ -762,12 +762,20 @@ pipelines:
     # Display only — see kubernetes's `pipelines.observe.icon`.
     icon: aops:home
     # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
-    # Coordinator's own coordinating agent — what it tells the agent about WHEN
-    # to invoke this entry, never a routing rule of its own. Unused under
-    # `pipelines` mode.
+    # Coordinator's own coordinating agent. It states what this agent IS and
+    # CAN DO, what it cannot, and what to hand it — so a person's instruction
+    # matches it as readily as a signal does. Never a trigger alone, and never
+    # a routing rule of its own. Unused under `pipelines` mode.
+    #
+    # It used to say "read-only". It is not: this agent USES the house — see
+    # profiles.user.systemPrompt. What it lacks is configuration, not action.
     description: >-
-      Answer an everyday question about the house using Assist intents —
-      read-only, never reconfigures anything.
+      The household's everyday assistant, acting through Assist intents. Can
+      report the state of any entity and operate the house the way a resident
+      would — lights, switches, climate, media, scenes and automations. Cannot
+      reach configuration: no integration setup or reload, no automation edit,
+      no repair of anything Home Assistant reports as broken. Hand it a
+      question about the house or an instruction to operate something in it.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
@@ -782,8 +790,16 @@ pipelines:
     icon: aops:operate
     # See control.description above — same purpose, coordinator mode only.
     description: >-
-      Repair or reconfigure a Home Assistant integration once the cause is
-      known — the only route that can reach configuration.
+      The Home Assistant repair engineer, with the REST API and the operator
+      credential. Can read the error log and every integration's state,
+      diagnose a failed setup or an unavailable device, call any service,
+      validate configuration and make the narrowest change that fixes a
+      fault — the only agent that reaches configuration. Describes and stops
+      instead of acting on anything hard to undo: a restart, a reload, a
+      re-pairing, deleting history, editing someone else's automations. Hand
+      it a question about Home Assistant's own health or status, an error it
+      logs about itself, a device that went unavailable, or an instruction to
+      repair or reconfigure an integration.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""

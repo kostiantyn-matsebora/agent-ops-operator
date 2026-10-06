@@ -2330,6 +2330,224 @@ func TestOutputFormatCanBeDeclined(t *testing.T) {
 // because a profile picked by hand to match a value drifts the first time it
 // is flipped. These pin the three states the spec names.
 
+// everyBundleCoordinator renders the chart-rendered Coordinator with EVERY
+// shipped route in its agents[]: both kubernetes routes, prometheus's one, and
+// both home-assistant routes, plus the reaper the template folds in itself.
+func everyBundleCoordinator(t *testing.T, args ...string) string {
+	t.Helper()
+	return helmTemplate(t, append([]string{
+		"--set", "global.agentops.wiringMode=coordinator",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.pipelines.observe.enabled=true",
+		"--set", "kubernetes.pipelines.admin.enabled=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.pipelines.enabled=true",
+		"--set", "home-assistant.enabled=true",
+		"--set", "home-assistant.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "home-assistant.homeAssistant.credentials.controlToken=CTOK",
+		"--set", "home-assistant.homeAssistant.credentials.operatorToken=OTOK",
+		"--set", "home-assistant.pipelines.enabled=true",
+	}, args...)...)
+}
+
+// coordinatorRole returns the coordinating agent's rendered systemPrompt body,
+// de-indented, the same way k8sEngineerRole does for the bundle profile.
+func coordinatorRole(t *testing.T, args ...string) string {
+	t.Helper()
+	out := everyBundleCoordinator(t, args...)
+	doc := findDocByKindAndName(t, out, "AgentProfile", "agentops-coordinator")
+	_, after, ok := strings.Cut(doc, "systemPrompt: |\n")
+	if !ok {
+		t.Fatalf("the coordinator profile renders no systemPrompt:\n%s", doc)
+	}
+	body, _, _ := strings.Cut(after, "\n  outputFormat:")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(strings.TrimRight(line, " "), "    ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// coordinatorAgentDescriptions reads name → description off the rendered
+// Coordinator's agents[] — the exact text list_agents hands the coordinating
+// agent, since the manager returns spec.agents as stored.
+func coordinatorAgentDescriptions(t *testing.T, rendered string) map[string]string {
+	t.Helper()
+	doc := findDocByKindAndName(t, rendered, "Coordinator", "agentops-coordinator")
+	_, agents, ok := strings.Cut(doc, "\n  agents:\n")
+	if !ok {
+		t.Fatalf("the Coordinator renders no agents[]:\n%s", doc)
+	}
+	out := map[string]string{}
+	name := ""
+	for _, line := range strings.Split(agents, "\n") {
+		switch {
+		case strings.HasPrefix(line, "    - name: "):
+			name = strings.TrimPrefix(line, "    - name: ")
+		case strings.HasPrefix(line, "      description: "):
+			quoted := strings.TrimPrefix(line, "      description: ")
+			text, err := strconv.Unquote(quoted)
+			if err != nil {
+				t.Fatalf("agents[%s].description is not a quoted scalar: %v\n%s", name, err, line)
+			}
+			out[name] = text
+		}
+	}
+	return out
+}
+
+// THE COORDINATING AGENT IS AN ORCHESTRATOR, AND THE PROMPT SAYS SO.
+//
+// It used to be a dispatcher — "your only job is reading what started the
+// conversation and routing it", "pick the one whose description matches what
+// arrived". A lookup with no hit returns nothing: asked directly to restart a
+// pod on the reference install, it answered that it had no tools while
+// k8s-operate sat in agents[]. This pins the sentences that make it delegate
+// instead, and the ordering the operator's prefix and the self-heal paragraph
+// have always had around them.
+func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
+	role := coordinatorRole(t)
+	for _, phrase := range []string{
+		"an orchestrator, not a",
+		"YOUR TOOLS ARE THE AGENTS",
+		"never answer that you have no tools",
+		"say which kind of agent",
+		"this install does not list",
+		"1. Analyse.",
+		"2. Delegate.",
+		"3. Decide.",
+		"`list_agents`",
+		"`invoke`",
+		"`escalate`",
+		"A person's direct instruction to act",
+		"IS the authorisation",
+		"Do not ask the person to confirm",
+		"A change YOU conclude is worth making",
+		"is proposed, not made",
+	} {
+		if !strings.Contains(role, phrase) {
+			t.Errorf("the coordinating agent's role lacks %q:\n%s", phrase, role)
+		}
+	}
+	// The dispatcher's sentences are gone, not merely outnumbered.
+	for _, retired := range []string{
+		"only job is reading what started the conversation and routing it",
+		"Pick the one whose description matches",
+		"description of when to use it",
+	} {
+		if strings.Contains(role, retired) {
+			t.Errorf("the role still carries the dispatcher sentence %q:\n%s", retired, role)
+		}
+	}
+	// The self-heal paragraph (coordinator-self-heal) still closes the role and
+	// still names the reaper entry and its source — the one entry the prompt
+	// names, because it is chosen by trigger.
+	// findDocByKindAndName strips every `#`-led line, the markdown heading
+	// included, so the paragraph is anchored on its first sentence.
+	at := strings.LastIndex(role, "One of your claimed sources")
+	if at < 0 {
+		t.Fatalf("the self-heal paragraph is gone from the role:\n%s", role)
+	}
+	tail := role[at:]
+	if !strings.Contains(tail, "`reaper-sweep`") || !strings.Contains(tail, "invoke the entry named `reaper`") {
+		t.Errorf("the self-heal paragraph must still close the role naming the reaper and its source:\n%s", tail)
+	}
+	if !strings.HasPrefix(role, "You are the coordinating agent") {
+		t.Errorf("with no prefix the role opens with the orchestrator sentence:\n%s", role)
+	}
+}
+
+func TestCoordinatorPromptKeepsTheOperatorsPrefixFirst(t *testing.T) {
+	role := coordinatorRole(t, "--set", "coordinator.systemPromptPrefix=Severity P1 means a person is paged.")
+	if !strings.HasPrefix(role, "Severity P1 means a person is paged.\n\nYou are the coordinating agent") {
+		t.Errorf("the operator's prefix must lead the generated role after one blank line:\n%s", role)
+	}
+}
+
+// EVERY SHIPPED DESCRIPTION STATES PURPOSE AND REACH, NOT A TRIGGER.
+//
+// The description is the whole of what the coordinating agent knows about an
+// entry (coordinator-model). Written as a trigger — "a cluster event", "once
+// the cause is known", "a firing alert" — it matches an arriving signal and
+// nothing a person types, so a direct instruction found no entry at all. Each
+// now says what the agent IS, what it CAN do in the actions its toolset
+// supports, what it CANNOT, and what to hand it. The reaper is the stated
+// exception: for it the trigger is the purpose.
+func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
+	descs := coordinatorAgentDescriptions(t, everyBundleCoordinator(t))
+	// Prometheus's entry is named for the PROFILE (alert-investigator), not the
+	// route (alert-triage) — gotchas.md's bundle table says so.
+	for _, name := range []string{"k8s-observe", "k8s-operate", "alert-investigator", "ha-control", "ha-ops", "reaper"} {
+		if descs[name] == "" {
+			t.Errorf("agents[] lacks %q with every bundle enabled; got %v", name, descs)
+		}
+	}
+	retiredOpenings := []string{
+		"Investigate a Kubernetes cluster event",
+		"Act on the cluster to remediate",
+		"Investigate a firing alert",
+		"Answer an everyday question",
+		"Repair or reconfigure a Home Assistant integration once",
+	}
+	// What each domain entry must say it CAN do, in the words of its own
+	// toolset, and what it CANNOT — one of each, so a rewrite that drops either
+	// half fails here.
+	must := map[string][]string{
+		"k8s-observe":  {"read-only", "logs", "Cannot change anything", "Hand it"},
+		"k8s-operate":  {"act on the cluster", "restart a workload by deleting its pod", "scale", "patch", "pod execution", "Cannot touch kube-system", "Hand it an instruction"},
+		"alert-investigator": {"PromQL", "Cannot change anything", "Hand it a firing alert"},
+		"ha-control":   {"Assist intents", "operate the house", "Cannot reach configuration", "Hand it"},
+		"ha-ops":       {"REST API", "diagnose", "reaches configuration", "Describes and stops", "Hand it"},
+	}
+	// The CRD caps a description (coordinator_types.go, MaxLength) and helm
+	// template validates no schema, so the first live install of the
+	// purpose-shaped texts failed at the API server on two of them under the
+	// old 512-byte cap. Bytes, not runes: an em dash is three.
+	assertDescriptionsUnderCap(t, descs, 2048)
+	for name, phrases := range must {
+		assertPurposeDescription(t, name, descs[name], retiredOpenings, phrases)
+	}
+	// ha-control USES the house (profiles.user.systemPrompt) — it was described
+	// as read-only, which was simply false.
+	if strings.Contains(descs["ha-control"], "read-only") {
+		t.Errorf("ha-control acts on the house and must not be called read-only:\n%s", descs["ha-control"])
+	}
+	// The reaper keeps its instruction-shaped description, naming its source.
+	if !strings.Contains(descs["reaper"], "ONLY in response to the hourly self-heal signal from source \"reaper-sweep\"") {
+		t.Errorf("the reaper's description must stay trigger-shaped and name its source:\n%s", descs["reaper"])
+	}
+}
+
+// assertPurposeDescription checks one entry's description states a purpose:
+// no retired trigger opening, every required phrase, no moment-gating.
+func assertPurposeDescription(t *testing.T, name, d string, retiredOpenings, phrases []string) {
+	t.Helper()
+	for _, opening := range retiredOpenings {
+		if strings.HasPrefix(d, opening) {
+			t.Errorf("%s's description is the retired trigger %q again:\n%s", name, opening, d)
+		}
+	}
+	for _, phrase := range phrases {
+		if !strings.Contains(d, phrase) {
+			t.Errorf("%s's description lacks %q:\n%s", name, phrase, d)
+		}
+	}
+	if strings.Contains(d, "once the cause is known") {
+		t.Errorf("%s's description still gates itself on a moment rather than stating a purpose:\n%s", name, d)
+	}
+}
+
+// assertDescriptionsUnderCap fails for every description over the byte cap.
+func assertDescriptionsUnderCap(t *testing.T, descs map[string]string, limit int) {
+	t.Helper()
+	for name, d := range descs {
+		if len(d) > limit {
+			t.Errorf("%s's description is %d bytes, over the CRD's %d:\n%s", name, len(d), limit, d)
+		}
+	}
+}
+
 // k8sEngineerRole returns the rendered systemPrompt body of the bundle's
 // profile, de-indented, with the outputFormat line that follows it cut off.
 func k8sEngineerRole(t *testing.T, args ...string) string {

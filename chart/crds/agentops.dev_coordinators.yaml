@@ -107,9 +107,12 @@ spec:
                       type: object
                     description:
                       description: |-
-                        Description tells the COORDINATING AGENT when to invoke this entry. It
-                        is read by the agent and parsed by nothing here.
-                      maxLength: 512
+                        Description tells the COORDINATING AGENT what this entry IS and can do —
+                        its purpose and reach, what it cannot do, and what to hand it — so that a
+                        person's instruction matches it as readily as a signal does. It is read
+                        by the agent and parsed by nothing here. Four parts need room: the bound
+                        was 512 bytes and the chart's own purpose-shaped texts did not fit.
+                      maxLength: 2048
                       minLength: 1
                       type: string
                     name:

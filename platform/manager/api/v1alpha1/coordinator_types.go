@@ -33,10 +33,13 @@ type CoordinatorAgentEntry struct {
 	// `Ready`, and again at `invoke` time against the live `causedBy` chain).
 	// +optional
 	CoordinatorRef *ObjectRef `json:"coordinatorRef,omitempty"`
-	// Description tells the COORDINATING AGENT when to invoke this entry. It
-	// is read by the agent and parsed by nothing here.
+	// Description tells the COORDINATING AGENT what this entry IS and can do —
+	// its purpose and reach, what it cannot do, and what to hand it — so that a
+	// person's instruction matches it as readily as a signal does. It is read
+	// by the agent and parsed by nothing here. Four parts need room: the bound
+	// was 512 bytes and the chart's own purpose-shaped texts did not fit.
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:MaxLength=2048
 	Description string `json:"description"`
 }
 

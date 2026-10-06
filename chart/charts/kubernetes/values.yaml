@@ -581,13 +581,19 @@ pipelines:
     # surface can fetch one.
     icon: aops:observe
     # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
-    # Coordinator's own coordinating agent — what it tells the agent about WHEN
-    # to invoke this entry, never a routing rule of its own. Unused under
-    # `pipelines` mode.
+    # Coordinator's own coordinating agent. It states what this agent IS and
+    # CAN DO, in the actions its toolset supports, what it cannot, and what to
+    # hand it — so a person's instruction matches it as readily as a signal.
+    # Never a trigger alone ("a cluster event"): an instruction matches no
+    # trigger, and the coordinating agent then reports it has nothing. Never
+    # a routing rule of its own. Unused under `pipelines` mode.
     description: >-
-      Investigate a Kubernetes cluster event read-only — inspect the object,
-      recent logs and related resources, and report the likely cause. Never
-      changes the cluster.
+      A read-only Kubernetes engineer. Can list and inspect any resource in
+      any namespace, read pod and node logs, events and live CPU and memory
+      usage, and explain what it finds — why a pod restarts, whether a
+      rollout is stuck, what an event means. Cannot change anything in the
+      cluster. Hand it any question about the cluster's state, and any
+      signal or alert whose cause is not yet known.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
@@ -603,10 +609,22 @@ pipelines:
     # internet too. k8s-observe stays read-only and does not gain it.
     name: k8s-operate
     icon: aops:operate
-    # See observe.description above — same purpose, coordinator mode only.
+    # See observe.description above — same purpose, coordinator mode only. The
+    # actions named are the k8s-admin toolset's: there is no "restart" tool, so
+    # the text says how a restart happens, and the pod-execution clause follows
+    # global.agentops.runtimeDefaults.allowPodExecution exactly as the
+    # profile's own posture paragraph does.
     description: >-
-      Act on the cluster to remediate a Kubernetes issue once the cause is
-      known — restart, scale or patch the affected workload.
+      A Kubernetes engineer that can act on the cluster. Can read everything
+      — resources, logs, events, usage — and change it: restart a workload by
+      deleting its pod so its controller recreates it, scale a Deployment or
+      StatefulSet, patch or create any resource, delete one, and, where this
+      install allows pod execution, exec into a pod or run a one-off pod. It
+      can also look things up on the web. It investigates before it acts and
+      describes a risky change instead of making it. Cannot touch kube-system
+      or the control plane. Hand it an instruction to change something —
+      "restart X", "scale Y to N", "fix the Z ConfigMap" — or a known cause
+      that needs a fix.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
