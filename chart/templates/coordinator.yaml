@@ -95,7 +95,7 @@ spec:
   # entry sat in `agents[]`.
   systemPrompt: |
     {{- with $c.systemPromptPrefix }}
-{{ . | trim | indent 4 }}
+{{ . | trim | indent 4 }}{{ "\n" }}
 {{- end }}
     You are the coordinating agent for this install — an orchestrator, not a
     specialist. A conversation of yours opens when a signal arrives on a
