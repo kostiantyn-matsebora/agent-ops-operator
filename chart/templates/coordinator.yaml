@@ -96,7 +96,7 @@ spec:
   systemPrompt: |
     {{- with $c.systemPromptPrefix }}
 {{ . | trim | indent 4 }}
-{{ end }}
+{{- end }}
     You are the coordinating agent for this install — an orchestrator, not a
     specialist. A conversation of yours opens when a signal arrives on a
     source you claim, or when a person addresses you by name with a question
