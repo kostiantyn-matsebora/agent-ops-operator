@@ -66,17 +66,18 @@ describe('row states (prototype/States.html)', () => {
     expect(rowSnippet(row)).toBe('k8s-engineer is working…')
   })
 
-  it('OBSERVED — no console thread, never unread, the snippet says why it waits', () => {
+  it('PENDING, never joined — no console thread, never unread, the snippet says why it waits', () => {
     const row = conv('high-mem', { joined: false, phase: 'Pending' })
     renderRow(row)
-    expect(rowTag(row, false)).toBe('observed')
     expect(rowSnippet(row)).toContain('pending')
   })
 
-  it('OBSERVED with nothing else to say falls through to the empty snippet — "observed" lives only in the chip', () => {
+  it('never joined with nothing else to say falls through to the empty snippet — there is no "observed" tag any more', () => {
+    // `observed` (`!row.joined`) was dropped: it showed on effectively every
+    // unattended alert-investigator row, distinguishing nothing.
     const row = conv('watched', { joined: false, phase: 'Idle' })
     expect(rowSnippet(row)).toBe('')
-    expect(rowTag(row, false)).toBe('observed')
+    expect(rowTag(row, false)).toBeUndefined()
   })
 
   it('ERRORED — failed dot and the run-failed tag, still unread', () => {
@@ -141,12 +142,21 @@ describe('arrival (console-thread-live-cues)', () => {
 })
 
 describe('coordination extras', () => {
-  it('a root with members shows a caret and the member/turn summary instead of a snippet', () => {
-    const row = conv('root-1', { coordinator: 'root-1', budget: { maxTurns: 6, turns: 2 } })
+  it('a root with members shows a caret — no turn/member summary, no snippet line any more', () => {
+    // Every row is exactly two lines now: title + time, then chips + menu.
+    // The old "turn 2 of 6 · 3 members" line was internal budget-tracking
+    // detail with no scanning value, and the snippet line that replaced it
+    // was dropped too — a third line fighting the chips for space, when the
+    // chips (coordinator + source) already say what a reader needs.
+    const row = conv('root-1', {
+      coordinator: 'root-1', budget: { maxTurns: 6, turns: 2 },
+      lastMessage: { kind: 'relay', sender: 'oncall', text: 'any update?' },
+    })
     renderRow(row, { memberCount: 3 })
     expect(screen.getByLabelText(`collapse ${row.title || row.name}`)).toBeInTheDocument()
-    expect(screen.getByText(/turn 2 of 6/)).toBeInTheDocument()
-    expect(screen.getByText(/3 members/)).toBeInTheDocument()
+    expect(screen.queryByText(/turn 2 of 6/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/3 members/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/any update\?/)).not.toBeInTheDocument()
   })
 
   it('a member names the entry it was invoked as', () => {
@@ -267,6 +277,23 @@ describe('every row names what answers it', () => {
     renderRow(row, { depth: 1 })
     expect(screen.queryByText('k8s-observe')).not.toBeInTheDocument()
   })
+
+  it('a PLAIN conversation (no coordinator, no pipeline) still chips its source', () => {
+    // Measured live: `job-cb5vg` ("Self-heal sweep") had `source:
+    // "reaper-sweep"` but no `coordinator` field at all — a cron-triggered
+    // conversation reached by a claimed source, never a Coordinator root.
+    // Gating the source chip on `isRoot` hid a source that was genuinely
+    // there.
+    const row = conv('job-cb5vg', { source: 'reaper-sweep' })
+    renderRow(row)
+    expect(screen.getByText('reaper-sweep')).toBeInTheDocument()
+  })
+
+  it('a member still never chips a source, even if one happened to be set', () => {
+    const row = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' }, source: 'reaper-sweep' })
+    renderRow(row, { depth: 1 })
+    expect(screen.queryByText('reaper-sweep')).not.toBeInTheDocument()
+  })
 })
 
 describe('the row menu (regression: Reopen was built but never rendered)', () => {
@@ -284,5 +311,40 @@ describe('the row menu (regression: Reopen was built but never rendered)', () =>
     renderRow(row, { depth: 1 })
     await userEvent.click(screen.getByLabelText(`actions for ${row.title || row.name}`))
     expect(screen.queryByText('Reopen')).toBeNull()
+  })
+})
+
+describe('tree guide lines (distinguishing nesting levels from one another, not just from a root)', () => {
+  it('a root has no guide columns and a FULL-WIDTH divider', () => {
+    const row = conv('root-1', { coordinator: 'agentops-coordinator' })
+    renderRow(row, { depth: 0 })
+    const li = screen.getByTestId('row-root-1')
+    // The row itself carries the divider at depth 0 — nothing narrower.
+    expect(li).toHaveStyle({ borderBottom: '1px solid var(--ao-canvas)' })
+    // No guide column before the row's own content div.
+    expect(li.children).toHaveLength(1)
+  })
+
+  it('a depth-1 member gets exactly one guide column, and its divider sits on the INNER content, not the row', () => {
+    const row = conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } })
+    renderRow(row, { depth: 1 })
+    const li = screen.getByTestId('row-member-1')
+    // One guide column + one content div.
+    expect(li.children).toHaveLength(2)
+    // The outer <li> carries no divider of its own at a nested depth — a
+    // nested row must never look like it closes out a whole group.
+    expect(li).not.toHaveStyle({ borderBottom: '1px solid var(--ao-canvas)' })
+    const content = li.children[1] as HTMLElement
+    expect(content).toHaveStyle({ borderBottom: '1px solid var(--ao-canvas)' })
+  })
+
+  it('a depth-2 row (a member that is itself a Coordinator\'s own member) gets TWO guide columns — visibly distinct from depth 1', () => {
+    const row = conv('sub-member-1', { causedBy: { parent: 'member-1', entry: 'k8s-observe' } })
+    renderRow(row, { depth: 2 })
+    const li = screen.getByTestId('row-sub-member-1')
+    // Two guide columns + one content div — one more than a depth-1 row,
+    // which is the whole point: today's indent alone could not tell a
+    // depth-1 and a depth-2 row apart at a glance past two levels.
+    expect(li.children).toHaveLength(3)
   })
 })

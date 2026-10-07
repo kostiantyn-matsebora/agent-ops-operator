@@ -306,3 +306,16 @@ body {
 .ao-nav-collapsed .pf-v6-c-nav__link-icon {
   margin-inline-end: 0;
 }
+
+/* pf-v6-c-nav, -__list and -__item are display:grid with no declared
+   grid-template-columns, so the browser's implicit auto column floors at
+   each row's max-content width — the link's padding plus icon, unshrunk by
+   the sidebar's own narrower width. That overflow was clipped by the
+   sidebar's own overflow:hidden, leaving a visible sliver of the wider,
+   icon-off-center row bleeding past the collapsed rail's edge. minmax(0, 1fr)
+   lets the track shrink to the rail's actual width instead of its content's. */
+.ao-nav-collapsed .pf-v6-c-nav,
+.ao-nav-collapsed .pf-v6-c-nav__list,
+.ao-nav-collapsed .pf-v6-c-nav__item {
+  grid-template-columns: minmax(0, 1fr);
+}

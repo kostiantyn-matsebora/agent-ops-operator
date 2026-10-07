@@ -95,10 +95,12 @@ export function ThreadPane({ name, onBack }: Readonly<{ name: string; onBack?: (
               (measured live at 375px — a long title wrapped one WORD per
               line, seven lines tall), since text-overflow only engages on a
               block-level box with a constrained width. */}
-          <span style={{
-            fontSize: '1.1em', fontWeight: 700, flex: 1, minWidth: 0,
-            display: 'block', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
-          }}
+          <span
+            title={title}
+            style={{
+              fontSize: '1.1em', fontWeight: 700, flex: 1, minWidth: 0,
+              display: 'block', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+            }}
           >
             <Icon icon={pipelineIcon} /> <PlainText>{title}</PlainText>
           </span>

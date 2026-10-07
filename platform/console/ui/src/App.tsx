@@ -220,7 +220,15 @@ export function App() {
                     <span className="pf-v6-c-nav__link-icon" aria-hidden="true">{item.icon}</span>
                     {!navCollapsed && <span className="pf-v6-c-nav__link-text">{item.label}</span>}
                     {item.to === '/conversations' && (unread.data?.unreadTotal ?? 0) > 0 && (
-                      <Badge isRead={false} data-testid="unread-badge" style={{ marginLeft: navCollapsed ? 4 : 8 }}>
+                      <Badge
+                        isRead={false}
+                        data-testid="unread-badge"
+                        style={
+                          navCollapsed
+                            ? { position: 'absolute', top: 2, right: 6, fontSize: 10, minWidth: 16, height: 16, lineHeight: '16px', padding: '0 4px' }
+                            : { marginLeft: 8 }
+                        }
+                      >
                         {unread.data?.unreadTotal}
                       </Badge>
                     )}

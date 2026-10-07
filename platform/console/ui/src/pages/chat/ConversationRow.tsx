@@ -5,7 +5,7 @@ import { PlainText } from '../../components/Text'
 import { relativeAge } from './format'
 import { prefersReducedMotion } from './motion'
 import { RowMenu } from './RowMenu'
-import type { ConversationBudget, ConversationSummary } from '../../api/types'
+import type { ConversationSummary } from '../../api/types'
 
 // Ported from `prototype/States.html` (row states) and `C-rail.html` /
 // `D-incident.html` (the grid, the caret, the member line) — composition and
@@ -39,7 +39,14 @@ export function rowSnippet(row: ConversationSummary): string {
   return ''
 }
 
-/** The small tag on the right of the snippet line — absent most of the time. */
+/**
+ * The small tag on the right of the snippet line — absent most of the time.
+ *
+ * `observed` (`!row.joined`) is GONE: measured live, it showed on every
+ * unattended alert-investigator row in every screenshot, since the viewer
+ * never "joins" an automated conversation by replying to it. A tag on
+ * effectively 100% of rows distinguishes nothing and is pure noise.
+ */
 export function rowTag(row: ConversationSummary, isNew: boolean): string | undefined {
   if (isNew) return 'new'
   if (row.errored) return 'run failed'
@@ -50,7 +57,6 @@ export function rowTag(row: ConversationSummary, isNew: boolean): string | undef
     if (row.coordinator && !row.escalatedAt && row.closeReason) return 'nobody notified'
     return 'closed'
   }
-  if (!row.joined) return 'observed'
   return undefined
 }
 
@@ -70,23 +76,6 @@ const DOT_COLOR: Record<DotState, string | undefined> = {
   failed: 'var(--ao-danger)',
   idle: 'var(--ao-success)',
   none: undefined,
-}
-
-/** "2 of 6" when a ceiling is set, else just the count. */
-function counted(used: number | undefined, max: number | undefined): string {
-  const count = used ?? 0
-  return max ? `${count} of ${max}` : String(count)
-}
-
-/** The root row's extra line — turn, member count, time left (design D-F). */
-export function budgetSummary(budget: ConversationBudget | undefined, memberCount: number): string {
-  const parts = [`${memberCount} member${memberCount === 1 ? '' : 's'}`]
-  if (budget?.maxTurns || budget?.turns) parts.unshift(`turn ${counted(budget?.turns, budget?.maxTurns)}`)
-  if (budget?.deadline) {
-    const msLeft = new Date(budget.deadline).getTime() - Date.now()
-    if (msLeft > 0) parts.push(`${Math.round(msLeft / 60000)}m left`)
-  }
-  return parts.join(' · ')
 }
 
 function rowTint(row: ConversationSummary, isRoot: boolean): string {
@@ -120,6 +109,26 @@ function RowBadges({
       {isRoot && (
         <Label isCompact color="purple">
           <PlainText>{row.coordinator}</PlainText>
+        </Label>
+      )}
+      {/* The SignalSource that opened this conversation — a domain entity
+          (`terminology.md`: a root is reached by "a signal posted to a
+          source it claims"), never to be confused with text that happens to
+          sit inside some titles (a k8s alert's own namespace, embedded by
+          the alert itself). NOT root-only: measured live, a plain
+          cron-triggered conversation (`job-cb5vg`, "Self-heal sweep") had a
+          real `source: "reaper-sweep"` but NO `coordinator` field at all —
+          it was never a Coordinator root, just an ordinary conversation
+          reached by a claimed source. Gating on `isRoot` hid a source that
+          was genuinely there. The one row that must NEVER show it is a
+          member (`depth > 0 && row.causedBy`): a member is reached by
+          `causedBy`, never by a source, and already carries its own "via X"
+          attribution below. Absent on anything a channel started, or
+          anything older than the manager recording it — rendered as
+          nothing, never guessed. */}
+      {!(depth > 0 && row.causedBy) && row.source && (
+        <Label isCompact color="grey">
+          <PlainText>{row.source}</PlainText>
         </Label>
       )}
       {depth > 0 && row.causedBy && (
@@ -188,12 +197,25 @@ export interface ConversationRowProps {
   onDelete: () => void
 }
 
-/** The expand/collapse chevron of a root, or the spacer a top-level leaf keeps. */
+/**
+ * The expand/collapse chevron, or the spacer a leaf keeps in its place.
+ *
+ * The spacer is reserved AT EVERY DEPTH, not only at depth 0. A depth-0 leaf
+ * and a depth-1 leaf must sit behind the identical "toggle slot" width so the
+ * guide column is the ONLY thing that moves a member's icon — measured live:
+ * dropping the spacer for depth > 0 let a root's own chevron+gap (21px)
+ * almost exactly cancel the guide column's 24px, leaving a member's icon
+ * ~3px from its root's — visually unreadable as nested.
+ *
+ * The toggle BUTTON also gets the identical explicit width, for the same
+ * reason one level up: unset, its width is the glyph's own metrics (measured
+ * live at 6px) against the spacer's fixed 11px — two SIBLING roots, one
+ * collapsible and one not, sat 5px apart despite being at the same depth.
+ */
 function CollapseToggle({
-  memberCount, depth, title, collapsed, onToggleCollapse,
+  memberCount, title, collapsed, onToggleCollapse,
 }: Readonly<{
   memberCount: number
-  depth: number
   title: string
   collapsed?: boolean
   onToggleCollapse?: () => void
@@ -205,13 +227,16 @@ function CollapseToggle({
         aria-label={collapsed ? `expand ${title}` : `collapse ${title}`}
         aria-expanded={!collapsed}
         onClick={onToggleCollapse}
-        style={{ all: 'unset', cursor: 'pointer', color: 'var(--ao-text-subtle)', fontSize: 11, paddingTop: 10 }}
+        style={{
+          all: 'unset', cursor: 'pointer', color: 'var(--ao-text-subtle)', fontSize: 11, paddingTop: 3,
+          width: 11, textAlign: 'center', alignSelf: 'start',
+        }}
       >
         {collapsed ? '▸' : '▾'}
       </button>
     )
   }
-  return depth === 0 ? <span aria-hidden style={{ width: 11 }} /> : null
+  return <span aria-hidden style={{ width: 11, alignSelf: 'start' }} />
 }
 
 export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProps>(function ConversationRow(
@@ -232,7 +257,6 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
   const title = stripNamePrefix(stripLeadingIcon(row.title || row.name), nameForStrip)
   const unread = (row.unreadCount ?? 0) > 0
   const dot = phaseDot(row)
-  const snippet = rowSnippet(row)
   const tag = rowTag(row, isNew)
   const tint = rowTint(row, isRoot)
 
@@ -245,6 +269,25 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
     void navigator.clipboard?.writeText(`${window.location.origin}/conversations/${row.name}`)
   }
 
+  // One plain vertical line per ancestor level, each spanning this row's own
+  // full height — no elbow, no "is this the last child" termination. The
+  // same simplification file trees, outliners and nested comment threads
+  // make: indentation ALONE reads as one flat group past two levels, with
+  // nothing marking which rows share a parent once a member is itself a
+  // Coordinator's own root and nests a level further.
+  //
+  // `--ao-border` (a 1.5px fractional width) was invisible in practice: it is
+  // the subtle default-divider token, barely distinct from the canvas in
+  // EITHER theme (#cfd6da on a near-white light background, #3a4247 on a
+  // near-black dark one) — present in the DOM with correct geometry, measured
+  // live, yet unreadable in an actual screenshot. `--ao-text-subtle` is the
+  // token this project already uses where something needs to read against
+  // the background in both themes, and an integer 2px avoids sub-pixel
+  // rounding making the line thinner than requested.
+  const guides = Array.from({ length: depth }, (_, i) => (
+    <span key={i} aria-hidden style={{ width: 24, flex: 'none', borderLeft: '2px solid var(--ao-text-subtle)' }} />
+  ))
+
   return (
     <li
       // The arrival TINT is motion and is skipped under reduced motion; the
@@ -255,29 +298,49 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
       className={isNew && !prefersReducedMotion() ? 'ao-row-arrive' : undefined}
       data-testid={`row-${row.name}`}
       style={{
-        display: 'grid',
-        gridTemplateColumns: selectionMode ? 'auto auto 1fr auto' : 'auto 1fr auto',
-        alignItems: 'start',
-        gap: 10,
-        padding: '10px 12px',
-        paddingLeft: 12 + depth * 24,
-        borderBottom: '1px solid var(--ao-canvas)',
+        display: 'flex',
+        // A root's divider spans the FULL row — it closes out an entire
+        // group. A nested row's divider (below, on the inner content only)
+        // is inset and lighter: it separates rows WITHIN one family, never
+        // reading as a new group's own boundary.
+        borderBottom: depth === 0 ? '1px solid var(--ao-canvas)' : undefined,
         background: highlighted ? 'var(--ao-brand-soft)' : undefined,
         boxShadow: highlighted ? 'inset 3px 0 0 var(--ao-brand)' : undefined,
       }}
     >
       {selectionMode && (
-        <Checkbox
-          id={`select-${row.name}`}
-          aria-label={`select ${title}`}
-          isChecked={selected}
-          isDisabled={row.deleting}
-          onChange={(_e, checked) => onSelect(checked)}
-        />
+        // Rendered BEFORE the guide columns, at a fixed offset from the
+        // row's own left edge — never shifted by depth. Living inside the
+        // depth-dependent content grid put a root's checkbox hard against
+        // the row edge and a member's checkbox one guide-column further
+        // right, which read as a ragged column rather than one a reader can
+        // scan straight down. `alignSelf: 'start'` still anchors it to the
+        // title line, matching the toggle.
+        <span style={{ flex: 'none', paddingLeft: 12, paddingRight: 10, paddingTop: 13, alignSelf: 'start' }}>
+          <Checkbox
+            id={`select-${row.name}`}
+            aria-label={`select ${title}`}
+            isChecked={selected}
+            isDisabled={row.deleting}
+            onChange={(_e, checked) => onSelect(checked)}
+          />
+        </span>
       )}
+      {guides}
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr auto',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 12px',
+          borderBottom: depth > 0 ? '1px solid var(--ao-canvas)' : undefined,
+        }}
+      >
       <CollapseToggle
         memberCount={memberCount}
-        depth={depth}
         title={title}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
@@ -319,8 +382,16 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
           )}
         </span>
         <span style={{ minWidth: 0 }}>
+          {/* Every row is exactly two lines: title + time, then chips + the
+              menu. No snippet line — the last-message text added a third
+              dimension of varying length that fought the chips for space,
+              and the chip set itself (coordinator/source for a root, "via X"
+              for a member) already says what a reader needs to decide
+              whether to open the row. The native `title` attribute carries
+              the FULL text for hover, since the visible text truncates. */}
           <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
             <span
+              title={title}
               style={{
                 fontSize: '0.95em', fontWeight: unread ? 700 : 400,
                 color: unread ? 'var(--ao-brand-strong)' : 'var(--ao-text)',
@@ -333,26 +404,15 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
               {relativeAge(row.ageSeconds)}
             </time>
           </span>
-          <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
-            <span
-              style={{
-                fontSize: '0.85em', color: 'var(--ao-text-subtle)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}
-            >
-              {isRoot && memberCount > 0 ? (
-                <PlainText>{budgetSummary(row.budget, memberCount)}</PlainText>
-              ) : (
-                <PlainText>{snippet}</PlainText>
-              )}
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-              <RowBadges row={row} depth={depth} parentMissing={parentMissing} isRoot={isRoot} unread={unread} tag={tag} />
-            </span>
+          <span style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+            <RowBadges row={row} depth={depth} parentMissing={parentMissing} isRoot={isRoot} unread={unread} tag={tag} />
           </span>
         </span>
       </button>
-      <span style={{ paddingTop: 4 }}>
+      {/* Aligned to the END of the outer row (the chips' line), not centred
+          across both lines, so the menu visually sits beside the chips
+          rather than floating between the two lines. */}
+      <span style={{ flex: 'none', alignSelf: 'end' }}>
         <RowMenu
           row={row}
           canWrite={canWrite}
@@ -367,6 +427,7 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
           onDelete={onDelete}
         />
       </span>
+      </div>
     </li>
   )
 })
