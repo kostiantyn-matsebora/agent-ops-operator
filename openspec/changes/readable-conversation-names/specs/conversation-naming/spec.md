@@ -54,6 +54,10 @@ That length SHALL be chosen against the LONGEST derived name, not the bare
 
 The total SHALL stay within Kubernetes' object-name and label-value limits.
 
+The 4-character suffix is a budget, not a cap. The remaining 14 characters
+of the 63-character limit hold a suffix of up to 13 digits, so a base name
+past 999 conversations keeps allocating and the name stays valid.
+
 Where the joined chain exceeds that length, the manager SHALL drop whole
 trailing words until it fits, never cut a word in half.
 

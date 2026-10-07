@@ -122,7 +122,7 @@ list-then-create step, bounded to a small fixed number of attempts.**
 This is the one place a retry loop remains, and it exists only for an
 actual simultaneous write race, not for volume.
 
-The bound (a small constant, e.g. 3) exists so a stuck informer cache or a
+The bound (a small constant: 5) exists so a stuck informer cache or a
 true hot loop fails loudly rather than spinning. It is not a tool for
 absorbing scale, which is the lookup's job.
 
