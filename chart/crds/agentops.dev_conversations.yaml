@@ -472,6 +472,11 @@ spec:
                   (e.g. alertgroup/alertname/namespace, job:<name>).
                 type: string
               title:
+                description: |-
+                  Title is bounded by MaxConversationTitle — see that constant's own
+                  comment for why a cap belongs HERE despite the message-body rule
+                  against transport-shaped limits.
+                maxLength: 500
                 type: string
               toolsets:
                 description: |-

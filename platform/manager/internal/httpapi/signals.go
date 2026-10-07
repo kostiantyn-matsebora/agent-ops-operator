@@ -119,16 +119,17 @@ const (
 // fallback. The icon says which lane asked — 💬 somebody typed it, 🛠 a
 // machine posted it.
 //
-// UNBOUNDED on purpose (see `chat.memberTitle`'s own comment, same fix,
-// same reason): Telegram already enforces its own 128-character topic-name
-// cap at the adapter. A manager-side cut here was that one transport's
-// limit imposed on every channel and the console's own list/chat views.
+// Bounded by agentopsv1alpha1.MaxConversationTitle — NOT the transport-shaped
+// limit the "no manager-side cut" rule warns against (see that constant's own
+// comment). Telegram's own 128-rune topic-name cap is a separate, later bound
+// at the adapter; this one exists because a one-shot signal's payload has no
+// cap at all before it reaches an etcd-permanent field.
 func titleFromText(icon, text string) string {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
 		return ""
 	}
-	return icon + " " + strings.Join(fields, " ")
+	return agentopsv1alpha1.BoundConversationTitle(icon + " " + strings.Join(fields, " "))
 }
 
 // orDefault fills an empty string with a fallback (telemetry labelling only).

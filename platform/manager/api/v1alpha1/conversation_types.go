@@ -348,7 +348,11 @@ type ConversationSpec struct {
 	// channel started. Render it as absent rather than guessing.
 	// +optional
 	Signal *SignalProvenance `json:"signal,omitempty"`
+	// Title is bounded by MaxConversationTitle — see that constant's own
+	// comment for why a cap belongs HERE despite the message-body rule
+	// against transport-shaped limits.
 	// +optional
+	// +kubebuilder:validation:MaxLength=500
 	Title string `json:"title,omitempty"`
 	// Signature groups same/similar problems into one conversation
 	// (e.g. alertgroup/alertname/namespace, job:<name>).
@@ -814,6 +818,37 @@ const MaxCloseReason = 256
 
 // MaxBrief bounds ConversationStatus.Brief.
 const MaxBrief = 512
+
+// MaxConversationTitle bounds ConversationSpec.Title.
+//
+// This is NOT the transport-shaped-limit mistake the "no manager-side cut"
+// rule (gotchas.md, invariants.md) warns against. That rule is about a
+// MESSAGE BODY an adapter renders and a transport bounds in its own way
+// (Telegram's own 128-rune topic-name cap, enforced only at
+// channels/telegram/telegram.go's CreateTopic). Title is a different thing:
+// a ConversationSpec field, stored permanently in the API server and
+// returned on every list/watch of this object, set directly from
+// attacker-or-adopter-controlled text (an alert or chat payload, an
+// addressed command's task, an invoked member's entry) with no per-transport
+// cap standing between the input and etcd. Every other free-text field on
+// this type IS bounded here (CloseReason, EscalationMessage,
+// RecordedInput.Text) — Title was the one exception, able to grow to
+// whatever the inbound request body's own limit allowed.
+const MaxConversationTitle = 500
+
+// BoundConversationTitle truncates s to MaxConversationTitle runes, applied
+// at every site that sets ConversationSpec.Title from request-shaped text
+// (internal/httpapi/signals.go's title construction, internal/chat's
+// CreateTaskConversation and memberTitle). Rune-safe — a Title carries an
+// emoji prefix (🛠, 🤖, 🤝, 🔍) ahead of the caller's own words, and a byte
+// slice would cut a multi-byte character in half.
+func BoundConversationTitle(s string) string {
+	runes := []rune(s)
+	if len(runes) <= MaxConversationTitle {
+		return s
+	}
+	return string(runes[:MaxConversationTitle])
+}
 
 // ConversationStatus is the observed state.
 type ConversationStatus struct {

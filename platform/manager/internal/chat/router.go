@@ -352,23 +352,33 @@ func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alph
 // fan-out of `/close`) and the idle timer all reach a root's members exactly as
 // that verb does, with no reason required or threaded through: a plain human
 // close carries none, which `cascadeCloseMembers` already allows.
+//
+// THE CASCADE RUNS EVEN WHEN THIS CONVERSATION IS ALREADY CLOSED — only the
+// farewell and the status write are skipped then. A cascade that fails
+// partway (a transient API error on some descendant) leaves THIS conversation
+// already persisted Closed, so a retry that short-circuited on "already
+// closed" would never reach the un-cascaded members again: the root would
+// read Closed forever while a child sat open beneath it. Falling through
+// unconditionally is what `coordinate.go`'s `closeWithCascade` already does
+// for the same reason — its own self-close step no-ops the same way on an
+// already-closed conversation, and the cascade call after it is never gated
+// on that.
 func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, farewell string) error {
-	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		return nil // already closed: no second farewell
-	}
-	// A STABLE op id, so a close whose status write fails and is retried says
-	// goodbye once rather than once per attempt. The farewell still goes FIRST:
-	// a thread that simply stops is indistinguishable from a fault, so a lost
-	// farewell is worse than a suppressed duplicate.
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
-	})
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
-	conv.Status.ClosedAt = &now
-	if err := client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch)); err != nil {
-		return err
+	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		// A STABLE op id, so a close whose status write fails and is retried says
+		// goodbye once rather than once per attempt. The farewell still goes
+		// FIRST: a thread that simply stops is indistinguishable from a fault,
+		// so a lost farewell is worse than a suppressed duplicate.
+		r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+			r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
+		})
+		patch := client.MergeFrom(conv.DeepCopy())
+		now := metav1.Now()
+		conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+		conv.Status.ClosedAt = &now
+		if err := client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch)); err != nil {
+			return err
+		}
 	}
 	return r.cascadeCloseMembers(ctx, conv.Name, "")
 }
@@ -605,13 +615,17 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, task, sender, reader string,
 	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
 	profile := capability.ProfileName()
-	// UNBOUNDED on purpose — see `memberTitle`'s own comment. Telegram
-	// enforces its own 128-character topic-name cap at the adapter; a
-	// manager-side cut here was that one transport's limit imposed on every
-	// channel and the console's own views.
-	title := "🛠 " + strings.Join(strings.Fields(task), " ")
+	// NOT cut to Telegram's own topic-name shape — see `memberTitle`'s own
+	// comment: Telegram enforces its own 128-character topic-name cap at the
+	// adapter, and a manager-side cut of THAT shape here was one transport's
+	// limit imposed on every channel and the console's own views.
+	//
+	// Still bounded, by agentopsv1alpha1.MaxConversationTitle — a different
+	// bound for a different reason: an addressed command's task is typed by
+	// a person and stored verbatim into an etcd-permanent field otherwise.
+	title := agentopsv1alpha1.BoundConversationTitle("🛠 " + strings.Join(strings.Fields(task), " "))
 	if profile != "" {
-		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
+		title = agentopsv1alpha1.BoundConversationTitle("🤖 " + profile + ": " + strings.Join(strings.Fields(task), " "))
 	}
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = r.Namespace

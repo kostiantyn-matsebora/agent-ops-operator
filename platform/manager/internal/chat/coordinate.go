@@ -757,9 +757,16 @@ func (r *Router) closeConversationReason(ctx context.Context, conv *agentopsv1al
 // all — it closes with message as its reason and its result, which reaches
 // its OWN parent as an ordinary member-result input, bubbling one hop at a
 // time until a call reaches the uncaused root.
+//
+// The caused branch closes through `closeWithCascade`, never the bare
+// `closeConversationReason`: a member MAY ITSELF BE A ROOT
+// (terminology.md) — a conversation can carry both `causedBy` and its own
+// `coordinatorRef` with live `agents[]` invocations. Closing it with no
+// cascade would orphan its own sub-members the moment it escalated itself,
+// exactly the gap `cascadeCloseMembers` exists to close everywhere else.
 func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversation, message string) error {
 	if conv.Spec.CausedBy != nil {
-		if err := r.closeConversationReason(ctx, conv, message); err != nil {
+		if err := r.closeWithCascade(ctx, conv, message); err != nil {
 			return err
 		}
 		return r.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name,
@@ -778,19 +785,25 @@ func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversati
 // memberTitle names a member conversation from the entry it was invoked as,
 // plus the task's own words when there are any.
 //
-// UNBOUNDED here on purpose — length limits belong to the component that
-// knows them (gotchas.md / invariants.md: "a manager-side fix would be one
-// transport's limits imposed on all of them"). Telegram already enforces its
-// own 128-character topic-name cap (`channels/telegram/telegram.go`,
-// `telegramTopicLimit`); a 60-rune cut HERE was Telegram's constraint
-// leaking into every other channel and the console's own list/chat views,
-// cutting an alert's title mid-word for readers who never touch Telegram.
+// NOT cut to Telegram's own topic-name shape here — length limits belong to
+// the component that knows them (gotchas.md / invariants.md: "a manager-side
+// fix would be one transport's limits imposed on all of them"). Telegram
+// already enforces its own 128-character topic-name cap
+// (`channels/telegram/telegram.go`, `telegramTopicLimit`); a 60-rune cut HERE
+// was Telegram's constraint leaking into every other channel and the
+// console's own list/chat views, cutting an alert's title mid-word for
+// readers who never touch Telegram.
+//
+// Still bounded, by agentopsv1alpha1.MaxConversationTitle — a different
+// bound for a different reason (see that constant's own comment):
+// ConversationSpec.Title is an etcd-permanent field set from a task's own
+// words, which has nothing to do with any one transport's render shape.
 func memberTitle(entryName, task string) string {
 	fields := strings.Fields(task)
 	if len(fields) == 0 {
-		return "🤝 " + entryName
+		return agentopsv1alpha1.BoundConversationTitle("🤝 " + entryName)
 	}
-	return "🤝 " + entryName + ": " + strings.Join(fields, " ")
+	return agentopsv1alpha1.BoundConversationTitle("🤝 " + entryName + ": " + strings.Join(fields, " "))
 }
 
 func boundedString(s string, limit int) string {
