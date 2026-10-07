@@ -31,7 +31,7 @@ Every build and test below runs against THIS working copy's tree — the worktre
 ## 6. Console — frontend-developer
 
 - [ ] 6.1 Add `Severity string` to the `Message` struct in `platform/console/transcript.go`, filled from the inbound op the same way `Payload` already is. Verify a transcript test for a rated op and an unrated one.
-- [ ] 6.2 Add `severity?: string` to the frontend `Message` interface in `platform/console/ui/src/api/types.ts`, and draw it leading the signal card in `Conversation.tsx`, tinted per value from the theme's existing severity-family tokens, unchanged for a message carrying none. Verify a component test for a `critical` card and an unrated one, and a screenshot of a rated conversation against the dev server per `visual-check.md`.
+- [ ] 6.2 Add `severity?: string` to the frontend `Message` interface in `platform/console/ui/src/api/types.ts`, and draw it leading the signal card in `Conversation.tsx`, tinted per value from the theme's existing status tokens (`--ao-danger` for `critical` and `error`, `--ao-warning`, `--ao-neutral` for `info`, and no new token), unchanged for a message carrying none. Verify a component test for a `critical` card and an unrated one, and a screenshot of a rated conversation against the dev server per `visual-check.md`.
 
 ## 7. Unit tests
 
