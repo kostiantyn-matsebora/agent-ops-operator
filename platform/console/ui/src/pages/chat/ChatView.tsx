@@ -190,6 +190,70 @@ function ListBody({
   return <>{children}</>
 }
 
+/**
+ * The list's client-side narrowing. The coordinator scope keeps its own
+ * members. Closed conversations are hidden everywhere except the dedicated
+ * Closed scope, where showing them is the whole point — narrowed CLIENT-SIDE
+ * since there is no server-side "exclude closed" param to ask for instead.
+ */
+/** The row an arrow key lands on, clamped to the list's ends. */
+function neighbourName(names: string[], current: string | undefined, down: boolean): string {
+  const idx = current ? names.indexOf(current) : -1
+  const next = down ? Math.min(idx + 1, names.length - 1) : Math.max(idx - 1, 0)
+  return names[Math.max(next, 0)]
+}
+
+type ListKeyAction = 'clear' | 'open' | 'down' | 'up' | 'none'
+
+/** What a key does on the list: Escape clears, arrows move, Enter opens the highlighted row. */
+export function listKeyAction(key: string, rowCount: number, highlighted: string | undefined): ListKeyAction {
+  if (key === 'Escape') return 'clear'
+  if (rowCount === 0) return 'none'
+  if (key === 'Enter') return highlighted ? 'open' : 'none'
+  if (key === 'ArrowDown') return 'down'
+  if (key === 'ArrowUp') return 'up'
+  return 'none'
+}
+
+/** A modifier-click on a row toggles its selection instead of opening it. */
+function isMultiSelectClick(e: React.MouseEvent | undefined): boolean {
+  return Boolean(e && (e.metaKey || e.ctrlKey))
+}
+
+/** Keeps the name → button map in step with mounting and unmounting rows. */
+function trackRowRef(refs: Map<string, HTMLButtonElement>, rowName: string, el: HTMLButtonElement | null) {
+  if (el) refs.set(rowName, el)
+  else refs.delete(rowName)
+}
+
+/** A copy of the set with the name added when absent, removed when present. */
+function toggleName(names: Set<string>, rowName: string): Set<string> {
+  const next = new Set(names)
+  if (next.has(rowName)) next.delete(rowName)
+  else next.add(rowName)
+  return next
+}
+
+/** A copy of the set with the name present or absent, as asked. */
+function withMembership(names: Set<string>, rowName: string, present: boolean): Set<string> {
+  const next = new Set(names)
+  if (present) next.add(rowName)
+  else next.delete(rowName)
+  return next
+}
+
+/** The rows a bulk action may touch, and whether every one is selected. */
+function selectionState(items: ConversationSummary[], selected: Set<string>) {
+  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
+  const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
+  return { selectableRows, allSelected }
+}
+
+/** The inbox pane's width, the narrow strip when it is collapsed. */
+function inboxPaneWidth(layout: { inboxCollapsed: boolean; inboxWidth: number }): number {
+  return layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -207,16 +271,20 @@ export function ChatView() {
   const [mobileInboxOpen, setMobileInboxOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [flatten, setFlatten] = useState(false)
-  // No existing layout preference carries a per-scope toggle like this one,
-  // so it is plain component state rather than a new persistence mechanism —
-  // `layout.ts` owns only pane widths and the inbox's collapsed state.
-  const [showClosed, setShowClosed] = useState(false)
+  // Persisted in `layout.ts`, same as the pane widths and the inbox's
+  // collapsed state — a viewer preference, never conversation state.
+  const showClosed = layout.showClosed
+  const setShowClosed = (v: boolean) => updateLayout({ showClosed: v })
   const [selectionMode, setSelectionMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [highlighted, setHighlighted] = useState<string | undefined>()
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set())
   const [newNames, setNewNames] = useState<Set<string>>(new Set())
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  // Every root name this component has ever applied the persisted fold
+  // default to — so a root the viewer explicitly expanded (or collapsed) by
+  // hand is never silently re-folded just because the tree re-rendered.
+  const seededRootsRef = useRef<Set<string>>(new Set())
 
   const params = useMemo(() => scopeParams(scope, search), [scope, search])
   const { data, isLoading, error } = useConversations(params)
@@ -260,6 +328,24 @@ export function ChatView() {
   const collapsibleNames = useMemo(() => tree.filter((t) => t.memberCount > 0).map((t) => t.row.name), [tree])
   const anyCollapsed = collapsibleNames.some((n) => collapsedRoots.has(n))
 
+  // Applies the persisted fold default to every root the FIRST time it is
+  // seen — on mount (item 2's "first time" requirement) and again for any
+  // root that arrives later, so a reload or a live arrival both land on the
+  // same preference. A root already seeded is never touched again here, so
+  // expanding or collapsing one by hand sticks until the viewer changes it.
+  useEffect(() => {
+    const seeded = seededRootsRef.current
+    const fresh = collapsibleNames.filter((n) => !seeded.has(n))
+    if (fresh.length === 0) return
+    for (const n of fresh) seeded.add(n)
+    if (!layout.treeCollapsedByDefault) return
+    setCollapsedRoots((prev) => {
+      const next = new Set(prev)
+      for (const n of fresh) next.add(n)
+      return next
+    })
+  }, [collapsibleNames, layout.treeCollapsedByDefault])
+
   // The PatternFly sidebar collapses to icons on this view (design D-J),
   // restored to whatever it was on leaving.
   useEffect(() => {
@@ -273,16 +359,11 @@ export function ChatView() {
   }
 
   function toggleSelect(rowName: string, checked: boolean) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(rowName)
-      else next.delete(rowName)
-      return next
-    })
+    setSelected((prev) => withMembership(prev, rowName, checked))
   }
 
   function openRow(rowName: string, e?: React.MouseEvent) {
-    if (e && (e.metaKey || e.ctrlKey)) {
+    if (isMultiSelectClick(e)) {
       setSelectionMode(true)
       toggleSelect(rowName, !selected.has(rowName))
       return
@@ -323,33 +404,30 @@ export function ChatView() {
   })
 
   function onListKeyDown(e: Pick<KeyboardEvent, 'key' | 'preventDefault'>) {
-    if (e.key === 'Escape') {
+    const action = listKeyAction(e.key, rows.length, highlighted)
+    if (action === 'clear') {
       setSelected(new Set())
       setSelectionMode(false)
-      return
+    } else if (action === 'open') {
+      openRow(highlighted as string)
+    } else if (action === 'down' || action === 'up') {
+      e.preventDefault()
+      const nextName = neighbourName(
+        rows.map((r) => r.row.name),
+        highlighted,
+        action === 'down',
+      )
+      setHighlighted(nextName)
+      rowRefs.current.get(nextName)?.focus()
     }
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
-    const names = rows.map((r) => r.row.name)
-    if (names.length === 0) return
-    if (e.key === 'Enter') {
-      if (highlighted) openRow(highlighted)
-      return
-    }
-    e.preventDefault()
-    const idx = highlighted ? names.indexOf(highlighted) : -1
-    const next = e.key === 'ArrowDown' ? Math.min(idx + 1, names.length - 1) : Math.max(idx - 1, 0)
-    const nextName = names[Math.max(next, 0)]
-    setHighlighted(nextName)
-    rowRefs.current.get(nextName)?.focus()
   }
 
-  const selectableRows = items.filter((c) => !c.deleting).map((c) => c.name)
-  const allSelected = selectableRows.length > 0 && selectableRows.every((n) => selected.has(n))
+  const { selectableRows, allSelected } = selectionState(items, selected)
 
   const showingList = !narrow || !name
   const showingThread = !narrow || Boolean(name)
   const listWidth = layout.listWidth
-  const inboxWidth = layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
+  const inboxWidth = inboxPaneWidth(layout)
 
   return (
     <section
@@ -422,7 +500,13 @@ export function ChatView() {
                 <Button
                   variant="link"
                   isInline
-                  onClick={() => setCollapsedRoots(anyCollapsed ? new Set() : new Set(collapsibleNames))}
+                  onClick={() => {
+                    const collapsing = !anyCollapsed
+                    setCollapsedRoots(collapsing ? new Set(collapsibleNames) : new Set())
+                    // What was just clicked becomes the fold every root —
+                    // present or still to arrive — follows from here on.
+                    updateLayout({ treeCollapsedByDefault: collapsing })
+                  }}
                 >
                   {anyCollapsed ? 'Expand all' : 'Collapse all'}
                 </Button>
@@ -471,10 +555,7 @@ export function ChatView() {
                   {rows.map(({ row, depth, memberCount, parentMissing }) => (
                     <ConversationRow
                       key={row.name}
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(row.name, el)
-                        else rowRefs.current.delete(row.name)
-                      }}
+                      ref={(el) => trackRowRef(rowRefs.current, row.name, el)}
                       row={row}
                       depth={depth}
                       memberCount={memberCount}
@@ -495,14 +576,7 @@ export function ChatView() {
                       onClose={() => closeRow(row.name)}
                       onDelete={() => deleteRow(row.name)}
                       collapsed={collapsedRoots.has(row.name)}
-                      onToggleCollapse={() =>
-                        setCollapsedRoots((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(row.name)) next.delete(row.name)
-                          else next.add(row.name)
-                          return next
-                        })
-                      }
+                      onToggleCollapse={() => setCollapsedRoots((prev) => toggleName(prev, row.name))}
                     />
                   ))}
                 </ul>

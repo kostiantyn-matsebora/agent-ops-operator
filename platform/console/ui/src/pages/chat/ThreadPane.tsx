@@ -756,6 +756,17 @@ function SubTableLabel({ children }: Readonly<{ children: React.ReactNode }>) {
   )
 }
 
+/** Pairs each item with a content key, suffixed by its occurrence so repeats stay unique. */
+function withKeys<T>(items: T[], keyOf: (item: T) => string): Array<[string, T]> {
+  const seen = new Map<string, number>()
+  return items.map((item) => {
+    const base = keyOf(item)
+    const n = (seen.get(base) ?? 0) + 1
+    seen.set(base, n)
+    return [`${base}#${n}`, item]
+  })
+}
+
 function TurnsTable({ turns }: Readonly<{ turns: RunTurn[] }>) {
   return (
     <div>
@@ -765,8 +776,8 @@ function TurnsTable({ turns }: Readonly<{ turns: RunTurn[] }>) {
           <Tr><Th>Model</Th><Th>Tokens in</Th><Th>Tokens out</Th><Th>Stop reason</Th></Tr>
         </Thead>
         <Tbody>
-          {turns.map((t, i) => (
-            <Tr key={i}>
+          {withKeys(turns, (t) => `${t.model}:${t.tokensIn}:${t.tokensOut}:${t.stopReason}`).map(([key, t]) => (
+            <Tr key={key}>
               <Td dataLabel="Model"><PlainText>{t.model || '—'}</PlainText></Td>
               <Td dataLabel="Tokens in">
                 {t.tokensIn ?? '—'}
@@ -793,8 +804,8 @@ function ToolCallsTable({ calls }: Readonly<{ calls: RunToolCall[] }>) {
           <Tr><Th>Tool</Th><Th>Server</Th><Th>Duration</Th><Th>Result size</Th></Tr>
         </Thead>
         <Tbody>
-          {calls.map((c, i) => (
-            <Tr key={i}>
+          {withKeys(calls, (c) => `${c.server}:${c.tool}:${c.durationMs}:${c.resultBytes}`).map(([key, c]) => (
+            <Tr key={key}>
               <Td dataLabel="Tool"><PlainText>{c.tool || '—'}</PlainText></Td>
               <Td dataLabel="Server">
                 {/* Empty means a built-in tool, never missing data — say so rather

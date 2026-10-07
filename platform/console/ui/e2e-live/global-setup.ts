@@ -97,17 +97,19 @@ interface ConditionedObject {
 }
 
 async function waitCoordinatorsReady(names: string[]): Promise<void> {
-  for (const name of names) {
-    await waitFor(
-      `coordinator ${name} Ready`,
-      () => {
-        const out = getJSON<ConditionedObject>('coordinator.agentops.dev', name)
-        const ready = (out.status?.conditions ?? []).find((c) => c.type === 'Ready')
-        return ready?.status === 'True' ? true : undefined
-      },
-      60_000,
-    )
-  }
+  await Promise.all(
+    names.map((name) =>
+      waitFor(
+        `coordinator ${name} Ready`,
+        () => {
+          const out = getJSON<ConditionedObject>('coordinator.agentops.dev', name)
+          const ready = (out.status?.conditions ?? []).find((c) => c.type === 'Ready')
+          return ready?.status === 'True' ? true : undefined
+        },
+        60_000,
+      ),
+    ),
+  )
 }
 
 export default async function globalSetup(config: FullConfig): Promise<() => Promise<void>> {
@@ -286,7 +288,8 @@ async function arrangeFixtures(
   writeFileSync(path.join(generatedDir, 'fixtures.json'), JSON.stringify(fixtures, null, 2))
   console.log('[global-setup] fixtures ready:', JSON.stringify(fixtures.conversations, null, 2))
 
-  return async () => {
+  return () => {
     stopManagerForward()
+    return Promise.resolve()
   }
 }

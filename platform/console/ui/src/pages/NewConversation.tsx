@@ -85,8 +85,9 @@ export function matchEntries(
 }
 
 /** A destination card's icon: the Pipeline's own, or a shape naming its KIND. */
-function DestinationIcon({ entry }: { entry: VocabularyEntry }) {
+function DestinationIcon({ entry }: Readonly<{ entry: VocabularyEntry }>) {
   const isCoordinator = entry.kind === 'coordinator'
+  const fallbackGlyph = isCoordinator ? '◆' : '⚙'
   return (
     <span
       aria-hidden
@@ -104,13 +105,13 @@ function DestinationIcon({ entry }: { entry: VocabularyEntry }) {
         color: isCoordinator ? 'var(--ao-accent)' : 'var(--ao-brand-strong)',
       }}
     >
-      {entry.icon ? <Icon icon={entry.icon} /> : isCoordinator ? '◆' : '⚙'}
+      {entry.icon ? <Icon icon={entry.icon} /> : fallbackGlyph}
     </span>
   )
 }
 
 /** The `pipeline` / `coordinator` tag, styled distinctly for a coordinator. */
-function DestinationKindTag({ kind }: { kind: VocabularyEntry['kind'] }) {
+function DestinationKindTag({ kind }: Readonly<{ kind: VocabularyEntry['kind'] }>) {
   const isCoordinator = kind === 'coordinator'
   return (
     <span
@@ -155,10 +156,10 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
   const requestedTask = useComposerIntent((s) => s.requestedTask)
   useEffect(() => {
     if (requestedTask === null) return
-    const m = /^\/(\S+)\s*([\s\S]*)$/.exec(requestedTask)
+    const m = /^\/(\S+)/.exec(requestedTask)
     if (m) {
       setSelected(m[1])
-      setTask(m[2])
+      setTask(requestedTask.slice(m[0].length).trimStart())
     } else {
       setTask(requestedTask)
     }
@@ -367,16 +368,16 @@ export function NewConversation({ onStarted }: { onStarted?: () => void }) {
               </small>
             </FormGroup>
             <FormGroup label="Destination" fieldId="new-conversation-destination">
-              {vocabulary.isLoading ? (
-                <small>Loading what can be addressed…</small>
-              ) : startable.length === 0 ? (
-                // An empty state is a state: no Ready pipeline or coordinator
-                // is directly addressable, so say so rather than showing an
-                // empty box — the task below still goes out unaddressed.
+              {vocabulary.isLoading && <small>Loading what can be addressed…</small>}
+              {/* An empty state is a state: no Ready pipeline or coordinator
+                  is directly addressable, so say so rather than showing an
+                  empty box — the task below still goes out unaddressed. */}
+              {!vocabulary.isLoading && startable.length === 0 && (
                 <small data-testid="destination-empty">
                   Nothing is directly addressable yet — the task below is sent unaddressed.
                 </small>
-              ) : (
+              )}
+              {!vocabulary.isLoading && startable.length > 0 && (
                 <>
                   <div
                     ref={cardsRef}

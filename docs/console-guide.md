@@ -112,13 +112,15 @@ Five views, one question each.
 
   **A Coordinator's root shows an incident timeline instead of a transcript.**
   It interleaves the root's own turns with every member's start, result and
-  closure, nesting a member that is itself coordinating in place. Before it
-  escalates, the pane is read-only and says so.
+  closure, nesting a member that is itself coordinating in place. The reply
+  box is shown from creation, since the root's channels are bound then. The
+  pane is read-only only when no channel is bound or the conversation is
+  closed.
 
   A member opened directly is read-only and names its place in the tree. It
   holds no channel of its own, so there is nothing to reply into from there.
 
-  ![A Coordinator's root before escalation: agents invoked, turns and the deadline, two result cards from its members, and the read-only notice since nobody has been paged yet.]({{ '/assets/img/console/incident-light.png' | relative_url }})
+  ![A Coordinator's root before escalation: agents invoked, turns and the deadline, two result cards from its members, and the reply box, open from creation.]({{ '/assets/img/console/incident-light.png' | relative_url }})
 
 - **Queues** — What is waiting, and what is stuck?
 

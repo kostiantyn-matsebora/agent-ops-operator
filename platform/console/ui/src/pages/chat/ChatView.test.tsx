@@ -22,6 +22,10 @@ let items: ConversationSummary[] = DEFAULT_ITEMS
 // tests). Restoring in `afterEach` runs regardless of how the test ended.
 afterEach(() => {
   items = DEFAULT_ITEMS
+  // `showClosed` and the tree's fold default now live in `layout.ts`'s
+  // localStorage-backed store (item 2 / item 8) — left unset, a persistence
+  // test earlier in the file would leak its choice into every test after it.
+  localStorage.clear()
 })
 
 vi.mock('../../api/hooks', () => ({
@@ -31,8 +35,10 @@ vi.mock('../../api/hooks', () => ({
   useSources: () => ({ data: { sources: [] } }),
   useInboxCounts: () => ({ data: { items: [], total: items.length, unreadTotal: 0, offset: 0, limit: 0, facets: {}, scopes: {} } }),
   useVocabulary: () => ({ data: { entries: [] } }),
-  useMarkRead: () => ({ mutate: vi.fn() }),
-  useMarkUnread: () => ({ mutate: vi.fn() }),
+  useCloseConversations: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useDeleteConversations: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useMarkRead: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useMarkUnread: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
   useReopenConversation: () => ({ mutate: vi.fn() }),
 }))
 
@@ -196,6 +202,10 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     ]
     renderAt('/conversations')
     await userEvent.click(screen.getByTestId('scope-Mine'))
+    // A root with members starts folded (item 2's first-time default) — this
+    // test is about the tree-scope keeping the member in the result at all,
+    // not about the fold, so expand it to see it.
+    await userEvent.click(screen.getByText('Expand all'))
     expect(screen.getByTestId('row-root-1')).toBeInTheDocument()
     expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
   })
@@ -207,6 +217,8 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     ]
     renderAt('/conversations')
     await userEvent.click(screen.getByTestId('scope-Unread'))
+    // Same fold default as above — not what this test is checking.
+    await userEvent.click(screen.getByText('Expand all'))
     expect(screen.getByTestId('row-root-2')).toBeInTheDocument()
     expect(screen.getByTestId('row-member-2')).toBeInTheDocument()
     // The root itself must still render as read — the tree qualifying is not
@@ -240,17 +252,43 @@ describe('expand all / collapse all (item 2)', () => {
     expect(screen.queryByText('Collapse all')).not.toBeInTheDocument()
   })
 
-  it('collapses every root with members, then expands them again', async () => {
+  it('starts folded for a first-time viewer (item 2), and expands/collapses from there', async () => {
     const original = items
     items = [
       conv('root-1', { coordinator: 'root-1' }),
       conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
     ]
     renderAt('/conversations')
-    await userEvent.click(screen.getByText('Collapse all'))
     expect(screen.queryByTestId('row-member-1')).not.toBeInTheDocument()
     await userEvent.click(screen.getByText('Expand all'))
     expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('Collapse all'))
+    expect(screen.queryByTestId('row-member-1')).not.toBeInTheDocument()
+    items = original
+  })
+
+  it('remembers "Expand all" across a reload, for a root that arrives afterward too', async () => {
+    const original = items
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+    ]
+    const { unmount } = renderAt('/conversations')
+    await userEvent.click(screen.getByText('Expand all'))
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    unmount()
+
+    // A second root arriving after the reload — never expanded by hand —
+    // still follows the remembered preference, not the first-time default.
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+      conv('root-2', { coordinator: 'root-2' }),
+      conv('member-2', { causedBy: { parent: 'root-2', entry: 'diagnose' } }),
+    ]
+    renderAt('/conversations')
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    expect(screen.getByTestId('row-member-2')).toBeInTheDocument()
     items = original
   })
 })
@@ -265,6 +303,20 @@ describe('show closed (item 8)', () => {
     expect(screen.getByTestId('row-b')).toBeInTheDocument()
     items = original
   })
+
+  it('remembers the choice across a reload', async () => {
+    const original = items
+    items = [conv('a'), conv('b', { phase: 'Closed' })]
+    const { unmount } = renderAt('/conversations')
+    await userEvent.click(screen.getByLabelText('Show closed'))
+    expect(screen.getByTestId('row-b')).toBeInTheDocument()
+    unmount()
+
+    renderAt('/conversations')
+    expect(screen.getByLabelText('Show closed')).toBeChecked()
+    expect(screen.getByTestId('row-b')).toBeInTheDocument()
+    items = original
+  })
 })
 
 describe('keyboard navigation', () => {
@@ -276,5 +328,32 @@ describe('keyboard navigation', () => {
     expect(document.activeElement).toHaveAttribute('data-testid', 'open-b')
     await userEvent.keyboard('{Enter}')
     expect(screen.getByTestId('thread-pane')).toHaveTextContent('b')
+  })
+
+  it('clamps at both ends of the list', async () => {
+    renderAt('/conversations')
+    screen.getByTestId('chat-view').focus()
+    await userEvent.keyboard('{ArrowUp}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-a')
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-c')
+    await userEvent.keyboard('{ArrowUp}')
+    expect(document.activeElement).toHaveAttribute('data-testid', 'open-b')
+  })
+
+  it('ignores Enter with nothing highlighted and other keys entirely', async () => {
+    renderAt('/conversations')
+    screen.getByTestId('chat-view').focus()
+    await userEvent.keyboard('{Enter}x')
+    expect(screen.queryByTestId('thread-pane')).toBeNull()
+  })
+
+  it('Escape leaves selection mode', async () => {
+    renderAt('/conversations')
+    await userEvent.click(screen.getByText('Select'))
+    expect(screen.getByText('Done selecting')).toBeInTheDocument()
+    screen.getByTestId('chat-view').focus()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.getByText('Select')).toBeInTheDocument()
   })
 })

@@ -212,7 +212,7 @@ to it. Where it lands depends on whether the conversation has a parent:
 
 | Calling conversation | `escalate` does |
 |---|---|
-| the **uncaused root** — no parent | posts the message as a notice into its already-open thread |
+| the **uncaused root** — no parent | posts the message as an ordinary message into its already-open thread |
 | a **member** — invoked by another Coordinator | closes ITSELF, and the message becomes an ordinary result on its parent's next input |
 
 **A nested escalation bubbles one hop at a time.** The parent's agent reads
