@@ -12,8 +12,8 @@ describe('readLayout', () => {
   })
 
   it('reads back what was written', () => {
-    writeLayout({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true })
-    expect(readLayout()).toEqual({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true })
+    writeLayout({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true, showClosed: true, treeCollapsedByDefault: false })
+    expect(readLayout()).toEqual({ inboxWidth: 300, listWidth: 400, inboxCollapsed: true, showClosed: true, treeCollapsedByDefault: false })
   })
 
   it('fills a partial or malformed record with the defaults rather than failing', () => {

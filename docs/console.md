@@ -108,10 +108,14 @@ Two exceptions, both layout preferences and neither a fact about any
 conversation:
 
 - The navigation's fold state (`shell.ts`).
-- The Conversations view's pane widths and inbox collapse, under
-  `agentops.console.layout`. Reads and writes are guarded in `try`/`catch`, so
-  a private window or a cleared store falls back to the view's defaults
-  rather than breaking it.
+- The Conversations view's pane widths, inbox collapse, "show closed" toggle
+  and the tree's default fold, under `agentops.console.layout`. A root with
+  members starts folded for a first-time viewer, and from there follows
+  whatever "Collapse all" / "Expand all" was last clicked — applied to every
+  root as it is first seen, present at mount or arriving later, so a reload
+  and a live arrival land on the same preference. Reads and writes are
+  guarded in `try`/`catch`, so a private window or a cleared store falls back
+  to the view's defaults rather than breaking it.
 
 ## Pages
 

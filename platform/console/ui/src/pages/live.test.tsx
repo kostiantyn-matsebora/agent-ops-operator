@@ -305,12 +305,18 @@ describe('the Conversations list', () => {
     await screen.findByText('certificate expiring')
     expect(loading()).toBeNull()
 
-    // CHANGING PHASE.
+    // CHANGING PHASE. The row no longer carries a snippet line (every row is
+    // title+time, then chips+menu) and the "closed" tag is UNREACHABLE here —
+    // `rowTag` checks `isNew` first, and this row is still inside its arrival
+    // window, so its tag reads "new" rather than "closed". The row menu is
+    // phase-aware independent of that window, so "Reopen" is the reliable
+    // signal that the delta actually applied.
     emit('delta', {
       type: 'MODIFIED', kind: 'conversations', name: 'conv-2',
       conversationRow: summary({ name: 'conv-2', title: 'certificate expiring', phase: 'Closed', runs: undefined }),
     })
-    await screen.findByText('closed · 1 run(s)')
+    await userEvent.click(screen.getByLabelText('actions for certificate expiring'))
+    await screen.findByText('Reopen')
     expect(loading()).toBeNull()
 
     // BEING DELETED.
