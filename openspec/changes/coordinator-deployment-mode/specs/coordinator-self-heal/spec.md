@@ -4,7 +4,7 @@ This change depends on `coordinated-agents` landing first. The
 `coordination-loop` spec cited here is defined there and is not yet archived.
 
 The reaper: an ordinary `AgentProfile`/`AgentCapability` pair, shipped by
-coordinator mode itself, addressed hourly by a claimed cron signal, that
+coordinator mode itself, addressed on a configured schedule by a claimed cron signal, that
 surveys its own Coordinator's open roots and closes the ones it judges
 healed — reusing `invoke` and member-result routing unchanged.
 
@@ -34,9 +34,9 @@ already define for any `agents[]` entry.
 - **THEN** the CRDs it installs are unchanged from pipelines mode plus the
   ones `coordinated-agents` already added — no reaper-specific kind exists
 
-### Requirement: The hourly signal reaches the reaper through the coordinating agent's own invoke
+### Requirement: The scheduled signal reaches the reaper through the coordinating agent's own invoke
 
-Coordinator mode SHALL claim a `signals/cron` source on an hourly schedule,
+Coordinator mode SHALL claim a `signals/cron` source on a configured schedule,
 on the SAME chart-rendered Coordinator that claims every enabled bundle's
 source. Claiming SHALL use `Coordinator.spec.signalSourceRefs`, the one
 field every claim already uses.
@@ -48,7 +48,7 @@ Each admitted cron signal SHALL open an ordinary conversation running the
 Coordinator's OWN coordinating agent — the same capability that opens for
 any other signal on any other claimed source.
 
-That agent's prompt SHALL instruct it to recognise an hourly cron signal and
+That agent's prompt SHALL instruct it to recognise the self-heal cron signal and
 respond by `invoke`-ing the reaper's `agents[]` entry, exactly as it invokes
 a domain entry in response to a domain signal.
 
@@ -65,14 +65,14 @@ Where coordinator mode is off, no cron source for the reaper SHALL render.
 #### Scenario: The reaper's schedule is an ordinary cron claim
 
 - **WHEN** coordinator mode renders
-- **THEN** a `signals/cron` source scheduled hourly is claimed on the
+- **THEN** a `signals/cron` source scheduled on its configured cadence is claimed on the
   chart-rendered Coordinator's `signalSourceRefs`, exactly as any other
   claimed source is — counted in `Wired`, fanned out like any other
   claimant
 
-#### Scenario: An hourly signal opens the coordinating agent, which invokes the reaper
+#### Scenario: A scheduled signal opens the coordinating agent, which invokes the reaper
 
-- **WHEN** the cron source's hourly signal is admitted
+- **WHEN** the cron source's scheduled signal is admitted
 - **THEN** a root conversation running the Coordinator's own coordinating
   agent opens, and that agent invokes the reaper's `agents[]` entry as an
   ordinary member, which carries out the survey
@@ -102,7 +102,7 @@ bound, the `agents[]` entries that Coordinator already lists.
 
 ### Requirement: The reaper surveys, re-invokes the original agent, and closes healed roots
 
-On each hourly run, the reaper's conversation SHALL list its own
+On each run, the reaper's conversation SHALL list its own
 Coordinator's open root conversations (the Coordinator-owner reach class,
 `coordinator-owner-reach`), and for each one SHALL `invoke` the SAME
 domain `AgentCapability` entry named in that root's `members` field
@@ -149,13 +149,13 @@ survey may still SURVEY and report on such a root. It may never end it.
 - **WHEN** the reaper re-invokes the original agent on an open root and the
   result reports the condition still present
 - **THEN** the reaper takes no close action on that root, and it remains
-  open for the next hourly survey or for escalation
+  open for the next scheduled survey or for escalation
 
 #### Scenario: A root a person started is never closed, however stale
 
 - **WHEN** the reaper's survey includes an open root that carries no
   `spec.signal` or whose `spec.signal` carries the chat lane's channel
-  label, and it has sat open for many consecutive hourly cycles
+  label, and it has sat open for many consecutive scheduled cycles
 - **THEN** the reaper leaves it open and may report it as needing a human's
   attention, but its own `close` call against that root is refused
 

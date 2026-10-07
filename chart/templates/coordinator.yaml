@@ -12,7 +12,7 @@ source and listing every enabled bundle's AgentCapability in one Coordinator's
 what each bundle actually rendered in `capabilities.yaml`.
 
 `reaper.yaml` renders the reaper's own AgentProfile, AgentCapability, and its
-hourly `signals/cron` claim — THIS file folds the reaper in as one more
+scheduled `signals/cron` claim — THIS file folds the reaper in as one more
 `agents[]` entry and one more `signalSourceRefs` claim (coordinator-self-heal,
 design D-E), never a reaper-specific field on the Coordinator object itself.
 */ -}}
@@ -30,7 +30,7 @@ than a job label, because — unlike a domain entry a signal's content decides �
 this one is chosen by RECOGNIZING a specific trigger, named again below in the
 coordinating agent's own prompt so the instruction is not the description's to
 carry alone. */ -}}
-{{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs the hourly self-heal sweep: lists this Coordinator's own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the hourly self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
+{{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs this Coordinator's self-heal sweep: lists its own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
 {{- $sources = append $sources $r.source.name }}
 {{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
 "DEMO MODE'S CONSOLE WIRING DOES NOT CARRY OVER TO COORDINATOR MODE" gap).
@@ -75,7 +75,7 @@ spec:
   # Behaviour only — no repository, no capabilities. GENERATED: the routing
   # instructions below are built from the SAME aggregation that fills this
   # Coordinator's own `agents[]`, so the reaper's name always matches what the
-  # agent is told to invoke for the hourly signal (design D-E, task 2.5).
+  # agent is told to invoke for the self-heal signal (design D-E, task 2.5).
   systemPrompt: |
     {{- with $c.systemPromptPrefix }}
 {{ . | trim | indent 4 }}
@@ -98,14 +98,13 @@ spec:
     Propose it in your own words and wait. Write the authorized task only
     after a human says yes.
 
-    ## The hourly self-heal signal
+    ## The self-heal signal
 
-    One of your claimed sources (`{{ $r.source.name }}`) fires on an hourly
-    schedule and carries no incident of its own — it exists only to trigger a
-    survey of what your `agents[]` has left open. When a conversation starts
-    from that source, invoke the entry named `{{ $r.name }}` and nothing
-    else: do not treat it as an ordinary task, and do not attempt the survey
-    yourself.
+    One of your claimed sources (`{{ $r.source.name }}`) fires on a schedule
+    and carries no incident of its own — it exists only to trigger a survey
+    of what your `agents[]` has left open. When a conversation starts from
+    that source, invoke the entry named `{{ $r.name }}` and nothing else: do
+    not treat it as an ordinary task, and do not attempt the survey yourself.
   # REQUIRED, and with no default on purpose: `none` leaves output unformatted
   # unless this profile's prompt says otherwise, and `blocks` shapes it by
   # something the author never asked for. The author declares it.
@@ -162,7 +161,7 @@ spec:
   {{- with $sources }}
   # Claimed exactly as a Pipeline claims — shareable, fanned out, counted in
   # Wired. Every enabled bundle's own source (the same one its `pipelines`
-  # mode route would claim), plus the reaper's hourly cron claim.
+  # mode route would claim), plus the reaper's scheduled cron claim.
   signalSourceRefs:
     {{- range . }}
     - name: {{ . }}

@@ -1407,7 +1407,7 @@ bundle renders its routes, release-wide:
   `pipelines` mode keeps.
 - **The chart-rendered Coordinator claims every enabled bundle's source** —
   the same ones its `pipelines`-mode routes claim — plus the self-heal
-  reaper's own hourly `signals/cron` claim, below.
+  reaper's own scheduled `signals/cron` claim, below.
 - **No API-server exclusivity exists between the two kinds.** An operator may
   hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
   same cluster, whatever the chart last rendered. The API server accepts
@@ -1416,16 +1416,17 @@ bundle renders its routes, release-wide:
 ### The self-heal reaper
 
 **An ordinary `agents[]` entry, shipped by `coordinator` mode alone — no new
-CRD.** It surveys its own Coordinator's open roots on an hourly schedule and
-closes the ones it judges healed.
+CRD.** It surveys its own Coordinator's open roots on a configured schedule
+(`reaper.schedule`, four times a day by default) and closes the ones it
+judges healed.
 
 | Step | Does |
 |---|---|
-| an hourly `signals/cron` signal, claimed on the chart-rendered Coordinator | opens a conversation running the Coordinator's own coordinating agent |
+| a `signals/cron` signal on its configured schedule, claimed on the chart-rendered Coordinator | opens a conversation running the Coordinator's own coordinating agent |
 | the coordinating agent | recognises the cron signal and `invoke`s the reaper's `agents[]` entry |
 | the reaper | calls `list_open_roots`, then `invoke`s the SAME capability named in each root's `members` to re-check it |
 | a re-check reporting the condition cleared | the reaper `close`s that root, naming the re-check as the reason |
-| a re-check still finding the condition present | the root is left open for the next hourly run or an escalation |
+| a re-check still finding the condition present | the root is left open for the next scheduled run or an escalation |
 
 - **It holds no domain toolset and no domain `MCPConfig`** — only the
   coordination reach through `agentops-coordinate` and the aops `MCPConfig`.

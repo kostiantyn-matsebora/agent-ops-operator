@@ -147,9 +147,10 @@ itself.
 whatever `coordination.enabled` says — the chart-rendered `Coordinator` and
 its self-heal reaper both need that MCP server.
 
-It needs nothing else to install. The reaper's hourly trigger is the chart's
-own `signals/cron` `SignalAdapter`, deployed automatically with it — no
-bundle to enable and no extra component. See
+It needs nothing else to install. The reaper's trigger (every six hours by
+default, `reaper.schedule`) is the chart's own `signals/cron`
+`SignalAdapter`, deployed automatically with it — no bundle to enable and no
+extra component. See
 [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}).
 
 ## Configure
