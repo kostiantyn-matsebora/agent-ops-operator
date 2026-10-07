@@ -25,7 +25,7 @@ hash-derived token.
 #### Scenario: An alert conversation's name hints at the alert
 
 - **WHEN** a signal of kind `alert` with title text "NodeDown — ns-prod" opens a new conversation
-- **THEN** the created conversation's name is `alert-node-down-ns-prod`
+- **THEN** the created conversation's name is `alert-node-down-ns`
 
 #### Scenario: A member conversation's name hints at the invoked entry
 
@@ -54,12 +54,12 @@ trailing words until it fits, never cut a word in half.
 #### Scenario: CamelCase and punctuation both split into words
 
 - **WHEN** the word source text is "NodeDown — ns-prod"
-- **THEN** the word-chain is `node-down-ns-prod`, with every token a whole word
+- **THEN** the word-chain is `node-down-ns`, with every token a whole word and only the first three kept
 
 #### Scenario: A stopword is dropped
 
 - **WHEN** the word source text is "Nightly backup of prod-db"
-- **THEN** the word-chain is `nightly-backup-prod-db`, with "of" absent
+- **THEN** the word-chain is `nightly-backup-prod`, with "of" absent
 
 #### Scenario: Too many words drops from the end, not mid-word
 
@@ -102,13 +102,13 @@ small, fixed number of attempts.
 
 #### Scenario: First conversation for a base name has no suffix
 
-- **WHEN** no conversation labeled `agentops.dev/name-base: alert-node-down-ns-prod` exists yet
-- **THEN** the created conversation's name is `alert-node-down-ns-prod`, with no numeric suffix
+- **WHEN** no conversation labeled `agentops.dev/name-base: alert-node-down-ns` exists yet
+- **THEN** the created conversation's name is `alert-node-down-ns`, with no numeric suffix
 
 #### Scenario: A recurring alert gets the next number
 
-- **WHEN** conversations labeled `agentops.dev/name-base: alert-node-down-ns-prod` already exist named `alert-node-down-ns-prod` and `alert-node-down-ns-prod-2`
-- **THEN** the next created conversation for that base name is `alert-node-down-ns-prod-3`
+- **WHEN** conversations labeled `agentops.dev/name-base: alert-node-down-ns` already exist named `alert-node-down-ns` and `alert-node-down-ns-2`
+- **THEN** the next created conversation for that base name is `alert-node-down-ns-3`
 
 #### Scenario: Collision resolution costs one lookup regardless of history
 

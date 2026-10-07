@@ -23,7 +23,7 @@ the object's actual NAME — the thing an operator types, greps, and reads in
 
   | Creation path | Word source | Example |
   |---|---|---|
-  | Root conversation from a signal (`alert`, `job`, `chat`, `task` kind) | the same title text already derived for `spec.title` | `alert-node-down-ns-prod` |
+  | Root conversation from a signal (`alert`, `job`, `chat`, `task` kind) | the same title text already derived for `spec.title` | `alert-node-down-ns` |
   | Task conversation opened from a channel command | the addressed pipeline name | `task-deploy-notes` |
   | Member conversation created by a Coordinator `invoke` | the invoked `agents[]` entry name | `member-researcher` |
 
@@ -48,7 +48,7 @@ the object's actual NAME — the thing an operator types, greps, and reads in
   own base name (`agentops.dev/name-base: <kind>-<words>`). Creating a new
   conversation lists existing conversations sharing that label, picks the
   next unused numeric suffix, and creates with that name
-  (`alert-node-down-ns-prod-2`, `-3`, …) in one list-then-create step — not
+  (`alert-node-down-ns-2`, `-3`, …) in one list-then-create step — not
   by retrying guesses one at a time. A create conflict from a genuine race
   between two concurrent creators retries that same lookup a small, bounded
   number of times.
