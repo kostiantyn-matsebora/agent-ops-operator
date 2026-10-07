@@ -385,19 +385,30 @@ func TestChatConversationIsTitledByTheMessage(t *testing.T) {
 		t.Fatalf("the source name is not a useful title for a question: %q", title)
 	}
 
-	// A long question is bounded, and cut on a RUNE so multi-byte input is not
-	// sliced in half.
+	// A long question (a distinct fingerprint, so a SECOND conversation)
+	// is kept WHOLE — length limits belong to the channel that knows them
+	// (Telegram's own 128-char topic-name cap), never the manager. Still
+	// verified valid UTF-8: a long multi-byte question must never come back
+	// cut mid-character.
 	long := strings.Repeat("почему ", 40)
 	if rec := chatSignal(t, srv, "src-title", "chan-title", long); rec.Code != 200 {
 		t.Fatalf("long chat signal: %d %s", rec.Code, rec.Body.String())
 	}
-	for _, c := range convsBoundTo(t, "chan-title") {
-		if n := len([]rune(c.Spec.Title)); n > 60 {
-			t.Fatalf("title not bounded: %d runes", n)
+	after := convsBoundTo(t, "chan-title")
+	if len(after) != 2 {
+		t.Fatalf("want 2 conversations after a second, distinct question, got %d", len(after))
+	}
+	var longTitle string
+	for _, c := range after {
+		if c.Name != convs[0].Name {
+			longTitle = c.Spec.Title
 		}
 		if !utf8.ValidString(c.Spec.Title) {
 			t.Fatalf("title was cut mid-character: %q", c.Spec.Title)
 		}
+	}
+	if !strings.Contains(longTitle, strings.TrimSpace(long)) {
+		t.Fatalf("a long title must be kept whole: %q", longTitle)
 	}
 }
 

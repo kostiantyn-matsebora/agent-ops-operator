@@ -604,12 +604,13 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // (internal/httpapi/signals.go) — empty when the adapter named none.
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender, reader string,
 	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
+	// UNBOUNDED on purpose — see `memberTitle`'s own comment. Telegram
+	// enforces its own 128-character topic-name cap at the adapter; a
+	// manager-side cut here was that one transport's limit imposed on every
+	// channel and the console's own views.
 	title := "🛠 " + strings.Join(strings.Fields(task), " ")
 	if profile != "" {
 		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
-	}
-	if len(title) > 60 {
-		title = title[:60]
 	}
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = r.Namespace

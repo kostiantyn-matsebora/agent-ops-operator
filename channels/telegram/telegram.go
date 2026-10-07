@@ -165,8 +165,14 @@ func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMe
 
 // CreateTopic creates a forum topic and returns its thread id.
 func (t *Telegram) CreateTopic(ctx context.Context, chatID, title string) (int64, error) {
-	if len(title) > 128 {
-		title = title[:128]
+	// Rune-safe: a byte slice cuts a multi-byte character in half, and a
+	// title carries emoji (🤝, 🔍, 🤖) and whatever alert text an adopter's
+	// own alerting sends. This is now the ONLY place that enforces
+	// Telegram's topic-name limit — the manager stopped imposing it on
+	// every channel (gotchas.md: "a manager-side fix would be one
+	// transport's limits imposed on all of them").
+	if runes := []rune(title); len(runes) > 128 {
+		title = string(runes[:128])
 	}
 	res, err := t.API(ctx, "createForumTopic", map[string]any{"chat_id": chatID, "name": title})
 	if err != nil {

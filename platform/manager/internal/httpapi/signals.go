@@ -115,21 +115,20 @@ const (
 )
 
 // titleFromText renders a conversation title from the request itself:
-// whitespace collapsed, bounded to fit a chat topic name and a table column.
-// Empty for empty input, so the caller keeps its own fallback. The icon says
-// which lane asked — 💬 somebody typed it, 🛠 a machine posted it.
+// whitespace collapsed. Empty for empty input, so the caller keeps its own
+// fallback. The icon says which lane asked — 💬 somebody typed it, 🛠 a
+// machine posted it.
+//
+// UNBOUNDED on purpose (see `chat.memberTitle`'s own comment, same fix,
+// same reason): Telegram already enforces its own 128-character topic-name
+// cap at the adapter. A manager-side cut here was that one transport's
+// limit imposed on every channel and the console's own list/chat views.
 func titleFromText(icon, text string) string {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
 		return ""
 	}
-	title := icon + " " + strings.Join(fields, " ")
-	// Rune-safe: a byte slice would cut a multi-byte character in half, and chat
-	// input is exactly where non-ASCII shows up.
-	if runes := []rune(title); len(runes) > 60 {
-		title = strings.TrimSpace(string(runes[:59])) + "…"
-	}
-	return title
+	return icon + " " + strings.Join(fields, " ")
 }
 
 // orDefault fills an empty string with a fallback (telemetry labelling only).

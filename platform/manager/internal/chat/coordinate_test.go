@@ -654,8 +654,12 @@ func TestInvokeMemberTitlesAMemberFromItsEntryWhenTaskIsBlank(t *testing.T) {
 	}
 }
 
-// memberTitle: a title over 60 runes is truncated.
-func TestInvokeMemberTruncatesALongTitle(t *testing.T) {
+// memberTitle: a long title is kept WHOLE. Length limits belong to the
+// channel that knows them (Telegram's own 128-char topic-name cap in
+// channels/telegram/telegram.go), never the manager — a 60-rune cut here
+// used to leak that one transport's limit into every channel and the
+// console's own views, cutting an alert's title mid-word.
+func TestInvokeMemberKeepsALongTitleWhole(t *testing.T) {
 	entry := agentopsv1alpha1.CoordinatorAgentEntry{
 		Name: "worker", Description: "does the work",
 		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
@@ -673,8 +677,9 @@ func TestInvokeMemberTruncatesALongTitle(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: result.Member}, &member); err != nil {
 		t.Fatal(err)
 	}
-	if runes := []rune(member.Spec.Title); len(runes) != 60 {
-		t.Fatalf("a long title must be truncated to 60 runes, got %d: %q", len(runes), member.Spec.Title)
+	want := "🤝 worker: " + strings.TrimSpace(longTask)
+	if member.Spec.Title != want {
+		t.Fatalf("a long title must be kept whole, got %q, want %q", member.Spec.Title, want)
 	}
 }
 

@@ -712,18 +712,21 @@ func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversati
 }
 
 // memberTitle names a member conversation from the entry it was invoked as,
-// plus the task's own words when there are any — bounded to fit a chat topic
-// name, the same shape httpapi.titleForGroup gives a signal-opened one.
+// plus the task's own words when there are any.
+//
+// UNBOUNDED here on purpose — length limits belong to the component that
+// knows them (gotchas.md / invariants.md: "a manager-side fix would be one
+// transport's limits imposed on all of them"). Telegram already enforces its
+// own 128-character topic-name cap (`channels/telegram/telegram.go`,
+// `telegramTopicLimit`); a 60-rune cut HERE was Telegram's constraint
+// leaking into every other channel and the console's own list/chat views,
+// cutting an alert's title mid-word for readers who never touch Telegram.
 func memberTitle(entryName, task string) string {
 	fields := strings.Fields(task)
 	if len(fields) == 0 {
 		return "🤝 " + entryName
 	}
-	title := "🤝 " + entryName + ": " + strings.Join(fields, " ")
-	if runes := []rune(title); len(runes) > 60 {
-		title = string(runes[:60])
-	}
-	return title
+	return "🤝 " + entryName + ": " + strings.Join(fields, " ")
 }
 
 func boundedString(s string, limit int) string {
