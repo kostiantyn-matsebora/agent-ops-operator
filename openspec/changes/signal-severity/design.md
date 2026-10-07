@@ -135,11 +135,10 @@ string `json:"severity,omitempty"`` beside `Payload`, filled from the
 inbound op the same way `Payload` already is.
 
 The frontend `Message` interface gains `severity?: string`, and
-`Conversation.tsx` draws it where present, tinted from the existing
-`--ao-warning` family of tokens the SPEAKER_STYLE table already uses for
-`signal`-kind messages. No new token is defined for this change —
-`critical`/`error`/`warning`/`info` each reuse an existing semantic color
-token from the theme.
+`Conversation.tsx` draws it where present, tinted per value from the
+theme's existing status tokens: `critical` and `error` use `--ao-danger`,
+`warning` uses `--ao-warning`, `info` uses `--ao-neutral`. No new token is
+defined for this change.
 
 **Rejected:** resolving an icon for severity here. That ladder
 (`chat.ResolveIcon`, `IconRef`) does not exist until `resource-icons`
