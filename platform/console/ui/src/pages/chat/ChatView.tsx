@@ -254,6 +254,13 @@ function inboxPaneWidth(layout: { inboxCollapsed: boolean; inboxWidth: number })
   return layout.inboxCollapsed ? INBOX_COLLAPSED_WIDTH : layout.inboxWidth
 }
 
+// `/exit` is fully recoverable (invariants.md: "`/exit` RELEASES THE
+// RUNTIME") so it needs no confirmation and runs the same way a thread
+// command chip does — an ordinary message, never a dedicated endpoint.
+function exitRuntime(rowName: string) {
+  void api.send(rowName, '/exit')
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -370,13 +377,6 @@ export function ChatView() {
     }
     clearNew(rowName)
     void navigate(`/conversations/${rowName}`)
-  }
-
-  // `/exit` is fully recoverable (invariants.md: "`/exit` RELEASES THE
-  // RUNTIME") so it needs no confirmation and runs the same way a thread
-  // command chip does — an ordinary message, never a dedicated endpoint.
-  function exitRuntime(rowName: string) {
-    void api.send(rowName, '/exit')
   }
 
   // `/close` and Delete are both destructive and already have a full,
