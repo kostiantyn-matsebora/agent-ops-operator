@@ -16,7 +16,7 @@ import { Inbox, sameScope, scopeKey, type Scope } from './Inbox'
 import { ConversationRow } from './ConversationRow'
 import { SelectionBar } from './SelectionBar'
 import { ThreadPane } from './ThreadPane'
-import { buildTree } from './tree'
+import { buildTree, rootNameOf } from './tree'
 import type { ConversationSummary } from '../../api/types'
 
 // `console-chat-layout`: one view, four columns, switching in place.
@@ -306,7 +306,15 @@ export function ChatView() {
   const items = useMemo(() => {
     let raw = data?.items ?? []
     if (scope.kind === 'coordinator') {
-      raw = raw.filter((c) => c.coordinator === scope.name || c.causedBy)
+      // `c.causedBy` truthy alone is not enough — it admits a member of ANY
+      // coordinator, not just this scope's. A member carries no field naming
+      // which coordinator it ultimately belongs to, only its immediate
+      // parent (`causedBy.parent`), so membership is decided by walking to
+      // the uncaused root — within the UNFILTERED snapshot, since the
+      // walk needs every ancestor still present — and checking THAT root's
+      // own `coordinator` field.
+      const byName = new Map(raw.map((c) => [c.name, c]))
+      raw = raw.filter((c) => byName.get(rootNameOf(raw, c))?.coordinator === scope.name)
     }
     const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
       unread: (c) => Boolean(c.unread),
@@ -395,13 +403,22 @@ export function ChatView() {
 
   // Attached natively: the workspace is a landmark, not a widget, and the
   // arrow-key list navigation is a shortcut layer over its rows.
+  //
+  // `onListKeyDown` closes over this render's own `rows`/`highlighted`/
+  // `selected` and is a plain function (not `useCallback`), so it is a new
+  // value every render. Reading it through a ref keeps the LISTENER itself
+  // stable — attached once per mount — rather than detaching and reattaching
+  // the real DOM listener on every render just to pick up a fresh closure.
   const workspaceRef = useRef<HTMLElement>(null)
+  const onListKeyDownRef = useRef<(e: Pick<KeyboardEvent, 'key' | 'preventDefault'>) => void>(() => undefined)
+  onListKeyDownRef.current = onListKeyDown
   useEffect(() => {
     const el = workspaceRef.current
     if (!el) return
-    el.addEventListener('keydown', onListKeyDown)
-    return () => el.removeEventListener('keydown', onListKeyDown)
-  })
+    const handler = (e: KeyboardEvent) => onListKeyDownRef.current(e)
+    el.addEventListener('keydown', handler)
+    return () => el.removeEventListener('keydown', handler)
+  }, [])
 
   function onListKeyDown(e: Pick<KeyboardEvent, 'key' | 'preventDefault'>) {
     const action = listKeyAction(e.key, rows.length, highlighted)

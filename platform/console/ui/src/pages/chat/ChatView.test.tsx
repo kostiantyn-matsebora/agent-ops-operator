@@ -3,7 +3,7 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ChatView } from './ChatView'
-import type { ConversationSummary } from '../../api/types'
+import type { ConversationSummary, VocabularyEntry } from '../../api/types'
 
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
@@ -14,6 +14,9 @@ function conv(name: string, over: Partial<ConversationSummary> = {}): Conversati
 
 const DEFAULT_ITEMS: ConversationSummary[] = [conv('a'), conv('b'), conv('c')]
 let items: ConversationSummary[] = DEFAULT_ITEMS
+// The Inbox's own "pipelines and coordinators" section, read from the
+// vocabulary — empty by default since most tests here never open it.
+let vocabularyEntries: VocabularyEntry[] = []
 
 // A manual `items = original` at the END of a test body never runs if an
 // assertion earlier in that SAME test throws — which leaks that test's
@@ -22,6 +25,7 @@ let items: ConversationSummary[] = DEFAULT_ITEMS
 // tests). Restoring in `afterEach` runs regardless of how the test ended.
 afterEach(() => {
   items = DEFAULT_ITEMS
+  vocabularyEntries = []
   // `showClosed` and the tree's fold default now live in `layout.ts`'s
   // localStorage-backed store (item 2 / item 8) — left unset, a persistence
   // test earlier in the file would leak its choice into every test after it.
@@ -34,7 +38,7 @@ vi.mock('../../api/hooks', () => ({
   useSession: () => ({ data: { canWrite: true, identity: 'dana', canOriginate: true } }),
   useSources: () => ({ data: { sources: [] } }),
   useInboxCounts: () => ({ data: { items: [], total: items.length, unreadTotal: 0, offset: 0, limit: 0, facets: {}, scopes: {} } }),
-  useVocabulary: () => ({ data: { entries: [] } }),
+  useVocabulary: () => ({ data: { entries: vocabularyEntries } }),
   useCloseConversations: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
   useDeleteConversations: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
   useMarkRead: () => ({ mutate: vi.fn(), data: undefined, error: null, isPending: false, reset: vi.fn() }),
@@ -242,6 +246,34 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     expect(screen.getByTestId('row-root-4')).toBeInTheDocument()
     expect(screen.queryByTestId('row-root-3')).not.toBeInTheDocument()
     expect(screen.queryByTestId('row-member-3')).not.toBeInTheDocument()
+  })
+})
+
+describe('a Coordinator scope shows only its OWN root and members', () => {
+  // A member carries no field naming which coordinator it ultimately
+  // belongs to — only `causedBy.parent`, one hop to its immediate parent —
+  // so with TWO coordinators in the snapshot, testing `causedBy` truthiness
+  // alone (rather than walking to the uncaused root and checking THAT root's
+  // own `coordinator` field) leaked every coordinator's members into every
+  // other coordinator's scope.
+  it('never shows another coordinator\'s own root or members', async () => {
+    vocabularyEntries = [
+      { kind: 'coordinator', name: 'root-1', position: 'general' },
+      { kind: 'coordinator', name: 'root-2', position: 'general' },
+    ]
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+      conv('root-2', { coordinator: 'root-2' }),
+      conv('member-2', { causedBy: { parent: 'root-2', entry: 'diagnose' } }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByTestId('scope-root-1'))
+    await userEvent.click(screen.getByText('Expand all'))
+    expect(screen.getByTestId('row-root-1')).toBeInTheDocument()
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('row-root-2')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('row-member-2')).not.toBeInTheDocument()
   })
 })
 

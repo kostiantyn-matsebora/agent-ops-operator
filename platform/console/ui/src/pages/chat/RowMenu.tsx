@@ -74,7 +74,10 @@ export function RowMenu(props: Readonly<RowMenuProps>) {
         <Divider key="d1" />,
         <DropdownItem key="new-tab" onClick={act(props.onOpenNewTab)}>Open in new tab</DropdownItem>,
         <DropdownItem key="copy-link" onClick={act(props.onCopyLink)}>Copy link</DropdownItem>,
-        <Divider key="d2" />,
+        // Every item below this divider is canWrite-gated, so the divider
+        // itself would otherwise be the LAST rendered item for a read-only
+        // viewer — a trailing separator with nothing below it.
+        canWrite && <Divider key="d2" />,
         !isClosed && canWrite && (
           <DropdownItem key="exit" onClick={act(props.onExitRuntime)}>Exit runtime</DropdownItem>
         ),
