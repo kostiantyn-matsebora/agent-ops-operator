@@ -253,7 +253,9 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
   // invoked as (`causedBy.entry` — `row.pipeline` is unset on a member, so
   // comparing against it left the prefix in place), and everything else by
   // its pipeline.
-  const nameForStrip = isRoot ? row.coordinator : isMember ? row.causedBy?.entry : row.pipeline
+  let nameForStrip = row.pipeline
+  if (isRoot) nameForStrip = row.coordinator
+  else if (isMember) nameForStrip = row.causedBy?.entry
   const title = stripNamePrefix(stripLeadingIcon(row.title || row.name), nameForStrip)
   const unread = (row.unreadCount ?? 0) > 0
   const dot = phaseDot(row)

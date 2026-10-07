@@ -587,7 +587,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if err != nil {
 		return fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
 	}
-	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, reader, claimant, capability)
+	_, err = r.CreateTaskConversation(ctx, ch, cmd.Rest, sender, reader, claimant, capability)
 	return err
 }
 
@@ -602,8 +602,9 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // reader is the opaque per-channel key of whoever typed the addressing
 // command, mirrored onto OriginReader exactly as the bare chat lane's does
 // (internal/httpapi/signals.go) — empty when the adapter named none.
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender, reader string,
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, task, sender, reader string,
 	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
+	profile := capability.ProfileName()
 	// UNBOUNDED on purpose — see `memberTitle`'s own comment. Telegram
 	// enforces its own 128-character topic-name cap at the adapter; a
 	// manager-side cut here was that one transport's limit imposed on every
