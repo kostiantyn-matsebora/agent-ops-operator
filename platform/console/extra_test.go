@@ -300,6 +300,46 @@ func TestQueuesWorkRowsAndStuckReasons(t *testing.T) {
 	}
 }
 
+// A Closed conversation is INERT (invariants.md: "no place in the FIFO
+// waiting set") and can carry unpruned spec.inputs forever — one that
+// arrived but was never processed before close. Measured live: the Queues
+// page listed these as ordinary work rows, identical to a conversation
+// genuinely waiting for a slot — same bug as the manager's own /status
+// waiting count, same fix shape.
+func TestQueuesExcludesClosedConversationsFromWork(t *testing.T) {
+	f := newFakeManager(t, ChannelInfo{Name: "console"})
+	objs := append(fixtureInstall(),
+		obj("conversations", "waiting", "1",
+			`{"profileRef":{"name":"k8s-engineer"},"channelRefs":[{"name":"console"}],"inputs":[{"text":"hi"}]}`,
+			`{"phase":"Pending"}`),
+		obj("conversations", "closed-with-leftover-input", "1",
+			`{"profileRef":{"name":"k8s-engineer"},"channelRefs":[{"name":"console"}],"inputs":[{"text":"hi"}]}`,
+			`{"phase":"Closed"}`),
+	)
+	adapter, tr, cache := consoleUnderTest(t, f, objs...)
+	adapter.refreshChannels(context.Background())
+	api := NewAPI(APIDeps{
+		Cache: cache, Transcripts: tr, Adapter: adapter,
+		Activity: NewActivityWindow(adapter.mgr, 500), Manager: adapter.mgr,
+		Config: &Config{Namespace: "agent-ops", AdapterName: "console", UIToken: "tok", WriteEnabled: true},
+	})
+	api.mgr = newStatusManager(t, &ManagerStatus{})
+	h := api.Handler(http.NotFoundHandler())
+
+	var q Queues
+	getJSON(t, h, "/api/queues", &q)
+	byName := map[string]bool{}
+	for _, row := range q.Work {
+		byName[row.Conversation] = true
+	}
+	if !byName["waiting"] {
+		t.Fatalf("an open conversation with pending input must be in the work queue: %+v", q.Work)
+	}
+	if byName["closed-with-leftover-input"] {
+		t.Fatalf("a closed conversation must never be in the work queue, got %+v", q.Work)
+	}
+}
+
 // summaryLine is the one key fact per kind. The coordination kinds and the
 // capability-routed pipeline shape had no direct test.
 func TestSummaryLinePerKind(t *testing.T) {

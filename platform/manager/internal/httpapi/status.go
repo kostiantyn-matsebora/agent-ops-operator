@@ -174,6 +174,16 @@ func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] {
 			continue
 		}
+		// A closed conversation is INERT (invariants.md: "no place in the FIFO
+		// waiting set") — it can carry unpruned spec.inputs forever (an input
+		// that arrived but was never processed before close), and PendingInputs
+		// has no phase awareness by design, so this is the one caller that must
+		// apply it. Left unchecked, every such conversation inflated this count
+		// and the console's Queues page with conversations that will never be
+		// dispatched again.
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
 		if len(dispatch.PendingInputs(c)) > 0 || c.Status.Inflight != nil {
 			waiting++
 		}
