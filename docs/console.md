@@ -104,7 +104,7 @@ per page, not a convention.
 closed tab — applied state is replaced wholesale whenever the client may have
 missed an event, which is what the resync rule is for.
 
-Two exceptions, both layout preferences and neither a fact about any
+Three exceptions, each a per-browser preference and neither a fact about any
 conversation:
 
 - The navigation's fold state (`shell.ts`).
@@ -116,6 +116,9 @@ conversation:
   and a live arrival land on the same preference. Reads and writes are
   guarded in `try`/`catch`, so a private window or a cleared store falls back
   to the view's defaults rather than breaking it.
+- The `/close` confirm dialog's "don't ask again" opt-out, under
+  `agentops.console.skipCloseConfirm`. Guarded the same way, so a private
+  window or a cleared store simply asks again.
 
 ## Pages
 

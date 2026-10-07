@@ -1,19 +1,79 @@
 # Testing
 
-agent-ops is verified at three tiers, and each exists for what the one below
-it structurally cannot decide.
+agent-ops is verified at four tiers, and each of the first three exists for
+what the one below it structurally cannot decide. The fourth is orthogonal to
+that chain — see below.
 
 | Tier | Runs | Decides | Cannot decide |
 |---|---|---|---|
 | **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
 | **Contract conformance** | every adapter's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter | anything about the cluster |
 | **End to end** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
+| **Console browser e2e** (`e2e-live`, manual) | Playwright driving a real browser against an ALREADY-RUNNING install — the real console, the real manager, `kubectl` against a real context | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
 
-**Every change declares its first and third tiers in its own task list.** An
-openspec change's `tasks.md` ends with a unit-test section, an e2e-test section
-and a documentation section, in that order; the e2e one states in a single
-ticked line when nothing a cluster decides was touched. `docs-task` in CI refuses
-to finish a change missing any of the three — see `CONTRIBUTING.md`.
+**Every change declares its first and third tiers in its own task list.**
+`docs-task` in CI refuses to finish a change missing any of the three — see
+`CONTRIBUTING.md`.
+
+An openspec change's `tasks.md` ends with, in order:
+
+1. a unit-test section
+2. an e2e-test section — one ticked line states when nothing a cluster decides was touched
+3. a documentation section
+
+## The console's browser tier (`e2e-live`), and why it exists beside the other three
+
+`platform/console/ui/e2e-live/` — 21 Playwright specs, `global-setup.ts` and
+`support/` — was added for `chat-shaped-conversations` because unit tests and
+envtest both missed a defect only a real API server and a real rendered page,
+together, could expose:
+
+- `ThreadBinding.ReadAt` / `ReaderMark.ReadAt` were `*metav1.Time`, which the
+  Kubernetes API serializes at SECOND granularity, silently dropping the
+  sub-second component the mark-unread rewind needs.
+- A freshly-read message could therefore count as unread forever, in
+  ordinary, continuous operation.
+- `platform/manager/test/e2e/lifecycle_test.go`'s
+  `TestConsoleMarkReadThenUnreadRewind` is this defect's own regression test.
+- `internal/integration/channelread_test.go`'s
+  `TestChannelReadPreservesSubSecondPrecision` now pins the same round-trip
+  in the gating envtest suite.
+
+- **It is a BLACK-BOX reader of the rendered page**, never a second way to
+  arrange state — setup goes straight at `kubectl` and the manager's own HTTP
+  surface (`support/kube.ts`, `support/manager.ts`), exactly as the Go e2e
+  pack's typed client does, and every assertion reads the console's own
+  rendering.
+- **It is NOT CI-gated, and no workflow dispatches it.** No job under
+  `.github/workflows/` invokes it, and no `package.json` script runs it either
+  — `test:e2e` is the pre-existing mocked-API rendering smoke (a different
+  config, under `../e2e`, with no real backend). The only way it runs is by
+  hand:
+
+  ```sh
+  cd platform/console/ui
+  kubectl port-forward svc/agentops-adapter-console 18099:8080 &
+  npx playwright test --config e2e-live/playwright.config.ts
+  ```
+
+- **It is WORKSTATION-ONLY**, on the same footing `.claude/rules/remote-session.md`
+  gives the local cluster and any deploy. `global-setup.ts` hard-requires an
+  already-running cluster — `kubectl` on PATH against a real context, a
+  reachable manager Service — that the cloud bootstrap does not provide: it
+  installs no `k3d`/docker and deploys nothing, so a remote session cannot
+  satisfy it.
+- **It owns no cluster lifecycle.** Point it at any already-running install —
+  the Go e2e pack's own cluster (`E2E_REUSE=1`), a local `rancher-desktop`
+  deploy, anything reachable — it arranges its own fixtures through
+  `global-setup.ts` and tears down only what it opened (a port-forward to the
+  manager).
+
+| Variable | Does |
+|---|---|
+| `E2E_LIVE_CONSOLE_URL` | the console's base URL — default `http://localhost:18099` |
+| `E2E_LIVE_KUBE_CONTEXT` | the `kubectl` context to use — default `k3d-agentops-e2e` |
+| `E2E_LIVE_NAMESPACE` | the namespace fixtures are created in — default `agent-ops` |
+| `E2E_LIVE_KUBECTL` | overrides the `kubectl` binary resolved from an absolute `PATH` entry |
 
 ## What gates a pull request
 
@@ -63,9 +123,10 @@ constantly is visible rather than quietly degrading.
 
 **A stub runtime exists for what no agent exhibits on cue.** A handle that
 names nothing, a crash that reports nothing, a stall past the idle TTL, a
-storage outage — these are manager mechanisms, and the stub is an instrument
-for them, not a cost workaround. A test that could have been written against
-the real runtime is.
+storage outage — these are manager mechanisms.
+
+The stub is an instrument for them, not a cost workaround. A test that could
+have been written against the real runtime is.
 
 - Its behaviour is scripted by the first word of the input: `echo`, `fail`,
   `stale-context`, `no-context`, `die`, `stall`, `storage-outage`.
@@ -77,11 +138,13 @@ the real runtime is.
 
 Every inbound adapter is driven by a captured, scrubbed payload from
 `test/fixtures/` — an Alertmanager webhook body POSTed to the adapter's
-`/webhook/{source}`, a Telegram `Update` fed to a fake Bot API. The fake is
-faithful because `gateway-telegram` forwards updates verbatim: what it replays
-is byte-identical to what Telegram would have produced. The same fixtures are
-the owning modules' unit-test inputs, so one captured payload cannot drift
-between the two suites.
+`/webhook/{source}`, a Telegram `Update` fed to a fake Bot API.
+
+The fake is faithful because `gateway-telegram` forwards updates verbatim:
+what it replays is byte-identical to what Telegram would have produced.
+
+The same fixtures are the owning modules' unit-test inputs, so one captured
+payload cannot drift between the two suites.
 
 The console is the end-to-end channel: a conforming `ChannelAdapter` with no
 third-party dependency, driven through its own HTTP API — the path a person
@@ -125,9 +188,11 @@ context costs a full re-run to learn anything.
 
 **Every CI run of the pack — pass or fail — also appends a report to the
 Actions run's own summary page**, built by `.github/scripts/e2e-report.py`
-from the pack's `go test -json` output, so a result is readable without
-opening the job log. The two tiers get different depth, matched to how much
-of each is worth reading in full:
+from the pack's `go test -json` output. A result is readable without opening
+the job log.
+
+The two tiers get different depth, matched to how much of each is worth
+reading in full:
 
 | Tier | Report level | Because |
 |---|---|---|

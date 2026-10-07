@@ -656,9 +656,10 @@ export interface ConversationPage {
   facets: Record<string, string[]>
   /**
    * Present on the count-only form alone: the UNREAD count within each fixed
-   * inbox scope (`working`, `mine`, `errored`, `incidents`, `closed`), plus
-   * one entry keyed by name for every pipeline and coordinator a row
-   * attributes to — what the inbox's per-scope badges read.
+   * inbox scope (`working`, `mine`, `errored`, `closed`), plus one entry
+   * keyed by name for every pipeline and coordinator a row attributes to —
+   * what the inbox's per-scope badges read. There is no `incidents` scope:
+   * that concept was removed from the inbox outright.
    */
   scopes?: Record<string, number>
 }

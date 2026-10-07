@@ -19,9 +19,11 @@ for the source and the reference material beside this file.
   - Unread counts MESSAGES (`signal`/`agent`/`relay`) rather than lateness,
     summed per scope, and a new **Mark unread** reclaims one as a
     reader-scoped rewind on the read verb.
-  - Pane widths and the inbox collapse state persist under one guarded
-    `localStorage` key, `agentops.console.layout` — the one piece of browser
-    persistence beside the nav fold, and still no conversation state.
+  - Pane widths and the inbox collapse state persist under a guarded
+    `localStorage` key, `agentops.console.layout`, and the `/close` confirm
+    dialog's "don't ask again" opt-out persists under a second guarded key,
+    `agentops.console.skipCloseConfirm` — browser preferences beside the nav
+    fold, and still no conversation state.
   - See [console.md](console.md#conversations).
 - **Two new CRDs let a conversation's own agent invoke other agents.**
   `AgentCapability` extracts the six capability fields a Pipeline already
