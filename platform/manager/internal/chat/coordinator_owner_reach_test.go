@@ -244,6 +244,65 @@ func TestListOpenRootsReturnsSiblingRootsWithTheirDirectMembersProjection(t *tes
 	}
 }
 
+// An Idle root that never produced a single member had no agent the reaper
+// could ever "re-check through" — its own stated method — so it is excluded
+// rather than surfaced identically forever. This is the job-cb5vg bug,
+// reproduced directly: a Coordinator-addressed root whose only run failed
+// before invoking anyone.
+func TestListOpenRootsExcludesAnIdleRootWithNoMembers(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	deadEnd := coordinatorRoot("root-2", "co-a")
+	deadEnd.Status.Phase = agentopsv1alpha1.ConversationIdle
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller, deadEnd)
+
+	got, err := r.ListOpenRoots(context.Background(), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("an Idle root with no members has nothing left to re-check, got %+v", got)
+	}
+}
+
+// A root still actively Working, with no member YET, is not a dead end — it
+// may invoke one before this very run ends. Only Idle-and-memberless is
+// excluded.
+func TestListOpenRootsIncludesAWorkingRootWithNoMembersYet(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	stillRunning := coordinatorRoot("root-2", "co-a")
+	stillRunning.Status.Phase = agentopsv1alpha1.ConversationWorking
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller, stillRunning)
+
+	got, err := r.ListOpenRoots(context.Background(), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "root-2" {
+		t.Fatalf("a Working root with no member yet must still be listed, got %+v", got)
+	}
+}
+
+// An Idle root WITH members is the ordinary healed-or-not case and is
+// unaffected by the dead-end exclusion above.
+func TestListOpenRootsIncludesAnIdleRootThatHasMembers(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	healed := coordinatorRoot("root-2", "co-a")
+	healed.Status.Phase = agentopsv1alpha1.ConversationIdle
+	member := coordMember("member-1", "root-2", "k8s-observe")
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller, healed, member)
+
+	got, err := r.ListOpenRoots(context.Background(), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "root-2" {
+		t.Fatalf("an Idle root with a member is the ordinary case, got %+v", got)
+	}
+}
+
 func TestListOpenRootsRefusesACallerWithNoCoordinatorScope(t *testing.T) {
 	pipelineAddressed := &agentopsv1alpha1.Conversation{}
 	pipelineAddressed.Name, pipelineAddressed.Namespace = "plain-1", testNS

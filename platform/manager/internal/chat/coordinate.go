@@ -316,6 +316,17 @@ type OpenRoot struct {
 // acts for — never a member (whatever Coordinator it carries), never a
 // different Coordinator's root, and never the caller's own root, since
 // closing it would cascade to close the caller's own conversation mid-run.
+//
+// ALSO EXCLUDED: an Idle root with NO members. The reaper's whole method is
+// "re-check each one through the agent that originally handled it" — a root
+// that finished its last run (Idle, not Working or still admitting) and never
+// produced a single member never had an agent to re-check through, so there
+// is nothing here that re-checking could ever find changed. Left in, this is
+// not a stale edge case: a root whose first run failed before it could invoke
+// anyone (an auth error, a missing tool) surfaces forever, identically, every
+// hourly cycle — measured live on job-cb5vg, 96 consecutive cycles restating
+// one 2026-10-03 run's error with zero new information, because the member
+// that would have let the reaper confirm a fix never existed to re-check.
 func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]OpenRoot, error) {
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
 	if err != nil {
@@ -346,6 +357,9 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 		members, err := r.directMemberEntries(ctx, c.Name)
 		if err != nil {
 			return nil, err
+		}
+		if c.Status.Phase == agentopsv1alpha1.ConversationIdle && len(members) == 0 {
+			continue // nothing this root ever handed off to — nothing to re-check
 		}
 		out = append(out, OpenRoot{
 			Name: c.Name, Title: c.Spec.Title, Brief: c.Status.Brief, Phase: c.Status.Phase, Members: members,
