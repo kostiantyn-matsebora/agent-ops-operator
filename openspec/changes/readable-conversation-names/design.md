@@ -6,7 +6,7 @@ prefix and no slug:
 
 - `httpapi.createConversationForGroup` (`platform/manager/internal/httpapi/signals.go`), for `alert` / `job` / `chat` / `task` root conversations. It already computes a title via `titleForGroup` before setting `spec.Title`. That same text is the natural word source.
 - `chat.CreateTaskConversation` (`platform/manager/internal/chat/router.go`), for a `/<pipeline> <task>` chat command.
-- `chat.createMember` (`platform/manager/internal/chat/coordinate.go`), for a Coordinator `invoke`. It already computes a title via `memberTitle` from the invoked entry name.
+- `chat.createMember` (`platform/manager/internal/chat/coordinate.go`), for a Coordinator `invoke`. Its word source is the invoked `agents[]` entry name itself, not the text `memberTitle` derives from it.
 
 `spec.Title` is a separate, pre-existing field and is out of scope. See
 `conversation-naming/spec.md`.
@@ -22,7 +22,7 @@ prefix and no slug:
 **Non-Goals:**
 - Renaming existing conversations, or backfilling a label onto names already generated.
 - A `kubectl` printer column for `spec.title` (orthogonal, separate change if wanted).
-- Changing how `spec.title` itself is computed, beyond widening one existing fallback tier (below). `titleForGroup` and `memberTitle` are otherwise read for word input, not altered.
+- Changing how `spec.title` itself is computed, beyond widening one existing fallback tier (below). `titleForGroup` is otherwise read for word input, not altered. `memberTitle` is not a word source.
 
 ## Decisions
 
