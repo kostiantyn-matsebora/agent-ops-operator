@@ -686,6 +686,12 @@ func TestHandleCoordinateCloseWidenedBoundPermitsAPlainMemberToCloseASiblingRoot
 	root := coordRoot("root-1", "co-a")
 	reaper := coordMember("reaper-1", "root-1", "reaper")
 	incident := coordRoot("incident-1", "co-a")
+	// An alert, not a person's own request — isHumanInitiated must report
+	// false for the widened bound to apply.
+	incident.Spec.Signal = &agentopsv1alpha1.SignalProvenance{
+		SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"},
+		Labels:    map[string]string{"alertname": "KubeJobFailed"},
+	}
 	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper, incident)
 
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")

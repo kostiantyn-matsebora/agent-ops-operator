@@ -41,7 +41,7 @@ The MANAGER validates the token and enforces a bound per verb:
 | `invoke` | the Coordinator's `agents[]` list |
 | `escalate` | the caller itself — it takes no conversation argument and acts only on the calling conversation, never a member reached through it |
 | `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
-| `close` | the caller itself, a conversation it directly caused, per `conversation-close`'s rule, OR — when the caller RESOLVES to a Coordinator (`coordinator-owner-reach`'s walk) — any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor, never a deeper descendant reached through an intermediate member and never a member of any kind |
+| `close` | the caller itself, a conversation it directly caused, per `conversation-close`'s rule, OR — when the caller RESOLVES to a Coordinator (`coordinator-owner-reach`'s walk) — any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor, never a deeper descendant reached through an intermediate member, never a member of any kind, and never a root a PERSON started (no `spec.signal` at all, or `spec.signal` carrying the chat lane's channel label) |
 | `list_conversations`, `get_conversation` | for a `channel-reader:<channel>` token, the projection of that Channel's conversations and no verb, per `coordinated-agents` |
 | `list_open_roots` | the calling conversation's own Coordinator's open UNCAUSED roots only — see `coordinator-owner-reach` |
 
@@ -89,6 +89,32 @@ it directly caused.
   conversation it did not itself cause
 - **THEN** the manager refuses it — the widened bound never applies to a
   caller that is not itself acting for a Coordinator
+
+#### Scenario: The widened bound never closes a root a person started
+
+- **WHEN** a Coordinator-owner caller (the self-heal reaper included) asks
+  to close a sibling root with no `spec.signal` (an addressed
+  `/<pipeline> <task>` command) or whose `spec.signal` carries the chat
+  lane's channel label (a bare chat message)
+- **THEN** the manager refuses it, distinctly from an out-of-scope sibling,
+  whatever the sibling root's age — only an alert or a job origination is
+  closable through this bound. Measured live: the reaper reported the same
+  stale finding on a person's unanswered request for 96 consecutive hourly
+  cycles rather than ever being ABLE to close it, which is the intended
+  outcome — the fix here is a clearer refusal reason, not a widened close
+
+#### Scenario: `read` and `get_tree` name their own, narrower bound
+
+- **WHEN** a Coordinator-owner caller's `read` or `get_tree` call names a
+  sibling root `list_open_roots` just returned — in scope for THAT verb,
+  never for `read`
+- **THEN** the manager refuses it with a message naming `read`'s actual
+  bound (the caller's own subtree), never `close`'s wider wording — reusing
+  one shared message across both verbs told a caller a sibling root WAS in
+  scope for `read` when it never has been, which a live self-heal cycle
+  demonstrated: the agent read the refusal as proof the roots must belong
+  to a DIFFERENT Coordinator, when they were its own Coordinator's siblings
+  the entire time
 
 ### Requirement: The server sits behind the component wall
 

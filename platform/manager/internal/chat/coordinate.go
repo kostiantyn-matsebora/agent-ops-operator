@@ -47,7 +47,28 @@ var (
 	ErrUnknownAgent       = fmt.Errorf("no such agents[] entry")
 	ErrCoordinatorCycle   = fmt.Errorf("would repeat a Coordinator already in this coordination")
 	ErrMaxAgents          = fmt.Errorf("maxAgents reached")
-	ErrOutOfScope         = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
+	ErrOutOfScope = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
+	// ErrOutOfSubtree refuses `read` and `get_tree` — narrower than
+	// ErrOutOfScope. Those two verbs' bound is the caller's own subtree
+	// only (aops-mcp-server: "read | the calling conversation's own
+	// subtree, at any depth"), with NO coordinator-sibling widening —
+	// unlike `close`, which ErrOutOfScope's wording correctly describes.
+	// aops-mcp-server also requires "A refusal SHALL reach the caller as
+	// an error naming the bound that refused it" — reusing ErrOutOfScope's
+	// wider wording here told a caller a coordinator-sibling root WAS in
+	// scope for read when it never has been. Measured live: the self-heal
+	// reaper's list_open_roots returned sibling roots, read refused every
+	// one of them, and the message's own "...or an open root of the
+	// caller's own Coordinator" read as though it should have worked —
+	// the agent concluded the roots must belong to a DIFFERENT Coordinator
+	// instead, which was simply wrong.
+	ErrOutOfSubtree = fmt.Errorf("out of scope: not the caller itself or within its own subtree")
+	// ErrCannotCloseHumanRoot refuses the widened Coordinator-owner close
+	// bound for a target isHumanInitiated reports true for — a distinct,
+	// named reason rather than the generic ErrOutOfScope, per
+	// aops-mcp-server's "a refusal SHALL reach the caller as an error
+	// naming the bound that refused it."
+	ErrCannotCloseHumanRoot = fmt.Errorf("out of scope: a sibling root a person started is never closed by the widened reach")
 	// ErrNoCoordinatorScope refuses the Coordinator-owner reach class
 	// (list_open_roots, the widened close — coordinator-owner-reach) for a
 	// caller that resolves to no Coordinator at all by ResolveActingCoordinator:
@@ -417,6 +438,28 @@ func (r *Router) isOwnCoordinatorSiblingRoot(ctx context.Context, caller, target
 	return true, nil
 }
 
+// isHumanInitiated reports whether a conversation exists because a PERSON
+// asked for it — an addressed `/<pipeline> <task>` command (no spec.signal
+// at all) or a bare chat message (spec.signal present but carrying the chat
+// lane's own LabelChatChannel label) — as opposed to an alert, a job or any
+// other machine signal, which always carries spec.signal with neither mark.
+//
+// CloseCoordinated uses this to refuse ever auto-closing a person's own
+// request under the widened Coordinator-owner reach: the self-heal reaper
+// may close a sibling root it finds healed, but never one somebody is still
+// waiting on an answer to, however long it has sat open. This is a
+// mechanical guarantee rather than a prompt instruction on purpose — the
+// reaper's own task text already said "not a new incident, re-check each
+// one", and that alone did not stop it from reading a human-originated root
+// as fair game.
+func isHumanInitiated(c *agentopsv1alpha1.Conversation) bool {
+	if c.Spec.Signal == nil {
+		return true
+	}
+	_, isChat := c.Spec.Signal.Labels[agentopsv1alpha1.LabelChatChannel]
+	return isChat
+}
+
 // findReusableMember is conversation-provenance's reuse rule: a live
 // conversation with the same signature AND the same (parent, entry) —
 // depth plays no part.
@@ -607,7 +650,11 @@ func (r *Router) appendInputIdempotent(ctx context.Context, convName string, ite
 // naming it out of scope; reaching one means asking the direct member to
 // close it, whose own close cascades in turn), OR — only when the caller
 // RESOLVES to a Coordinator (design D-A) — any OTHER open, uncaused root of
-// that SAME Coordinator (design D-B).
+// that SAME Coordinator (design D-B) — EXCEPT one isHumanInitiated reports
+// true for, refused with ErrCannotCloseHumanRoot regardless of how long it
+// has sat open: a person's own request is never auto-closed by the widened
+// reach, only by that person, a direct cascade from their own conversation,
+// or an operator.
 func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.Conversation, targetName, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("a coordinator's close requires a reason")
@@ -628,6 +675,9 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 	}
 	if !ok {
 		return ErrOutOfScope
+	}
+	if isHumanInitiated(&target) {
+		return ErrCannotCloseHumanRoot
 	}
 	return r.closeWithCascade(ctx, &target, reason)
 }

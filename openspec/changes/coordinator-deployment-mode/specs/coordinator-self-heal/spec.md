@@ -129,6 +129,15 @@ survived root is neither.
 
 A root the re-check still finds unhealthy SHALL be left open.
 
+A root a PERSON started SHALL NEVER be closed by the reaper. This covers a
+root reached through an addressed `/<pipeline> <task>` command or a bare
+chat message, never a machine signal.
+
+This holds whatever the re-check finds, however long the root has sat open.
+
+`aops-mcp-server`'s `close` bound enforces this mechanically. The reaper's
+survey may still SURVEY and report on such a root. It may never end it.
+
 #### Scenario: A healed root is closed
 
 - **WHEN** the reaper re-invokes the original agent on an open root and the
@@ -141,6 +150,14 @@ A root the re-check still finds unhealthy SHALL be left open.
   result reports the condition still present
 - **THEN** the reaper takes no close action on that root, and it remains
   open for the next hourly survey or for escalation
+
+#### Scenario: A root a person started is never closed, however stale
+
+- **WHEN** the reaper's survey includes an open root that carries no
+  `spec.signal` or whose `spec.signal` carries the chat lane's channel
+  label, and it has sat open for many consecutive hourly cycles
+- **THEN** the reaper leaves it open and may report it as needing a human's
+  attention, but its own `close` call against that root is refused
 
 #### Scenario: The re-check reuses invoke and member-result routing unchanged
 
