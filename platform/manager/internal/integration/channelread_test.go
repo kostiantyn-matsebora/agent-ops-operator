@@ -490,6 +490,71 @@ func TestChannelReadRewindRequiresAReader(t *testing.T) {
 	}
 }
 
+// Regression test for the production defect
+// `platform/manager/test/e2e/lifecycle_test.go`'s `TestConsoleMarkReadThenUnreadRewind`
+// found against a real deployed cluster: `ThreadBinding.ReadAt` /
+// `ReaderMark.ReadAt` used to be `*metav1.Time`, which the Kubernetes API
+// serializes at SECOND granularity — any sub-second component was silently
+// dropped on write, so a watermark could never actually cover the message it
+// was meant to, in ordinary continuous operation. Both fields are now a plain
+// `*string` (RFC3339Nano), and this pins the round-trip at genuine sub-second
+// precision against the real envtest API server — every other case in this
+// file formats `readAt` with `time.RFC3339` (whole seconds) exclusively, and
+// so none of them could ever have caught this regression.
+func TestChannelReadPreservesSubSecondPrecision(t *testing.T) {
+	mkProfile(t, "read-prof-precision")
+	mkChannel(t, "chan-precision", "tg-precision")
+	srv := apiServer()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	mkBoundConv(t, "conv-precision", "chan-precision", "pr1", base)
+
+	// The CHANNEL-WIDE mark, via an ordinary (non-rewind) advance.
+	precise := base.Add(time.Hour + 123456789*time.Nanosecond)
+	code, out := postRead(t, srv, "chan-precision", []map[string]any{
+		{"threadId": "pr1", "readAt": precise.Format(time.RFC3339Nano)},
+	}, "test-adapter-token")
+	if code != 200 || out.Marked != 1 {
+		t.Fatalf("ordinary read: %d %+v", code, out)
+	}
+	got := threadOf(t, "conv-precision", "chan-precision")
+	if got.ReadAt == nil {
+		t.Fatal("no channel-wide watermark written")
+	}
+	parsed, ok := agentopsv1alpha1.ParseWatermark(*got.ReadAt)
+	if !ok || !parsed.Equal(precise) {
+		t.Fatalf("the channel-wide watermark must round-trip at full precision, sent %v stored %v (raw %q)",
+			precise, parsed, *got.ReadAt)
+	}
+
+	// The READER-SCOPED mark, via a rewind — the exact mechanism
+	// `TestConsoleMarkReadThenUnreadRewind` exercises end to end. Pinned here
+	// too so a regression to second-granularity storage fails fast, in the
+	// envtest suite every pull request runs, rather than only in the manual
+	// e2e-live/e2e pack.
+	preciseRewind := base.Add(30*time.Minute + 987654321*time.Nanosecond)
+	code, out = postRead(t, srv, "chan-precision", []map[string]any{
+		{"threadId": "pr1", "readAt": preciseRewind.Format(time.RFC3339Nano), "reader": "sha256:precise-reader", "rewind": true},
+	}, "test-adapter-token")
+	if code != 200 || out.Marked != 1 {
+		t.Fatalf("rewind: %d %+v", code, out)
+	}
+	got = threadOf(t, "conv-precision", "chan-precision")
+	var readerMark *string
+	for _, r := range got.Readers {
+		if r.Key == "sha256:precise-reader" {
+			readerMark = r.ReadAt
+		}
+	}
+	if readerMark == nil {
+		t.Fatal("no reader watermark written")
+	}
+	parsed, ok = agentopsv1alpha1.ParseWatermark(*readerMark)
+	if !ok || !parsed.Equal(preciseRewind) {
+		t.Fatalf("the reader's rewound watermark must round-trip at full precision, sent %v stored %v (raw %q)",
+			preciseRewind, parsed, *readerMark)
+	}
+}
+
 // The person who STARTED a conversation has seen it: their own watermark is
 // stamped at the one moment their thread comes into existence, so it is never
 // presented back to them as unread before an answer could exist — and it stays
