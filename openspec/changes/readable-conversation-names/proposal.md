@@ -50,8 +50,8 @@ the object's actual NAME — the thing an operator types, greps, and reads in
   next unused numeric suffix, and creates with that name
   (`alert-node-down-ns-2`, `-3`, …) in one list-then-create step — not
   by retrying guesses one at a time. A create conflict from a genuine race
-  between two concurrent creators retries that same lookup a small, bounded
-  number of times.
+  between two concurrent creators retries that same lookup, bounded to 5
+  attempts, and returns the conflict error if all 5 fail.
 
 - `spec.title` itself is untouched: already populated at creation for every
   path above, and remains the primary human-facing label everywhere a UI

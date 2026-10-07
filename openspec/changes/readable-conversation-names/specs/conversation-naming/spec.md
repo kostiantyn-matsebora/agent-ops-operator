@@ -43,10 +43,16 @@ Word-chain extraction SHALL split source text on punctuation and on
 `CamelCase` boundaries, drop a fixed, small stopword list, and keep the
 first three remaining words, lowercased and joined by `-`.
 
-The result SHALL be capped at a fixed maximum length. That length SHALL be
-chosen so every name derived from the conversation name downstream —
-including `agentops-conv-<name>` and `agentops-mcp-conv-<name>` — stays
-within Kubernetes' object-name and label-value limits.
+The word-chain SHALL be capped at a fixed maximum length of 24 characters.
+
+That length SHALL be chosen against the LONGEST derived name, not the bare
+63-character limit. Added to the 24 characters:
+
+- the 18-character `agentops-mcp-conv-` prefix
+- the 7-character `member-` kind prefix
+- a numeric suffix of up to 4 characters (`-999`)
+
+The total SHALL stay within Kubernetes' object-name and label-value limits.
 
 Where the joined chain exceeds that length, the manager SHALL drop whole
 trailing words until it fits, never cut a word in half.
@@ -98,7 +104,16 @@ substitute a random or hash-derived suffix at any point.
 
 A create conflict caused by a genuine race between two concurrent creators
 SHALL be resolved by retrying the same list-then-create step, bounded to a
-small, fixed number of attempts.
+small, fixed number of attempts: 5.
+
+When all 5 attempts end in a create conflict, the manager SHALL return the
+last conflict error to its caller, naming the base name. It SHALL NOT fall
+back to a random or hash-derived suffix.
+
+#### Scenario: Exhausted retries return an error
+
+- **WHEN** five consecutive list-then-create attempts for one base name all end in a create conflict
+- **THEN** the creation fails with the conflict error naming the base name, and no conversation with a random suffix is created
 
 #### Scenario: First conversation for a base name has no suffix
 
