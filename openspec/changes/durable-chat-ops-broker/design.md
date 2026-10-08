@@ -24,9 +24,9 @@ per process (`main.go:156`). It is shared between the reconciler and
   on.
 - A crashed leader's in-flight claim recovers without a hand-tuned,
   independently-invented heartbeat mechanism.
-- No change to the URL, query parameters, or op payload shapes a conforming
-  adapter already speaks (`channel-adapter-contract`) beyond the new 503
-  case.
+- No change to the URL or op payload shapes a conforming adapter already
+  speaks (`channel-adapter-contract`) beyond the new 503 case and the
+  mandatory `contract=<version>` query parameter.
 
 **Non-Goals:**
 

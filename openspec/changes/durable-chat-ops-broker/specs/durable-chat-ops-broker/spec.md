@@ -13,8 +13,8 @@ that a previously claimed op is abandoned, SHALL be performed only by the
 manager replica currently holding the leader-election `Lease`.
 
 The claim SHALL be recorded on the owning Conversation's `status`, keyed
-per channel, carrying at minimum the claiming holder's identity and the
-time it was claimed.
+per channel, as `status.threads[].claim` with the subfields `holder` (the
+claiming replica's identity) and `claimedAt` (the time it was claimed).
 
 #### Scenario: The leader claims an op
 
