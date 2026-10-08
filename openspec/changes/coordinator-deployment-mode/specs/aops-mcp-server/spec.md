@@ -103,10 +103,10 @@ it directly caused.
   cycles rather than ever being ABLE to close it, which is the intended
   outcome — the fix here is a clearer refusal reason, not a widened close
 
-#### Scenario: `read` and `get_tree` name their own, narrower bound
+#### Scenario: `read` names its own, narrower bound
 
-- **WHEN** a Coordinator-owner caller's `read` or `get_tree` call names a
-  sibling root `list_open_roots` just returned — in scope for THAT verb,
+- **WHEN** a Coordinator-owner caller's `read` call names a
+  sibling root `list_open_roots` just returned — in scope for `close`,
   never for `read`
 - **THEN** the manager refuses it with a message naming `read`'s actual
   bound (the caller's own subtree), never `close`'s wider wording — reusing

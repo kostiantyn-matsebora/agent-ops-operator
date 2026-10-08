@@ -34,6 +34,15 @@ the ordinary rule. Nothing about an input's timing relative to
 - **THEN** the message posts into every one of its already-bound channels
 - **AND** no channel is newly bound by the call
 
+#### Scenario: Escalate opens a thread with the digest
+- **WHEN** an uncaused conversation escalates with a message
+- **THEN** that message is posted into each already-open thread as the digest
+- **AND** no earlier member result is replayed into it
+
+#### Scenario: After escalation the root is an ordinary multi-channel conversation
+- **WHEN** a person replies in an escalated thread
+- **THEN** the reply is an input on that conversation, delivered to every other bound channel per the ordinary rule
+
 #### Scenario: A member result reaches an already-open thread
 - **WHEN** a member reports its result to an uncaused root before that root has ever escalated
 - **THEN** the result is delivered to the root's bound channels the same way it would be after escalation

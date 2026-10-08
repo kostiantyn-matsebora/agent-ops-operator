@@ -31,6 +31,11 @@ inline or by `capabilityRef` with the same exclusivity a Pipeline has.
 - **THEN** a thread is created on each of its `channelRefs` at once
 - **AND** a human reply there is an ordinary input before the agent ever escalates
 
+#### Scenario: Escalation channels open no thread at admission
+- **WHEN** a signal opens a Coordinator's conversation
+- **THEN** threads open only on its `channelRefs`, at admission
+- **AND** escalating opens no thread of its own
+
 ### Requirement: Limits and escalation channels are snapshotted onto the conversation opened
 
 The Coordinator's limits SHALL be snapshotted onto every conversation it

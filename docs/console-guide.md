@@ -77,9 +77,11 @@ Five views, one question each.
   a transcript.
 
   The inbox counts **messages**, not lateness — a `signal`, an `agent` reply
-  or a `relay`, never an ack or a run event. Every scope carries its own sum,
-  and **Mark unread** reclaims a conversation you want to come back to.
-  Reading a conversation in another channel never clears the console's unread.
+  or a `relay`, never an ack or a run event.
+
+  Every scope carries its own sum, and **Mark unread** reclaims a conversation
+  you want to come back to. Reading a conversation in another channel never
+  clears the console's unread.
 
   The list renders as a **coordination tree** by default: a root and every
   conversation it caused nest together, indented by depth, the root carrying
@@ -112,10 +114,11 @@ Five views, one question each.
 
   **A Coordinator's root shows an incident timeline instead of a transcript.**
   It interleaves the root's own turns with every member's start, result and
-  closure, nesting a member that is itself coordinating in place. The reply
-  box is shown from creation, since the root's channels are bound then. The
-  pane is read-only only when no channel is bound or the conversation is
-  closed.
+  closure, nesting a member that is itself coordinating in place.
+
+  The reply box is shown from creation, since the root's channels are bound
+  then. The pane is read-only only when no channel is bound or the
+  conversation is closed.
 
   A member opened directly is read-only and names its place in the tree. It
   holds no channel of its own, so there is nothing to reply into from there.

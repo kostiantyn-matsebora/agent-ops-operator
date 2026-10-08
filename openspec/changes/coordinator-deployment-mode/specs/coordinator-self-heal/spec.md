@@ -36,7 +36,8 @@ already define for any `agents[]` entry.
 
 ### Requirement: The scheduled signal reaches the reaper through the coordinating agent's own invoke
 
-Coordinator mode SHALL claim a `signals/cron` source on a configured schedule,
+Coordinator mode SHALL claim a `signals/cron` source on the schedule set by
+the chart value `reaper.schedule` (a five-field cron expression),
 on the SAME chart-rendered Coordinator that claims every enabled bundle's
 source. Claiming SHALL use `Coordinator.spec.signalSourceRefs`, the one
 field every claim already uses.
