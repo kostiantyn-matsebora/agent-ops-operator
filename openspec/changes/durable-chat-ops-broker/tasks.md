@@ -62,4 +62,5 @@
 
 ### Adopter site
 
+- [ ] 8.7a `docs/concepts.md` — add `claim` and `undeliveredReply` rows to the restart-resilience matrix, as the `state-durability` spec requires.
 - [ ] 8.8 Confirm no adopter-site page beyond `docs/configuration.md`'s `replicas` row needs a word changed (`proposal.md`'s own Impact section states why) — ticked as a stated "not applicable" rather than silently skipped.
