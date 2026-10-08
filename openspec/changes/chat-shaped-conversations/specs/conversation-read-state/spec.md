@@ -40,6 +40,8 @@ A report MAY instead ask for a REWIND:
 - **WHEN** a rewind names no reader
 - **THEN** it is refused and nothing is written
 
+## ADDED Requirements
+
 ### Requirement: Read watermarks are opaque RFC3339Nano strings
 `status.threads[].readAt` and `status.threads[].readers[].readAt` SHALL be strings in RFC3339Nano form, under the same JSON field names.
 

@@ -25,8 +25,7 @@ they have not read.
 
 - **One chat-shaped view replaces the list page and the detail page.** An
   icon navigation rail, an inbox column (scopes with counts: All, Unread,
-  Working, Mine, Errored, Incidents, then each Pipeline and Coordinator, then
-  the commands, then Closed), the conversation list, and the thread pane.
+  Working, Mine, Errored, then each Pipeline and Coordinator, then Closed), the conversation list, and the thread pane.
   Switching conversations never leaves the view. `↑`/`↓` move, `Enter` opens,
   `⌘`-click selects. Runs, Graph, Sequence and YAML stay reachable from the
   thread header as secondary views.
@@ -133,7 +132,7 @@ they have not read.
 - `conversation-read-state`: the watermark still never moves backwards for a
   stale report, but a named reader may EXPLICITLY rewind their own entry.
   The channel-wide mark never rewinds.
-- `console-live-runs`: the list's filter set gains Mine and Incidents, rows
+- `console-live-runs`: the list's filter set gains Mine, rows
   gain the unread count and the last counted message, the unread scenario is
   restated by the new rule, and the detail's views become secondary views of
   one thread pane.

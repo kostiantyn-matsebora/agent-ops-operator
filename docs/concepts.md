@@ -1307,7 +1307,7 @@ root used to run unseen, and now it does not.
 
 | Caller | `escalate` does |
 |---|---|
-| the uncaused root (no `causedBy`) | posts `message` as a notice into every already-bound channel's thread, and stamps `status.escalatedAt` |
+| the uncaused root (no `causedBy`) | posts `message` as the digest into every already-bound channel's thread, and stamps `status.escalatedAt` |
 | a nested member (carries `causedBy`) | opens **no** thread — closes itself with `message` as `closeReason` and result, landing on its own parent as an ordinary member-result input |
 
 **The bubble repeats for a member.** A parent receiving that report may
