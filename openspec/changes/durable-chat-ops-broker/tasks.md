@@ -56,9 +56,9 @@
 - [ ] 8.3 `.claude/rules/gotchas.md` — record the replicas-break-chat-delivery incident measured this session, so the next person raising `replicas` finds it before re-discovering it live.
 - [ ] 8.4 `docs/configuration.md` — the `replicas` row's caveat is rewritten to match the new, safe behavior.
 - [ ] 8.5 `docs/CHANGELOG.md` — a new entry naming the adapter-facing 503-retry contract change and that `replicas` is safe to raise again.
-- [ ] 8.7 `docs/configuration.md` — document the chart value that sets the claim staleness bound from 2.3, with its default and rationale.
-- [ ] 8.6 Re-run `python3 .github/scripts/docs-generate.py` — the CR reference and any generated resource block covering `ConversationStatus` are build output and must not go stale.
+- [ ] 8.6 `docs/configuration.md` — document the chart value that sets the claim staleness bound from 2.3, with its default and rationale.
+- [ ] 8.7 Re-run `python3 .github/scripts/docs-generate.py` — the CR reference and any generated resource block covering `ConversationStatus` are build output and must not go stale.
 
 ### Adopter site
 
-- [ ] 8.7 Confirm no adopter-site page beyond `docs/configuration.md`'s `replicas` row needs a word changed (`proposal.md`'s own Impact section states why) — ticked as a stated "not applicable" rather than silently skipped.
+- [ ] 8.8 Confirm no adopter-site page beyond `docs/configuration.md`'s `replicas` row needs a word changed (`proposal.md`'s own Impact section states why) — ticked as a stated "not applicable" rather than silently skipped.

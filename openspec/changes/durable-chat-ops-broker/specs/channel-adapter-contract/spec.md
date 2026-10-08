@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Outbound operations delivered to adapters by long-poll
-The manager SHALL expose `GET /channel/ops?adapter=<name>&wait=<seconds>`. It SHALL return the next pending outbound operation for any Channel served by that adapter, 204 on timeout, or 503 when the serving replica is not the current leader and cannot safely claim one on this adapter's behalf.
+The manager SHALL expose `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`. It SHALL return the next pending outbound operation for any Channel served by that adapter, 204 on timeout, or 503 when the serving replica is not the current leader and cannot safely claim one on this adapter's behalf.
 
 The parameter names the adapter, the same value Channels carry in `spec.adapter`, replacing the former `?type=`.
 

@@ -114,6 +114,8 @@ takes dependencies).
   caveat is lifted once this ships.
 - `docs/CHANGELOG.md` — the adapter-facing 503-retry contract change, and
   that `replicas` is safe again.
+- `python3 .github/scripts/docs-generate.py` — re-run, since the new
+  `ConversationStatus` fields change the generated CR reference.
 
 **Adopter site**: no page beyond `docs/configuration.md`'s `replicas` row
 is affected.

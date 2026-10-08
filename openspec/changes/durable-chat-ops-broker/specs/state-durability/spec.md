@@ -81,3 +81,20 @@ that thread, cleared when delivery succeeds.
 #### Scenario: A claim held only in a dead process's memory is not the record of anything
 - **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
 - **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op
+
+### Requirement: A restart-resilience matrix is documented and maintained
+The documentation SHALL carry a matrix naming every component, the state it
+holds, that state's declared home, and what a restart of that component costs.
+Adding state to a component SHALL require adding its row.
+
+The matrix SHALL name the Conversation's op claim and
+`status.threads[].undeliveredReply`: Kubernetes-API state, surviving every
+restart, with a claim held by a former leader cleared on recovery.
+
+#### Scenario: Guarantee is checkable
+- **WHEN** an operator asks what restarting a given component loses
+- **THEN** the answer is read from the documented matrix rather than inferred from code
+
+#### Scenario: Claim and owed-reply state have rows
+- **WHEN** an operator asks what a manager restart does to a claimed op or an undelivered reply
+- **THEN** the matrix names both as Conversation status, surviving the restart
