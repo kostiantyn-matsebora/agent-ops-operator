@@ -96,7 +96,7 @@ Measured live on the reference install. The manager is pinned back to
 **Code**: `platform/manager/internal/chat/ops.go` (rewritten backing
 store), `internal/controller/conversation_controller.go` (every `OpQueue`
 call site), `internal/httpapi/server.go` (`/channel/ops` — leader check, 503 path), `api/v1alpha1` (the new
-claim fields on `ConversationStatus`, plus CRD regeneration in
+claim fields and `status.threads[].undeliveredReply` on `ConversationStatus`, plus CRD regeneration in
 `chart/crds/`). New dependency: `github.com/ThreeDotsLabs/watermill` in
 `platform/manager/go.mod` (the one module in this repository that already
 takes dependencies).

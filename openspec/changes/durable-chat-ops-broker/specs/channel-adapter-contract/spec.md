@@ -18,6 +18,7 @@ Every operation SHALL carry a stable id, the channel and conversation names, a k
 | `send` | a typed message (`signal`, `answer`, `relay`, or `notice`) with markdown-valued free text and typed structured fields, plus the target thread id |
 | `ensure-topic` | a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`), never a rendered title string — `pipeline` is inferred and MAY be empty |
 | `close-topic` | the target thread id, asking the adapter to archive or close that thread on its transport |
+| `delete-conversation` | the target thread id and the notice, reporting that the conversation ended for good, as the base capability defines |
 
 Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility. The manager SHALL emit no transport markup and declare no maximum message size.
 
