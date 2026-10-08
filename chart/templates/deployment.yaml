@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-manager
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: agentops-manager
@@ -16,6 +16,17 @@ spec:
         app.kubernetes.io/name: agentops-manager
     spec:
       serviceAccountName: {{ .Values.serviceAccounts.manager }}
+      # Hard requirement, not a preference: two manager pods on one node
+      # defeats the point of a second replica (the node is still a single
+      # point of failure), and the leader-elected reconcile loop means a
+      # pod that cannot schedule simply waits rather than losing work.
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: agentops-manager
+              topologyKey: kubernetes.io/hostname
       {{- with .Values.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}

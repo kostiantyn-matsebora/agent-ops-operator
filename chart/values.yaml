@@ -2,6 +2,12 @@ image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
   tag: 0.57.3
 
+# Manager replica count. Safe above 1: the controller's reconcile loop is
+# leader-elected (cmd/manager/main.go), and /status et al. are NOT
+# leader-gated (invariants.md), so every replica serves the HTTP API. The
+# Deployment's own podAntiAffinity (below) keeps replicas off the same node.
+replicas: 2
+
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
 # and does not count. Over-cap work is not dropped — it waits in phase Pending

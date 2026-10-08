@@ -547,6 +547,7 @@ names what is not covered.
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
 | `maxQueuedConversations` | `50` | the backlog bound. Past it, new signals are declined and the sender is told |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
+| `replicas` | `2` | manager pods. Leader-elected for reconciling, every replica serves the HTTP API. A required `podAntiAffinity` keeps replicas off the same node |
 
 ### The agent's power
 
