@@ -86,6 +86,10 @@ binds a human channel.
 - **WHEN** the operator opens a root with an empty bound-channel set
 - **THEN** no composer is shown and the pane says there is no channel to reply through
 
+#### Scenario: A closed conversation is read-only
+- **WHEN** the operator opens a root in phase `Closed` that still has bound channels
+- **THEN** no composer is shown and the pane says the conversation is closed
+
 ### Requirement: A member names its place in the tree
 A member's thread header SHALL show the chain from the uncaused root through
 every parent to the member, each named by the entry it was invoked as. Each

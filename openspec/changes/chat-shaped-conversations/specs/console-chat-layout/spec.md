@@ -67,6 +67,19 @@ The widths and the inbox's collapsed state are the viewer's own:
 - **WHEN** the browser refuses local storage
 - **THEN** the view renders at the default widths and every function still works
 
+The close confirmation's "don't ask again" opt-out is the same kind of
+preference. It SHALL be remembered in the viewer's browser under its own key
+(`agentops.console.skipCloseConfirm`), SHALL NOT be written to any server-side
+state, and a browser that cannot store it SHALL ask every time.
+
+#### Scenario: The close confirmation opt-out survives a reload
+- **WHEN** the operator chooses "don't ask again" on the close confirmation and reloads the page
+- **THEN** closing a conversation no longer asks for confirmation
+
+#### Scenario: Opt-out storage unavailable
+- **WHEN** the browser refuses local storage
+- **THEN** closing a conversation asks for confirmation every time and still works
+
 ### Requirement: The inbox collapses to icons and keeps its badges
 The inbox column SHALL collapse to an icon strip and expand again from a
 control at its foot. Collapsed, every scope SHALL keep its icon, its name as
