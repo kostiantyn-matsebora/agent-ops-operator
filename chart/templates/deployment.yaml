@@ -6,7 +6,20 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-manager
 spec:
-  replicas: {{ .Values.replicas }}
+  # HARDCODED, never a value — NOT safe above 1 yet, and an overridable
+  # number is how it went to 2 the first time. The reconcile loop is
+  # leader-elected, but `internal/chat.OpQueue` is in-memory, per-PROCESS,
+  # and populated only by the leader's reconciler. httpapi's /channel/ops
+  # (the endpoint adapters long-poll to claim chat ops) is NOT leader-gated,
+  # so with >1 replica behind one Service an adapter's poll can land on the
+  # non-leader and see a permanently empty queue — every ensure-topic
+  # silently never completes for conversations whose poll lands there.
+  # Measured live: half of all new chat-bound conversations stuck in Queued
+  # forever, pods cycling on the idle TTL, no error anywhere. Raising this
+  # again needs OpQueue made cross-replica-safe first (shared state via the
+  # API server, or routing /channel/ops to the leader only) — not merely
+  # bumping the number, and not merely re-exposing it as a value either.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: agentops-manager
