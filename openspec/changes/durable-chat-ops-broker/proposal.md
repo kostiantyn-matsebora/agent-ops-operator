@@ -95,9 +95,16 @@ Measured live on the reference install. The manager is pinned back to
 
 **Code**: `platform/manager/internal/chat/ops.go` (rewritten backing
 store), `internal/controller/conversation_controller.go` (every `OpQueue`
-call site), `internal/httpapi/server.go` (`/channel/ops` — leader check, 503 path), `api/v1alpha1` (the new
-claim fields and `status.threads[].undeliveredReply` on `ConversationStatus`, plus CRD regeneration in
-`chart/crds/`). New dependency: `github.com/ThreeDotsLabs/watermill` in
+call site), `internal/httpapi/server.go` (`/channel/ops` — leader check, 503 path).
+
+**API**: `api/v1alpha1` (the new claim fields and
+`status.threads[].undeliveredReply` on `ConversationStatus`), plus CRD
+regeneration in `chart/crds/`.
+
+**Chart**: `chart/values.yaml` and `chart/templates/` (the new
+`claimStalenessSeconds` value, rendered into the manager's configuration).
+
+**Dependency**: new, `github.com/ThreeDotsLabs/watermill` in
 `platform/manager/go.mod` (the one module in this repository that already
 takes dependencies).
 
@@ -111,7 +118,7 @@ takes dependencies).
 - `.claude/rules/gotchas.md` — the replicas-break-chat-delivery incident,
   so the next person to raise `replicas` without reading this far does not
   re-discover it live.
-- `docs/configuration.md` — the `replicas` row's "NOT safe to raise yet"
+- `docs/configuration.md` — the new `claimStalenessSeconds` row, and the `replicas` row's "NOT safe to raise yet"
   caveat is lifted once this ships.
 - `docs/CHANGELOG.md` — the adapter-facing 503-retry contract change, and
   that `replicas` is safe again.
@@ -121,6 +128,7 @@ takes dependencies).
 **Adopter site**: no page beyond `docs/configuration.md`'s `replicas` row
 is affected.
 
-This is an internal resilience fix with no new install-time decision and
-no new chart value an adopter must set. The URL and op shapes are
+This is an internal resilience fix with no new install-time decision.
+`claimStalenessSeconds` is a new chart value an adopter MAY set, and it
+has a default. The URL and op shapes are
 unchanged. The adapter-author guide gains only the 503-retry note named above.
