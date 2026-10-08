@@ -156,3 +156,41 @@ describe('an activity gap', () => {
     expect(screen.getByText(/not recorded/)).toBeInTheDocument()
   })
 })
+
+describe('a folded run can be expanded back out', () => {
+  it('shows every event with its own latency, and collapses back to the summary', async () => {
+    const events = [
+      ev('c1', 'run.dispatched', 'r1', '2024-01-01T00:00:01Z', { latencyMs: 300 }),
+      ev('c2', 'runtime.starting', 'r1', '2024-01-01T00:00:02Z'),
+    ]
+    render(<Timeline messages={[]} events={events} presence={false} />)
+    const expandButton = screen.getByText('2 events')
+    fireEvent.click(expandButton)
+    expect(screen.getByText('run dispatched')).toBeInTheDocument()
+    expect(screen.getByText('(0.3s)')).toBeInTheDocument()
+    expect(screen.getByText('runtime starting')).toBeInTheDocument()
+    expect(screen.queryByText('run dispatched · runtime starting')).toBeNull()
+    fireEvent.click(screen.getByText('collapse'))
+    expect(screen.getByText('run dispatched · runtime starting')).toBeInTheDocument()
+  })
+
+  it('offers no expand toggle for a run folding only one event', () => {
+    const events = [ev('c1', 'run.dispatched', 'r1', '2024-01-01T00:00:01Z')]
+    render(<Timeline messages={[]} events={events} presence={false} />)
+    expect(screen.queryByText(/events$/)).toBeNull()
+  })
+})
+
+describe('the typing row names the pipeline that is working', () => {
+  it('shows "<pipeline> is working…" beside the typing dots when a pipeline name is given', () => {
+    render(<Timeline messages={[]} events={[]} presence pipelineName="ha-control" />)
+    expect(screen.getByText('ha-control')).toBeInTheDocument()
+    expect(screen.getByText(/is working…/)).toBeInTheDocument()
+  })
+
+  it('shows only the typing dots with no pipeline name', () => {
+    render(<Timeline messages={[]} events={[]} presence />)
+    expect(screen.queryByText(/is working…/)).toBeNull()
+    expect(screen.getByTestId('typing')).toBeInTheDocument()
+  })
+})

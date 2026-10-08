@@ -8,10 +8,17 @@ const closeMutate = vi.fn()
 const deleteMutate = vi.fn()
 const markReadMutate = vi.fn()
 const markUnreadMutate = vi.fn()
+const closeReset = vi.fn()
+const deleteReset = vi.fn()
+// Overridable per test — the default mirrors "nothing has completed yet",
+// which is every test below except the ones that exercise the merged result
+// (`close.data`/`del.data` truthy only once a batch has actually finished).
+let closeState: { data?: unknown; error?: unknown; isPending?: boolean } = {}
+let deleteState: { data?: unknown; error?: unknown; isPending?: boolean } = {}
 
 vi.mock('../../api/hooks', () => ({
-  useCloseConversations: () => ({ mutate: closeMutate, data: undefined, error: null, isPending: false, reset: vi.fn() }),
-  useDeleteConversations: () => ({ mutate: deleteMutate, data: undefined, error: null, isPending: false, reset: vi.fn() }),
+  useCloseConversations: () => ({ mutate: closeMutate, data: undefined, error: null, isPending: false, reset: closeReset, ...closeState }),
+  useDeleteConversations: () => ({ mutate: deleteMutate, data: undefined, error: null, isPending: false, reset: deleteReset, ...deleteState }),
   useMarkRead: () => ({ mutate: markReadMutate, data: undefined, error: null, isPending: false, reset: vi.fn() }),
   useMarkUnread: () => ({ mutate: markUnreadMutate, data: undefined, error: null, isPending: false, reset: vi.fn() }),
 }))
@@ -24,10 +31,14 @@ function conv(name: string, over: Partial<ConversationSummary> = {}): Conversati
 }
 
 beforeEach(() => {
-  closeMutate.mockClear()
-  deleteMutate.mockClear()
+  closeMutate.mockReset()
+  deleteMutate.mockReset()
   markReadMutate.mockClear()
   markUnreadMutate.mockClear()
+  closeReset.mockClear()
+  deleteReset.mockClear()
+  closeState = {}
+  deleteState = {}
 })
 
 function renderBar(items: ConversationSummary[], selected: Set<string>, over: Partial<React.ComponentProps<typeof SelectionBar>> = {}) {
@@ -132,5 +143,50 @@ describe('a member reached directly, with no ancestor also selected', () => {
     await userEvent.click(screen.getByTestId('close-selected'))
     await userEvent.click(screen.getByTestId('close-confirm'))
     expect(closeMutate).toHaveBeenCalledWith({ names: ['root-1'], includeWorking: false }, expect.anything())
+  })
+})
+
+describe('the merged result folds a skipped member in beside what the server reported', () => {
+  // member-1's own root is NOT selected (unlike the "dropped silently" case
+  // above) — only an unrelated root-2 is, alongside the member — so member-1
+  // gets an actual "skipped" row rather than being dropped with no trace,
+  // and root-2 gives the batch something to actually send.
+  const items = [
+    conv('root-1', { coordinator: 'root-1' }),
+    conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+    conv('root-2', { coordinator: 'root-2' }),
+  ]
+
+  it('close: a member with no ancestor sent gets its own "skipped" row, and Done dismisses it', async () => {
+    // The mutation "succeeds" synchronously from the test's point of view —
+    // there is no real network here, only the re-render `runClose`'s own
+    // `setCloseSkipped` already triggers, which is what lets a freshly
+    // evaluated `useCloseConversations()` see the updated data below.
+    closeMutate.mockImplementation(() => {
+      closeState = { data: { results: [{ name: 'root-2', outcome: 'closed' }], closed: 1, skipped: 0, failed: 0 } }
+    })
+    renderBar(items, new Set(['member-1', 'root-2']))
+    await userEvent.click(screen.getByTestId('close-selected'))
+    await userEvent.click(screen.getByTestId('close-confirm'))
+    expect(screen.getByText('Close finished')).toBeInTheDocument()
+    expect(screen.getByText(/member of root-1 — act on root-1 instead/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(closeReset).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('close-modal')).toBeNull()
+  })
+
+  it('delete: the same fold, and Done dismisses it', async () => {
+    const closedItems = items.map((c) => ({ ...c, phase: 'Closed' }))
+    deleteMutate.mockImplementation(() => {
+      deleteState = { data: { results: [{ name: 'root-2', outcome: 'deleted' }], deleted: 1, skipped: 0, failed: 0 } }
+    })
+    renderBar(closedItems, new Set(['member-1', 'root-2']))
+    await userEvent.click(screen.getByTestId('delete-selected'))
+    await userEvent.click(screen.getByTestId('delete-confirm'))
+    expect(screen.getByText('Delete finished')).toBeInTheDocument()
+    expect(screen.getByText(/member of root-1 — act on root-1 instead/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(deleteReset).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('delete-modal')).toBeNull()
   })
 })

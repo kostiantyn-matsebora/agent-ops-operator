@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
@@ -346,5 +346,52 @@ describe('tree guide lines (distinguishing nesting levels from one another, not 
     // which is the whole point: today's indent alone could not tell a
     // depth-1 and a depth-2 row apart at a glance past two levels.
     expect(li.children).toHaveLength(3)
+  })
+})
+
+describe('a parent missing from the current view', () => {
+  it('shows a "parent missing" tag naming the parent, for a member whose parent is absent', () => {
+    const row = conv('orphan-1', { causedBy: { parent: 'root-gone', entry: 'diagnose' } })
+    renderRow(row, { depth: 1, parentMissing: true })
+    expect(screen.getByText('parent missing')).toBeInTheDocument()
+    expect(screen.getByTitle('parent root-gone is not in view')).toBeInTheDocument()
+  })
+
+  it('never shows it for a root, even if parentMissing were somehow set', () => {
+    const row = conv('root-1', { coordinator: 'root-1' })
+    renderRow(row, { parentMissing: true })
+    expect(screen.queryByText('parent missing')).not.toBeInTheDocument()
+  })
+})
+
+describe('the row menu\'s navigation actions, through the real row (regression: wired to a stub in isolation only)', () => {
+  const realLocation = window.location
+  const realClipboard = navigator.clipboard
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { value: realLocation, configurable: true })
+    Object.defineProperty(navigator, 'clipboard', { value: realClipboard, configurable: true })
+  })
+
+  it('"Open in new tab" opens this row\'s own conversation URL', async () => {
+    Object.defineProperty(window, 'location', { value: { origin: 'https://console.example' }, configurable: true })
+    const openSpy = vi.fn()
+    window.open = openSpy
+    const row = conv('checkout-api')
+    renderRow(row)
+    await userEvent.click(screen.getByLabelText(`actions for ${row.title || row.name}`))
+    await userEvent.click(screen.getByText('Open in new tab'))
+    expect(openSpy).toHaveBeenCalledWith('https://console.example/conversations/checkout-api', '_blank', 'noopener')
+  })
+
+  it('"Copy link" writes the same URL to the clipboard', async () => {
+    Object.defineProperty(window, 'location', { value: { origin: 'https://console.example' }, configurable: true })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const row = conv('checkout-api')
+    renderRow(row)
+    await userEvent.click(screen.getByLabelText(`actions for ${row.title || row.name}`))
+    await userEvent.click(screen.getByText('Copy link'))
+    expect(writeText).toHaveBeenCalledWith('https://console.example/conversations/checkout-api')
   })
 })

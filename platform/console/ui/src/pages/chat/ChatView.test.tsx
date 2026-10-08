@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { api } from '../../api/client'
 import { ChatView } from './ChatView'
 import type { ConversationSummary, VocabularyEntry } from '../../api/types'
 
@@ -387,5 +388,106 @@ describe('keyboard navigation', () => {
     screen.getByTestId('chat-view').focus()
     await userEvent.keyboard('{Escape}')
     expect(screen.getByText('Select')).toBeInTheDocument()
+  })
+})
+
+describe('a modifier-click toggles selection instead of opening (design D-A)', () => {
+  it('ctrl-click enters selection mode and selects just that row, without navigating', () => {
+    renderAt('/conversations')
+    fireEvent.click(screen.getByTestId('open-a'), { ctrlKey: true })
+    expect(screen.getByText('Done selecting')).toBeInTheDocument()
+    expect(screen.getByLabelText('select a')).toBeChecked()
+    expect(screen.queryByTestId('thread-pane')).toBeNull()
+  })
+
+  it('meta-click does the same', () => {
+    renderAt('/conversations')
+    fireEvent.click(screen.getByTestId('open-b'), { metaKey: true })
+    expect(screen.getByLabelText('select b')).toBeChecked()
+  })
+
+  it('clicking the same row again toggles it back off', () => {
+    renderAt('/conversations')
+    fireEvent.click(screen.getByTestId('open-a'), { ctrlKey: true })
+    expect(screen.getByLabelText('select a')).toBeChecked()
+    fireEvent.click(screen.getByTestId('open-a'), { ctrlKey: true })
+    expect(screen.getByLabelText('select a')).not.toBeChecked()
+  })
+})
+
+describe('opening a row clears its own "new" tag', () => {
+  it('an arrived row loses the tag once opened', async () => {
+    const original = items
+    items = [conv('a'), conv('b'), conv('c')]
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/conversations']}>
+        <Routes>
+          <Route path="/conversations" element={<ChatView />} />
+          <Route path="/conversations/:name" element={<ChatView />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    items = [conv('fresh'), ...items]
+    rerender(
+      <MemoryRouter initialEntries={['/conversations']}>
+        <Routes>
+          <Route path="/conversations" element={<ChatView />} />
+          <Route path="/conversations/:name" element={<ChatView />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('new')).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('open-fresh'))
+    expect(screen.queryByText('new')).not.toBeInTheDocument()
+    items = original
+  })
+})
+
+describe('collapsing a single root through its own chevron', () => {
+  it('hides that root\'s members without touching any other root, or the "Expand/Collapse all" state', async () => {
+    const original = items
+    items = [
+      conv('root-1', { coordinator: 'root-1' }),
+      conv('member-1', { causedBy: { parent: 'root-1', entry: 'diagnose' } }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByText('Expand all'))
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('collapse root-1'))
+    expect(screen.queryByTestId('row-member-1')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByLabelText('expand root-1'))
+    expect(screen.getByTestId('row-member-1')).toBeInTheDocument()
+    items = original
+  })
+})
+
+describe('the per-row menu actions reach the real conversation', () => {
+  it('"Exit runtime" sends /exit to the manager for that row', async () => {
+    renderAt('/conversations')
+    await userEvent.click(screen.getByLabelText('actions for a'))
+    await userEvent.click(screen.getByText('Exit runtime'))
+    expect(api.send).toHaveBeenCalledWith('a', '/exit')
+  })
+
+  it('"Close" hands the row to the selection bar\'s own close flow, selected alone', async () => {
+    renderAt('/conversations')
+    await userEvent.click(screen.getByLabelText('actions for a'))
+    await userEvent.click(screen.getByText('Close'))
+    expect(screen.getByText('Done selecting')).toBeInTheDocument()
+    expect(screen.getByLabelText('select a')).toBeChecked()
+    expect(screen.getByLabelText('select b')).not.toBeChecked()
+  })
+
+  it('"Delete" hands a closed row to the selection bar\'s own delete flow, selected alone', async () => {
+    const original = items
+    items = [conv('a', { phase: 'Closed' }), conv('b', { phase: 'Closed' })]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByLabelText('Show closed'))
+    await userEvent.click(screen.getByLabelText('actions for a'))
+    await userEvent.click(screen.getByText('Delete'))
+    expect(screen.getByText('Done selecting')).toBeInTheDocument()
+    expect(screen.getByLabelText('select a')).toBeChecked()
+    expect(screen.getByLabelText('select b')).not.toBeChecked()
+    items = original
   })
 })

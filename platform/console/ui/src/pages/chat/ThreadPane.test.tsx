@@ -122,7 +122,31 @@ const MID_CLOCK_SKEW = conv('mid-clock-skew', {
   created: '2026-10-05T21:19:04Z', threads: [],
 })
 
-const ALL = [ROOT, MID, PLAIN, RICH, ROOT_JOINED, ROOT_INVOKE_ORDER, MID_INVOKE_ORDER, ROOT_CLOCK_SKEW, MID_CLOCK_SKEW]
+// A conversation whose last activity is unread AND joined — the one
+// combination that fires the mark-read effect (item: the effect is a no-op
+// otherwise, and nothing above exercises it).
+const UNREAD_JOINED = conv('unread-1', { joined: true, unread: true, lastActivity: '2024-01-01T00:05:00Z' })
+// `presence` with and without an inflight run id — the header's "working"
+// label names the run only when one is actually inflight.
+const PRESENCE_WORKING = conv('presence-1', { presence: true, inflight: { runId: 'run-9' } })
+const PRESENCE_IDLE = conv('presence-2', { presence: true })
+// A conversation carrying `brief` — the subheading paragraph under the title.
+const BRIEF_1 = conv('brief-1', { brief: 'Investigating a recurring timeout.' })
+// A conversation whose last message offers a choice chip — inserted into the
+// composer on click, never sent straight away (unlike the exit/close icon
+// chips, which run immediately).
+const CHOICES_1 = conv('choices-1')
+// A root whose Coordinator already escalated — the "Escalated" divider in
+// its own transcript.
+const ROOT_ESCALATED = conv('root-escalated', {
+  coordinator: 'root-escalated', threads: [{ channel: 'console', threadId: 't-esc' }], joined: true,
+  budget: { maxTurns: 4, turns: 4, deadline: '2024-06-01T00:00:00Z' }, escalatedAt: '2024-01-01T00:10:00Z',
+})
+
+const ALL = [
+  ROOT, MID, PLAIN, RICH, ROOT_JOINED, ROOT_INVOKE_ORDER, MID_INVOKE_ORDER, ROOT_CLOCK_SKEW, MID_CLOCK_SKEW,
+  UNREAD_JOINED, PRESENCE_WORKING, PRESENCE_IDLE, BRIEF_1, ROOT_ESCALATED,
+]
 const DETAILS: Record<string, ConversationDetail> = {
   'root-1': detailFor(ROOT, {
     transcript: [
@@ -147,17 +171,48 @@ const DETAILS: Record<string, ConversationDetail> = {
     ],
   }),
   'mid-clock-skew': detailFor(MID_CLOCK_SKEW),
+  'unread-1': detailFor(UNREAD_JOINED),
+  'presence-1': detailFor(PRESENCE_WORKING),
+  'presence-2': detailFor(PRESENCE_IDLE),
+  'brief-1': detailFor(BRIEF_1),
+  'choices-1': detailFor(CHOICES_1, {
+    transcript: [{
+      id: 'm1', thread: 'choices-1', kind: 'agent', text: 'Approve the restart?', at: '2024-01-01T00:00:00Z',
+      choices: [{ command: '/approve', label: 'Approve' }],
+    }],
+  }),
+  'root-escalated': detailFor(ROOT_ESCALATED, {
+    transcript: [{ id: 'm1', thread: 'root-escalated', kind: 'agent', text: 'escalating to a human', at: '2024-01-01T00:09:00Z' }],
+    events: [
+      { cursor: 'c1', kind: 'run.dispatched', ts: '2024-01-01T00:00:00Z', status: 'ok', from: { kind: 'Pipeline', name: 'ha-ops' }, to: { kind: 'Conversation', name: 'root-escalated' } },
+      { cursor: 'c2', kind: 'run.completed', ts: '2024-01-01T00:00:05Z', status: 'error', latencyMs: 1500 },
+    ],
+  }),
 }
+
+const markReadMutate = vi.fn()
+// Per-conversation Graph tab fixtures — absent names fall back to the
+// original "not needed here" stub, so every pre-existing test is unaffected.
+// A plain mutable record (not a `vi.fn`), the same pattern `DETAILS` already
+// uses: the mock factory's closure reads it lazily, at call time.
+const GRAPH_STATE: Record<string, { data: unknown; isLoading: boolean; error: unknown }> = {}
+const TOPOLOGY_STATE: { current: { data: unknown; isLoading: boolean; error: unknown } } = {
+  current: { data: undefined, isLoading: false, error: null },
+}
+// The destination typeahead needs real vocabulary entries to offer anything —
+// empty by default (every existing test), overridden per test below.
+let VOCAB_ENTRIES: Array<{ kind: string; name: string; position: string; icon?: string }> = []
 
 vi.mock('../../api/hooks', () => ({
   useConversation: (name: string) => ({ data: DETAILS[name], isLoading: false, error: null }),
   useConversations: () => ({ data: { items: ALL, total: ALL.length, unreadTotal: 0, offset: 0, limit: 200, facets: {} }, isLoading: false, error: null }),
-  useConversationGraph: () => ({ data: undefined, isLoading: false, error: 'not needed here' }),
-  useMarkRead: () => ({ mutate: vi.fn() }),
+  useConversationGraph: (name: string) => GRAPH_STATE[name] ?? { data: undefined, isLoading: false, error: 'not needed here' },
+  useMarkRead: () => ({ mutate: markReadMutate }),
+  usePipelineIcon: () => () => undefined,
   useSession: () => ({ data: { canWrite: true, canOriginate: true } }),
   useSources: () => ({ data: { sources: [] } }),
-  useTopology: () => ({ data: undefined, isLoading: false, error: null }),
-  useVocabulary: () => ({ data: { entries: [] } }),
+  useTopology: () => TOPOLOGY_STATE.current,
+  useVocabulary: () => ({ data: { entries: VOCAB_ENTRIES } }),
 }))
 
 vi.mock('../../api/stream', () => ({
@@ -176,7 +231,12 @@ vi.mock('../../api/client', () => ({
 
 beforeEach(() => {
   sendSpy.mockClear()
+  sendSpy.mockResolvedValue({ id: 'sent' })
   localStorage.clear()
+  markReadMutate.mockClear()
+  for (const k of Object.keys(GRAPH_STATE)) delete GRAPH_STATE[k]
+  TOPOLOGY_STATE.current = { data: undefined, isLoading: false, error: null }
+  VOCAB_ENTRIES = []
 })
 
 function renderPane(name: string) {
@@ -387,5 +447,253 @@ describe('closing from the composer asks first (item 22)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(screen.queryByTestId('close-confirm-modal')).toBeNull()
     expect(sendSpy).toHaveBeenCalledWith('plain-1', '/exit')
+  })
+})
+
+describe('marking read', () => {
+  it('marks a joined, unread conversation read exactly once per activity stamp', () => {
+    renderPane('unread-1')
+    expect(markReadMutate).toHaveBeenCalledWith({ names: ['unread-1'] })
+    expect(markReadMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('never marks read a conversation that is not unread', () => {
+    renderPane('plain-1')
+    expect(markReadMutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('the back button', () => {
+  it('is absent with no onBack given', () => {
+    renderPane('plain-1')
+    expect(screen.queryByRole('button', { name: 'back to the list' })).toBeNull()
+  })
+
+  it('calls onBack when given, and is otherwise an ordinary header button', async () => {
+    const onBack = vi.fn()
+    render(
+      <MemoryRouter>
+        <ThreadPane name="plain-1" onBack={onBack} />
+      </MemoryRouter>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'back to the list' }))
+    expect(onBack).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the presence label', () => {
+  it('names the inflight run when one is actually running', () => {
+    renderPane('presence-1')
+    expect(screen.getByText('working · run run-9')).toBeInTheDocument()
+  })
+
+  it('says only "working" with presence but no inflight run', () => {
+    renderPane('presence-2')
+    expect(screen.getByText('working')).toBeInTheDocument()
+  })
+
+  it('shows no presence label at all for an ordinary idle conversation', () => {
+    renderPane('plain-1')
+    expect(screen.queryByText('working')).toBeNull()
+  })
+})
+
+describe('the brief subheading', () => {
+  it('renders when the conversation carries one', () => {
+    renderPane('brief-1')
+    expect(screen.getByText('Investigating a recurring timeout.')).toBeInTheDocument()
+  })
+
+  it('renders nothing extra when absent', () => {
+    renderPane('plain-1')
+    expect(screen.queryByText('Investigating a recurring timeout.')).toBeNull()
+  })
+})
+
+describe('the YAML view', () => {
+  it('shows the object metadata and the raw YAML', async () => {
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: 'YAML' }))
+    expect(screen.getByTestId('yaml')).toHaveAttribute('aria-label', 'conversation plain-1 YAML')
+    await userEvent.click(screen.getByRole('button', { name: 'Back to transcript' }))
+    expect(screen.getByText('hello')).toBeInTheDocument()
+  })
+})
+
+describe('a coordinator root that has escalated (item 6)', () => {
+  it('shows the Escalated divider and the deadline, in its own transcript', () => {
+    renderPane('root-escalated')
+    expect(screen.getByText(/Escalated/)).toBeInTheDocument()
+    expect(screen.getByText('Deadline')).toBeInTheDocument()
+    expect(screen.getByText('4 of 4')).toBeInTheDocument()
+  })
+})
+
+describe('the Runs view with no completed runs', () => {
+  it('shows an empty state rather than an empty list', async () => {
+    renderPane('root-joined')
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }))
+    expect(screen.getByText('No completed runs')).toBeInTheDocument()
+  })
+})
+
+describe('the thread command typeahead (slash commands)', () => {
+  it('opens on a bare "/", narrows as typed, and Escape dismisses it', async () => {
+    VOCAB_ENTRIES = [
+      { kind: 'builtin', name: 'exit', position: 'thread' },
+      { kind: 'builtin', name: 'close', position: 'thread' },
+    ]
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/')
+    expect(screen.getByTestId('command-typeahead')).toBeInTheDocument()
+    expect(screen.getByText('/exit')).toBeInTheDocument()
+    expect(screen.getByText('/close')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByTestId('command-typeahead')).toBeNull()
+  })
+
+  it('ArrowDown/ArrowUp move the highlighted entry, and Tab picks it', async () => {
+    VOCAB_ENTRIES = [
+      { kind: 'builtin', name: 'exit', position: 'thread' },
+      { kind: 'builtin', name: 'close', position: 'thread' },
+    ]
+    renderPane('plain-1')
+    const field = screen.getByLabelText('message')
+    await userEvent.type(field, '/')
+    await userEvent.keyboard('{ArrowDown}')
+    await userEvent.keyboard('{ArrowUp}')
+    await userEvent.keyboard('{Tab}')
+    expect(field).toHaveValue('/exit')
+    expect(screen.queryByTestId('command-typeahead')).toBeNull()
+  })
+
+  it('Enter picks the highlighted entry exactly like Tab', async () => {
+    VOCAB_ENTRIES = [{ kind: 'builtin', name: 'exit', position: 'thread' }]
+    renderPane('plain-1')
+    const field = screen.getByLabelText('message')
+    await userEvent.type(field, '/')
+    await userEvent.keyboard('{Enter}')
+    expect(field).toHaveValue('/exit')
+  })
+
+  it('clicking an entry in the list picks it too', async () => {
+    VOCAB_ENTRIES = [{ kind: 'builtin', name: 'exit', position: 'thread' }]
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/')
+    await userEvent.click(screen.getByText('/exit'))
+    expect(screen.getByLabelText('message')).toHaveValue('/exit')
+  })
+
+  it('Shift+Enter sends the message directly, bypassing the typeahead', async () => {
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), 'hello there{Shift>}{Enter}{/Shift}')
+    expect(sendSpy).toHaveBeenCalledWith('plain-1', 'hello there')
+  })
+})
+
+describe('an offered choice chip inserts, a thread command chip runs (item: insert vs run)', () => {
+  it('clicking an offered choice fills the composer without sending it', async () => {
+    renderPane('choices-1')
+    await userEvent.click(screen.getByText('Approve'))
+    expect(screen.getByLabelText('message')).toHaveValue('/approve ')
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('clicking the exit icon chip sends /exit immediately, with nothing to insert', async () => {
+    VOCAB_ENTRIES = [{ kind: 'builtin', name: 'exit', position: 'thread' }]
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: '/exit' }))
+    expect(sendSpy).toHaveBeenCalledWith('plain-1', '/exit')
+  })
+})
+
+describe('sending fails', () => {
+  it('shows the server error inline and leaves the composer open', async () => {
+    sendSpy.mockRejectedValueOnce(new Error('network down'))
+    renderPane('plain-1')
+    await userEvent.type(screen.getByLabelText('message'), '/exit')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByText('network down')).toBeInTheDocument()
+  })
+})
+
+describe('a thread that cannot bind a console channel (item: joinHint)', () => {
+  it('offers the fix to claim the source when the manager reports one', () => {
+    GRAPH_STATE['joinhint-1'] = { data: undefined, isLoading: false, error: 'not needed here' }
+    DETAILS['joinhint-1'] = detailFor(conv('joinhint-1'), {
+      joinHint: { reason: 'no Ready Pipeline claims this source', fix: 'kubectl patch ...' },
+    })
+    renderPane('joinhint-1')
+    expect(screen.getByText(/no Ready Pipeline claims this source/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue('kubectl patch ...')).toBeInTheDocument()
+  })
+})
+
+describe('an archived thread', () => {
+  it('says the transcript stays readable, with no composer', () => {
+    DETAILS['archived-1'] = detailFor(conv('archived-1', { joined: false }), { archived: true })
+    renderPane('archived-1')
+    expect(screen.getByText(/The conversation was closed/)).toBeInTheDocument()
+  })
+})
+
+describe('the Graph tab', () => {
+  it('shows the re-wired notice and the graph once both the conversation graph and the topology resolve', async () => {
+    GRAPH_STATE['plain-1'] = {
+      data: {
+        nodes: [], edges: [], eventNodeKinds: {},
+        events: [{ cursor: 'g1', kind: 'run.dispatched', ts: '2024-01-01T00:00:00Z', status: 'ok' }],
+        diverged: true, pipeline: 'ha-ops',
+      },
+      isLoading: false, error: null,
+    }
+    TOPOLOGY_STATE.current = {
+      data: {
+        topology: { nodes: [], edges: [], eventNodeKinds: {} },
+        consoleChannel: 'console', unjoinedPipelines: [], synced: {},
+        stream: { connected: true, events: 0, resyncs: 0 }, oldestEvent: '2024-01-01T00:00:00Z', metricsAvailable: true,
+      },
+      isLoading: false, error: null,
+    }
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Graph' }))
+    expect(screen.getByText(/re-wired since this ran/)).toBeInTheDocument()
+    expect(screen.getByTestId('graph-stub')).toBeInTheDocument()
+  })
+
+  it('shows an error state when the conversation graph could not be built', async () => {
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Graph' }))
+    expect(screen.getByText('Could not build the graph')).toBeInTheDocument()
+  })
+
+  it('shows an error state when the topology itself failed to load', async () => {
+    GRAPH_STATE['plain-1'] = {
+      data: { nodes: [], edges: [], eventNodeKinds: {}, events: [], diverged: false },
+      isLoading: false, error: null,
+    }
+    TOPOLOGY_STATE.current = { data: undefined, isLoading: false, error: 'topology down' }
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Graph' }))
+    expect(screen.getByText('Could not load the topology')).toBeInTheDocument()
+  })
+})
+
+describe('the Sequence tab', () => {
+  it('shows an empty state with nothing recorded', async () => {
+    renderPane('plain-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Sequence' }))
+    expect(screen.getByText('No recorded hops for this conversation')).toBeInTheDocument()
+  })
+
+  it('lists every hop with its endpoints, an error marker and formatted latency', async () => {
+    renderPane('root-escalated')
+    await userEvent.click(screen.getByRole('button', { name: 'Sequence' }))
+    expect(screen.getByText('run.dispatched')).toBeInTheDocument()
+    expect(screen.getByText('Pipeline/ha-ops → Conversation/root-escalated')).toBeInTheDocument()
+    expect(screen.getByText('run.completed')).toBeInTheDocument()
+    expect(screen.getByText('∅ → ∅')).toBeInTheDocument()
+    expect(screen.getByText('error')).toBeInTheDocument()
+    expect(screen.getByText('1.50s')).toBeInTheDocument()
   })
 })
