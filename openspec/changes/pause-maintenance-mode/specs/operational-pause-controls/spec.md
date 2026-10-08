@@ -44,7 +44,7 @@ JSON body, patching exactly one spec field and returning the result:
 | Pause a source | `POST /admin/pause-signal-source` | `{"name"}` | that SignalSource's `spec.paused` to `true` |
 | Resume a source | `POST /admin/resume-signal-source` | `{"name"}` | that SignalSource's `spec.paused` to `false` |
 | Pause a route | `POST /admin/pause-pipeline` | `{"kind": "pipeline"\|"coordinator", "name"}` | the named Pipeline's or Coordinator's `spec.paused` to `true` |
-| Resume a route | `POST /admin/resume-pipeline` | `{"kind", "name"}` | the named Pipeline's or Coordinator's `spec.paused` to `false` |
+| Resume a route | `POST /admin/resume-pipeline` | `{"kind": "pipeline"\|"coordinator", "name"}` | the named Pipeline's or Coordinator's `spec.paused` to `false` |
 | Set maintenance mode | `POST /admin/set-maintenance-mode` | `{}` | the honored `MaintenanceMode` singleton's `spec.paused` to `true` |
 | Clear maintenance mode | `POST /admin/clear-maintenance-mode` | `{}` | the honored `MaintenanceMode` singleton's `spec.paused` to `false` |
 

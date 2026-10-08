@@ -211,7 +211,7 @@
 - [ ] 8a.5 `docs/configuration.md`: `global.agentops.maintenanceMode.paused`
       value entry (reversible by `helm upgrade`, so configuration rather
       than installation).
-- [ ] 8a.6 `CHANGELOG.md`: new entry, newest first.
+- [ ] 8a.6 `docs/CHANGELOG.md`: new entry, newest first.
 - [ ] 8a.7 `.claude/rules/invariants.md`'s own edit (task 5.1) counted
       here too, since it documents a changed invariant.
 
