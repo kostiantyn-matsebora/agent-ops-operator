@@ -165,6 +165,10 @@ A root a PERSON started SHALL NEVER be closed by the reaper. This covers a
 root reached through an addressed `/<pipeline> <task>` command or a bare
 chat message, never a machine signal.
 
+Detected the same way `aops-mcp-server`'s widened `close` bound does: no
+`spec.signal` at all, or `spec.signal` carrying `agentops.dev/channel` —
+the label `chat-signal-origination` requires on every chat signal.
+
 This holds whatever the re-check finds, however long the root has sat open.
 
 `aops-mcp-server`'s `close` bound enforces this mechanically. The reaper's
