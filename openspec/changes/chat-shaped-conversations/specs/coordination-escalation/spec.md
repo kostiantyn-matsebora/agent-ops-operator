@@ -41,14 +41,10 @@ the ordinary rule. Nothing about an input's timing relative to
 - **WHEN** a person replies in an uncaused root's thread before the agent has escalated
 - **THEN** the reply is delivered as an input, the same as any other bound conversation
 
-#### Scenario: Escalate posts into the thread that is already open
-- **WHEN** an uncaused root escalates with a message
-- **THEN** the message posts into every one of its already-bound channels
-- **AND** no channel is newly bound by the call
-
 #### Scenario: Escalate posts the digest into the open thread
-- **WHEN** an uncaused conversation escalates with a message
-- **THEN** that message is posted into each already-open thread as the digest
+- **WHEN** an uncaused root escalates with a message
+- **THEN** that message posts into every one of its already-bound channels as the digest
+- **AND** no channel is newly bound by the call
 - **AND** no earlier member result is replayed into it
 
 #### Scenario: After escalation the root is an ordinary multi-channel conversation

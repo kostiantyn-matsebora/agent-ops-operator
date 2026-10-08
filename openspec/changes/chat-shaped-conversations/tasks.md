@@ -38,6 +38,7 @@ from `../agent-ops-worktrees/chat-shaped-conversations` for Go, `npm` under
 ## 5. The thread pane
 
 - [x] 5.1 `pages/chat/ThreadPane.tsx`: header with title, presence chip, bound channels, the secondary views (Runs, Graph, Sequence, YAML) replacing the transcript in place. Verify: a test switches to Runs and back.
+- [x] 5.1.1 `pages/chat/closeConfirm.ts`: typing `/close` in the composer asks for confirmation with a "don't ask again" opt-out, persisted under `agentops.console.skipCloseConfirm` — a per-browser convenience, guarded on both sides exactly like `layout.ts`. Verify: `closeConfirm.test.ts` covers the command match and the guarded read/write, `ThreadPane.test.tsx` covers the dialog and the opt-out skipping it on a later `/close`.
 - [x] 5.2 `pages/chat/Timeline.tsx`: messages interleaved with run events from `detail.events`, folded per run, the activity gap marker, acks rendered as the presence row. Verify: `Timeline.test.tsx` asserts order, folding and that an ack is not a bubble.
 - [x] 5.3 The new-messages divider above the first uncounted message, open scrolls to it, autoscroll only at the bottom, the jump pill with its count. Verify: tests for divider placement and for no scroll while scrolled up.
 - [x] 5.4 Incident timeline on a root: invocation lines, result cards with transcript links, nested cards for a coordinating member, the escalation divider, read-only before escalation with the reason, the parent chain in a member's header, PORTED from `D-incident.html`. Verify: tests over a two-level fixture.

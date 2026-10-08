@@ -55,6 +55,8 @@ view, and SHALL offer secondary views holding:
 - **WHEN** a conversation is bound to several channels
 - **THEN** each binding is shown with its channel and thread
 
+## ADDED Requirements
+
 ### Requirement: A member's own input is not shown twice when rebuilding from runs
 Each entry of `status.runs[].inputs[]` SHALL carry an `origin` field, one of
 `signal`, `channel` or `member` — HOW the input reached the manager, never
