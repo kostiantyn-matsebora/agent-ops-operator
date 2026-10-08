@@ -156,12 +156,18 @@ pipelines:
   # Display only — see kubernetes's `pipelines.observe.icon`.
   icon: aops:alert
   # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
-  # Coordinator's own coordinating agent — what it tells the agent about WHEN
-  # to invoke this entry, never a routing rule of its own. Unused under
-  # `pipelines` mode.
+  # Coordinator's own coordinating agent. It states what this agent IS and CAN
+  # DO, what it cannot, and what to hand it — so a person's question matches it
+  # as readily as an alert does. Never a trigger alone ("a firing alert"), and
+  # never a routing rule of its own. Unused under `pipelines` mode.
   description: >-
-    Investigate a firing alert using live metrics and report the likely cause
-    and its severity.
+    A metrics investigator over the Prometheus query API. Can run PromQL
+    queries against live and historical data, read the rules and targets the
+    backend exposes, tell a spike from a trend, and say what a firing alert
+    means, how severe it is and what the likely cause is. Cannot change
+    anything — no silence, no rule edit, no action on the cluster. Hand it a
+    firing alert, or any question a metric can answer — "is the api latency
+    up", "how much memory does X use".
   # Channels to deliver to, BY NAME — the one object the bundle does not render,
   # so the key is omitted entirely when empty. Empty works: the conversation
   # dispatches immediately and the answer lands in status.runs[].result.
