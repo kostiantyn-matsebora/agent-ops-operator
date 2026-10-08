@@ -392,11 +392,17 @@ export const ConversationRow = forwardRef<HTMLButtonElement, ConversationRowProp
               whether to open the row. The native `title` attribute carries
               the FULL text for hover, since the visible text truncates. */}
           <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+            {/* `display: block` + `flex: 1` + `minWidth: 0` — a bare
+                flex-child <span> keeps its content's natural width and
+                never shrinks to trigger text-overflow, so the row clips
+                mid-word with no ellipsis instead of truncating (the same
+                trio ThreadPane's own title applies, above). */}
             <span
               title={title}
               style={{
                 fontSize: '0.95em', fontWeight: unread ? 700 : 400,
                 color: unread ? 'var(--ao-brand-strong)' : 'var(--ao-text)',
+                display: 'block', flex: 1, minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}
             >
