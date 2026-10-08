@@ -58,6 +58,7 @@
 - [ ] 8.4 `docs/configuration.md` — the `replicas` row's caveat is rewritten to match the new, safe behavior.
 - [ ] 8.5 `docs/CHANGELOG.md` — a new entry naming the adapter-facing 503-retry contract change and that `replicas` is safe to raise again.
 - [ ] 8.6 `docs/configuration.md` — document the chart value that sets the claim staleness bound from 2.3, with its default and rationale.
+- [ ] 8.6a `.github/retired-vocabulary.json` and `.claude/rules/retired-vocabulary.md` — add a term for the retired `/channel/ops` `?type=` parameter, with `contract=` as its replacement, in this change.
 - [ ] 8.7 Re-run `python3 .github/scripts/docs-generate.py` — the CR reference and any generated resource block covering `ConversationStatus` are build output and must not go stale.
 
 ### Adopter site

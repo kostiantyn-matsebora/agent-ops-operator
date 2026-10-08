@@ -89,9 +89,9 @@ A failed `delete-conversation` is logged and not regenerated. No object remains 
 - **WHEN** an adapter completes a `close-topic` op with an error
 - **THEN** the thread stays absent from `status.threadsArchived[]` and the next reconciliation re-enqueues the op
 
-#### Scenario: Failed close-topic is logged, writes no condition and is regenerated
+#### Scenario: Failed close-topic does not block deletion
 - **WHEN** an adapter completes a `close-topic` op with an error
-- **THEN** the failure is logged, no Conversation condition is written, and the next reconciliation re-derives the op
+- **THEN** the failure is logged, no Conversation condition is written, deletion is not blocked, and the next reconciliation re-derives the op while the object exists
 
 #### Scenario: Failed delete-conversation is not regenerated
 - **WHEN** an adapter completes a `delete-conversation` op with an error
