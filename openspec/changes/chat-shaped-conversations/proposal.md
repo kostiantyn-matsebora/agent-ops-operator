@@ -133,7 +133,8 @@ they have not read.
 - `conversation-read-state`: the watermark still never moves backwards for a
   stale report, but a named reader may EXPLICITLY rewind their own entry.
   The channel-wide mark never rewinds.
-- `console-live-runs`: the list's filter set gains Mine, rows gain the
+- `console-live-runs`: the list's filter set gains Mine and the
+  coordination-root filter, rows gain the
   unread count and the last counted message, the unread scenario is
   restated by the new rule, and the detail's views become secondary views of
   one thread pane.

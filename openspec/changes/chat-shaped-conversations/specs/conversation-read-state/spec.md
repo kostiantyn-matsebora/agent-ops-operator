@@ -47,6 +47,12 @@ A report MAY instead ask for a REWIND:
 
 The type changed from a timestamp because the Kubernetes API serializes timestamps at second granularity. A rewind watermark then lost its sub-second part, and a message after it counted as unread forever.
 
+A stored value needs no migration and no dual-read. The old type serialized as an RFC3339 string, so an existing `readAt` is already a valid value of the new type and reads unchanged, at second precision.
+
+#### Scenario: A stored second-granularity watermark survives the upgrade
+- **WHEN** a Conversation written before this change holds `readAt: "2026-08-13T11:04:00Z"`
+- **THEN** it parses as the same instant and the next report or rewind compares against it as usual
+
 #### Scenario: A watermark keeps sub-second precision
 - **WHEN** a reader reports or rewinds to a time with a sub-second component
 - **THEN** the stored value round-trips through the API server with that component intact
