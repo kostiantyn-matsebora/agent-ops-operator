@@ -1,9 +1,21 @@
-## RENAMED Requirements
+## REMOVED Requirements
 
-- FROM: `### Requirement: Escalating the uncaused root binds its channels late, with a first message`
-- TO: `### Requirement: The uncaused root binds its channels at creation, and escalation posts into them`
+### Requirement: Escalating the uncaused root binds its channels late, with a first message
 
-## MODIFIED Requirements
+**Reason**: Channels now bind at creation, unconditionally, instead of
+waiting for the agent to escalate — a human can reply from the moment the
+conversation exists.
+
+The old scenario ("Escalate opens a thread with the digest") described
+exactly the binding-on-escalate mechanism this removes. Escalating no
+longer opens anything, because the thread is already open.
+
+**Migration**: This file's "The uncaused root binds its channels at
+creation, and escalation posts into them" requirement (below) covers the
+replacement behavior, including escalation posting into the already-open
+thread.
+
+## ADDED Requirements
 
 ### Requirement: The uncaused root binds its channels at creation, and escalation posts into them
 
@@ -46,6 +58,8 @@ the ordinary rule. Nothing about an input's timing relative to
 #### Scenario: A member result reaches an already-open thread
 - **WHEN** a member reports its result to an uncaused root before that root has ever escalated
 - **THEN** the result is delivered to the root's bound channels the same way it would be after escalation
+
+## MODIFIED Requirements
 
 ### Requirement: Escalating a nested member bubbles instead of opening a thread
 
