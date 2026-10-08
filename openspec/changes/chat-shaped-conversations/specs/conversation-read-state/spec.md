@@ -47,6 +47,19 @@ A report MAY instead ask for a REWIND:
 
 The type changed from a timestamp because the Kubernetes API serializes timestamps at second granularity. A rewind watermark then lost its sub-second part, and a message after it counted as unread forever.
 
+NO MIGRATION IS NEEDED. Both the old and new CRD schema declare `readAt`
+as `type: string` at the wire level — the old one added `format:
+date-time`, a hint dropped rather than enforced.
+
+A value an older manager stored is already exactly the RFC3339 string
+this one expects, parsed by the same `ParseWatermark`, which accepts a
+string with or without a fractional component. A pre-upgrade watermark
+simply stays at second granularity until the next report advances it.
+
 #### Scenario: A watermark keeps sub-second precision
 - **WHEN** a reader reports or rewinds to a time with a sub-second component
 - **THEN** the stored value round-trips through the API server with that component intact
+
+#### Scenario: A pre-upgrade watermark reads unchanged
+- **WHEN** a `readAt` stored by an older manager, at second granularity, is read after the upgrade
+- **THEN** it parses as the same instant it always did, and nothing rewrites or rejects it

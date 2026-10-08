@@ -643,9 +643,10 @@ row above it:
 
 - **Runs** — `status.runs[]` with status, exit code, result and the messages
   each run consumed, plus the bindings the conversation materialized and its
-  runtime pod. Each run also carries its own `turns`/`toolCalls`, the API
-  server's DERIVED view of that run's `model.call`/`tool.call` activity hops
-  — the manager itself writes neither to the Conversation (docs/contracts.md).
+  runtime pod. Each run also carries its own `turns`/`toolCalls`, the console
+  API's DERIVED view of that run's `model.call`/`tool.call` activity hops
+  (see [the activity contract](contracts.md#the-activity-contract)) — the
+  manager itself writes neither field to the Conversation.
 - **Graph** — the install's topology, **opened on this conversation's
   replay**, with every element its run did not touch dimmed. The three views,
   the hop feed and the content panel are the Topology page's own.

@@ -133,10 +133,10 @@ they have not read.
 - `conversation-read-state`: the watermark still never moves backwards for a
   stale report, but a named reader may EXPLICITLY rewind their own entry.
   The channel-wide mark never rewinds.
-- `console-live-runs`: the list's filter set gains Mine, rows gain the
-  unread count and the last counted message, the unread scenario is
-  restated by the new rule, and the detail's views become secondary views of
-  one thread pane.
+- `console-live-runs`: the list's filter set gains Mine and a
+  coordination-root filter, rows gain the unread count and the last counted
+  message, the unread scenario is restated by the new rule, and the
+  detail's views become secondary views of one thread pane.
 - `conversation-close`: closing a conversation now cascades to every live
   conversation it caused, recursively, for every originator — not only the
   coordinator's own MCP verb. Deleting a `Closed` conversation cascades the
