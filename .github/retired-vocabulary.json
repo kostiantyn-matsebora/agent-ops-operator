@@ -867,7 +867,7 @@
     {
       "id": "channel-ops-type-param",
       "pattern": "/channel/ops\\?type=",
-      "says": "the ops poll names its adapter with ?adapter=<name>; ?type= was replaced",
+      "says": "the ops poll names its adapter with ?adapter=<name>. ?type= was replaced",
       "allow": [
         "removed",
         "retired",

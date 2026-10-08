@@ -83,7 +83,7 @@ Measured live on the reference install. The manager is pinned back to
 
 - `channel-adapter-contract`: the `GET /channel/ops` requirement's
   "non-leader-gated" claim is no longer simply true — a poll SHALL now be
-  rejected with `503` and a `Retry-After` header on a non-leader replica, and a conforming adapter
+  rejected with `503` on a non-leader replica, and a conforming adapter
   MUST retry on that response exactly as it already does on `204`.
 - `state-durability`: "the in-memory operation queue SHALL remain the hot
   path and SHALL NOT become the record of what is owed" is replaced — the
