@@ -120,8 +120,9 @@ it gives the migration a familiar, documented contract (`Publish`,
   unrecovered for longer than necessary → **Mitigation**: size it from
   measured `ensure-topic` round-trip latency against the slowest adapter
   in the reference install (Telegram), with margin, and make it a chart
-  value rather than a constant so an install with a slower transport can
-  raise it.
+  value (`claimStalenessSeconds`, declared in the
+  `durable-chat-ops-broker` delta spec) rather than a constant so an install
+  with a slower transport can raise it.
 - **[Risk]** A conforming adapter that does NOT yet retry on 503 (every
   shipped adapter today predates this change) silently degrades to "poll
   fails, backs off, retries later" rather than retrying immediately →

@@ -35,9 +35,9 @@ claiming replica's identity) and `claimedAt` (the time it was claimed).
 A claim SHALL carry a staleness bound. A claim older than that bound, on a
 channel that still has no thread, SHALL be treated as abandoned.
 
-The bound SHALL be configurable through a chart value rendered into the
-manager's configuration, never a compiled-in constant, so an install with a
-slower transport can raise it.
+The bound SHALL be configurable through the chart value
+`claimStalenessSeconds`, rendered into the manager's configuration, never a
+compiled-in constant, so an install with a slower transport can raise it.
 
 The replica that clears an abandoned claim is always the current leader —
 the same replica that is the only one ever allowed to write a claim in the

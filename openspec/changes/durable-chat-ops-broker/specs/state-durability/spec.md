@@ -87,7 +87,7 @@ The documentation SHALL carry a matrix naming every component, the state it
 holds, that state's declared home, and what a restart of that component costs.
 Adding state to a component SHALL require adding its row.
 
-The matrix SHALL name the Conversation's op claim and
+The matrix SHALL name `status.threads[].claim` and
 `status.threads[].undeliveredReply`: Kubernetes-API state, surviving every
 restart, with a claim held by a former leader cleared on recovery.
 
