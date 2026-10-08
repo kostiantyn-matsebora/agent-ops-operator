@@ -52,6 +52,7 @@
 ### Reference docs
 
 - [ ] 8.1 `docs/contracts.md` — the `/channel/ops` section gains the 503-retry case, matching the modified `channel-adapter-contract` spec.
+- [ ] 8.1a `docs/guides/channel-adapter.md` — "Take operations from the queue" gains the 503-retry note.
 - [ ] 8.2 `.claude/rules/invariants.md` — state the claim-write exception to "HTTP API is NOT leader-gated," and record the staleness pattern as a named precedent beside the existing runtime-pod-reaping one.
 - [ ] 8.3 `.claude/rules/gotchas.md` — record the replicas-break-chat-delivery incident measured this session, so the next person raising `replicas` finds it before re-discovering it live.
 - [ ] 8.4 `docs/configuration.md` — the `replicas` row's caveat is rewritten to match the new, safe behavior.

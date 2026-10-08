@@ -61,3 +61,34 @@ A `close-topic` operation SHALL be derivable from CR state for as long as it is 
 #### Scenario: A conforming adapter retries a 503 immediately
 - **WHEN** an adapter receives a 503 from `/channel/ops`
 - **THEN** it re-polls at once, the same way it already does on `204`, and does not report the response as a failure
+
+### Requirement: Asynchronous operation completion
+The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation result. For `ensure-topic` it is the thread id string to store in the conversation's status. For `close-topic` it is an empty body on success. For failures it is an error the manager records (condition/event) and may retry via regeneration.
+
+The Conversation reconciler SHALL tolerate the pending window between enqueue and completion: inputs stay queued, serial-per-conversation semantics hold, and runtime-pod handling proceeds per existing ordering rules.
+
+A failed `close-topic` SHALL NOT be exempt from regeneration.
+
+The conversation survives its close. The thread stays absent from `status.threadsArchived[]`, so the archive is still owed and the next reconciliation re-derives the op.
+
+A failed `delete-conversation` is logged and not regenerated. No object remains to carry the obligation.
+
+#### Scenario: Topic id lands asynchronously
+- **WHEN** an adapter completes an `ensure-topic` op with `{threadId: "9876"}`
+- **THEN** that channel's binding in the conversation's `status.threads[]` carries `"9876"` and dispatch proceeds normally
+
+#### Scenario: Failed op is surfaced, not silently dropped
+- **WHEN** an adapter completes an op with an error
+- **THEN** the failure is observable on the Conversation (condition or event) and the operation is eligible for regeneration
+
+#### Scenario: Close-topic completes with an empty result
+- **WHEN** an adapter archives the thread and completes the `close-topic` op with an empty body
+- **THEN** the thread is recorded in `status.threadsArchived[]`
+
+#### Scenario: Failed close-topic is re-derived
+- **WHEN** an adapter completes a `close-topic` op with an error
+- **THEN** the thread stays absent from `status.threadsArchived[]` and the next reconciliation re-enqueues the op
+
+#### Scenario: Failed delete-conversation is not regenerated
+- **WHEN** an adapter completes a `delete-conversation` op with an error
+- **THEN** the failure is logged and no op is regenerated

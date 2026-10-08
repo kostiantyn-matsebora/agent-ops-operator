@@ -104,6 +104,7 @@ takes dependencies).
 **Reference docs**:
 
 - `docs/contracts.md` — the `/channel/ops` section gains the 503-retry case.
+- `docs/guides/channel-adapter.md` — "Take operations from the queue" gains the 503-retry note.
 - `.claude/rules/invariants.md` — "HTTP API is NOT leader-gated" needs the
   claim-write exception stated, plus the staleness pattern recorded as a
   named precedent.
@@ -122,4 +123,4 @@ is affected.
 
 This is an internal resilience fix with no new install-time decision and
 no new chart value an adopter must set. The URL and op shapes are
-unchanged, so no adapter-author guide needs a word changed either.
+unchanged. The adapter-author guide gains only the 503-retry note named above.
