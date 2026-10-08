@@ -28,7 +28,7 @@
 ## 4b. Durable derivation of owed ops — backend-developer
 
 - [ ] 4b.1 Release an op's dedup-window entry when it completes with an error and its conversation still exists, so reconciliation re-derives it. Verify: an envtest case fails an op and asserts it is re-derived.
-- [ ] 4b.2 Surface a reply whose delivery to a bound thread has failed as an undelivered thread in `Conversation.status`. Verify: an envtest case asserts the status entry appears on failure and clears on success.
+- [ ] 4b.2 Surface a reply whose delivery to a bound thread has failed as `status.threads[].undeliveredReply` (the owed run id) on that thread in `Conversation.status`. Verify: an envtest case asserts the status entry appears on failure and clears on success.
 - [ ] 4b.3 Remove `close-topic`'s delivery exemption: add `status.threadsArchived[]`, re-derive `close-topic` for any bound thread missing from it, and mark it on completion. Verify: an envtest case fails a close-topic and asserts it is re-derived, and that a delete-conversation failure is not.
 
 ## 5. Chart default and docs values re-enabled — deployment-engineer
@@ -56,6 +56,7 @@
 - [ ] 8.3 `.claude/rules/gotchas.md` — record the replicas-break-chat-delivery incident measured this session, so the next person raising `replicas` finds it before re-discovering it live.
 - [ ] 8.4 `docs/configuration.md` — the `replicas` row's caveat is rewritten to match the new, safe behavior.
 - [ ] 8.5 `docs/CHANGELOG.md` — a new entry naming the adapter-facing 503-retry contract change and that `replicas` is safe to raise again.
+- [ ] 8.7 `docs/configuration.md` — document the chart value that sets the claim staleness bound from 2.3, with its default and rationale.
 - [ ] 8.6 Re-run `python3 .github/scripts/docs-generate.py` — the CR reference and any generated resource block covering `ConversationStatus` are build output and must not go stale.
 
 ### Adopter site

@@ -55,7 +55,7 @@ A `close-topic` operation SHALL be derivable from CR state for as long as it is 
 
 #### Scenario: A poll served by a non-leader is rejected, not answered empty
 - **WHEN** an adapter's poll is handled by a manager replica that is not the current leader
-- **THEN** the manager responds 503, never a 204 that would read as "nothing to deliver" when a claim-worthy op may in fact exist
+- **THEN** the manager responds 503 with a `Retry-After` header, never a 204 that would read as "nothing to deliver" when a claim-worthy op may in fact exist
 
 #### Scenario: A conforming adapter retries a 503 immediately
 - **WHEN** an adapter receives a 503 from `/channel/ops`

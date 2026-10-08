@@ -86,7 +86,8 @@ discarded this session:**
 
 ### A non-leader rejects (503), rather than proxying
 
-**Chosen**: `/channel/ops` on a non-leader returns 503 immediately.
+**Chosen**: `/channel/ops` on a non-leader returns 503 immediately, with a
+`Retry-After` header.
 
 **Why**: the adapter's long-poll client already retries on an
 empty/timed-out response by design (`channel-adapter-contract`'s existing

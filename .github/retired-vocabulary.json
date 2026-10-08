@@ -865,6 +865,21 @@
       ]
     },
     {
+      "id": "channel-ops-type-param",
+      "pattern": "/channel/ops\\?type=",
+      "says": "the ops poll names its adapter with ?adapter=<name>; ?type= was replaced",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "old contract",
+        "replacing",
+        "replaced",
+        "400"
+      ]
+    },
+    {
       "id": "autofix-guard-ci-purpose",
       "pattern": "--purpose ci\\b",
       "says": "the dispute guard is the archive command's alone (autofix-guard.py, no purpose flag); docs-task never fails on a dispute",

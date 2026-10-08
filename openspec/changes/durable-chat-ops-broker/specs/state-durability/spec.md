@@ -34,7 +34,9 @@ unarchived bound thread is an archive still owed, and is re-derivable like
 any other operation.
 
 A reply that remains undelivered to a bound thread after its operation failed
-SHALL be observable on the Conversation rather than only in manager logs.
+SHALL be observable on the Conversation rather than only in manager logs, as
+`status.threads[].undeliveredReply`: the run id whose reply is still owed to
+that thread, cleared when delivery succeeds.
 
 #### Scenario: Reply survives a restart between completion and delivery
 - **WHEN** the manager restarts after `POST /work/done` recorded a run result but before any adapter claimed the resulting `send` op
@@ -74,7 +76,7 @@ SHALL be observable on the Conversation rather than only in manager logs.
 
 #### Scenario: An owed reply is visible on the object
 - **WHEN** a run's reply has failed delivery to a bound thread and has not yet succeeded
-- **THEN** the Conversation reports the undelivered thread in its status, so an empty chat thread can be diagnosed without reading manager logs
+- **THEN** the Conversation reports the undelivered thread in `status.threads[].undeliveredReply`, so an empty chat thread can be diagnosed without reading manager logs
 
 #### Scenario: A claim held only in a dead process's memory is not the record of anything
 - **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
