@@ -40,9 +40,11 @@ the same replica that is the only one ever allowed to write a claim in the
 first place. Clearing one is therefore never a second, competing writer.
 
 A leader failover SHALL NOT, on its own, require waiting for that bound.
-The claim lived only in the dead leader's process memory, so the new
-leader's own next reconcile pass finds no claim at all and proceeds as if
-none was ever made.
+The claim persists on the Conversation's `status`, so the new leader's
+first reconcile pass finds it.
+
+A claim whose holder is not the current leader is treated as abandoned at
+once and cleared, without waiting for the staleness bound.
 
 #### Scenario: A legitimately slow claim is left alone
 
@@ -60,8 +62,8 @@ none was ever made.
 
 - **WHEN** the leader that wrote a claim stops renewing its `Lease` and a
   new leader takes over
-- **THEN** the new leader's reconcile pass finds no claim recorded for
-  that op and dispatches it immediately, without waiting for the
+- **THEN** the new leader's reconcile pass finds a claim held by a
+  former leader, clears it and dispatches the op immediately, without waiting for the
   staleness bound to elapse
 
 ### Requirement: A non-leader rejects rather than proxies a poll it cannot safely answer

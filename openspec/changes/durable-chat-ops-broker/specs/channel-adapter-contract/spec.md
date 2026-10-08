@@ -7,7 +7,7 @@ The parameter names the adapter, the same value Channels carry in `spec.adapter`
 
 A request carrying the retired parameter SHALL fail with 400 naming the replacement, rather than being served an empty list. An outdated adapter then fails loudly instead of appearing to work while delivering nothing.
 
-The polling adapter SHALL additionally declare the outbound contract version it speaks. An absent or unsupported declaration SHALL fail with 400 naming what is expected.
+The polling adapter SHALL additionally declare the outbound contract version it speaks, in the `contract=<version>` query parameter (`GET /channel/ops?adapter=<name>&contract=2&wait=25`). An absent or unsupported declaration SHALL fail with 400 naming what is expected.
 
 A 503 response SHALL be distinguishable from 204: an adapter MUST retry a 503 immediately rather than waiting out its normal idle backoff, and MUST NOT treat it as an error to surface.
 

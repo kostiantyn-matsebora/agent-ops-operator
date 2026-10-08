@@ -78,4 +78,4 @@ SHALL be observable on the Conversation rather than only in manager logs.
 
 #### Scenario: A claim held only in a dead process's memory is not the record of anything
 - **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
-- **THEN** the Conversation's own `status` — not that process's memory — is what the next leader reads to decide whether the op is still owed
+- **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op

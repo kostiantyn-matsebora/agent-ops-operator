@@ -17,10 +17,18 @@
 - [ ] 3.1 Add a leader check to `handleChannelOps` in `internal/httpapi/server.go`. A non-leader returns 503 with a `Retry-After` header, never the leader's own claim-derivation path. Verify: a unit test against a non-leader `Server` asserts 503, and against a leader asserts the existing 200/204 behavior unchanged.
 - [ ] 3.2 Confirm `/channel/ops/{id}/done` needs no leader check — its Patch is an ordinary, unconditional write safe from any replica (`design.md`). Verify: a unit test completes an op from a non-leader-configured `Server` and asserts the Patch still lands.
 
+- [ ] 3.3 Reject a poll carrying the retired `?type=` parameter, or an absent or unsupported `contract=` version, with 400 naming the replacement. Verify: a unit test asserts 400 for each and 200/204 for a conforming request.
+
 ## 4. Shipped adapters retry immediately on 503 — backend-developer
 
 - [ ] 4.1 `channels/telegram`'s poll loop treats 503 the same as an empty/timed-out 204 — retry at once, no backoff, no error logged as a failure. Verify: a conformance test (`test/conformance/`) against a stub manager returning 503 asserts an immediate re-poll.
 - [ ] 4.2 `platform/console`'s own poll loop gets the identical treatment. Verify: the same conformance pattern as 4.1, run against the console's binary.
+
+## 4b. Durable derivation of owed ops — backend-developer
+
+- [ ] 4b.1 Release an op's dedup-window entry when it completes with an error and its conversation still exists, so reconciliation re-derives it. Verify: an envtest case fails an op and asserts it is re-derived.
+- [ ] 4b.2 Surface a reply whose delivery to a bound thread has failed as an undelivered thread in `Conversation.status`. Verify: an envtest case asserts the status entry appears on failure and clears on success.
+- [ ] 4b.3 Remove `close-topic`'s delivery exemption: add `status.threadsArchived[]`, re-derive `close-topic` for any bound thread missing from it, and mark it on completion. Verify: an envtest case fails a close-topic and asserts it is re-derived, and that a delete-conversation failure is not.
 
 ## 5. Chart default and docs values re-enabled — deployment-engineer
 
