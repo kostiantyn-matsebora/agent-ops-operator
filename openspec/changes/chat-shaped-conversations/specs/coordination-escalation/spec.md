@@ -34,7 +34,7 @@ the ordinary rule. Nothing about an input's timing relative to
 - **THEN** the message posts into every one of its already-bound channels
 - **AND** no channel is newly bound by the call
 
-#### Scenario: Escalate opens a thread with the digest
+#### Scenario: Escalate posts the digest into the open thread
 - **WHEN** an uncaused conversation escalates with a message
 - **THEN** that message is posted into each already-open thread as the digest
 - **AND** no earlier member result is replayed into it

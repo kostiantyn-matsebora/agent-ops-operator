@@ -97,11 +97,9 @@ it directly caused.
   `/<pipeline> <task>` command) or whose `spec.signal` carries the chat
   lane's channel label (a bare chat message)
 - **THEN** the manager refuses it, distinctly from an out-of-scope sibling,
-  whatever the sibling root's age — only an alert or a job origination is
-  closable through this bound. Measured live: the reaper reported the same
-  stale finding on a person's unanswered request for 96 consecutive hourly
-  cycles rather than ever being ABLE to close it, which is the intended
-  outcome — the fix here is a clearer refusal reason, not a widened close
+  whatever the sibling root's age
+- **AND** only an alert or a job origination is closable through this bound
+- **AND** the fix here is a clearer refusal reason, not a widened close
 
 #### Scenario: `read` names its own, narrower bound
 
