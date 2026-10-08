@@ -2,6 +2,20 @@ image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
   tag: 0.57.3
 
+# Manager replica count. REVERTED TO 1 (was briefly 2) — NOT actually safe
+# above 1 yet. The reconcile loop is leader-elected, but `internal/chat.OpQueue`
+# is in-memory, per-PROCESS, and populated only by the leader's reconciler.
+# httpapi's /channel/ops (the endpoint adapters long-poll to claim chat ops)
+# is NOT leader-gated, so with >1 replica behind one Service an adapter's poll
+# can land on the non-leader and see a permanently empty queue — every
+# ensure-topic silently never completes for conversations whose poll lands
+# there. Measured live: half of all new chat-bound conversations stuck in
+# Queued forever, pods cycling on the idle TTL, no error anywhere.
+# Raising this again needs OpQueue made cross-replica-safe first (shared
+# state via the API server, or routing /channel/ops to the leader only) —
+# not merely bumping the number.
+replicas: 1
+
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
 # and does not count. Over-cap work is not dropped — it waits in phase Pending
@@ -1290,6 +1304,11 @@ coordinator:
 # and the `coordination` MCPConfig above. No new CRD: this is one more
 # AgentCapability, one more `agents[]` entry.
 reaper:
+  # OFF by default. It is an extra LLM conversation every hour for every
+  # install running coordinator mode, whether or not anything is actually
+  # stuck open — real token cost for a feature most installs will never
+  # need to lean on. An operator who wants self-healing turns it on.
+  enabled: false
   # Its own AgentCapability / agents[] entry name.
   name: reaper
   # Its own AgentProfile name.

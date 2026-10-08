@@ -323,9 +323,13 @@ helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
 
 ## Self-heal: the hourly reaper
 
-`coordinator` mode ships one more `agents[]` entry beyond your bundles: the
-**reaper**, an ordinary `AgentProfile` / `AgentCapability` pair with no
+`coordinator` mode can ship one more `agents[]` entry beyond your bundles:
+the **reaper**, an ordinary `AgentProfile` / `AgentCapability` pair with no
 domain tools of its own.
+
+**OFF by default** (`reaper.enabled: false`). An hourly survey conversation
+is real cost whether or not anything is stuck open, so turn it on
+(`reaper.enabled: true`) rather than finding it running unasked.
 
 | Step | Does |
 |---|---|

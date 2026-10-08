@@ -144,13 +144,17 @@ lets an agent invoke other agents rather than answering a source or a channel
 itself.
 
 **`global.agentops.wiringMode: coordinator` also brings up Coordination**,
-whatever `coordination.enabled` says — the chart-rendered `Coordinator` and
-its self-heal reaper both need that MCP server.
+whatever `coordination.enabled` says — the chart-rendered `Coordinator` needs
+that MCP server.
 
-It needs nothing else to install. The reaper's trigger (every six hours by
-default, `reaper.schedule`) is the chart's own `signals/cron`
-`SignalAdapter`, deployed automatically with it — no bundle to enable and no
-extra component. See
+It needs nothing else to install. The self-heal reaper is OFF by default
+(`reaper.enabled: false`). A conversation surveying every open root is real
+cost, and most installs will never need it.
+
+Turn it on with `reaper.enabled: true`. That also brings up the
+`signals/cron` `SignalAdapter` that gives it its trigger (every six hours
+by default, `reaper.schedule`) — no bundle to enable and no extra
+component. See
 [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}).
 
 ## Configure

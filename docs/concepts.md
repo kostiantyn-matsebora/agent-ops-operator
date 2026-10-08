@@ -1407,7 +1407,7 @@ bundle renders its routes, release-wide:
   `pipelines` mode keeps.
 - **The chart-rendered Coordinator claims every enabled bundle's source** —
   the same ones its `pipelines`-mode routes claim — plus the self-heal
-  reaper's own scheduled `signals/cron` claim, below.
+  reaper's own scheduled `signals/cron` claim, below, when the reaper is on.
 - **No API-server exclusivity exists between the two kinds.** An operator may
   hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
   same cluster, whatever the chart last rendered. The API server accepts
@@ -1419,6 +1419,10 @@ bundle renders its routes, release-wide:
 CRD.** It surveys its own Coordinator's open roots on a configured schedule
 (`reaper.schedule`, four times a day by default) and closes the ones it
 judges healed.
+
+**OFF by default** (`reaper.enabled: false`). A survey conversation is real
+LLM cost whether or not anything is stuck, so an install turns it on rather
+than carrying it the moment `coordinator` mode is.
 
 | Step | Does |
 |---|---|

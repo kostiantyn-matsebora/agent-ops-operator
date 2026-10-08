@@ -1,8 +1,7 @@
 {{- /*
 THE SELF-HEAL REAPER (coordinator-self-heal) — an ORDINARY AgentProfile /
-AgentCapability pair, gated on `coordinator` mode ALONE, no separate flag: the
-reaper is what makes that mode self-healing, not a component an operator opts
-into on top of it.
+AgentCapability pair, gated on `coordinator` mode AND `reaper.enabled`
+(default false — see that value's own comment for why).
 
 It is reached, invoked and bounded by exactly the mechanisms `coordinator-model`
 and `coordination-loop` already define for any `agents[]` entry — NO new CRD.
@@ -11,7 +10,7 @@ chart-rendered Coordinator's `agents[]` and claims the SignalSource below; this
 file renders only the reaper's OWN objects plus the cron adapter that gives it
 a trigger, since no bundle owns a cron lane (design D-E).
 */ -}}
-{{- if eq (include "agentops.wiringMode" .) "coordinator" }}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") .Values.reaper.enabled }}
 {{- $r := .Values.reaper }}
 {{- $g := .Values.global | default dict }}
 ---

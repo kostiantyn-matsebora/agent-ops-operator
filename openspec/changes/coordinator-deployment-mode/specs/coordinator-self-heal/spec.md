@@ -10,6 +10,37 @@ healed — reusing `invoke` and member-result routing unchanged.
 
 ## ADDED Requirements
 
+### Requirement: The reaper is OFF by default, behind its own flag
+
+The reaper SHALL be gated on `reaper.enabled`, DEFAULT FALSE, in addition to
+coordinator mode.
+
+An hourly conversation surveying every open root is real LLM cost. It runs
+whether or not anything is actually stuck. An install opts in rather than
+carrying it the moment coordinator mode is on.
+
+Where `reaper.enabled` is false, no reaper object SHALL render: no
+`SignalAdapter`, no `SignalSource`, no `AgentProfile`, no `AgentCapability`.
+
+The chart-rendered Coordinator SHALL NOT list the reaper in `agents[]` or
+claim its source. The coordinating agent's own prompt SHALL carry no
+self-heal paragraph in that case. Otherwise it would instruct the agent to
+invoke an entry that does not exist.
+
+#### Scenario: Default coordinator mode ships no reaper
+
+- **WHEN** coordinator mode renders with no `reaper.enabled` override
+- **THEN** no reaper `SignalAdapter`, `SignalSource`, `AgentProfile` or
+  `AgentCapability` renders, the Coordinator's `agents[]` has no reaper
+  entry, and its `signalSourceRefs` carries no reaper source
+
+#### Scenario: Turning it on renders the whole reaper
+
+- **WHEN** coordinator mode renders with `reaper.enabled=true`
+- **THEN** every reaper object renders, the Coordinator lists it in
+  `agents[]` and claims its source, and the coordinating agent's prompt
+  carries the self-heal paragraph
+
 ### Requirement: The reaper is an ordinary agents[] entry, not a new kind
 
 Coordinator mode SHALL render one `AgentProfile` and one `AgentCapability`
