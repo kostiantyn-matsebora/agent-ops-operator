@@ -44,7 +44,7 @@ per process (`main.go:156`). It is shared between the reconciler and
 
 ### The durable store is the Conversation CR, not a new object
 
-**Chosen**: add a claim (holder, claimed-at) to
+**Chosen**: add a claim (holder, claimedAt) to
 `status.threads[channel]`, written via ordinary resourceVersion-conditioned
 Patches.
 

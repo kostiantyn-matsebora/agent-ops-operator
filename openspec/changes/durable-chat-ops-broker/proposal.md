@@ -23,7 +23,7 @@ Measured live on the reference install. The manager is pinned back to
 
 - Replace `internal/chat.OpQueue`'s backing store for channel ops with the
   Conversation CR itself. `status.threads[channel]` gains a claim (holder +
-  claimed-at), written by ordinary resourceVersion-conditioned Patches — the
+  claimedAt), written by ordinary resourceVersion-conditioned Patches — the
   same optimistic-concurrency primitive this codebase already uses elsewhere
   (`AgentsInvoked`).
 - Only the LEADER ever writes claim state — both claiming an op out to an
