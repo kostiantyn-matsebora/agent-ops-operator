@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: A Coordinator claims sources and names its escalation channels`
+- TO: `### Requirement: A Coordinator claims sources and names its channels`
+
 ## MODIFIED Requirements
 
 ### Requirement: A Coordinator claims sources and names its channels

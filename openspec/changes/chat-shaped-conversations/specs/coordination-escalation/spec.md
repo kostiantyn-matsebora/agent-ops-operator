@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: Escalating the uncaused root binds its channels late, with a first message`
+- TO: `### Requirement: The uncaused root binds its channels at creation, and escalation posts into them`
+
 ## MODIFIED Requirements
 
 ### Requirement: The uncaused root binds its channels at creation, and escalation posts into them
