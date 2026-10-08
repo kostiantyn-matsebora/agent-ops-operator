@@ -1,6 +1,6 @@
 ## 1. Claim fields on the Conversation CR — api-architect
 
-- [ ] 1.1 Add a claim (holder, claimed-at) to `ConversationStatus.Threads[channel]` in `platform/manager/api/v1alpha1/conversation_types.go`. Verify: the field compiles and carries doc comments matching `durable-chat-ops-broker`'s spec requirements.
+- [ ] 1.1 Add a claim (holder, claimedAt) to `ConversationStatus.Threads[channel]` in `platform/manager/api/v1alpha1/conversation_types.go`. Verify: the field compiles and carries doc comments matching `durable-chat-ops-broker`'s spec requirements.
 - [ ] 1.2 Regenerate deepcopy and CRDs (`controller-gen object` and `controller-gen crd`, per `build-test.md`). Verify: `git diff chart/crds/` shows only the new field added, nothing else changed.
 - [ ] 1.3 Apply the regenerated CRDs directly to a cluster used for verification in this change's own worktree. Verify: `kubectl get crd conversations.agentops.dev -o jsonpath='{...}'` shows the new field present.
 
