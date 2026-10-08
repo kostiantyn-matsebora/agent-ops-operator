@@ -41,9 +41,17 @@ The MANAGER validates the token and enforces a bound per verb:
 | `invoke` | the Coordinator's `agents[]` list |
 | `escalate` | the caller itself — it takes no conversation argument and acts only on the calling conversation, never a member reached through it |
 | `read` | the calling conversation's own subtree, at any depth — never the tree's ultimate root when the caller is nested |
-| `close` | the caller itself, a conversation it directly caused, per `conversation-close`'s rule, OR — when the caller RESOLVES to a Coordinator (`coordinator-owner-reach`'s walk) — any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor, never a deeper descendant reached through an intermediate member, never a member of any kind, and never a root a PERSON started (no `spec.signal` at all, or `spec.signal` carrying the chat lane's channel label) |
+| `close` | the caller itself, a conversation it directly caused, or a sibling root — see the list below |
 | `list_conversations`, `get_conversation` | for a `channel-reader:<channel>` token, the projection of that Channel's conversations and no verb, per `coordinated-agents` |
 | `list_open_roots` | the calling conversation's own Coordinator's open UNCAUSED roots only — see `coordinator-owner-reach` |
+
+The `close` bound, in full:
+
+- The caller itself, or a conversation it directly caused, per `conversation-close`'s rule.
+- OR, when the caller RESOLVES to a Coordinator (`coordinator-owner-reach`'s walk), any open UNCAUSED root of that SAME Coordinator other than the caller's own ancestor.
+- NEVER a deeper descendant reached through an intermediate member.
+- NEVER a member of any kind.
+- NEVER a root a PERSON started (no `spec.signal` at all, or `spec.signal` carrying the chat lane's channel label).
 
 A refusal SHALL reach the caller as an error naming the bound that refused
 it, so the calling agent can report why instead of retrying blindly.
@@ -99,20 +107,21 @@ it directly caused.
 - **THEN** the manager refuses it, distinctly from an out-of-scope sibling,
   whatever the sibling root's age
 - **AND** only an alert or a job origination is closable through this bound
-- **AND** the fix here is a clearer refusal reason, not a widened close
+
+Rationale: the fix here is a clearer refusal reason, not a widened close.
 
 #### Scenario: `read` names its own, narrower bound
 
 - **WHEN** a Coordinator-owner caller's `read` call names a
-  sibling root `list_open_roots` just returned — in scope for `close`,
-  never for `read`
-- **THEN** the manager refuses it with a message naming `read`'s actual
-  bound (the caller's own subtree), never `close`'s wider wording — reusing
-  one shared message across both verbs told a caller a sibling root WAS in
-  scope for `read` when it never has been, which a live self-heal cycle
-  demonstrated: the agent read the refusal as proof the roots must belong
-  to a DIFFERENT Coordinator, when they were its own Coordinator's siblings
-  the entire time
+  sibling root `list_open_roots` just returned
+- **THEN** the manager refuses it, because that root is in scope for `close`
+  and never for `read`
+- **AND** the message names `read`'s actual bound, the caller's own subtree
+- **AND** it never uses `close`'s wider wording
+
+Rationale: one shared message across both verbs told a caller a sibling root
+WAS in scope for `read`. A live self-heal cycle showed the agent concluding
+the roots belonged to a DIFFERENT Coordinator.
 
 ### Requirement: The server sits behind the component wall
 

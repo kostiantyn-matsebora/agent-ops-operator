@@ -39,3 +39,12 @@ A report MAY instead ask for a REWIND:
 #### Scenario: A rewind with no reader is refused
 - **WHEN** a rewind names no reader
 - **THEN** it is refused and nothing is written
+
+### Requirement: Read watermarks are opaque RFC3339Nano strings
+`status.threads[].readAt` and `status.threads[].readers[].readAt` SHALL be strings in RFC3339Nano form, under the same JSON field names.
+
+The type changed from a timestamp because the Kubernetes API serializes timestamps at second granularity. A rewind watermark then lost its sub-second part, and a message after it counted as unread forever.
+
+#### Scenario: A watermark keeps sub-second precision
+- **WHEN** a reader reports or rewinds to a time with a sub-second component
+- **THEN** the stored value round-trips through the API server with that component intact

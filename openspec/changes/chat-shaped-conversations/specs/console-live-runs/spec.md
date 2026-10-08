@@ -54,3 +54,16 @@ view, and SHALL offer secondary views holding:
 #### Scenario: Multi-channel bindings are visible
 - **WHEN** a conversation is bound to several channels
 - **THEN** each binding is shown with its channel and thread
+
+### Requirement: A recorded input names the surface it entered on
+Each entry of `status.runs[].inputs[]` SHALL carry an `origin` field naming the surface the input entered on.
+
+The console SHALL read `origin` to attribute a recorded message to its surface. An entry recorded before the field existed carries none and SHALL be shown without attribution.
+
+#### Scenario: A recorded input carries its origin
+- **WHEN** a person's message enters a conversation on a bound surface and its run is recorded
+- **THEN** the run's input entry carries that surface as `origin`
+
+#### Scenario: An older input has no origin
+- **WHEN** a run recorded before the field existed is rendered
+- **THEN** its inputs render without attribution and nothing is inferred

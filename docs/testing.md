@@ -56,6 +56,12 @@ together, could expose:
   npx playwright test --config e2e-live/playwright.config.ts
   ```
 
+  ```powershell
+  cd platform/console/ui
+  Start-Process kubectl -ArgumentList 'port-forward','svc/agentops-adapter-console','18099:8080'
+  npx playwright test --config e2e-live/playwright.config.ts
+  ```
+
 - **It is WORKSTATION-ONLY**, on the same footing `.claude/rules/remote-session.md`
   gives the local cluster and any deploy. `global-setup.ts` hard-requires an
   already-running cluster — `kubectl` on PATH against a real context, a
