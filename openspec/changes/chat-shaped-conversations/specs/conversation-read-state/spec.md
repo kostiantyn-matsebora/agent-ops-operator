@@ -60,6 +60,6 @@ simply stays at second granularity until the next report advances it.
 - **WHEN** a reader reports or rewinds to a time with a sub-second component
 - **THEN** the stored value round-trips through the API server with that component intact
 
-#### Scenario: A pre-upgrade watermark reads unchanged
-- **WHEN** a `readAt` stored by an older manager, at second granularity, is read after the upgrade
-- **THEN** it parses as the same instant it always did, and nothing rewrites or rejects it
+#### Scenario: A stored second-granularity watermark survives the upgrade
+- **WHEN** a Conversation written before this change holds `readAt: "2026-08-13T11:04:00Z"`
+- **THEN** it parses as the same instant, and the next report or rewind compares against it as usual
