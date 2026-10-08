@@ -100,8 +100,9 @@ Pausing is not, and that gap grows as pipelines and coordinators multiply.
 - **Adopter site**: `docs/console-guide.md` (what the new controls do and
   who can reach them), `docs/guides/` if an existing guide walks pipeline or
   signal-source creation (regenerated marker, not hand-edited).
-- **Terminology/invariants**: `.claude/rules/invariants.md`'s console
-  write-path note ("the only two writes... are POST /channel/inbound and
-  POST /signal/inbound") needs a third line for `/admin/*`, with the same
-  reasoning this proposal states — stay this repository's convention for
-  revising an invariant rather than quietly going around it.
+- **Terminology/invariants**: the console write-path statement in
+  `.claude/rules/structure.md` (the console has no Kubernetes write path
+  and its only write is `POST /channel/inbound`) needs a line for
+  `/admin/*`, with the same reasoning this proposal states. That is this
+  repository's convention for revising an invariant rather than quietly
+  going around it.
