@@ -96,7 +96,7 @@ Pausing is not, and that gap grows as pipelines and coordinators multiply.
   conditions, the `MaintenanceMode` kind in the CRD matrix and the state
   matrix), `docs/contracts.md` (the `/admin/*` HTTP surface), `docs/cr-reference.md`
   (regenerated — new kind, new fields), `docs/console.md` (the new
-  endpoints and RBAC), `CHANGELOG.md`.
+  endpoints and RBAC), `docs/CHANGELOG.md`.
 - **Adopter site**: `docs/console-guide.md` (what the new controls do and
   who can reach them), `docs/guides/` if an existing guide walks pipeline or
   signal-source creation (regenerated marker, not hand-edited).
