@@ -549,7 +549,7 @@ names what is not covered.
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
 | `maxQueuedConversations` | `50` | the backlog bound. Past it, new signals are declined and the sender is told |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
-| `replicas` | `2` | manager pods. Leader-elected for reconciling, every replica serves the HTTP API. A required `podAntiAffinity` keeps replicas off the same node |
+| `replicas` | `1` | manager pods. NOT safe to raise yet — `internal/chat.OpQueue` is in-memory and per-pod, populated only by the leader's reconciler, while `/channel/ops` is not leader-gated. A second replica can silently never complete `ensure-topic` for conversations whose adapter poll lands on it |
 
 ### The agent's power
 
