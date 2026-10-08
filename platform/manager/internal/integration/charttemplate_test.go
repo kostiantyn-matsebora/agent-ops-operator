@@ -2337,6 +2337,7 @@ func everyBundleCoordinator(t *testing.T, args ...string) string {
 	t.Helper()
 	return helmTemplate(t, append([]string{
 		"--set", "global.agentops.wiringMode=coordinator",
+		"--set", "reaper.enabled=true",
 		"--set", "kubernetes.enabled=true",
 		"--set", "kubernetes.pipelines.enabled=true",
 		"--set", "kubernetes.pipelines.observe.enabled=true",

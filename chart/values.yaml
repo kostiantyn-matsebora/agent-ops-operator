@@ -1296,6 +1296,11 @@ coordinator:
 # and the `coordination` MCPConfig above. No new CRD: this is one more
 # AgentCapability, one more `agents[]` entry.
 reaper:
+  # OFF by default. It is an extra LLM conversation every hour for every
+  # install running coordinator mode, whether or not anything is actually
+  # stuck open — real token cost for a feature most installs will never
+  # need to lean on. An operator who wants self-healing turns it on.
+  enabled: false
   # Its own AgentCapability / agents[] entry name.
   name: reaper
   # Its own AgentProfile name.

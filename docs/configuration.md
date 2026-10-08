@@ -432,6 +432,7 @@ A wrong credential fails late and quietly. The pod is created, then sits in
 | Key | Default | Consequence |
 |---|---|---|
 | `global.agentops.wiringMode` | `null`, which resolves to `pipelines` — or `coordinator` when `global.demo.enabled` is `true` | whether an enabled bundle renders an inline `Pipeline` per route (`pipelines`) or a standalone `AgentCapability` gathered under one chart-rendered `Coordinator` (`coordinator`) |
+| `reaper.enabled` | `false` | under `coordinator` mode, an hourly self-heal survey conversation over every open root. Real LLM cost, so it is opt-in |
 
 - **Chart rendering only.** It adds no CRD validation or CEL rule making a
   `Pipeline` and a `Coordinator` mutually exclusive, on one object, one
@@ -439,11 +440,12 @@ A wrong credential fails late and quietly. The pod is created, then sits in
 - **Any other value fails the render**, naming the value and the two it
   accepts.
 - **`coordinator` mode also renders `agentops-mcp-aops`**, whatever
-  `coordination.enabled` says, since the chart-rendered Coordinator and its
-  self-heal reaper both bind that MCP server by construction.
+  `coordination.enabled` says, since the chart-rendered Coordinator binds
+  that MCP server by construction — the self-heal reaper does too, when
+  `reaper.enabled` turns it on.
 - **Reversible.** Set it back, or clear it, and `helm upgrade` — the
-  chart-rendered `Coordinator`, its bundles' `AgentCapability` objects and
-  the reaper stop rendering.
+  chart-rendered `Coordinator` and its bundles' `AgentCapability` objects
+  stop rendering.
 - See [Coordinate agents](https://kostiantyn-matsebora.github.io/agent-ops-operator/guides/coordinate-agents/)
   for what each mode deploys and what to watch for when trying `coordinator`
   mode.
