@@ -44,7 +44,7 @@
 ## 7. E2E tests
 
 - [x] 7.1 Add an e2e lane in `platform/manager/test/e2e/` that runs the manager at `replicas: 2` against a real cluster, posts a chat-bound signal repeatedly, and asserts every resulting conversation gets its thread. (`replicas_test.go`'s `TestReplicasTwoDeliversEveryConsoleThread`) — the chart's own default is now 2, so the WHOLE pack installs at two manager pods, not only this lane.
-- [x] 7.2 The pack run is the cluster tier's, dispatched to `e2e-smoke.yml` on the pull request's branch and judged by CI. It was not run in the authoring session (no docker/k3d there), and the lane's binary compiles (`go test -c -tags e2e`).
+- [ ] 7.2 The pack run is the cluster tier's, dispatched to `e2e-smoke.yml` on the pull request's branch and judged by CI. It was not run in the authoring session (no docker/k3d there), and the lane's binary compiles (`go test -c -tags e2e`).
 
 ## 8. Documentation
 
