@@ -1131,9 +1131,14 @@ func (c *Conversation) SetContextID(id string) {
 }
 
 // ThreadFor returns the thread id bound for a channel, or nil.
+//
+// An empty ThreadID is treated the same as no binding at all: a binding may
+// now exist carrying only a Claim (durable-chat-ops-broker) while its topic is
+// still being created, and every caller here answers "has a thread to post
+// to", never "is there bookkeeping for this channel yet".
 func (c *Conversation) ThreadFor(channel string) *string {
 	for i := range c.Status.Threads {
-		if c.Status.Threads[i].Channel == channel {
+		if c.Status.Threads[i].Channel == channel && c.Status.Threads[i].ThreadID != "" {
 			return &c.Status.Threads[i].ThreadID
 		}
 	}

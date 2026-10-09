@@ -146,6 +146,23 @@ func (s *Server) leaderIdentity(ctx context.Context) string {
 	return *lease.Spec.HolderIdentity
 }
 
+// isLeader reports whether THIS replica currently holds the leader-election
+// Lease, for /channel/ops's durable-chat-ops-broker gate.
+//
+// ReplicaIdentity unset disables the check entirely (every existing test, and
+// any Server wired with no leader election behind it) — that Server answers
+// exactly as it always has. Once set, an UNREADABLE lease answers false, the
+// same conservative direction leaderIdentity's own "best effort" takes:
+// a replica that cannot tell whether it is the leader cannot safely claim an
+// op on one either, and the adapter contract already tolerates retrying a 503
+// immediately.
+func (s *Server) isLeader(ctx context.Context) bool {
+	if s.ReplicaIdentity == "" {
+		return true
+	}
+	return s.leaderIdentity(ctx) == s.ReplicaIdentity
+}
+
 // runtimeSlots counts capacity the way admission does: live pods against the
 // ceiling, and conversations that want a pod and have none.
 func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {

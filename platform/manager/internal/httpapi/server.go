@@ -116,6 +116,14 @@ type Server struct {
 	// Nil is usable: one is built lazily so a zero-valued Server works.
 	StorageBreaker *storagebreaker.Breaker
 
+	// ReplicaIdentity is this process's own identity, the same string the
+	// reconciler's claims carry (durable-chat-ops-broker). Compared against
+	// the leader-election Lease's holder to decide whether THIS replica may
+	// safely claim a channel op on /channel/ops. Empty disables the check
+	// (tests, and any Server built with no leader election behind it at
+	// all), so a zero-valued Server keeps answering as it always has.
+	ReplicaIdentity string
+
 	breakerOnce sync.Once
 }
 
@@ -927,6 +935,18 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !contractOK(w, r) {
+		return
+	}
+	// durable-chat-ops-broker: a claim is written only by the current leader
+	// (the Conversation reconciler, leader-gated by construction), so a
+	// non-leader has no safe way to answer this poll from its own state —
+	// its in-memory OpQueue was never populated for ops this process did not
+	// claim, and proxying to the leader is exactly the complexity this design
+	// chose not to build. Distinguishable from 204 so a conforming adapter
+	// retries at once instead of waiting out its normal idle backoff.
+	if !s.isLeader(r.Context()) {
+		w.Header().Set("Retry-After", "0")
+		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader"})
 		return
 	}
 	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
