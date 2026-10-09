@@ -63,7 +63,7 @@ eventsAdapter:
     # / drainingNodeBound) — it REQUIRES the nodes grant below (cluster-wide
     # installs only) to do anything; an earlier image ignores those keys
     # entirely and a namespaced install always ran this way.
-    tag: 0.4.5
+    tag: 0.4.6
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding

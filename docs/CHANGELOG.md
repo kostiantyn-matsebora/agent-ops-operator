@@ -8,7 +8,18 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [13.4.1] — 2026-10-09
+
+**Every image below is rebuilt against `golang:1.27`, no behaviour change
+beyond clearing two stdlib HIGH CVEs:** CVE-2026-78667 (`net/http`) and
+CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
+
+- `manager` 0.57.4, `console` 0.38.4, `housekeeping` 0.2.5, `context-sync`
+  0.2.5, `egress-proxy` 0.2.6.
+- `channel-telegram` 0.25.1, `gateway-telegram` 0.6.1, `signal-telegram`
+  0.6.5.
+- `signal-alertmanager` 0.7.5, `signal-ha` 0.4.1, `signal-k8s-events` 0.4.6.
+- `signal-cron` 0.0.1-rc3 and `runtime-ollama` 0.1.2.
 
 ### Added
 
@@ -192,6 +203,11 @@ for the source and the reference material beside this file.
   name, and the half an instance does not register is inert. Not breaking: an
   install overriding `home-assistant.mcp.toolsets.*.tools` keeps its own list
   and must add the prefixed names itself.
+- **The self-heal reaper's `cronAdapter` pinned `signal-cron:0.2.0`**, a
+  version `signal-cron` never shipped — only `0.0.1-rc1`/`rc2`/`rc3` exist.
+  Off by default (`reaper.enabled: false`), so no install pulled it, but an
+  install already on `wiringMode: coordinator` is one flag from
+  `ImagePullBackOff`. Now `0.0.1-rc3`.
 
 ### Upgrade
 
