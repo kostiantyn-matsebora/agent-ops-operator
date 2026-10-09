@@ -1076,21 +1076,11 @@ func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, namespace
 		if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &conv); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
-		if existing := conv.Status.Thread(channel); existing != nil && existing.Claim != nil {
-			live := existing.Claim.Holder == r.ReplicaIdentity &&
-				time.Since(existing.Claim.ClaimedAt.Time) <= r.claimStaleness()
-			if live {
-				return false, nil
-			}
+		if r.holdsLiveClaim(&conv, channel) {
+			return false, nil
 		}
 		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		claim := &agentopsv1alpha1.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: metav1.Time{Time: time.Now()}}
-		if binding := conv.Status.Thread(channel); binding != nil {
-			binding.Claim = claim
-		} else {
-			conv.Status.Threads = append(conv.Status.Threads,
-				agentopsv1alpha1.ThreadBinding{Channel: channel, Claim: claim})
-		}
+		r.setClaim(&conv, channel)
 		err := r.Status().Patch(ctx, &conv, patch)
 		if err == nil {
 			return true, nil
@@ -1100,6 +1090,29 @@ func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, namespace
 		}
 	}
 	return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s", channel, name)
+}
+
+// holdsLiveClaim reports whether THIS replica's claim on the channel's
+// ensure-topic is still inside the staleness bound.
+func (r *ConversationReconciler) holdsLiveClaim(conv *agentopsv1alpha1.Conversation, channel string) bool {
+	existing := conv.Status.Thread(channel)
+	if existing == nil || existing.Claim == nil {
+		return false
+	}
+	return existing.Claim.Holder == r.ReplicaIdentity &&
+		time.Since(existing.Claim.ClaimedAt.Time) <= r.claimStaleness()
+}
+
+// setClaim stamps this replica's claim on the channel's binding, creating the
+// binding when none exists yet.
+func (r *ConversationReconciler) setClaim(conv *agentopsv1alpha1.Conversation, channel string) {
+	claim := &agentopsv1alpha1.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: metav1.Time{Time: time.Now()}}
+	if binding := conv.Status.Thread(channel); binding != nil {
+		binding.Claim = claim
+		return
+	}
+	conv.Status.Threads = append(conv.Status.Threads,
+		agentopsv1alpha1.ThreadBinding{Channel: channel, Claim: claim})
 }
 
 // deliverEscalation posts the digest an `escalate` call snapshotted
