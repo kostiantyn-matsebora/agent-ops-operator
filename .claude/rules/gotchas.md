@@ -911,3 +911,32 @@ and re-place `conveyor:run` before the next implement session would start.
   the same standing instruction a person gave once. What changed is which
   EVENTS get to ask `fire` for a restart, not who may authorise one.
 
+**RAISING `manager.replicas` SILENTLY BROKE CHAT DELIVERY, AND THE OpQueue WAS
+IN-MEMORY, PER-PROCESS, THE WHOLE TIME — MEASURED LIVE, 2026-10-08.**
+`internal/chat.OpQueue` is a plain Go map, built once per process and
+populated only by the leader-elected Conversation reconciler.
+
+`/channel/ops` — what a channel adapter long-polls to claim ops — was
+explicitly NOT leader-gated. With more than one manager pod behind one
+Service, a poll landing on the non-leader saw a permanently empty queue.
+
+- **`ensure-topic` never completed for roughly half of all new chat-bound
+  conversations.** They sat in phase `Queued` forever, idling out and
+  cycling their runtime pod on `RUNTIME_IDLE_TTL_M`, with no error anywhere
+  — the same silent-capacity-loss shape as the 2026-08-20 incident two
+  entries up, one layer over.
+- **The stopgap was `replicas: 1`, hardcoded rather than a value** — an
+  overridable number is how it reached 2 the first time, and a number
+  someone can set back is not a fix for a bug that only shows up when they
+  do.
+- **`durable-chat-ops-broker` is the real fix, not a bigger hardcoded
+  floor.** A claim on the Conversation CR itself, written only by the
+  current leader-election Lease holder, recovers a crashed leader's
+  in-flight work through the SAME failover that already gates every
+  reconciler — no second, hand-rolled heartbeat. A poll on a non-leader
+  rejects with 503, retried at once, rather than answering from a queue
+  that replica's own reconciler never populated.
+- **`replicas` is a value again, default 2**, on the same grounds the
+  hardcoded version argued FOR safety: the number now means something,
+  because the thing that made raising it dangerous is what changed.
+

@@ -36,8 +36,14 @@ adapter.
    transport backpressure in-process (below), because finishing after it expires
    means a second claimant posts the same message again.
 
+   **A `503` means this replica cannot safely answer the poll** — it is not
+   the manager's current leader, and only the leader claims an op (multiple
+   manager pods share one `/channel/ops`). **Retry at once**, exactly as you
+   already do on an empty `204`, and never surface it as an error — the
+   claim may well exist, this replica simply cannot see it.
+
    **Every response carries `X-Agentops-Vocabulary-Revision`** — the delivered
-   op and the empty `204` alike. See [What may be
+   op, the empty `204` and the `503` alike. See [What may be
    typed](#what-may-be-typed) below.
 
 2. **Complete each op** with `POST /channel/ops/{id}/done`.

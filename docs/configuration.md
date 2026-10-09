@@ -549,14 +549,8 @@ names what is not covered.
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
 | `maxQueuedConversations` | `50` | the backlog bound. Past it, new signals are declined and the sender is told |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
-
-**Manager replicas are HARDCODED at 1 in `chart/templates/deployment.yaml`,
-not a value.** `internal/chat.OpQueue` is in-memory and per-pod, populated
-only by the leader's reconciler.
-
-`/channel/ops` is not leader-gated, so a second replica can silently never
-complete `ensure-topic` for conversations whose adapter poll lands on it. An
-overridable number is how it went to 2 once already.
+| `replicas` | `2` | how many manager pods run. Safe above 1: an ensure-topic op is claimed on the Conversation CR by the current leader, never served from an in-memory queue a non-leader never populated |
+| `claimStalenessSeconds` | `90` | how long a claimed-but-undelivered thread may sit before the leader treats it as abandoned and retries. Raise it for a slower transport |
 
 ### The agent's power
 
