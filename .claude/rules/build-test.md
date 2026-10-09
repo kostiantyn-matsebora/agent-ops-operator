@@ -127,7 +127,7 @@ with it — warm rebuilds are ~2s through `exec` and are not through `run --rm`.
 docker volume create agentops-gomodcache; docker volume create agentops-gocache
 # volumes are created ROOT-owned; chown once or every write fails as your uid
 docker run --rm -u 0 -v agentops-gomodcache:/gomodcache -v agentops-gocache:/gocache \
-  golang:1.25 chown -R "$(id -u):$(id -g)" /gomodcache /gocache
+  golang:1.27 chown -R "$(id -u):$(id -g)" /gomodcache /gocache
 # TWO MOUNTS, NOT ONE, AND NOT THEIR COMMON PARENT. Every change is worked in a
 # worktree at ../agent-ops-worktrees/<name>, which is invisible inside a
 # container that mounted only this directory — `go build` there fails naming a
@@ -143,7 +143,7 @@ docker run -d --name agentops-go -u "$(id -u):$(id -g)" \
   -v agentops-gocache:/gocache -v agentops-gomodcache:/gomodcache \
   -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \
   -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
-  golang:1.25 sleep infinity
+  golang:1.27 sleep infinity
 # then, for every go command (-w keeps submodules working):
 docker exec -i -w "$PWD" agentops-go go build ./...
 ```
@@ -169,10 +169,10 @@ Four details, each of which cost a debugging round:
 - **`go clean -modcache` fails** (`unlinkat //gomodcache: permission denied`) —
   it tries to remove the mount point. Remove the VOLUME instead.
 
-**THE CONTAINER IS `golang:1.25`, AND IT IS THE ONLY ONE.** That is the
+**THE CONTAINER IS `golang:1.27`, AND IT IS THE ONLY ONE.** That is the
 toolchain every Go image builds with (`.github/docker/go-module.Dockerfile`
 and the manager, console and egress-proxy Dockerfiles — `runtime-claude` is
-Node), and two modules REQUIRE it: `runtimes/ollama/` for
+Node), and two modules REQUIRE at least Go 1.25: `runtimes/ollama/` for
 the official MCP SDK's 1.25 floor, and `platform/manager/` since
 `trivy-image-scanning` bumped `golang.org/x/net` past what Go 1.23 links.
 The other modules still declare `go 1.23` and a newer toolchain builds them
@@ -183,6 +183,14 @@ unchanged, so one container covers the whole tree.
   built — the build toolchain IS the stdlib the image ships. A second container
   named `agentops-go125` existed only for `runtimes/ollama/`; if one is still
   running, remove it rather than keeping two toolchains to disagree.
+- **A `golang:1.25` CONTAINER IS ALSO RETIRED, on the same grounds.** CVE-2026-78667
+  (`net/http`) and CVE-2026-97031 (`crypto/tls`), both HIGH, landed in Go
+  1.25.14's stdlib and failed the fixable-CRITICAL/HIGH gate across every
+  image this container builds — `housekeeping`, `channel-telegram`,
+  `signal-alertmanager`, `runtime-ollama`, `signal-ha`, `mcp-aops` and more,
+  all on one master push. Fixed upstream in 1.26.9 and 1.27.2. The container
+  moved to the current stable line (1.27) rather than the backported one
+  (1.26), so a future stdlib CVE needs one less bump to clear.
 - **CI reads the Go version from each module's `go.mod`**, so it needs no such
   list, and a module that lifts its floor lifts only its own job.
 

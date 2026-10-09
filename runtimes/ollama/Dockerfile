@@ -10,7 +10,7 @@
 # two reasons that each suffice: the MCP SDK needs Go 1.25 where the shared
 # recipe is 1.23, and the image needs git and a shell — a checkout to hold and
 # a Bash tool to run — where the shared recipe is distroless.
-FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
