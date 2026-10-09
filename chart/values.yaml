@@ -2,6 +2,24 @@ image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
   tag: 0.57.3
 
+# How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
+# the Conversation reconciler claims an ensure-topic op on the Conversation CR
+# itself before dispatching it, so a crashed leader's in-flight claim recovers
+# through the SAME leader-election Lease failover that already gates every
+# reconciler, and a poll that lands on a non-leader rejects (503, retried at
+# once) instead of answering from an OpQueue that replica's reconciler never
+# populated. Two is the default rather than one: the whole point of the
+# resilience this release adds is that a second pod is there to take over.
+replicas: 2
+
+# How long an ensure-topic claim may sit with no thread yet before the current
+# leader treats it as abandoned and dispatches the op again — never while the
+# SAME leader that wrote it still holds the Lease and the op is merely slow to
+# come back from an adapter. Sized with margin over a measured ensure-topic
+# round-trip against the slowest shipped adapter (Telegram, forum-topic
+# creation). Raise it for a slower transport.
+claimStalenessSeconds: 90
+
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
 # and does not count. Over-cap work is not dropped — it waits in phase Pending
