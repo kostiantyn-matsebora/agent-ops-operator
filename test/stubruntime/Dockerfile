@@ -3,7 +3,7 @@
 # Published by no release tag (.github/components.sh excludes test/), referenced
 # by no chart default and no sample. If you see it in a real deployment,
 # something is wrong.
-FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod ./

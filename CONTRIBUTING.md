@@ -269,8 +269,8 @@ before anything is published, and runs on demand on any branch
 credential — runs nightly when master moved and on dispatch (`e2e-full.yml`),
 and gates nothing.
 
-`platform/manager/` and `runtimes/ollama/` need Go 1.25; the others declare
-1.23 and build under either. Every image is built with `golang:1.25`, because
+`platform/manager/` and `runtimes/ollama/` need Go 1.25. The others declare
+1.23 and build under either. Every image is built with `golang:1.27`, because
 the toolchain that builds a binary is the standard library it ships.
 
 ### The image scan
