@@ -227,6 +227,14 @@ func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (
 	code, err := m.do(ctx, "GET",
 		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
 			url.QueryEscape(adapter), ContractVersion, waitSeconds), nil, &op)
+	// durable-chat-ops-broker: 503 means the replica that answered is not the
+	// current leader and cannot safely claim an op on this adapter's behalf —
+	// never a failure to surface or back off from, exactly like an ordinary
+	// 204 except the caller should retry at once rather than pacing itself as
+	// it would after a genuine error.
+	if code == http.StatusServiceUnavailable {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

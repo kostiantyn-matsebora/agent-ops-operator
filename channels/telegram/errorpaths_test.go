@@ -108,6 +108,49 @@ func TestPollOnceLogsAndSleepsOnAFailedPoll(t *testing.T) {
 	a.pollOnce(ctx)
 }
 
+// nonLeaderManager answers every ops poll with 503, as a manager replica
+// that is not the current leader does (durable-chat-ops-broker). NextOp
+// must treat it exactly like an empty 204, never as a failure.
+func nonLeaderManager(t *testing.T) *Manager {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	return NewManager(srv.URL, "tok")
+}
+
+func TestNextOpTreats503AsNoOpRatherThanAnError(t *testing.T) {
+	mgr := nonLeaderManager(t)
+	op, _, err := mgr.NextOp(context.Background(), "telegram-ops", 0)
+	if err != nil {
+		t.Fatalf("503 must not surface as an error: %v", err)
+	}
+	if op != nil {
+		t.Fatalf("503 must not be read as a delivered op: %+v", op)
+	}
+}
+
+// pollOnce's only idle backoff is the 5s sleep on NextOp returning an error.
+// A 503 must skip it entirely so a poll pinned to the wrong replica is
+// retried at once, the way it already is after an ordinary 204.
+func TestPollOnceDoesNotSleepOnANonLeaderRejection(t *testing.T) {
+	a := &adapter{
+		mgr: nonLeaderManager(t), pace: newPacer(), completed: newCompletedOps(16),
+		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	done := make(chan struct{})
+	go func() {
+		a.pollOnce(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pollOnce must return at once on 503, not wait out the 5s error backoff")
+	}
+}
+
 func TestPollOnceLogsAndSwallowsAFailedCompleteOp(t *testing.T) {
 	op := Op{ID: "op-2", Channel: "not-served", Kind: "send"}
 	a := &adapter{

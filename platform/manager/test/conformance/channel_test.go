@@ -63,6 +63,7 @@ func TestChannelTelegramConformance(t *testing.T) {
 	topic := tgEnsureTopicAndAssertContract(t, mgr, bot)
 	send := tgSendAndAssertRendered(t, mgr, bot, topic)
 	tgAssertRedeliveredSendNotReposted(t, mgr, bot, send)
+	assertRetriesAtOnceAfterNonLeaderRejection(t, mgr, "ops", "c1")
 	tgAssertInboundPushForwarded(t, mgr, p)
 	tgAssertNoRelayLoopOrUnauthenticated(t, mgr)
 	tgAssertCloseTopicIdempotent(t, mgr, topic)
@@ -183,6 +184,33 @@ func tgAssertRedeliveredSendNotReposted(t *testing.T, mgr *FakeManager, bot *Pro
 	if got := len(botCallsFor(t, bot, "sendMessage")); got != 1 {
 		t.Fatalf("a redelivered op must not post again: %d sendMessage calls", got)
 	}
+}
+
+// assertRetriesAtOnceAfterNonLeaderRejection: durable-chat-ops-broker — a
+// poll rejected with 503 (not the current leader) is treated as "nothing to
+// do right now" and retried, never as a failure. Shared by every adapter's
+// conformance suite, since the behavior is the same contract on every one.
+//
+// This is the black-box half, proving the WIRING end to end (a real 503 off
+// the wire reaches a running adapter and it keeps polling rather than
+// wedging or erroring out); the deterministic, UNIT-level proof that no
+// artificial backoff fires belongs to each adapter's own fast tests
+// (errorpaths_test.go's TestPollOnceDoesNotSleepOnANonLeaderRejection here,
+// and platform/console's own), since a black-box timing assertion at this
+// layer would also have to account for an adapter's own, unrelated pacing
+// (telegram's send-rate budget) and would mostly measure that instead.
+func assertRetriesAtOnceAfterNonLeaderRejection(t *testing.T, mgr *FakeManager, channel, conversation string) {
+	t.Helper()
+	before := len(mgr.OpsRequests())
+	mgr.RejectOpsAsNonLeader(1 << 20)
+	waitFor(t, "at least one non-leader rejection", 30*time.Second,
+		func() bool { return len(mgr.OpsRequests())-before >= 1 })
+
+	mgr.RejectOpsAsNonLeader(0)
+	mgr.QueueOp(map[string]any{"id": "op-nonleader", "channel": channel, "conversation": conversation, "kind": "close-topic",
+		"threadId": "whatever"})
+	waitFor(t, "completion once this replica answers as leader again", 30*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-nonleader"); return n > 0 })
 }
 
 // tgAssertInboundPushForwarded: inbound push with threadId — the router's
@@ -327,4 +355,5 @@ func TestConsoleConformance(t *testing.T) {
 	if mgr.Unauthorized() != 0 {
 		t.Fatalf("%d unauthenticated requests reached the manager", mgr.Unauthorized())
 	}
+	assertRetriesAtOnceAfterNonLeaderRejection(t, mgr, "console", "c1")
 }

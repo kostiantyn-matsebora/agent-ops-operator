@@ -208,6 +208,14 @@ func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds in
 		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
 			url.QueryEscape(channelType), ContractVersion, waitSeconds), nil, &op)
 	rev := hdr.Get(VocabularyRevisionHeader)
+	// durable-chat-ops-broker: 503 means the replica that answered is not the
+	// current leader and cannot safely claim an op on this adapter's behalf —
+	// never a failure to surface or back off from, and distinguished from an
+	// ordinary 204 ONLY so the caller can retry at once rather than pacing
+	// itself as it would after a genuine error.
+	if code == http.StatusServiceUnavailable {
+		return nil, rev, nil
+	}
 	if err != nil {
 		return nil, rev, err
 	}
