@@ -1,11 +1,14 @@
-// Coordinator claiming and addressing (design D-B, D-D, D-E, tasks 2.3/2.3b/2.5
-// of coordinated-agents): a Coordinator claims a signal source exactly as a
-// Pipeline does, fans out its own root conversation with no channel bound at
-// creation, snapshots its limits into status.budget and its own channelRefs as
-// the conversation's escalation targets, and is addressable by name exactly as
-// a Pipeline is — except an addressed root binds ONLY the surface it was
-// addressed from. Invoking members, enforcing the budget and escalating are
-// later tasks (2.6 onward) and are not exercised here.
+// Coordinator claiming and addressing (design D-B, D-E, superseded on channel
+// binding by coordinator-unconditional-channels; tasks 2.3/2.3b/2.5 of
+// coordinated-agents): a Coordinator claims a signal source exactly as a
+// Pipeline does, fans out its own root conversation with its OWN declared
+// channels bound at creation — exactly like a Pipeline's — snapshots its
+// limits into status.budget and its own channelRefs as EscalationChannelRefs
+// too, and is addressable by name exactly as a Pipeline is, with an addressed
+// root ALSO folding in the surface it was addressed from when that is not
+// already one of its declared channels. Invoking members, enforcing the
+// budget and escalating are later tasks (2.6 onward) and are not exercised
+// here.
 package integration
 
 import (
@@ -25,8 +28,10 @@ import (
 
 // mkCoordinator creates a Coordinator claiming sources with an inline
 // capability, mirroring mkPipeline — the coordinated-agents sibling that
-// claims sources exactly as a Pipeline does (design D-B). channels are its
-// ESCALATION targets, never bound at creation.
+// claims sources exactly as a Pipeline does (design D-B). Its channels bind
+// to a conversation it opens at creation, unconditionally
+// (coordinator-unconditional-channels), and are ALSO snapshotted as that
+// root's own EscalationChannelRefs.
 func mkCoordinator(t *testing.T, name string, sources, channels []string, profile string, limits *agentopsv1alpha1.CoordinatorLimits) {
 	t.Helper()
 	co := &agentopsv1alpha1.Coordinator{}
@@ -93,11 +98,12 @@ func TestSharedSourceWiredNamesPipelineAndCoordinator(t *testing.T) {
 	}
 }
 
-// A Coordinator-claimed alert opens a root with NO channel bound — a
-// Coordinator's channelRefs are escalation targets only (design D-D) — and its
-// own limits snapshotted into status.budget (design D-E), its channelRefs
-// snapshotted as the escalation set.
-func TestCoordinatorClaimedSignalOpensUnboundRootWithBudget(t *testing.T) {
+// A Coordinator-claimed alert opens a root with its OWN declared channels
+// ALREADY bound (coordinator-unconditional-channels) — exactly as a
+// Pipeline's own channelRefs bind — and its own limits snapshotted into
+// status.budget (design D-E), its channelRefs ALSO snapshotted as
+// EscalationChannelRefs.
+func TestCoordinatorClaimedSignalOpensRootWithBoundChannelsAndBudget(t *testing.T) {
 	mkProfile(t, "prof-co-root")
 	mkChannel(t, "co-root-escalate", "co-root-ta")
 	mkSignalSource(t, "src-co-root", "am-co-root", "")
@@ -118,8 +124,8 @@ func TestCoordinatorClaimedSignalOpensUnboundRootWithBudget(t *testing.T) {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
 	}
 	conv := convs[0]
-	if len(conv.Spec.ChannelRefs) != 0 {
-		t.Fatalf("a Coordinator-rooted conversation must bind no channel at creation: %+v", conv.Spec.ChannelRefs)
+	if len(conv.Spec.ChannelRefs) != 1 || conv.Spec.ChannelRefs[0].Name != "co-root-escalate" {
+		t.Fatalf("a Coordinator-rooted conversation must bind its own declared channels at creation: %+v", conv.Spec.ChannelRefs)
 	}
 	if conv.Spec.PipelineRef != nil {
 		t.Fatalf("a Coordinator-rooted conversation must carry no pipelineRef: %+v", conv.Spec.PipelineRef)
@@ -142,9 +148,10 @@ func TestCoordinatorClaimedSignalOpensUnboundRootWithBudget(t *testing.T) {
 }
 
 // The bare-chat lane's ONE claimant may be a Coordinator: the message routes
-// to it exactly as it would to a sole Pipeline, and still binds no channel —
-// the person sees nothing until the Coordinator escalates (chat-signal-origination,
-// design's documented risk).
+// to it exactly as it would to a sole Pipeline. This Coordinator declares NO
+// channels of its own, so its root still binds none — a bare-chat
+// origination is NOT folded in the way an ADDRESSED one is (boundChannels'
+// origin-surface guarantee applies only to the addressed path).
 func TestBareChatRoutesToSoleCoordinatorClaimant(t *testing.T) {
 	mkProfile(t, "prof-co-chat")
 	mkChannel(t, "co-chat-chan", "co-chat-ta")
@@ -162,11 +169,11 @@ func TestBareChatRoutesToSoleCoordinatorClaimant(t *testing.T) {
 		t.Fatalf("want 1 conversation routed to the sole Coordinator claimant, got %d", len(convs))
 	}
 	if len(convs[0].Spec.ChannelRefs) != 0 {
-		t.Fatalf("a bare-routed Coordinator conversation binds no channel, even the origin one: %+v",
+		t.Fatalf("a Coordinator declaring no channels still binds none, even the origin one: %+v",
 			convs[0].Spec.ChannelRefs)
 	}
 	if n := len(convsBoundTo(t, "co-chat-chan")); n != 0 {
-		t.Fatalf("the origin channel must show no thread until the Coordinator escalates: %d bound", n)
+		t.Fatalf("with no channel bound, the origin channel shows no thread: %d bound", n)
 	}
 }
 
@@ -215,10 +222,10 @@ func TestAmbiguousBareChatNamesPipelineAndCoordinator(t *testing.T) {
 	}
 }
 
-// Addressing a Coordinator by name binds ONLY the surface it was addressed
-// from — never its escalation channels, which stay reachable only through
-// `escalate` (design D-D, chat-signal-origination).
-func TestAddressedCoordinatorBindsOriginSurfaceOnly(t *testing.T) {
+// Addressing a Coordinator by name binds its OWN declared channels PLUS the
+// surface it was addressed from (coordinator-unconditional-channels), with
+// its own channelRefs ALSO snapshotted as EscalationChannelRefs.
+func TestAddressedCoordinatorBindsItsOwnChannelsPlusTheOriginSurface(t *testing.T) {
 	mkProfile(t, "prof-co-addr")
 	mkChannel(t, "co-addr-origin", "co-addr-ta")
 	mkChannel(t, "co-addr-escalate", "co-addr-tb")
@@ -237,8 +244,13 @@ func TestAddressedCoordinatorBindsOriginSurfaceOnly(t *testing.T) {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
 	}
 	conv := convs[0]
-	if len(conv.Spec.ChannelRefs) != 1 || conv.Spec.ChannelRefs[0].Name != "co-addr-origin" {
-		t.Fatalf("an addressed Coordinator conversation binds ONLY the origin surface: %+v", conv.Spec.ChannelRefs)
+	gotChannels := map[string]bool{}
+	for _, ref := range conv.Spec.ChannelRefs {
+		gotChannels[ref.Name] = true
+	}
+	if len(gotChannels) != 2 || !gotChannels["co-addr-escalate"] || !gotChannels["co-addr-origin"] {
+		t.Fatalf("an addressed Coordinator conversation binds its OWN channels plus the origin surface: %+v",
+			conv.Spec.ChannelRefs)
 	}
 	if len(conv.Spec.EscalationChannelRefs) != 1 || conv.Spec.EscalationChannelRefs[0].Name != "co-addr-escalate" {
 		t.Fatalf("the Coordinator's own channelRefs are still snapshotted for later escalation: %+v",

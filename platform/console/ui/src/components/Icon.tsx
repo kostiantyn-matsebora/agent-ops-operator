@@ -94,15 +94,19 @@ export function Icon({ icon, size = '1em' }: { icon?: string; size?: string }) {
 /**
  * Drops a lane emoji the manager wrote into a conversation TITLE.
  *
- * Titles are composed with a leading 🤖 or 🛠 so a chat surface — which cannot
- * draw an SVG next to a thread name — still says something at a glance. A
- * surface that CAN draw the Pipeline's own icon shows that instead, and would
- * otherwise show both.
+ * Titles are composed with a leading 🤖, 🛠 or 💬 so a chat surface — which
+ * cannot draw an SVG next to a thread name — still says something at a
+ * glance. A surface that CAN draw the Pipeline's own icon shows that
+ * instead, and would otherwise show both. 🤝 is the fourth: a Coordinator
+ * member's title (`internal/chat/coordinate.go`'s `"🤝 " + entryName + ...`),
+ * missing here left a member's own name-prefix strip unable to match —
+ * `stripNamePrefix` compares against the chip name, but the string still
+ * started with the emoji and a space.
  *
- * Deliberately narrow: only the two the manager writes, only at the very
+ * Deliberately narrow: only what the manager writes, only at the very
  * start. Somebody's own emoji in the middle of a title is their text.
  */
-const LANE_ICONS = ['🤖', '🛠', '💬']
+const LANE_ICONS = ['🤖', '🛠', '💬', '🤝']
 
 export function stripLeadingIcon(title: string): string {
   const t = title.trimStart()

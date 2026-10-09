@@ -410,6 +410,26 @@ export interface ThreadBinding {
   readTracked?: boolean
 }
 
+/**
+ * One message a run consumed, as the Conversation records it — the DURABLE
+ * half of a conversation's questions, kept beside the run's own answer.
+ * Absent on a run recorded before the manager kept them (`Run.inputs`,
+ * `omitempty` on the console's own wire).
+ */
+export interface RecordedInput {
+  id: string
+  type?: string
+  text?: string
+  /** `text` is the beginning of a larger payload, not the whole of it. */
+  truncated?: boolean
+  /** The channel the message was typed on. Empty when no surface displayed
+   * it — an alert, a job tick, a posted task, or a Coordinator's own
+   * `invoke` (which addresses no human channel at all). */
+  surface?: string
+  sender?: string
+  receivedAt?: string
+}
+
 export interface Run {
   runId: string
   jobKind?: string
@@ -418,6 +438,34 @@ export interface Run {
   result?: string
   startedAt?: string
   finishedAt?: string
+  /** The messages THIS run consumed — already on the wire
+   * (`platform/console/conversations.go`'s `Run.Inputs`), not previously
+   * modelled here. A member conversation's own task is recorded exactly
+   * this way: it binds no human channel, so this is the only place its task
+   * text lives. */
+  inputs?: RecordedInput[]
+  /** One entry per model call this run made. Absent — never an empty array —
+   * when the runtime did not report this data for the run. */
+  turns?: RunTurn[]
+  /** One entry per tool invocation this run made, same absence rule as
+   * `turns`. */
+  toolCalls?: RunToolCall[]
+}
+
+export interface RunTurn {
+  model?: string
+  tokensIn?: number
+  tokensOut?: number
+  cacheReadTokens?: number
+  stopReason?: string
+}
+
+export interface RunToolCall {
+  tool?: string
+  /** Empty means a BUILT-IN tool, never "missing data" — render accordingly. */
+  server?: string
+  durationMs?: number
+  resultBytes?: number
 }
 
 export interface BlockedReason {
@@ -455,6 +503,18 @@ export interface ConversationBudget {
   turns?: number
 }
 
+/**
+ * The most recent counted-kind message (signal, agent, relay — see
+ * `countedKinds` on the Go side) on a conversation's console thread — the
+ * row's snippet, read or not. Never an ack: an ack is PRESENCE, not a line
+ * of transcript.
+ */
+export interface LastMessage {
+  kind: string
+  sender?: string
+  text: string
+}
+
 export interface ConversationSummary {
   name: string
   uid?: string
@@ -483,9 +543,31 @@ export interface ConversationSummary {
    * merely queued — its pod could not come up, and this is the kubelet's own
    * reason for it. The 2026-08-20 outage showed a phase and nothing else. */
   blocked?: BlockedReason
-  /** The CONSOLE's own thread has activity newer than its watermark. Observed
-   * conversations — no console thread — are never unread. */
+  /** `unreadCount` is above zero. Observed conversations — no console thread
+   * — are never unread. */
   unread: boolean
+  /**
+   * The number of counted-kind messages (signal, agent, relay) on the
+   * CONSOLE's own thread, after the reader's watermark. An ack, a notice, a
+   * console user's own words and a run event are never counted.
+   *
+   * Optional here only because older fixtures in this tree predate it —
+   * the server always sends it, with no `omitempty` on its Go side.
+   */
+  unreadCount?: number
+  /** The most recent counted-kind message on the console thread, read or
+   * not — the row's snippet. Absent on a conversation with no console
+   * thread, or with no counted message yet. */
+  lastMessage?: LastMessage
+  /** A run is inflight right now. Drawn apart from `unread` — a conversation
+   * can be both, either or neither. Optional for the same fixture reason as
+   * `unreadCount`; always sent. */
+  presence?: boolean
+  /** The requesting reader is who STARTED this conversation (its
+   * `originReader`, in this console's own channel). The inbox's "Mine"
+   * scope. Always false with no reader resolved. Optional for the same
+   * fixture reason as `unreadCount`; always sent. */
+  mine?: boolean
   /** The console thread's watermark, so a read is reported only when it advances. */
   readAt?: string
   ageSeconds: number
@@ -572,6 +654,14 @@ export interface ConversationPage {
   offset: number
   limit: number
   facets: Record<string, string[]>
+  /**
+   * Present on the count-only form alone: the UNREAD count within each fixed
+   * inbox scope (`working`, `mine`, `errored`, `closed`), plus one entry
+   * keyed by name for every pipeline and coordinator a row attributes to —
+   * what the inbox's per-scope badges read. There is no `incidents` scope:
+   * that concept was removed from the inbox outright.
+   */
+  scopes?: Record<string, number>
 }
 
 // ---- marking a batch read ----------------------------------------------------
@@ -731,8 +821,10 @@ export interface SourcesResponse {
  * has never held one. What a message addresses is a PIPELINE.
  */
 export interface VocabularyEntry {
-  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline. */
-  kind: 'builtin' | 'pipeline'
+  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline,
+   * `coordinator` for an addressable Coordinator — the two share one name
+   * space and are addressed identically (manager's `chat/vocabulary.go`). */
+  kind: 'builtin' | 'pipeline' | 'coordinator'
   name: string
   /** Menu text. For a pipeline, the profile answering for it. */
   description?: string

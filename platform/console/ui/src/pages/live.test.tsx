@@ -282,10 +282,20 @@ describe('Configuration', () => {
 
 describe('the Conversations list', () => {
   it('shows a conversation appearing, changing phase and being deleted, in place', async () => {
-    const { ConversationsPage } = await import('./Conversations')
-    const { stop } = mount(<ConversationsPage />)
+    const { ChatView } = await import('./chat/ChatView')
+    const { stop } = mount(
+      <Routes>
+        <Route path="/conversations" element={<ChatView />} />
+      </Routes>,
+      '/conversations',
+    )
     await screen.findByText('disk pressure on node-3')
     const before = calls.conversations
+
+    // Closed conversations are hidden by default now (item 8) — this test is
+    // about live delta application, not that toggle, so switch it on up
+    // front and keep testing the phase transition in place.
+    await userEvent.click(screen.getByLabelText('Show closed'))
 
     // APPEARING: newest first, no filter — its place is unambiguous.
     emit('delta', {
@@ -295,12 +305,18 @@ describe('the Conversations list', () => {
     await screen.findByText('certificate expiring')
     expect(loading()).toBeNull()
 
-    // CHANGING PHASE.
+    // CHANGING PHASE. The row no longer carries a snippet line (every row is
+    // title+time, then chips+menu) and the "closed" tag is UNREACHABLE here —
+    // `rowTag` checks `isNew` first, and this row is still inside its arrival
+    // window, so its tag reads "new" rather than "closed". The row menu is
+    // phase-aware independent of that window, so "Reopen" is the reliable
+    // signal that the delta actually applied.
     emit('delta', {
       type: 'MODIFIED', kind: 'conversations', name: 'conv-2',
       conversationRow: summary({ name: 'conv-2', title: 'certificate expiring', phase: 'Closed', runs: undefined }),
     })
-    await screen.findByText('Closed')
+    await userEvent.click(screen.getByLabelText('actions for certificate expiring'))
+    await screen.findByText('Reopen')
     expect(loading()).toBeNull()
 
     // BEING DELETED.
@@ -315,10 +331,10 @@ describe('the Conversations list', () => {
 
 describe('one Conversation', () => {
   it('takes a message and a run advancing without blanking, and asks nothing', async () => {
-    const { ConversationPage } = await import('./Conversation')
+    const { ChatView } = await import('./chat/ChatView')
     const { stop } = mount(
       <Routes>
-        <Route path="/conversations/:name" element={<ConversationPage />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
       </Routes>,
       '/conversations/conv-1',
     )
@@ -349,10 +365,10 @@ describe('one Conversation', () => {
 
 describe('the composer', () => {
   it('sends and asks for nothing — the echo arrives on the stream', async () => {
-    const { ConversationPage } = await import('./Conversation')
+    const { ChatView } = await import('./chat/ChatView')
     const { stop } = mount(
       <Routes>
-        <Route path="/conversations/:name" element={<ConversationPage />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
       </Routes>,
       '/conversations/conv-1',
     )
@@ -379,10 +395,10 @@ describe('the composer', () => {
   // down nothing delivers it, and the bubble would sit unconfirmed until the
   // page was reloaded — so the read is conditioned, not removed.
   it('reads once after a send when the stream is down', async () => {
-    const { ConversationPage } = await import('./Conversation')
+    const { ChatView } = await import('./chat/ChatView')
     const { stop } = mount(
       <Routes>
-        <Route path="/conversations/:name" element={<ConversationPage />} />
+        <Route path="/conversations/:name" element={<ChatView />} />
       </Routes>,
       '/conversations/conv-1',
     )
@@ -498,18 +514,27 @@ describe('after first paint, no event puts a page back into loading', () => {
     [
       'Conversations',
       async () => {
-        const { ConversationsPage } = await import('./Conversations')
-        return { ui: <ConversationsPage />, path: '/conversations', painted: 'disk pressure on node-3', stays: 'Conversations' }
+        const { ChatView } = await import('./chat/ChatView')
+        return {
+          ui: (
+            <Routes>
+              <Route path="/conversations" element={<ChatView />} />
+            </Routes>
+          ),
+          path: '/conversations',
+          painted: 'disk pressure on node-3',
+          stays: 'disk pressure on node-3',
+        }
       },
     ],
     [
       'Conversation',
       async () => {
-        const { ConversationPage } = await import('./Conversation')
+        const { ChatView } = await import('./chat/ChatView')
         return {
           ui: (
             <Routes>
-              <Route path="/conversations/:name" element={<ConversationPage />} />
+              <Route path="/conversations/:name" element={<ChatView />} />
             </Routes>
           ),
           path: '/conversations/conv-1',

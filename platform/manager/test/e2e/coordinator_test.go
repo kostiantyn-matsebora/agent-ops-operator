@@ -4,12 +4,18 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
 // Section 11 — coordinator mode (coordinator-deployment-mode) end to end.
@@ -227,6 +233,90 @@ func TestCoordinatorSelfHealSurveyExcludesAncestorRoot(t *testing.T) {
 	if ownCode != 403 {
 		t.Fatalf("want 403 closing the reaper's own ancestor root, got %d %v", ownCode, ownOut)
 	}
+}
+
+// 11.4 The console's close/delete cascade against a REAL coordinator tree
+// (conversation-close, console-conversation-tree): closing the root through
+// the console's bulk-close surface cascades to a LIVE member — real
+// reconciler-driven pod teardown, which is exactly the kind of thing
+// envtest's fake-less-kubelet world cannot observe (docs/testing.md gives the
+// kubelet to this tier alone) — and deleting the Closed root through the same
+// surface removes the member too, never orphaning it.
+func TestCoordinatorCloseAndDeleteCascadeThroughConsole(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+
+	const coordName = "e2e-coord-cascade"
+	const domainCap = "e2e-coord-cascade-domain"
+	const srcName = "e2e-coord-cascade-src"
+
+	mustCreate(t, e.K, agentCapability(domainCap, ProfileStub))
+	mustCreate(t, e.K, source(srcName, "e2e", nil))
+	co := coordinatorObjWithChannels(coordName, ProfileStub, []string{srcName}, []string{ChannelConsole},
+		[]agentopsv1alpha1.CoordinatorAgentEntry{capabilityEntry("domain", domainCap, "handles domain tasks")})
+	mustCreate(t, e.K, co)
+	if err := waitCoordinatorReady(ctx, e.K, coordName, 2*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	fp := "e2e-coord-cascade-root-" + stamp
+	e.PostTask(t, srcName, fp, "echo cascade-root-"+stamp)
+	root := e.ConversationFor(t, fp, 2*time.Minute)
+	e.WaitRun(t, root.Name, 1, 3*time.Minute)
+	waitFor(t, "the root's console thread bound (coordinator-unconditional-channels)", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		return err == nil && len(c.Status.Threads) >= 1, err
+	})
+
+	// A LIVE member — a real pod, still present (idle, not yet evicted) when
+	// the cascade below reaches it.
+	member := e.invokeMember(t, coordName, root.Name, "domain", "echo cascade-member-"+stamp)
+	e.WaitRun(t, member, 1, 3*time.Minute)
+
+	memberPodName := types.NamespacedName{Namespace: e.K.Namespace, Name: runtimepod.PodName(member)}
+	waitFor(t, "the member's runtime pod to exist", time.Minute, func() (bool, error) {
+		var pod corev1.Pod
+		return e.K.Get(ctx, memberPodName, &pod) == nil, nil
+	})
+
+	// Close the ROOT ALONE through the console's bulk-close surface — never
+	// the member — and let the cascade find it.
+	closeBody, _ := json.Marshal(map[string]any{"names": []string{root.Name}})
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/close", closeBody, "Bearer "+e.Values.UIToken); code/100 != 2 || !strings.Contains(out, `"closed":1`) {
+		t.Fatalf("bulk close the root: %d %s", code, out)
+	}
+
+	waitFor(t, "the root closed", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
+	})
+	waitFor(t, "the cascade closes the live member too", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, member)
+		return err == nil && c.Status.Phase == agentopsv1alpha1.ConversationClosed, err
+	})
+	// The REAL, reconciler-driven teardown: the member's runtime pod is gone,
+	// not merely its phase flipped.
+	waitFor(t, "the member's runtime pod torn down by the real reconciler/kubelet", 2*time.Minute, func() (bool, error) {
+		var pod corev1.Pod
+		err := e.K.Get(ctx, memberPodName, &pod)
+		return apierrors.IsNotFound(err), nil
+	})
+
+	// Delete cascades too: deleting the now-Closed root through the SAME
+	// console surface removes the member as well.
+	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete", closeBody, "Bearer "+e.Values.UIToken); code/100 != 2 || !strings.Contains(out, `"deleted":1`) {
+		t.Fatalf("bulk delete the root: %d %s", code, out)
+	}
+	waitFor(t, "the root object gone", 3*time.Minute, func() (bool, error) {
+		_, err := e.K.Conversation(ctx, root.Name)
+		return err != nil, nil
+	})
+	waitFor(t, "the cascade-deleted member gone too — never left orphaned", 3*time.Minute, func() (bool, error) {
+		_, err := e.K.Conversation(ctx, member)
+		return err != nil, nil
+	})
 }
 
 // waitForCronRoot waits for the conversation the cron source's signal opened.

@@ -153,6 +153,8 @@ func statusFor(err error) int {
 		errors.Is(err, chat.ErrCoordinatorCycle),
 		errors.Is(err, chat.ErrMaxAgents),
 		errors.Is(err, chat.ErrOutOfScope),
+		errors.Is(err, chat.ErrOutOfSubtree),
+		errors.Is(err, chat.ErrCannotCloseHumanRoot),
 		errors.Is(err, chat.ErrNoCoordinatorScope):
 		return 403
 	default:
@@ -321,7 +323,7 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 	}
 	var t agentopsv1alpha1.Conversation
 	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: target}, &t); err != nil {
-		writeCoordinateError(w, 404, chat.ErrOutOfScope)
+		writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 		return
 	}
 	inScope, err := s.descendsFrom(ctx, &t, caller.Name)
@@ -330,7 +332,7 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inScope {
-		writeCoordinateError(w, 403, chat.ErrOutOfScope)
+		writeCoordinateError(w, 403, chat.ErrOutOfSubtree)
 		return
 	}
 	writeJSON(w, 200, projectConversation(&t))
@@ -447,7 +449,7 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 	if in.Target != "" && in.Target != caller.Name {
 		var t agentopsv1alpha1.Conversation
 		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Target}, &t); err != nil {
-			writeCoordinateError(w, 404, chat.ErrOutOfScope)
+			writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 			return
 		}
 		inScope, err := s.descendsFrom(ctx, &t, caller.Name)
@@ -456,7 +458,7 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !inScope {
-			writeCoordinateError(w, 403, chat.ErrOutOfScope)
+			writeCoordinateError(w, 403, chat.ErrOutOfSubtree)
 			return
 		}
 		target = &t

@@ -390,8 +390,15 @@ func TestCloseCoordinatedRefusesAGrandchildDirectly(t *testing.T) {
 	}
 }
 
-func TestEscalateUncausedRootBindsChannelsAndStampsTheDigest(t *testing.T) {
+// TestEscalateUncausedRootPostsIntoAlreadyBoundChannelsAndStampsTheDigest
+// pins coordinator-unconditional-channels: an uncaused root's ChannelRefs are
+// already bound at creation (the fixture sets them exactly as
+// createConversationForGroup/CreateTaskConversation now do, from
+// coordinatorClaimant.BoundChannelRefs), so Escalate must leave them
+// untouched — it only stamps status, it never (re)binds anything.
+func TestEscalateUncausedRootPostsIntoAlreadyBoundChannelsAndStampsTheDigest(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), root, nsChannel("ops-desk", "telegram"))
 
@@ -401,7 +408,7 @@ func TestEscalateUncausedRootBindsChannelsAndStampsTheDigest(t *testing.T) {
 	var got agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: root.Name}, &got)
 	if len(got.Spec.ChannelRefs) != 1 || got.Spec.ChannelRefs[0].Name != "ops-desk" {
-		t.Fatalf("escalate must bind the snapshotted escalation channels, got %v", got.Spec.ChannelRefs)
+		t.Fatalf("escalate must leave the already-bound channels exactly as they were, got %v", got.Spec.ChannelRefs)
 	}
 	if got.Status.EscalatedAt == nil {
 		t.Fatal("escalatedAt must be stamped")
@@ -411,6 +418,28 @@ func TestEscalateUncausedRootBindsChannelsAndStampsTheDigest(t *testing.T) {
 	}
 	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		t.Fatal("escalating the uncaused root must NOT close it")
+	}
+}
+
+// TestEscalateUncausedRootNeverOverwritesAWiderBoundChannelSet pins the
+// addressed-chat-origin case: ChannelRefs may carry MORE than
+// EscalationChannelRefs (the addressing channel, folded in by
+// router.boundChannels). Escalate must never replace ChannelRefs with the
+// narrower EscalationChannelRefs snapshot — that would UNBIND the addressing
+// channel the moment the agent escalates.
+func TestEscalateUncausedRootNeverOverwritesAWiderBoundChannelSet(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}, {Name: "telegram-adhoc"}}
+	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
+	r, c := coordFixture(t, testCoordinator("co-a"), root, nsChannel("ops-desk", "telegram"), nsChannel("telegram-adhoc", "telegram"))
+
+	if err := r.Escalate(context.Background(), root, "need a human"); err != nil {
+		t.Fatal(err)
+	}
+	var got agentopsv1alpha1.Conversation
+	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: root.Name}, &got)
+	if len(got.Spec.ChannelRefs) != 2 {
+		t.Fatalf("escalate must not narrow ChannelRefs to the Coordinator's own declared set, got %v", got.Spec.ChannelRefs)
 	}
 }
 
@@ -625,8 +654,12 @@ func TestInvokeMemberTitlesAMemberFromItsEntryWhenTaskIsBlank(t *testing.T) {
 	}
 }
 
-// memberTitle: a title over 60 runes is truncated.
-func TestInvokeMemberTruncatesALongTitle(t *testing.T) {
+// memberTitle: a long title is kept WHOLE. Length limits belong to the
+// channel that knows them (Telegram's own 128-char topic-name cap in
+// channels/telegram/telegram.go), never the manager — a 60-rune cut here
+// used to leak that one transport's limit into every channel and the
+// console's own views, cutting an alert's title mid-word.
+func TestInvokeMemberKeepsALongTitleWhole(t *testing.T) {
 	entry := agentopsv1alpha1.CoordinatorAgentEntry{
 		Name: "worker", Description: "does the work",
 		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
@@ -644,8 +677,9 @@ func TestInvokeMemberTruncatesALongTitle(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: result.Member}, &member); err != nil {
 		t.Fatal(err)
 	}
-	if runes := []rune(member.Spec.Title); len(runes) != 60 {
-		t.Fatalf("a long title must be truncated to 60 runes, got %d: %q", len(runes), member.Spec.Title)
+	want := "🤝 worker: " + strings.TrimSpace(longTask)
+	if member.Spec.Title != want {
+		t.Fatalf("a long title must be kept whole, got %q, want %q", member.Spec.Title, want)
 	}
 }
 

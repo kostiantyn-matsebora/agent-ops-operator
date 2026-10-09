@@ -1244,9 +1244,9 @@ coordination:
 # THE CHART-RENDERED Coordinator (coordinator-deployment-mode) — rendered
 # exactly once, ONLY under `global.agentops.wiringMode: coordinator`. It claims
 # every enabled bundle's source (the same sources those bundles' `pipelines`
-# mode routes claim today) plus the reaper's own hourly `signals/cron` claim,
-# and lists every enabled bundle's AgentCapability plus the reaper's in its own
-# `agents[]` — see `agentops.coordinatorContributions` and
+# mode routes claim today) plus the reaper's own scheduled `signals/cron`
+# claim, and lists every enabled bundle's AgentCapability plus the reaper's in
+# its own `agents[]` — see `agentops.coordinatorContributions` and
 # `chart/templates/coordinator.yaml`.
 #
 # This is the COORDINATING agent's OWN capability and profile — the agent that
@@ -1281,9 +1281,9 @@ coordinator:
 
 # THE SELF-HEAL REAPER (coordinator-self-heal) — an ORDINARY AgentProfile /
 # AgentCapability pair, rendered under `coordinator` mode ALONE (no separate
-# flag). Addressed hourly through the chart-rendered Coordinator's own
-# coordinating agent, which recognises the cron signal and invokes it exactly
-# as it invokes a domain entry for a domain signal.
+# flag). Addressed on its own schedule through the chart-rendered
+# Coordinator's own coordinating agent, which recognises the cron signal and
+# invokes it exactly as it invokes a domain entry for a domain signal.
 #
 # IT BINDS NO DOMAIN TOOLSET — only the coordination reach
 # (list_open_roots / invoke / close) through `global.builtinToolsets.coordinate`
@@ -1300,8 +1300,10 @@ reaper:
   # Its own AgentProfile name.
   profileName: reaper
   # Five-field cron schedule (minute hour dom month dow) served by
-  # `signals/cron` — see reaper.cronAdapter below.
-  schedule: "0 * * * *"
+  # `signals/cron` — see reaper.cronAdapter below. Four times a day by
+  # default. Never hardcoded elsewhere: the prompt text below describes the
+  # sweep without naming a cadence, so changing this needs no other edit.
+  schedule: "0 */6 * * *"
   maxTurns: 20
   runtimeRef: ""
   serviceAccountName: ""
@@ -1309,18 +1311,19 @@ reaper:
   # Prepended to the generated survey instructions below (empty by default).
   systemPromptPrefix: ""
   # The `signals/cron` SignalAdapter this chart deploys to serve the reaper's
-  # hourly SignalSource — the one implementation shipping the reaper's trigger
-  # needs, since no bundle owns a cron lane. `servedBy` is not an option here:
-  # nothing else in a coordinator-mode install already runs this process.
+  # scheduled SignalSource — the one implementation shipping the reaper's
+  # trigger needs, since no bundle owns a cron lane. `servedBy` is not an
+  # option here: nothing else in a coordinator-mode install already runs
+  # this process.
   cronAdapter:
     name: reaper-cron
     image:
       repository: ghcr.io/kostiantyn-matsebora/agentops-signal-cron
       tag: 0.2.0
     resources: {}
-  # The SignalSource the hourly tick posts to — claimed on the chart-rendered
-  # Coordinator's own signalSourceRefs (design D-E), never on a per-entry
-  # trigger field.
+  # The SignalSource the scheduled tick posts to — claimed on the
+  # chart-rendered Coordinator's own signalSourceRefs (design D-E), never on
+  # a per-entry trigger field.
   source:
     name: reaper-sweep
 

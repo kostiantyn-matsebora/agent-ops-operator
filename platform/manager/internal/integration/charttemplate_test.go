@@ -2515,7 +2515,7 @@ func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
 		t.Errorf("ha-control acts on the house and must not be called read-only:\n%s", descs["ha-control"])
 	}
 	// The reaper keeps its instruction-shaped description, naming its source.
-	if !strings.Contains(descs["reaper"], "ONLY in response to the hourly self-heal signal from source \"reaper-sweep\"") {
+	if !strings.Contains(descs["reaper"], "ONLY in response to the self-heal signal from source \"reaper-sweep\"") {
 		t.Errorf("the reaper's description must stay trigger-shaped and name its source:\n%s", descs["reaper"])
 	}
 }

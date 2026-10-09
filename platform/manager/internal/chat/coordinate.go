@@ -47,7 +47,28 @@ var (
 	ErrUnknownAgent       = fmt.Errorf("no such agents[] entry")
 	ErrCoordinatorCycle   = fmt.Errorf("would repeat a Coordinator already in this coordination")
 	ErrMaxAgents          = fmt.Errorf("maxAgents reached")
-	ErrOutOfScope         = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
+	ErrOutOfScope = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
+	// ErrOutOfSubtree refuses `read` and `get_tree` — narrower than
+	// ErrOutOfScope. Those two verbs' bound is the caller's own subtree
+	// only (aops-mcp-server: "read | the calling conversation's own
+	// subtree, at any depth"), with NO coordinator-sibling widening —
+	// unlike `close`, which ErrOutOfScope's wording correctly describes.
+	// aops-mcp-server also requires "A refusal SHALL reach the caller as
+	// an error naming the bound that refused it" — reusing ErrOutOfScope's
+	// wider wording here told a caller a coordinator-sibling root WAS in
+	// scope for read when it never has been. Measured live: the self-heal
+	// reaper's list_open_roots returned sibling roots, read refused every
+	// one of them, and the message's own "...or an open root of the
+	// caller's own Coordinator" read as though it should have worked —
+	// the agent concluded the roots must belong to a DIFFERENT Coordinator
+	// instead, which was simply wrong.
+	ErrOutOfSubtree = fmt.Errorf("out of scope: not the caller itself or within its own subtree")
+	// ErrCannotCloseHumanRoot refuses the widened Coordinator-owner close
+	// bound for a target isHumanInitiated reports true for — a distinct,
+	// named reason rather than the generic ErrOutOfScope, per
+	// aops-mcp-server's "a refusal SHALL reach the caller as an error
+	// naming the bound that refused it."
+	ErrCannotCloseHumanRoot = fmt.Errorf("out of scope: a sibling root a person started is never closed by the widened reach")
 	// ErrNoCoordinatorScope refuses the Coordinator-owner reach class
 	// (list_open_roots, the widened close — coordinator-owner-reach) for a
 	// caller that resolves to no Coordinator at all by ResolveActingCoordinator:
@@ -316,6 +337,17 @@ type OpenRoot struct {
 // acts for — never a member (whatever Coordinator it carries), never a
 // different Coordinator's root, and never the caller's own root, since
 // closing it would cascade to close the caller's own conversation mid-run.
+//
+// ALSO EXCLUDED: an Idle root with NO members. The reaper's whole method is
+// "re-check each one through the agent that originally handled it" — a root
+// that finished its last run (Idle, not Working or still admitting) and never
+// produced a single member never had an agent to re-check through, so there
+// is nothing here that re-checking could ever find changed. Left in, this is
+// not a stale edge case: a root whose first run failed before it could invoke
+// anyone (an auth error, a missing tool) surfaces forever, identically, every
+// hourly cycle — measured live on job-cb5vg, 96 consecutive cycles restating
+// one 2026-10-03 run's error with zero new information, because the member
+// that would have let the reaper confirm a fix never existed to re-check.
 func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]OpenRoot, error) {
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
 	if err != nil {
@@ -346,6 +378,9 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 		members, err := r.directMemberEntries(ctx, c.Name)
 		if err != nil {
 			return nil, err
+		}
+		if c.Status.Phase == agentopsv1alpha1.ConversationIdle && len(members) == 0 {
+			continue // nothing this root ever handed off to — nothing to re-check
 		}
 		out = append(out, OpenRoot{
 			Name: c.Name, Title: c.Spec.Title, Brief: c.Status.Brief, Phase: c.Status.Phase, Members: members,
@@ -401,6 +436,28 @@ func (r *Router) isOwnCoordinatorSiblingRoot(ctx context.Context, caller, target
 		return false, nil // the caller's own ancestor root
 	}
 	return true, nil
+}
+
+// isHumanInitiated reports whether a conversation exists because a PERSON
+// asked for it — an addressed `/<pipeline> <task>` command (no spec.signal
+// at all) or a bare chat message (spec.signal present but carrying the chat
+// lane's own LabelChatChannel label) — as opposed to an alert, a job or any
+// other machine signal, which always carries spec.signal with neither mark.
+//
+// CloseCoordinated uses this to refuse ever auto-closing a person's own
+// request under the widened Coordinator-owner reach: the self-heal reaper
+// may close a sibling root it finds healed, but never one somebody is still
+// waiting on an answer to, however long it has sat open. This is a
+// mechanical guarantee rather than a prompt instruction on purpose — the
+// reaper's own task text already said "not a new incident, re-check each
+// one", and that alone did not stop it from reading a human-originated root
+// as fair game.
+func isHumanInitiated(c *agentopsv1alpha1.Conversation) bool {
+	if c.Spec.Signal == nil {
+		return true
+	}
+	_, isChat := c.Spec.Signal.Labels[agentopsv1alpha1.LabelChatChannel]
+	return isChat
 }
 
 // findReusableMember is conversation-provenance's reuse rule: a live
@@ -593,7 +650,11 @@ func (r *Router) appendInputIdempotent(ctx context.Context, convName string, ite
 // naming it out of scope; reaching one means asking the direct member to
 // close it, whose own close cascades in turn), OR — only when the caller
 // RESOLVES to a Coordinator (design D-A) — any OTHER open, uncaused root of
-// that SAME Coordinator (design D-B).
+// that SAME Coordinator (design D-B) — EXCEPT one isHumanInitiated reports
+// true for, refused with ErrCannotCloseHumanRoot regardless of how long it
+// has sat open: a person's own request is never auto-closed by the widened
+// reach, only by that person, a direct cascade from their own conversation,
+// or an operator.
 func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.Conversation, targetName, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("a coordinator's close requires a reason")
@@ -614,6 +675,9 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 	}
 	if !ok {
 		return ErrOutOfScope
+	}
+	if isHumanInitiated(&target) {
+		return ErrCannotCloseHumanRoot
 	}
 	return r.closeWithCascade(ctx, &target, reason)
 }
@@ -685,48 +749,61 @@ func (r *Router) closeConversationReason(ctx context.Context, conv *agentopsv1al
 }
 
 // Escalate is the MCP `escalate(message)` verb (design D-D,
-// coordination-escalation): an UNCAUSED conversation binds its snapshotted
-// escalation channels and opens a human thread with message as the first
-// post; a CAUSED one opens no thread at all — it closes with message as its
-// reason and its result, which reaches its OWN parent as an ordinary
-// member-result input, bubbling one hop at a time until a call reaches the
-// uncaused root.
+// coordination-escalation, superseded by coordinator-unconditional-channels):
+// an UNCAUSED conversation already has its channels bound — at creation, same
+// as a Pipeline's — so escalating no longer BINDS anything. It posts message
+// as a notice into every thread already open, and stamps `status.escalatedAt`
+// so the agent's decision is recorded. A CAUSED one still opens no thread at
+// all — it closes with message as its reason and its result, which reaches
+// its OWN parent as an ordinary member-result input, bubbling one hop at a
+// time until a call reaches the uncaused root.
+//
+// The caused branch closes through `closeWithCascade`, never the bare
+// `closeConversationReason`: a member MAY ITSELF BE A ROOT
+// (terminology.md) — a conversation can carry both `causedBy` and its own
+// `coordinatorRef` with live `agents[]` invocations. Closing it with no
+// cascade would orphan its own sub-members the moment it escalated itself,
+// exactly the gap `cascadeCloseMembers` exists to close everywhere else.
 func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversation, message string) error {
 	if conv.Spec.CausedBy != nil {
-		if err := r.closeConversationReason(ctx, conv, message); err != nil {
+		if err := r.closeWithCascade(ctx, conv, message); err != nil {
 			return err
 		}
 		return r.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name,
 			"escalate:"+conv.Name+":"+strconv.FormatInt(time.Now().UnixNano(), 36), message)
 	}
 	if conv.Status.EscalatedAt != nil {
-		return nil // already escalated: no second binding, no replayed digest
+		return nil // already escalated: no replayed digest
 	}
 	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Spec.ChannelRefs = append([]agentopsv1alpha1.ObjectRef{}, conv.Spec.EscalationChannelRefs...)
-	if err := r.Client.Patch(ctx, conv, patch); err != nil {
-		return err
-	}
-	statusPatch := client.MergeFrom(conv.DeepCopy())
 	now := metav1.Now()
 	conv.Status.EscalatedAt = &now
 	conv.Status.EscalationMessage = boundedString(message, 2000)
-	return r.Client.Status().Patch(ctx, conv, statusPatch)
+	return r.Client.Status().Patch(ctx, conv, patch)
 }
 
 // memberTitle names a member conversation from the entry it was invoked as,
-// plus the task's own words when there are any — bounded to fit a chat topic
-// name, the same shape httpapi.titleForGroup gives a signal-opened one.
+// plus the task's own words when there are any.
+//
+// NOT cut to Telegram's own topic-name shape here — length limits belong to
+// the component that knows them (gotchas.md / invariants.md: "a manager-side
+// fix would be one transport's limits imposed on all of them"). Telegram
+// already enforces its own 128-character topic-name cap
+// (`channels/telegram/telegram.go`, `telegramTopicLimit`); a 60-rune cut HERE
+// was Telegram's constraint leaking into every other channel and the
+// console's own list/chat views, cutting an alert's title mid-word for
+// readers who never touch Telegram.
+//
+// Still bounded, by agentopsv1alpha1.MaxConversationTitle — a different
+// bound for a different reason (see that constant's own comment):
+// ConversationSpec.Title is an etcd-permanent field set from a task's own
+// words, which has nothing to do with any one transport's render shape.
 func memberTitle(entryName, task string) string {
 	fields := strings.Fields(task)
 	if len(fields) == 0 {
-		return "🤝 " + entryName
+		return agentopsv1alpha1.BoundConversationTitle("🤝 " + entryName)
 	}
-	title := "🤝 " + entryName + ": " + strings.Join(fields, " ")
-	if runes := []rune(title); len(runes) > 60 {
-		title = string(runes[:60])
-	}
-	return title
+	return agentopsv1alpha1.BoundConversationTitle("🤝 " + entryName + ": " + strings.Join(fields, " "))
 }
 
 func boundedString(s string, limit int) string {

@@ -142,6 +142,14 @@ func (a *API) queues(ctx context.Context) Queues {
 	pipelines := a.cache.List("pipelines")
 	for _, obj := range a.cache.List("conversations") {
 		v := conversationView(obj)
+		if v.Status.Phase == "Closed" {
+			// INERT (invariants.md: "no place in the FIFO waiting set") — a
+			// closed conversation can carry unpruned spec.inputs forever (one
+			// that arrived but was never processed before close), and nothing
+			// ever dispatches it again. Left unchecked, every such
+			// conversation showed up here as an ordinary queued row.
+			continue
+		}
 		queued := len(v.Spec.Inputs)
 		if queued == 0 && v.Status.Inflight == nil {
 			continue // nothing waiting and nothing out: not in any queue

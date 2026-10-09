@@ -22,12 +22,12 @@ conversation selected and the list beside it.
 
 ### Requirement: The inbox column lists scopes, each with its count
 The inbox column SHALL list, in this order: the filters All, Unread, Working,
-Mine, Errored and Incidents, then every Ready Pipeline and Coordinator, then
-the manager's commands, then Closed. Each scope SHALL show its unread count
-where one is non-zero, computed by the console-unread rule.
+Mine and Errored, then every Ready Pipeline and Coordinator, then Closed.
+Each scope SHALL show its unread count where one is non-zero, computed by
+the console-unread rule.
 
 Mine SHALL mean conversations the viewer's own identity started or replied
-in. Incidents SHALL mean root conversations that have members.
+in.
 
 #### Scenario: A pipeline scope narrows the list
 - **WHEN** the operator selects a Pipeline in the inbox
@@ -66,6 +66,19 @@ The widths and the inbox's collapsed state are the viewer's own:
 #### Scenario: Storage unavailable
 - **WHEN** the browser refuses local storage
 - **THEN** the view renders at the default widths and every function still works
+
+The close confirmation's "don't ask again" opt-out is the same kind of
+preference. It SHALL be remembered in the viewer's browser under its own key
+(`agentops.console.skipCloseConfirm`), SHALL NOT be written to any server-side
+state, and a browser that cannot store it SHALL ask every time.
+
+#### Scenario: The close confirmation opt-out survives a reload
+- **WHEN** the operator chooses "don't ask again" on the close confirmation and reloads the page
+- **THEN** closing a conversation no longer asks for confirmation
+
+#### Scenario: Opt-out storage unavailable
+- **WHEN** the browser refuses local storage
+- **THEN** closing a conversation asks for confirmation every time and still works
 
 ### Requirement: The inbox collapses to icons and keeps its badges
 The inbox column SHALL collapse to an icon strip and expand again from a

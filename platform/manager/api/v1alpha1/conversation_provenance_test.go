@@ -125,3 +125,32 @@ func TestConversationStatusFieldsAbsentOnAnOrdinaryConversation(t *testing.T) {
 		t.Fatalf("Brief = %q, want empty, no runtime reported one", c.Status.Brief)
 	}
 }
+
+// RecordedInput.Origin carries the input's OriginKind into the durable
+// record (item #15 QA, bug 2), so a reader rehydrating a thread from
+// status.runs[] alone can tell a coordination-internal input (OriginMember)
+// from an ordinary one — both record Surface as "", so Surface alone cannot.
+func TestInputItemRecordCarriesOriginKind(t *testing.T) {
+	item := &InputItem{
+		ID: "member:member-xw4h5:r0", Payload: "the ha report",
+		Origin: &InputOrigin{Kind: OriginMember, Name: "member-xw4h5", Entry: "ha-ops"},
+	}
+	rec := item.Record(item.Payload, nil)
+	if rec.Origin != OriginMember {
+		t.Fatalf("Origin = %q, want %q", rec.Origin, OriginMember)
+	}
+	if rec.Surface != "" {
+		t.Fatalf("Surface = %q, want empty — OriginMember carries no surface", rec.Surface)
+	}
+}
+
+// An input with no Origin at all (predates provenance) records Origin as "",
+// exactly like a genuine surfaceless signal — neither is mistaken for the
+// other kind, and both render as they always have.
+func TestInputItemRecordOriginAbsentWithNoOrigin(t *testing.T) {
+	item := &InputItem{ID: "in-1", Payload: "disk at 99%"}
+	rec := item.Record(item.Payload, nil)
+	if rec.Origin != "" {
+		t.Fatalf("Origin = %q, want empty", rec.Origin)
+	}
+}

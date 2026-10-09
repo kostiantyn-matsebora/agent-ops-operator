@@ -747,7 +747,9 @@ func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult
 		// only; everyone else's view is untouched, which is what makes this
 		// safe to do at all.
 		if o := conv.Spec.OriginReader; o != nil && o.Key != "" && o.Channel == op.Channel {
-			now := metav1.Now()
+			// Opaque RFC3339Nano string, never metav1.Time — see
+			// ThreadBinding.ReadAt's comment.
+			now := time.Now().UTC().Format(time.RFC3339Nano)
 			binding.Readers = []agentopsv1alpha1.ReaderMark{{Key: o.Key, ReadAt: &now}}
 		}
 		conv.Status.Threads = append(conv.Status.Threads, binding)

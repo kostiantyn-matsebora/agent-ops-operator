@@ -76,7 +76,7 @@ path. Plugins are limited to the set Pages enables by default.
     `assets/img/console/`, shown on the CONSOLE page.
   - **The landing recording and its poster** — `npm run demo` in the same
     place, published to `assets/video/`, shown on the LANDING page.
-- **The six views are toured in ONE place**, the Console page. The landing page
+- **The five views are toured in ONE place**, the Console page. The landing page
   shows the recording instead — a still cannot show work arriving and being
   answered.
 - **The recording carries no text of its own.** No caption, no title card. What

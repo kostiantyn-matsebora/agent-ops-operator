@@ -54,3 +54,41 @@ view, and SHALL offer secondary views holding:
 #### Scenario: Multi-channel bindings are visible
 - **WHEN** a conversation is bound to several channels
 - **THEN** each binding is shown with its channel and thread
+
+## ADDED Requirements
+
+### Requirement: A member's own input is not shown twice when rebuilding from runs
+Each entry of `status.runs[].inputs[]` SHALL carry an `origin` field, one of
+`signal`, `channel` or `member` — HOW the input reached the manager, never
+WHERE it was typed.
+
+`Surface` already carries where. `origin` exists because an `OriginMember`
+input and a genuine surfaceless signal (an alert, a job tick) both carry an
+empty `Surface`, so `Surface` alone cannot tell them apart.
+
+Rebuilding the transcript from `status.runs[].inputs[]` alone SHALL skip an
+entry whose `origin` is `member` — a task `invoke` handed down, or a
+member's result routed back up.
+
+The invoke card already shows it, built straight from that member's own
+transcript. Showing it again here would duplicate a member's result on the
+page it was invoked from.
+
+An entry recorded before the field existed carries none and SHALL be shown
+exactly as it always has.
+
+#### Scenario: A member's input is not shown twice
+- **WHEN** the transcript is rebuilt from `status.runs[].inputs[]` and one
+  entry's `origin` is `member`
+- **THEN** that entry is skipped, and the member's own invoke card is the
+  only place its content appears
+
+#### Scenario: A surfaceless signal is still shown
+- **WHEN** an alert or a job tick recorded an input with no `surface` and
+  `origin` is `signal`, not `member`
+- **THEN** the input is rendered, distinguishing it from coordination
+  plumbing
+
+#### Scenario: An older input has no origin
+- **WHEN** a run recorded before the field existed is rendered
+- **THEN** its inputs render exactly as they always have, nothing skipped

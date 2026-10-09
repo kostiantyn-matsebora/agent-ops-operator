@@ -339,3 +339,18 @@ func TestAttributeCoordinator(t *testing.T) {
 		t.Fatalf("a conversation with no coordinatorRef must attribute to none, got %q", got)
 	}
 }
+
+// coordinatorRef is provenance, snapshotted once at creation — it SHALL
+// survive the Coordinator being edited or deleted, the same guarantee
+// escalate() and the budget snapshot already carry. A conversation whose
+// Coordinator is gone (deleted, or never synced into this list) must still
+// attribute by name, never silently fall back to "".
+func TestAttributeCoordinatorSurvivesCoordinatorDeletion(t *testing.T) {
+	conv := obj("conversations", "c", "1", `{"coordinatorRef":{"name":"incident"}}`, "")
+	if got := AttributeCoordinator(conv, nil); got != "incident" {
+		t.Fatalf("attribution must not depend on the Coordinator still existing, got %q", got)
+	}
+	if got := AttributeCoordinator(conv, []*Object{obj("coordinators", "unrelated", "1", `{}`, "")}); got != "incident" {
+		t.Fatalf("attribution must not depend on the live list naming it, got %q", got)
+	}
+}

@@ -139,7 +139,7 @@ func TestChannelReadIsMonotonic(t *testing.T) {
 		[]map[string]any{{"threadId": "10", "readAt": t2.Format(time.RFC3339)}}, "test-adapter-token"); code != 200 || out.Marked != 1 {
 		t.Fatalf("first report: %d %+v", code, out)
 	}
-	stored := threadOf(t, "conv-mono", "chan-mono").ReadAt.DeepCopy()
+	stored := *threadOf(t, "conv-mono", "chan-mono").ReadAt
 
 	// an earlier watermark from a stale view
 	code, out := postRead(t, srv, "chan-mono",
@@ -152,7 +152,7 @@ func TestChannelReadIsMonotonic(t *testing.T) {
 		[]map[string]any{{"threadId": "10", "readAt": t2.Format(time.RFC3339)}}, "test-adapter-token"); out.Skipped != 1 {
 		t.Fatalf("unchanged watermark must skip: %+v", out)
 	}
-	if now := threadOf(t, "conv-mono", "chan-mono").ReadAt; !now.Time.Equal(stored.Time) {
+	if now := threadOf(t, "conv-mono", "chan-mono").ReadAt; now == nil || *now != stored {
 		t.Fatalf("watermark moved backwards: %v -> %v", stored, now)
 	}
 }
@@ -171,7 +171,11 @@ func TestChannelReadClampsTheFuture(t *testing.T) {
 		t.Fatalf("clamped report: %d %+v", code, out)
 	}
 	got := threadOf(t, "conv-clamp", "chan-clamp")
-	if got.ReadAt == nil || !got.ReadAt.Time.Before(future.Add(-time.Hour)) {
+	if got.ReadAt == nil {
+		t.Fatal("clamped report did not write a watermark")
+	}
+	parsed, ok := agentopsv1alpha1.ParseWatermark(*got.ReadAt)
+	if !ok || !parsed.Before(future.Add(-time.Hour)) {
 		t.Fatalf("future watermark was not clamped to the manager's clock: %v", got.ReadAt)
 	}
 }
@@ -414,6 +418,140 @@ func TestReaderKeyMustNotBeAnIdentity(t *testing.T) {
 	}
 	if len(threadOf(t, "conv-pii", "chan-pii").Readers) != 0 {
 		t.Fatal("a refused request wrote a reader entry")
+	}
+}
+
+// A reader may rewind their OWN watermark earlier than it is stored — "mark
+// unread" — and the channel-wide mark never moves.
+func TestChannelReadRewind(t *testing.T) {
+	mkProfile(t, "read-prof-rewind")
+	mkChannel(t, "chan-rewind", "tg-rewind")
+	srv := apiServer()
+	at := time.Now().Add(-time.Hour)
+	mkBoundConv(t, "conv-rewind", "chan-rewind", "rw1", at)
+
+	later := at.Add(30 * time.Minute)
+	if out := postReaderRead(t, srv, "chan-rewind", "rw1", "sha256:rewinder", later); out.Marked != 1 {
+		t.Fatalf("seed: %+v", out)
+	}
+	earlier := at.Add(-10 * time.Minute)
+	code, out := postRead(t, srv, "chan-rewind", []map[string]any{
+		{"threadId": "rw1", "readAt": earlier.Format(time.RFC3339), "reader": "sha256:rewinder", "rewind": true},
+	}, "test-adapter-token")
+	if code != 200 || out.Marked != 1 || out.Results[0].Outcome != "marked" {
+		t.Fatalf("rewind: %d %+v", code, out)
+	}
+	got := threadOf(t, "conv-rewind", "chan-rewind")
+	var mark *string
+	for _, r := range got.Readers {
+		if r.Key == "sha256:rewinder" {
+			mark = r.ReadAt
+		}
+	}
+	if mark == nil {
+		t.Fatal("rewind did not write a watermark")
+	}
+	parsed, ok := agentopsv1alpha1.ParseWatermark(*mark)
+	if !ok || !parsed.Before(later) {
+		t.Fatalf("rewind did not move the reader's watermark earlier: %v (was %v)", mark, later)
+	}
+	if got.ReadAt != nil {
+		t.Fatal("a rewind moved the CHANNEL-WIDE mark")
+	}
+
+	// unreadness follows: the rewound message counts again for this reader,
+	// and only for this reader.
+	var fresh agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "conv-rewind"}, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if !fresh.Status.UnreadFor("chan-rewind", "sha256:rewinder") {
+		t.Fatal("rewinding a reader's own mark must make the thread unread for them again")
+	}
+}
+
+// A rewind naming no reader is refused outright: the only watermark it could
+// move is the channel-wide one, which a rewind must never touch.
+func TestChannelReadRewindRequiresAReader(t *testing.T) {
+	mkProfile(t, "read-prof-rewind-nr")
+	mkChannel(t, "chan-rewind-nr", "tg-rewind-nr")
+	srv := apiServer()
+	at := time.Now().Add(-time.Hour)
+	mkBoundConv(t, "conv-rewind-nr", "chan-rewind-nr", "rwnr1", at)
+
+	code, out := postRead(t, srv, "chan-rewind-nr", []map[string]any{
+		{"threadId": "rwnr1", "readAt": at.Format(time.RFC3339), "rewind": true},
+	}, "test-adapter-token")
+	if code != 200 || out.Failed != 1 || out.Results[0].Outcome != "failed" {
+		t.Fatalf("a rewind with no reader must be refused: %d %+v", code, out)
+	}
+	if threadOf(t, "conv-rewind-nr", "chan-rewind-nr").ReadAt != nil {
+		t.Fatal("a refused rewind wrote the channel-wide mark")
+	}
+}
+
+// Regression test for the production defect
+// `platform/manager/test/e2e/lifecycle_test.go`'s `TestConsoleMarkReadThenUnreadRewind`
+// found against a real deployed cluster: `ThreadBinding.ReadAt` /
+// `ReaderMark.ReadAt` used to be `*metav1.Time`, which the Kubernetes API
+// serializes at SECOND granularity — any sub-second component was silently
+// dropped on write, so a watermark could never actually cover the message it
+// was meant to, in ordinary continuous operation. Both fields are now a plain
+// `*string` (RFC3339Nano), and this pins the round-trip at genuine sub-second
+// precision against the real envtest API server — every other case in this
+// file formats `readAt` with `time.RFC3339` (whole seconds) exclusively, and
+// so none of them could ever have caught this regression.
+func TestChannelReadPreservesSubSecondPrecision(t *testing.T) {
+	mkProfile(t, "read-prof-precision")
+	mkChannel(t, "chan-precision", "tg-precision")
+	srv := apiServer()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	mkBoundConv(t, "conv-precision", "chan-precision", "pr1", base)
+
+	// The CHANNEL-WIDE mark, via an ordinary (non-rewind) advance.
+	precise := base.Add(time.Hour + 123456789*time.Nanosecond)
+	code, out := postRead(t, srv, "chan-precision", []map[string]any{
+		{"threadId": "pr1", "readAt": precise.Format(time.RFC3339Nano)},
+	}, "test-adapter-token")
+	if code != 200 || out.Marked != 1 {
+		t.Fatalf("ordinary read: %d %+v", code, out)
+	}
+	got := threadOf(t, "conv-precision", "chan-precision")
+	if got.ReadAt == nil {
+		t.Fatal("no channel-wide watermark written")
+	}
+	parsed, ok := agentopsv1alpha1.ParseWatermark(*got.ReadAt)
+	if !ok || !parsed.Equal(precise) {
+		t.Fatalf("the channel-wide watermark must round-trip at full precision, sent %v stored %v (raw %q)",
+			precise, parsed, *got.ReadAt)
+	}
+
+	// The READER-SCOPED mark, via a rewind — the exact mechanism
+	// `TestConsoleMarkReadThenUnreadRewind` exercises end to end. Pinned here
+	// too so a regression to second-granularity storage fails fast, in the
+	// envtest suite every pull request runs, rather than only in the manual
+	// e2e-live/e2e pack.
+	preciseRewind := base.Add(30*time.Minute + 987654321*time.Nanosecond)
+	code, out = postRead(t, srv, "chan-precision", []map[string]any{
+		{"threadId": "pr1", "readAt": preciseRewind.Format(time.RFC3339Nano), "reader": "sha256:precise-reader", "rewind": true},
+	}, "test-adapter-token")
+	if code != 200 || out.Marked != 1 {
+		t.Fatalf("rewind: %d %+v", code, out)
+	}
+	got = threadOf(t, "conv-precision", "chan-precision")
+	var readerMark *string
+	for _, r := range got.Readers {
+		if r.Key == "sha256:precise-reader" {
+			readerMark = r.ReadAt
+		}
+	}
+	if readerMark == nil {
+		t.Fatal("no reader watermark written")
+	}
+	parsed, ok = agentopsv1alpha1.ParseWatermark(*readerMark)
+	if !ok || !parsed.Equal(preciseRewind) {
+		t.Fatalf("the reader's rewound watermark must round-trip at full precision, sent %v stored %v (raw %q)",
+			preciseRewind, parsed, *readerMark)
 	}
 }
 

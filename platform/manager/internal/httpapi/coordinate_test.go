@@ -151,8 +151,13 @@ func TestHandleCoordinateCloseEnforcesOneHopReach(t *testing.T) {
 	}
 }
 
-func TestHandleCoordinateEscalateOpensAHumanThreadOnTheUncausedRoot(t *testing.T) {
+// coordinator-unconditional-channels: the root's channel is already bound at
+// creation, exactly as a Pipeline's own is, so `escalate` stamps the digest
+// and leaves ChannelRefs exactly as it found it — it posts into an
+// already-open thread rather than opening one.
+func TestHandleCoordinateEscalatePostsIntoTheAlreadyBoundThreadOnTheUncausedRoot(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
+	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace = "ops-desk", "agent-ops"
@@ -171,7 +176,7 @@ func TestHandleCoordinateEscalateOpensAHumanThreadOnTheUncausedRoot(t *testing.T
 		t.Fatalf("escalate must stamp the digest, got %+v", got.Status)
 	}
 	if len(got.Spec.ChannelRefs) != 1 || got.Spec.ChannelRefs[0].Name != "ops-desk" {
-		t.Fatalf("escalate must bind the snapshotted channels, got %v", got.Spec.ChannelRefs)
+		t.Fatalf("escalate must leave the already-bound channel exactly as it was, got %v", got.Spec.ChannelRefs)
 	}
 }
 
@@ -681,6 +686,12 @@ func TestHandleCoordinateCloseWidenedBoundPermitsAPlainMemberToCloseASiblingRoot
 	root := coordRoot("root-1", "co-a")
 	reaper := coordMember("reaper-1", "root-1", "reaper")
 	incident := coordRoot("incident-1", "co-a")
+	// An alert, not a person's own request — isHumanInitiated must report
+	// false for the widened bound to apply.
+	incident.Spec.Signal = &agentopsv1alpha1.SignalProvenance{
+		SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"},
+		Labels:    map[string]string{"alertname": "KubeJobFailed"},
+	}
 	s, c := coordServer(t, coordCoordinator("co-a"), root, reaper, incident)
 
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "reaper-1")

@@ -70,13 +70,17 @@ type CoordinatorLimits struct {
 }
 
 // CoordinatorSpec declares a COORDINATING agent: its own capability, the
-// sources it claims, the channels an escalation may open, and the agents its
-// own conversation may invoke.
+// sources it claims, the channels a conversation it opens binds, and the
+// agents its own conversation may invoke.
 //
-// A conversation this Coordinator creates binds NO channel at creation —
-// `ChannelRefs` is reached only through `escalate`, which snapshots it onto
-// the UNCAUSED root as `status.escalationChannelRefs`. Listing a channel here
-// claims no thread until then.
+// An UNCAUSED root this Coordinator creates binds `ChannelRefs`
+// UNCONDITIONALLY at creation (coordinator-unconditional-channels) — the
+// same moment a Pipeline's own `channelRefs` bind — so a human can reach any
+// open coordinator conversation whether or not its agent ever calls
+// `escalate`. It is also snapshotted onto the root as
+// `spec.escalationChannelRefs`, kept as separate provenance of the
+// Coordinator's own declared set. A member (one `invoke` created) still
+// binds no channel at all.
 //
 // +kubebuilder:validation:XValidation:rule="!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef) || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs) || has(self.persistence)))",message="capabilityRef and the inline capability fields (profileRef, runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence) are mutually exclusive"
 type CoordinatorSpec struct {
@@ -85,8 +89,8 @@ type CoordinatorSpec struct {
 	// the same source without conflict.
 	// +optional
 	SignalSourceRefs []ObjectRef `json:"signalSourceRefs,omitempty"`
-	// ChannelRefs are the surfaces an ESCALATION may open — never bound at
-	// creation. See the type doc comment.
+	// ChannelRefs are the surfaces a conversation this Coordinator opens
+	// binds at creation, unconditionally — see the type doc comment.
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
 	// AgentCapabilitySpec is the CAPABILITY for the COORDINATING agent

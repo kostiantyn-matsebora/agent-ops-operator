@@ -172,7 +172,7 @@ DIAGRAMS: dict[str, dict] = {
         # `named` gives the SVG itself an accessible name (title + aria-label).
         "named": True,
         "alt": "A Coordinator's root conversation invokes AgentCapabilities as "
-               "members, and escalates to a channel only when it decides to.",
+               "members, and its agent escalates through a channel already open.",
         "cols": [
             [("SignalSource", "or /<coordinator>", "plain")],
             [("Coordinator", "root agent + agents[]", "yours")],

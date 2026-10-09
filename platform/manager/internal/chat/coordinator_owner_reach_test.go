@@ -244,6 +244,65 @@ func TestListOpenRootsReturnsSiblingRootsWithTheirDirectMembersProjection(t *tes
 	}
 }
 
+// An Idle root that never produced a single member had no agent the reaper
+// could ever "re-check through" — its own stated method — so it is excluded
+// rather than surfaced identically forever. This is the job-cb5vg bug,
+// reproduced directly: a Coordinator-addressed root whose only run failed
+// before invoking anyone.
+func TestListOpenRootsExcludesAnIdleRootWithNoMembers(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	deadEnd := coordinatorRoot("root-2", "co-a")
+	deadEnd.Status.Phase = agentopsv1alpha1.ConversationIdle
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller, deadEnd)
+
+	got, err := r.ListOpenRoots(context.Background(), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("an Idle root with no members has nothing left to re-check, got %+v", got)
+	}
+}
+
+// A root still actively Working, with no member YET, is not a dead end — it
+// may invoke one before this very run ends. Only Idle-and-memberless is
+// excluded.
+func TestListOpenRootsIncludesAWorkingRootWithNoMembersYet(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	stillRunning := coordinatorRoot("root-2", "co-a")
+	stillRunning.Status.Phase = agentopsv1alpha1.ConversationWorking
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller, stillRunning)
+
+	got, err := r.ListOpenRoots(context.Background(), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "root-2" {
+		t.Fatalf("a Working root with no member yet must still be listed, got %+v", got)
+	}
+}
+
+// An Idle root WITH members is the ordinary healed-or-not case and is
+// unaffected by the dead-end exclusion above.
+func TestListOpenRootsIncludesAnIdleRootThatHasMembers(t *testing.T) {
+	caller := coordinatorRoot("root-1", "co-a")
+	healed := coordinatorRoot("root-2", "co-a")
+	healed.Status.Phase = agentopsv1alpha1.ConversationIdle
+	member := coordMember("member-1", "root-2", "k8s-observe")
+
+	r, _ := coordFixture(t, testCoordinator("co-a"), caller, healed, member)
+
+	got, err := r.ListOpenRoots(context.Background(), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "root-2" {
+		t.Fatalf("an Idle root with a member is the ordinary case, got %+v", got)
+	}
+}
+
 func TestListOpenRootsRefusesACallerWithNoCoordinatorScope(t *testing.T) {
 	pipelineAddressed := &agentopsv1alpha1.Conversation{}
 	pipelineAddressed.Name, pipelineAddressed.Namespace = "plain-1", testNS
@@ -276,6 +335,7 @@ func TestCloseCoordinatedPermitsASiblingRootOfTheCallersOwnCoordinator(t *testin
 	reaper.Name, reaper.Namespace = "reaper-1", testNS
 	reaper.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "reaper"}
 	sibling := coordinatorRoot("incident-1", "co-a")
+	sibling.Spec.Signal = automatedSignal() // an alert — not a person's own request
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, reaper, sibling)
 
@@ -286,6 +346,57 @@ func TestCloseCoordinatedPermitsASiblingRootOfTheCallersOwnCoordinator(t *testin
 	c.Get(context.Background(), nsName("incident-1"), &got)
 	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		t.Fatal("the sibling root must be closed")
+	}
+}
+
+// automatedSignal is what a genuine alert/job origination's spec.signal
+// looks like — no LabelChatChannel, so isHumanInitiated reports false.
+func automatedSignal() *agentopsv1alpha1.SignalProvenance {
+	return &agentopsv1alpha1.SignalProvenance{
+		SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"},
+		Labels:    map[string]string{"alertname": "KubeJobFailed"},
+	}
+}
+
+// chatSignal is what a bare chat message's spec.signal looks like — carries
+// LabelChatChannel, so isHumanInitiated reports true even though
+// spec.signal is set.
+func chatSignal() *agentopsv1alpha1.SignalProvenance {
+	return &agentopsv1alpha1.SignalProvenance{
+		SourceRef: &agentopsv1alpha1.ObjectRef{Name: "console"},
+		Labels:    map[string]string{agentopsv1alpha1.LabelChatChannel: "console"},
+	}
+}
+
+// The job-cb5vg bug, as a scope test: the widened Coordinator-owner reach
+// must never close a sibling root a PERSON started — an addressed task
+// command (no spec.signal at all), a bare chat message (spec.signal
+// carrying LabelChatChannel), the reaper's own real sweep target. An
+// automated sibling (an alert, a job) stays closable, per the test above.
+func TestCloseCoordinatedRefusesASiblingRootAPersonStarted(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	reaper := &agentopsv1alpha1.Conversation{}
+	reaper.Name, reaper.Namespace = "reaper-1", testNS
+	reaper.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "reaper"}
+
+	addressedTask := coordinatorRoot("task-1", "co-a") // no spec.signal — an addressed command
+	chatOrigin := coordinatorRoot("chat-1", "co-a")
+	chatOrigin.Spec.Signal = chatSignal()
+
+	r, c := coordFixture(t, testCoordinator("co-a"), root, reaper, addressedTask, chatOrigin)
+
+	for _, name := range []string{"task-1", "chat-1"} {
+		t.Run(name, func(t *testing.T) {
+			err := r.CloseCoordinated(context.Background(), reaper, name, "sweeping")
+			if err != ErrCannotCloseHumanRoot {
+				t.Fatalf("want ErrCannotCloseHumanRoot, got %v", err)
+			}
+			var got agentopsv1alpha1.Conversation
+			c.Get(context.Background(), nsName(name), &got)
+			if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+				t.Fatal("a person's own request must never be closed by the widened reach")
+			}
+		})
 	}
 }
 
@@ -374,5 +485,30 @@ func TestCloseCoordinatedRefusesTheCallersOwnAncestorRoot(t *testing.T) {
 	c.Get(context.Background(), nsName("root-1"), &got)
 	if got.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		t.Fatal("the reaper must never be able to close its own ancestor root")
+	}
+}
+
+// --- isHumanInitiated -------------------------------------------------------
+
+func TestIsHumanInitiated(t *testing.T) {
+	cases := []struct {
+		name string
+		conv *agentopsv1alpha1.Conversation
+		want bool
+	}{
+		{"an addressed task command carries no spec.signal at all", &agentopsv1alpha1.Conversation{}, true},
+		{"a bare chat message carries LabelChatChannel", &agentopsv1alpha1.Conversation{
+			Spec: agentopsv1alpha1.ConversationSpec{Signal: chatSignal()},
+		}, true},
+		{"an alert or a job carries spec.signal with no chat label", &agentopsv1alpha1.Conversation{
+			Spec: agentopsv1alpha1.ConversationSpec{Signal: automatedSignal()},
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isHumanInitiated(tc.conv); got != tc.want {
+				t.Fatalf("want %v, got %v", tc.want, got)
+			}
+		})
 	}
 }

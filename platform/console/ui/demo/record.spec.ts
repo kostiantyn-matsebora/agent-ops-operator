@@ -7,7 +7,7 @@ import { extname, join, normalize } from 'node:path'
 import { promisify } from 'node:util'
 import type { AddressInfo } from 'node:net'
 import { NOW, responder, type Install } from '../screenshots/fixture'
-import { ADDRESS_PREFIX, ADDRESSED, REPLY, TASK, beats, opening } from './story'
+import { ADDRESS_PREFIX, ADDRESSED, CONVERSATION, REPLY, TASK, beats, opening } from './story'
 
 // The landing page's recording, produced rather than captured.
 //
@@ -248,7 +248,12 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
   for (const beat of beats) {
     current = []
     await page.clock.setFixedTime(new Date(NOW.getTime() + beat.clock * 1000))
-    harness.advance(beat.patch)
+    // The 'reply' beat applies its OWN patch, once, after Send is clicked
+    // below — its whole point is a person typing before the server has
+    // answered. Applying it here too pushed the reply onto the transcript
+    // a second time: the frame showed it once while still mid-type and
+    // again, duplicated, after sending.
+    if (beat.act !== 'reply') harness.advance(beat.patch)
 
     if (beat.path) {
       await page.goto(`${harness.url}${beat.path}`)
@@ -257,6 +262,13 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
     // what the beat waits for is on the tab, not on the view that holds it.
     if (beat.act === 'yaml') {
       await page.getByText('YAML', { exact: true }).first().click()
+    }
+    // OPENED IN PLACE (design D-A): a click on the row, not a second
+    // navigation — the list this beat inherited from the one before it stays
+    // on screen, and the thread opens beside it through the console's own
+    // in-app route change.
+    if (beat.act === 'open') {
+      await page.getByTestId(`open-${CONVERSATION}`).click()
     }
     if (beat.ready) {
       await page.getByText(beat.ready, { exact: false }).first().waitFor({ timeout: 30_000 })

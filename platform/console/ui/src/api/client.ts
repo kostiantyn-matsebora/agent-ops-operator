@@ -82,6 +82,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+  // Same shape as markRead — a reader-scoped REWIND rather than an advance
+  // (design D-E). The server refuses it with no reader resolved.
+  markUnread: (req: MarkReadRequest) =>
+    request<MarkReadResponse>('/api/conversations/unread', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
   deleteConversations: (req: CloseRequest) =>
     request<DeleteResponse>('/api/conversations/delete', {
       method: 'POST',

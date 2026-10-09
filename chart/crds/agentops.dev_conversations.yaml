@@ -92,7 +92,10 @@ spec:
                 description: |-
                   ChannelRefs — every listed channel mirrors the whole conversation (own
                   thread per channel, replies and acks fanned out). Empty = chat-less
-                  (HTTP-only / shadow).
+                  (HTTP-only / shadow). For a Coordinator-rooted conversation this is
+                  bound from the Coordinator's own `channelRefs` at creation, the same way
+                  a Pipeline's is (coordinator-unconditional-channels) — never left empty
+                  pending an `escalate` call.
                 items:
                   description: ObjectRef references another object by name (same namespace).
                   properties:
@@ -136,10 +139,12 @@ spec:
 
                   PROVENANCE, never wiring — nothing resolves the Coordinator's
                   agents[], sources or channels through this ref at dispatch time; those
-                  were already snapshotted at creation (ChannelRefs stay empty here,
-                  status.budget carries the limits). It exists so `invoke` knows which
-                  Coordinator's `agents[]` this conversation may invoke from, and so a
-                  nested cycle guard can name the Coordinator repeated.
+                  were already snapshotted at creation (ChannelRefs carries the
+                  Coordinator's own channels, bound unconditionally — see ChannelRefs'
+                  own comment — and status.budget carries the limits). It exists so
+                  `invoke` knows which Coordinator's `agents[]` this conversation may
+                  invoke from, and so a nested cycle guard can name the Coordinator
+                  repeated.
                 properties:
                   name:
                     description: Name of the referenced object.
@@ -154,13 +159,17 @@ spec:
                   own `channelRefs`, taken at creation — set only alongside CoordinatorRef,
                   and only for an UNCAUSED root (a member never binds it).
 
-                  It names where an `escalate` verb on THIS conversation opens its human
-                  thread (design D-D). Nothing binds these channels at creation: they sit
-                  here, unused, until escalation reaches for them — which is what keeps a
-                  Coordinator claiming a chat surface from opening a thread on a bare
-                  message. Editing the Coordinator's `channelRefs` after creation changes
-                  nothing here, exactly as editing its `limits` cannot reach the budget
-                  already snapshotted into status.
+                  UNCONDITIONALLY BOUND INTO ChannelRefs AT CREATION TOO
+                  (coordinator-unconditional-channels): any open coordinator root must be
+                  reachable by a human from the moment it exists, whether or not its agent
+                  ever calls `escalate` — exactly as a Pipeline's own `channelRefs` already
+                  are. `escalate` no longer binds anything; it posts into a thread already
+                  open. This field survives as its own PROVENANCE — the Coordinator's own
+                  declared set, as opposed to ChannelRefs, which for a chat-addressed root
+                  may additionally carry the one channel it was addressed from. Editing
+                  the Coordinator's `channelRefs` after creation changes nothing here,
+                  exactly as editing its `limits` cannot reach the budget already
+                  snapshotted into status.
                 items:
                   description: ObjectRef references another object by name (same namespace).
                   properties:
@@ -463,6 +472,11 @@ spec:
                   (e.g. alertgroup/alertname/namespace, job:<name>).
                 type: string
               title:
+                description: |-
+                  Title is bounded by MaxConversationTitle — see that constant's own
+                  comment for why a cap belongs HERE despite the message-body rule
+                  against transport-shaped limits.
+                maxLength: 500
                 type: string
               toolsets:
                 description: |-
@@ -712,22 +726,23 @@ spec:
                 type: object
               escalatedAt:
                 description: |-
-                  EscalatedAt stamps the moment the `escalate` verb opened this
-                  conversation's human thread — an UNCAUSED root only; a caused member
-                  escalates by closing instead (see CloseReason) and never sets this.
+                  EscalatedAt stamps the moment the `escalate` verb was called on this
+                  conversation — an UNCAUSED root only; a caused member escalates by
+                  closing instead (see CloseReason) and never sets this.
 
-                  DeliverInputs fences on it: nothing with an earlier arrival is
-                  (re)delivered to the channels escalation just bound, so opening the
-                  thread late does not replay everything that happened before it existed.
+                  Its threads were already open at creation
+                  (coordinator-unconditional-channels), so this no longer gates DeliverInputs
+                  at all — it is the record of the agent's decision, not a bind moment.
                 format: date-time
                 type: string
               escalationMessage:
                 description: |-
                   EscalationMessage is the digest the escalating agent supplied, snapshotted
-                  at the same moment as EscalatedAt so the reconciler can post it as the
-                  newly-bound threads' opening message once each topic exists — the ensure-topic
-                  enqueue and the topic actually being created by the adapter are two
-                  separate moments, so the message has to sit somewhere between them.
+                  at the same moment as EscalatedAt so the reconciler can post it into
+                  each already-bound channel's thread once that thread exists — the
+                  ensure-topic enqueue and the topic actually being created by the adapter
+                  are two separate moments, so the message has to sit somewhere between
+                  them.
                 maxLength: 2000
                 type: string
               inflight:
@@ -847,6 +862,22 @@ spec:
                           id:
                             description: ID is the input's id, the same one runs[].inputIds
                               names.
+                            type: string
+                          origin:
+                            description: |-
+                              Origin is this input's OriginKind, carried into the durable record so a
+                              reader rehydrating a thread from `status.runs[]` alone can tell a
+                              coordination-internal input (OriginMember — a task `invoke` handed down,
+                              or a member's result routed back up) from an ordinary one, WITHOUT
+                              re-deriving it from Surface: both an OriginMember input and a genuine
+                              surfaceless signal (an alert, a job tick) record Surface as "", so Surface
+                              alone cannot tell them apart. Absent on an input recorded before this
+                              field existed, which reads as neither kind and renders exactly as it
+                              always has.
+                            enum:
+                            - signal
+                            - channel
+                            - member
                             type: string
                           payloadRef:
                             description: |-
@@ -980,7 +1011,16 @@ spec:
                         Per THREAD, therefore per CHANNEL: a conversation bound to Telegram and the
                         console has two audiences reading it in two places, and one shared mark
                         would let a Telegram reader clear the console's.
-                      format: date-time
+
+                        AN OPAQUE RFC3339(-NANO) STRING, NEVER metav1.Time. metav1.Time's
+                        MarshalJSON truncates to WHOLE-SECOND precision on the round trip through
+                        the API server — UnmarshalJSON on the way IN preserves sub-second digits,
+                        the loss is in STORAGE — so a watermark stamped from a message's own
+                        full-precision timestamp could round-trip to a value that same message's
+                        timestamp still reads as strictly after, leaving the thread it was meant
+                        to clear unread forever. A plain string stores exactly the bytes it was
+                        given. Parse with ParseWatermark; never compare it as a time.Time
+                        directly.
                       type: string
                     readTracked:
                       description: |-
@@ -1017,7 +1057,9 @@ spec:
                               contract as ThreadID and RuntimeContextID.
                             type: string
                           readAt:
-                            format: date-time
+                            description: |-
+                              ReadAt carries the same opaque RFC3339(-Nano) string as
+                              ThreadBinding.ReadAt, for the same reason — see that field's comment.
                             type: string
                         required:
                         - key

@@ -206,6 +206,63 @@ func TestDeleteReclaimsAClosedConversation(t *testing.T) {
 	}
 }
 
+// mkCascadeConv builds a conversation for the delete-cascade test: a root
+// with no parent, or a member/grandchild naming one via causedBy — the same
+// label the cascade filters on, and the same field it confirms against.
+func mkCascadeConv(t *testing.T, name, parent string) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Name, conv.Namespace = name, ns
+	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "verb-profile"}
+	if parent != "" {
+		conv.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: "worker"}
+		conv.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	} else {
+		conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "verb-ch-cascade"}}
+	}
+	if err := k8sClient.Create(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	conv.Status.ClosedAt = &now
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	return conv
+}
+
+// Deleting a root cascades to every conversation reachable from it by
+// causedBy, AT ANY DEPTH — mirroring the close cascade, so a coordination's
+// members are never left orphaned, unreachable and occupying the API after
+// their root is gone. Two members, one itself a root with its own member.
+func TestDeleteCascadesToDescendantsAtAnyDepth(t *testing.T) {
+	srv := apiServer()
+	mkChannel(t, "verb-ch-cascade", "tg")
+
+	root := mkCascadeConv(t, "cascade-root", "")
+	mkCascadeConv(t, "cascade-member-a", root.Name)
+	memberB := mkCascadeConv(t, "cascade-member-b", root.Name)
+	mkCascadeConv(t, "cascade-grandchild", memberB.Name)
+
+	rec := adapterReq(srv, "POST", "/channel/conversations/cascade-root/delete",
+		map[string]string{"channel": "verb-ch-cascade"}, "test-adapter-token")
+	if rec.Code != 202 {
+		t.Fatalf("delete of the root: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for _, name := range []string{"cascade-root", "cascade-member-a", "cascade-member-b", "cascade-grandchild"} {
+		var got agentopsv1alpha1.Conversation
+		err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &got)
+		// Either gone, or held by its OWN finalizer with a deletion stamp —
+		// the same "either" TestDeleteReclaimsAClosedConversation already
+		// allows for the root, extended here to every descendant.
+		if err == nil && got.DeletionTimestamp.IsZero() {
+			t.Fatalf("%s must be deleted along with its root", name)
+		}
+	}
+}
+
 // Deletion tells every bound thread that the conversation is gone — whether or
 // not it was closed first. A closed conversation's threads were told it could
 // be reopened; deletion makes that false, and correcting it is the point.

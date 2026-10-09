@@ -12,7 +12,7 @@ source and listing every enabled bundle's AgentCapability in one Coordinator's
 what each bundle actually rendered in `capabilities.yaml`.
 
 `reaper.yaml` renders the reaper's own AgentProfile, AgentCapability, and its
-hourly `signals/cron` claim — THIS file folds the reaper in as one more
+scheduled `signals/cron` claim — THIS file folds the reaper in as one more
 `agents[]` entry and one more `signalSourceRefs` claim (coordinator-self-heal,
 design D-E), never a reaper-specific field on the Coordinator object itself.
 Both halves are gated on `reaper.enabled` (default false): the fold-in below
@@ -38,9 +38,10 @@ IT IS THE ONE TRIGGER-SHAPED DESCRIPTION. Every domain entry's description
 REACH — what it is, what it can do, what it cannot, what to hand it — so that a
 person's instruction matches it as readily as a signal does. A description
 that names only the moment to invoke ("once the cause is known") matches no
-instruction, and the coordinating agent then reports it has nothing. */ -}}
+instruction, and the coordinating agent then reports it has nothing. Never a
+cadence word here either — `reaper.schedule` is the one place that changes. */ -}}
 {{- if $r.enabled }}
-{{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs the hourly self-heal sweep: lists this Coordinator's own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the hourly self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
+{{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs this Coordinator's self-heal sweep: lists its own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
 {{- $sources = append $sources $r.source.name }}
 {{- end }}
 {{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
@@ -89,8 +90,9 @@ spec:
   # no domain entry — bundles vary per install, and the agent reads them from
   # `list_agents`. GENERATED: the self-heal paragraph is built from the SAME
   # aggregation that fills this Coordinator's own `agents[]`, so the reaper's
-  # name always matches what the agent is told to invoke for the hourly signal
-  # (design D-E, task 2.5).
+  # name always matches what the agent is told to invoke for the self-heal
+  # signal (design D-E, task 2.5). Never a cadence word here — `reaper.schedule`
+  # is the one place that changes.
   #
   # It used to read "your only job is reading what started the conversation
   # and routing it" and "pick the one whose description matches what arrived".
@@ -148,14 +150,13 @@ spec:
 
     {{- if $r.enabled }}
 
-    ## The hourly self-heal signal
+    ## The self-heal signal
 
-    One of your claimed sources (`{{ $r.source.name }}`) fires on an hourly
-    schedule and carries no incident of its own — it exists only to trigger a
-    survey of what your `agents[]` has left open. When a conversation starts
-    from that source, invoke the entry named `{{ $r.name }}` and nothing
-    else: do not treat it as an ordinary task, and do not attempt the survey
-    yourself.
+    One of your claimed sources (`{{ $r.source.name }}`) fires on a schedule
+    and carries no incident of its own — it exists only to trigger a survey
+    of what your `agents[]` has left open. When a conversation starts from
+    that source, invoke the entry named `{{ $r.name }}` and nothing else: do
+    not treat it as an ordinary task, and do not attempt the survey yourself.
     {{- end }}
   # REQUIRED, and with no default on purpose: `none` leaves output unformatted
   # unless this profile's prompt says otherwise, and `blocks` shapes it by
@@ -213,7 +214,7 @@ spec:
   {{- with $sources }}
   # Claimed exactly as a Pipeline claims — shareable, fanned out, counted in
   # Wired. Every enabled bundle's own source (the same one its `pipelines`
-  # mode route would claim), plus the reaper's hourly cron claim.
+  # mode route would claim), plus the reaper's scheduled cron claim.
   signalSourceRefs:
     {{- range . }}
     - name: {{ . }}

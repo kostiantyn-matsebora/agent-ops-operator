@@ -48,6 +48,29 @@ func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string)
 	}, "test-adapter-token")
 }
 
+// chatSignalWithReader posts one general-surface message carrying the
+// originating surface's opaque reader key, exactly as the console and every
+// other chat-signal adapter do — the field chatSignal above leaves empty for
+// every other test, which do not care who typed it.
+func chatSignalWithReader(t *testing.T, srv *httpapi.Server, source, channel, text, reader string) *httptest.ResponseRecorder {
+	t.Helper()
+	chatFingerprint++
+	return adapterReq(srv, "POST", "/signal/inbound", map[string]any{
+		"source": source,
+		"signals": []map[string]any{{
+			"fingerprint": fmt.Sprintf("tg-%d", chatFingerprint),
+			"kind":        "chat",
+			"payload":     text,
+			"reader":      reader,
+			"labels": map[string]string{
+				"agentops.dev/channel": channel,
+				"agentops.dev/sender":  "somebody@example.com",
+				"agentops.dev/message": chatMessageHandle,
+			},
+		}},
+	}, "test-adapter-token")
+}
+
 // mkChatSource creates a chat SignalSource served by a telegram signal adapter.
 func mkChatSource(t *testing.T, name, channel string) {
 	t.Helper()
@@ -249,6 +272,92 @@ func TestChatCommandsAnswerWithoutCreatingConversations(t *testing.T) {
 	}
 }
 
+// An addressed command (/<pipeline> <task>) is as much a person deliberately
+// originating a conversation as a bare chat message is, so it is owed the
+// same OriginReader stamp — the console's "Mine" scope reads exactly this
+// field. This was the bug: HandleCommand's own conv-construction path
+// (CreateTaskConversation) never wrote it, only the bare-chat lane in
+// signals.go did, so every console conversation started by addressing a
+// Pipeline or Coordinator by name silently dropped out of "Mine".
+func TestAddressedCommandStampsOriginReader(t *testing.T) {
+	mkProfile(t, "prof-origin-addr")
+	mkChannel(t, "chan-origin-addr", "telegram")
+	mkChatSource(t, "src-origin-addr", "chan-origin-addr")
+	mkPipeline(t, "origin-addr-pipe", []string{"src-origin-addr"}, []string{"chan-origin-addr"}, "prof-origin-addr")
+	reconcilePipeline(t, "origin-addr-pipe")
+	srv := apiServer()
+
+	rec := chatSignalWithReader(t, srv, "src-origin-addr", "chan-origin-addr",
+		"/origin-addr-pipe check nodes", "sha256:addressed-reader")
+	if rec.Code != 200 {
+		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
+	}
+	convs := convsBoundTo(t, "chan-origin-addr")
+	if len(convs) != 1 {
+		t.Fatalf("want 1 conversation, got %d", len(convs))
+	}
+	got := convs[0].Spec.OriginReader
+	if got == nil || got.Channel != "chan-origin-addr" || got.Key != "sha256:addressed-reader" {
+		t.Fatalf("an addressed command must stamp OriginReader exactly like the bare chat lane: %+v", got)
+	}
+}
+
+// With no reader named — the adapter supplied none — an addressed command
+// stamps no OriginReader, exactly as the bare chat lane does not either.
+func TestAddressedCommandWithNoReaderStampsNone(t *testing.T) {
+	mkProfile(t, "prof-origin-noreader")
+	mkChannel(t, "chan-origin-noreader", "telegram")
+	mkChatSource(t, "src-origin-noreader", "chan-origin-noreader")
+	mkPipeline(t, "origin-noreader-pipe", []string{"src-origin-noreader"}, []string{"chan-origin-noreader"}, "prof-origin-noreader")
+	reconcilePipeline(t, "origin-noreader-pipe")
+	srv := apiServer()
+
+	if rec := chatSignal(t, srv, "src-origin-noreader", "chan-origin-noreader",
+		"/origin-noreader-pipe check nodes"); rec.Code != 200 {
+		t.Fatalf("addressed command: %d %s", rec.Code, rec.Body.String())
+	}
+	convs := convsBoundTo(t, "chan-origin-noreader")
+	if len(convs) != 1 {
+		t.Fatalf("want 1 conversation, got %d", len(convs))
+	}
+	if convs[0].Spec.OriginReader != nil {
+		t.Fatalf("no reader named means no OriginReader: %+v", convs[0].Spec.OriginReader)
+	}
+}
+
+// A machine-posted task or an alert carries no reader at all, and must stamp
+// no OriginReader whichever lane it lands in — a machine posting a task is
+// not owed a read mark.
+func TestMachinePostedTaskStampsNoOriginReader(t *testing.T) {
+	mkProfile(t, "prof-origin-task")
+	mkSignalSource(t, "src-origin-task", "am-origin-task", "")
+	mkPipeline(t, "origin-task-pipe", []string{"src-origin-task"}, nil, "prof-origin-task")
+	reconcilePipeline(t, "origin-task-pipe")
+
+	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-origin-task", []map[string]any{
+		{"fingerprint": "task-1", "kind": "task", "payload": "run the thing"},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := k8sClient.List(context.Background(), &list); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i := range list.Items {
+		if list.Items[i].Spec.PipelineRef != nil && list.Items[i].Spec.PipelineRef.Name == "origin-task-pipe" {
+			found = true
+			if list.Items[i].Spec.OriginReader != nil {
+				t.Fatalf("a machine-posted task must stamp no OriginReader: %+v", list.Items[i].Spec.OriginReader)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("want a conversation from the machine-posted task")
+	}
+}
+
 // A chat conversation is titled by the QUESTION, not by the surface it arrived
 // on. Falling back to the source name gave every conversation from one surface
 // the same title, which makes a list of them unreadable and search useless.
@@ -276,19 +385,30 @@ func TestChatConversationIsTitledByTheMessage(t *testing.T) {
 		t.Fatalf("the source name is not a useful title for a question: %q", title)
 	}
 
-	// A long question is bounded, and cut on a RUNE so multi-byte input is not
-	// sliced in half.
+	// A long question (a distinct fingerprint, so a SECOND conversation)
+	// is kept WHOLE — length limits belong to the channel that knows them
+	// (Telegram's own 128-char topic-name cap), never the manager. Still
+	// verified valid UTF-8: a long multi-byte question must never come back
+	// cut mid-character.
 	long := strings.Repeat("почему ", 40)
 	if rec := chatSignal(t, srv, "src-title", "chan-title", long); rec.Code != 200 {
 		t.Fatalf("long chat signal: %d %s", rec.Code, rec.Body.String())
 	}
-	for _, c := range convsBoundTo(t, "chan-title") {
-		if n := len([]rune(c.Spec.Title)); n > 60 {
-			t.Fatalf("title not bounded: %d runes", n)
+	after := convsBoundTo(t, "chan-title")
+	if len(after) != 2 {
+		t.Fatalf("want 2 conversations after a second, distinct question, got %d", len(after))
+	}
+	var longTitle string
+	for _, c := range after {
+		if c.Name != convs[0].Name {
+			longTitle = c.Spec.Title
 		}
 		if !utf8.ValidString(c.Spec.Title) {
 			t.Fatalf("title was cut mid-character: %q", c.Spec.Title)
 		}
+	}
+	if !strings.Contains(longTitle, strings.TrimSpace(long)) {
+		t.Fatalf("a long title must be kept whole: %q", longTitle)
 	}
 }
 

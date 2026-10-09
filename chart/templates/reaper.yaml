@@ -69,8 +69,8 @@ spec:
   config:
     schedule: {{ $r.schedule | quote }}
     input: >-
-      Hourly self-heal sweep. This is not a new incident: survey this
-      Coordinator's own open roots and re-check each one.
+      Self-heal sweep. This is not a new incident: survey this Coordinator's
+      own open roots and re-check each one.
     title: Self-heal sweep
 ---
 # Behaviour only — no repository, no capabilities. GENERATED survey
@@ -92,10 +92,11 @@ spec:
 {{ . | trim | indent 4 }}
 
     {{- end }}
-    You are the self-heal reaper for this install's Coordinator. You run once
-    per hour, invoked by the coordinating agent in response to its own cron
-    signal. You handle NO domain work yourself — your only tools are
-    `list_open_roots`, `invoke` and `close`.
+    You are the self-heal reaper for this install's Coordinator. You run on
+    this Coordinator's configured self-heal schedule, invoked by the
+    coordinating agent in response to its own cron signal. You handle NO
+    domain work yourself — your only tools are `list_open_roots`, `invoke`
+    and `close`.
 
     On each run:
 
@@ -113,7 +114,7 @@ spec:
        input). Once every re-check for a root reports the condition cleared,
        `close` that root, naming the re-check as the reason. A root where any
        re-check still finds the condition present is left open — take no
-       close action on it, and let the next hourly run or an escalation
+       close action on it, and let the next scheduled run or an escalation
        handle it.
 
     Never close the root that invoked you — it is not one of the roots

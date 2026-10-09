@@ -420,3 +420,13 @@ behind the coordination wall.
   - **It also watches pods, deployments and cronjobs**, read-only, because
     Components and Infrastructure are drawn from them.
   - **`docs/console.md` owns the detail.** This is only where it lives.
+- **The Conversations view is `platform/console/ui/src/pages/chat/`** — one
+  four-column view, not a table plus a separate detail page. `tree.ts` derives
+  the coordination tree client-side from `causedBy`, never from a server
+  endpoint.
+  - **Two browser-persisted keys, both guarded reads and writes, neither a
+    fact about any conversation.** `agentops.console.layout` holds pane
+    widths and the inbox collapse state. `agentops.console.skipCloseConfirm`
+    holds the "don't ask again" opt-out for the `/close` confirm dialog
+    (`closeConfirm.ts`). Every other piece of conversation state is replaced
+    wholesale on resync, never kept in the browser.

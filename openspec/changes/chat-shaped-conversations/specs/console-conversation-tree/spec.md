@@ -61,17 +61,34 @@ render as that member's result card, marked as an escalation.
 - **WHEN** a member that is itself a coordinator's root escalates
 - **THEN** its parent's timeline shows a result card marked as an escalation, and no divider appears below the uncaused root's
 
-### Requirement: The composer follows escalation
-Before the uncaused root has escalated it is bound to no channel, so its
-thread pane SHALL be read-only and SHALL say why. After escalation it SHALL
-behave as any multi-channel conversation.
+### Requirement: The composer follows channel binding, not escalation
+The uncaused root's `channelRefs` bind at creation, the same way a
+Pipeline's do (coordination-escalation). Its thread pane SHALL show the
+composer from the moment it is open.
+
+Escalating is a message the agent posts THROUGH that channel. It is never
+what unlocks it.
+
+The pane SHALL be read-only only in two cases, each naming itself:
+
+- there is genuinely no bound channel (predates this behaviour, or the
+  install's wiring declares none)
+- the conversation is `Closed`
 
 A member's pane SHALL be read-only at every depth, since a member never
 binds a human channel.
 
-#### Scenario: Not yet escalated
+#### Scenario: Open before escalating
 - **WHEN** the operator opens a root whose coordinator has not escalated
-- **THEN** no composer is shown and the pane says the coordinator has not asked for a person
+- **THEN** the composer is shown and a reply is an ordinary input, delivered the same way it would be after escalation
+
+#### Scenario: No channel at all
+- **WHEN** the operator opens a root with an empty bound-channel set
+- **THEN** no composer is shown and the pane says there is no channel to reply through
+
+#### Scenario: A closed conversation is read-only
+- **WHEN** the operator opens a root in phase `Closed` that still has bound channels
+- **THEN** no composer is shown and the pane says the conversation is closed
 
 ### Requirement: A member names its place in the tree
 A member's thread header SHALL show the chain from the uncaused root through

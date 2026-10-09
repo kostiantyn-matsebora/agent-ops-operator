@@ -54,6 +54,7 @@ export function CloseSelectedModal({
   busy,
   onConfirm,
   onClose,
+  memberCount = 0,
 }: {
   isOpen: boolean
   names: string[]
@@ -63,6 +64,8 @@ export function CloseSelectedModal({
   busy: boolean
   onConfirm: (includeWorking: boolean) => void
   onClose: () => void
+  /** Live descendants the manager's cascade also closes — console-conversation-tree: "the confirmation SHALL state how many descendants close with it". */
+  memberCount?: number
 }) {
   // Default OFF, and re-defaulted every time the dialog opens: an opt-in that
   // remembers itself is not one.
@@ -76,7 +79,13 @@ export function CloseSelectedModal({
       aria-label="close conversations"
       data-testid="close-modal"
     >
-      <ModalHeader title={result ? 'Close finished' : `Close ${names.length} conversation(s)?`} />
+      <ModalHeader
+        title={
+          result
+            ? 'Close finished'
+            : `Close ${names.length + memberCount} conversation(s)?`
+        }
+      />
       <ModalBody>
         {result ? (
           <>
@@ -105,11 +114,17 @@ export function CloseSelectedModal({
         ) : (
           <>
             <p>
-              {names.length} conversation(s) will be closed. Each is sent <code>/close</code> on its
-              console thread: the agent says goodbye and the threads are archived. The conversation
-              itself stays — its answers and its workspace are kept — and{' '}
-              <b>it can be reopened</b>.
+              {names.length + memberCount} conversation(s) will be closed. Each is sent{' '}
+              <code>/close</code> on its console thread: the agent says goodbye and the threads
+              are archived. The conversation itself stays — its answers and its workspace are kept
+              — and <b>it can be reopened</b>.
             </p>
+            {memberCount > 0 && (
+              <p data-testid="close-member-count">
+                {names.length} selected, reaching {memberCount} member conversation(s) the
+                manager's cascade closes too.
+              </p>
+            )}
             {working > 0 && (
               <>
                 <p data-testid="close-working-count">

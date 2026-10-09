@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -49,36 +50,6 @@ func (t ThreadBinding) watermark(reader string) string {
 	return t.ReadAt
 }
 
-// unread reports whether this binding has activity newer than the reader's
-// watermark. It mirrors ThreadBinding.Unread on the CRD type — the console
-// reads the CR over HTTP and holds no Go dependency on the operator module.
-func (t ThreadBinding) unread(lastActivity, reader string) bool {
-	if !t.ReadTracked {
-		return false
-	}
-	at := t.watermark(reader)
-	if at == "" {
-		return true
-	}
-	read, err := parseStamp(at)
-	if err != nil {
-		return false
-	}
-	act, err := parseStamp(lastActivity)
-	if err != nil {
-		return false
-	}
-	return act.After(read)
-}
-
-// parseStamp reads an API-server timestamp in either precision.
-func parseStamp(s string) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	return time.Parse(time.RFC3339Nano, s)
-}
-
 // Run is one completed agent run from status.runs[].
 type Run struct {
 	RunID      string `json:"runId"`
@@ -93,6 +64,111 @@ type Run struct {
 	// runs recorded before the manager kept them, which is why a thread from
 	// before this change still reads as answers alone.
 	Inputs []RecordedInput `json:"inputs,omitempty"`
+	// Turns and ToolCalls are this run's own model/tool call diagnostics,
+	// DERIVED by attachRunCalls from the activity feed's `model.call` /
+	// `tool.call` hops for this RunID — never read off the Conversation. The
+	// manager's own work contract is explicit that it writes neither to the
+	// Conversation (docs/contracts.md, "What the run did: turns[] and
+	// toolCalls[]"): that telemetry is recorded as activity hops only. Both
+	// are absent on a run whose runtime reported neither, or one outside the
+	// activity window.
+	Turns     []RunTurn     `json:"turns,omitempty"`
+	ToolCalls []RunToolCall `json:"toolCalls,omitempty"`
+}
+
+// RunTurn is one model call a run made, read off a `model.call` activity hop.
+// Field names match the work contract's own `turns[]` exactly
+// (docs/contracts.md).
+type RunTurn struct {
+	Model           string `json:"model,omitempty"`
+	TokensIn        *int64 `json:"tokensIn,omitempty"`
+	TokensOut       *int64 `json:"tokensOut,omitempty"`
+	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
+	StopReason      string `json:"stopReason,omitempty"`
+}
+
+// RunToolCall is one tool call a run made, read off a `tool.call` activity
+// hop. Field names match the work contract's own `toolCalls[]` exactly
+// (docs/contracts.md).
+type RunToolCall struct {
+	Tool        string `json:"tool,omitempty"`
+	Server      string `json:"server,omitempty"`
+	DurationMs  *int64 `json:"durationMs,omitempty"`
+	ResultBytes *int64 `json:"resultBytes,omitempty"`
+}
+
+// attachRunCalls groups one conversation's `model.call` / `tool.call`
+// activity hops by RunID and layers them onto the matching Run — the one
+// place this telemetry reaches the browser as a PER-RUN diagnostic rather
+// than loose hops on the activity stream. It reads the SAME events array the
+// detail view already fetches for its own "events" field, never a second
+// activity read.
+//
+// A run with no matching hops (a runtime that reported neither, or a run
+// older than the activity window) keeps both fields absent — exactly the
+// shape the work contract itself allows.
+func attachRunCalls(runs []Run, events []ActivityEvent) []Run {
+	if len(runs) == 0 || len(events) == 0 {
+		return runs
+	}
+	turns := map[string][]RunTurn{}
+	toolCalls := map[string][]RunToolCall{}
+	for _, e := range events {
+		if e.RunID == "" {
+			continue
+		}
+		switch e.Kind {
+		case "model.call":
+			turns[e.RunID] = append(turns[e.RunID], RunTurn{
+				Model: e.Data["model"], StopReason: e.Data["stopReason"],
+				TokensIn: reportedCount(e.Data, "tokensIn"), TokensOut: reportedCount(e.Data, "tokensOut"),
+				CacheReadTokens: reportedCount(e.Data, "cacheReadTokens"),
+			})
+		case "tool.call":
+			toolCalls[e.RunID] = append(toolCalls[e.RunID], RunToolCall{
+				Tool: e.Data["tool"], Server: e.Data["server"],
+				ResultBytes: reportedCount(e.Data, "resultBytes"), DurationMs: reportedLatency(e.LatencyMs),
+			})
+		}
+	}
+	if len(turns) == 0 && len(toolCalls) == 0 {
+		return runs
+	}
+	out := make([]Run, len(runs))
+	for i, r := range runs {
+		r.Turns = turns[r.RunID]
+		r.ToolCalls = toolCalls[r.RunID]
+		out[i] = r
+	}
+	return out
+}
+
+// reportedCount reads a bounded telemetry count out of an activity hop's
+// string data map, or nil when the key is absent or not a clean
+// non-negative integer. The manager OMITS a fact it cannot determine rather
+// than reporting it as zero (docs/contracts.md: "A fact the runtime cannot
+// determine is OMITTED, never sent as zero"), and a value that fails to
+// parse across this boundary is treated the same way rather than trusted.
+func reportedCount(data map[string]string, key string) *int64 {
+	v, ok := data[key]
+	if !ok {
+		return nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return nil
+	}
+	return &n
+}
+
+// reportedLatency mirrors Edges' own treatment of an activity hop's
+// LatencyMs: the wire's `omitempty` already makes zero and "not reported"
+// indistinguishable, so zero reads as absent here too, consistently.
+func reportedLatency(ms int64) *int64 {
+	if ms <= 0 {
+		return nil
+	}
+	return &ms
 }
 
 // RecordedInput is one message a run consumed, as the Conversation records it.
@@ -104,10 +180,28 @@ type RecordedInput struct {
 	Truncated bool `json:"truncated,omitempty"`
 	// Surface is the channel the message was typed on, empty when no surface
 	// displayed it — an alert, a job tick, a posted task.
-	Surface    string `json:"surface,omitempty"`
-	Sender     string `json:"sender,omitempty"`
+	Surface string `json:"surface,omitempty"`
+	Sender  string `json:"sender,omitempty"`
+	// Origin is the input's OriginKind ("signal" | "channel" | "member"), the
+	// field name matching the manager's own API exactly
+	// (api/v1alpha1.RecordedInput). "member" is the one value this console
+	// acts on: a task `invoke` handed down, or a member's result routed back
+	// up (coordination-loop) — both coordination-internal, never a human-facing
+	// card. A genuine surfaceless signal (an alert, a job tick) also records
+	// Surface as "", so Surface alone cannot tell the two apart — this is the
+	// field that can. Empty on an input recorded before this field existed.
+	Origin     string `json:"origin,omitempty"`
 	ReceivedAt string `json:"receivedAt,omitempty"`
 }
+
+// originMember is recordedSignalCard's sibling fact: an input whose Origin is
+// this is coordination plumbing between a conversation and its own causedBy
+// member — already shown in full by the invoke card console-conversation-tree
+// builds straight from that member's own transcript (ThreadPane.tsx,
+// MemberInvocationExchange). Rendering it AGAIN here, as a generic signal
+// card, duplicated a member's result on the page it was invoked from (item
+// #15 QA, bug 2) — matches api/v1alpha1.OriginMember exactly.
+const originMember = "member"
 
 // Inflight is the unit currently dispatched to a runtime.
 type Inflight struct {
@@ -173,7 +267,13 @@ type convView struct {
 			SourceRef *Ref              `json:"sourceRef,omitempty"`
 			Labels    map[string]string `json:"labels,omitempty"`
 		} `json:"signal,omitempty"`
-		Title      string      `json:"title,omitempty"`
+		Title string `json:"title,omitempty"`
+		// OriginReader names whoever STARTED this conversation, in the opaque
+		// key space of the channel they started it from — what "Mine" reads,
+		// since the person who typed the request is the one case a watermark
+		// rule would otherwise get wrong (api/v1alpha1's own comment on the
+		// field).
+		OriginReader *originReaderRef `json:"originReader,omitempty"`
 		Toolsets   *refBinding `json:"toolsets,omitempty"`
 		MCPConfigs *refBinding `json:"mcpConfigs,omitempty"`
 		Inputs     []struct {
@@ -204,6 +304,12 @@ type convView struct {
 			Message string `json:"message,omitempty"`
 		} `json:"conditions,omitempty"`
 	} `json:"status"`
+}
+
+// originReaderRef is spec.originReader as the console reads it.
+type originReaderRef struct {
+	Channel string `json:"channel"`
+	Key     string `json:"key"`
 }
 
 // conversationView parses a cached Conversation object.
@@ -284,10 +390,28 @@ type ConversationSummary struct {
 	Toolsets   []string `json:"toolsets,omitempty"`
 	MCPConfigs []string `json:"mcpConfigs,omitempty"`
 
-	// Unread: the CONSOLE's own thread has activity newer than its watermark.
-	// An observed conversation — one with no console thread — is never unread:
-	// the console holds no watermark on it and has no standing to call it new.
+	// Unread: UnreadCount is above zero. An observed conversation — one with
+	// no console thread — is never unread: the console holds no watermark on
+	// it and has no standing to call it new.
 	Unread bool `json:"unread"`
+	// UnreadCount is the number of counted-kind messages (signal, agent,
+	// relay — see countedKinds) on the CONSOLE's own thread, after the
+	// reader's watermark. An ack, a notice, a console user's own words and a
+	// run event are never counted, whatever the watermark says.
+	UnreadCount int `json:"unreadCount"`
+	// LastMessage is the most recent counted-kind message on the console
+	// thread, read or not — the row's snippet, and never an ack: an ack is
+	// PRESENCE, shown as the pulsing dot below, not a line of transcript.
+	LastMessage *LastMessage `json:"lastMessage,omitempty"`
+	// Presence: a run is inflight right now. Drawn apart from Unread (design
+	// decision "Presence is drawn apart from unread") — a conversation can be
+	// both, either or neither.
+	Presence bool `json:"presence"`
+	// Mine: the requesting reader is who STARTED this conversation (its
+	// OriginReader, in this console's own channel's key space). The inbox's
+	// "Mine" scope. Always false with no reader resolved — there is no
+	// identity to compare against.
+	Mine bool `json:"mine"`
 	// ReadAt is the console thread's watermark, so the browser can report a
 	// read only when it would actually advance.
 	ReadAt string `json:"readAt,omitempty"`
@@ -316,6 +440,48 @@ type ConversationSummary struct {
 	// written by the agent — shown wherever a list would otherwise show only
 	// a name (design D-I).
 	Brief string `json:"brief,omitempty"`
+
+	// lastMessageAt is the newest counted message's own timestamp — never
+	// serialized, since the row needs only LastMessage's kind/sender/text.
+	// Kept server-side for the two computations that need the TIME rather
+	// than the text: the read report on open (design D-D) and mark unread's
+	// rewind target (design D-E), so neither re-derives it from the merged
+	// transcript a second time.
+	lastMessageAt string
+}
+
+// readReportTime is what reporting a conversation read sends: the newest
+// counted message's own time, or the conversation's activity time where that
+// is later (design D-D). Never a locally generated "now" — both halves are
+// read off the conversation's own state.
+//
+// Falls back to sortKey() when there is no counted message yet to read a
+// time from — the conversation predates a message, or carries none on this
+// console's thread at all — which is exactly what reporting read against
+// this conversation did before counted messages existed.
+func (s ConversationSummary) readReportTime() string {
+	newest, ok := parseAt(s.lastMessageAt)
+	if !ok {
+		return s.sortKey()
+	}
+	if act, ok := parseAt(s.LastActivity); ok && act.After(newest) {
+		return s.LastActivity
+	}
+	return s.lastMessageAt
+}
+
+// RewindTarget is what "mark unread" (design D-E) asks the manager to set the
+// reader's own watermark to: just before the newest counted message, so that
+// message counts again and nothing earlier does.
+//
+// Absent when there is no counted message to rewind to — mark unread has
+// nothing to offer a conversation nobody has to read yet.
+func (s ConversationSummary) RewindTarget() (string, bool) {
+	newest, ok := parseAt(s.lastMessageAt)
+	if !ok {
+		return "", false
+	}
+	return newest.Add(-time.Nanosecond).Format(time.RFC3339Nano), true
 }
 
 // summarize projects one Conversation for the browser. consoleChannel is the
@@ -335,7 +501,20 @@ type BlockedReason struct {
 	Storage bool `json:"storage"`
 }
 
-func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, reader string) ConversationSummary {
+// LastMessage is the most recent counted-kind message on a conversation's
+// console thread (see countedKinds) — the row's snippet, carried as a
+// kind/sender/text triple rather than a flattened string so the UI can draw
+// it the way it draws the thread itself.
+type LastMessage struct {
+	Kind   string `json:"kind"`
+	Sender string `json:"sender,omitempty"`
+	Text   string `json:"text"`
+}
+
+// summarize projects one Conversation for the browser. transcripts is nilable
+// so pure CR-derived fields stay testable with no live buffer at all — a row
+// with no console thread never reads it either.
+func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, reader string, transcripts *Transcripts) ConversationSummary {
 	v := conversationView(obj)
 	s := ConversationSummary{
 		Name: obj.Metadata.Name, UID: obj.Metadata.UID, Title: v.Spec.Title,
@@ -354,6 +533,9 @@ func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, r
 		EscalatedAt: v.Status.EscalatedAt,
 		CloseReason: v.Status.CloseReason,
 		Brief:       v.Status.Brief,
+		Presence:    v.Status.Inflight != nil,
+		Mine: reader != "" && v.Spec.OriginReader != nil &&
+			v.Spec.OriginReader.Channel == consoleChannel && v.Spec.OriginReader.Key == reader,
 	}
 	// RunCount is set HERE, not only on the list path: the detail view carries
 	// Runs too, and a summary that reported 0 runs beside a populated list was
@@ -362,29 +544,60 @@ func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, r
 	if n := len(v.Status.Runs); n > 0 && v.Status.Runs[n-1].Status != "succeeded" {
 		s.Errored = true
 	}
+	s.Blocked = blockedReason(v)
+	s.AgeSeconds = ageSeconds(time.Now(), s.sortKey())
+	s.joinConsoleThread(v, consoleChannel, reader)
+	// Unreadness is a property of the CONSOLE's own thread, and only of it: a
+	// conversation this console merely observes carries no watermark and has
+	// no standing to call anything new.
+	if s.Joined {
+		s.applyUnread(v, consoleChannel, transcripts)
+	}
+	return s
+}
+
+// blockedReason reads the RuntimeStarted=False condition, the last one wins.
+func blockedReason(v convView) *BlockedReason {
+	var blocked *BlockedReason
 	for _, c := range v.Status.Conditions {
 		if c.Type == "RuntimeStarted" && c.Status == "False" {
-			s.Blocked = &BlockedReason{
+			blocked = &BlockedReason{
 				Reason: c.Reason, Detail: c.Message,
 				Storage: c.Reason == "VolumeUnavailable" || c.Reason == "StorageUnavailable",
 			}
 		}
 	}
-	s.AgeSeconds = ageSeconds(time.Now(), s.sortKey())
-	if consoleChannel != "" {
-		for _, t := range v.Status.Threads {
-			if t.Channel == consoleChannel {
-				s.Joined = true
-				s.ConsoleThread = t.ThreadID
-				s.ReadAt = t.watermark(reader)
-				// sortKey(), not LastActivity, so the unread mark and the
-				// ordering can never disagree: unread rows are exactly a prefix
-				// of the list.
-				s.Unread = t.unread(s.sortKey(), reader)
-			}
+	return blocked
+}
+
+// joinConsoleThread records the console's own thread binding, when there is one.
+func (s *ConversationSummary) joinConsoleThread(v convView, consoleChannel, reader string) {
+	if consoleChannel == "" {
+		return
+	}
+	for _, t := range v.Status.Threads {
+		if t.Channel == consoleChannel {
+			s.Joined = true
+			s.ConsoleThread = t.ThreadID
+			s.ReadAt = t.watermark(reader)
 		}
 	}
-	return s
+}
+
+// applyUnread counts what the console thread holds past the reader's watermark.
+func (s *ConversationSummary) applyUnread(v convView, consoleChannel string, transcripts *Transcripts) {
+	var live []Message
+	if transcripts != nil {
+		live = transcripts.Thread(s.ConsoleThread)
+	}
+	merged := mergeTranscript(s.ConsoleThread, consoleChannel, live, v.Status.Runs, *s)
+	count, newest, hasNewest := countUnread(merged, s.ReadAt)
+	s.UnreadCount = count
+	s.Unread = count > 0
+	if hasNewest {
+		s.LastMessage = &LastMessage{Kind: newest.Kind, Sender: newest.Sender, Text: newest.Text}
+		s.lastMessageAt = newest.At
+	}
 }
 
 // sortKey orders the listing newest-activity-first. lastActivity is the field

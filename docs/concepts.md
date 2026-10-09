@@ -1284,7 +1284,8 @@ name, and never anything its own `agents[]` does not list.
 | the parent's next run | includes that input, attributed to the member's entry name |
 
 **A member binds no channel at creation.** Its inputs and results reach no
-surface — a coordinator reaches people only by escalating.
+surface directly — only its UNCAUSED root's own bound channels ever show a
+human anything, whether that root's agent escalates or not (see below).
 
 **A conversation never receives its own output as input.** `/channel/inbound`
 refuses an inbound message whose origin surface is its own target
@@ -1293,31 +1294,34 @@ conversation.
 **A member reporting after its parent is `Closed` is dropped.** No input is
 appended, and the result stays on the member's own record.
 
-### Escalation: only the uncaused root ever opens a human thread
+### Escalation: a decision posted into a thread already open
 
-**Escalation is a decision, not an arrival.** A Coordinator's `channelRefs`
-bind nothing at creation. They are snapshotted onto the UNCAUSED root as
-`spec.escalationChannelRefs`, and nothing opens a thread on them until the
-agent calls `escalate(message)`.
+**An uncaused root's channels bind at creation, unconditionally** — the same
+moment a Pipeline's own `channelRefs` bind, and whether or not its agent ever
+calls `escalate`. Any open coordinator root is reachable by a human from the
+start.
+
+This replaced an earlier design where a Coordinator's `channelRefs` bound
+nothing until `escalate(message)` ran. That design is gone: an unescalated
+root used to run unseen, and now it does not.
 
 | Caller | `escalate` does |
 |---|---|
-| the uncaused root (no `causedBy`) | binds the snapshotted channels, opens a thread on each with `message` as its first post |
+| the uncaused root (no `causedBy`) | posts `message` as the digest into every already-bound channel's thread, and stamps `status.escalatedAt` |
 | a nested member (carries `causedBy`) | opens **no** thread — closes itself with `message` as `closeReason` and result, landing on its own parent as an ordinary member-result input |
 
-**The bubble repeats.** A parent receiving that report may itself be nested,
-and calling `escalate` again closes it the same way, one hop up, until a call
-reaches the uncaused root.
+**The bubble repeats for a member.** A parent receiving that report may
+itself be nested, and calling `escalate` again closes it the same way, one
+hop up, until a call reaches the uncaused root — where it posts into the
+already-open thread rather than closing anything.
 
-**Escalating reads no Coordinator.** It works even after the Coordinator is
-edited or deleted, because the channels were already snapshotted.
+**A second call is a no-op.** `status.escalatedAt` is set once. A later
+`escalate` on the same root replays no digest.
 
-**Prior inputs are never replayed into a late thread.** `DeliverInputs` fences
-on `status.escalatedAt` — nothing that arrived earlier is delivered to the
-channels escalation just bound.
-
-**After escalation the root is an ordinary multi-channel conversation.** A
-person's reply is an input, delivered to every other bound channel as usual.
+**The root was already an ordinary multi-channel conversation, and stays
+one.** A person's reply is an input, delivered to every other bound channel
+as usual. Nothing about delivery changes at the moment of escalation, because
+nothing was ever fenced on it.
 
 **Close and drop record why.** `status.closeReason` is stamped beside
 `closedAt`. The MCP `close` verb requires one. `/close` from a surface does
@@ -1403,7 +1407,7 @@ bundle renders its routes, release-wide:
   `pipelines` mode keeps.
 - **The chart-rendered Coordinator claims every enabled bundle's source** —
   the same ones its `pipelines`-mode routes claim — plus the self-heal
-  reaper's own hourly `signals/cron` claim, below, when the reaper is on.
+  reaper's own scheduled `signals/cron` claim, below, when the reaper is on.
 - **No API-server exclusivity exists between the two kinds.** An operator may
   hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
   same cluster, whatever the chart last rendered. The API server accepts
@@ -1411,21 +1415,22 @@ bundle renders its routes, release-wide:
 
 ### The self-heal reaper
 
-**An ordinary `agents[]` entry, shipped by `coordinator` mode — no new
-CRD.** It surveys its own Coordinator's open roots on an hourly schedule and
-closes the ones it judges healed.
+**An ordinary `agents[]` entry, shipped by `coordinator` mode alone — no new
+CRD.** It surveys its own Coordinator's open roots on a configured schedule
+(`reaper.schedule`, four times a day by default) and closes the ones it
+judges healed.
 
-**OFF by default** (`reaper.enabled: false`). An hourly survey conversation
-is real LLM cost whether or not anything is stuck, so an install turns it on
-rather than carrying it the moment `coordinator` mode is.
+**OFF by default** (`reaper.enabled: false`). A survey conversation is real
+LLM cost whether or not anything is stuck, so an install turns it on rather
+than carrying it the moment `coordinator` mode is.
 
 | Step | Does |
 |---|---|
-| an hourly `signals/cron` signal, claimed on the chart-rendered Coordinator | opens a conversation running the Coordinator's own coordinating agent |
+| a `signals/cron` signal on its configured schedule, claimed on the chart-rendered Coordinator | opens a conversation running the Coordinator's own coordinating agent |
 | the coordinating agent | recognises the cron signal and `invoke`s the reaper's `agents[]` entry |
 | the reaper | calls `list_open_roots`, then `invoke`s the SAME capability named in each root's `members` to re-check it |
 | a re-check reporting the condition cleared | the reaper `close`s that root, naming the re-check as the reason |
-| a re-check still finding the condition present | the root is left open for the next hourly run or an escalation |
+| a re-check still finding the condition present | the root is left open for the next scheduled run or an escalation |
 
 - **It holds no domain toolset and no domain `MCPConfig`** — only the
   coordination reach through `agentops-coordinate` and the aops `MCPConfig`.
@@ -2089,6 +2094,16 @@ Without it the first upgrade presents every conversation in the namespace as
 new. The manager sets `readTracked` on every binding it creates from that point
 on, for every channel, so the rule stays one rule.
 
+**The console counts unread MESSAGES, not just lateness.** Its own rule —
+which kinds count, and the per-conversation `unreadCount` it derives from
+them — is [the console's own](console.md#unread), built on this watermark
+rather than replacing it.
+
+A reader may also RECLAIM a message as unread. `POST /channel/read` accepts
+`rewind` beside `readAt`, moving that reader's own watermark backward
+instead of forward, still named and still clamped — see
+[the rewind rule](contracts.md#post-channelread).
+
 ### Telemetry says where it lost the thread
 
 **The activity ring stays bounded, in-memory and lossy.**
@@ -2143,6 +2158,11 @@ nobody reached for it.
 **A reply typed into a closed thread is answered with "this conversation is
 closed" and creates nothing.** An input there would never dispatch.
 
+**Closing cascades through `causedBy`, for every originator.** A human
+`/close`, the console's bulk close, and the idle timer all close every LIVE
+descendant recursively, through the path the coordinator's own `close` verb
+already used for its members. A plain conversation closes as before.
+
 **Deletion is a second verb** with its own trigger, window and flag.
 
 - **`kubectl delete conversation` still works**, and the
@@ -2179,6 +2199,11 @@ gone and that a new message starts a new one.
   object is disappearing — and the finalizer's 2-minute grace releases
   regardless, because a deletion must never be wedged by an adapter that is
   down.
+
+**Deleting cascades through `causedBy` too**, for every originator: every
+conversation reachable from the deleted one is deleted first, recursively.
+Nothing is skipped as not-yet-closed, since the close cascade above already
+closed the whole subtree before any of it could be deleted.
 
 ### Reopening
 

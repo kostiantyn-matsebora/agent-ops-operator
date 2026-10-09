@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -266,28 +268,37 @@ type ConversationSpec struct {
 	//
 	// PROVENANCE, never wiring — nothing resolves the Coordinator's
 	// agents[], sources or channels through this ref at dispatch time; those
-	// were already snapshotted at creation (ChannelRefs stay empty here,
-	// status.budget carries the limits). It exists so `invoke` knows which
-	// Coordinator's `agents[]` this conversation may invoke from, and so a
-	// nested cycle guard can name the Coordinator repeated.
+	// were already snapshotted at creation (ChannelRefs carries the
+	// Coordinator's own channels, bound unconditionally — see ChannelRefs'
+	// own comment — and status.budget carries the limits). It exists so
+	// `invoke` knows which Coordinator's `agents[]` this conversation may
+	// invoke from, and so a nested cycle guard can name the Coordinator
+	// repeated.
 	// +optional
 	CoordinatorRef *ObjectRef `json:"coordinatorRef,omitempty"`
 	// EscalationChannelRefs is the SNAPSHOT of the originating Coordinator's
 	// own `channelRefs`, taken at creation — set only alongside CoordinatorRef,
 	// and only for an UNCAUSED root (a member never binds it).
 	//
-	// It names where an `escalate` verb on THIS conversation opens its human
-	// thread (design D-D). Nothing binds these channels at creation: they sit
-	// here, unused, until escalation reaches for them — which is what keeps a
-	// Coordinator claiming a chat surface from opening a thread on a bare
-	// message. Editing the Coordinator's `channelRefs` after creation changes
-	// nothing here, exactly as editing its `limits` cannot reach the budget
-	// already snapshotted into status.
+	// UNCONDITIONALLY BOUND INTO ChannelRefs AT CREATION TOO
+	// (coordinator-unconditional-channels): any open coordinator root must be
+	// reachable by a human from the moment it exists, whether or not its agent
+	// ever calls `escalate` — exactly as a Pipeline's own `channelRefs` already
+	// are. `escalate` no longer binds anything; it posts into a thread already
+	// open. This field survives as its own PROVENANCE — the Coordinator's own
+	// declared set, as opposed to ChannelRefs, which for a chat-addressed root
+	// may additionally carry the one channel it was addressed from. Editing
+	// the Coordinator's `channelRefs` after creation changes nothing here,
+	// exactly as editing its `limits` cannot reach the budget already
+	// snapshotted into status.
 	// +optional
 	EscalationChannelRefs []ObjectRef `json:"escalationChannelRefs,omitempty"`
 	// ChannelRefs — every listed channel mirrors the whole conversation (own
 	// thread per channel, replies and acks fanned out). Empty = chat-less
-	// (HTTP-only / shadow).
+	// (HTTP-only / shadow). For a Coordinator-rooted conversation this is
+	// bound from the Coordinator's own `channelRefs` at creation, the same way
+	// a Pipeline's is (coordinator-unconditional-channels) — never left empty
+	// pending an `escalate` call.
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
 	ProfileRef  ObjectRef   `json:"profileRef"`
@@ -337,7 +348,11 @@ type ConversationSpec struct {
 	// channel started. Render it as absent rather than guessing.
 	// +optional
 	Signal *SignalProvenance `json:"signal,omitempty"`
+	// Title is bounded by MaxConversationTitle — see that constant's own
+	// comment for why a cap belongs HERE despite the message-body rule
+	// against transport-shaped limits.
 	// +optional
+	// +kubebuilder:validation:MaxLength=500
 	Title string `json:"title,omitempty"`
 	// Signature groups same/similar problems into one conversation
 	// (e.g. alertgroup/alertname/namespace, job:<name>).
@@ -558,6 +573,17 @@ type RecordedInput struct {
 	// Sender is who typed it, when a sender was named. Attribution only.
 	// +optional
 	Sender string `json:"sender,omitempty"`
+	// Origin is this input's OriginKind, carried into the durable record so a
+	// reader rehydrating a thread from `status.runs[]` alone can tell a
+	// coordination-internal input (OriginMember — a task `invoke` handed down,
+	// or a member's result routed back up) from an ordinary one, WITHOUT
+	// re-deriving it from Surface: both an OriginMember input and a genuine
+	// surfaceless signal (an alert, a job tick) record Surface as "", so Surface
+	// alone cannot tell them apart. Absent on an input recorded before this
+	// field existed, which reads as neither kind and renders exactly as it
+	// always has.
+	// +optional
+	Origin OriginKind `json:"origin,omitempty"`
 	// +optional
 	ReceivedAt *metav1.Time `json:"receivedAt,omitempty"`
 }
@@ -572,6 +598,9 @@ func (i *InputItem) Record(text string, labels map[string]string) RecordedInput 
 	rec := RecordedInput{
 		ID: i.ID, Type: i.Type, PayloadRef: i.PayloadRef,
 		Surface: i.OriginSurface(labels), Sender: i.OriginSender(labels),
+	}
+	if i.Origin != nil {
+		rec.Origin = i.Origin.Kind
 	}
 	if !i.ReceivedAt.IsZero() {
 		at := i.ReceivedAt
@@ -630,8 +659,18 @@ type ThreadBinding struct {
 	// Per THREAD, therefore per CHANNEL: a conversation bound to Telegram and the
 	// console has two audiences reading it in two places, and one shared mark
 	// would let a Telegram reader clear the console's.
+	//
+	// AN OPAQUE RFC3339(-NANO) STRING, NEVER metav1.Time. metav1.Time's
+	// MarshalJSON truncates to WHOLE-SECOND precision on the round trip through
+	// the API server — UnmarshalJSON on the way IN preserves sub-second digits,
+	// the loss is in STORAGE — so a watermark stamped from a message's own
+	// full-precision timestamp could round-trip to a value that same message's
+	// timestamp still reads as strictly after, leaving the thread it was meant
+	// to clear unread forever. A plain string stores exactly the bytes it was
+	// given. Parse with ParseWatermark; never compare it as a time.Time
+	// directly.
 	// +optional
-	ReadAt *metav1.Time `json:"readAt,omitempty"`
+	ReadAt *string `json:"readAt,omitempty"`
 	// ReadTracked marks a binding created by a manager that tracks reads. It is
 	// what tells a NEVER-READ binding from a PRE-UPGRADE one — both look like "a
 	// binding with no readAt", and no timestamp can separate them, exactly as
@@ -667,8 +706,10 @@ type ReaderMark struct {
 	// conversation records THAT someone read it without recording WHO. Same
 	// contract as ThreadID and RuntimeContextID.
 	Key string `json:"key"`
+	// ReadAt carries the same opaque RFC3339(-Nano) string as
+	// ThreadBinding.ReadAt, for the same reason — see that field's comment.
 	// +optional
-	ReadAt *metav1.Time `json:"readAt,omitempty"`
+	ReadAt *string `json:"readAt,omitempty"`
 }
 
 // Watermark returns how far a reader has seen this thread: their own mark when
@@ -679,7 +720,7 @@ type ReaderMark struct {
 // inherit where the channel as a whole got to — so a teammate joining today is
 // not handed a namespace-sized backlog they can act on none of, which is the
 // ReadTracked backfill argument one level down.
-func (t *ThreadBinding) Watermark(reader string) *metav1.Time {
+func (t *ThreadBinding) Watermark(reader string) *string {
 	if reader != "" {
 		for i := range t.Readers {
 			if t.Readers[i].Key == reader {
@@ -688,6 +729,22 @@ func (t *ThreadBinding) Watermark(reader string) *metav1.Time {
 		}
 	}
 	return t.ReadAt
+}
+
+// ParseWatermark parses a ReadAt string into a comparable time.Time. It is the
+// ONE place a stored or reported watermark is interpreted — Unread uses it
+// below, and the HTTP read-report handler uses it too, so a malformed
+// watermark reads the same way on both sides of the write.
+//
+// An empty or unparsable string reports !ok. Nothing today writes such a
+// value, but a reader must not panic on one it did not itself produce — it is
+// treated the same as "no watermark at all", conservatively.
+func ParseWatermark(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	return t, err == nil
 }
 
 // Unread reports whether this thread has activity newer than its watermark,
@@ -709,10 +766,15 @@ func (t *ThreadBinding) Unread(lastActivity *metav1.Time, reader string) bool {
 	if at == nil {
 		return true
 	}
+	parsed, ok := ParseWatermark(*at)
+	if !ok {
+		// Carries no usable information — the same as no watermark at all.
+		return true
+	}
 	if lastActivity == nil {
 		return false
 	}
-	return lastActivity.Time.After(at.Time)
+	return lastActivity.Time.After(parsed)
 }
 
 // ConversationBudget is a Coordinator-rooted conversation's own resource
@@ -756,6 +818,37 @@ const MaxCloseReason = 256
 
 // MaxBrief bounds ConversationStatus.Brief.
 const MaxBrief = 512
+
+// MaxConversationTitle bounds ConversationSpec.Title.
+//
+// This is NOT the transport-shaped-limit mistake the "no manager-side cut"
+// rule (gotchas.md, invariants.md) warns against. That rule is about a
+// MESSAGE BODY an adapter renders and a transport bounds in its own way
+// (Telegram's own 128-rune topic-name cap, enforced only at
+// channels/telegram/telegram.go's CreateTopic). Title is a different thing:
+// a ConversationSpec field, stored permanently in the API server and
+// returned on every list/watch of this object, set directly from
+// attacker-or-adopter-controlled text (an alert or chat payload, an
+// addressed command's task, an invoked member's entry) with no per-transport
+// cap standing between the input and etcd. Every other free-text field on
+// this type IS bounded here (CloseReason, EscalationMessage,
+// RecordedInput.Text) — Title was the one exception, able to grow to
+// whatever the inbound request body's own limit allowed.
+const MaxConversationTitle = 500
+
+// BoundConversationTitle truncates s to MaxConversationTitle runes, applied
+// at every site that sets ConversationSpec.Title from request-shaped text
+// (internal/httpapi/signals.go's title construction, internal/chat's
+// CreateTaskConversation and memberTitle). Rune-safe — a Title carries an
+// emoji prefix (🛠, 🤖, 🤝, 🔍) ahead of the caller's own words, and a byte
+// slice would cut a multi-byte character in half.
+func BoundConversationTitle(s string) string {
+	runes := []rune(s)
+	if len(runes) <= MaxConversationTitle {
+		return s
+	}
+	return string(runes[:MaxConversationTitle])
+}
 
 // ConversationStatus is the observed state.
 type ConversationStatus struct {
@@ -820,20 +913,21 @@ type ConversationStatus struct {
 	// on any other conversation: there is nothing to enforce.
 	// +optional
 	Budget *ConversationBudget `json:"budget,omitempty"`
-	// EscalatedAt stamps the moment the `escalate` verb opened this
-	// conversation's human thread — an UNCAUSED root only; a caused member
-	// escalates by closing instead (see CloseReason) and never sets this.
+	// EscalatedAt stamps the moment the `escalate` verb was called on this
+	// conversation — an UNCAUSED root only; a caused member escalates by
+	// closing instead (see CloseReason) and never sets this.
 	//
-	// DeliverInputs fences on it: nothing with an earlier arrival is
-	// (re)delivered to the channels escalation just bound, so opening the
-	// thread late does not replay everything that happened before it existed.
+	// Its threads were already open at creation
+	// (coordinator-unconditional-channels), so this no longer gates DeliverInputs
+	// at all — it is the record of the agent's decision, not a bind moment.
 	// +optional
 	EscalatedAt *metav1.Time `json:"escalatedAt,omitempty"`
 	// EscalationMessage is the digest the escalating agent supplied, snapshotted
-	// at the same moment as EscalatedAt so the reconciler can post it as the
-	// newly-bound threads' opening message once each topic exists — the ensure-topic
-	// enqueue and the topic actually being created by the adapter are two
-	// separate moments, so the message has to sit somewhere between them.
+	// at the same moment as EscalatedAt so the reconciler can post it into
+	// each already-bound channel's thread once that thread exists — the
+	// ensure-topic enqueue and the topic actually being created by the adapter
+	// are two separate moments, so the message has to sit somewhere between
+	// them.
 	// +optional
 	// +kubebuilder:validation:MaxLength=2000
 	EscalationMessage string `json:"escalationMessage,omitempty"`

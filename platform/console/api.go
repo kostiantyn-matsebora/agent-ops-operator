@@ -190,6 +190,11 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	// an unread badge earns its keep, and one that could show a backlog but
 	// never clear it would be broken in the way the badge exists to fix.
 	mux.HandleFunc("POST /api/conversations/read", a.auth(a.handleMarkRead))
+	// Mark unread is the reverse rewind (design D-E) — authenticated and
+	// attributed on the same grounds as mark read, and NOT write-gated for
+	// the identical reason: a watermark instructs no agent and starts no
+	// work, whichever direction it moves.
+	mux.HandleFunc("POST /api/conversations/unread", a.auth(a.handleMarkUnread))
 	mux.HandleFunc("POST /api/conversations/{name}/messages", a.write("send-message", a.handleSend))
 	mux.HandleFunc("POST /api/conversations/{name}/reopen", a.write("reopen", a.handleReopen))
 

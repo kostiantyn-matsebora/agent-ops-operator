@@ -33,13 +33,19 @@ type Claimant interface {
 	// ClaimantKind says which kind this is.
 	ClaimantKind() ClaimantKind
 	// BoundChannelRefs are the channels a conversation this claimant opens
-	// binds at CREATION. A Pipeline's own ChannelRefs; empty for a
-	// Coordinator, whose `channelRefs` are reached only through `escalate`
-	// (design D-D) — never at admission.
+	// binds at CREATION — a Pipeline's own ChannelRefs, and (coordinator-
+	// unconditional-channels) a Coordinator's own, UNCONDITIONALLY: any open
+	// coordinator root is reachable by a human from the moment it exists,
+	// exactly as a Pipeline-rooted conversation already is. `escalate` no
+	// longer binds anything; it posts through a channel already open.
 	BoundChannelRefs() []agentopsv1alpha1.ObjectRef
 	// EscalationChannelRefs are snapshotted onto a new root conversation's
 	// `spec.escalationChannelRefs` (design D-D) — nil for a Pipeline, which
-	// escalates nothing.
+	// escalates nothing. For a Coordinator this is now the SAME set
+	// BoundChannelRefs returns (coordinator-unconditional-channels): kept as
+	// its own field for provenance — "which channels did the Coordinator
+	// itself declare" — distinct from `ChannelRefs`, which for a
+	// chat-addressed root may additionally carry the addressing channel.
 	EscalationChannelRefs() []agentopsv1alpha1.ObjectRef
 	// SnapshotBudget is the ConversationBudget a new conversation this
 	// claimant opens should carry in status, or nil for a Pipeline — which
@@ -73,9 +79,13 @@ type coordinatorClaimant struct {
 
 func (c coordinatorClaimant) ClaimantKind() ClaimantKind { return ClaimantCoordinator }
 
-// BoundChannelRefs is always empty: a Coordinator's `channelRefs` are
-// escalation targets, never bound at creation (design D-D, D-B).
-func (c coordinatorClaimant) BoundChannelRefs() []agentopsv1alpha1.ObjectRef { return nil }
+// BoundChannelRefs is the Coordinator's own `channelRefs`, bound at creation
+// exactly like a Pipeline's (coordinator-unconditional-channels, superseding
+// design D-D's "never bound at creation"): any open coordinator root must be
+// reachable by a human whether or not its agent ever calls `escalate`.
+func (c coordinatorClaimant) BoundChannelRefs() []agentopsv1alpha1.ObjectRef {
+	return c.EscalationChannelRefs()
+}
 
 // EscalationChannelRefs snapshots the Coordinator's own `channelRefs` — a copy,
 // so a later edit to the Coordinator never reaches a conversation already

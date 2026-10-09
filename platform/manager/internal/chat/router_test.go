@@ -118,6 +118,64 @@ func TestCloseInThreadClosesAndSaysGoodbyeOnEveryChannel(t *testing.T) {
 	}
 }
 
+// Closing now cascades to every live descendant too — the same
+// cascadeCloseMembers helper the coordinator's own MCP close verb already
+// uses (coordinate.go), so a human's /close reaches a root's members and
+// their own members, recursively, exactly as that verb does. No reason is
+// required or threaded through for a plain human close.
+func TestCloseInThreadCascadesToMembersTwoLevelsDeep(t *testing.T) {
+	root := boundConv("root-1", "c1")
+	member := &agentopsv1alpha1.Conversation{}
+	member.Name, member.Namespace = "member-1", testNS
+	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: root.Name, Entry: "worker"}
+	member.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
+	grandchild := &agentopsv1alpha1.Conversation{}
+	grandchild.Name, grandchild.Namespace = "grandchild-1", testNS
+	grandchild.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: member.Name, Entry: "helper"}
+	grandchild.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: member.Name}
+
+	r, _, c := closeFixture(t, nsChannel("c1", "slack"), root, member, grandchild)
+
+	thread := "thread-c1"
+	if err := r.HandleMessage(context.Background(), nsChannel("c1", "slack"),
+		InboundMessage{ThreadID: &thread, Text: "/close"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"root-1", "member-1", "grandchild-1"} {
+		var got agentopsv1alpha1.Conversation
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, &got); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+			t.Fatalf("%s must close with its root, got phase %q", name, got.Status.Phase)
+		}
+		if got.Status.CloseReason != "" {
+			t.Fatalf("%s: a plain human close must carry no reason, got %q", name, got.Status.CloseReason)
+		}
+	}
+}
+
+// A plain conversation with no members closes exactly as before — the
+// cascade finds nothing labelled as its member and changes nothing else.
+func TestCloseInThreadWithNoMembersIsUnaffected(t *testing.T) {
+	conv := boundConv("conv-1", "c1")
+	r, _, c := closeFixture(t, nsChannel("c1", "slack"), conv)
+
+	thread := "thread-c1"
+	if err := r.HandleMessage(context.Background(), nsChannel("c1", "slack"),
+		InboundMessage{ThreadID: &thread, Text: "/close"}); err != nil {
+		t.Fatal(err)
+	}
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "conv-1"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatalf("phase must be Closed, got %q", got.Status.Phase)
+	}
+}
+
 func TestCloseIsNotHandedToTheAgent(t *testing.T) {
 	conv := boundConv("conv-1", "c1")
 	// nothing may be appended even though the reply path is what saw the text
@@ -181,7 +239,7 @@ func TestCloseOnGeneralSurfaceAnswersWithUsage(t *testing.T) {
 	if !ok {
 		t.Fatal("parse")
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -276,7 +334,7 @@ func listingBody(t *testing.T, r *Router, q *OpQueue, text string) string {
 	if !ok {
 		t.Fatalf("parse %q", text)
 	}
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -329,7 +387,7 @@ func TestListingOffersEachPipelineAsAChoice(t *testing.T) {
 		pipeline("half-wired", "nobody", false),
 	)
 	cmd, _ := addressing.Parse("/" + ListCommand)
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -389,7 +447,7 @@ func TestListingOffersEachCoordinatorAsAChoiceToo(t *testing.T) {
 		coordinator("incident-coordinator", "responder", true),
 	)
 	cmd, _ := addressing.Parse("/" + ListCommand)
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ops := drain(q, "slack")
@@ -402,15 +460,17 @@ func TestListingOffersEachCoordinatorAsAChoiceToo(t *testing.T) {
 	}
 }
 
-// Addressing a Coordinator opens a root bound to ONLY the origin surface,
-// with its limits and escalation channels snapshotted (design D-B, D-D, D-E).
-func TestAddressingACoordinatorBindsOriginSurfaceOnly(t *testing.T) {
+// Addressing a Coordinator opens a root bound to its OWN declared channels
+// PLUS the origin surface (coordinator-unconditional-channels: a Coordinator
+// now binds channels at creation exactly like a Pipeline), with its limits
+// and escalation channels snapshotted (design D-B, D-E).
+func TestAddressingACoordinatorBindsItsOwnChannelsPlusTheOriginSurface(t *testing.T) {
 	co := coordinator("incident-coordinator", "responder", true)
 	co.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "escalation-channel"}}
 	co.Spec.Limits = &agentopsv1alpha1.CoordinatorLimits{MaxAgents: 4}
 	r, _, c := closeFixture(t, co)
 	cmd, _ := addressing.Parse("/incident-coordinator investigate api latency")
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "someone", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "someone", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var list agentopsv1alpha1.ConversationList
@@ -427,8 +487,13 @@ func TestAddressingACoordinatorBindsOriginSurfaceOnly(t *testing.T) {
 	if conv.Spec.PipelineRef != nil {
 		t.Fatalf("only one of the two refs may be set: %+v", conv.Spec.PipelineRef)
 	}
-	if len(conv.Spec.ChannelRefs) != 1 || conv.Spec.ChannelRefs[0].Name != "c1" {
-		t.Fatalf("an addressed Coordinator conversation binds ONLY the origin surface: %+v", conv.Spec.ChannelRefs)
+	gotChannels := map[string]bool{}
+	for _, ref := range conv.Spec.ChannelRefs {
+		gotChannels[ref.Name] = true
+	}
+	if len(gotChannels) != 2 || !gotChannels["escalation-channel"] || !gotChannels["c1"] {
+		t.Fatalf("an addressed Coordinator conversation binds its OWN channels plus the origin surface: %+v",
+			conv.Spec.ChannelRefs)
 	}
 	if len(conv.Spec.EscalationChannelRefs) != 1 || conv.Spec.EscalationChannelRefs[0].Name != "escalation-channel" {
 		t.Fatalf("escalationChannelRefs must snapshot the Coordinator's own channelRefs: %+v",
@@ -448,7 +513,7 @@ func TestPipelineResolvesBeforeCoordinatorOnASharedName(t *testing.T) {
 		coordinator("shared-name", "co-profile", true),
 	)
 	cmd, _ := addressing.Parse("/shared-name do a thing")
-	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", ""); err != nil {
+	if err := r.HandleCommand(context.Background(), nsChannel("c1", "slack"), cmd, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var list agentopsv1alpha1.ConversationList

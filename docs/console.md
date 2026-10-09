@@ -100,10 +100,25 @@ per page, not a convention.
 | Eviction of unused data | 5 minutes | a conversation glanced at an hour ago should not still cost memory |
 | Freshness on remount | 1 minute | returning to a view loads fresh rather than rendering what was last applied |
 
-**Nothing is persisted.** No `localStorage`, no IndexedDB, no service worker —
-closing the tab leaves nothing behind. Correctness comes from the resync rule
-rather than from cache lifetime: applied state is replaced wholesale whenever
-the client may have missed an event.
+**Nothing CORRECTNESS-BEARING is persisted.** No conversation state survives a
+closed tab — applied state is replaced wholesale whenever the client may have
+missed an event, which is what the resync rule is for.
+
+Three exceptions, each a per-browser preference and neither a fact about any
+conversation:
+
+- The navigation's fold state (`shell.ts`).
+- The Conversations view's pane widths, inbox collapse, "show closed" toggle
+  and the tree's default fold, under `agentops.console.layout`. A root with
+  members starts folded for a first-time viewer, and from there follows
+  whatever "Collapse all" / "Expand all" was last clicked — applied to every
+  root as it is first seen, present at mount or arriving later, so a reload
+  and a live arrival land on the same preference. Reads and writes are
+  guarded in `try`/`catch`, so a private window or a cleared store falls back
+  to the view's defaults rather than breaking it.
+- The `/close` confirm dialog's "don't ask again" opt-out, under
+  `agentops.console.skipCloseConfirm`. Guarded the same way, so a private
+  window or a cleared store simply asks again.
 
 ## Pages
 
@@ -538,56 +553,148 @@ index by cursor replay.
 
 ### Conversations
 
+**One view, not a table plus a separate detail.** Both `/conversations` and
+`/conversations/:name` render the same layout, and opening a row switches the
+thread pane in place — there is no navigation away from the list.
+
+| Column | Shows |
+|---|---|
+| Icon rail | the app's own sidebar, collapsed to icons on this view |
+| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with its own unread count |
+| List | the rows in the active scope, as a coordination tree by default |
+| Thread pane | the open conversation |
+
+Two `Splitter`s resize the inbox and list columns: drag, double-click to
+reset, or `←`/`→` in 16px steps with `Enter` as the keyboard reset. Minimum
+widths are 200px (inbox), 280px (list) and 480px (thread pane).
+
+The inbox collapses to an icon strip with badges. These widths and the
+collapse state are the one conversation-adjacent thing the browser keeps —
+see [What the browser keeps](#what-the-browser-keeps).
+
+**Below 900px the view shows one column at a time** — list or thread pane —
+instead of shrinking all four past legibility.
+
+**Keyboard**: `↑`/`↓` moves the selection in the list, `Enter` opens it,
+`⌘`/`Ctrl`-click adds to a multi-selection, `Esc` clears selection mode.
+
 Server-side filtering (phase, pipeline, profile, channel, errored, unread,
-search), sorting by last activity, and pagination with a total match count.
+search) backs every scope, with pagination in pages of 50 rows. An event
+storm makes thousands, and shipping them all so the browser can hide most is
+how a viewer becomes an API-server problem.
 
-An event storm makes thousands, and shipping them all so the browser can hide
-most is how a viewer becomes an API-server problem.
+#### The coordination tree
 
-Run history is dropped from list rows. A result is a whole agent message, and
-each row carries its read state instead.
+A root — a Coordinator's own conversation, or one with no `causedBy` — and
+every conversation it caused, at any depth, render as one group. Depth
+follows `causedBy.parent` from the snapshot the list already holds.
 
-Detail is tabbed:
+A root carries a caret, its member count, its turn and deadline from its own
+`status.budget`. Flattening the list restores the server's own newest-first
+ordering, one conversation per row.
 
-- **Transcript** with a composer. Conversations the console started are joined
-  automatically. For ones another source started, the composer is live when the
-  console channel holds a thread. When it does not, the tab explains why and shows
-  the exact patch. The console never edits a Pipeline — showing the edit is the
-  answer.
+A member reached whose parent the snapshot does not hold renders at the top
+level with a marker, never dropped.
 
-  The transcript is a **cache of the conversation's durable record**, never its
-  only copy. Every read merges the live buffer with `status.runs[]` — the
-  messages each run consumed AND its result, in time order — so a reload or a
-  console restart rebuilds the whole thread, starting at the message that opened
-  it. Only acks and notices are lost, because nothing records them.
+**A member carries no conversation-level actions of its own** — mark
+read/unread, reopen, close, delete — because it holds no channel binding. Its
+row menu offers only *Open in new tab*, *Copy link* and *Open incident*.
 
-  A message typed here is shown at once and **confirmed** by the copy the manager
-  delivers back. The console declares `echoesOwnMessages: false`, so it receives
-  its own users' messages like any other destination, matched to the pending
-  bubble by the input it names — never by comparing text.
-- **Runs** — `status.runs[]` with status, exit code, result and the messages each
-  run consumed, plus the bindings the conversation materialized and its runtime
-  pod.
-- **Graph** — the install's topology, **opened on this conversation's replay**,
-  with every element its run did not touch dimmed. The three views, the hop
-  feed and the content panel are the Topology page's own.
+Opened directly, its thread pane shows its own run history read-only, with a
+link back to the incident.
+
+#### The thread pane
+
+**Transcript** is the default view, with a composer. Conversations the
+console started are joined automatically. For ones another source started,
+the composer is live when the console channel holds a thread.
+
+When it does not, the tab explains why and shows the exact patch — the
+console never edits a Pipeline, showing the edit is the answer.
+
+The transcript is a **cache of the conversation's durable record**, never its
+only copy. Every read merges the live buffer with `status.runs[]` — the
+messages each run consumed AND its result, in time order.
+
+Run events interleave with the messages, folded per run, with a gap marker
+over the activity between them. A reload or a console restart rebuilds the
+whole thread this way, starting at the message that opened it.
+
+Only acks and notices are lost, rendered as a presence row rather than a
+bubble while they last.
+
+A new-messages divider sits above the first uncounted message. Opening
+scrolls to it, and the view autoscrolls only while already at the bottom,
+with a jump pill showing the count otherwise.
+
+A message typed here is shown at once and **confirmed** by the copy the
+manager delivers back. The console declares `echoesOwnMessages: false`, so
+it receives its own users' messages like any other destination.
+
+It matches the confirmation to the pending bubble by the input it names,
+never by comparing text.
+
+**Quick chips** open a new conversation prefilled with `/<pipeline> ` or
+`/<coordinator> ` (start chips, from the vocabulary), or send a thread or
+choice chip's text directly. Absent when the write gate is off.
+
+The secondary views **replace the transcript in place**, same pane, a toggle
+row above it:
+
+- **Runs** — `status.runs[]` with status, exit code, result and the messages
+  each run consumed, plus the bindings the conversation materialized and its
+  runtime pod. Each run also carries its own `turns`/`toolCalls`, the console
+  API's DERIVED view of that run's `model.call`/`tool.call` activity hops
+  (see [the activity contract](contracts.md#the-activity-contract)) — the
+  manager itself writes neither field to the Conversation.
+- **Graph** — the install's topology, **opened on this conversation's
+  replay**, with every element its run did not touch dimmed. The three views,
+  the hop feed and the content panel are the Topology page's own.
   - **A re-wire is reported, never hidden.** A Conversation snapshots the
     bindings it materialized. When they differ from the Pipeline's current
     wiring, the tab names each difference above the graph, because the graph
     draws the current wiring.
 - **Sequence** — a waterfall over the same hops, in time order, with per-hop
-  latency. This is where "why did that take 40 seconds" gets answered, and it is
-  the view a graph cannot replace.
+  latency. This is where "why did that take 40 seconds" gets answered, and it
+  is the view a graph cannot replace.
 - **YAML** — the Conversation object.
+
+**On a Coordinator's root**, the transcript is instead an incident timeline:
+invocation lines, result cards linking each member's own transcript, nested
+cards for a member that is itself coordinating, and (once it happens) the
+escalation divider at `status.escalatedAt`.
+
+A root's composer is live from creation, unconditionally. It does not wait for
+the agent to escalate.
 
 ### Unread
 
-Conversations whose console thread has activity newer than its watermark are
-marked in the list, an **Unread only** switch narrows to them, and the count
-rides on the *Conversations* navigation item.
+**The count is messages, not lateness.** A conversation's `unreadCount` is
+the counted messages — `signal`, `agent`, `relay` — newer than the reader's
+watermark. Acks, notices, listings, refusals and run events never count, and
+a phase change is not a message at all.
 
-Opening a conversation reports its console thread read. **Mark read** over a
-selection clears a batch of them.
+The source is `status.runs[]` — a run's inputs and its result — merged with
+the live buffer for a message not yet recorded. A member conversation has no
+console thread and so no count of its own.
+
+Its result arrives on its root as an input, and is counted there instead.
+
+Every scope in the inbox carries its own unread sum — the fixed scopes
+(Unread, Working, Mine, Errored, Closed), and one per Pipeline or Coordinator.
+
+A Coordinator's own root conversations are reached through ITS scope, same as
+any pipeline's. There is no separate "Incidents" scope.
+
+The **Unread** scope narrows the list to conversations with a count.
+
+Every sum is computed before any filter, so narrowing the view never moves
+it.
+
+Opening a conversation reports it read, at `max(the newest counted message's
+time, status.lastActivity)` — the second term keeps the report monotone
+across a dispatch that stamped `lastActivity` after the answer. **Mark
+read** over a selection clears a batch of them the same way.
 
 **Read is per PERSON where the console can tell people apart, and per console
 otherwise.** Which install you have depends on one thing — whether a request
@@ -624,9 +731,6 @@ The rest of what it does, and why:
   never unread: the console has no watermark on it and no standing to call it
   new. Same reach boundary as closing, and a batch naming one comes back
   `skipped` with the same fix.
-- **The count is computed before any filter**, over every conversation, so
-  narrowing the view never moves it — a count that shrank because you filtered
-  would let a filter hide a backlog without saying so.
 - **The browser never invents a timestamp.** A read is reported with the
   watermark the server read off the conversation's own state, and nothing is
   sent when it would not advance. The manager clamps and enforces monotonicity
@@ -640,9 +744,20 @@ The rest of what it does, and why:
   read-only console still selects rows and marks them read — one that could show
   a backlog and never clear it would be broken in the way the unread mark exists
   to fix.
-- **The mark only moves forward.** There is no "mark as unread": a watermark
-  that could go backwards is a different mechanism, and reading a conversation
-  again is what makes it read.
+
+**Mark unread** reclaims a conversation. It is a reader-scoped REWIND on the
+same read verb, never a client-side flag: the console sends the newest
+counted message's time minus one nanosecond, so exactly that message counts
+again.
+
+- **Named-reader only.** There is no per-reader entry to rewind under a
+  shared token or with no salt projected, so the row menu offers it only
+  where the console can tell readers apart (above).
+- **It never touches the channel-wide mark.** Rewinding your own watermark
+  cannot un-read a thread for anyone else.
+- **It is the one exception to monotonic.** Every other report only ever
+  advances a watermark — see [the rewind rule](contracts.md#post-channelread).
+- **Bounded at 50 and attributed exactly like mark read.**
 
 Threads bound before this existed are treated as **read** — see the backfill
 rule in [concepts](concepts.md#read-state-per-thread). Right after the upgrade
@@ -695,10 +810,24 @@ What that costs, and why each cost is the right one:
   logged against the identity that ordered it. A read-only console renders no
   close action, and refuses the request if one is made anyway.
 
+**Closing cascades to every live descendant.** `/close` on a root closes
+every conversation it caused, recursively, in the manager — not a second
+request the console makes. The confirmation names the member count the
+cascade will also reach.
+
+**A member selected directly is skipped, naming its parent.** It holds no
+channel binding, so there is nothing to send `/close` to — selecting its
+root reaches it instead. The row menu agrees: a member's menu offers no
+close action at all.
+
 ### Reopening one
 
 A `Closed` row offers **Reopen**. It goes back to `Idle` with its wiring, its
 recorded runs and its context handle exactly as they were.
+
+**Reopen never cascades, unlike close and delete.** It acts on exactly the
+one named conversation, and a member's row menu never offers it — the same
+reach rule that leaves a member with no close or delete action of its own.
 
 The materialized refs are not re-resolved, so a Pipeline edit made in the
 meantime does not leak into a conversation that already exists.
@@ -734,6 +863,14 @@ disk**.
   server-side, the same explicit selection over rows on screen, the same
   per-item outcomes (`deleted` / `skipped` / `failed`) with reasons, and the
   same write gate, identity and logging.
+
+**Deleting cascades to every already-closed descendant**, the same way
+closing does, and for the same reason: a member holds no channel of its
+own, so the console has no way to reach it directly.
+
+A member selected directly is skipped and names its parent, exactly as for
+closing. Every descendant is already `Closed` by the time its root is, so
+none is ever turned away as not-yet-closed.
 
 **Delete and reopen are manager verbs the console calls**, not Kubernetes
 writes — the console still has no write path to the API.

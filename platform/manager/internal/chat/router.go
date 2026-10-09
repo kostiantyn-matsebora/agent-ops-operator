@@ -345,22 +345,42 @@ func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alph
 // The teardown that used to ride on deletion — runtime pod, MCP ConfigMap,
 // close-topic ops, capacity — is the reconciler's, driven off the phase. Doing
 // it here as well would be a second implementation of it.
+//
+// RECURSIVELY closes every LIVE conversation this one directly caused, through
+// the SAME `cascadeCloseMembers` helper the coordinator's own MCP `close` verb
+// already uses (coordinate.go) — so `/close`, the console's bulk close (a
+// fan-out of `/close`) and the idle timer all reach a root's members exactly as
+// that verb does, with no reason required or threaded through: a plain human
+// close carries none, which `cascadeCloseMembers` already allows.
+//
+// THE CASCADE RUNS EVEN WHEN THIS CONVERSATION IS ALREADY CLOSED — only the
+// farewell and the status write are skipped then. A cascade that fails
+// partway (a transient API error on some descendant) leaves THIS conversation
+// already persisted Closed, so a retry that short-circuited on "already
+// closed" would never reach the un-cascaded members again: the root would
+// read Closed forever while a child sat open beneath it. Falling through
+// unconditionally is what `coordinate.go`'s `closeWithCascade` already does
+// for the same reason — its own self-close step no-ops the same way on an
+// already-closed conversation, and the cascade call after it is never gated
+// on that.
 func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, farewell string) error {
-	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		return nil // already closed: no second farewell
+	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		// A STABLE op id, so a close whose status write fails and is retried says
+		// goodbye once rather than once per attempt. The farewell still goes
+		// FIRST: a thread that simply stops is indistinguishable from a fault,
+		// so a lost farewell is worse than a suppressed duplicate.
+		r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+			r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
+		})
+		patch := client.MergeFrom(conv.DeepCopy())
+		now := metav1.Now()
+		conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+		conv.Status.ClosedAt = &now
+		if err := client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch)); err != nil {
+			return err
+		}
 	}
-	// A STABLE op id, so a close whose status write fails and is retried says
-	// goodbye once rather than once per attempt. The farewell still goes FIRST:
-	// a thread that simply stops is indistinguishable from a fault, so a lost
-	// farewell is worse than a suppressed duplicate.
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
-	})
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
-	conv.Status.ClosedAt = &now
-	return client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch))
+	return r.cascadeCloseMembers(ctx, conv.Name, "")
 }
 
 // ReopenConversation brings a closed conversation back to Idle.
@@ -438,12 +458,10 @@ func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.
 // boundChannels resolves the channel set a new conversation binds to, with the
 // originating channel guaranteed included (it is where the user is looking).
 //
-// A Pipeline's BoundChannelRefs is its own `spec.channelRefs`, so an addressed
-// Pipeline conversation binds its WHOLE channel set — full mirroring, as
-// before this kind existed. A Coordinator's is always empty (design D-D): its
-// `channelRefs` are escalation targets, never bound at creation, so an
-// addressed Coordinator conversation binds EXACTLY the one surface it was
-// addressed from (chat-addressing-discovery, chat-signal-origination).
+// Both kinds' BoundChannelRefs is now their own `spec.channelRefs`
+// (coordinator-unconditional-channels), so an addressed Pipeline OR
+// Coordinator conversation binds its WHOLE declared channel set, plus the
+// addressing channel when that is not already one of them.
 func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
 	if origin == nil {
 		return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
@@ -522,7 +540,12 @@ func (r *Router) resolveClaimant(ctx context.Context, name string) (Claimant, er
 // It is carried because an addressed command is a MESSAGE like any other: it is
 // delivered to every surface that did not display it, and one with no sender
 // arrives there anonymous.
-func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID string) error {
+//
+// reader is the opaque per-channel key of the person who typed it, exactly as
+// the bare chat lane carries — an addressed command is equally a person
+// deliberately originating a conversation, so it is owed the same read-mark
+// treatment on the thread it opens.
+func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID, reader string) error {
 	if isListCommand(cmd.Pipeline) {
 		return r.handleListPipelines(ctx, ch)
 	}
@@ -574,7 +597,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if err != nil {
 		return fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
 	}
-	_, err = r.CreateTaskConversation(ctx, ch, capability.ProfileName(), cmd.Rest, sender, claimant, capability)
+	_, err = r.CreateTaskConversation(ctx, ch, cmd.Rest, sender, reader, claimant, capability)
 	return err
 }
 
@@ -585,14 +608,24 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // conversation — capabilities come from the wiring that originated it, never
 // from the profile. capability is the origin's ALREADY RESOLVED capability
 // (see dispatch.ResolveCapability), ignored when origin is nil.
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender string,
+//
+// reader is the opaque per-channel key of whoever typed the addressing
+// command, mirrored onto OriginReader exactly as the bare chat lane's does
+// (internal/httpapi/signals.go) — empty when the adapter named none.
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, task, sender, reader string,
 	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
-	title := "🛠 " + strings.Join(strings.Fields(task), " ")
+	profile := capability.ProfileName()
+	// NOT cut to Telegram's own topic-name shape — see `memberTitle`'s own
+	// comment: Telegram enforces its own 128-character topic-name cap at the
+	// adapter, and a manager-side cut of THAT shape here was one transport's
+	// limit imposed on every channel and the console's own views.
+	//
+	// Still bounded, by agentopsv1alpha1.MaxConversationTitle — a different
+	// bound for a different reason: an addressed command's task is typed by
+	// a person and stored verbatim into an etcd-permanent field otherwise.
+	title := agentopsv1alpha1.BoundConversationTitle("🛠 " + strings.Join(strings.Fields(task), " "))
 	if profile != "" {
-		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
-	}
-	if len(title) > 60 {
-		title = title[:60]
+		title = agentopsv1alpha1.BoundConversationTitle("🤖 " + profile + ": " + strings.Join(strings.Fields(task), " "))
 	}
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = r.Namespace
@@ -612,6 +645,13 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 			},
 		}},
 	}
+	// The person who typed the addressing command has, by definition,
+	// already seen their own request — same rule the bare chat lane
+	// applies in internal/httpapi/signals.go, carried here because an
+	// addressed command is the OTHER origination a chat surface owns.
+	if reader != "" {
+		conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{Channel: ch.Name, Key: reader}
+	}
 	nodeKind := activity.NodePipeline
 	if origin != nil {
 		conv.Spec.Toolsets = capability.Toolsets.DeepCopy()
@@ -630,8 +670,10 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// scoping, never to resolve wiring. An addressed command is the one
 		// origination that names its claimant outright, so this ref is exact
 		// rather than inferred. Exactly one of the two is ever set (design
-		// D-B): a Coordinator also snapshots its OWN escalation channels,
-		// never bound at creation.
+		// D-B): a Coordinator also snapshots its OWN declared channels as
+		// EscalationChannelRefs — already bound into ChannelRefs above via
+		// BoundChannelRefs (coordinator-unconditional-channels), this is kept
+		// as separate provenance of the Coordinator's own declared set.
 		if origin.ClaimantKind() == ClaimantCoordinator {
 			nodeKind = activity.NodeCoordinator
 			conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}

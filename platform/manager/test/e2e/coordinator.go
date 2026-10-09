@@ -65,6 +65,18 @@ func coordinatorObj(name, profile string, sources []string, agents []agentopsv1a
 	return co
 }
 
+// coordinatorObjWithChannels is coordinatorObj plus a declared `channelRefs`
+// set — the bindings a conversation this Coordinator opens now binds at
+// CREATION, unconditionally (coordinator-unconditional-channels), exactly as
+// a Pipeline's own channelRefs always have.
+func coordinatorObjWithChannels(name, profile string, sources, channels []string, agents []agentopsv1alpha1.CoordinatorAgentEntry) *agentopsv1alpha1.Coordinator {
+	co := coordinatorObj(name, profile, sources, agents)
+	for _, c := range channels {
+		co.Spec.ChannelRefs = append(co.Spec.ChannelRefs, agentopsv1alpha1.ObjectRef{Name: c})
+	}
+	return co
+}
+
 // waitCoordinatorReady mirrors waitPipelineReady for the Coordinator kind —
 // a reconciler that cannot watch Coordinators never writes the condition, so
 // this is itself an informer-liveness fact, exactly as the Pipeline wait is.
@@ -129,6 +141,33 @@ func (e *Env) invokeMember(t *testing.T, callerCoordinator, caller, agent, task 
 		t.Fatalf("invoke(%s) from %s: no member name in response %v", agent, caller, out)
 	}
 	return member
+}
+
+// waitForCoordinatorRoot polls for the UNCAUSED conversation a Coordinator's
+// own claim or addressed command opened after `after` — the shape an
+// addressed chat command produces, since it is created under
+// `GenerateName: "task-"` and its eventual name is not known in advance the
+// way a signal-opened conversation's fingerprint-matched one is (see
+// ConversationFor).
+func waitForCoordinatorRoot(ctx context.Context, t *testing.T, e *Env, coordName string, after time.Time, timeout time.Duration) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	var found *agentopsv1alpha1.Conversation
+	waitFor(t, "a root conversation from coordinator "+coordName, timeout, func() (bool, error) {
+		items, err := e.K.Conversations(ctx)
+		if err != nil {
+			return false, err
+		}
+		for i := range items {
+			c := &items[i]
+			if c.Spec.CoordinatorRef != nil && c.Spec.CoordinatorRef.Name == coordName &&
+				c.Spec.CausedBy == nil && c.CreationTimestamp.Time.After(after) {
+				found = c
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	return found
 }
 
 // waitForConversation polls until a conversation with this name exists.

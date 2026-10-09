@@ -39,3 +39,27 @@ A report MAY instead ask for a REWIND:
 #### Scenario: A rewind with no reader is refused
 - **WHEN** a rewind names no reader
 - **THEN** it is refused and nothing is written
+
+## ADDED Requirements
+
+### Requirement: Read watermarks are opaque RFC3339Nano strings
+`status.threads[].readAt` and `status.threads[].readers[].readAt` SHALL be strings in RFC3339Nano form, under the same JSON field names.
+
+The type changed from a timestamp because the Kubernetes API serializes timestamps at second granularity. A rewind watermark then lost its sub-second part, and a message after it counted as unread forever.
+
+NO MIGRATION IS NEEDED. Both the old and new CRD schema declare `readAt`
+as `type: string` at the wire level — the old one added `format:
+date-time`, a hint dropped rather than enforced.
+
+A value an older manager stored is already exactly the RFC3339 string
+this one expects, parsed by the same `ParseWatermark`, which accepts a
+string with or without a fractional component. A pre-upgrade watermark
+simply stays at second granularity until the next report advances it.
+
+#### Scenario: A watermark keeps sub-second precision
+- **WHEN** a reader reports or rewinds to a time with a sub-second component
+- **THEN** the stored value round-trips through the API server with that component intact
+
+#### Scenario: A stored second-granularity watermark survives the upgrade
+- **WHEN** a Conversation written before this change holds `readAt: "2026-08-13T11:04:00Z"`
+- **THEN** it parses as the same instant, and the next report or rewind compares against it as usual

@@ -16,8 +16,11 @@ next:
 ---
 
 A `Coordinator` is **the second wiring kind, for a composition of agents
-instead of one**. It claims sources as a `Pipeline` does and names
-channels for escalation only. It also names a LIST of agents its own conversation may invoke, instead of
+instead of one**. It claims sources and binds channels exactly as a
+`Pipeline` does, so any conversation it opens is reachable by a human from
+the moment it exists.
+
+It also names a LIST of agents its own conversation may invoke, instead of
 answering everything itself.
 
 {: .ao-callout}
@@ -25,7 +28,7 @@ answering everything itself.
 > own `AgentCapability` — its own profile, tools and identity — rather than
 > one prompt holding every tool a task might ever need.
 
-![A Coordinator's root conversation invokes AgentCapabilities as members, and escalates to a channel only when it decides to.]({{ '/assets/img/guides/coordinate-agents-light.svg' | relative_url }}){: .ao-diagram}
+![A Coordinator's root conversation invokes AgentCapabilities as members, and its agent escalates through a channel already open.]({{ '/assets/img/guides/coordinate-agents-light.svg' | relative_url }}){: .ao-diagram}
 
 ## Before you start
 
@@ -65,8 +68,9 @@ named list of agents it may invoke:
    the coordinating agent reads to decide when to use it.
 4. **`limits`** — `maxAgents`, `maxTurns`, `deadline`, enforced on THIS
    conversation alone.
-5. **`channelRefs`** — where an escalation opens a human thread. Never bound
-   until the root decides to use it.
+5. **`channelRefs`** — bound to the root conversation at creation, exactly
+   like a Pipeline's. `escalate` posts into these threads, it does not open
+   them.
 
 **An entry without a description is refused.** The coordinating agent has
 nothing else to read to decide which member answers which task.
@@ -155,8 +159,8 @@ spec:
     deadline: 1h
 ```
 
-**`channelRefs` binds no thread yet.** The root conversation runs unseen
-until it calls `escalate`, or until nothing answers and the budget closes it.
+**`channelRefs` binds its thread at creation.** The root conversation is
+visible from the start, whether or not it ever calls `escalate`.
 
 ## Nest a composition
 
@@ -201,19 +205,21 @@ Past any limit, the conversation closes every member it still has open with
 the same reason, then escalates itself with a digest — the limit, the counts,
 the member list — as if its own agent had called `escalate`.
 
-## Escalation is a decision, and only the root ever opens a thread
+## Escalation is a decision posted into a thread already open
 
 `escalate` is a verb the coordinating agent calls, not something that happens
 to it. Where it lands depends on whether the conversation has a parent:
 
 | Calling conversation | `escalate` does |
 |---|---|
-| the **uncaused root** — no parent | binds `channelRefs`, opens the thread, with the message as the opening post |
+| the **uncaused root** — no parent | posts the message as an ordinary message into its already-open thread |
 | a **member** — invoked by another Coordinator | closes ITSELF, and the message becomes an ordinary result on its parent's next input |
 
 **A nested escalation bubbles one hop at a time.** The parent's agent reads
 it like any other member result and decides: handle it, or `escalate` again.
-A human thread opens only once that decision reaches the uncaused root.
+
+The human sees it as a posted message only once that decision reaches the
+uncaused root. Its thread was already open, long before this moment.
 
 A member's result — from finishing normally or from escalating — always
 lands as an input on the conversation that invoked it. Nothing an
@@ -308,12 +314,12 @@ helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
 > **The console does not auto-wire itself under this mode, yet.** A
 > `Pipeline`-rendering bundle claims the console's signal source and binds
 > its channel for you (Installation's demo). An `AgentCapability` carries no
-> subscription of its own, and a `Coordinator`'s `channelRefs` are reached
-> only by escalation — never bound to a new conversation the way a
-> Pipeline's are. Asking the console something will not reach the
-> chart-rendered Coordinator until you claim its source by hand, and even
-> then the answer will not appear as a console thread the way a `Pipeline`
-> route's does — that second half has no coordinator-mode equivalent yet.
+> subscription of its own, and no chart template lists the console's channel
+> in the rendered `Coordinator`'s own `channelRefs` — a chart-wiring gap,
+> not a manager-level restriction: a Coordinator whose `channelRefs` DID name
+> the console would bind it at creation exactly like a Pipeline's. Asking the
+> console something will not reach the chart-rendered Coordinator until you
+> claim its source AND its channel by hand.
 
 ## Self-heal: the hourly reaper
 

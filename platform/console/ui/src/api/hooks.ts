@@ -126,6 +126,26 @@ export function useMarkRead() {
   })
 }
 
+/** The reader-scoped rewind (design D-E) — absent wherever the console resolves no reader, same as mark read otherwise. */
+export function useMarkUnread() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (req: MarkReadRequest) => api.markUnread(req),
+    onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
+  })
+}
+
+/**
+ * The inbox's per-scope unread counts — the SAME count-only request the
+ * navigation badge already fetches (`useUnreadCount`, below), which also
+ * carries `scopes` (console-unread: "the count per scope SHALL be available
+ * for the inbox"). One query, one cache entry, one `apply.ts` invalidation
+ * rule for both readers.
+ */
+export function useInboxCounts() {
+  return useUnreadCount()
+}
+
 /**
  * The unread count for the navigation, without the rows.
  *

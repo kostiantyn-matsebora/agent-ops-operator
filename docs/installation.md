@@ -148,12 +148,13 @@ whatever `coordination.enabled` says — the chart-rendered `Coordinator` needs
 that MCP server.
 
 It needs nothing else to install. The self-heal reaper is OFF by default
-(`reaper.enabled: false`). An hourly conversation surveying every open root
-is real cost, and most installs will never need it.
+(`reaper.enabled: false`). A conversation surveying every open root is real
+cost, and most installs will never need it.
 
 Turn it on with `reaper.enabled: true`. That also brings up the
-`signals/cron` `SignalAdapter` that gives it its hourly trigger — no
-bundle to enable and no extra component. See
+`signals/cron` `SignalAdapter` that gives it its trigger (every six hours
+by default, `reaper.schedule`) — no bundle to enable and no extra
+component. See
 [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}).
 
 ## Configure

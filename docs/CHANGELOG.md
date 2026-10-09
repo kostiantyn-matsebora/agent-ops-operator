@@ -12,6 +12,19 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- **The console's Conversations page is one chat-shaped view**, not a table
+  plus a separate detail page: an inbox of scopes, a list rendered as a
+  coordination tree, and a thread pane that switches in place. Replaces
+  `pages/Conversations.tsx` and `pages/Conversation.tsx`.
+  - Unread counts MESSAGES (`signal`/`agent`/`relay`) rather than lateness,
+    summed per scope, and a new **Mark unread** reclaims one as a
+    reader-scoped rewind on the read verb.
+  - Pane widths and the inbox collapse state persist under a guarded
+    `localStorage` key, `agentops.console.layout`, and the `/close` confirm
+    dialog's "don't ask again" opt-out persists under a second guarded key,
+    `agentops.console.skipCloseConfirm` — browser preferences beside the nav
+    fold, and still no conversation state.
+  - See [console.md](console.md#conversations).
 - **Two new CRDs let a conversation's own agent invoke other agents.**
   `AgentCapability` extracts the six capability fields a Pipeline already
   carries inline (`profileRef`, `runtimeRef`, `serviceAccountName`,
@@ -84,6 +97,14 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **Closing or deleting a conversation now cascades to every conversation it
+  caused**, for every originator — a human `/close`, the console's bulk
+  close, the idle timer, and a bulk delete — not only the coordinator's own
+  MCP `close` verb. Close reaches every live descendant recursively, through
+  the same helper that verb already used. Delete reaches every descendant,
+  already left `Closed` by that cascade. Neither widens who may close or
+  delete anything — both were already bounded exactly as any other close or
+  delete is.
 - **The fixing loop re-runs an unexplained red check once before asking, and
   its fixing step runs on branches that lag master.** A check the fixer finds
   nothing in the tree for gets one empty commit pushed, so CI judges the head

@@ -93,6 +93,12 @@ func TestCoordinateCloseWidenedBoundOverTheRealAPI(t *testing.T) {
 	sibling.Name, sibling.Namespace = "co-wclose-incident", ns
 	sibling.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-wclose-co"}
 	sibling.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-wclose"}
+	// An alert, not a person's own request — isHumanInitiated must report
+	// false for the widened bound to close it.
+	sibling.Spec.Signal = &agentopsv1alpha1.SignalProvenance{
+		SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"},
+		Labels:    map[string]string{"alertname": "KubeJobFailed"},
+	}
 	if err := k8sClient.Create(context.Background(), sibling); err != nil {
 		t.Fatal(err)
 	}

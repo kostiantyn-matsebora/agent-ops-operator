@@ -73,8 +73,8 @@ func mergeTranscript(thread, ownChannel string, live []Message, runs []Run, conv
 
 	for _, r := range runs {
 		for _, in := range r.Inputs {
-			if in.Text == "" || liveInputs[in.ID] {
-				continue
+			if in.Text == "" || liveInputs[in.ID] || in.Origin == originMember {
+				continue // coordination plumbing — the invoke card already shows it
 			}
 			out = append(out, recordedMessage(thread, ownChannel, in, conv))
 		}
@@ -189,6 +189,9 @@ func recordedSignalCard(conv ConversationSummary) string {
 	}
 	if conv.Pipeline != "" {
 		from = append(from, "**Pipeline** `"+conv.Pipeline+"`")
+	}
+	if conv.Coordinator != "" {
+		from = append(from, "**Coordinator** `"+conv.Coordinator+"`")
 	}
 	if len(from) > 0 {
 		parts = append(parts, strings.Join(from, " · "))

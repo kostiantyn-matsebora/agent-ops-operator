@@ -164,6 +164,13 @@ runs:
     # SonarCloud's own check in branch protection, is what makes the verdict
     # reach `ci-green` on a hand run too — a `workflow_dispatch` analysis
     # attaches no check of the service's own to the pull request.
+    #
+    # `ui/e2e-live/**` gets the SAME exclusion as `ui/e2e/**`: Playwright
+    # specs against a real backend, with no vitest coverage by design and
+    # no match for `sonar.test.inclusions` (`*.test.ts`, not `*.spec.ts`).
+    # Missing it once left ~2,000 "new, uncovered" lines dragging the
+    # console's new-code coverage down regardless of how well-tested the
+    # actual production diff was (#298).
     - uses: SonarSource/sonarqube-scan-action@v8.2.1
       env:
         SONAR_TOKEN: ${{ inputs.token }}
@@ -174,7 +181,7 @@ runs:
           -Dsonar.projectKey=${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
           -Dsonar.projectName=agentops-${{ steps.component.outputs.name }}
           -Dsonar.sources=${{ inputs.sources }}
-          -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/coverage/**,ui/e2e/**,ui/screenshots/**,ui/demo/**
+          -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/coverage/**,ui/e2e/**,ui/e2e-live/**,ui/screenshots/**,ui/demo/**
           -Dsonar.coverage.exclusions=test/e2e/**,test/conformance/**
           -Dsonar.tests=${{ inputs.tests }}
           -Dsonar.test.inclusions=${{ inputs.test-inclusions }}

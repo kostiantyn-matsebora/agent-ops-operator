@@ -115,21 +115,21 @@ const (
 )
 
 // titleFromText renders a conversation title from the request itself:
-// whitespace collapsed, bounded to fit a chat topic name and a table column.
-// Empty for empty input, so the caller keeps its own fallback. The icon says
-// which lane asked — 💬 somebody typed it, 🛠 a machine posted it.
+// whitespace collapsed. Empty for empty input, so the caller keeps its own
+// fallback. The icon says which lane asked — 💬 somebody typed it, 🛠 a
+// machine posted it.
+//
+// Bounded by agentopsv1alpha1.MaxConversationTitle — NOT the transport-shaped
+// limit the "no manager-side cut" rule warns against (see that constant's own
+// comment). Telegram's own 128-rune topic-name cap is a separate, later bound
+// at the adapter; this one exists because a one-shot signal's payload has no
+// cap at all before it reaches an etcd-permanent field.
 func titleFromText(icon, text string) string {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
 		return ""
 	}
-	title := icon + " " + strings.Join(fields, " ")
-	// Rune-safe: a byte slice would cut a multi-byte character in half, and chat
-	// input is exactly where non-ASCII shows up.
-	if runes := []rune(title); len(runes) > 60 {
-		title = strings.TrimSpace(string(runes[:59])) + "…"
-	}
-	return title
+	return agentopsv1alpha1.BoundConversationTitle(icon + " " + strings.Join(fields, " "))
 }
 
 // orDefault fills an empty string with a fallback (telemetry labelling only).
@@ -404,9 +404,11 @@ func (s *Server) routeChatSignals(ctx context.Context, source *agentopsv1alpha1.
 		}
 		// Addressed input: /agents and friends answer in place;
 		// /<pipeline> <task> still opens a conversation, on the pipeline it
-		// names rather than the one claiming the source.
+		// names rather than the one claiming the source. sig.Reader rides
+		// along exactly as it does for the bare chat lane below — an
+		// addressed command is equally a person originating a conversation.
 		if err := s.Router.HandleCommand(ctx, ch, cmd,
-			sig.Labels[LabelChatSender], sig.Labels[LabelChatMessage]); err != nil {
+			sig.Labels[LabelChatSender], sig.Labels[LabelChatMessage], sig.Reader); err != nil {
 			return 0, 0, "", err
 		}
 		answered++
@@ -720,8 +722,10 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 	}
 	// Provenance names EXACTLY one originating wiring object (design D-B):
 	// a Pipeline names PipelineRef, a Coordinator names CoordinatorRef and
-	// snapshots its OWN escalation channels — never bound at creation,
-	// reached only through `escalate` (design D-D).
+	// snapshots its OWN declared channels as EscalationChannelRefs too —
+	// already bound into ChannelRefs above via BoundChannelRefs
+	// (coordinator-unconditional-channels: a coordinator root is reachable
+	// from creation, exactly like a Pipeline's).
 	nodeKind := activity.NodePipeline
 	if claimant.ClaimantKind() == chat.ClaimantCoordinator {
 		nodeKind = activity.NodeCoordinator

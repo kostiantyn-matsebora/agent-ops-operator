@@ -60,6 +60,29 @@ func TestHandleStatusCountsSlotsFromLivePodsNotStatus(t *testing.T) {
 	}
 }
 
+// A Closed conversation is INERT (invariants.md: "no place in the FIFO
+// waiting set") and can carry unpruned spec.inputs forever — one that
+// arrived but was never processed before close. Measured live: the console's
+// Capacity widget and Queues page both counted these as waiting, inflating
+// both by exactly the number of closed conversations holding leftover input.
+func TestHandleStatusExcludesClosedConversationsFromWaiting(t *testing.T) {
+	closed := &agentopsv1alpha1.Conversation{}
+	closed.Name, closed.Namespace = "conv-closed", "agent-ops"
+	closed.Status.Phase = agentopsv1alpha1.ConversationClosed
+	closed.Spec.Inputs = []agentopsv1alpha1.InputItem{{ID: "in-1", Type: agentopsv1alpha1.InputTask}}
+
+	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(closed).Build()
+	s := &Server{Reader: c, Client: c, Namespace: "agent-ops", MaxActiveConversations: 5, Version: "test"}
+
+	rec := httptest.NewRecorder()
+	s.handleStatus(rec, httptest.NewRequest("GET", "/status", nil))
+	var out statusResponse
+	mustUnmarshal(t, rec.Body.Bytes(), &out)
+	if out.RuntimeSlots.Waiting != 0 {
+		t.Fatalf("a closed conversation must never count as waiting, got %+v", out.RuntimeSlots)
+	}
+}
+
 // An open breaker is reported as an install-wide storage outage on /status --
 // the same fact MetricsSample turns into a gauge, from the one breaker both
 // edges feed.
