@@ -32,7 +32,7 @@
 
 - [x] 5.1 `cd platform/manager && go build ./... && go vet ./... && go test ./...` passes.
 - [x] 5.2 `go test -tags system -c -o /dev/null ./test/system/` compiles the renamed pack's test binary.
-- [x] 5.3 `.github/tests/run.sh` (the Python script suite, which runs `docs-task-guard-test.sh`, `e2e-report.test.sh`/`system-report.test.sh`, `smoke-evidence.test.sh` and `retired-vocabulary-guard.py`'s own tests) passes.
+- [x] 5.3 `.github/tests/run.sh` (the Python script suite, which runs `docs-task-guard-test.sh`, `e2e-report.test.sh`/`system-report.test.sh`, `smoke-evidence.test.sh` and `retired-vocabulary-guard.py`'s own tests) passes. The suite as a whole reports 3 failures in `cloud-bootstrap.test.sh`, reproduced identically against a clean `origin/master` checkout with none of this change's commits — pre-existing, environment-dependent flakiness unrelated to this rename, in a file this change does not touch.
 - [x] 5.4 `python3 .claude/scripts/rules_compliance.py` over every `.md` file this change edits reports clean. (Verified by diffing violations before/after this change's edits per file. Every surviving violation is a pre-existing one at a shifted line number, and this change introduces none. The pre-existing debt is unrelated to this rename and out of scope.)
 
 ## 6. System tests
