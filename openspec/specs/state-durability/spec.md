@@ -10,7 +10,9 @@ objects, or declared lossy telemetry — and state fitting none of the three is 
 defect. That is why outbound operations are derivable rather than queued
 in memory, why suppression windows are written on the SignalSource, and why a
 telemetry gap is reported rather than rendered as silence.
+
 ## Requirements
+
 ### Requirement: Every piece of live state has one declared home
 The system SHALL classify every piece of live state into exactly one of three
 homes, and SHALL NOT hold state that belongs to no class:
@@ -51,29 +53,39 @@ SHALL be a cache of that record, never its only copy.
 Every outbound channel operation except `delete-conversation` SHALL be re-derivable from
 Kubernetes state after a manager restart. A run whose result is recorded in
 `Conversation.status` but not yet delivered to a bound thread SHALL be
-re-enqueued by reconciliation. The in-memory operation queue SHALL remain the
-hot path and SHALL NOT become the record of what is owed.
+re-enqueued by reconciliation.
+
+The in-memory operation queue SHALL remain the hot path. The record of what
+is currently claimed, and of what is owed, SHALL be the Conversation's own
+`status`, not the in-memory queue.
 
 Re-derivation SHALL NOT depend on a restart. The manager's completed-operation
-window exists to suppress duplicates and SHALL therefore record operations that
-**succeeded**, never operations that were merely **attempted**. When a derivable
-operation completes with an error, the manager SHALL release that operation's
-dedup entry so the next reconciliation re-derives it. An operation whose failure
-leaves its id in the window is indistinguishable from one that was delivered,
-which converts a transient transport error into permanent, unrecoverable loss of
-a reply the CR still records as owed.
+window exists to suppress duplicates, and SHALL therefore record operations
+that **succeeded**, never operations that were merely **attempted**.
+
+When a derivable operation completes with an error, the manager SHALL
+release that operation's dedup entry. The next reconciliation then
+re-derives it.
+
+An operation whose failure leaves its id in the window is
+indistinguishable from one that was delivered. That would convert a
+transient transport error into permanent, unrecoverable loss of a reply
+the CR still records as owed.
 
 `delete-conversation` SHALL keep its terminal semantics: it is not regenerated,
 because the object that would carry the obligation is being deleted. It is the
 only exemption.
 
-`close-topic` SHALL NOT be exempt. It was, while closing a conversation deleted
-it; the object now survives its close and `status.threadsArchived[]` records
-which threads are done, so an unarchived bound thread is an archive still owed
-and is re-derivable like any other operation.
+`close-topic` SHALL NOT be exempt. It once was, because closing a
+conversation used to delete it. The object now survives its close, and
+`status.threadsArchived[]` records which threads are done — so an
+unarchived bound thread is an archive still owed, and is re-derivable like
+any other operation.
 
 A reply that remains undelivered to a bound thread after its operation failed
-SHALL be observable on the Conversation rather than only in manager logs.
+SHALL be observable on the Conversation rather than only in manager logs, as
+`status.threads[].undeliveredReply`: the run id whose reply is still owed to
+that thread, cleared when delivery succeeds.
 
 #### Scenario: Reply survives a restart between completion and delivery
 - **WHEN** the manager restarts after `POST /work/done` recorded a run result but before any adapter claimed the resulting `send` op
@@ -113,7 +125,11 @@ SHALL be observable on the Conversation rather than only in manager logs.
 
 #### Scenario: An owed reply is visible on the object
 - **WHEN** a run's reply has failed delivery to a bound thread and has not yet succeeded
-- **THEN** the Conversation reports the undelivered thread in its status, so an empty chat thread can be diagnosed without reading manager logs
+- **THEN** the Conversation reports the undelivered thread in `status.threads[].undeliveredReply`, so an empty chat thread can be diagnosed without reading manager logs
+
+#### Scenario: A claim held only in a dead process's memory is not the record of anything
+- **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
+- **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op
 
 ### Requirement: Suppression windows survive a manager restart
 Fingerprint cooldown state SHALL be durable for the lifetime of its window. The
@@ -149,9 +165,17 @@ The documentation SHALL carry a matrix naming every component, the state it
 holds, that state's declared home, and what a restart of that component costs.
 Adding state to a component SHALL require adding its row.
 
+The matrix SHALL name `status.threads[].claim` and
+`status.threads[].undeliveredReply`: Kubernetes-API state, surviving every
+restart, with a claim held by a former leader cleared on recovery.
+
 #### Scenario: Guarantee is checkable
 - **WHEN** an operator asks what restarting a given component loses
 - **THEN** the answer is read from the documented matrix rather than inferred from code
+
+#### Scenario: Claim and owed-reply state have rows
+- **WHEN** an operator asks what a manager restart does to a claimed op or an undelivered reply
+- **THEN** the matrix names both as Conversation status, surviving the restart
 
 ### Requirement: Coordination state has a declared home
 
@@ -185,4 +209,3 @@ SHALL name it: Kubernetes-API state, surviving every restart.
 #### Scenario: A runtime that reports none costs nothing
 - **WHEN** a runtime completes a run with no `brief` field
 - **THEN** the stored brief is unchanged, and a conversation that never had one is described by `title` alone
-
