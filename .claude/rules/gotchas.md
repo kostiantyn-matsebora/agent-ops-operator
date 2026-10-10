@@ -1209,3 +1209,26 @@ EXISTING — MEASURED LIVE ON A STANDALONE RUN OF
 - **Fixed by retrying the list, up to 30s, until the new ReplicaSet
   actually exists**, instead of acting on a list taken too early.
 
+**A FEW CONVERSATIONS CAN GET NO RECONCILER ACTIVITY AT ALL FOR
+MULTIPLE `claimStalenessSeconds` CYCLES RIGHT AFTER A REPLICA
+SCALE-UP, AND IT IS CI-ONLY — MEASURED LIVE, 2026-10-10.**
+
+With the cross-lane admission fix above confirmed (no sibling
+leftovers), 2 of `TestReplicasThreeDeliversEveryConsoleThreadInParallel`'s
+10 still took ~178s — almost exactly two 90s staleness cycles — to even
+get a claim.
+
+- **The tell is silence, not an error.** Neither conversation's name
+  appeared in ANY manager pod's log until the claim finally landed.
+  The holder pod's own log was nearly empty for its whole life.
+- **Consistent with leader-election churn from `scaleManagerReplicas`'s
+  own force-deletes, landing right as this lane starts.** CI's slower,
+  shared runner exposes this. Two clean full local runs never did.
+- **Told apart from the admission-starvation bug by shape, not
+  feeling.** That one's delay GREW across reruns (180s, then 318s) with
+  no other change — unbounded. This one is BOUNDED, matching whole
+  multiples of the staleness constant. Bumping a wait timeout was the
+  WRONG fix for the first and is the RIGHT one for this.
+- **Fixed by widening THIS wait alone to 5m**, sized to three cycles,
+  not by touching the staleness constant itself or the admission fix.
+

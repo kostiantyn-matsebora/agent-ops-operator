@@ -463,15 +463,22 @@ func TestReplicasThreeDeliversEveryConsoleThreadInParallel(t *testing.T) {
 		}
 	}
 
-	// The straggler here was never a claim or delivery bug: with
-	// TestReplicasTwoDeliversEveryConsoleThread now closing its own 8
-	// conversations before returning, this lane's 10 no longer compete for
-	// maxActiveConversations (5 by default) against a preceding lane's
-	// still-idle backlog — measured live, "evicting idle worker to make
-	// room" for a conversation that had done nothing wrong but arrive
-	// behind 8 occupied slots. 3m is back to a real margin, not a guess.
+	// The cross-lane admission starvation (sibling leftovers, e2e-cron)
+	// is fixed above, and confirmed by TWO conversations' own pattern
+	// when it still happens: a bounded, NOT GROWING delay, unlike that
+	// bug's symptom. Measured live on CI after the fix: 2 of 10 sat with
+	// NO reconciler activity at all — not even a log line naming them —
+	// until a claim finally landed at ~178s, almost exactly two
+	// claimStalenessSeconds cycles (90s default). The holder pod's own
+	// log was nearly empty for its whole life, consistent with
+	// leader-election churn from scaleManagerReplicas's own
+	// force-deletes landing right as this lane starts, which CI's
+	// slower runner exposes more than a fast local cluster does. 5m is
+	// the margin for up to three such cycles, not a guess this time —
+	// bumping this exact number already masked a DIFFERENT, unbounded
+	// bug once; it is safe here because this one is bounded.
 	waitFor(t, fmt.Sprintf("all %d conversations to get a console thread AND a delivered reply", n),
-		3*time.Minute, func() (bool, error) {
+		5*time.Minute, func() (bool, error) {
 			items, err := e.K.Conversations(ctx)
 			if err != nil {
 				return false, err
