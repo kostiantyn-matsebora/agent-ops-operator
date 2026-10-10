@@ -81,6 +81,16 @@ func envDurationOr(key string, def time.Duration) time.Duration {
 	return def
 }
 
+// envSeconds reads a plain integer seconds value (chart values express a
+// staleness bound in seconds, not as a Go duration string). Zero or unset
+// means "use the caller's own default".
+func envSeconds(key string) time.Duration {
+	if v := envInt(key, 0); v > 0 {
+		return time.Duration(v) * time.Second
+	}
+	return 0
+}
+
 // maxActiveConversations resolves the cap on simultaneously ACTIVE
 // conversations (one holding a runtime pod), reporting whether the deprecated
 // MAX_RUNTIMES spelling supplied it. The rename is deliberate: the number is
@@ -125,6 +135,17 @@ func main() {
 	setupLog := ctrl.Log.WithName("setup")
 
 	namespace := env("NAMESPACE", "agent-ops")
+
+	// durable-chat-ops-broker: this process's own identity for the claims its
+	// reconciler writes. Needs no relation to the leader-election Lease's own
+	// HolderIdentity — see ConversationReconciler.ReplicaIdentity's comment.
+	// The hostname is the pod name in Kubernetes, which is enough: a claim
+	// surviving a same-pod container restart is exactly what the separate
+	// staleness bound (ClaimStaleness) exists to still catch.
+	replicaIdentity, err := os.Hostname()
+	if err != nil {
+		replicaIdentity = "unknown"
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -264,6 +285,15 @@ func main() {
 		// The timer closes through the SAME path /close does, which is why the
 		// reconciler holds the router at all.
 		Router: router,
+		// durable-chat-ops-broker: this reconciler runs only while this process
+		// holds the leader-election Lease, so any claim written under a
+		// DIFFERENT identity is, by construction, a former leader's — there is
+		// no need to read the Lease's own HolderIdentity to know that.
+		ReplicaIdentity: replicaIdentity,
+		// A chart value, never a compiled-in constant: an install with a
+		// slower transport can raise it. Zero (unset) falls back to
+		// controller.DefaultClaimStalenessSeconds.
+		ClaimStaleness: envSeconds("CLAIM_STALENESS_SECONDS"),
 		// Both OFF by default and independent: autoclose with autodelete off —
 		// a lane that tidies itself and keeps its record — is the common
 		// configuration, so enabling one must never imply the other.
@@ -344,6 +374,11 @@ func main() {
 		StorageBreaker:         breaker,
 		MaxActiveConversations: maxActive,
 		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),
+		// durable-chat-ops-broker: the SAME identity the reconciler's claims
+		// carry, so a replica that is not the current Lease holder rejects a
+		// channel-ops poll (503) instead of answering from an OpQueue the
+		// leader-gated reconciler never populated on this process.
+		ReplicaIdentity: replicaIdentity,
 	}
 	if err := mgr.Add(api); err != nil {
 		setupLog.Error(err, "http api")

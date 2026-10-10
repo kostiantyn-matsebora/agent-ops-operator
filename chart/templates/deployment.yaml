@@ -6,20 +6,20 @@ metadata:
   labels:
     app.kubernetes.io/name: agentops-manager
 spec:
-  # HARDCODED, never a value — NOT safe above 1 yet, and an overridable
-  # number is how it went to 2 the first time. The reconcile loop is
-  # leader-elected, but `internal/chat.OpQueue` is in-memory, per-PROCESS,
-  # and populated only by the leader's reconciler. httpapi's /channel/ops
-  # (the endpoint adapters long-poll to claim chat ops) is NOT leader-gated,
-  # so with >1 replica behind one Service an adapter's poll can land on the
-  # non-leader and see a permanently empty queue — every ensure-topic
-  # silently never completes for conversations whose poll lands there.
-  # Measured live: half of all new chat-bound conversations stuck in Queued
-  # forever, pods cycling on the idle TTL, no error anywhere. Raising this
-  # again needs OpQueue made cross-replica-safe first (shared state via the
-  # API server, or routing /channel/ops to the leader only) — not merely
-  # bumping the number, and not merely re-exposing it as a value either.
-  replicas: 1
+  # SAFE ABOVE 1 NOW (durable-chat-ops-broker). It was HARDCODED at 1 for a
+  # release: `internal/chat.OpQueue` is in-memory, per-PROCESS, and populated
+  # only by the leader's reconciler, while httpapi's /channel/ops was not
+  # leader-gated — so a poll landing on a non-leader saw a permanently empty
+  # queue and half of all new chat-bound conversations stuck in Queued
+  # forever, with no error anywhere.
+  #
+  # The reconciler now writes a durable claim on the Conversation CR itself
+  # before dispatching an ensure-topic op, and a poll on a non-leader rejects
+  # with 503 (retried at once) instead of answering from that replica's own,
+  # never-populated queue. A crashed leader's in-flight claim recovers through
+  # the SAME Lease failover that already gates every reconciler — no new
+  # heartbeat mechanism.
+  replicas: {{ .Values.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: agentops-manager
@@ -62,6 +62,10 @@ spec:
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS
               value: {{ .Values.maxQueuedConversations | quote }}
+            # durable-chat-ops-broker: a chart value, never a compiled-in
+            # constant, so an install with a slower transport can raise it.
+            - name: CLAIM_STALENESS_SECONDS
+              value: {{ .Values.claimStalenessSeconds | quote }}
             # Paired with rbac.drainAware: without the ClusterRole the manager
             # cannot read nodes, so enabling the behaviour alone would only
             # produce forbidden loops in the log.

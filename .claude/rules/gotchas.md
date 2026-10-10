@@ -911,3 +911,324 @@ and re-place `conveyor:run` before the next implement session would start.
   the same standing instruction a person gave once. What changed is which
   EVENTS get to ask `fire` for a restart, not who may authorise one.
 
+**RAISING `manager.replicas` SILENTLY BROKE CHAT DELIVERY, AND THE OpQueue WAS
+IN-MEMORY, PER-PROCESS, THE WHOLE TIME — MEASURED LIVE, 2026-10-08.**
+`internal/chat.OpQueue` is a plain Go map, built once per process and
+populated only by the leader-elected Conversation reconciler.
+
+`/channel/ops` — what a channel adapter long-polls to claim ops — was
+explicitly NOT leader-gated. With more than one manager pod behind one
+Service, a poll landing on the non-leader saw a permanently empty queue.
+
+- **`ensure-topic` never completed for roughly half of all new chat-bound
+  conversations.** They sat in phase `Queued` forever, idling out and
+  cycling their runtime pod on `RUNTIME_IDLE_TTL_M`, with no error anywhere
+  — the same silent-capacity-loss shape as the 2026-08-20 incident two
+  entries up, one layer over.
+- **The stopgap was `replicas: 1`, hardcoded rather than a value** — an
+  overridable number is how it reached 2 the first time, and a number
+  someone can set back is not a fix for a bug that only shows up when they
+  do.
+- **`durable-chat-ops-broker` is the real fix, not a bigger hardcoded
+  floor.** A claim on the Conversation CR itself, written only by the
+  current leader-election Lease holder, recovers a crashed leader's
+  in-flight work through the SAME failover that already gates every
+  reconciler — no second, hand-rolled heartbeat. A poll on a non-leader
+  rejects with 503, retried at once, rather than answering from a queue
+  that replica's own reconciler never populated.
+- **`replicas` is a value again, default 2**, on the same grounds the
+  hardcoded version argued FOR safety: the number now means something,
+  because the thing that made raising it dangerous is what changed.
+
+**THE LEADER CHECK THAT SHIPPED FOR THE ABOVE NEVER MATCHED, EVEN FOR THE
+REAL LEADER — MEASURED LIVE, 2026-10-10.** `isLeader()` compared
+`ReplicaIdentity` (bare `os.Hostname()`) against the Lease's
+`HolderIdentity` for EQUALITY.
+
+- **The two strings can never equal, on any install, at any replica
+  count.** controller-runtime's own `leaderelection.NewResourceLock` mints
+  the Lease's holder as `os.Hostname() + "_" + a per-process uuid` —
+  confirmed reading `leader_election.go` itself.
+- **Every poll 503'd forever, unconditionally** — not the ~50% silent drop
+  this whole feature exists to fix, a 100% chat outage.
+
+- **CI never caught it because nothing exercises a real Lease.** Both the
+  unit tests and envtest construct a `Server` with `ReplicaIdentity` set by
+  hand, comparing against a hand-set `HolderIdentity` with no uuid suffix —
+  the fixture matched the bug's own wrong assumption.
+- **Fixed to a PREFIX match**: `holder == identity ||
+  strings.HasPrefix(holder, identity+"_")`. Safe because a Kubernetes pod
+  hostname is a DNS-1123 name — no `_` — so the delimiter rules out `pod-1`
+  false-matching `pod-10_<uuid>`.
+- **FOUND BY A SECOND, INDEPENDENT SESSION ON THE SAME MACHINE, CONCURRENTLY
+  WORKING THE SAME WORKTREE.** `worktree-delivery.md`'s one-session-per-
+  worktree rule is why that is noted rather than normal — the fix landed,
+  verified, and pushed (`b49a617c`) before the session that first reported
+  the live symptom had finished writing it up.
+
+**FIXING THE IDENTITY CHECK UNMASKED A SECOND, DEEPER BUG THE FIRST ONE HAD
+BEEN HIDING: A NON-LEADER'S CONNECTION STAYS PINNED TO THAT NON-LEADER
+FOREVER.** "Retry at once" (section 4 above) assumes the retry reaches a
+different replica.
+
+- **It does not, over a kept-alive HTTP/1.1 connection.** A Kubernetes
+  Service picks a backend per TCP CONNECTION, not per request.
+- **A connection that happened to dial a non-leader keeps asking that SAME
+  non-leader on every later poll.** kube-proxy is never consulted again
+  until the connection closes for some unrelated reason.
+
+- **Invisible at 2 replicas on good luck, certain to surface harsher.**
+  Asked for explicitly: raising the live-verification install from 2 to 3
+  replicas (to make the non-leader landing MORE likely, not less) turned an
+  occasional stall into a reliable repro — 0/10 conversations delivered,
+  for minutes, surviving a full pod restart of the adapter (a fresh process
+  dials fresh too, and can pin just as badly).
+- **Silent, because the first fix made 503 deliberately unlogged.** The two
+  defects compounded: a livelock that never once reports an error.
+- **Fixed with `m.HTTP.CloseIdleConnections()` on the 503 path**, in BOTH
+  shipped adapters (`platform/console/manager.go`,
+  `channels/telegram/manager.go`) — closing the just-used connection forces
+  the NEXT poll to dial fresh, giving kube-proxy another chance. Verified
+  with `httptrace.ClientTrace.GotConn.Reused`: false after the fix, true
+  (and the regression test fails) without it.
+- **A HAND-PATCHED DEPLOYMENT IMAGE REVERTS ON ITS OWN, AND IT IS NOT HELM'S
+  DOING.** `kubectl set image deployment/agentops-adapter-console ...`
+  appeared to work and then silently reverted to the old tag within
+  seconds. The `ChannelAdapter` reconciler owns that Deployment
+  (`adapters.md`) and re-applies the CR's own `spec.image` on its next
+  reconcile — a different mechanism from the Helm three-way-merge gotcha
+  above, same symptom. Patch the `ChannelAdapter` CR's `spec.image`, never
+  the Deployment it renders.
+
+**A THIRD BUG, ONLY REACHABLE ONCE THE FIRST TWO WERE FIXED: A RUN'S REPLY
+CAN BE MARKED DELIVERED WITHOUT EVER REACHING THE THREAD.**
+`deliverRunReplies` iterated `conv.Status.Threads` directly rather than
+through `ThreadFor`, which already treats an empty `ThreadID` as "does not
+exist."
+
+- **`setClaim` writes a `ThreadBinding` carrying a `Claim` but no
+  `ThreadID` BEFORE `ensureTopics` completes** — durable-chat-ops-broker's
+  own mechanism, introduced by this same change.
+
+- **The reply was enqueued with an empty thread id anyway.** The adapter's
+  own fallback (`thread := "channel:" + op.Channel` when the id is empty,
+  meant for a channel-level notice with no specific thread) accepted it,
+  delivered it to a pseudo-thread nobody reads, and marked the run
+  `Delivered` — which `deliverRunReplies` never re-checks once true. The
+  real thread `ensureTopics` created moments later never received the
+  answer the person was waiting for.
+- **Measured at roughly 1 in 10** under the 3-replica parallel lane
+  (`TestReplicasThreeDeliversEveryConsoleThreadInParallel`) — the specific
+  hit rate needs both ops racing in the SAME reconcile pass, which plain
+  sequential starts (the original `TestReplicasTwoDeliversEveryConsoleThread`)
+  essentially never produces.
+- **Fixed by skipping delivery while `ThreadID == ""`**, while still marking
+  the channel `owed` in the `DeliveryPending` condition — the difference
+  between "not yet" and "never coming."
+
+**PATCHING A DEPLOYMENT'S POD TEMPLATE DOES NOT UNBLOCK A ROLLOUT AN
+EXISTING POD'S HARD ANTI-AFFINITY IS BLOCKING — MEASURED LIVE, LOCALLY AND
+IN CI.** Testing past the chart's own default (two replicas) needs a
+single-node cluster to schedule a third pod.
+
+- **Clearing `spec.template.spec.affinity` and waiting for `kubectl
+  rollout status` stalled forever**, at `"1 out of N new replicas
+  updated"` — on both a local Rancher Desktop cluster and the e2e pack's
+  own k3d cluster in CI.
+
+- **A pod's spec is immutable once created.** The EXISTING pod from before
+  the patch still carries the OLD anti-affinity rule, and the scheduler
+  still refuses to place a new pod beside it — the Deployment's template
+  change only reaches pods created AFTER the patch, and none can be
+  created while the old one still occupies the only node.
+- **Deleting the blocking pods was tried next, and also failed.** Their
+  OWNING ReplicaSet's desired count is untouched by a pod deletion, so it
+  recreated them — identical, still carrying the rule — within seconds.
+- **The fix: scale that ReplicaSet itself to zero**, identified by
+  `spec.template.spec.affinity != nil` so a LATER call that only changes
+  the replica count (affinity already cleared) never zeroes the
+  Deployment's current, correct ReplicaSet and fights its own controller.
+- **`TestReplicasTwoDeliversEveryConsoleThreadInParallel`'s dispatch to
+  `e2e-smoke.yml` is what caught the second half of this**: the EXISTING
+  `TestReplicasTwoDeliversEveryConsoleThread` lane's own precondition
+  (`len(pods) >= 2`, no readiness check) had been passing this whole time
+  against exactly ONE ready manager pod on this same single-node cluster —
+  the chart's own default install never actually ran two REAL replicas in
+  CI until this fix was written.
+
+**SCALING THE OLD REPLICASET TO ZERO STILL WASN'T FAST ENOUGH, AND THE
+FAILURE CASCADED — MEASURED ON THE VERY NEXT DISPATCH.** The fix above
+only ASKS the old pod to terminate.
+
+- **Gracefully, up to its 30s `terminationGracePeriodSeconds`** — and it
+  keeps blocking scheduling the whole time it is still there.
+
+- **The symptom changed, which is what gave it away.** The rollout no
+  longer stalled at "1 out of N updated" (scheduling), it stalled at "0 of
+  N updated replicas are available" (readiness) — the new pods WERE
+  scheduling, just not before the old one finally left.
+- **Fixed by force-deleting the old pods** (`client.GracePeriodSeconds(0)`)
+  right after zeroing their ReplicaSet, instead of waiting out a shutdown
+  nothing needs graceful. Verified by hand: 23s end to end, against a
+  multi-minute hang before.
+- **A SEPARATE bug turned that one failure into several.**
+  `scaleManagerReplicas` registered its restore `t.Cleanup` AFTER the
+  risky scale-up call. `t.Fatal` stops the calling goroutine at once via
+  `runtime.Goexit`, so a failed scale-up skipped the registration
+  entirely — the Deployment sat stuck mid-rollout for every test that ran
+  after, and several unrelated lanes failed with it
+  (`TestContextSurvivesLosingThePod`, `TestAdmissionFIFOOnPodDelete`,
+  `TestStubMechanisms/*`).
+- **Register `t.Cleanup` BEFORE the call it cleans up after, always** —
+  the general form of the bug, not specific to this file. A cleanup
+  registered only on a success path is a cleanup that does not run on the
+  one path it matters most for.
+
+**FORCE-DELETING THE OLD POD IS NOT ENOUGH EITHER — THE NEW POD CAN LOSE
+THE RACE AGAINST ITS OWN DELETION, MEASURED AFTER ALL THREE FIXES ABOVE
+WERE ALREADY LIVE.**
+
+The Deployment's patch asks for the new pod before this function ever
+reaches the old ReplicaSet, so the new pod's FIRST scheduling attempt can
+still fail with the same anti-affinity error.
+
+- **The scheduler's own retry-after-failure did not reliably fire**, even
+  minutes after the pod that blocked it was gone. Measured live: one
+  `FailedScheduling` event, then silence for 4+ minutes.
+- **Fixed by force-deleting any still-PENDING pod of the CURRENT
+  ReplicaSet** right after clearing the old one. A freshly created pod
+  object gets an ordinary, un-backed-off scheduling attempt — a RETRY of
+  the failed one does not.
+- **THE FIRST VERSION OF THAT FIX KILLED A HEALTHY POD.** Deleting any
+  Pending pod of the current ReplicaSet also catches one from an ORDINARY
+  scale-up with no competing affinity rule at all — nothing for it to lose
+  a race against. Measured live: a brand-new, correctly-scheduling replica
+  force-deleted before the scheduler had even placed it once, reporting
+  `Completed` after the manager's own graceful-shutdown path ran.
+- **The fix is to scope the delete to whether an old-affinity ReplicaSet
+  was actually cleared in THIS call.** No clearing, no race to break, no
+  reason to touch a Pending pod at all.
+
+**TWO LANES SHARING ONE CLUSTER COMPETE FOR THE SAME ADMISSION CAP, AND
+ONE LANE'S IDLE BACKLOG STARVES THE NEXT — MEASURED ON
+`TestReplicasThreeDeliversEveryConsoleThreadInParallel`, INTERMITTENTLY,
+RIGHT AFTER `TestReplicasTwoDeliversEveryConsoleThread`.**
+
+A conversation stays Idle after its task finishes, still holding a slot
+under `maxActiveConversations` (5 by default) until its own idle TTL
+evicts it.
+
+- **The preceding lane's 8 conversations outlive the lane.** A lane
+  immediately after it can face up to 18 conversations competing for 5
+  pod slots, not 10.
+- **The tell is `"evicting idle worker to make room"`** logged against a
+  conversation that did nothing wrong but arrive behind a still-occupied
+  backlog.
+- **Bumping the waiting test's own timeout was tried first, and is the
+  wrong fix.** The delay is not bounded by anything the waiting lane
+  controls — it grows with how much of the PRECEDING lane's backlog is
+  still live, measured climbing from 180s to 318s across reruns with no
+  other change.
+- **Fixed by having each lane close its own conversations before
+  returning**, freeing their slots for whatever runs next.
+- **A fire-and-forget `/close` is not enough.** It only enqueues an input.
+  A lane that returns the moment it is sent hands the next lane the same
+  still-Idle backlog it meant to clear — measured live, one run passed and
+  the very next hit the same starvation because the reconciler had not
+  caught up yet. Wait for the conversation to actually reach phase
+  `Closed` before returning.
+
+**THAT FIX WAS STILL NOT ENOUGH ON CI, BECAUSE THE BACKLOG WAS NEVER ONLY
+THIS FILE'S — MEASURED LIVE, 2026-10-10.** `maxActiveConversations` is a
+GLOBAL cap, not scoped to console.
+
+- **Sibling lanes on OTHER sources leave idle leftovers too.** A lane on
+  `vm-alerts`, `tg-ops` or `e2e-fanout` that never calls `/close` holds a
+  slot forever (until its idle TTL). Measured on CI: 7 such leftovers from
+  unrelated lanes, still competing for 5 slots alongside this file's own.
+- **`e2e-cron` is worse: it keeps firing on its OWN schedule**, independent
+  of any test's lifetime. A one-time sweep at the top of a lane can still
+  lose to a NEW cron-originated conversation created mid-run — measured as
+  the same starvation recurring intermittently even with a sweep already
+  in place.
+- **Fixed by reusing `TestAdmissionFIFOOnPodDelete`'s own
+  `pauseCronLaneAndClearLeftovers`** in both replica lanes — it un-claims
+  the cron source (ticks then drop, restored on cleanup) and deletes every
+  existing conversation outright, not just Idle ones.
+- **That reuse needed ONE MORE fix: the helper's own delete runs with
+  `--wait=false`.** A deleted conversation lingers under its close-topics
+  finalizer for up to two minutes, still holding a slot the whole time.
+  Calling the helper and immediately creating a new batch raced the OLD
+  conversations' finalizers against the new batch's own close-and-wait
+  step, and timed out. `TestAdmissionFIFOOnPodDelete` already follows the
+  pause with its own explicit wait for zero `agentops.dev/conversation`
+  pods — add the same wait wherever this helper is reused.
+
+**A LONG-LIVED `kubectl port-forward` DOES NOT SURVIVE ITS BACKING POD
+BEING FORCE-DELETED, AND NOTHING RESTARTS IT — MEASURED LIVE,
+2026-10-10, EXPOSED BY `TestReplicasThreeDeliversEveryConsoleThreadInParallel`'s
+OWN REPLICA CHURN.**
+
+- **`kubectl port-forward svc/<name>` pins itself to ONE backing pod's
+  IP for its whole life.** A pod force-deleted out from under it
+  (`scaleManagerReplicas`'s own mechanism) makes the kubectl process
+  exit, and the harness's `Forward` never noticed or relaunched it.
+- **Every later test sharing that same `Forward` then fails
+  `connection refused`**, against a port nothing listens on — cascading
+  into `TestContextSurvivesLosingThePod`, `TestAdmissionFIFOOnPodDelete`
+  and `TestStubMechanisms/*`, none of them about replicas at all.
+- **Master's own smoke suite never does this pod churn**, so this was
+  never exposed there — it is the replica-scaling test code itself that
+  surfaces it, not a pre-existing flake.
+- **Fixed in `test/e2e/cluster.go`'s `Forward`**: a supervisor goroutine
+  relaunches the port-forward on the SAME local port whenever its process
+  exits before `Stop` is called, so a caller's `URL()` never has to
+  change.
+
+**LISTING A ReplicaSet IMMEDIATELY AFTER PATCHING ITS DEPLOYMENT CAN FIND
+ONLY THE OLD ONE, SILENTLY SKIPPING EVERY FIX THAT DEPENDS ON THE NEW ONE
+EXISTING — MEASURED LIVE ON A STANDALONE RUN OF
+`TestReplicasThreeDeliversEveryConsoleThreadInParallel`.**
+
+- **The Deployment controller does not necessarily have the NEW
+  ReplicaSet created in the same instant the patch lands.** A single
+  list call right after the patch can see only the OLD one, leaving
+  `current` nil in `zeroAffinityReplicaSets` and silently skipping the
+  fresh-reschedule step for every pod the new ReplicaSet goes on to
+  create.
+- **The tell was a cleanly zeroed old ReplicaSet beside three pods stuck
+  on their ONE AND ONLY `FailedScheduling` event for 5+ minutes** — proof
+  the rest of the function worked, and only this one list's timing was
+  wrong.
+- **It passed in every run where an earlier lane had already cleared the
+  affinity field first**, because that path never needed the new
+  ReplicaSet to exist — `current` was found by a different route. It only
+  failed standalone, which is exactly why isolating "just the failing
+  test" during a debugging session is worth doing even after a fix looks
+  confirmed on the full suite.
+- **Fixed by retrying the list, up to 30s, until the new ReplicaSet
+  actually exists**, instead of acting on a list taken too early.
+
+**A FEW CONVERSATIONS CAN GET NO RECONCILER ACTIVITY AT ALL FOR
+MULTIPLE `claimStalenessSeconds` CYCLES RIGHT AFTER A REPLICA
+SCALE-UP, AND IT IS CI-ONLY — MEASURED LIVE, 2026-10-10.**
+
+With the cross-lane admission fix above confirmed (no sibling
+leftovers), 2 of `TestReplicasThreeDeliversEveryConsoleThreadInParallel`'s
+10 still took ~178s — almost exactly two 90s staleness cycles — to even
+get a claim.
+
+- **The tell is silence, not an error.** Neither conversation's name
+  appeared in ANY manager pod's log until the claim finally landed.
+  The holder pod's own log was nearly empty for its whole life.
+- **Consistent with leader-election churn from `scaleManagerReplicas`'s
+  own force-deletes, landing right as this lane starts.** CI's slower,
+  shared runner exposes this. Two clean full local runs never did.
+- **Told apart from the admission-starvation bug by shape, not
+  feeling.** That one's delay GREW across reruns (180s, then 318s) with
+  no other change — unbounded. This one is BOUNDED, matching whole
+  multiples of the staleness constant. Bumping a wait timeout was the
+  WRONG fix for the first and is the RIGHT one for this.
+- **Fixed by widening THIS wait alone to 5m**, sized to three cycles,
+  not by touching the staleness constant itself or the admission fix.
+

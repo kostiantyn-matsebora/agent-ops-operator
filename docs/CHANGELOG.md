@@ -8,7 +8,32 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [14.0.1] — 2026-10-10
+
+- `signal-cron` 0.2.0.
+
+### Fixed
+
+- **The self-heal reaper's `cronAdapter` still pinned `signal-cron:0.0.1-rc3`**,
+  an unreleased candidate rather than a real version — 14.0.0's own fix for
+  `signal-cron:0.2.0` (a version that had never shipped) landed on the closest
+  tag that DID exist instead of actually cutting one. Off by default
+  (`reaper.enabled: false`), so no install pulled it, but an install that turns
+  the reaper on now gets a real release: `signal-cron:0.2.0`, built from the
+  same unchanged source the `rc3` tag already shipped.
+
+## [14.0.0] — 2026-10-09
+
+**Every image below is rebuilt against `golang:1.27`, no behaviour change
+beyond clearing two stdlib HIGH CVEs:** CVE-2026-78667 (`net/http`) and
+CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
+
+- `manager` 0.57.4, `console` 0.38.4, `housekeeping` 0.2.5, `context-sync`
+  0.2.5, `egress-proxy` 0.2.6.
+- `channel-telegram` 0.25.1, `gateway-telegram` 0.6.1, `signal-telegram`
+  0.6.5.
+- `signal-alertmanager` 0.7.5, `signal-ha` 0.4.1, `signal-k8s-events` 0.4.6.
+- `signal-cron` 0.0.1-rc3 and `runtime-ollama` 0.1.2.
 
 ### Added
 
@@ -102,6 +127,23 @@ for the source and the reference material beside this file.
   `metadata.generateName`'s random suffix. Non-breaking: existing
   conversations keep their current names. See
   [concepts.md](concepts.md#conversation).
+- **`manager.replicas` is a value again, default `2`.** It was hardcoded at
+  `1`, because `internal/chat.OpQueue` was in-memory and per-process,
+  populated only by the leader's reconciler — and `/channel/ops` served
+  every replica, so a poll landing on the non-leader saw a permanently
+  empty queue. `ensure-topic` silently never completed for roughly half of
+  all new chat-bound conversations.
+  - The reconciler now writes a claim on the Conversation CR itself before
+    dispatching an op, and a non-leader rejects a poll with `503` (retried
+    at once) instead of answering from that queue.
+  - A crashed leader's in-flight claim recovers through the same
+    leader-election failover every reconciler already uses.
+  - New value: `claimStalenessSeconds` (default `90`), the bound past which
+    the current leader treats its own claim as abandoned and retries.
+  - **Breaking for a hand-rolled channel adapter.** `GET /channel/ops` may
+    now answer `503`. A conforming adapter retries at once, the same way it
+    already retries an empty `204`, and never logs it as a failure. Both
+    shipped adapters (`channels/telegram`, `platform/console`) do this.
 - **Closing or deleting a conversation now cascades to every conversation it
   caused**, for every originator — a human `/close`, the console's bulk
   close, the idle timer, and a bulk delete — not only the coordinator's own
@@ -197,6 +239,11 @@ for the source and the reference material beside this file.
   name, and the half an instance does not register is inert. Not breaking: an
   install overriding `home-assistant.mcp.toolsets.*.tools` keeps its own list
   and must add the prefixed names itself.
+- **The self-heal reaper's `cronAdapter` pinned `signal-cron:0.2.0`**, a
+  version `signal-cron` never shipped — only `0.0.1-rc1`/`rc2`/`rc3` exist.
+  Off by default (`reaper.enabled: false`), so no install pulled it, but an
+  install already on `wiringMode: coordinator` is one flag from
+  `ImagePullBackOff`. Now `0.0.1-rc3`.
 
 ### Upgrade
 
@@ -749,50 +796,11 @@ one a forgotten grant looks identical to.
    nothing is silently ignored.
 5. Optionally delete the orphaned accounts listed above.
 
-## [channel-telegram 0.24.2] — 2026-08-24
-
-### Fixed
-
-**A signal card larger than about 4KB never arrived**, and the delivery retried
-in a loop. The agents' own answers were unaffected — only event cards failed.
-
-Telegram answered:
-
-```
-can't parse entities: Can't find end tag corresponding to start tag "blockquote"
-```
-
-**Cause.** A signal payload over six lines is folded into
-`<blockquote expandable>`, which spans many lines. The splitter chooses a chunk
-boundary at a newline, on an assumption stated in its own comment — that every
-tag it emits opens and closes on the same line.
-
-That was false for exactly this tag. The first chunk carried an opening tag with
-no end and the second a stray end tag, and the Bot API rejects the **whole
-message** rather than the tag.
-
-The adapter already solved this one path over: a split fold in an agent's answer
-has each piece re-wrapped in its own quote. A signal is not agent output, so it
-never reached that code.
-
-**Fix.** The splitter closes a quote it cuts and reopens the same tag on the
-remainder, and reserves room for the end tag up front — adding it after choosing
-a cut would push the chunk past the 4096 limit, trading one rejected message for
-another.
-
-**Still true after this:** a message the Bot API will never accept retries
-forever. The latch that disables expandable quotes recognises a refusal about an
-*unsupported* tag, and this one was *unbalanced*. This removes the trigger, not
-the poison-pill behaviour.
-
-### Upgrade
-
-Nothing to do. The chart pins the new tag.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-channel-telegram-0.24.2.md](changelog/CHANGELOG-channel-telegram-0.24.2.md) | channel-telegram 0.24.2 |
 | [CHANGELOG-9.0-10.0.md](changelog/CHANGELOG-9.0-10.0.md) | chart 9.0.0 through 10.0.0 |
 | [CHANGELOG-8.0.md](changelog/CHANGELOG-8.0.md) | chart 8.0.0 |
 | [CHANGELOG-5.22-7.0.md](changelog/CHANGELOG-5.22-7.0.md) | chart 5.22.0 through 7.0.0 |

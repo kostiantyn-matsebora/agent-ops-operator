@@ -461,9 +461,31 @@ configuration, defaulting to the real one.
   single-`getUpdates` rule is about how many pollers exist, not where they
   point.
 
-### HTTP API is NOT leader-gated
+### HTTP API is NOT leader-gated — WITH ONE EXCEPTION
 
 `NeedLeaderElection()=false` — webhooks must serve during rollouts.
+
+**`/channel/ops` is the one endpoint that answers differently off the
+leader** (durable-chat-ops-broker).
+
+- **Claiming an outbound channel op is written only by the current
+  leader-election Lease holder**, on the Conversation's own
+  `status.threads[].claim`. So is deciding a previous claim is abandoned.
+- **A non-leader rejects the poll with 503.** Answering from its own state
+  would read an `OpQueue` the leader-gated reconciler never populated on
+  that process.
+
+- **This is the SAME staleness pattern as "a runtime pod that never starts is
+  reaped"** two sections up: a bound after which something unclaimed-but-stuck
+  is treated as abandoned, decided entirely by the one process allowed to
+  decide it, so no second writer or hand-rolled heartbeat is needed.
+- **A claim held by a replica other than this one is, BY CONSTRUCTION, a
+  former leader's** — this reconciler never runs except while its process
+  holds the Lease — so it is cleared and re-dispatched AT ONCE, never waited
+  out. Only the SAME leader's own claim going quiet waits for the
+  (chart-configurable) staleness bound.
+- **Every other endpoint is unaffected.** `/channel/ops/{id}/done` is an
+  ordinary, unconditional write, safe from any replica.
 
 **Exactly one getUpdates consumer per bot token, ever.** That consumer is
 `gateway-telegram`: ONE poll loop per Deployment and ONE Deployment per token

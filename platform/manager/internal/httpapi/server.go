@@ -116,6 +116,14 @@ type Server struct {
 	// Nil is usable: one is built lazily so a zero-valued Server works.
 	StorageBreaker *storagebreaker.Breaker
 
+	// ReplicaIdentity is this process's own identity, the same string the
+	// reconciler's claims carry (durable-chat-ops-broker). Compared against
+	// the leader-election Lease's holder to decide whether THIS replica may
+	// safely claim a channel op on /channel/ops. Empty disables the check
+	// (tests, and any Server built with no leader election behind it at
+	// all), so a zero-valued Server keeps answering as it always has.
+	ReplicaIdentity string
+
 	breakerOnce sync.Once
 }
 
@@ -680,13 +688,24 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		b := conv.Status.Budget
 		maxTurnsExceeded = b.MaxTurns > 0 && b.Turns >= b.MaxTurns
 	}
+	desiredPhase := agentopsv1alpha1.ConversationIdle
 	if len(dispatch.PendingInputs(&conv)) > 0 {
-		conv.Status.Phase = agentopsv1alpha1.ConversationQueued
-	} else {
-		conv.Status.Phase = agentopsv1alpha1.ConversationIdle
+		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
 	conv.Status.LastActivity = &now
 	if err := s.Client.Status().Patch(ctx, &conv, patch); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	// Phase moves in its OWN optimistic-locked patch, never folded into the
+	// one above: a run that was still in flight when /close landed reports
+	// its completion here, and this write must not un-close the conversation
+	// when that belated report lands — Closed is sticky until an explicit
+	// reopen. Folded in, an unconditioned merge patch landing after close's
+	// own patch silently reverted phase to Idle/Queued while leaving
+	// ClosedAt stamped — measured live on the chart-v14.0.0 release smoke
+	// (TestConsoleLifecycle/close_then_delete).
+	if err := s.setPhaseUnlessClosed(ctx, d.Convo, desiredPhase); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -750,6 +769,39 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// setPhaseUnlessClosed moves a conversation to Queued or Idle after a run
+// completes, UNLESS a concurrent /close already moved it to Closed — Closed
+// is sticky until an explicit reopen, so a work report that was merely slow
+// to arrive must never resurrect the phase close already retired.
+//
+// Optimistic-locked and retried on conflict, deliberately separate from the
+// rest of handleWorkDone's status write: that write carries no sticky
+// invariant (a late result is still worth recording, closed or not), so it
+// stays a plain, unconditioned patch. Phase is the one field here that must
+// be re-decided against the LATEST state rather than the state this request
+// started with.
+func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired agentopsv1alpha1.ConversationPhase) error {
+	for range 5 {
+		var conv agentopsv1alpha1.Conversation
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if conv.Status.Phase == agentopsv1alpha1.ConversationClosed || conv.Status.Phase == desired {
+			return nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		conv.Status.Phase = desired
+		err := s.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return fmt.Errorf("conflict setting phase on %q", name)
 }
 
 // recordInputs renders the queued inputs a run consumed as the record kept on
@@ -943,8 +995,24 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	//
 	// Computed ONCE per request, before the wait: it is a read of the informer
 	// cache, and recomputing it every second of a 30-second poll would buy
-	// nothing an adapter can act on any sooner.
+	// nothing an adapter can act on any sooner. Set before the leader check
+	// below too — the revision rides EVERY poll response, a rejected one
+	// included, since the manager cannot dial an otherwise-idle adapter any
+	// other way.
 	s.setVocabularyRevision(r.Context(), w)
+
+	// durable-chat-ops-broker: a claim is written only by the current leader
+	// (the Conversation reconciler, leader-gated by construction), so a
+	// non-leader has no safe way to answer this poll from its own state —
+	// its in-memory OpQueue was never populated for ops this process did not
+	// claim, and proxying to the leader is exactly the complexity this design
+	// chose not to build. Distinguishable from 204 so a conforming adapter
+	// retries at once instead of waiting out its normal idle backoff.
+	if !s.isLeader(r.Context()) {
+		w.Header().Set("Retry-After", "0")
+		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader"})
+		return
+	}
 
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
