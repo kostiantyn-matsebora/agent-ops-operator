@@ -103,7 +103,9 @@ BEFORE any filter is applied, so the badge never moves because a filter hid
 something.
 
 A count-only form SHALL be available for surfaces that need the number
-without the rows. The count per scope SHALL be available for the inbox.
+without the rows. The count per scope SHALL be available for the inbox. A scope is one of the
+inbox's groupings of conversations, such as all conversations, one pipeline
+or one coordinator.
 
 #### Scenario: Unread-only narrows server-side
 - **WHEN** the operator turns on the unread filter

@@ -172,6 +172,10 @@ reaches — its own bound threads, if it has any. A member typically has none.
 contract operation and no CRD field CLOSES a conversation: an external
 caller reaches closing only by posting `/close` on a thread it holds.
 
+The Coordinator's MCP `close` verb is not an external caller's. It is
+reachable only from inside a coordination tree, and only on the calling
+root itself or a direct member it caused.
+
 Deleting and reopening are separate verbs with their own rules and are not
 a way to close. Deleting's cascade is the requirement added in this file.
 

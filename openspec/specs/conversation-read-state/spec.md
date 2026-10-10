@@ -91,10 +91,10 @@ manager's current time.
 
 A report MAY instead ask for a REWIND:
 
-- it SHALL name a reader and a time
+- it SHALL name a `reader` and a `readAt` time, with `rewind: true`
 - it SHALL set that reader's own entry to the time, even where it is earlier than the stored one
 - it SHALL never move the channel-wide mark
-- naming no reader, it SHALL be refused
+- naming no reader, it SHALL be refused with a 400 whose reason reads `rewind requires a reader`
 - the clamp SHALL still apply
 
 #### Scenario: A stale client cannot un-read a thread

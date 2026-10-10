@@ -100,7 +100,7 @@ line, so a list reads as a chat list without fetching any transcript.
 - **WHEN** an agent answered a conversation last
 - **THEN** its row shows the agent as speaker and the answer's first line
 
-### Requirement: A conversation detail shows its whole record
+### Requirement: A conversation's thread pane shows its whole record
 The thread pane SHALL present the transcript with a composer as its default
 view, and SHALL offer secondary views holding:
 
