@@ -62,15 +62,15 @@ runs against a real single-node cluster".
 Scenario TITLES do not: the validator diffs scenario titles against the
 existing requirement and refuses a MODIFIED block that drops one.
 
-One scenario in `continuous-integration` therefore keeps its old title, "A
-per-module job is not duplicated in the e2e workflow", with only its body
-updated to say `system.yml`.
+One scenario in `continuous-integration` therefore has its title fixed by a
+direct edit to `openspec/specs/continuous-integration/spec.md` in THIS change
+(task 4.3), before the delta is validated. The delta then carries the new
+title, "A per-module job is not duplicated in the system workflow", with its
+body saying `system.yml`.
 
-Fixing that title is a direct edit to
-`openspec/specs/continuous-integration/spec.md` outside the delta mechanism
-— the same way the `vm-alertmanager-signal-adapter` →
-`alertmanager-signal-adapter` capability rename was done directly rather
-than through a delta, back in chart 5.24.0.
+The direct edit follows the way the `vm-alertmanager-signal-adapter` →
+`alertmanager-signal-adapter` capability rename was done, back in chart
+5.24.0.
 
 ### Order of operations
 
@@ -144,8 +144,8 @@ change.
 
 **[Risk] A leftover scenario title in `continuous-integration`'s spec**
 ("... e2e workflow") would read as an incomplete rename.
-→ Mitigation: the delta in this change retitles it to "system workflow", so
-nothing is deferred until after archive.
+→ Mitigation: task 4.3 retitles it to "system workflow" directly in this
+change, so nothing is deferred until after archive.
 
 **[Risk] This change's own `tasks.md` could fail the renamed guard**, since
 `docs-task-guard.py` stops accepting "E2E tests".
