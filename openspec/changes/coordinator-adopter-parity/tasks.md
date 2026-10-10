@@ -101,6 +101,13 @@
       `openspec/changes/coordinator-deployment-mode/tasks.md` (smoke test
       against the live install, from this working copy's chart, not
       master's) and tick it there once the verdict is recorded.
+      NOT PERFORMED HERE: a hand-exploratory smoke against a live install
+      (hand-trigger the hourly cron path, watch a self-close prompt
+      resolve in-turn) needs a live cluster and a browser
+      (`visual-check.md`, `remote-session.md`), which this remote session
+      does not have and cannot dispatch as a CI run — unlike 4.2, this one
+      is not an automated test. Left open for whoever runs the
+      workstation-only verification.
 - [ ] 4.2 Run task 8.1 from the same file (the already-written e2e
       coordinator lane, `go test -tags e2e ./test/e2e/` from this working
       copy's `platform/manager/`, against a cluster built from this
