@@ -147,8 +147,8 @@ runs:
     # node --test lcov, the console UI's lcov, the scripts' Cobertura XML —
     # and a report that is not there is a scanner INFO, never an error.
     #
-    # test/e2e/** and test/conformance/** are EXCLUDED FROM COVERAGE, not from
-    # analysis — build-tag-gated (`e2e`, `conformance`), so `coverage.out`
+    # test/system/** and test/conformance/** are EXCLUDED FROM COVERAGE, not
+    # from analysis — build-tag-gated (`system`, `conformance`), so `coverage.out`
     # from the plain `go test ./...` this job already ran has no data for
     # them at all: not "0% covered", ABSENT. Any diff touching cluster.go,
     # install.go, wiring.go or runner.go there read as new-code coverage in
@@ -182,7 +182,7 @@ runs:
           -Dsonar.projectName=agentops-${{ steps.component.outputs.name }}
           -Dsonar.sources=${{ inputs.sources }}
           -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/coverage/**,ui/e2e/**,ui/e2e-live/**,ui/screenshots/**,ui/demo/**
-          -Dsonar.coverage.exclusions=test/e2e/**,test/conformance/**
+          -Dsonar.coverage.exclusions=test/system/**,test/conformance/**
           -Dsonar.tests=${{ inputs.tests }}
           -Dsonar.test.inclusions=${{ inputs.test-inclusions }}
           -Dsonar.go.coverage.reportPaths=coverage.out

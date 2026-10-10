@@ -47,7 +47,7 @@ The rules injected when a tasks file is generated SHALL require each
 implementation section to name the role agent that fulfils it, or none
 where no role fits.
 
-The three trailing sections — unit tests, e2e tests, documentation — keep
+The three trailing sections — unit tests, system tests, documentation — keep
 their shape and are not required to name one.
 
 #### Scenario: A tasks file is generated

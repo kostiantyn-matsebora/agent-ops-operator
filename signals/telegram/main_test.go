@@ -31,7 +31,7 @@ func mustUpdate(t *testing.T, raw string) tgUpdate {
 // the chat lane, a per-update fingerprint, and the reserved labels that let a
 // reply find its way back to the surface the message came from.
 func TestNormalizeChatSignal(t *testing.T) {
-	// The CANONICAL captured update, shared with the e2e pack (test-only
+	// The CANONICAL captured update, shared with the system pack (test-only
 	// relative read, no go.mod entry): the fake Bot API replays this exact
 	// payload and the router forwards it verbatim, so what this test pins is
 	// what the pack sends.

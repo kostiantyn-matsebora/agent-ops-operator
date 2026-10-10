@@ -116,8 +116,8 @@ func post(t *testing.T, h http.Handler, path, bearer, body string) *httptest.Res
 	return rec
 }
 
-// twoFiringOneResolved is the CANONICAL webhook body, shared with the e2e pack
-// so a single captured payload cannot drift between the two suites. Read by
+// twoFiringOneResolved is the CANONICAL webhook body, shared with the system
+// pack so a single captured payload cannot drift between the two suites. Read by
 // relative path from this test file — a test-only read, no go.mod entry —
 // and read inside the test, so a missing file fails that test rather than
 // the package's init.

@@ -224,13 +224,16 @@ request exists.
 The remote session SHALL deliver the change as one pull request from
 `change/<name>` REFERENCING the issue without a closing keyword, carrying NO
 label, with the unit and chart tiers run in the session and the cluster tier
-dispatched to the smoke end-to-end workflow on its branch. Nothing the session
-does SHALL merge, or place a label. Nothing the IMPLEMENT station does SHALL
-archive.
+dispatched to the smoke system workflow on its branch.
+
+Nothing the session does SHALL merge, or place a label. Nothing the IMPLEMENT
+station does SHALL archive.
 
 **The label on the issue is the owner's word, given once**, and a WORKFLOW —
 never the session — carries it to the pull request as the consent the fixing
-loop already reads — over everything that holds the merge: the review's
+loop already reads.
+
+That consent stands over everything that holds the merge: the review's
 findings, the analysis service's issues and the failed required checks. What
 that loop cannot settle — a dispute, an unanswered gate — waits for a person,
 as it does today. The session SHALL NOT wait for the checks or the review
