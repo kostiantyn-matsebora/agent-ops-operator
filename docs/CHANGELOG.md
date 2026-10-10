@@ -122,6 +122,11 @@ CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
 
 ### Changed
 
+- **A Conversation's object name is now a deterministic word-chain**
+  (`alert-node-down-ns`, `member-researcher`), never
+  `metadata.generateName`'s random suffix. Non-breaking: existing
+  conversations keep their current names. See
+  [concepts.md](concepts.md#conversation).
 - **`manager.replicas` is a value again, default `2`.** It was hardcoded at
   `1`, because `internal/chat.OpQueue` was in-memory and per-process,
   populated only by the leader's reconciler — and `/channel/ops` served

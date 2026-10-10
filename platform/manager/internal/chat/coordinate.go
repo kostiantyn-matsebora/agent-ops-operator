@@ -24,6 +24,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -518,7 +519,11 @@ func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, persistenceName, capability, r.Runtime)
 	member := &agentopsv1alpha1.Conversation{}
 	member.Namespace = r.Namespace
-	member.GenerateName = "member-"
+	// The word-chain and the actual Create are AllocateName's below —
+	// readable-conversation-names: an object name is a deterministic
+	// word-chain, never metadata.generateName's random suffix. The word
+	// source is the invoked agents[] entry name, non-empty by
+	// construction (a CoordinatorAgentEntry always names one).
 	member.Labels = map[string]string{
 		labelSignatureHash:             ingest.SignatureHash(signature),
 		agentopsv1alpha1.LabelCausedBy: caller.Name,
@@ -540,7 +545,7 @@ func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		claimant := coordinatorClaimant{nested}
 		member.Spec.EscalationChannelRefs = claimant.EscalationChannelRefs()
 	}
-	if err := r.Client.Create(ctx, member); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Client, r.Namespace, "member", namewords.Words(entry.Name), member); err != nil {
 		return nil, err
 	}
 	if nested != nil {

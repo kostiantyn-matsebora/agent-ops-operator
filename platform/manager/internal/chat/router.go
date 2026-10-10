@@ -45,6 +45,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -629,7 +630,16 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	}
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = r.Namespace
-	conv.GenerateName = "task-"
+	// The word-chain and the actual Create are AllocateName's below —
+	// readable-conversation-names: an object name is a deterministic
+	// word-chain, never metadata.generateName's random suffix. The word
+	// source is the addressed pipeline name, non-empty by construction for
+	// every caller that reaches this function with an origin; a channel
+	// name covers the case the doc comment allows (origin nil).
+	nameWords := ch.Name
+	if origin != nil {
+		nameWords = origin.GetName()
+	}
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
 		ChannelRefs: r.boundChannels(origin, ch),
 		ProfileRef:  agentopsv1alpha1.ObjectRef{Name: profile},
@@ -682,7 +692,7 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 			conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
 		}
 	}
-	if err := r.Client.Create(ctx, conv); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Client, r.Namespace, "task", namewords.Words(nameWords), conv); err != nil {
 		return conv, err
 	}
 	// A Coordinator-rooted conversation's own resource ceiling (design D-E) is
