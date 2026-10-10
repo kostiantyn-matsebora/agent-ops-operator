@@ -138,13 +138,21 @@
       working copy's chart) and tick it there once the verdict is
       recorded.
       DISPATCHED, VERDICT PENDING: this remote session has no docker
-      daemon and no k3d, so the pack cannot run directly here. Dispatched
-      `gh workflow run e2e-smoke.yml --ref change/coordinator-adopter-parity`
-      per `remote-session.md`'s cluster-tier rule — the coordinator e2e
-      lane (`TestCoordinatorModeInvokeAndMemberResultRouting` and
-      siblings) runs on the stub runtime, which the smoke tier covers.
-      Per `implement-issue.md` step 6, not waited on here. The run is
-      linked in the pull request for a reviewer to read.
+      daemon and no k3d, so the pack cannot run directly here. First
+      dispatched `e2e-smoke.yml` (run 38072406832) — the coordinator
+      tests (`TestCoordinatorModeInvokeAndMemberResultRouting` and
+      siblings) all logged "full tier only (E2E_TIER=full)" and were
+      SKIPPED under the smoke tier, correcting the assumption they used
+      the stub runtime and ran under smoke. That run also failed on two
+      unrelated, known-flaky lanes
+      (`TestConsolePlainConversationBulkCloseAndDelete`,
+      `TestReplicasThreeDeliversEveryConsoleThreadInParallel` — the
+      second has a documented flakiness history in `gotchas.md`). Not
+      this change's doing, since it touches no code — master's last
+      scheduled full run (38042912111, same day) passed both.
+      Dispatched `e2e-full.yml` (run 38074304800) to actually exercise
+      the coordinator lane. Per `implement-issue.md` step 6, not waited
+      on here. Both runs are linked in the pull request.
 - [x] 4.3 Resolve task 9b.5 from the same file: confirm whether the
       conditional screenshot/demo re-check is actually needed (expected
       no-op, since that change touched no console code) and tick it with
