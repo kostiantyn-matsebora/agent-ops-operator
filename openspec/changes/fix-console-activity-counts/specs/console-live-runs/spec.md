@@ -18,9 +18,9 @@ to its Pipeline's node.
 - **WHEN** a Coordinator has opened a root conversation and several caused member conversations, some with inflight work
 - **THEN** the Coordinator's node shows an active count matching how many of them have inflight work, and a recent count matching the total attributed to it
 
-#### Scenario: A Coordinator with no running conversations shows idle, not absent
+#### Scenario: A Coordinator with no running conversations looks like an idle pipeline
 - **WHEN** a Coordinator node has zero attributed conversations
-- **THEN** it shows the same idle state a Pipeline node with zero would show, rather than omitting the activity fact entirely
+- **THEN** it renders exactly as an idle Pipeline node does, with no activity fact and no badge, and never as a newly rendered zero
 
 ### Requirement: Conversations are filterable and paginated server-side
 The conversation list SHALL support filtering by phase, pipeline, profile,

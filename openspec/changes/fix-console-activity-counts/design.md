@@ -78,8 +78,8 @@ broken. The design keeps the existing gate as-is.
 An idle Coordinator then renders exactly like an idle Pipeline does today —
 no fact line.
 
-That is the spec's "idle, not absent": idle is the gate omitting a zero
-fact exactly as it already does for Pipelines, not a newly rendered zero.
+The spec's idle-Coordinator scenario says the same: idle is the gate
+omitting a zero fact exactly as it already does for Pipelines.
 
 **Render `Problem.since` with a relative-time string, with a tooltip
 holding the raw timestamp.** This follows the pattern already used
