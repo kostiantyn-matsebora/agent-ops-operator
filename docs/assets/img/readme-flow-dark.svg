@@ -80,10 +80,10 @@
 <path d="M446 558 H460" stroke="#a996f5" stroke-width="1.5" fill="none" marker-end="url(#ac)"/>
 <rect x="460" y="414" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
 <text x="474" y="434" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">log-analyzer</text>
-<text x="474" y="448" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">its own pod, its</text>
+<text x="474" y="448" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">own pod, own identity</text>
 <rect x="460" y="474" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
 <text x="474" y="494" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">remediator</text>
-<text x="474" y="508" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">own identity, each</text>
+<text x="474" y="508" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">own pod, own identity</text>
 <rect x="460" y="534" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
 <text x="474" y="554" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">…and more</text>
 <text x="474" y="568" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">as it decides</text>

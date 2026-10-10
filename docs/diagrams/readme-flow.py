@@ -63,15 +63,14 @@ COORD_CY = COORD_Y + COORD_H // 2  # 498 — also where the sources spine exits
 
 MEM_X, MEM_Y, MEM_W, MEM_H, MEM_GAP = 460, COORD_Y, 130, 48, 12
 MEMBERS = [
-    ("log-analyzer", "its own pod, its"),
-    ("remediator",   "own identity, each"),
+    ("log-analyzer", "own pod, own identity"),
+    ("remediator",   "own pod, own identity"),
     ("…and more",    "as it decides"),
 ]
 
 # The channel card from column 3 (548,268,196,88) — escalate's target, reached
-# from its BOTTOM edge, never through the Pipeline's own automatic arrow.
+# at its RIGHT edge, never through the Pipeline's own automatic arrow.
 CHANNEL_CX = 548 + 196 // 2   # 646
-CHANNEL_BOTTOM = 268 + 88     # 356
 
 
 def esc(s):

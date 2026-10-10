@@ -430,6 +430,10 @@
     var groupLists = group.lists;
     var storyCount = Math.min(groupLists.length, STORIES.length);
     if (!storyCount) return;
+    if (groupLists.length > STORIES.length && window.console) {
+      console.warn('presentation: ' + (groupLists.length - STORIES.length) +
+        ' extra .ao-presentation list(s) under one parent are not rendered');
+    }
 
     // The caption is each item's own text, and the stanza is whatever fenced
     // block the item carries. Reading them out before anything is built keeps
@@ -510,7 +514,7 @@
     wrap.setAttribute('aria-label', BASE_LABEL);
     wrap.tabIndex = 0;
 
-    var text = el('div', 'ao-pres-caption', stage);
+    var text = null;
 
     var storyIndex = 0;
     var parts = {};

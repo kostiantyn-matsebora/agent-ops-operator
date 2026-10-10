@@ -423,8 +423,8 @@ see [below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
 `serviceAccountName`, see [below](#execution-is-wiring-too)).
 
 A `Coordinator` (below) declares the same two fields for its OWN coordinating
-agent, inline on itself. A Pipeline is the only place either is declared for
-an ordinary, single-agent route.
+agent, inline on itself, and an `AgentCapability` declares them standalone.
+A Pipeline is where an ordinary, single-agent route declares them inline.
 
 **It is reached two ways and no others**:
 
