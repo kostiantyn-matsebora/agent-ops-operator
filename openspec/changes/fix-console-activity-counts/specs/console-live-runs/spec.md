@@ -66,3 +66,7 @@ instead, alongside each row's read state.
 #### Scenario: A scope's badge matches its list
 - **WHEN** three conversations are in phase `Working`, and one of the three is unread
 - **THEN** the Working scope's badge reads 3, and opening the Working scope lists all three
+
+#### Scenario: A row shows its last message
+- **WHEN** an agent answered a conversation last
+- **THEN** its row shows the agent as speaker and the answer's first line
