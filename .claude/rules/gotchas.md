@@ -1084,3 +1084,57 @@ only ASKS the old pod to terminate.
   registered only on a success path is a cleanup that does not run on the
   one path it matters most for.
 
+**FORCE-DELETING THE OLD POD IS NOT ENOUGH EITHER — THE NEW POD CAN LOSE
+THE RACE AGAINST ITS OWN DELETION, MEASURED AFTER ALL THREE FIXES ABOVE
+WERE ALREADY LIVE.**
+
+The Deployment's patch asks for the new pod before this function ever
+reaches the old ReplicaSet, so the new pod's FIRST scheduling attempt can
+still fail with the same anti-affinity error.
+
+- **The scheduler's own retry-after-failure did not reliably fire**, even
+  minutes after the pod that blocked it was gone. Measured live: one
+  `FailedScheduling` event, then silence for 4+ minutes.
+- **Fixed by force-deleting any still-PENDING pod of the CURRENT
+  ReplicaSet** right after clearing the old one. A freshly created pod
+  object gets an ordinary, un-backed-off scheduling attempt — a RETRY of
+  the failed one does not.
+- **THE FIRST VERSION OF THAT FIX KILLED A HEALTHY POD.** Deleting any
+  Pending pod of the current ReplicaSet also catches one from an ORDINARY
+  scale-up with no competing affinity rule at all — nothing for it to lose
+  a race against. Measured live: a brand-new, correctly-scheduling replica
+  force-deleted before the scheduler had even placed it once, reporting
+  `Completed` after the manager's own graceful-shutdown path ran.
+- **The fix is to scope the delete to whether an old-affinity ReplicaSet
+  was actually cleared in THIS call.** No clearing, no race to break, no
+  reason to touch a Pending pod at all.
+
+**TWO LANES SHARING ONE CLUSTER COMPETE FOR THE SAME ADMISSION CAP, AND
+ONE LANE'S IDLE BACKLOG STARVES THE NEXT — MEASURED ON
+`TestReplicasThreeDeliversEveryConsoleThreadInParallel`, INTERMITTENTLY,
+RIGHT AFTER `TestReplicasTwoDeliversEveryConsoleThread`.**
+
+A conversation stays Idle after its task finishes, still holding a slot
+under `maxActiveConversations` (5 by default) until its own idle TTL
+evicts it.
+
+- **The preceding lane's 8 conversations outlive the lane.** A lane
+  immediately after it can face up to 18 conversations competing for 5
+  pod slots, not 10.
+- **The tell is `"evicting idle worker to make room"`** logged against a
+  conversation that did nothing wrong but arrive behind a still-occupied
+  backlog.
+- **Bumping the waiting test's own timeout was tried first, and is the
+  wrong fix.** The delay is not bounded by anything the waiting lane
+  controls — it grows with how much of the PRECEDING lane's backlog is
+  still live, measured climbing from 180s to 318s across reruns with no
+  other change.
+- **Fixed by having each lane close its own conversations before
+  returning**, freeing their slots for whatever runs next.
+- **A fire-and-forget `/close` is not enough.** It only enqueues an input.
+  A lane that returns the moment it is sent hands the next lane the same
+  still-Idle backlog it meant to clear — measured live, one run passed and
+  the very next hit the same starvation because the reconciler had not
+  caught up yet. Wait for the conversation to actually reach phase
+  `Closed` before returning.
+

@@ -76,6 +76,58 @@ func TestReplicasTwoDeliversEveryConsoleThread(t *testing.T) {
 		}
 		return got >= n, nil
 	})
+
+	// This lane's own 8 conversations stay Idle, each still holding an
+	// ADMISSION SLOT under maxActiveConversations (5 by default) until
+	// their idle TTL evicts them on its own schedule. A LATER lane in the
+	// same process (TestReplicasThreeDeliversEveryConsoleThreadInParallel)
+	// creates 10 more immediately — measured live: one of its 10 sat
+	// behind "evicting idle worker to make room" for over five minutes,
+	// not because anything was stuck, but because up to 18 conversations
+	// were competing for 5 pod slots. Closing this lane's own backlog
+	// before returning is what a well-behaved caller of a capped resource
+	// does, and it is the fix — not a longer wait in the lane that merely
+	// inherited the contention.
+	closeConsoleConversationsMatching(t, ctx, e, SourceConsole, start)
+}
+
+// closeConsoleConversationsMatching sends "/close" through the console to
+// every conversation on the given source created after start, and WAITS for
+// each to actually reach phase Closed before returning. "/close" only
+// enqueues an input — a caller that returns the moment it is sent, without
+// confirming the phase transition, hands the NEXT test the same still-Idle
+// backlog it meant to clear: measured live, one run of this fix passed and
+// the next still hit "evicting idle worker to make room" because the
+// reconciler had not yet caught up when the next lane's conversations were
+// created a few hundred milliseconds later.
+func closeConsoleConversationsMatching(t *testing.T, ctx context.Context, e *Env, source string, start time.Time) {
+	t.Helper()
+	items, err := e.K.Conversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for i := range items {
+		c := &items[i]
+		if c.Spec.Signal == nil || c.Spec.Signal.SourceRef == nil ||
+			c.Spec.Signal.SourceRef.Name != source || !c.CreationTimestamp.Time.After(start) {
+			continue
+		}
+		e.ConsoleSend(t, c.Name, "/close")
+		names = append(names, c.Name)
+	}
+	waitFor(t, fmt.Sprintf("%d conversations to close", len(names)), 2*time.Minute, func() (bool, error) {
+		for _, name := range names {
+			var c agentopsv1alpha1.Conversation
+			if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: name}, &c); err != nil {
+				return false, err
+			}
+			if c.Status.Phase != agentopsv1alpha1.ConversationClosed {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 }
 
 // assertManagerRunsAtLeastNReadyReplicas is the precondition every lane in
@@ -189,12 +241,61 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 		client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
 		t.Fatal(err)
 	}
+	var current *appsv1.ReplicaSet
+	clearedAnAffinityRS := false
 	for i := range sets.Items {
-		zeroStaleReplicaSet(t, ctx, e, &sets.Items[i])
+		rs := &sets.Items[i]
+		if rs.Spec.Template.Spec.Affinity != nil {
+			zeroStaleReplicaSet(t, ctx, e, rs)
+			clearedAnAffinityRS = true
+			continue
+		}
+		current = rs // the Deployment's current one — leave ITS REPLICAS to the controller
 	}
 
+	// The new pods' FIRST scheduling attempt races the old pod's deletion
+	// above — the Deployment's patch already asked for them before this
+	// function ever reaches the old ReplicaSet. One that lost that race
+	// fails with the same anti-affinity error and then sits in the
+	// scheduler's OWN backoff queue, which does not reliably wake up on
+	// the old pod's deletion despite that being exactly what would let it
+	// succeed next try — measured live: a FailedScheduling event, and no
+	// second attempt for 4+ minutes after the pod that blocked it was long
+	// gone. Deleting a PENDING pod (never one already Running) forces the
+	// ReplicaSet to create a FRESH pod object, which gets an ordinary,
+	// un-backed-off scheduling attempt instead of a retry of the failed one.
+	//
+	// ONLY WHEN AN OLD-AFFINITY ReplicaSet WAS ACTUALLY CLEARED ABOVE. A
+	// later call that only changes the replica COUNT (no affinity left to
+	// clear) creates a pod with no competing anti-affinity rule at all —
+	// nothing for it to lose a race against. Deleting that pod anyway was
+	// measured live to kill a brand-new, correctly-scheduling replica
+	// before the scheduler had even placed it once, reporting Completed
+	// after the manager's own graceful-shutdown path ran — not stuck, just
+	// unlucky to be Pending at the instant this function looked.
+	if current != nil && clearedAnAffinityRS {
+		var pending corev1.PodList
+		if err := e.K.List(ctx, &pending, client.InNamespace(Namespace),
+			client.MatchingLabels{"pod-template-hash": current.Labels["pod-template-hash"]}); err != nil {
+			t.Fatal(err)
+		}
+		for j := range pending.Items {
+			if pending.Items[j].Status.Phase != corev1.PodPending {
+				continue
+			}
+			if err := e.K.Delete(ctx, &pending.Items[j], client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// 5m was still too tight on a FRESH cluster: measured live, both new
+	// pods eventually reached Running/Ready (confirmed in the failed run's
+	// own diagnostics snapshot), just a little past the 5-minute mark —
+	// cold image import plus container start on a brand-new node, not the
+	// scheduling deadlock above. 8m is the margin, not the expectation.
 	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace,
-		"rollout", "status", "deployment/agentops-manager", "--timeout=5m"); err != nil {
+		"rollout", "status", "deployment/agentops-manager", "--timeout=8m"); err != nil {
 		t.Fatalf("manager rollout to %d replicas: %v\n%s", n, err, out)
 	}
 }
@@ -282,6 +383,13 @@ func TestReplicasThreeDeliversEveryConsoleThreadInParallel(t *testing.T) {
 		}
 	}
 
+	// The straggler here was never a claim or delivery bug: with
+	// TestReplicasTwoDeliversEveryConsoleThread now closing its own 8
+	// conversations before returning, this lane's 10 no longer compete for
+	// maxActiveConversations (5 by default) against a preceding lane's
+	// still-idle backlog — measured live, "evicting idle worker to make
+	// room" for a conversation that had done nothing wrong but arrive
+	// behind 8 occupied slots. 3m is back to a real margin, not a guess.
 	waitFor(t, fmt.Sprintf("all %d conversations to get a console thread AND a delivered reply", n),
 		3*time.Minute, func() (bool, error) {
 			items, err := e.K.Conversations(ctx)
@@ -290,6 +398,10 @@ func TestReplicasThreeDeliversEveryConsoleThreadInParallel(t *testing.T) {
 			}
 			return countDeliveredConsoleConversations(items, start) >= n, nil
 		})
+
+	// Same hygiene as the "Two" lane — leave no idle backlog for whatever
+	// runs after this one in the same process.
+	closeConsoleConversationsMatching(t, ctx, e, SourceConsole, start)
 }
 
 // countDeliveredConsoleConversations counts console-started conversations
