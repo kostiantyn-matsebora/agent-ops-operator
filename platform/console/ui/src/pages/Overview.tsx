@@ -361,7 +361,7 @@ function TelemetryCard({ stream }: { stream: Overview['stream'] }) {
  * displaying — a Display filter can simplify a graph but must never remove a
  * failure from this list.
  */
-export function ProblemsCard({ problems }: { problems: Problem[] }) {
+export function ProblemsCard({ problems }: Readonly<{ problems: Problem[] }>) {
   return (
     <Card>
       <CardTitle>Problems ({problems.length})</CardTitle>

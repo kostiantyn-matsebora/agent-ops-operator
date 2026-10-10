@@ -149,13 +149,13 @@ git checkout -b change/<name> origin/master     # or check out the existing bran
 |---|---|
 | the local cluster, `helmfile sync`, any deploy | the cluster is on that machine |
 | the visual check (`visual-check.md`) | it screenshots a live install |
-| the e2e pack run by hand | needs docker, k3d and the cluster |
+| the system pack run by hand | needs docker, k3d and the cluster |
 
 - **A remote session RECORDS such a step as not performed**, never as done.
 - **The pull request's description names what was not run here**, so a reviewer
   sees the gap rather than inferring it.
 - **The cluster tier is DISPATCHED, not carried**: `gh workflow run
-  e2e-smoke.yml --ref change/<name>`, then read the run's conclusion.
+  system-smoke.yml --ref change/<name>`, then read the run's conclusion.
 
 ### VARIABLES ARE PUBLIC. A SECRET IS AN API CREDENTIAL
 

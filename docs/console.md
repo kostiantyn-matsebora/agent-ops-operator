@@ -684,8 +684,8 @@ Every scope in the inbox carries a count matching what opening it lists.
 
 | Scope | Counts |
 |---|---|
-| Working, Mine, Errored | every conversation its own filter admits — phase, ownership or error state — read or unread |
-| Unread, Closed, each Pipeline or Coordinator | unread rows only |
+| Working, Mine, Errored, Closed, each Pipeline or Coordinator | every conversation its own filter admits — phase, ownership, error state or wiring — read or unread |
+| Unread | unread rows only, since unread IS that scope |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
