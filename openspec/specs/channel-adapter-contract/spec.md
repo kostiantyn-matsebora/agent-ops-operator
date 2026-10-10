@@ -24,13 +24,13 @@ Every operation SHALL carry a stable id, the channel and conversation names, a k
 | `send` | a typed message (`signal`, `answer`, `relay`, or `notice`) with markdown-valued free text and typed structured fields, plus the target thread id |
 | `ensure-topic` | a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`), never a rendered title string — `pipeline` is inferred and MAY be empty |
 | `close-topic` | the target thread id, asking the adapter to archive or close that thread on its transport |
-| `delete-conversation` | the target thread id and the notice, reporting that the conversation ended for good, as the base capability defines |
+| `delete-conversation` | the target thread id and the notice, reporting that the conversation ended for good, as the requirement "A delete-conversation operation reports that a conversation ended for good" defines |
 
 Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility. The manager SHALL emit no transport markup and declare no maximum message size.
 
 Operations SHALL be derived from CR state or router actions, such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped. Delivery is at-least-once, and adapters MUST tolerate duplicates by id.
 
-A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the deleting conversation's finalizer guarantees.
+A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the Conversation surviving its close guarantees.
 
 #### Scenario: Adapter receives a topic-creation op
 - **WHEN** a Conversation referencing a Channel with `adapter: slack` is reconciled with no `threadId` and an adapter is long-polling `/channel/ops?adapter=slack`
@@ -95,9 +95,9 @@ A failed `delete-conversation` is logged and not regenerated. No object remains 
 - **WHEN** an adapter completes a `close-topic` op with an error
 - **THEN** the thread stays absent from `status.threadsArchived[]` and the next reconciliation re-enqueues the op
 
-#### Scenario: Failed close-topic does not block deletion
+#### Scenario: Failed close-topic is logged without a condition
 - **WHEN** an adapter completes a `close-topic` op with an error
-- **THEN** the failure is logged, no Conversation condition is written, deletion is not blocked, and the next reconciliation re-derives the op while the object exists
+- **THEN** the failure is logged, no Conversation condition is written, and the next reconciliation re-derives the op while the object exists
 
 #### Scenario: Failed delete-conversation is not regenerated
 - **WHEN** an adapter completes a `delete-conversation` op with an error
