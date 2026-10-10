@@ -188,9 +188,10 @@
 ## 6. E2E tests
 
 - [x] 6.1 Not applicable. Nothing in this change is decided by a
-      cluster beyond the coordinator-deployment-mode verification already
-      covered in section 4, which belongs to that change's own e2e task
-      (8.1) and is run, not re-specified, here.
+      cluster beyond the coordinator-deployment-mode verification tracked
+      in section 4 (4.2 is still open, its verdict pending), which belongs
+      to that change's own e2e task (8.1) and is run, not re-specified,
+      here.
 
 ## 7. Documentation
 

@@ -613,7 +613,9 @@
     // preference asks. There is no path back to the still: pausing afterwards
     // leaves the ordinary paused figure, exactly as it would for any other
     // reader who has already said what they want.
+    var engaged = false;
     function engage() {
+      engaged = true;
       stillNow = false;
       wrap.classList.remove('is-still');
       wrap.setAttribute('aria-label', BASE_LABEL);
@@ -648,7 +650,7 @@
       timer = null;
       fit();
 
-      if (reduced) {
+      if (reduced && !engaged) {
         goTo(beats.length - 1);
         Object.keys(parts).forEach(function (id) { parts[id].classList.add('is-on'); });
         pause();

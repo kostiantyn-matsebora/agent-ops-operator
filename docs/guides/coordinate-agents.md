@@ -66,8 +66,8 @@ named list of agents it may invoke:
 3. **`agents[]`** — the WHOLE outbound reach. Each entry names `capabilityRef`
    (an ordinary member) or `coordinatorRef` (nesting), plus a `description`
    stating what that agent IS, what it CAN do, what it CANNOT, and what to
-   HAND it — the coordinating agent's tools are the `agents[]` list itself,
-   and this is the only thing it reads to match a task to one of them.
+   HAND it. The coordinating agent reads these descriptions to choose which
+   entry to `invoke`, and they are the only thing it reads to do so.
 4. **`limits`** — `maxAgents`, `maxTurns`, `deadline`, enforced on THIS
    conversation alone.
 5. **`channelRefs`** — bound to the root conversation at creation, exactly
