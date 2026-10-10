@@ -189,40 +189,44 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 		client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
 		t.Fatal(err)
 	}
-	zero := int32(0)
 	for i := range sets.Items {
-		rs := &sets.Items[i]
-		if rs.Spec.Template.Spec.Affinity == nil {
-			continue // the Deployment's current one — leave it to the controller
-		}
-		rsPatch := client.MergeFrom(rs.DeepCopy())
-		rs.Spec.Replicas = &zero
-		if err := e.K.Patch(ctx, rs, rsPatch); err != nil && !apierrors.IsNotFound(err) {
-			t.Fatal(err)
-		}
-		// Scaling the ReplicaSet to zero only asks its pod(s) to terminate —
-		// a graceful SIGTERM, up to the pod's own terminationGracePeriod
-		// (30s default). Each one still carries the OLD anti-affinity rule
-		// until it is actually GONE, so the new pods stay unschedulable for
-		// that whole window — measured live as "didn't satisfy existing
-		// pods anti-affinity rules," still failing minutes in. A test fixture
-		// has no reason to wait out a graceful shutdown for a pod on its way
-		// out regardless, so delete it outright instead.
-		var pods corev1.PodList
-		if err := e.K.List(ctx, &pods, client.InNamespace(Namespace),
-			client.MatchingLabels{"pod-template-hash": rs.Labels["pod-template-hash"]}); err != nil {
-			t.Fatal(err)
-		}
-		for j := range pods.Items {
-			if err := e.K.Delete(ctx, &pods.Items[j], client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
-				t.Fatal(err)
-			}
-		}
+		zeroStaleReplicaSet(t, ctx, e, &sets.Items[i])
 	}
 
 	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace,
 		"rollout", "status", "deployment/agentops-manager", "--timeout=5m"); err != nil {
 		t.Fatalf("manager rollout to %d replicas: %v\n%s", n, err, out)
+	}
+}
+
+// zeroStaleReplicaSet scales rs to zero and force-deletes its pods when its
+// template still carries the old anti-affinity. See forceManagerRollout.
+func zeroStaleReplicaSet(t *testing.T, ctx context.Context, e *Env, rs *appsv1.ReplicaSet) {
+	t.Helper()
+	if rs.Spec.Template.Spec.Affinity == nil {
+		return // the Deployment's current one — leave it to the controller
+	}
+	zero := int32(0)
+	rsPatch := client.MergeFrom(rs.DeepCopy())
+	rs.Spec.Replicas = &zero
+	if err := e.K.Patch(ctx, rs, rsPatch); err != nil && !apierrors.IsNotFound(err) {
+		t.Fatal(err)
+	}
+	// Scaling the ReplicaSet to zero only asks its pod(s) to terminate —
+	// a graceful SIGTERM, up to the pod's own terminationGracePeriod
+	// (30s default). Each one still carries the OLD anti-affinity rule
+	// until it is actually GONE, so the new pods stay unschedulable for
+	// that whole window. A test fixture has no reason to wait out a
+	// graceful shutdown, so delete the pods outright instead.
+	var pods corev1.PodList
+	if err := e.K.List(ctx, &pods, client.InNamespace(Namespace),
+		client.MatchingLabels{"pod-template-hash": rs.Labels["pod-template-hash"]}); err != nil {
+		t.Fatal(err)
+	}
+	for j := range pods.Items {
+		if err := e.K.Delete(ctx, &pods.Items[j], client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
 	}
 }
 
