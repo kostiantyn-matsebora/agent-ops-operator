@@ -175,3 +175,43 @@ func TestWorkResultFallsBackToTheRuntimeWhenNoImageResolves(t *testing.T) {
 		t.Fatalf("an unresolvable runtime names the runtime, never an invented image: %+v", models)
 	}
 }
+
+// A run that was still in flight when /close landed reports its completion
+// here — the report must be recorded (it is still a real answer) but phase
+// must stay Closed: Closed is sticky until an explicit reopen. Measured live
+// on the chart-v14.0.0 release smoke (TestConsoleLifecycle/close_then_delete):
+// handleWorkDone's own phase write folded into the same unconditioned patch
+// as the rest of the report, so it silently reverted phase to Idle while
+// ClosedAt stayed stamped.
+func TestWorkDoneNeverReopensAClosedConversation(t *testing.T) {
+	s, _ := workReportServer(t)
+	conv := &agentopsv1alpha1.Conversation{}
+	if err := s.Client.Get(t.Context(), types.NamespacedName{Namespace: "agent-ops", Name: "conv-a"}, conv); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	conv.Status.ClosedAt = &now
+	if err := s.Client.Status().Update(t.Context(), conv); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := postWorkDone(t, s, map[string]any{"convo": "conv-a", "runId": "r1", "status": "succeeded", "result": "done"})
+	if rec.Code != 200 {
+		t.Fatalf("a belated report for a closed conversation is still accepted: %d %s", rec.Code, rec.Body.String())
+	}
+
+	got := &agentopsv1alpha1.Conversation{}
+	if err := s.Client.Get(t.Context(), types.NamespacedName{Namespace: "agent-ops", Name: "conv-a"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatalf("a belated work report must not reopen a closed conversation, got phase %q", got.Status.Phase)
+	}
+	if got.Status.ClosedAt == nil {
+		t.Fatalf("closedAt must survive the report")
+	}
+	if len(got.Status.Runs) != 1 || got.Status.Runs[0].Result != "done" {
+		t.Fatalf("the run's result is still worth recording even after close: %+v", got.Status.Runs)
+	}
+}
