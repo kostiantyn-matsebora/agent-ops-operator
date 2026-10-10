@@ -1,11 +1,11 @@
-<title>Pipeline vs Orchestrator</title>
+<title>Pipeline vs Coordinator</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700&family=Red+Hat+Text:wght@400;500;700&family=Red+Hat+Mono:wght@400&display=swap">
 <style>
 /*
   Layout: the site's own `.ao-pres` component (CSS from agentops.css,
   behaviour from presentation.js), redrawn with two upgrades:
 
-  1. Orchestrator is a different SHAPE of drawing than Pipeline -- a hub
+  1. Coordinator is a different SHAPE of drawing than Pipeline -- a hub
      with a trunk splitting into a branch per member, escalate as its own
      path off the root -- not the same chain relabelled.
   2. Every node is now drawn in the shape its KIND actually gets in the
@@ -119,12 +119,12 @@ p.lede{color:var(--ao-text-subtle); font-size:0.92rem; margin:0 0 20px; max-widt
 </style>
 
 <div class="page">
-  <h1>Pipeline vs Orchestrator</h1>
+  <h1>Pipeline vs Coordinator</h1>
   <p class="lede">Same install, different shape. A Pipeline is a chain: source to agent to channel. A Coordinator is a hub: one agent that decides, branching out to whichever members the moment calls for.</p>
 
   <div class="card">
     <div class="ao-tablist" role="tablist" aria-label="Wiring story">
-      <button class="ao-tab is-current" role="tab" id="tab-coordinator" aria-selected="true">Orchestrator</button>
+      <button class="ao-tab is-current" role="tab" id="tab-coordinator" aria-selected="true">Coordinator</button>
       <button class="ao-tab" role="tab" id="tab-pipeline" aria-selected="false">Pipeline</button>
     </div>
     <div class="ao-pres-viewport" id="viewport">
@@ -274,10 +274,10 @@ p.lede{color:var(--ao-text-subtle); font-size:0.92rem; margin:0 0 20px; max-widt
     ],
   };
 
-  // ---- Orchestrator: a hub, a trunk, a branch per member. Escalate is its
+  // ---- Coordinator: a hub, a trunk, a branch per member. Escalate is its
   // own path straight off the root, separate from the member branches. ----
   var COORDINATOR = {
-    tabLabel: 'Orchestrator',
+    tabLabel: 'Coordinator',
     frame: { left: 212, top: -16, width: 456, height: 261, label: 'your cluster · one Helm install' },
     nodes: [
       { id: 'n0', kind: 'SignalSource', name: 'cluster-events', icon: 'source', rect: { left: 0, top: 8, width: 164, height: 56 } },
