@@ -1,0 +1,502 @@
+<title>Pipeline vs Orchestrator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700&family=Red+Hat+Text:wght@400;500;700&family=Red+Hat+Mono:wght@400&display=swap">
+<style>
+/*
+  Layout: the site's own `.ao-pres` component (CSS from agentops.css,
+  behaviour from presentation.js), redrawn with two upgrades:
+
+  1. Orchestrator is a different SHAPE of drawing than Pipeline -- a hub
+     with a trunk splitting into a branch per member, escalate as its own
+     path off the root -- not the same chain relabelled.
+  2. Every node is now drawn in the shape its KIND actually gets in the
+     console's own topology (graph/shapes.tsx SHAPES + GLYPHS), not a
+     uniform dashed rectangle with a small icon in the corner: a trigger
+     is a hexagon, a channel a cylinder, an identity a circle, a server
+     pairing a double-notched diamond, a transcript a dog-eared note --
+     and the one node with no console shape of its own, the Coordinator
+     hub, is drawn as a diamond deliberately: the universal flowchart mark
+     for a decision, which is exactly its job.
+*/
+:root{
+  --ao-brand:#0d7d76; --ao-brand-strong:#0a615c; --ao-brand-soft:#d3ece9;
+  --ao-accent:#6b4bd6; --ao-accent-soft:#e9e3fb;
+  --ao-success:#1f7a4d; --ao-warning:#a86400; --ao-danger:#b32c3f;
+  --ao-surface:#ffffff; --ao-surface-alt:#f3f5f6; --ao-canvas:#eef1f2;
+  --ao-border:#cfd6da; --ao-border-strong:#9aa4ab;
+  --ao-text:#16191c; --ao-text-subtle:#5c656d;
+  --ao-edge-idle:#b6c0c6; --ao-code-bg:#f6f8f8;
+  --ao-radius:6px;
+  --ao-font-display:'Red Hat Display','Red Hat Text',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --ao-font-text:'Red Hat Text',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --ao-font-mono:'Red Hat Mono',ui-monospace,'SFMono-Regular','Cascadia Mono',Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ao-brand:#43c9bd; --ao-brand-strong:#7fded5; --ao-brand-soft:#123b39;
+    --ao-accent:#a996f5; --ao-accent-soft:#2a2350;
+    --ao-success:#55c98a; --ao-warning:#e0a63c; --ao-danger:#f2708a;
+    --ao-surface:#1b1f22; --ao-surface-alt:#23282c; --ao-canvas:#14171a;
+    --ao-border:#3a4247; --ao-border-strong:#5c666d;
+    --ao-text:#e8ecee; --ao-text-subtle:#a5b0b7;
+    --ao-edge-idle:#4a545b; --ao-code-bg:#14181b;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ao-brand:#43c9bd; --ao-brand-strong:#7fded5; --ao-brand-soft:#123b39;
+  --ao-accent:#a996f5; --ao-accent-soft:#2a2350;
+  --ao-success:#55c98a; --ao-warning:#e0a63c; --ao-danger:#f2708a;
+  --ao-surface:#1b1f22; --ao-surface-alt:#23282c; --ao-canvas:#14171a;
+  --ao-border:#3a4247; --ao-border-strong:#5c666d;
+  --ao-text:#e8ecee; --ao-text-subtle:#a5b0b7;
+  --ao-edge-idle:#4a545b; --ao-code-bg:#14181b;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--ao-canvas); color:var(--ao-text); font-family:var(--ao-font-text); line-height:1.5; padding:28px 16px 48px}
+.page{max-width:928px; margin:0 auto}
+h1{font-family:var(--ao-font-display); font-size:1.3rem; margin:0 0 4px; letter-spacing:-0.01em}
+p.lede{color:var(--ao-text-subtle); font-size:0.92rem; margin:0 0 20px; max-width:38rem}
+.card{background:var(--ao-surface); border:1px solid var(--ao-border); border-radius:10px; padding:1.1rem 1.25rem 1.3rem; box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+
+.ao-tablist{display:flex; gap:0.25rem; border-bottom:1px solid var(--ao-border); overflow-x:auto; scrollbar-width:none; margin-bottom:0}
+.ao-tablist::-webkit-scrollbar{display:none}
+.ao-tab{white-space:nowrap; padding:0.35rem 0.85rem; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; background:none; color:var(--ao-text-subtle); font-family:var(--ao-font-text); font-size:0.85rem; cursor:pointer}
+.ao-tab:hover{color:var(--ao-text)}
+.ao-tab.is-current{border-bottom-color:var(--ao-brand); color:var(--ao-brand-strong); font-weight:500}
+.ao-tab:focus-visible{outline:2px solid var(--ao-brand); outline-offset:2px}
+
+.ao-pres{display:flex; flex-direction:column; gap:0.55rem; margin-top:1rem; cursor:pointer; border-radius:var(--ao-radius)}
+.ao-pres:focus-visible{outline:2px solid var(--ao-brand); outline-offset:4px}
+.ao-pres-viewport{overflow:hidden}
+.ao-pres-stage{position:relative; width:878px; height:245px; transform-origin:top left}
+.ao-pres-wire{position:absolute; inset:0; width:660px; height:245px; overflow:visible}
+.ao-pres-wire path.ao-pres-track{fill:none; stroke:var(--ao-border); stroke-width:1; stroke-dasharray:3 3; opacity:0.55}
+.ao-pres-wire path.ao-pres-draw{fill:none; stroke:var(--ao-edge-idle); stroke-width:1.5; stroke-dasharray:var(--ao-pres-len) var(--ao-pres-len); stroke-dashoffset:var(--ao-pres-len); transition:stroke-dashoffset .5s ease, stroke .3s ease}
+.ao-pres-wire path.ao-pres-draw.is-on{stroke-dashoffset:0}
+.ao-pres-wire path.ao-pres-draw.is-lit{stroke:var(--ao-brand); stroke-width:2}
+
+/* A shaped node: an absolutely-positioned SVG outline (the console's own
+   per-kind silhouette, stretched non-uniformly to the slot and kept at a
+   constant stroke weight with vector-effect) sitting BEHIND a centred text
+   layer, instead of one dashed rectangle for every kind. */
+.ao-pres-node{position:absolute; opacity:0.3; transition:opacity .35s ease, left .4s ease, top .4s ease, width .4s ease, height .4s ease}
+.ao-pres-node.is-on{opacity:1}
+.ao-pres-shape{position:absolute; inset:0; width:100%; height:100%; overflow:visible}
+.ao-pres-shape path{fill:transparent; stroke:var(--ao-border); stroke-width:1.4; stroke-dasharray:3.5 3; vector-effect:non-scaling-stroke; transition:stroke .25s ease, fill .25s ease, stroke-dasharray .25s ease}
+.ao-pres-node.is-on .ao-pres-shape path{fill:var(--ao-surface-alt); stroke-dasharray:none}
+.ao-pres-node.is-lit .ao-pres-shape path{stroke:var(--ao-brand); fill:var(--ao-surface)}
+.ao-pres-content{position:relative; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.08rem; padding:0 16%; text-align:center}
+.ao-pres-head{display:flex; align-items:center; justify-content:center; gap:0.26rem}
+.ao-pres-glyph{display:inline-block; width:12px; height:12px; flex:0 0 auto; overflow:visible; color:var(--ao-text-subtle); transition:color .25s ease; vertical-align:middle}
+.ao-pres-glyph path{fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke}
+.ao-pres-node.is-lit .ao-pres-glyph{color:var(--ao-brand)}
+.ao-pres-conv .ao-pres-glyph{color:var(--ao-text-subtle)}
+.ao-pres-conv.is-on .ao-pres-glyph{color:var(--ao-brand-strong)}
+.ao-pres-kind{display:block; color:var(--ao-text-subtle); font-family:var(--ao-font-mono); font-size:0.55rem; letter-spacing:0.07em; text-transform:uppercase}
+.ao-pres-name{display:block; font-family:var(--ao-font-display); font-size:0.84rem; font-weight:700; line-height:1.18}
+
+.ao-pres-reach{position:absolute; display:flex; flex-wrap:wrap; gap:0.28rem; opacity:0.28; transition:opacity .35s ease, left .4s ease, top .4s ease, width .4s ease}
+.ao-pres-reach.is-on{opacity:1}
+.ao-pres-chip{padding:0.1rem 0.42rem; background:var(--ao-surface); border:1px solid var(--ao-border); border-radius:999px; color:var(--ao-text-subtle); font-size:0.72rem; white-space:nowrap}
+.ao-pres-chip.is-granted{border-color:var(--ao-brand); color:var(--ao-brand-strong)}
+.ao-pres-chip.is-denied{opacity:0.6; text-decoration:line-through}
+.ao-pres-frame{position:absolute; border:1px dashed var(--ao-border-strong); border-radius:10px; opacity:0; transition:opacity .45s ease, left .4s ease, top .4s ease, width .4s ease, height .4s ease; pointer-events:none}
+.ao-pres-frame.is-on{opacity:1}
+.ao-pres-frame>span{position:absolute; top:-0.6rem; left:0.8rem; padding:0 0.4rem; background:var(--ao-surface); color:var(--ao-text-subtle); font-family:var(--ao-font-mono); font-size:0.6rem; letter-spacing:0.08em; text-transform:uppercase}
+
+.ao-pres-conv{position:absolute}
+.ao-pres-conv .ao-pres-content{padding:0 14%}
+.ao-pres-conv i{display:block; width:55%; height:4px; margin-top:0.2rem; background:var(--ao-border); border-radius:3px}
+.ao-pres-conv i:first-of-type{width:72%}
+.ao-pres-dot{display:inline-block; width:6px; height:6px; margin-right:0.1rem; background:var(--ao-success); border-radius:50%}
+.ao-pres-caption{position:absolute; left:688px; width:190px; font-family:var(--ao-font-display); font-size:0.82rem; font-weight:700; line-height:1.35; color:var(--ao-text); transition:top .35s ease}
+.ao-pres.is-paused .ao-pres-caption::after{content:' · paused'; color:var(--ao-text-subtle); font-family:var(--ao-font-mono); font-size:0.68rem; font-weight:400; letter-spacing:0.06em; text-transform:uppercase}
+.ao-pres.is-still .ao-pres-caption::after{content:' · press to play'; color:var(--ao-text-subtle); font-family:var(--ao-font-mono); font-size:0.68rem; font-weight:400; letter-spacing:0.06em; text-transform:uppercase}
+
+.note{font-size:0.8rem; color:var(--ao-text-subtle); margin-top:1rem; padding-top:0.9rem; border-top:1px dashed var(--ao-border)}
+@media (max-width:480px){ body{padding:20px 14px 36px} h1{font-size:1.15rem} }
+</style>
+
+<div class="page">
+  <h1>Pipeline vs Orchestrator</h1>
+  <p class="lede">Same install, different shape. A Pipeline is a chain: source to agent to channel. A Coordinator is a hub: one agent that decides, branching out to whichever members the moment calls for.</p>
+
+  <div class="card">
+    <div class="ao-tablist" role="tablist" aria-label="Wiring story">
+      <button class="ao-tab is-current" role="tab" id="tab-coordinator" aria-selected="true">Orchestrator</button>
+      <button class="ao-tab" role="tab" id="tab-pipeline" aria-selected="false">Pipeline</button>
+    </div>
+    <div class="ao-pres-viewport" id="viewport">
+      <div class="ao-pres-stage" id="stage"></div>
+    </div>
+  </div>
+
+  <p class="note" id="note">Each kind draws the shape it gets in the console's own topology (hexagon trigger, cylinder channel, circle identity, diamond decision) &mdash; not a label in a uniform box. Conversation names follow the upcoming word-chain scheme (<code>kind-word-word</code>, numeric suffix on collision), not a random hash.</p>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var DRAW_H = 245, PAD_TOP = 28, PAD_BOTTOM = 4, PAD_RIGHT = 2;
+  var CAP_LANE = 190, CAP_GUTTER = 20;
+  var DRAW_W = 668 + CAP_GUTTER + CAP_LANE;
+  var STAGE_W = DRAW_W + PAD_RIGHT, STAGE_H = PAD_TOP + DRAW_H + PAD_BOTTOM;
+  var HOLD = 2600;
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  // Outline + glyph, lifted from console/ui/src/graph/shapes.tsx (SHAPES /
+  // GLYPHS). viewBox per shape is its own natural bounding box, so a
+  // non-uniform stretch to each slot's width/height is the only scaling
+  // applied -- no shape is hand-refit per node.
+  var SHAPES = {
+    hexagon:  { d: 'M-18 0 L-9 -15 L9 -15 L18 0 L9 15 L-9 15 Z', vb: '-18 -15 36 30' },
+    rect:     { d: 'M-22 -13 h44 a3 3 0 0 1 3 3 v20 a3 3 0 0 1 -3 3 h-44 a3 3 0 0 1 -3 -3 v-20 a3 3 0 0 1 3 -3 z', vb: '-22 -13 44 26' },
+    circle:   { d: 'M-15 0 a15 15 0 1 0 30 0 a15 15 0 1 0 -30 0', vb: '-15 -15 30 30' },
+    diamond:  { d: 'M0 -17 L17 0 L0 17 L-17 0 Z', vb: '-17 -17 34 34' },
+    diamond2: { d: 'M0 -17 L17 0 L0 17 L-17 0 Z M-17 0 h-4 M17 0 h4', vb: '-21 -17 42 34' },
+    cylinder: { d: 'M-16 -10 a16 5 0 0 0 32 0 a16 5 0 0 0 -32 0 v20 a16 5 0 0 0 32 0 v-20', vb: '-16 -15 32 30' },
+    note:     { d: 'M-13 -15 h18 l8 8 v22 h-26 z M5 -15 v8 h8', vb: '-13 -15 26 30' },
+  };
+  var GLYPHS = {
+    source: 'M2 -7 L-4 1 h4 l-1 6 6 -8 h-4 z',
+    pipeline: 'M-8 -4 h5 a3 3 0 0 1 3 3 v2 a3 3 0 0 0 3 3 h5 M6 2 l2 2 -2 2',
+    coordinator: 'M-7 0 h4 M-3 0 l5 -6 M-3 0 l5 0 M-3 0 l5 6',
+    profile: 'M0 -6 a3 3 0 1 1 0 6 a3 3 0 0 1 0 -6 M-6 7 a6 6 0 0 1 12 0 z',
+    agentCapability: 'M-3 -7 a2 2 0 1 0 0.01 0 M-3 -5 v9 M-3 2 h3 M-3 5 h2',
+    toolset: 'M5 -5 a3 3 0 0 1 -4 4 l-5 5 -1 -1 5 -5 a3 3 0 0 1 4 -4 z',
+    mcpconfig: 'M-6 -5 h12 v4 h-12 z M-6 1 h12 v4 h-12 z',
+    channel: 'M-6 -3 h12 v8 h-6 l-3 3 v-3 h-3 z',
+    conversation: 'M-5 -2 h10 M-5 2 h6',
+  };
+  // Which outline each kind draws. Source/channel/profile/toolset/mcpconfig/
+  // conversation match NODE_STYLES in shapes.tsx exactly. The Coordinator hub
+  // is deliberately a DIAMOND rather than shapes.tsx's `rect` -- this
+  // drawing distinguishes Pipeline from Coordinator by silhouette, which the
+  // topology view (glyph-only) doesn't need to. AgentCapability keeps
+  // `circle`, same family as AgentProfile: both are an identity, not a
+  // decision.
+  var KIND_SHAPE = {
+    source: 'hexagon', pipeline: 'rect', coordinator: 'diamond',
+    profile: 'circle', agentCapability: 'circle',
+    toolset: 'diamond', mcpconfig: 'diamond2', channel: 'cylinder', conversation: 'note',
+  };
+  function el(tag, cls, parent){ var n = document.createElement(tag); if (cls) n.className = cls; if (parent) parent.appendChild(n); return n; }
+  function svgEl(tag, parent){ var n = document.createElementNS(SVG_NS, tag); if (parent) parent.appendChild(n); return n; }
+  function pos(node, r){ node.style.left = r.left + 'px'; node.style.top = r.top + 'px'; node.style.width = r.width + 'px'; node.style.height = r.height + 'px'; }
+
+  // "meet" (uniform scale, centered) was tried here and measured broken:
+  // shrinking the shape to its true proportions left text up to 3x wider
+  // than the shape it sits in (checked programmatically, not eyeballed --
+  // e.g. a 48px-wide shape under 151px of text). "none" (fill exactly)
+  // is what's actually been verified clean, repeatedly: the shape IS the
+  // box, so text sized for the box always fits inside it. The shapes read
+  // as compact/wide rather than textbook-proportioned, and that is the
+  // deliberate tradeoff -- it is the one that doesn't break.
+  function shapeLayer(parent, kind){
+    var shape = SHAPES[KIND_SHAPE[kind]];
+    var wrap = el('div', 'ao-pres-shape', parent);
+    var s = svgEl('svg', wrap);
+    s.setAttribute('viewBox', shape.vb);
+    s.setAttribute('preserveAspectRatio', 'none');
+    s.setAttribute('width', '100%');
+    s.setAttribute('height', '100%');
+    s.setAttribute('aria-hidden', 'true');
+    var p = svgEl('path', s);
+    p.setAttribute('d', shape.d);
+  }
+  // The small inline mark beside each KIND label is the glyph ALONE, no
+  // outline -- the node's own shape (drawn by shapeLayer) is the outline
+  // now, so repeating it at 12px would just be a second, illegible copy.
+  //
+  // PLAIN INLINE SVG, not a CSS mask-image. A mask driven by a custom
+  // property (`mask: var(--x)`) has shipped broken in real browser
+  // versions -- silently, no console error, just a missing icon -- and
+  // that is exactly the kind of failure that would look fine here and
+  // wrong on a viewer I can't open myself. An inline <path> has no such
+  // failure mode: if the SVG is in the DOM, it paints.
+  function glyphSpan(parent, kind){
+    var g = el('span', 'ao-pres-glyph', parent);
+    var s = svgEl('svg', g);
+    s.setAttribute('viewBox', '-10 -10 20 20');
+    s.setAttribute('width', '100%');
+    s.setAttribute('height', '100%');
+    s.setAttribute('aria-hidden', 'true');
+    var p = svgEl('path', s);
+    p.setAttribute('d', GLYPHS[kind]);
+    return g;
+  }
+
+  // ---- Pipeline: the real site's own geometry, heights made explicit so a
+  // shape layer has something to stretch into (was implicit/auto before). ----
+  var PIPELINE = {
+    tabLabel: 'Pipeline',
+    frame: { left: 212, top: -16, width: 456, height: 261, label: 'your cluster · one Helm install' },
+    nodes: [
+      { id: 'n0', kind: 'SignalSource', name: 'cluster-events', icon: 'source', rect: { left: 0, top: 8, width: 164, height: 56 } },
+      { id: 'n1', kind: 'Pipeline', name: 'k8s-ops', icon: 'pipeline', rect: { left: 248, top: 2, width: 164, height: 56 } },
+      { id: 'n2', kind: 'Channel', name: 'telegram', icon: 'channel', rect: { left: 496, top: 8, width: 164, height: 56 } },
+      { id: 'n3', kind: 'AgentProfile', name: 'k8s-engineer', icon: 'profile', rect: { left: 168, top: 118, width: 152, height: 56 } },
+      { id: 'n4', kind: 'MCPToolset', name: 'agentops-observe', icon: 'toolset', rect: { left: 340, top: 118, width: 152, height: 56 } },
+      { id: 'n5', kind: 'MCPConfig', name: 'k8s-api', icon: 'mcpconfig', rect: { left: 502, top: 118, width: 152, height: 56 } },
+    ],
+    conv: { left: 0, top: 150, width: 160, height: 78 },
+    reach: { left: 340, top: 186, width: 314,
+      chips: [
+        { text: 'read pods, events, logs', granted: true },
+        { text: 'query metrics', granted: true },
+        { text: 'delete anything', granted: false },
+        { text: 'a shell', granted: false },
+      ] },
+    convIcon: 'conversation',
+    convName: 'alert-cluster-events',
+    wires: [
+      { id: 'w-source', d: 'M164 30 H248' },
+      { id: 'w-channel', d: 'M412 30 H496' },
+      { id: 'w-n3', d: 'M300 58 V96 H244 V118' },
+      { id: 'w-n4', d: 'M360 58 V96 H416 V118' },
+      { id: 'w-n5', d: 'M406 58 V84 H578 V118' },
+      { id: 'w-reach', d: 'M416 163 V186' },
+      { id: 'w-conv', d: 'M82 58 V150' },
+    ],
+    script: [
+      { on: ['n0'], lit: ['n0'], text: 'Something happens.' },
+      { on: ['frame', 'n1'], lit: [], text: 'One Helm install puts an agent in the path.' },
+      { on: [], lit: ['n1'], text: 'You declare the route. One Pipeline.' },
+      { on: ['w-source'], lit: ['n0', 'w-source'], text: 'What starts it.' },
+      { on: ['n3', 'w-n3'], lit: ['n3', 'w-n3'], text: 'What it should do.' },
+      { on: ['n4', 'reach', 'w-n4', 'w-reach'], lit: ['n4', 'w-n4'], text: 'What it may touch — and nothing else.' },
+      { on: ['n5', 'w-n5'], lit: ['n5', 'w-n5'], text: 'Which servers those tools come from.' },
+      { on: ['n2', 'w-channel'], lit: ['n2', 'w-channel'], text: 'Where you talk to it.' },
+      { on: ['conv', 'w-conv'], lit: ['conv', 'w-conv'], text: 'Then it runs. One conversation, its own pod.' },
+      { on: [], lit: [], text: 'Reply in the thread. The same conversation continues.' },
+    ],
+  };
+
+  // ---- Orchestrator: a hub, a trunk, a branch per member. Escalate is its
+  // own path straight off the root, separate from the member branches. ----
+  var COORDINATOR = {
+    tabLabel: 'Orchestrator',
+    frame: { left: 212, top: -16, width: 456, height: 261, label: 'your cluster · one Helm install' },
+    nodes: [
+      { id: 'n0', kind: 'SignalSource', name: 'cluster-events', icon: 'source', rect: { left: 0, top: 8, width: 164, height: 56 } },
+      { id: 'n1', kind: 'Coordinator', name: 'k8s-triage', icon: 'coordinator', rect: { left: 222, top: 80, width: 130, height: 72 } },
+      { id: 'n2', kind: 'Channel', name: 'telegram', icon: 'channel', rect: { left: 480, top: 4, width: 150, height: 48 } },
+      { id: 'n3', kind: 'AgentCapability', name: 'log-reader', icon: 'agentCapability', rect: { left: 480, top: 60, width: 150, height: 48 } },
+      { id: 'n4', kind: 'AgentCapability', name: 'remediator', icon: 'agentCapability', rect: { left: 480, top: 116, width: 150, height: 48 } },
+      { id: 'n5', kind: 'Coordinator', name: 'home-triage', icon: 'coordinator', rect: { left: 480, top: 172, width: 150, height: 48 } },
+    ],
+    conv: { left: 0, top: 150, width: 160, height: 78 },
+    reach: { left: 222, top: 165, width: 210,
+      chips: [
+        { text: 'read, investigate', granted: true },
+        { text: 'propose a fix', granted: true },
+        { text: 'act without a reply', granted: false },
+        { text: 'skip the human', granted: false },
+      ] },
+    convIcon: 'conversation',
+    convName: 'alert-cluster-events-2',
+    wires: [
+      { id: 'w-source', d: 'M164 36 H190 V116 H222' },
+      { id: 'w-channel', d: 'M287 80 V28 H480' },
+      { id: 'w-n3', d: 'M352 116 H420 V84 H480' },
+      { id: 'w-n4', d: 'M352 116 H420 V140 H480' },
+      { id: 'w-n5', d: 'M352 116 H420 V196 H480' },
+      { id: 'w-reach', d: 'M287 152 V165' },
+      { id: 'w-conv', d: 'M287 152 V150 H80' },
+    ],
+    script: [
+      { on: ['n0'], lit: ['n0'], text: 'Something happens — or someone just asks.' },
+      { on: ['frame', 'n1'], lit: [], text: 'The same install can wire a Coordinator instead.' },
+      { on: [], lit: ['n1'], text: 'You declare the route. One Coordinator — the agent that decides.' },
+      { on: ['w-source'], lit: ['n0', 'w-source'], text: 'What starts it. Exactly like a Pipeline’s signalSourceRefs.' },
+      { on: ['n3', 'w-n3'], lit: ['n3', 'w-n3'], text: 'Each agents[] entry is a member it may call on.' },
+      { on: ['n4', 'reach', 'w-n4', 'w-reach'], lit: ['n4', 'w-n4'], text: 'It investigates freely. Acting needs your yes first.' },
+      { on: ['n5', 'w-n5'], lit: ['n5', 'w-n5'], text: 'An entry can itself be a Coordinator, nested as deep as it needs.' },
+      { on: ['n2', 'w-channel'], lit: ['n2', 'w-channel'], text: 'Only the root ever escalates — its own path, when it decides to.' },
+      { on: ['conv', 'w-conv'], lit: ['conv', 'w-conv'], text: 'Then it runs. One root conversation, invoking members as pods of their own.' },
+      { on: [], lit: [], text: 'Same install. A different shape of wiring.' },
+    ],
+  };
+
+  var STORIES = { pipeline: PIPELINE, coordinator: COORDINATOR };
+
+  var viewport = document.getElementById('viewport');
+  var stageEl = document.getElementById('stage');
+  var tabPipeline = document.getElementById('tab-pipeline');
+  var tabCoordinator = document.getElementById('tab-coordinator');
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var activeKey = 'coordinator';
+  var current = 0, timer = null, stillNow = false;
+  var parts = {}, wrap = null, text = null;
+
+  function buildStage(story){
+    stageEl.innerHTML = '';
+    parts = {};
+
+    var frame = el('div', 'ao-pres-frame', stageEl);
+    pos(frame, story.frame);
+    el('span', null, frame).textContent = story.frame.label;
+    parts.frame = frame;
+
+    var wire = svgEl('svg', stageEl);
+    wire.setAttribute('class', 'ao-pres-wire');
+    wire.setAttribute('viewBox', '0 0 660 ' + DRAW_H);
+    wire.setAttribute('aria-hidden', 'true');
+    story.wires.forEach(function (w) {
+      var track = svgEl('path', wire);
+      track.setAttribute('class', 'ao-pres-track');
+      track.setAttribute('d', w.d);
+    });
+    story.wires.forEach(function (w) {
+      var path = svgEl('path', wire);
+      path.setAttribute('class', 'ao-pres-draw');
+      path.setAttribute('d', w.d);
+      // The dash-reveal length comes from the PATH ITSELF, never a typed
+      // number: a hand-guessed length was exactly the bug that cut two
+      // branches short earlier (artifact-design's "build cleanly" rule
+      // against hand-written path data applies to this number too, not
+      // only to the 'd' string). getTotalLength() cannot drift from the
+      // path it measures.
+      path.style.setProperty('--ao-pres-len', path.getTotalLength());
+      parts[w.id] = path;
+    });
+
+    story.nodes.forEach(function (n) {
+      var node = el('div', 'ao-pres-node', stageEl);
+      node.setAttribute('data-node', n.id);
+      pos(node, n.rect);
+      shapeLayer(node, n.icon);
+      var content = el('div', 'ao-pres-content', node);
+      var head = el('div', 'ao-pres-head', content);
+      glyphSpan(head, n.icon);
+      el('span', 'ao-pres-kind', head).textContent = n.kind;
+      el('span', 'ao-pres-name', content).textContent = n.name;
+      parts[n.id] = node;
+    });
+
+    var reach = el('div', 'ao-pres-reach', stageEl);
+    pos3(reach, story.reach);
+    story.reach.chips.forEach(function (r) {
+      var chip = el('span', 'ao-pres-chip ' + (r.granted ? 'is-granted' : 'is-denied'), reach);
+      chip.textContent = r.text;
+    });
+    parts.reach = reach;
+
+    var conv = el('div', 'ao-pres-conv', stageEl);
+    pos(conv, story.conv);
+    shapeLayer(conv, story.convIcon);
+    var cc = el('div', 'ao-pres-content', conv);
+    var kind = el('span', 'ao-pres-kind', cc);
+    glyphSpan(kind, story.convIcon);
+    el('span', 'ao-pres-dot', kind);
+    kind.appendChild(document.createTextNode('running'));
+    el('span', 'ao-pres-name', cc).textContent = story.convName;
+    el('i', null, cc);
+    el('i', null, cc);
+    parts.conv = conv;
+
+    text = el('div', 'ao-pres-caption', stageEl);
+  }
+
+  function pos3(node, r){ node.style.left = r.left + 'px'; node.style.top = r.top + 'px'; node.style.width = r.width + 'px'; }
+
+  function anchorFor(n, script){
+    var beat = script[n] || {};
+    var ids = (beat.lit || []).concat(beat.on || []);
+    for (var i = 0; i < ids.length; i++){
+      var e = parts[ids[i]];
+      if (e && e.offsetWidth && !e.classList.contains('ao-pres-frame')) return e;
+    }
+    return parts.n1;
+  }
+
+  function place(n, script){
+    var a = anchorFor(n, script);
+    var h = text.offsetHeight || 34;
+    var mid = a.offsetTop + a.offsetHeight / 2 - h / 2;
+    text.style.top = Math.max(0, Math.min(DRAW_H - h, mid)) + 'px';
+  }
+
+  function goTo(n){
+    var script = STORIES[activeKey].script;
+    current = n;
+    var on = {}, lit = {};
+    for (var i = 0; i <= n && i < script.length; i++) script[i].on.forEach(function (id) { on[id] = true; });
+    if (script[n]) script[n].lit.forEach(function (id) { lit[id] = true; });
+    Object.keys(parts).forEach(function (id) {
+      parts[id].classList.toggle('is-on', !!on[id]);
+      parts[id].classList.toggle('is-lit', !!lit[id]);
+    });
+    text.textContent = script[n].text;
+    place(n, script);
+  }
+
+  function advance(){ goTo((current + 1) % STORIES[activeKey].script.length); timer = setTimeout(advance, HOLD); }
+  function start(){ if (timer) return; timer = setTimeout(advance, HOLD); wrap.classList.remove('is-paused'); }
+  function pause(){ clearTimeout(timer); timer = null; wrap.classList.add('is-paused'); }
+  function toggle(){ if (stillNow){ engage(); return; } if (timer) pause(); else start(); }
+  function engage(){ stillNow = false; wrap.classList.remove('is-still'); goTo(0); start(); }
+
+  function fit(){
+    var k = viewport.clientWidth / STAGE_W;
+    stageEl.style.transform = 'translate(0, ' + (PAD_TOP * k) + 'px) scale(' + k + ')';
+    viewport.style.height = Math.ceil(STAGE_H * k) + 'px';
+  }
+
+  function mount(key){
+    activeKey = key;
+    var story = STORIES[key];
+    buildStage(story);
+    tabPipeline.classList.toggle('is-current', key === 'pipeline');
+    tabPipeline.setAttribute('aria-selected', key === 'pipeline');
+    tabCoordinator.classList.toggle('is-current', key === 'coordinator');
+    tabCoordinator.setAttribute('aria-selected', key === 'coordinator');
+    clearTimeout(timer); timer = null;
+    fit();
+    if (reduced){
+      goTo(story.script.length - 1);
+      Object.keys(parts).forEach(function (id) { parts[id].classList.add('is-on'); });
+      pause();
+      stillNow = true;
+      wrap.classList.add('is-still');
+    } else {
+      stillNow = false;
+      wrap.classList.remove('is-still');
+      goTo(0);
+      start();
+    }
+  }
+
+  wrap = el('div', 'ao-pres', null);
+  wrap.setAttribute('role', 'group');
+  wrap.setAttribute('aria-label', 'How it works, one beat at a time');
+  wrap.tabIndex = 0;
+  viewport.parentNode.insertBefore(wrap, viewport);
+  wrap.appendChild(viewport);
+
+  wrap.addEventListener('click', function (e) {
+    if (e.target.closest('a')) return;
+    var sel = window.getSelection();
+    if (sel && String(sel).length) return;
+    toggle();
+  });
+  wrap.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar'){ e.preventDefault(); toggle(); }
+  });
+
+  tabPipeline.addEventListener('click', function(){ if (activeKey !== 'pipeline') mount('pipeline'); });
+  tabCoordinator.addEventListener('click', function(){ if (activeKey !== 'coordinator') mount('coordinator'); });
+
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(viewport);
+  window.addEventListener('resize', fit);
+
+  mount('coordinator');
+
+  if (reduced){
+    document.getElementById('note').textContent = 'Motion is reduced on this device — the drawing is shown composed and paused. Click it, or press space, to play either story.';
+  }
+})();
+</script>
