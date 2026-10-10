@@ -113,6 +113,14 @@
       copy's `platform/manager/`, against a cluster built from this
       working copy's chart) and tick it there once the verdict is
       recorded.
+      DISPATCHED, VERDICT PENDING: this remote session has no docker
+      daemon and no k3d, so the pack cannot run directly here. Dispatched
+      `gh workflow run e2e-smoke.yml --ref change/coordinator-adopter-parity`
+      per `remote-session.md`'s cluster-tier rule — the coordinator e2e
+      lane (`TestCoordinatorModeInvokeAndMemberResultRouting` and
+      siblings) runs on the stub runtime, which the smoke tier covers.
+      Per `implement-issue.md` step 6, not waited on here. The run is
+      linked in the pull request for a reviewer to read.
 - [x] 4.3 Resolve task 9b.5 from the same file: confirm whether the
       conditional screenshot/demo re-check is actually needed (expected
       no-op, since that change touched no console code) and tick it with
