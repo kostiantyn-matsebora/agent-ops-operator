@@ -141,10 +141,12 @@
 
 ### Reference docs
 
-- [ ] 7.1 Re-read `docs/guides/coordinate-agents.md`,
+- [x] 7.1 Re-read `docs/guides/coordinate-agents.md`,
       `docs/CHANGELOG.md`, and `docs/security.md` as finished pages (not
       diffs) and confirm each reads correctly on its own, now that every
       other task in this change has landed.
+      DONE: all three read correctly as finished pages, each self-
+      contained with no reference to this change's own process.
 
 ### Adopter site
 
