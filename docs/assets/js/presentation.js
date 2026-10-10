@@ -663,7 +663,7 @@
         stillNow = false;
         wrap.classList.remove('is-still');
         goTo(0);
-        if (wasPaused) pause(); else start();
+        if (wasPaused || reduced) pause(); else start();
       }
     }
 
