@@ -1319,7 +1319,7 @@ reaper:
     name: reaper-cron
     image:
       repository: ghcr.io/kostiantyn-matsebora/agentops-signal-cron
-      tag: 0.0.1-rc3
+      tag: 0.2.0
     resources: {}
   # The SignalSource the scheduled tick posts to — claimed on the
   # chart-rendered Coordinator's own signalSourceRefs (design D-E), never on
