@@ -12,6 +12,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -33,6 +34,14 @@ func TestReplicasTwoDeliversEveryConsoleThread(t *testing.T) {
 	ctx := context.Background()
 	stamp := fmt.Sprint(time.Now().UnixNano())
 
+	// Force it, never trust the install's own rollout: measured live, this
+	// pack's single-node k3d cluster leaves the chart's own replicas:2
+	// install with only ONE manager pod ever Ready — the second sits
+	// permanently Pending behind the hard anti-affinity, and the OLD
+	// precondition here (len(pods) >= 2, no readiness check) passed on that
+	// for as long as this lane has existed, proving nothing about a second
+	// replica ever racing a poll.
+	scaleManagerReplicas(t, ctx, e, 2)
 	assertManagerRunsAtLeastNReadyReplicas(t, ctx, e, 2)
 
 	const n = 8
@@ -100,16 +109,30 @@ func assertManagerRunsAtLeastNReadyReplicas(t *testing.T, ctx context.Context, e
 }
 
 // scaleManagerReplicas resizes the manager Deployment to n replicas for the
-// rest of this test, restoring the original replica count and pod
-// anti-affinity on cleanup so later lanes see the chart's own default again.
+// rest of this test, restoring the original replica count on cleanup so
+// later lanes get the chart's own default back. Affinity, once cleared, is
+// left cleared — see below for why putting it back is the wrong direction.
 //
 // The anti-affinity is a HARD requirement (deployment.yaml: one real node per
-// replica, deliberately — see chart/templates/deployment.yaml), which this
-// pack's single-node k3d cluster cannot satisfy for n > 1. Scaling alone
-// would leave n-1 pods permanently Pending, proving nothing about n replicas
-// racing a real poll. Cleared with a JSON MERGE patch (null removes the
-// field) rather than a JSON patch "remove", which errors on a field that is
-// not there to begin with — relevant on cleanup if the field was never set.
+// replica, deliberately), which this pack's single-node k3d cluster cannot
+// satisfy for n > 1. Patching the Deployment alone does not unblock it:
+// the Deployment controller's RollingUpdate will not place a new pod on a
+// node already holding one whose EXISTING, already-created pod spec still
+// carries the old anti-affinity rule — a pod's spec is immutable once
+// created, so clearing the field on the Deployment only reaches pods
+// created AFTER the patch. Measured live, twice: once by hand on a local
+// Rancher Desktop cluster (the rollout sat at "1 out of N new replicas
+// updated" until the OLD pods were deleted), and once in this exact pack
+// in CI before this comment existed — the same stall, the same fix.
+//
+// So this force-deletes the CURRENT pods right after patching: the
+// Deployment controller recreates them from the new, affinity-free
+// template, and only then can more than one land on this cluster's one
+// node. No lane in this file (or any other) asserts the anti-affinity is
+// PRESENT, so there is nothing to restore it for — leaving it cleared for
+// the rest of the run is simpler than restoring a field whose only
+// property anyone here cares about is "it must be gone for this cluster
+// to schedule more than one pod," which stays true either way.
 func scaleManagerReplicas(t *testing.T, ctx context.Context, e *Env, n int) {
 	t.Helper()
 	var dep appsv1.Deployment
@@ -117,8 +140,35 @@ func scaleManagerReplicas(t *testing.T, ctx context.Context, e *Env, n int) {
 		t.Fatal(err)
 	}
 	origReplicas := dep.Spec.Replicas
-	origAffinity := dep.Spec.Template.Spec.Affinity
 
+	forceManagerRollout(t, ctx, e, n)
+
+	t.Cleanup(func() {
+		forceManagerRollout(t, context.Background(), e, int(derefOr(origReplicas, 1)))
+	})
+}
+
+// forceManagerRollout is scaleManagerReplicas' shared mechanics: patch
+// (replicas=n, affinity cleared), zero any ReplicaSet STILL carrying the old
+// affinity so it stops recreating pods that block the new template, and wait
+// for the rollout to settle.
+//
+// Deleting the BLOCKING PODS alone was tried and is not enough — their own
+// ReplicaSet's desired count is untouched by that, so it recreates them
+// immediately, identical, still carrying the rule. Measured live: two more
+// pods from the same old ReplicaSet appeared within seconds of deleting the
+// first two. Scaling that ReplicaSet itself to zero is the only thing that
+// stops it recreating them. A ReplicaSet whose template ALREADY has no
+// affinity (e.g. a later call in the same test that only changes the
+// replica COUNT) is left alone — it is the Deployment's current one, and
+// zeroing it would fight the Deployment controller's own reconciliation of
+// it rather than help.
+func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
+	t.Helper()
+	var dep appsv1.Deployment
+	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: "agentops-manager"}, &dep); err != nil {
+		t.Fatal(err)
+	}
 	patch := client.MergeFrom(dep.DeepCopy())
 	want := int32(n)
 	dep.Spec.Replicas = &want
@@ -126,28 +176,38 @@ func scaleManagerReplicas(t *testing.T, ctx context.Context, e *Env, n int) {
 	if err := e.K.Patch(ctx, &dep, patch); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		var cur appsv1.Deployment
-		if err := e.K.Get(context.Background(), types.NamespacedName{Namespace: Namespace, Name: "agentops-manager"}, &cur); err != nil {
-			t.Logf("restoring manager replicas: %v", err)
-			return
+
+	var sets appsv1.ReplicaSetList
+	if err := e.K.List(ctx, &sets, client.InNamespace(Namespace),
+		client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
+		t.Fatal(err)
+	}
+	zero := int32(0)
+	for i := range sets.Items {
+		rs := &sets.Items[i]
+		if rs.Spec.Template.Spec.Affinity == nil {
+			continue // the Deployment's current one — leave it to the controller
 		}
-		restore := client.MergeFrom(cur.DeepCopy())
-		cur.Spec.Replicas = origReplicas
-		cur.Spec.Template.Spec.Affinity = origAffinity
-		if err := e.K.Patch(context.Background(), &cur, restore); err != nil {
-			t.Logf("restoring manager replicas: %v", err)
-			return
+		rsPatch := client.MergeFrom(rs.DeepCopy())
+		rs.Spec.Replicas = &zero
+		if err := e.K.Patch(ctx, rs, rsPatch); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
 		}
-		if out, err := e.Cluster.Kubectl(context.Background(), "-n", Namespace,
-			"rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
-			t.Logf("restoring manager replicas: %v\n%s", err, out)
-		}
-	})
+	}
+
 	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace,
 		"rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
-		t.Fatalf("manager scale to %d: %v\n%s", n, err, out)
+		t.Fatalf("manager rollout to %d replicas: %v\n%s", n, err, out)
 	}
+}
+
+// derefOr reads an *int32, falling back when the pointer is nil — the
+// Deployment's own default when the chart renders no explicit replicas.
+func derefOr(p *int32, def int32) int32 {
+	if p == nil {
+		return def
+	}
+	return *p
 }
 
 // durable-chat-ops-broker's harsher sibling: THREE replicas (one more than

@@ -1026,3 +1026,33 @@ exist."
   the channel `owed` in the `DeliveryPending` condition — the difference
   between "not yet" and "never coming."
 
+**PATCHING A DEPLOYMENT'S POD TEMPLATE DOES NOT UNBLOCK A ROLLOUT AN
+EXISTING POD'S HARD ANTI-AFFINITY IS BLOCKING — MEASURED LIVE, LOCALLY AND
+IN CI.** Testing past the chart's own default (two replicas) needs a
+single-node cluster to schedule a third pod.
+
+- **Clearing `spec.template.spec.affinity` and waiting for `kubectl
+  rollout status` stalled forever**, at `"1 out of N new replicas
+  updated"` — on both a local Rancher Desktop cluster and the e2e pack's
+  own k3d cluster in CI.
+
+- **A pod's spec is immutable once created.** The EXISTING pod from before
+  the patch still carries the OLD anti-affinity rule, and the scheduler
+  still refuses to place a new pod beside it — the Deployment's template
+  change only reaches pods created AFTER the patch, and none can be
+  created while the old one still occupies the only node.
+- **Deleting the blocking pods was tried next, and also failed.** Their
+  OWNING ReplicaSet's desired count is untouched by a pod deletion, so it
+  recreated them — identical, still carrying the rule — within seconds.
+- **The fix: scale that ReplicaSet itself to zero**, identified by
+  `spec.template.spec.affinity != nil` so a LATER call that only changes
+  the replica count (affinity already cleared) never zeroes the
+  Deployment's current, correct ReplicaSet and fights its own controller.
+- **`TestReplicasTwoDeliversEveryConsoleThreadInParallel`'s dispatch to
+  `e2e-smoke.yml` is what caught the second half of this**: the EXISTING
+  `TestReplicasTwoDeliversEveryConsoleThread` lane's own precondition
+  (`len(pods) >= 2`, no readiness check) had been passing this whole time
+  against exactly ONE ready manager pod on this same single-node cluster —
+  the chart's own default install never actually ran two REAL replicas in
+  CI until this fix was written.
+

@@ -47,14 +47,17 @@
 ## 7. E2E tests
 
 - [x] 7.1 Add an e2e lane in `platform/manager/test/e2e/` that runs the manager at `replicas: 2` against a real cluster, posts a chat-bound signal repeatedly, and asserts every resulting conversation gets its thread. (`replicas_test.go`'s `TestReplicasTwoDeliversEveryConsoleThread`) — the chart's own default is now 2, so the WHOLE pack installs at two manager pods, not only this lane.
-- [x] 7.2 The pack run is the cluster tier's, dispatched to `e2e-smoke.yml` on the pull request's branch and judged by CI. Green on `b49a617c` (run 38038804112), including `TestReplicasTwoDeliversEveryConsoleThread`.
+- [x] 7.2 The pack run is the cluster tier's, dispatched to `e2e-smoke.yml` on the pull request's branch and judged by CI.
+  - Green on `b49a617c` (run 38038804112) — before 7.3 existed, so it exercised only the 2-replica lane.
+  - A LATER dispatch, on `73f61216` (run 38042832736, after 7.3 landed), FAILED both lanes — and found something real: `TestReplicasTwoDeliversEveryConsoleThread`'s OWN precondition (`len(pods) >= 2`, no readiness check) had been passing for as long as this lane existed against only ONE ready manager pod, on this same single-node k3d cluster. See 7.3 for the fix both lanes needed.
 - [x] 7.3 Harsher sibling added after a live-cluster run (5.2) on a local 3-replica install found 2.6–2.8: `TestReplicasThreeDeliversEveryConsoleThreadInParallel`.
   - THREE replicas, not the chart's default two.
   - TRUE concurrency — goroutines, not a sequential loop, so two polls can race at the same instant.
   - A stronger assertion than 7.1's: a real thread AND a delivered reply, not merely a thread. 7.1 could not have caught 2.8's race.
-  - `scaleManagerReplicas` strips the chart's hard pod anti-affinity for this lane's own duration, since the single-node k3d cluster cannot schedule a third replica otherwise, and restores it on cleanup.
-  - `assertManagerRunsAtLeastNReadyReplicas` generalizes 7.1's precondition to check READY pods, not merely listed ones.
-  - Verified live against the local Rancher Desktop cluster (10/10 conversations, thread + delivery, in 10-14s across repeated runs) before being written back into this binary. Dispatch to `e2e-smoke.yml` on this change's final head is this task's own completion evidence.
+  - `assertManagerRunsAtLeastNReadyReplicas` generalizes 7.1's precondition to check READY pods, not merely listed ones — the check that caught the gap 7.2 records.
+  - `scaleManagerReplicas` forces the manager Deployment to N real, ready replicas on this pack's single-node k3d cluster, which the chart's own hard pod anti-affinity otherwise makes impossible past one. 7.1 is updated to call it too, for the same reason.
+  - **Patching the Deployment alone was tried first and is not enough.** A pod's spec is immutable once created, so an EXISTING pod still carries the old anti-affinity rule after the Deployment's template is patched, and the scheduler still refuses to place a new pod beside it — measured live as the rollout stalling at "1 out of N new replicas updated," on both a local Rancher Desktop cluster and this exact e2e pack in CI (7.2's failed run). Deleting the blocking pods was tried next and also failed: their OWNING ReplicaSet's desired count is untouched by that, so it recreates them, identical, within seconds. The fix scales that ReplicaSet itself to zero — identified by `spec.template.spec.affinity != nil`, never the current one — which is the only thing that stops it recreating them.
+  - Verified live against the local Rancher Desktop cluster (10/10 conversations, thread + delivery, in 10-14s across repeated runs) before being written back into this binary. The scale-to-zero fix was separately verified by hand, reproducing the exact CI stall and then clearing it. Dispatch to `e2e-smoke.yml` on this change's final head is this task's own completion evidence.
 
 ## 8. Documentation
 
