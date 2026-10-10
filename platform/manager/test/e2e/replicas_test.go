@@ -34,6 +34,27 @@ func TestReplicasTwoDeliversEveryConsoleThread(t *testing.T) {
 	ctx := context.Background()
 	stamp := fmt.Sprint(time.Now().UnixNano())
 
+	// EVERY earlier lane in this package's shared cluster shares ONE
+	// admission cap (maxActiveConversations, 5 by default) — it is NOT
+	// scoped per source. A sibling lane on `vm-alerts`, `tg-ops` or
+	// `e2e-fanout` that never calls `/close` leaves its conversation
+	// Idle, still holding a slot. Measured live on CI: 7 such leftovers
+	// from unrelated lanes, competing with this lane's own 8 and the
+	// next lane's 10 for 5 slots — closing only THIS file's own backlog
+	// (below) was not enough, because the backlog this lane inherited
+	// was never this file's to begin with.
+	//
+	// A ONE-TIME sweep is not enough either: `e2e-cron` keeps firing on
+	// its own schedule, independent of any test's lifetime, so a new
+	// leftover can appear WHILE this lane or the next one is still
+	// running — measured live as the same starvation recurring
+	// intermittently even with a sweep at the top of this function.
+	// `pauseCronLaneAndClearLeftovers` is TestAdmissionFIFOOnPodDelete's
+	// own fix for exactly this: it un-claims the cron source so its
+	// ticks stop admitting anything (restored on cleanup), then deletes
+	// every existing conversation outright.
+	clearAdmissionPoolForReplicaLane(t, ctx, e)
+
 	// Force it, never trust the install's own rollout: measured live, this
 	// pack's single-node k3d cluster leaves the chart's own replicas:2
 	// install with only ONE manager pod ever Ready — the second sits
@@ -127,6 +148,25 @@ func closeConsoleConversationsMatching(t *testing.T, ctx context.Context, e *Env
 			}
 		}
 		return true, nil
+	})
+}
+
+// clearAdmissionPoolForReplicaLane pauses the cron lane and deletes every
+// existing conversation, then WAITS for their runtime pods to actually be
+// gone before returning. `pauseCronLaneAndClearLeftovers`'s own delete runs
+// with `--wait=false` — a deleted conversation lingers under its
+// close-topics finalizer for up to two minutes, still holding an admission
+// slot the whole time. Measured live: proceeding right after the delete
+// call, as `TestAdmissionFIFOOnPodDelete` does not, raced this lane's own
+// 8 new conversations against the OLD ones still finalizing, failing to
+// close within this lane's own 2-minute budget — the same starvation this
+// whole fix exists to remove, just moved one step earlier.
+func clearAdmissionPoolForReplicaLane(t *testing.T, ctx context.Context, e *Env) {
+	t.Helper()
+	pauseCronLaneAndClearLeftovers(t, ctx, e)
+	waitFor(t, "no runtime pods", 4*time.Minute, func() (bool, error) {
+		pods, err := e.K.Pods(ctx, "agentops.dev/conversation")
+		return err == nil && len(pods) == 0, err
 	})
 }
 
@@ -278,23 +318,39 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 // whether any was cleared.
 func zeroAffinityReplicaSets(t *testing.T, ctx context.Context, e *Env) (*appsv1.ReplicaSet, bool) {
 	t.Helper()
-	var sets appsv1.ReplicaSetList
-	if err := e.K.List(ctx, &sets, client.InNamespace(Namespace),
-		client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
-		t.Fatal(err)
-	}
-	var current *appsv1.ReplicaSet
-	cleared := false
-	for i := range sets.Items {
-		rs := &sets.Items[i]
-		if rs.Spec.Template.Spec.Affinity != nil {
-			zeroStaleReplicaSet(t, ctx, e, rs)
-			cleared = true
-			continue
+	// The Deployment controller has not necessarily created the NEW
+	// ReplicaSet (the one with nil affinity) in the instant after the
+	// patch lands — only the OLD one may exist yet. Listing once and
+	// finding none with nil affinity left `current` nil, silently
+	// skipping the fresh-reschedule step below for every pod the new
+	// ReplicaSet eventually creates: measured live, three pods stuck on
+	// their one and only FailedScheduling event for 5+ minutes, with a
+	// cleanly zeroed old ReplicaSet proving the rest of this function had
+	// already done its job. Retry until the new ReplicaSet actually
+	// exists, rather than acting on a list taken too early.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var sets appsv1.ReplicaSetList
+		if err := e.K.List(ctx, &sets, client.InNamespace(Namespace),
+			client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
+			t.Fatal(err)
 		}
-		current = rs // the Deployment's current one — leave ITS REPLICAS to the controller
+		var current *appsv1.ReplicaSet
+		cleared := false
+		for i := range sets.Items {
+			rs := &sets.Items[i]
+			if rs.Spec.Template.Spec.Affinity != nil {
+				zeroStaleReplicaSet(t, ctx, e, rs)
+				cleared = true
+				continue
+			}
+			current = rs // the Deployment's current one — leave ITS REPLICAS to the controller
+		}
+		if current != nil || time.Now().After(deadline) {
+			return current, cleared
+		}
+		time.Sleep(2 * time.Second)
 	}
-	return current, cleared
 }
 
 // deletePendingPods force-deletes the Pending pods of rs, so each is
@@ -374,6 +430,14 @@ func TestReplicasThreeDeliversEveryConsoleThreadInParallel(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
 	stamp := fmt.Sprint(time.Now().UnixNano())
+
+	// This lane's OWN admission cap exposure, independent of the "Two"
+	// lane before it: TestReplicasTwoDeliversEveryConsoleThread's cleanup
+	// already restored the cron Pipeline by the time this lane starts, so
+	// its ticks are live again and this lane needs the same pause —
+	// skipping it here reopens exactly the race the comment above
+	// describes, just one lane later.
+	clearAdmissionPoolForReplicaLane(t, ctx, e)
 
 	scaleManagerReplicas(t, ctx, e, 3)
 	assertManagerRunsAtLeastNReadyReplicas(t, ctx, e, 3)

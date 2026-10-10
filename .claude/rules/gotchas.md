@@ -1138,3 +1138,74 @@ evicts it.
   caught up yet. Wait for the conversation to actually reach phase
   `Closed` before returning.
 
+**THAT FIX WAS STILL NOT ENOUGH ON CI, BECAUSE THE BACKLOG WAS NEVER ONLY
+THIS FILE'S — MEASURED LIVE, 2026-10-10.** `maxActiveConversations` is a
+GLOBAL cap, not scoped to console.
+
+- **Sibling lanes on OTHER sources leave idle leftovers too.** A lane on
+  `vm-alerts`, `tg-ops` or `e2e-fanout` that never calls `/close` holds a
+  slot forever (until its idle TTL). Measured on CI: 7 such leftovers from
+  unrelated lanes, still competing for 5 slots alongside this file's own.
+- **`e2e-cron` is worse: it keeps firing on its OWN schedule**, independent
+  of any test's lifetime. A one-time sweep at the top of a lane can still
+  lose to a NEW cron-originated conversation created mid-run — measured as
+  the same starvation recurring intermittently even with a sweep already
+  in place.
+- **Fixed by reusing `TestAdmissionFIFOOnPodDelete`'s own
+  `pauseCronLaneAndClearLeftovers`** in both replica lanes — it un-claims
+  the cron source (ticks then drop, restored on cleanup) and deletes every
+  existing conversation outright, not just Idle ones.
+- **That reuse needed ONE MORE fix: the helper's own delete runs with
+  `--wait=false`.** A deleted conversation lingers under its close-topics
+  finalizer for up to two minutes, still holding a slot the whole time.
+  Calling the helper and immediately creating a new batch raced the OLD
+  conversations' finalizers against the new batch's own close-and-wait
+  step, and timed out. `TestAdmissionFIFOOnPodDelete` already follows the
+  pause with its own explicit wait for zero `agentops.dev/conversation`
+  pods — add the same wait wherever this helper is reused.
+
+**A LONG-LIVED `kubectl port-forward` DOES NOT SURVIVE ITS BACKING POD
+BEING FORCE-DELETED, AND NOTHING RESTARTS IT — MEASURED LIVE,
+2026-10-10, EXPOSED BY `TestReplicasThreeDeliversEveryConsoleThreadInParallel`'s
+OWN REPLICA CHURN.**
+
+- **`kubectl port-forward svc/<name>` pins itself to ONE backing pod's
+  IP for its whole life.** A pod force-deleted out from under it
+  (`scaleManagerReplicas`'s own mechanism) makes the kubectl process
+  exit, and the harness's `Forward` never noticed or relaunched it.
+- **Every later test sharing that same `Forward` then fails
+  `connection refused`**, against a port nothing listens on — cascading
+  into `TestContextSurvivesLosingThePod`, `TestAdmissionFIFOOnPodDelete`
+  and `TestStubMechanisms/*`, none of them about replicas at all.
+- **Master's own smoke suite never does this pod churn**, so this was
+  never exposed there — it is the replica-scaling test code itself that
+  surfaces it, not a pre-existing flake.
+- **Fixed in `test/e2e/cluster.go`'s `Forward`**: a supervisor goroutine
+  relaunches the port-forward on the SAME local port whenever its process
+  exits before `Stop` is called, so a caller's `URL()` never has to
+  change.
+
+**LISTING A ReplicaSet IMMEDIATELY AFTER PATCHING ITS DEPLOYMENT CAN FIND
+ONLY THE OLD ONE, SILENTLY SKIPPING EVERY FIX THAT DEPENDS ON THE NEW ONE
+EXISTING — MEASURED LIVE ON A STANDALONE RUN OF
+`TestReplicasThreeDeliversEveryConsoleThreadInParallel`.**
+
+- **The Deployment controller does not necessarily have the NEW
+  ReplicaSet created in the same instant the patch lands.** A single
+  list call right after the patch can see only the OLD one, leaving
+  `current` nil in `zeroAffinityReplicaSets` and silently skipping the
+  fresh-reschedule step for every pod the new ReplicaSet goes on to
+  create.
+- **The tell was a cleanly zeroed old ReplicaSet beside three pods stuck
+  on their ONE AND ONLY `FailedScheduling` event for 5+ minutes** — proof
+  the rest of the function worked, and only this one list's timing was
+  wrong.
+- **It passed in every run where an earlier lane had already cleared the
+  affinity field first**, because that path never needed the new
+  ReplicaSet to exist — `current` was found by a different route. It only
+  failed standalone, which is exactly why isolating "just the failing
+  test" during a debugging session is worth doing even after a fix looks
+  confirmed on the full suite.
+- **Fixed by retrying the list, up to 30s, until the new ReplicaSet
+  actually exists**, instead of acting on a list taken too early.
+
