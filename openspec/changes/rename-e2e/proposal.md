@@ -103,6 +103,10 @@ install). Neither is run by a pipeline, so neither is this change's concern.
 - **Process tooling**: `openspec/config.yaml` (the injected task-section
   rule), `.github/scripts/docs-task-guard.py` and its test fixtures under
   `.github/tests/docs-task/*/tasks.md`, `.claude/hooks/require-docs-task.sh`.
+- **Retired vocabulary**: `.github/retired-vocabulary.json` gains entries for
+  `test/e2e/`, `-tags e2e`, the three old workflow file names and the five
+  `E2E_*` env vars, each naming its `system` replacement. The bare word
+  "e2e" is not retired.
 - **Reference docs**: `docs/testing.md` — the "End to end" tier row and its
   prose. `README.md`'s nightly-workflow badge link and label. No other
   reference doc (`docs/concepts.md`, `docs/contracts.md`,

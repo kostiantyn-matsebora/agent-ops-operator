@@ -35,7 +35,7 @@
 - [ ] 5.3 `.github/tests/run.sh` (the Python script suite, which runs `docs-task-guard-test.sh`, `e2e-report.test.sh`/`system-report.test.sh`, `smoke-evidence.test.sh` and `retired-vocabulary-guard.py`'s own tests) passes.
 - [ ] 5.4 `python3 .claude/scripts/rules_compliance.py` over every `.md` file this change edits reports clean.
 
-## 6. E2E tests
+## 6. System tests
 
 - [ ] 6.1 Dispatch the renamed smoke tier against this branch — `gh workflow run system-smoke.yml --ref change/rename-e2e` — and confirm the run succeeds. This is the one direct proof that the renamed build tag, package path, workflow files and env vars still cohere end to end against a real k3d cluster.
 

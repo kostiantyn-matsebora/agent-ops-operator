@@ -142,12 +142,12 @@ change land in different commits.
 `.github/tests/smoke-evidence.test.sh` pins the new suffix in the same
 change.
 
-**[Risk] The leftover scenario title in `continuous-integration`'s spec**
-("... e2e workflow") reads as an incomplete rename to the next reader.
-→ Mitigation: named explicitly here and in `tasks.md`, with the direct
-follow-up edit to make after archive, rather than left unexplained.
+**[Risk] A leftover scenario title in `continuous-integration`'s spec**
+("... e2e workflow") would read as an incomplete rename.
+→ Mitigation: the delta in this change retitles it to "system workflow", so
+nothing is deferred until after archive.
 
-**[Risk] This change's own `tasks.md` will itself say "E2E tests"** for its
-second trailing section, generated under the convention it is renaming.
-→ Accepted: the section still covers the same work (does this diff touch
-anything a cluster decides), whatever it is titled right now.
+**[Risk] This change's own `tasks.md` could fail the renamed guard**, since
+`docs-task-guard.py` stops accepting "E2E tests".
+→ Mitigation: its second trailing section is titled "System tests", so the
+guard accepts it.
