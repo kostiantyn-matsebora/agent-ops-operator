@@ -84,6 +84,7 @@
 - [x] 8.6a `.github/retired-vocabulary.json` and `.claude/rules/retired-vocabulary.md` — the retired `/channel/ops` `?type=` parameter term already exists (shipped with the earlier `adapter=`/`contract=` work per 3.3) — confirmed present, no new entry needed.
 - [x] 8.7 Re-run `python3 .github/scripts/docs-generate.py` — the CR reference and any generated resource block covering `ConversationStatus` are build output and must not go stale.
 - [x] 8.7a `docs/concepts.md` — add `claim` and `undeliveredReply` rows to the restart-resilience matrix, as the `state-durability` spec requires.
+
 ### Adopter site
 
 - [x] 8.8 Confirm no adopter-site page beyond `docs/configuration.md`'s `replicas` row needs a word changed (`proposal.md`'s own Impact section states why) — confirmed by grep across `docs/installation.md`, `getting-started.md`, `security.md`, `console.md`, `console-guide.md`, `introduction.md`, `index.md`: no mention of `replicas`, `OpQueue` or `channel/ops`.

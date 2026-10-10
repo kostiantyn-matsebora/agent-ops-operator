@@ -710,8 +710,8 @@ type ThreadBinding struct {
 	// (durable-chat-ops-broker) — never by a non-leader, however current its
 	// own cached view of this object looks.
 	//
-	// Absent: no claim outstanding, the binding has no thread yet and no
-	// replica currently owns dispatching it.
+	// Absent: no claim outstanding and no replica currently owns dispatching
+	// it.
 	// +optional
 	Claim *OpClaim `json:"claim,omitempty"`
 }
