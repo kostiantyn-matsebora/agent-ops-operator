@@ -894,6 +894,66 @@
         "replaced",
         "used to"
       ]
+    },
+    {
+      "id": "e2e-pack-path",
+      "pattern": "test/e2e\\b",
+      "says": "the pipeline-run cluster pack lives at platform/manager/test/system/; test/e2e/ was renamed",
+      "allow": [
+        "renamed",
+        "retired",
+        "no longer",
+        "is gone",
+        "was renamed",
+        "is now",
+        "replaced",
+        "gone"
+      ]
+    },
+    {
+      "id": "e2e-build-tag",
+      "pattern": "-tags e2e\\b|go:build e2e\\b",
+      "says": "the pack's build tag is `system`; the `e2e` build tag was renamed",
+      "allow": [
+        "renamed",
+        "retired",
+        "no longer",
+        "is gone",
+        "was renamed",
+        "is now",
+        "replaced",
+        "gone"
+      ]
+    },
+    {
+      "id": "e2e-workflow-names",
+      "pattern": "e2e\\.yml\\b|e2e-smoke\\.yml\\b|e2e-full\\.yml\\b",
+      "says": "the pack's workflows are system.yml/system-smoke.yml/system-full.yml; e2e.yml/e2e-smoke.yml/e2e-full.yml were renamed",
+      "allow": [
+        "renamed",
+        "retired",
+        "no longer",
+        "is gone",
+        "was renamed",
+        "is now",
+        "replaced",
+        "gone"
+      ]
+    },
+    {
+      "id": "e2e-env-vars",
+      "pattern": "E2E_TIER\\b|E2E_ARTIFACT_DIR\\b|E2E_BUDGET\\b|E2E_REUSE\\b|E2E_SKIP_BUILD\\b",
+      "says": "the pack's knobs are SYSTEM_TIER/SYSTEM_ARTIFACT_DIR/SYSTEM_BUDGET/SYSTEM_REUSE/SYSTEM_SKIP_BUILD; the E2E_* names were renamed",
+      "allow": [
+        "renamed",
+        "retired",
+        "no longer",
+        "is gone",
+        "was renamed",
+        "is now",
+        "replaced",
+        "gone"
+      ]
     }
   ]
 }
