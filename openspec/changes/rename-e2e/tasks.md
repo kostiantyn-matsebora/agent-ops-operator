@@ -26,8 +26,7 @@
 
 - [ ] 4.1 Add entries to `.github/retired-vocabulary.json` for `test/e2e/` as this pack's path, `-tags e2e`, the three old workflow file names, and the five `E2E_*` env vars, each naming its `system`-named replacement. Verify `python3 .github/scripts/retired-vocabulary-guard.py` reports no violation from any file this change leaves behind.
 - [ ] 4.2 Run `python3 .github/scripts/retired-vocabulary-guard.py --show` locally and confirm it does NOT flag `e2e-live`, `platform/console/ui/e2e/`, or any generic "end to end" prose — those stay legitimate.
-- [ ] 4.3 Edit the scenario title "A per-module job is not duplicated in the e2e workflow" in `openspec/specs/continuous-integration/spec.md` directly to say "system workflow", so the delta's renamed title matches the current spec.
-- [ ] 4.4 Run `openspec validate rename-e2e` and confirm the change validates cleanly.
+- [ ] 4.3 Run `openspec validate rename-e2e` and confirm the change validates cleanly.
 
 ## 5. Unit tests
 

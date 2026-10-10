@@ -426,6 +426,6 @@ restates another's jobs, so "what CI runs" has exactly one definition per tier.
 - **WHEN** a pull request changes only pages under `docs/`
 - **THEN** the `conformance` job is skipped and `ci-green` treats it as skipped, not failed
 
-#### Scenario: A per-module job is not duplicated in the system workflow
+#### Scenario: A per-module job is not duplicated in the e2e workflow
 - **WHEN** a change adds a per-module build, vet or lint step
 - **THEN** it is specified and wired under `continuous-integration`, and `e2e.yml` carries no copy of it
