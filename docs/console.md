@@ -560,7 +560,7 @@ thread pane in place — there is no navigation away from the list.
 | Column | Shows |
 |---|---|
 | Icon rail | the app's own sidebar, collapsed to icons on this view |
-| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with its own unread count |
+| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
 | List | the rows in the active scope, as a coordination tree by default |
 | Thread pane | the open conversation |
 
@@ -680,8 +680,12 @@ console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-Every scope in the inbox carries its own unread sum — the fixed scopes
-(Unread, Working, Mine, Errored, Closed), and one per Pipeline or Coordinator.
+Every scope in the inbox carries a count matching what opening it lists.
+
+| Scope | Counts |
+|---|---|
+| Working, Mine, Errored, Closed, each Pipeline or Coordinator | every conversation its own filter admits — phase, ownership, error state or wiring — read or unread |
+| Unread | unread rows only, since unread IS that scope |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.

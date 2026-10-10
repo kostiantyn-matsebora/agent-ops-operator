@@ -181,6 +181,30 @@ func TestActivityBadgesCountInflightConversations(t *testing.T) {
 	}
 }
 
+// A Coordinator's root AND its caused members all count toward the same
+// node — matching console-live-runs's "A Coordinator's members count toward
+// its node" scenario.
+func TestActivityBadgesCountCoordinatorMembers(t *testing.T) {
+	busy := obj("coordinators", "incident", "1", `{"profileRef":{"name":"lead"}}`, cond("Ready", "True", ""))
+	idle := obj("coordinators", "quiet", "1", `{"profileRef":{"name":"lead"}}`, cond("Ready", "True", ""))
+	c := staticCache(busy, idle,
+		obj("conversations", "root", "1", `{"coordinatorRef":{"name":"incident"},"profileRef":{"name":"lead"}}`,
+			`{"phase":"Idle"}`),
+		obj("conversations", "triage", "1", `{"causedBy":{"parent":"root","entry":"triage"},"profileRef":{"name":"lead"}}`,
+			`{"phase":"Working","inflight":{"runId":"r1"}}`),
+		obj("conversations", "logs", "1", `{"causedBy":{"parent":"root","entry":"logs"},"profileRef":{"name":"lead"}}`,
+			`{"phase":"Idle"}`),
+	)
+	topo := BuildTopology(c)
+	n := findNode(topo, "coordinators", "incident")
+	if n == nil || n.Active != 1 || n.Recent != 3 {
+		t.Fatalf("active/recent counts wrong for the coordinator and its members: %+v", n)
+	}
+	if n := findNode(topo, "coordinators", "quiet"); n == nil || n.Active != 0 || n.Recent != 0 {
+		t.Fatalf("a coordinator with no attributed conversations must show no activity: %+v", n)
+	}
+}
+
 // A Conversation carries no pipelineRef, so attribution is reconstructed from
 // the bindings it materialized. These cases pin both the match and the refusal
 // to guess.

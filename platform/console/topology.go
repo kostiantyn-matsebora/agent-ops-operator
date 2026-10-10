@@ -768,17 +768,30 @@ func capabilityEdges(reference func(kind, name string) bool, c *Cache, ownerID s
 
 type activityCount struct{ active, recent int }
 
-// activityByPipeline counts conversations per pipeline node: active =
-// currently inflight, recent = every attributed conversation still present.
+// activityByPipeline counts conversations per Pipeline AND Coordinator node:
+// active = currently inflight, recent = every attributed conversation still
+// present. A conversation keys the map by whichever one resolves —
+// AttributePipeline for a Pipeline-opened conversation, coordinatorRootOf for
+// one a Coordinator caused, directly or through a member.
 func activityByPipeline(c *Cache) map[string]activityCount {
 	out := map[string]activityCount{}
 	pipelines := c.List("pipelines")
-	for _, conv := range c.List("conversations") {
-		pipeline := AttributePipeline(conv, pipelines)
-		if pipeline == "" {
+	coordinators := c.List("coordinators")
+	convs := c.List("conversations")
+	byName := make(map[string]*Object, len(convs))
+	for _, conv := range convs {
+		byName[conv.Metadata.Name] = conv
+	}
+	for _, conv := range convs {
+		var id string
+		if pipeline := AttributePipeline(conv, pipelines); pipeline != "" {
+			id = nodeID("pipelines", pipeline)
+		} else if co := AttributeCoordinator(coordinatorRootOf(conv, byName), coordinators); co != "" {
+			id = nodeID("coordinators", co)
+		}
+		if id == "" {
 			continue
 		}
-		id := nodeID("pipelines", pipeline)
 		counts := out[id]
 		counts.recent++
 		if conversationView(conv).Status.Inflight != nil {
@@ -787,6 +800,36 @@ func activityByPipeline(c *Cache) map[string]activityCount {
 		out[id] = counts
 	}
 	return out
+}
+
+// coordinatorRootOf walks a conversation's causedBy chain to the uncaused
+// root, mirroring the browser's own walk (tree.ts's rootNameOf) — a member
+// counts toward the SAME Coordinator node its root does, since AttributeCoordinator
+// only ever resolves on the root that actually carries coordinatorRef.
+//
+// A parent missing from byName (predates the cache, or since deleted) or a
+// cycle (which the manager itself already refuses to create) stops the walk
+// at the conversation last found, which is never a Coordinator's root and so
+// resolves to "" — unattributed rather than guessed.
+func coordinatorRootOf(conv *Object, byName map[string]*Object) *Object {
+	cur := conv
+	seen := map[string]bool{}
+	for {
+		name := cur.Metadata.Name
+		if seen[name] {
+			return cur
+		}
+		seen[name] = true
+		parentName := conversationView(cur).Spec.CausedBy
+		if parentName == nil || parentName.Parent == "" {
+			return cur
+		}
+		parent, ok := byName[parentName.Parent]
+		if !ok {
+			return cur
+		}
+		cur = parent
+	}
 }
 
 // LabelPipeline is honored when present, but nothing in this system writes it.

@@ -74,6 +74,17 @@ describe('the three views', () => {
     fireEvent.click(n)
     expect(screen.getByTestId('node-panel')).toHaveTextContent('no Ready Pipeline lists this source')
   })
+
+  it('badges a Coordinator node with running conversations, same as a Pipeline', () => {
+    const topology = fixtureTopology()
+    topology.nodes.push(
+      { id: 'coordinators/incident', kind: 'coordinators', name: 'incident', health: 'ok', active: 2, recent: 2 },
+      { id: 'coordinators/quiet', kind: 'coordinators', name: 'quiet', health: 'ok', active: 0, recent: 0 },
+    )
+    draw({}, topology)
+    expect(screen.getByTestId('badge-coordinators/incident')).toHaveTextContent('2')
+    expect(screen.queryByTestId('badge-coordinators/quiet')).toBeNull()
+  })
 })
 
 describe('traffic', () => {
