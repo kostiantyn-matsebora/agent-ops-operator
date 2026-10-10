@@ -4,7 +4,7 @@
 
 - [x] 1.1 Do the thing
 
-## 2. E2E tests
+## 2. System tests
 
 - [x] 2.1 Not applicable: nothing here is decided by a cluster
 

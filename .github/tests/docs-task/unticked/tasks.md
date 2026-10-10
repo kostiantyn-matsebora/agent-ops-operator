@@ -8,7 +8,7 @@
 
 - [x] 2.1 Cover the thing
 
-## 3. E2E tests
+## 3. System tests
 
 - [x] 3.1 Not applicable: nothing here is decided by a cluster
 

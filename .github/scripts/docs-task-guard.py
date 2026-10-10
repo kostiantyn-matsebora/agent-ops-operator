@@ -19,9 +19,9 @@ WHAT IS CHECKED, and both halves were paid for:
   2. no task under it is unticked
 
 AND, FROM 2026-08-29, THE TWO SECTIONS BEFORE IT ARE TESTS: a unit-test section,
-then an e2e-test section, in that order, and every task in both ticked. The
+then a system-test section, in that order, and every task in both ticked. The
 documentation task exists because "docs later" is the line that never lands;
-"tests later" is the same line one section up. The e2e section is owed even
+"tests later" is the same line one section up. The system section is owed even
 where the change touches nothing a cluster decides -- then its one task SAYS
 so, and is ticked. An absent section and a forgotten one look identical, and
 a stated "not applicable" is the only shape a reader can disagree with.
@@ -83,7 +83,7 @@ DOCUMENTATION = re.compile(r"documentation", re.I)
 # heading, as the documentation section is.
 TEST_SECTIONS = (
     ("a unit-test section", re.compile(r"unit", re.I)),
-    ("an e2e-test section", re.compile(r"e2e|end.to.end", re.I)),
+    ("a system-test section", re.compile(r"system", re.I)),
 )
 
 BOTH_HALVES = """Every change ends with a dedicated documentation section covering BOTH halves,
@@ -98,7 +98,7 @@ listed separately because they are skipped independently:
 TAIL = """A finished change ends with three sections, in this order:
 
   1. Unit tests      - every change is covered by unit tests
-  2. E2E tests       - covered by the e2e pack where a cluster decides it;
+  2. System tests    - covered by the system pack where a cluster decides it;
                        otherwise ONE ticked task saying why not
   3. Documentation   - both halves, as below"""
 
@@ -121,7 +121,7 @@ def tests_verdict(tasks: pathlib.Path, lines: list[str],
             found = preceding[i][1] if i < len(preceding) else "(nothing)"
             return False, (
                 f"{tasks}: the section before "
-                f"{'documentation' if i == 1 else 'the e2e-test section'} is not {label}.\n\n"
+                f"{'documentation' if i == 1 else 'the system-test section'} is not {label}.\n\n"
                 f"  it is: {found}\n\n{TAIL}"
             )
     start, end = preceding[0][0], headings[-1][0]
