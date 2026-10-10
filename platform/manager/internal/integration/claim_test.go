@@ -314,4 +314,33 @@ func TestChannelOpsRejectsNonLeader(t *testing.T) {
 	if rec.Code != 204 {
 		t.Fatalf("the current leader must be served normally (empty queue = 204), got %d: %s", rec.Code, rec.Body.String())
 	}
+
+	// controller-runtime's own leaderelection.NewResourceLock mints the real
+	// Lease's HolderIdentity as os.Hostname() + "_" + a per-process uuid,
+	// never the bare ReplicaIdentity this process compares against — an
+	// exact-string holder above would have missed the bug that actually
+	// shipped: every poll 503'd forever, even for the real leader.
+	suffixed := "replica-b_f47ac10b-58cc-4372-a567-0e02b2c3d479"
+	patched := lease.DeepCopy()
+	patched.Spec.HolderIdentity = &suffixed
+	if err := k8sClient.Update(context.Background(), patched); err != nil {
+		t.Fatal(err)
+	}
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-leader&contract=2&wait=0", nil, testMasterToken)
+	if rec.Code != 204 {
+		t.Fatalf("a Lease holder carrying the real uuid-suffixed identity must still be recognized as this replica, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// A different replica's suffixed identity must still be rejected — the
+	// prefix match must not widen into a substring match.
+	other := "replica-a_f47ac10b-58cc-4372-a567-0e02b2c3d479"
+	patched = patched.DeepCopy()
+	patched.Spec.HolderIdentity = &other
+	if err := k8sClient.Update(context.Background(), patched); err != nil {
+		t.Fatal(err)
+	}
+	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-leader&contract=2&wait=0", nil, testMasterToken)
+	if rec.Code != 503 {
+		t.Fatalf("a different replica's suffixed identity must not match, got %d: %s", rec.Code, rec.Body.String())
+	}
 }
