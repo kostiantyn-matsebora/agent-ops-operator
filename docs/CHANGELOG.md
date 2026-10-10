@@ -122,6 +122,22 @@ CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
 
 ### Changed
 
+- **The chart-rendered Coordinator's own agent is an orchestrator, not a
+  dispatcher.** Asked to act, it used to answer that it had no tools while
+  an acting entry sat in its own `agents[]` — its prompt picked an entry
+  whose description matched what arrived, and every shipped description was
+  a trigger ("a cluster event", "once the cause is known"), so a person's
+  instruction matched none of them. The prompt now analyses what arrived,
+  delegates to the `agents[]` entry whose purpose covers it, and reads the
+  result back before deciding what to do next. A person's instruction
+  authorises its own action, but a change the agent discovers on its own is
+  proposed first. Every bundle route's description now states what that
+  agent IS, what it CAN do, what it CANNOT, and what to HAND it —
+  `kubernetes`'s `k8s-observe`/`k8s-operate`, `home-assistant`'s
+  `ha-control`/`ha-ops`, and `prometheus`'s `alert-investigator` all
+  rewritten, and `ha-control` stops being described as read-only, which it
+  never was. `Coordinator.spec.agents[].description`'s cap rises from 512
+  to 2048 bytes, since the new shape did not fit the old one.
 - **A Conversation's object name is now a deterministic word-chain**
   (`alert-node-down-ns`, `member-researcher`), never
   `metadata.generateName`'s random suffix. Non-breaking: existing

@@ -65,7 +65,9 @@ named list of agents it may invoke:
    started the conversation and decides what to invoke.
 3. **`agents[]`** — the WHOLE outbound reach. Each entry names `capabilityRef`
    (an ordinary member) or `coordinatorRef` (nesting), plus a `description`
-   the coordinating agent reads to decide when to use it.
+   stating what that agent IS, what it CAN do, what it CANNOT, and what to
+   HAND it — the coordinating agent's tools are the `agents[]` list itself,
+   and this is the only thing it reads to match a task to one of them.
 4. **`limits`** — `maxAgents`, `maxTurns`, `deadline`, enforced on THIS
    conversation alone.
 5. **`channelRefs`** — bound to the root conversation at creation, exactly
@@ -73,7 +75,8 @@ named list of agents it may invoke:
    them.
 
 **An entry without a description is refused.** The coordinating agent has
-nothing else to read to decide which member answers which task.
+nothing else to read to match a person's instruction, or a signal it is
+investigating, to the agent that can act on it.
 
 ## Declare a member
 
@@ -141,14 +144,18 @@ spec:
   agents:
     - name: log-analyzer
       description: >-
-        Reads recent logs for the named workload and reports the likely
-        cause. Use first for anything that looks like a crash.
+        A log reader for one workload. Can tail and search its recent pod
+        logs, events, and resource usage, and report the likely cause of a
+        crash or a stuck rollout. Cannot change anything. Hand it a
+        workload name and what looks wrong.
       capabilityRef:
         name: log-analyzer
     - name: remediator
       description: >-
-        Restarts or scales the named workload. Use only once the cause is
-        known and the fix is routine.
+        A remediation agent for one workload. Can restart it by deleting
+        its pod so its controller recreates it, or scale it to a given
+        replica count. Cannot diagnose a cause on its own. Hand it a known
+        cause and the fix to apply, once one is decided.
       capabilityRef:
         name: remediator
   channelRefs:
@@ -171,7 +178,10 @@ conversation is then THAT Coordinator's own root, free to invoke its own
 ```yaml
   agents:
     - name: home-desk
-      description: Anything about the house rather than the cluster.
+      description: >-
+        A household coordinator. Can answer questions about the house and
+        operate or repair it, through its own members. Cannot act on the
+        cluster. Hand it anything about the house rather than the cluster.
       coordinatorRef:
         name: home-triage
 ```

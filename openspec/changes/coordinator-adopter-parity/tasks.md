@@ -1,24 +1,39 @@
 ## 1. Coordinator guide, changelog and security catch-up
 
-- [ ] 1.1 Rewrite `docs/guides/coordinate-agents.md`'s worked examples
+- [x] 1.1 Rewrite `docs/guides/coordinate-agents.md`'s worked examples
       (`log-analyzer`, `remediator`, `home-desk`) off trigger-style
       descriptions onto the purpose shape: what the agent IS, what it CAN
       do, what it CANNOT, what to HAND it. Verify by reading the result
       against PR #301's actual shipped bundle descriptions
       (`chart/charts/*/values.yaml`) for the same shape.
-- [ ] 1.2 Correct the guide's surrounding prose (currently: "a description
+      DONE: all three worked examples (`log-analyzer`, `remediator`,
+      `home-desk`) rewritten to the IS/CAN/CANNOT/HAND shape, matching the
+      shipped `k8s-observe`/`k8s-operate`/`ha-control`/`ha-ops`/
+      `alert-investigator` descriptions in `chart/charts/*/values.yaml`.
+- [x] 1.2 Correct the guide's surrounding prose (currently: "a description
       the coordinating agent reads to decide when to use it", "decide
       which member answers which task") from dispatcher framing to the
       orchestrator framing the shipped prompt
       (`chart/templates/coordinator.yaml`) actually uses. Verify by
       re-reading the whole guide section for any remaining "matches what
       arrived" / "decide when to use" phrasing.
-- [ ] 1.3 Add the missing `docs/CHANGELOG.md` entry for #301 (orchestrator
+      DONE: both phrases reworded in "The overall shape". The
+      `agents[]` bullet now states the IS/CAN/CANNOT/HAND shape and names
+      the coordinating agent's tools AS the `agents[]` list. The no-
+      description-refused note now says "match" an instruction or signal
+      rather than "decide which member answers". Re-read confirms no
+      remaining "matches what arrived" / "decide when to use" phrasing.
+- [x] 1.3 Add the missing `docs/CHANGELOG.md` entry for #301 (orchestrator
       prompt reframe, description `maxLength` 512→2048, three bundles'
       rewritten capability descriptions) to the next chart version
       heading. Verify with `python3 .github/scripts/docs-generate.py
       --check` naming no stale version number.
-- [ ] 1.4 Disclose in `docs/security.md`'s "Agent-invoked agents" section
+      DONE: added to `## [14.0.0]`'s `### Changed` section (the version
+      #301 actually shipped under, confirmed via `git log` — no new
+      version is cut by this docs-only change, so there is no later
+      heading to add it to). `docs-generate.py --check` reports "52
+      generated file(s) up to date".
+- [x] 1.4 Disclose in `docs/security.md`'s "Agent-invoked agents" section
       that a coordinated member's ask-before-acting consent boundary is
       currently prompt-only (`agentops.memberScopeInstruction`,
       `chart/templates/_helpers.tpl`), not a mechanical gate at
@@ -27,6 +42,12 @@
       confirming `platform/manager/internal/httpapi/coordinate.go` and
       `platform/manager/internal/chat/coordinate.go` still hold no
       consent-check code, so the disclosure stays true as written.
+      DONE: added a row to the "Residual risk" table (the section this
+      kind of disclosure already lives in, alongside "Depth in a
+      coordination"). Confirmed `coordinate.go`'s handlers check only the
+      `agents[]` list, budgets and the cycle guard — no task-authorization
+      check exists anywhere in `httpapi/coordinate.go` or
+      `chat/coordinate.go`, so the disclosure holds.
 
 ## 2. Elevate Coordinator in the adopter narrative — frontend-developer
 
@@ -57,10 +78,22 @@
 
 ## 3. Review introduction.md and getting-started.md
 
-- [ ] 3.1 Read both pages end to end for the same Pipeline-only framing
+- [x] 3.1 Read both pages end to end for the same Pipeline-only framing
       found in README.md and index.md. Verify by stating, in this task's
       own completion note, either what was found and fixed or that
       nothing needed changing and why.
+      FOUND AND FIXED in `introduction.md`: the Pipeline concept card
+      claimed "the wiring, and the only object that carries any" and "there
+      is nowhere else to look" — stale since `Coordinator` shipped as the
+      second wiring kind, and contradicting the page's own "Two wiring
+      kinds share one capability shape" paragraph a few lines below it.
+      Reworded to "the wiring for one agent" with a pointer to Coordinator.
+      `getting-started.md`: NOTHING NEEDED CHANGING. It already states
+      `wiringMode=pipelines` explicitly with a callout explaining why (demo
+      mode's new `coordinator` default would leave the console unanswered),
+      and links to `coordinate-agents.md` to try `coordinator` mode instead
+      — this was already corrected by `coordinator-deployment-mode`'s own
+      task 9b.1.
 
 ## 4. Close coordinator-deployment-mode's remaining verification — testing-specialist
 
@@ -73,10 +106,15 @@
       copy's `platform/manager/`, against a cluster built from this
       working copy's chart) and tick it there once the verdict is
       recorded.
-- [ ] 4.3 Resolve task 9b.5 from the same file: confirm whether the
+- [x] 4.3 Resolve task 9b.5 from the same file: confirm whether the
       conditional screenshot/demo re-check is actually needed (expected
       no-op, since that change touched no console code) and tick it with
       the finding recorded, rather than left open or silently skipped.
+      DONE: confirmed genuinely no-op, not merely unverified — `git show
+      --stat --name-only` on every commit `coordinator-deployment-mode`
+      and its two follow-up fixes shipped under (#291, #296, #301, and the
+      `signal-cron` pin fix) touches zero files under `platform/console/`.
+      Ticked 9b.5 there with this finding.
 
 ## 5. Unit tests
 

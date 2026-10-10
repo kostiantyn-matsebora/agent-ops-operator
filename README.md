@@ -55,7 +55,7 @@ any MCP server &nbsp;·&nbsp; your own
 2. **One Helm install puts an agent in the path** — your cluster, your credentials.
 3. **You declare the route. One `Pipeline`** — what starts it, what it should
    do, what it may touch, which servers those tools come from, and where you
-   talk to it.
+   talk to it. Or one `Coordinator`, composing several agents into one.
 4. **Then it runs.** One conversation per incident, in its own isolated pod,
    strictly serial and capped. A restart loses nothing.
 5. **Every part of it is a Kubernetes object.** `kubectl get conversations`.
@@ -99,8 +99,9 @@ identity, mediated egress and at-least-once delivery are already in it.
   through the pipeline you already run.
 - **Open at three seams** — your own signal source, runtime or channel.
   Documented HTTP contracts, no fork.
-- **Compose agents, another seam** — a `Coordinator` invokes other agents as
-  its own tools, each its own capability and budget.
+- **Compose agents, another seam** — a `Coordinator` analyses what arrived,
+  delegates by purpose to the agents it lists, reads what they return, and
+  decides what happens next.
 - **Any model you can run** — Claude Code, Ollama and GitHub Copilot ship with
   it. Point it at your own image and the work contract is unchanged.
 - **A pod per conversation** — isolated, serial and capped.
