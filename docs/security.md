@@ -327,6 +327,12 @@ claim that the rest is handled too.
 | **Conversation content in pod logs** | the runtime writes what the agent produced to its pod's stdout |
 | **Signing and attestation** | no image is signed, and the chart carries no attestation |
 | **Depth in a coordination** | a tree of agents invoking agents nests as deep as every level's own budget allows — nothing bounds the number of LEVELS, only a repeated Coordinator is refused |
+| **A member's consent boundary is a prompt, not a gate** | `agentops.memberScopeInstruction` stops an invoked member acting past its task, and nothing checks it at `/coordinate/invoke` |
+
+**The consent boundary is the agent honoring an instruction.** The manager
+enforces WHO may be invoked, never WHAT the invoked agent then does with the
+task. Several rounds of prompt tuning, reverted twice, preceded the current
+wording (#296), so it is stated as open rather than assumed solid.
 
 **None of this is a surprise to the project.** These are decisions with reasons,
 and the reasons are in

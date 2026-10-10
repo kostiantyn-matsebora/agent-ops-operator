@@ -75,10 +75,10 @@ Seven kinds. Each card links to the guide that teaches it.
 - [Pipeline]({{ '/guides/pipeline/' | relative_url }})
   {: .ao-icon-pipeline}
 
-  **The wiring, and the only object that carries any** — the sources it listens
-  on, the profile that answers, the tools that answer may use, the channels it
-  answers on. To learn what an agent can do, read its Pipeline. There is nowhere
-  else to look.
+  **The wiring for one agent** — the sources it listens on, the profile that
+  answers, the tools that answer may use, the channels it answers on. To learn
+  what one agent can do, read its Pipeline. A `Coordinator` wires a
+  composition of agents instead — see below.
 
 **Two wiring kinds share one capability shape.** A `Pipeline` wires one agent
 to sources and channels.

@@ -15,6 +15,84 @@ you control and conversations you stay in.
 {: .ao-tabs #tour}
 - **How it works**
 
+  Two shapes of wiring, same install: a Coordinator that decides who
+  answers, or a Pipeline that routes straight to one agent.
+
+  {: .ao-presentation}
+  1. Something happens — or someone just asks.
+
+     ```yaml
+     # nothing declared yet
+     ```
+
+  2. The same install can wire a Coordinator instead.
+
+     ```text
+     helm install agent-ops agentops/agent-ops
+     ```
+
+  3. You declare the route. One Coordinator.
+
+     ```yaml
+     kind: Coordinator
+     metadata:
+       name: k8s-triage
+     ```
+
+  4. What starts it — exactly like a Pipeline's signalSourceRefs.
+
+     ```yaml
+       signalSourceRefs:
+         - name: cluster-events
+     ```
+
+  5. Each agent it may invoke is listed by purpose.
+
+     ```yaml
+       agents:
+         - name: log-reader
+           description: Reads logs. Cannot change anything.
+           capabilityRef:
+             name: log-reader
+     ```
+
+  6. It reads what each one returns, then decides what is next.
+
+     ```yaml
+         - name: remediator
+           description: Restarts or scales. Needs a known cause.
+           capabilityRef:
+             name: remediator
+     ```
+
+  7. An entry can itself be a Coordinator, nested as deep as it needs.
+
+     ```yaml
+         - name: home-triage
+           coordinatorRef:
+             name: home-triage
+     ```
+
+  8. Only the root escalates — its own path, when it decides to.
+
+     ```yaml
+       channelRefs:
+         - name: telegram
+     ```
+
+  9. Then it runs. One root conversation, each member its own pod.
+
+     ```yaml
+     # one root Conversation, each invoked member its own pod
+     ```
+
+  10. Same install. A different shape of wiring.
+
+      ```text
+      $ kubectl get conversations
+      alert-cluster-events-2   Running   2m
+      ```
+
   {: .ao-presentation}
   1. Something happens.
 

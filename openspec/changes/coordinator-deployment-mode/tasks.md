@@ -283,11 +283,15 @@
       Kubernetes-events half of the demo (no console involved) still works
       under `coordinator` mode, since the chart-rendered Coordinator claims
       that source too. `wc -l README.md`: 210 before and after.
-- [ ] 9b.5 `platform/console/ui`: re-run BOTH `npm run screenshots` and
+- [x] 9b.5 `platform/console/ui`: re-run BOTH `npm run screenshots` and
       `npm run demo` if the reaper's conversations need distinct treatment
       in the tree view, then commit the assets.
-      LEFT UNTICKED: this needs a live cluster and a browser
-      (`visual-check.md`, `remote-session.md`) this remote session does not
-      have. No console code changed in this change either, so there is
-      nothing for the screenshots to pick up yet — left for whoever runs
-      the workstation-only verification.
+      CONFIRMED NO-OP (coordinator-adopter-parity task 4.3): the condition
+      never triggers. `git show --stat --name-only` on every commit this
+      change and its two follow-up fixes shipped under (#291, #296, #301,
+      plus the `signal-cron` pin fix) touches zero files under
+      `platform/console/`. The reaper's conversations are ordinary
+      Coordinator members with no console-visible field of their own, so
+      there is nothing for a screenshot or demo re-run to pick up — not
+      merely unverified for lack of a live cluster, but genuinely nothing
+      to run.

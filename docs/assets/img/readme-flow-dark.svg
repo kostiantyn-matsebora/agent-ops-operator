@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 392" width="800" height="392" role="img" font-family="system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 660" width="800" height="660" role="img" font-family="system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#5c666d"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#43c9bd"/></marker><marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#a996f5"/></marker></defs>
 <text x="18" y="30" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">SOMETHING HAPPENS</text>
 <rect x="16" y="44" width="196" height="46" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
@@ -21,12 +21,13 @@
 <text x="56" y="233" fill="#e8ecee" font-size="13" font-weight="600" text-anchor="start">someone asks</text>
 <text x="56" y="248" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">chat</text>
 <path d="M212 235 H224" stroke="#5c666d" stroke-width="1.3" fill="none"/>
-<path d="M224 67 V235" stroke="#5c666d" stroke-width="1.3" fill="none"/>
+<path d="M224 67 V498" stroke="#5c666d" stroke-width="1.3" fill="none"/>
 <path d="M224 151 H248" stroke="#5c666d" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+<path d="M224 498 H248" stroke="#5c666d" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
 <text x="252" y="30" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">YOU DECLARE IT — ONE PIPELINE</text>
 <rect x="252" y="44" width="252" height="214" rx="12" fill="#123b39" stroke="#43c9bd" stroke-width="1.6"/>
 <text x="270" y="72" fill="#7fded5" font-size="15" font-weight="700" text-anchor="start">Pipeline</text>
-<text x="270" y="90" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">the only place wiring lives</text>
+<text x="270" y="90" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">the wiring, for one agent</text>
 <circle cx="274" cy="112" r="2.6" fill="#43c9bd"/>
 <text x="286" y="116" fill="#e8ecee" font-size="12" font-weight="600" text-anchor="start">what starts it</text>
 <text x="286" y="130" fill="#a5b0b7" font-size="10" font-weight="400" text-anchor="start">signalSourceRefs</text>
@@ -59,4 +60,35 @@
 <text x="566" y="329" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">your own adapter</text>
 <path d="M744 312 H772 V90 H748" stroke="#5c666d" stroke-width="1.3" fill="none" stroke-dasharray="4 4" marker-end="url(#a)"/>
 <text x="548" y="378" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">you reply, and the SAME conversation continues</text>
+<text x="252" y="400" fill="#a5b0b7" font-size="10.5" font-weight="700" text-anchor="start" letter-spacing="1.4">YOU DECLARE IT — OR A COORDINATOR</text>
+<rect x="252" y="414" width="180" height="168" rx="12" fill="#2a2350" stroke="#a996f5" stroke-width="1.6"/>
+<text x="270" y="438" fill="#a996f5" font-size="15" font-weight="700" text-anchor="start">Coordinator</text>
+<text x="270" y="456" fill="#a5b0b7" font-size="10.5" font-weight="400" text-anchor="start">invokes agents by purpose</text>
+<circle cx="274" cy="476" r="2.6" fill="#a996f5"/>
+<text x="286" y="480" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">reads what arrives</text>
+<text x="286" y="493" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">signal · chat · a result</text>
+<circle cx="274" cy="508" r="2.6" fill="#a996f5"/>
+<text x="286" y="512" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">delegates by purpose</text>
+<text x="286" y="525" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">agents[]</text>
+<circle cx="274" cy="540" r="2.6" fill="#a996f5"/>
+<text x="286" y="544" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">decides next</text>
+<text x="286" y="557" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">invoke · escalate · stop</text>
+<path d="M432 498 H446" stroke="#a996f5" stroke-width="1.5" fill="none"/>
+<path d="M446 438 V558" stroke="#a996f5" stroke-width="1.5" fill="none"/>
+<path d="M446 438 H460" stroke="#a996f5" stroke-width="1.5" fill="none" marker-end="url(#ac)"/>
+<path d="M446 498 H460" stroke="#a996f5" stroke-width="1.5" fill="none" marker-end="url(#ac)"/>
+<path d="M446 558 H460" stroke="#a996f5" stroke-width="1.5" fill="none" marker-end="url(#ac)"/>
+<rect x="460" y="414" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<text x="474" y="434" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">log-analyzer</text>
+<text x="474" y="448" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">own pod, own identity</text>
+<rect x="460" y="474" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<text x="474" y="494" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">remediator</text>
+<text x="474" y="508" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">own pod, own identity</text>
+<rect x="460" y="534" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
+<text x="474" y="554" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">…and more</text>
+<text x="474" y="568" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">as it decides</text>
+<path d="M460 574 H432" stroke="#a996f5" stroke-width="1.3" stroke-dasharray="3 2.5" fill="none" marker-end="url(#ac)"/>
+<text x="604" y="578" fill="#a996f5" font-size="8.5" font-weight="400" text-anchor="start">a result returns first</text>
+<path d="M342 582 V626 H758 V334 H748" stroke="#a996f5" stroke-width="1.5" stroke-dasharray="4 3" fill="none" marker-end="url(#ac)"/>
+<text x="646" y="642" fill="#a996f5" font-size="10.5" font-weight="400" text-anchor="middle">escalate — only when it decides to</text>
 </svg>

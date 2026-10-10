@@ -417,11 +417,14 @@ within the list.
 
 ### Pipeline
 
-**The wiring.** N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus
-the agent's **capabilities** (`toolsets` / `mcpConfigs`, see
-[below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
-`serviceAccountName`, see [below](#execution-is-wiring-too)) — the only place
-either is declared.
+**The wiring, for one agent.** N `signalSourceRefs` × M `channelRefs` + one
+`profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`,
+see [below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
+`serviceAccountName`, see [below](#execution-is-wiring-too)).
+
+A `Coordinator` (below) declares the same two fields for its OWN coordinating
+agent, inline on itself, and an `AgentCapability` declares them standalone.
+A Pipeline is where an ordinary, single-agent route declares them inline.
 
 **It is reached two ways and no others**:
 
@@ -440,8 +443,8 @@ What the wiring produces:
 - **A user message on one surface is delivered to every other bound channel** as
   attributed text.
 
-**Wiring lives ONLY here.** Sources route nothing until a Ready Pipeline lists
-them.
+**Wiring lives only in a Pipeline or a Coordinator.** Sources route nothing
+until a Ready one of either lists them.
 
 **Sources are shareable, exactly as channels are** — see
 [Sharing a source](#sharing-a-source).
@@ -546,6 +549,9 @@ invokes named members from `spec.agents[]`.
   Pipeline's are.
 - **Each `agents[]` entry names ONE of `capabilityRef` or `coordinatorRef`.**
   The second nests: the member is that Coordinator's own root.
+- **It declares its own capability inline**, the same `AgentCapabilitySpec`
+  fields as a Pipeline: `profileRef`, `runtimeRef`, `serviceAccountName`,
+  `toolsets`, `mcpConfigs` and `persistence`.
 - **`spec.limits` bounds the tree**: `maxAgents`, `maxTurns` and `deadline`,
   enforced per level and never pooled across nesting.
 - **`channelRefs` are reached only by escalation.** A member binds no channel
