@@ -115,7 +115,7 @@ A report MAY instead ask for a REWIND:
 
 #### Scenario: A rewind with no reader is refused
 - **WHEN** a rewind names no reader
-- **THEN** it is refused and nothing is written
+- **THEN** it is refused with a 400 whose reason reads `rewind requires a reader`, and nothing is written
 
 ### Requirement: A thread is unread when its activity is newer than its watermark
 A bound thread SHALL be considered unread when the conversation's
