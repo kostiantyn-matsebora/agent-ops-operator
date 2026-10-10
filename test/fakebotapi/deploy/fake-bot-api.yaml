@@ -1,6 +1,6 @@
 # The fake Bot API, in-cluster: the components under test resolve it by
 # cluster DNS, so it runs beside them rather than on the runner. Applied by the
-# e2e pack into the release namespace; the telegram bundle is pointed at it
+# system pack into the release namespace; the telegram bundle is pointed at it
 # with `telegram.apiBase: http://agentops-test-fake-bot-api:8081`.
 apiVersion: apps/v1
 kind: Deployment

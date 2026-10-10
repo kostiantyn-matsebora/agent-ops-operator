@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build system
 
-package e2e
+package system
 
 import (
 	"context"
@@ -50,7 +50,7 @@ func (v *InstallValues) valuesYAML() string {
 		claude = "true"
 		k8sMCP = "true"
 	}
-	return fmt.Sprintf(`# rendered by the e2e pack
+	return fmt.Sprintf(`# rendered by the system pack
 image:
   repository: agentops-manager
   tag: e2e

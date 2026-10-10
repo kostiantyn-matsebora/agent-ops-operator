@@ -117,8 +117,8 @@ var sendSeq atomic.Int64
 // not merely within one process. Adapters dedup by op id, as the contract
 // tells them to, so a counter that restarted at 1 handed a fresh notice the
 // id of one already acknowledged — and the adapter, correctly, refused to
-// repeat it. Found by the conformance suite's ack-once rule meeting the e2e
-// pack's manager restart.
+// repeat it. Found by the conformance suite's ack-once rule meeting the
+// system pack's manager restart.
 var sendEpoch = strconv.FormatInt(time.Now().UnixNano(), 36)
 
 // OpQueue holds pending outbound ops per channel type. In-memory by design and
@@ -663,7 +663,7 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // A merge patch on `status.runs` replaces the whole array, and a plain merge
 // patch carries no resourceVersion — so two threads' completions milliseconds
 // apart each wrote the array they had read, the last one won, and the other
-// channel's mark was gone with nothing left to re-derive it. The e2e pack's
+// channel's mark was gone with nothing left to re-derive it. The system pack's
 // fan-out test found it: console plus Telegram bound to one conversation,
 // `delivered: [tg-ops]` forever. With the lock the second write is a 409 and
 // this loop does what it always claimed to.

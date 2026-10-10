@@ -1,4 +1,4 @@
-# TEST IMAGE — the stub runtime. Built by the e2e pack and imported into its
+# TEST IMAGE — the stub runtime. Built by the system pack and imported into its
 # cluster under a name that says what it is: agentops-test-stub-runtime.
 # Published by no release tag (.github/components.sh excludes test/), referenced
 # by no chart default and no sample. If you see it in a real deployment,

@@ -163,7 +163,7 @@ func (s *Server) leaderIdentity(ctx context.Context) string {
 // hostname (main.go, deliberately — the claims this process writes need no
 // relation to that uuid). An exact-equality check here never matched, even
 // for the real leader, so every /channel/ops poll 503'd forever: measured
-// live in the e2e pack, where ensure-topic/send never completed for any
+// live in the system pack, where ensure-topic/send never completed for any
 // channel. Hostnames are unique per pod, so a prefix match is exact enough.
 func (s *Server) isLeader(ctx context.Context) bool {
 	if s.ReplicaIdentity == "" {

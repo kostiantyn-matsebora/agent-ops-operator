@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build system
 
-package e2e
+package system
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func setupAgent(t *testing.T, e *Env) {
 	p.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: agentRuntime}
 	// agentops-observe is filesystem-only (Read/Grep/Glob); the closed-form
 	// pod-name assertion below needs the kubernetes bundle's read MCP tools,
-	// which the e2e install renders only under the full tier (install.go's
+	// which the system install renders only under the full tier (install.go's
 	// k8sMCP) — the one lane that reaches this test.
 	p.Spec.Toolsets = &agentopsv1alpha1.ToolsetBinding{Refs: []agentopsv1alpha1.ObjectRef{
 		{Name: "agentops-observe"}, {Name: "k8s-observability"},

@@ -134,8 +134,8 @@ func TestContractLoopAndDie(t *testing.T) {
 	}
 }
 
-// The calls directive reports the turns and tool calls the e2e lane asserts
-// the manager turns into hops; every other directive reports none.
+// The calls directive reports the turns and tool calls the system lane
+// asserts the manager turns into hops; every other directive reports none.
 func TestCallsDirectiveReportsTurnsAndToolCalls(t *testing.T) {
 	withHome(t)
 	r, ok := perform(unit{RunID: "r", Convo: "c", PromptVars: map[string]string{"USER_TASK": "calls"}})

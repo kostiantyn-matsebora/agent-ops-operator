@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build system
 
-package e2e
+package system
 
 import (
 	"bytes"

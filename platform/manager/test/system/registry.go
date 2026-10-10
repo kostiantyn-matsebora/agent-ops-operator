@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build system
 
-package e2e
+package system
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func StartRegistry(ctx context.Context, c *Cluster) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(repoRoot(), "platform", "manager", "test", "e2e", ".registry")
+	dir := filepath.Join(repoRoot(), "platform", "manager", "test", "system", ".registry")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}

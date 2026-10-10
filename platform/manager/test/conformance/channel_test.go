@@ -70,7 +70,7 @@ func TestChannelTelegramConformance(t *testing.T) {
 }
 
 // tgStartFakeBotAPI starts the Bot API double as a BINARY too — the same one
-// the e2e pack deploys.
+// the system pack deploys.
 func tgStartFakeBotAPI(t *testing.T) *Process {
 	t.Helper()
 	botPort := freePort(t)
