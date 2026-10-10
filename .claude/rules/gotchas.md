@@ -1056,3 +1056,31 @@ single-node cluster to schedule a third pod.
   the chart's own default install never actually ran two REAL replicas in
   CI until this fix was written.
 
+**SCALING THE OLD REPLICASET TO ZERO STILL WASN'T FAST ENOUGH, AND THE
+FAILURE CASCADED — MEASURED ON THE VERY NEXT DISPATCH.** The fix above
+only ASKS the old pod to terminate.
+
+- **Gracefully, up to its 30s `terminationGracePeriodSeconds`** — and it
+  keeps blocking scheduling the whole time it is still there.
+
+- **The symptom changed, which is what gave it away.** The rollout no
+  longer stalled at "1 out of N updated" (scheduling), it stalled at "0 of
+  N updated replicas are available" (readiness) — the new pods WERE
+  scheduling, just not before the old one finally left.
+- **Fixed by force-deleting the old pods** (`client.GracePeriodSeconds(0)`)
+  right after zeroing their ReplicaSet, instead of waiting out a shutdown
+  nothing needs graceful. Verified by hand: 23s end to end, against a
+  multi-minute hang before.
+- **A SEPARATE bug turned that one failure into several.**
+  `scaleManagerReplicas` registered its restore `t.Cleanup` AFTER the
+  risky scale-up call. `t.Fatal` stops the calling goroutine at once via
+  `runtime.Goexit`, so a failed scale-up skipped the registration
+  entirely — the Deployment sat stuck mid-rollout for every test that ran
+  after, and several unrelated lanes failed with it
+  (`TestContextSurvivesLosingThePod`, `TestAdmissionFIFOOnPodDelete`,
+  `TestStubMechanisms/*`).
+- **Register `t.Cleanup` BEFORE the call it cleans up after, always** —
+  the general form of the bug, not specific to this file. A cleanup
+  registered only on a success path is a cleanup that does not run on the
+  one path it matters most for.
+

@@ -139,13 +139,20 @@ func scaleManagerReplicas(t *testing.T, ctx context.Context, e *Env, n int) {
 	if err := e.K.Get(ctx, types.NamespacedName{Namespace: Namespace, Name: "agentops-manager"}, &dep); err != nil {
 		t.Fatal(err)
 	}
-	origReplicas := dep.Spec.Replicas
+	origReplicas := int(derefOr(dep.Spec.Replicas, 1))
+
+	// Registered BEFORE the risky call below, never after: t.Fatal (which
+	// forceManagerRollout uses throughout) stops this goroutine at once via
+	// runtime.Goexit, so a Cleanup registered only after a successful call
+	// is never reached on the failure path — leaving the Deployment stuck
+	// mid-rollout for every test that runs after this one. Measured live:
+	// exactly that, cascading unrelated failures through the rest of the
+	// pack on a CI run where the scale-up itself timed out.
+	t.Cleanup(func() {
+		forceManagerRollout(t, context.Background(), e, origReplicas)
+	})
 
 	forceManagerRollout(t, ctx, e, n)
-
-	t.Cleanup(func() {
-		forceManagerRollout(t, context.Background(), e, int(derefOr(origReplicas, 1)))
-	})
 }
 
 // forceManagerRollout is scaleManagerReplicas' shared mechanics: patch
@@ -193,10 +200,28 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 		if err := e.K.Patch(ctx, rs, rsPatch); err != nil && !apierrors.IsNotFound(err) {
 			t.Fatal(err)
 		}
+		// Scaling the ReplicaSet to zero only asks its pod(s) to terminate —
+		// a graceful SIGTERM, up to the pod's own terminationGracePeriod
+		// (30s default). Each one still carries the OLD anti-affinity rule
+		// until it is actually GONE, so the new pods stay unschedulable for
+		// that whole window — measured live as "didn't satisfy existing
+		// pods anti-affinity rules," still failing minutes in. A test fixture
+		// has no reason to wait out a graceful shutdown for a pod on its way
+		// out regardless, so delete it outright instead.
+		var pods corev1.PodList
+		if err := e.K.List(ctx, &pods, client.InNamespace(Namespace),
+			client.MatchingLabels{"pod-template-hash": rs.Labels["pod-template-hash"]}); err != nil {
+			t.Fatal(err)
+		}
+		for j := range pods.Items {
+			if err := e.K.Delete(ctx, &pods.Items[j], client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+				t.Fatal(err)
+			}
+		}
 	}
 
 	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace,
-		"rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
+		"rollout", "status", "deployment/agentops-manager", "--timeout=5m"); err != nil {
 		t.Fatalf("manager rollout to %d replicas: %v\n%s", n, err, out)
 	}
 }
