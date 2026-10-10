@@ -132,7 +132,7 @@
 
 ## 6. E2E tests
 
-- [ ] 6.1 Not applicable. Nothing in this change is decided by a
+- [x] 6.1 Not applicable. Nothing in this change is decided by a
       cluster beyond the coordinator-deployment-mode verification already
       covered in section 4, which belongs to that change's own e2e task
       (8.1) and is run, not re-specified, here.
@@ -152,7 +152,18 @@
       (Jekyll build, serve, look at README.md's GitHub-rendered form and
       every page this change touched in both themes) and fix anything
       the look catches that an earlier task did not.
-- [ ] 7.3 Confirm no other adopter-facing page (console-guide.md,
+- [x] 7.3 Confirm no other adopter-facing page (console-guide.md,
       installation.md, any integration page) makes a claim this change
       contradicts — e.g. still describing Pipeline as the only way to
       wire an agent. Record the finding, even if it is "none found".
+      FOUND AND FIXED, in a reference page beyond the proposal's own
+      list: `docs/concepts.md`'s `### Pipeline` section called itself
+      "the only place either is declared" for capabilities/execution, and
+      separately claimed "Wiring lives ONLY here" for source-claiming —
+      both false since `Coordinator` ships its own inline capability and
+      execution fields and claims sources identically (confirmed against
+      `CoordinatorSpec` in `coordinator_types.go`). Both corrected, with a
+      pointer to the `### Coordinator` section below. No exclusivity claim
+      found in `console-guide.md`, `installation.md`, any
+      `integrations/*.md` or `runtimes/*.md` page (grepped for "only" /
+      "exclusively" near "pipeline" — none).
