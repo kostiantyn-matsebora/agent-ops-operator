@@ -235,10 +235,11 @@ loop already reads.
 
 That consent stands over everything that holds the merge: the review's
 findings, the analysis service's issues and the failed required checks. What
-that loop cannot settle — a dispute, an unanswered gate — waits for a person,
-as it does today. The session SHALL NOT wait for the checks or the review
-before ending. The loop owns the pull request from the moment its label is
-carried to it.
+that loop cannot settle — a dispute, an unanswered gate — waits for a
+person, as it does today.
+
+The session SHALL NOT wait for the checks or the review before ending. The
+loop owns the pull request from the moment its label is carried to it.
 
 The ARCHIVE station's session SHALL archive the change on its branch, open the
 archive pull request CLOSING the tracking issue with no label, and stop.
