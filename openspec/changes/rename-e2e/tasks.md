@@ -37,7 +37,7 @@
 
 ## 6. System tests
 
-- [ ] 6.1 Dispatch the renamed smoke tier against this branch — `gh workflow run system-smoke.yml --ref change/rename-e2e` — and confirm the run succeeds. This is the one direct proof that the renamed build tag, package path, workflow files and env vars still cohere end to end against a real k3d cluster.
+- [x] 6.1 `system-smoke.yml` could not be dispatched against `change/rename-e2e` itself (GitHub only recognizes a `workflow_dispatch` workflow once its file exists on the default branch, and the renamed file was new on that branch — see the PR's own note). Dispatched against `master` instead, once #333 had merged there: https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/38073958092. The renamed build tag, package path, workflow files and env vars cohered end to end — the pack built, ran under `-tags system`, `SYSTEM_*` env, wrote `system-report.py`'s summary and uploaded `system-smoke-*` diagnostics. Two tests failed (`TestReplicasThreeDeliversEveryConsoleThreadInParallel`, `TestConsolePlainConversationBulkCloseAndDelete`), but this is a pre-existing regression unrelated to this rename: it reproduces identically on `change/fix-console-activity-counts`, `change/coordinator-adopter-parity` and `change/readable-conversation-names`, including under the OLD `e2e` workflow name/tag on branches cut before this change merged — ruling this rename out as the cause. Filed as #336.
 
 ## 7. Documentation
 
