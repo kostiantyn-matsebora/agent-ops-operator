@@ -217,18 +217,19 @@ def build(t):
     # decides what is next — invoke someone else, escalate, or stop. Drawn
     # AFTER every box above, so it paints on top of them rather than under,
     # and clear of every member box's OWN text rather than crossing it.
-    return_y = mem_ys[-1] + MEM_H + 14
+    return_y = mem_ys[-1] + MEM_H - 8  # inside both boxes' vertical span, so the line joins them
     o.append(f'<path d="M{MEM_X} {return_y} H{hub_x}" stroke="{c["accent"]}" stroke-width="1.3" '
              f'stroke-dasharray="3 2.5" fill="none" marker-end="url(#ac)"/>')
     o.append(text(MEM_X + MEM_W + 14, return_y + 4, "a result returns first", c["accentInk"], 8.5))
 
     # Escalate: its OWN conditional path, routed below everything and
-    # reaching the channel card from UNDERNEATH — never the Pipeline's
+    # reaching the channel card by its RIGHT edge, in the clear column past the
+    # labels (x=548-744), so its vertical run crosses no text — never the Pipeline's
     # automatic channelRefs arrow above.
     esc_x0 = COORD_X + COORD_W // 2
     esc_y0 = COORD_Y + COORD_H
     esc_dip = esc_y0 + 44
-    o.append(f'<path d="M{esc_x0} {esc_y0} V{esc_dip} H{CHANNEL_CX} V{CHANNEL_BOTTOM}" '
+    o.append(f'<path d="M{esc_x0} {esc_y0} V{esc_dip} H758 V334 H748" '
              f'stroke="{c["accent"]}" stroke-width="1.5" stroke-dasharray="4 3" fill="none" '
              f'marker-end="url(#ac)"/>')
     o.append(text(CHANNEL_CX, esc_dip + 16, "escalate — only when it decides to",

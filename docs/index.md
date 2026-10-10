@@ -15,7 +15,7 @@ you control and conversations you stay in.
 {: .ao-tabs #tour}
 - **How it works**
 
-  Two shapes of wiring, same install: an Orchestrator that decides who
+  Two shapes of wiring, same install: a Coordinator that decides who
   answers, or a Pipeline that routes straight to one agent.
 
   {: .ao-presentation}

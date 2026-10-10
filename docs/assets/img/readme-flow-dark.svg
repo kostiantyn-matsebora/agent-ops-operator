@@ -87,8 +87,8 @@
 <rect x="460" y="534" width="130" height="48" rx="10" fill="#23282c" stroke="#3a4247" stroke-width="1"/>
 <text x="474" y="554" fill="#e8ecee" font-size="11.5" font-weight="600" text-anchor="start">…and more</text>
 <text x="474" y="568" fill="#a5b0b7" font-size="9.5" font-weight="400" text-anchor="start">as it decides</text>
-<path d="M460 596 H432" stroke="#a996f5" stroke-width="1.3" stroke-dasharray="3 2.5" fill="none" marker-end="url(#ac)"/>
-<text x="604" y="600" fill="#a996f5" font-size="8.5" font-weight="400" text-anchor="start">a result returns first</text>
-<path d="M342 582 V626 H646 V356" stroke="#a996f5" stroke-width="1.5" stroke-dasharray="4 3" fill="none" marker-end="url(#ac)"/>
+<path d="M460 574 H432" stroke="#a996f5" stroke-width="1.3" stroke-dasharray="3 2.5" fill="none" marker-end="url(#ac)"/>
+<text x="604" y="578" fill="#a996f5" font-size="8.5" font-weight="400" text-anchor="start">a result returns first</text>
+<path d="M342 582 V626 H758 V334 H748" stroke="#a996f5" stroke-width="1.5" stroke-dasharray="4 3" fill="none" marker-end="url(#ac)"/>
 <text x="646" y="642" fill="#a996f5" font-size="10.5" font-weight="400" text-anchor="middle">escalate — only when it decides to</text>
 </svg>

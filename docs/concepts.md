@@ -549,6 +549,9 @@ invokes named members from `spec.agents[]`.
   Pipeline's are.
 - **Each `agents[]` entry names ONE of `capabilityRef` or `coordinatorRef`.**
   The second nests: the member is that Coordinator's own root.
+- **It declares its own capability inline**, the same `AgentCapabilitySpec`
+  fields as a Pipeline: `profileRef`, `runtimeRef`, `serviceAccountName`,
+  `toolsets`, `mcpConfigs` and `persistence`.
 - **`spec.limits` bounds the tree**: `maxAgents`, `maxTurns` and `deadline`,
   enforced per level and never pooled across nesting.
 - **`channelRefs` are reached only by escalation.** A member binds no channel

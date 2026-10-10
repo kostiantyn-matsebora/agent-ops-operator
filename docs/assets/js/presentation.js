@@ -434,6 +434,12 @@
     // The caption is each item's own text, and the stanza is whatever fenced
     // block the item carries. Reading them out before anything is built keeps
     // the page the single source of both.
+    var tooShort = groupLists.slice(0, storyCount).some(function (list) {
+      return [].slice.call(list.children).filter(function (li) {
+        return li.tagName === 'LI';
+      }).length < 2;
+    });
+    if (tooShort) return;
     var beatsByStory = groupLists.slice(0, storyCount).map(function (list) {
       var items = [].slice.call(list.children).filter(function (li) {
         return li.tagName === 'LI';
@@ -451,8 +457,6 @@
         return { text: li.textContent.replace(/\s+/g, ' ').trim() };
       });
     });
-    if (beatsByStory.some(function (b) { return b.length < 2; })) return;
-
     var anchorList = groupLists[0];
     var multi = storyCount > 1;
 
@@ -461,6 +465,7 @@
 
     var tablist = null;
     var tabs = [];
+    var panelId = 'ao-pres-panel-' + groups.indexOf(group);
     if (multi) {
       tablist = el('div', 'ao-tablist', shell);
       tablist.setAttribute('role', 'tablist');
@@ -471,9 +476,24 @@
           btn.type = 'button';
           btn.setAttribute('role', 'tab');
           btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+          btn.setAttribute('aria-controls', panelId);
+          btn.tabIndex = i === 0 ? 0 : -1;
           btn.textContent = STORIES[i].tabLabel;
           tabs.push(btn);
           btn.addEventListener('click', function () { select(i); });
+          // WAI-ARIA tabs: arrows move between tabs, and only the current
+          // tab is in the Tab order.
+          btn.addEventListener('keydown', function (e) {
+            var to = -1;
+            if (e.key === 'ArrowRight') to = (i + 1) % storyCount;
+            else if (e.key === 'ArrowLeft') to = (i - 1 + storyCount) % storyCount;
+            else if (e.key === 'Home') to = 0;
+            else if (e.key === 'End') to = storyCount - 1;
+            if (to < 0) return;
+            e.preventDefault();
+            select(to);
+            tabs[to].focus();
+          });
         })(si);
       }
     }
@@ -485,7 +505,8 @@
     groupLists.forEach(function (list) { list.parentNode.removeChild(list); });
 
     var BASE_LABEL = 'How it works, one beat at a time';
-    wrap.setAttribute('role', 'group');
+    wrap.id = panelId;
+    wrap.setAttribute('role', multi ? 'tabpanel' : 'group');
     wrap.setAttribute('aria-label', BASE_LABEL);
     wrap.tabIndex = 0;
 
@@ -643,6 +664,7 @@
       tabs.forEach(function (btn, bi) {
         btn.classList.toggle('is-current', bi === i);
         btn.setAttribute('aria-selected', bi === i ? 'true' : 'false');
+        btn.tabIndex = bi === i ? 0 : -1;
       });
       mount(i);
     }
