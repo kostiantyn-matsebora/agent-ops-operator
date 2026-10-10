@@ -9,8 +9,8 @@
 ## 3. Coordinator activity on the graph — frontend-developer
 
 - [x] 3.1 Widen `Graph.tsx`'s badge render condition from `n.cls === 'pipelines'` to also include `n.cls === 'coordinators'`, so a Coordinator node with a nonzero active count draws the same badge a Pipeline node does. Verify the console UI builds (`npm run build` in `platform/console/ui`).
-- [x] 3.2 Confirm `model.ts`'s `if (n.active || n.recent)` node-detail gate needs no code change, so an idle Coordinator renders exactly like an idle Pipeline. Verify against this worktree's dev server per `.claude/rules/visual-check.md`: screenshot a Coordinator node with running conversations and an idle one, and confirm the first shows a badge and a fact line and the second shows neither.
-  - Confirmed by reading the code: the gate is `if (n.active || n.recent)` with no kind check, so no change is needed. Ticked at the maintainer's request. **The screenshot half was NOT done** — this session is a remote cloud session with no cluster to port-forward against (workstation-only per `.claude/rules/remote-session.md`).
+- [ ] 3.2 Confirm `model.ts`'s `if (n.active || n.recent)` node-detail gate needs no code change, so an idle Coordinator renders exactly like an idle Pipeline. Verify against this worktree's dev server per `.claude/rules/visual-check.md`: screenshot a Coordinator node with running conversations and an idle one, and confirm the first shows a badge and a fact line and the second shows neither.
+  - Confirmed by reading the code: the gate is `if (n.active || n.recent)` with no kind check, so no change is needed. Left unticked until the screenshot check runs. **The screenshot half was NOT done** — this session is a remote cloud session with no cluster to port-forward against (workstation-only per `.claude/rules/remote-session.md`).
 
 ## 4. Problems table timestamp — frontend-developer
 
@@ -41,5 +41,5 @@
 
 - [x] 7.2 Update `docs/console-guide.md` if it describes the topology's activity badges or the Problems table's columns, so an adopter reads the corrected behavior.
   - It describes neither in enough detail to go stale (no column list, no claim about which node kinds badge). No change needed.
-- [x] 7.3 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` against this worktree's tree, since this change alters the console UI.
-  - Ticked at the maintainer's request. **Attempted, not landed.** This session's pre-installed Chromium build (`chromium_headless_shell-1194`) does not match the version `@playwright/test` (resolved `1.62.1`) expects, so capture needed a non-default `executablePath` override. With that override, EVERY screenshot changed — including views this change never touches (Topology, Conversation, Incident, Queues, Configuration) — which is the renderer differing, not the UI. Reverted rather than committed. A workstation (or CI's own pinned toolchain) owes this re-run.
+- [ ] 7.3 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` against this worktree's tree, since this change alters the console UI.
+  - Left unticked until the re-run lands. **Attempted, not landed.** This session's pre-installed Chromium build (`chromium_headless_shell-1194`) does not match the version `@playwright/test` (resolved `1.62.1`) expects, so capture needed a non-default `executablePath` override. With that override, EVERY screenshot changed — including views this change never touches (Topology, Conversation, Incident, Queues, Configuration) — which is the renderer differing, not the UI. Reverted rather than committed. A workstation (or CI's own pinned toolchain) owes this re-run.
