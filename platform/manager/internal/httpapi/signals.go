@@ -30,6 +30,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -657,6 +658,21 @@ func titleForGroup(source *agentopsv1alpha1.SignalSource, group []NormalizedSign
 	return "🔍 " + source.Name
 }
 
+// wordsForGroup is the conversation NAME's word source — independent of
+// titleForGroup's own return value, which stays whatever is most readable
+// as spec.Title even when it carries no word namewords.Words can extract
+// (a non-ASCII question, a caption of only punctuation or emoji). Falling
+// back to the SOURCE's own name — a required Kubernetes field, so always
+// present — is what guarantees every creation path a non-empty word
+// source, widened here to every kind rather than only where titleForGroup
+// itself already falls back to it.
+func wordsForGroup(source *agentopsv1alpha1.SignalSource, title string) string {
+	if words := namewords.Words(title); words != "" {
+		return words
+	}
+	return namewords.Words(source.Name)
+}
+
 // createConversationForGroup opens a new conversation for this signature,
 // resolving the claimant's capability and execution wiring ONCE — whether
 // this claimant inlines it or names it through capabilityRef makes no
@@ -673,17 +689,22 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = s.Namespace
-	// The name prefix follows the KIND, not the input lane: chat and task
-	// share the task lane but are told apart at a glance in `kubectl get`.
-	conv.GenerateName = "alert-"
+	// The name KIND word follows the KIND, not the input lane: chat and
+	// task share the task lane but are told apart at a glance in
+	// `kubectl get`. The word-chain itself, and the actual Create, are
+	// AllocateName's — readable-conversation-names: an object name is a
+	// deterministic word-chain, never metadata.generateName's random
+	// suffix.
+	nameKind := "alert"
 	switch kind {
 	case KindJob:
-		conv.GenerateName = "job-"
+		nameKind = "job"
 	case KindChat:
-		conv.GenerateName = "chat-"
+		nameKind = "chat"
 	case KindTask:
-		conv.GenerateName = "task-"
+		nameKind = "task"
 	}
+	title := titleForGroup(source, group, kind)
 	conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
 	capability, err := dispatch.ResolveCapability(ctx, s.Reader, claimant)
 	if err != nil {
@@ -717,7 +738,7 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 			// signature, so they agree on everything grouping keyed off.
 			Labels: boundedLabels(group[0].Labels),
 		},
-		Title:     titleForGroup(source, group, kind),
+		Title:     title,
 		Signature: signature,
 	}
 	// Provenance names EXACTLY one originating wiring object (design D-B):
@@ -743,7 +764,7 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 			}
 		}
 	}
-	if err := s.Client.Create(ctx, conv); err != nil {
+	if _, err := namewords.AllocateName(ctx, s.Client, s.Namespace, nameKind, wordsForGroup(source, title), conv); err != nil {
 		return nil, err
 	}
 	// A Coordinator-rooted conversation's own resource ceiling (design D-E)

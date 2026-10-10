@@ -198,6 +198,24 @@ the same shape of provenance, naming its PARENT one hop up rather than the
 wiring object that started it. See [Coordinated
 agents](#coordinated-agents).
 
+**The object `Name` is a deterministic word-chain, never a random
+suffix.** `metadata.generateName` is not used, so `kubectl get conversations`
+reads as content instead of `member-h6jv7`. The word-chain's source:
+
+| Creation path | Word source |
+|---|---|
+| A signal-originated root (`alert`, `job`, `chat`, `task` kind) | the same title text as `spec.title` |
+| A chat command (`/<pipeline> <task>`) | the addressed pipeline's name |
+| A Coordinator member | the invoked `agents[]` entry's name |
+
+A repeat for the same base name gets the next integer suffix
+(`alert-node-down-ns-2`, `-3`, …). The manager finds it by listing
+conversations carrying the matching `agentops.dev/name-base` label, never by
+guessing names one at a time.
+
+Conversations created before this change keep their existing names. Nothing
+backfills a `name-base` label onto them.
+
 ### ConversationInput
 
 **Out-of-line payloads** — full alert JSON — so Conversation objects stay small

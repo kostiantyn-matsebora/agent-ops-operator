@@ -132,6 +132,15 @@ const (
 // changed — exactly like the field it mirrors.
 const LabelCausedBy = "agentops.dev/caused-by"
 
+// LabelNameBase names a conversation's own word-chain base name —
+// "<kind>-<words>", with no numeric collision suffix — so a later creation
+// for the same base can find every prior conversation sharing it with one
+// exact-match List (`client.MatchingLabels`), rather than scanning the
+// namespace or guessing names one Create attempt at a time
+// (readable-conversation-names). Set once at creation and never changed,
+// exactly like LabelCausedBy.
+const LabelNameBase = "agentops.dev/name-base"
+
 // InputItem is one queued work unit. Payload is inline OR referenced via
 // PayloadRef (a ConversationInput object) for large payloads.
 type InputItem struct {

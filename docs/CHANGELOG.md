@@ -97,6 +97,11 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- **A Conversation's object name is now a deterministic word-chain**
+  (`alert-node-down-ns`, `member-researcher`), never
+  `metadata.generateName`'s random suffix. Non-breaking: existing
+  conversations keep their current names. See
+  [concepts.md](concepts.md#conversation).
 - **Closing or deleting a conversation now cascades to every conversation it
   caused**, for every originator — a human `/close`, the console's bulk
   close, the idle timer, and a bulk delete — not only the coordinator's own
