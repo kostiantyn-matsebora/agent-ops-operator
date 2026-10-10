@@ -236,22 +236,7 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 		t.Fatal(err)
 	}
 
-	var sets appsv1.ReplicaSetList
-	if err := e.K.List(ctx, &sets, client.InNamespace(Namespace),
-		client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
-		t.Fatal(err)
-	}
-	var current *appsv1.ReplicaSet
-	clearedAnAffinityRS := false
-	for i := range sets.Items {
-		rs := &sets.Items[i]
-		if rs.Spec.Template.Spec.Affinity != nil {
-			zeroStaleReplicaSet(t, ctx, e, rs)
-			clearedAnAffinityRS = true
-			continue
-		}
-		current = rs // the Deployment's current one — leave ITS REPLICAS to the controller
-	}
+	current, clearedAnAffinityRS := zeroAffinityReplicaSets(t, ctx, e)
 
 	// The new pods' FIRST scheduling attempt races the old pod's deletion
 	// above — the Deployment's patch already asked for them before this
@@ -274,19 +259,7 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 	// after the manager's own graceful-shutdown path ran — not stuck, just
 	// unlucky to be Pending at the instant this function looked.
 	if current != nil && clearedAnAffinityRS {
-		var pending corev1.PodList
-		if err := e.K.List(ctx, &pending, client.InNamespace(Namespace),
-			client.MatchingLabels{"pod-template-hash": current.Labels["pod-template-hash"]}); err != nil {
-			t.Fatal(err)
-		}
-		for j := range pending.Items {
-			if pending.Items[j].Status.Phase != corev1.PodPending {
-				continue
-			}
-			if err := e.K.Delete(ctx, &pending.Items[j], client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
-				t.Fatal(err)
-			}
-		}
+		deletePendingPods(t, ctx, e, current)
 	}
 
 	// 5m was still too tight on a FRESH cluster: measured live, both new
@@ -297,6 +270,49 @@ func forceManagerRollout(t *testing.T, ctx context.Context, e *Env, n int) {
 	if out, err := e.Cluster.Kubectl(ctx, "-n", Namespace,
 		"rollout", "status", "deployment/agentops-manager", "--timeout=8m"); err != nil {
 		t.Fatalf("manager rollout to %d replicas: %v\n%s", n, err, out)
+	}
+}
+
+// zeroAffinityReplicaSets zeroes every manager ReplicaSet still carrying the
+// old affinity and returns the Deployment's current one (nil if none) plus
+// whether any was cleared.
+func zeroAffinityReplicaSets(t *testing.T, ctx context.Context, e *Env) (*appsv1.ReplicaSet, bool) {
+	t.Helper()
+	var sets appsv1.ReplicaSetList
+	if err := e.K.List(ctx, &sets, client.InNamespace(Namespace),
+		client.MatchingLabels{"app.kubernetes.io/name": "agentops-manager"}); err != nil {
+		t.Fatal(err)
+	}
+	var current *appsv1.ReplicaSet
+	cleared := false
+	for i := range sets.Items {
+		rs := &sets.Items[i]
+		if rs.Spec.Template.Spec.Affinity != nil {
+			zeroStaleReplicaSet(t, ctx, e, rs)
+			cleared = true
+			continue
+		}
+		current = rs // the Deployment's current one — leave ITS REPLICAS to the controller
+	}
+	return current, cleared
+}
+
+// deletePendingPods force-deletes the Pending pods of rs, so each is
+// recreated with a fresh, un-backed-off scheduling attempt.
+func deletePendingPods(t *testing.T, ctx context.Context, e *Env, rs *appsv1.ReplicaSet) {
+	t.Helper()
+	var pending corev1.PodList
+	if err := e.K.List(ctx, &pending, client.InNamespace(Namespace),
+		client.MatchingLabels{"pod-template-hash": rs.Labels["pod-template-hash"]}); err != nil {
+		t.Fatal(err)
+	}
+	for j := range pending.Items {
+		if pending.Items[j].Status.Phase != corev1.PodPending {
+			continue
+		}
+		if err := e.K.Delete(ctx, &pending.Items[j], client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
 	}
 }
 
