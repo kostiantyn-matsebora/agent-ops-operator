@@ -28,10 +28,9 @@
       rewritten capability descriptions) to the next chart version
       heading. Verify with `python3 .github/scripts/docs-generate.py
       --check` naming no stale version number.
-      DONE: added to `## [14.0.0]`'s `### Changed` section (the version
-      #301 actually shipped under, confirmed via `git log` — no new
-      version is cut by this docs-only change, so there is no later
-      heading to add it to). `docs-generate.py --check` reports "52
+      DONE: added to `## [Unreleased]`'s `### Changed` section (no new
+      version is cut by this docs-only change, so the entry waits under
+      Unreleased for the next chart release). `docs-generate.py --check` reports "52
       generated file(s) up to date".
 - [x] 1.4 Disclose in `docs/security.md`'s "Agent-invoked agents" section
       that a coordinated member's ask-before-acting consent boundary is

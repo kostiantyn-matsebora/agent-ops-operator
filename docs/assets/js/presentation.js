@@ -639,6 +639,8 @@
         entry state a fresh mount uses, whether this is the first story shown
         or a tab switch away from another one. */
     function mount(i) {
+      // A reader's manual pause survives a tab switch.
+      var wasPaused = wrap.classList.contains('is-paused');
       storyIndex = i;
       beats = beatsByStory[i];
       script = STORIES[i].script;
@@ -661,7 +663,7 @@
         stillNow = false;
         wrap.classList.remove('is-still');
         goTo(0);
-        start();
+        if (wasPaused) pause(); else start();
       }
     }
 
