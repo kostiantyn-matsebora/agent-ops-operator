@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A markdown report of one `go test -tags e2e -json` run, for the Actions
+"""A markdown report of one `go test -tags system -json` run, for the Actions
 run summary.
 
 Reads test2json events (one JSON object per line — `go test -json`'s output)
@@ -17,7 +17,7 @@ Which tier gets which level is a decision the CALLER makes (see
 openspec/changes/e2e-report-levels/design.md) — this script only renders the
 level it is given.
 
-    e2e-report.py --events events.jsonl --level summary >> "$GITHUB_STEP_SUMMARY"
+    system-report.py --events events.jsonl --level summary >> "$GITHUB_STEP_SUMMARY"
 
 A file with no parseable test events — most often a build failure, which
 `go test` reports before test2json ever emits a `run` action — renders a
@@ -110,7 +110,7 @@ def header(title: str, tests: dict[str, dict], elapsed: str) -> list[str]:
     whichever level they asked for."""
     counts = status_counts(tests)
     return [
-        f"## E2E report ({title})",
+        f"## System report ({title})",
         "",
         f"**{counts['pass']} passed, {counts['fail']} failed, {counts['skip']} skipped** "
         f"of {len(tests)} test(s), in {elapsed}",
@@ -169,7 +169,7 @@ def main() -> int:
 
     if not tests:
         print(
-            "## E2E report\n\n"
+            "## System report\n\n"
             "no test results were parsed — the pack likely failed to build or "
             "start before any test ran; see the job log.\n"
         )

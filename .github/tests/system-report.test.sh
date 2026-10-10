@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The program that turns an e2e pack's `go test -json` events into the two
+# The program that turns a system pack's `go test -json` events into the two
 # reports the workflow appends to the Actions run summary.
 #
 # WHAT IS ASSERTED IS THE LEVEL SPLIT AND THE ZERO-EVENTS FALLBACK. `summary`
@@ -10,7 +10,7 @@
 # since that step runs unconditionally.
 . "$(dirname "$0")/lib.sh"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-S="$ROOT/.github/scripts/e2e-report.py"
+S="$ROOT/.github/scripts/system-report.py"
 tmp=$(mktemp -d)
 
 cat > "$tmp/events.jsonl" <<'EOF'

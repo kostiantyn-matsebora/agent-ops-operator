@@ -3,11 +3,11 @@
 # release.yml. A pull request runs conformance alone (ci.yml) and no cluster —
 # this is the way to run the cluster against a branch before a release.
 #
-#   gh workflow run e2e-smoke.yml --ref <branch>
+#   gh workflow run system-smoke.yml --ref <branch>
 #
 # (GitHub offers a workflow for dispatch once its file is on the default
 # branch; from then on --ref runs the copy on the branch you name.)
-name: e2e-smoke
+name: system-smoke
 
 on:
   workflow_dispatch:
@@ -17,6 +17,6 @@ permissions:
 
 jobs:
   smoke:
-    uses: ./.github/workflows/e2e.yml
+    uses: ./.github/workflows/system.yml
     with:
       tier: smoke

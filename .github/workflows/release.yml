@@ -130,11 +130,11 @@ jobs:
   # answers "did ci already pass for this commit" — by looking up existing
   # evidence rather than trusting the tag. The evidence is the commit's CHECK
   # RUNS: the smoke is a reusable workflow called by a job named `smoke`, so
-  # every smoke — from this workflow or from `e2e-smoke.yml` — appears on the
-  # commit as `smoke / e2e / smoke`, whichever workflow produced it. Finding a
-  # passed one skips provisioning a cluster here; finding one still running
-  # waits for its verdict rather than racing it, since tags are pushed three
-  # at a time by rule and land on the commit together.
+  # every smoke — from this workflow or from `system-smoke.yml` — appears on
+  # the commit as `smoke / system / smoke`, whichever workflow produced it.
+  # Finding a passed one skips provisioning a cluster here; finding one
+  # still running waits for its verdict rather than racing it, since tags
+  # are pushed three at a time by rule and land on the commit together.
   smoke_is_green:
     name: smoke is green for this commit
     needs: [determine, ci_is_green]
@@ -173,7 +173,7 @@ jobs:
       needs.smoke_is_green.outputs.smoked != 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/e2e.yml
+    uses: ./.github/workflows/system.yml
     with:
       tier: smoke
 

@@ -43,7 +43,7 @@ run() { python3 "$S" --repo o/r --sha deadbeef "$@" 2>"$tmp/err"; }
 
 reset
 cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"success"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"completed","conclusion":"success"}]}
 JSON
 it "a passed smoke check run on the commit: smoked=true"
 out=$(run); rc=$?
@@ -61,7 +61,7 @@ assert_equals "smoked=false" "$out"
 
 reset
 cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"failure"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"completed","conclusion":"failure"}]}
 JSON
 it "only a failed smoke: smoked=false, run one"
 out=$(run); rc=$?
@@ -72,16 +72,16 @@ reset
 cat > "$PAGES/1.json" <<'JSON'
 {"check_runs":[{"name":"other-check","status":"completed","conclusion":"success"}]}
 JSON
-it "a passed check run that is not a smoke (name does not end in 'e2e / smoke'): smoked=false"
+it "a passed check run that is not a smoke (name does not end in 'system / smoke'): smoked=false"
 out=$(run); rc=$?
 assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
 
 reset
 cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"pre-e2e / smoke","status":"completed","conclusion":"success"}]}
+{"check_runs":[{"name":"pre-system / smoke","status":"completed","conclusion":"success"}]}
 JSON
-it "a name that merely ENDS in the bare characters 'e2e / smoke' with no leading '/' is NOT matched"
+it "a name that merely ENDS in the bare characters 'system / smoke' with no leading '/' is NOT matched"
 out=$(run); rc=$?
 assert_status 0 "$rc"
 assert_equals "smoked=false" "$out"
@@ -90,7 +90,7 @@ assert_equals "smoked=false" "$out"
 
 reset
 cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"in_progress"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"in_progress"}]}
 JSON
 it "an in-flight smoke, then success on re-check: waits and reports smoked"
 (
@@ -99,7 +99,7 @@ it "an in-flight smoke, then success on re-check: waits and reports smoked"
   # deterministic rather than a race between two equal sleeps.
   sleep 0.2
   cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"success"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"completed","conclusion":"success"}]}
 JSON
 ) &
 bgpid=$!
@@ -111,7 +111,7 @@ assert_contains "$(cat "$tmp/err")" "waiting"
 
 reset
 cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"in_progress"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"in_progress"}]}
 JSON
 it "an in-flight smoke that never resolves before the bound: smoked=false"
 out=$(run --wait-minutes 0 --poll-seconds 1); rc=$?
@@ -136,13 +136,13 @@ assert_equals "smoked=false" "$out"
 
 reset
 cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"in_progress"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"in_progress"}]}
 JSON
 it "an in-flight smoke that finishes FAILED before the bound: smoked=false, run our own"
 (
   sleep 0.2
   cat > "$PAGES/1.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"failure"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"completed","conclusion":"failure"}]}
 JSON
 ) &
 bgpid=$!
@@ -195,7 +195,7 @@ page = {"check_runs": [{"name": f"check-{i}", "status": "completed", "conclusion
 open(f"{sys.argv[1]}/1.json", "w").write(json.dumps(page))
 PY
 cat > "$PAGES/2.json" <<'JSON'
-{"check_runs":[{"name":"smoke / e2e / smoke","status":"completed","conclusion":"success"}]}
+{"check_runs":[{"name":"smoke / system / smoke","status":"completed","conclusion":"success"}]}
 JSON
 it "pages through check runs (100 on page 1) to find the smoke on page 2"
 out=$(run); rc=$?
