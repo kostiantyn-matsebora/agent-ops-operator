@@ -36,7 +36,7 @@ THEMES = {
     ),
 }
 
-W, H = 800, 640
+W, H = 800, 660
 
 ICONS = {
     # 16x16 glyphs, stroked in currentColor. Drawn rather than emoji: an emoji
@@ -138,7 +138,7 @@ def build(t):
     o.append(band_label(252, 30, "YOU DECLARE IT — ONE PIPELINE", c["subtle"]))
     o.append(card(252, 44, 252, 214, c["brandSoft"], c["brand"], r=12, sw=1.6))
     o.append(text(270, 72, "Pipeline", c["brandInk"], 15, 700))
-    o.append(text(270, 90, "the only place wiring lives", c["subtle"], 10.5))
+    o.append(text(270, 90, "the wiring, for one agent", c["subtle"], 10.5))
     rows = [("what starts it", "signalSourceRefs"),
             ("what it should do", "profileRef"),
             ("what it may touch", "toolsets · mcpConfigs"),
@@ -215,22 +215,23 @@ def build(t):
 
     # The loop: a member's result returns to the coordinator BEFORE it
     # decides what is next — invoke someone else, escalate, or stop. Drawn
-    # AFTER every box above, so it paints on top of them rather than under.
-    return_y = mem_ys[-1] + MEM_H - 10
+    # AFTER every box above, so it paints on top of them rather than under,
+    # and clear of every member box's OWN text rather than crossing it.
+    return_y = mem_ys[-1] + MEM_H + 14
     o.append(f'<path d="M{MEM_X} {return_y} H{hub_x}" stroke="{c["accent"]}" stroke-width="1.3" '
              f'stroke-dasharray="3 2.5" fill="none" marker-end="url(#ac)"/>')
-    o.append(text(hub_x + 8, return_y - 6, "a result returns", c["accentInk"], 8.5))
+    o.append(text(MEM_X + MEM_W + 14, return_y + 4, "a result returns first", c["accentInk"], 8.5))
 
     # Escalate: its OWN conditional path, routed below everything and
     # reaching the channel card from UNDERNEATH — never the Pipeline's
     # automatic channelRefs arrow above.
     esc_x0 = COORD_X + COORD_W // 2
     esc_y0 = COORD_Y + COORD_H
-    esc_dip = esc_y0 + 30
+    esc_dip = esc_y0 + 44
     o.append(f'<path d="M{esc_x0} {esc_y0} V{esc_dip} H{CHANNEL_CX} V{CHANNEL_BOTTOM}" '
              f'stroke="{c["accent"]}" stroke-width="1.5" stroke-dasharray="4 3" fill="none" '
              f'marker-end="url(#ac)"/>')
-    o.append(text(CHANNEL_CX, esc_dip + 14, "escalate — only when it decides to",
+    o.append(text(CHANNEL_CX, esc_dip + 16, "escalate — only when it decides to",
                    c["accentInk"], 10.5, anchor="middle"))
 
     o.append('</svg>')

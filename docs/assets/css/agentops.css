@@ -1175,9 +1175,10 @@ a:hover {
    manifest stanza that beat is about. `assets/js/presentation.js` reads the
    list, builds the stage and the transport, and removes the list.
 
-   WITHOUT JAVASCRIPT THE LIST IS THE CONTENT: nine beats in order, each with
+   WITHOUT JAVASCRIPT THE LIST IS THE CONTENT: ten beats in order, each with
    the lines it concerns. Nothing is hidden and no claim is lost — which is why
-   the beats are a list rather than a script's array.
+   the beats are a list rather than a script's array. Two such lists under one
+   parent are two stories, read in order — see `presentation.js`.
 
    THE STAGE IS AUTHORED AT ONE WIDTH AND SCALED. Connectors are drawn between
    known points, so reflowing at narrow widths would mean re-authoring every
@@ -1197,11 +1198,22 @@ a:hover {
   margin-top: 0.5rem;
 }
 
+/* The shell holds the (optional) story tablist and the figure beneath it.
+   Two or more `{: .ao-presentation}` lists sharing one parent become a
+   tablist plus one figure that switches STORIES; one list is still the
+   figure alone, with no tablist built at all. */
+.ao-pres-shell {
+  margin-top: 0.75rem;
+}
+
+.ao-pres-shell .ao-tablist {
+  margin-bottom: 0.6rem;
+}
+
 .ao-pres {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  margin-top: 0.75rem;
 }
 
 .ao-pres-viewport {
@@ -1258,104 +1270,134 @@ a:hover {
   stroke-width: 2;
 }
 
-.ao-pres-node {
+/* A shaped node: an absolutely-positioned SVG outline (the console's own
+   per-kind silhouette — see the mirrored SHAPES in presentation.js — stretched
+   non-uniformly to the slot and kept at a constant stroke weight with
+   vector-effect) sitting BEHIND a centred text layer, rather than one dashed
+   rectangle for every kind. Position, width and height are set inline by the
+   script per NODE and per STORY — a hexagon and a diamond are not the same
+   box, and two stories do not share one layout.
+   `.ao-pres-conv` shares every one of these rules: the conversation is a
+   shaped node too (a "note"), dim and dashed until its own beat lights it,
+   exactly like every other declared object. */
+.ao-pres-node,
+.ao-pres-conv {
   position: absolute;
-  padding: 0.32rem 0.55rem 0.38rem;
-  background: transparent;
-  border: 1px dashed var(--ao-border);
-  border-radius: var(--ao-radius);
   opacity: 0.3;
-  transition: opacity 0.35s ease, border-color 0.25s ease, border-style 0.25s ease,
-    background 0.25s ease, box-shadow 0.25s ease;
+  transition: opacity 0.35s ease, left 0.4s ease, top 0.4s ease, width 0.4s ease,
+    height 0.4s ease;
 }
 
-.ao-pres-node.is-on {
-  background: var(--ao-surface-alt);
-  border-style: solid;
+.ao-pres-node.is-on,
+.ao-pres-conv.is-on {
   opacity: 1;
 }
 
-.ao-pres-node.is-lit {
-  background: var(--ao-surface);
-  border-color: var(--ao-brand);
-  box-shadow: 0 0 0 3px var(--ao-brand-soft);
+.ao-pres-shape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ao-pres-shape path {
+  fill: transparent;
+  stroke: var(--ao-border);
+  stroke-width: 1.4;
+  stroke-dasharray: 3.5 3;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 0.25s ease, fill 0.25s ease, stroke-dasharray 0.25s ease;
+}
+
+.ao-pres-node.is-on .ao-pres-shape path,
+.ao-pres-conv.is-on .ao-pres-shape path {
+  fill: var(--ao-surface-alt);
+  stroke-dasharray: none;
+}
+
+.ao-pres-node.is-lit .ao-pres-shape path,
+.ao-pres-conv.is-lit .ao-pres-shape path {
+  stroke: var(--ao-brand);
+  fill: var(--ao-surface);
+}
+
+.ao-pres-content {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.08rem;
+  padding: 0 16%;
+  text-align: center;
+}
+
+.ao-pres-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.26rem;
+}
+
+/* The small inline mark beside each kind label is the glyph ALONE, no
+   outline — the node's own shape (drawn by the shape layer above) is the
+   outline now, so repeating it at 12px would just be a second, illegible
+   copy. */
+.ao-pres-glyph {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: var(--ao-text-subtle);
+  transition: color 0.25s ease;
+  vertical-align: middle;
+}
+
+.ao-pres-glyph path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.ao-pres-node.is-lit .ao-pres-glyph,
+.ao-pres-conv.is-lit .ao-pres-glyph {
+  color: var(--ao-brand);
 }
 
 .ao-pres-kind {
   display: block;
   color: var(--ao-text-subtle);
   font-family: var(--ao-font-mono);
-  font-size: 0.57rem;
-  letter-spacing: 0.08em;
+  font-size: 0.55rem;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
 .ao-pres-name {
   display: block;
   font-family: var(--ao-font-display);
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   font-weight: 700;
-  line-height: 1.25;
-}
-
-/* The five declared objects, at the coordinates the connectors are drawn
-   between. Changing one is changing the drawing's geometry. */
-.ao-pres-node[data-node="source"] {
-  left: 0;
-  top: 8px;
-  width: 164px;
-}
-
-.ao-pres-node[data-node="pipeline"] {
-  left: 248px;
-  top: 2px;
-  width: 164px;
-  text-align: center;
-}
-
-.ao-pres-node[data-node="pipeline"] .ao-pres-name {
-  font-size: 0.92rem;
-}
-
-.ao-pres-node[data-node="channel"] {
-  left: 496px;
-  top: 8px;
-  width: 164px;
-}
-
-.ao-pres-node[data-node="profile"] {
-  left: 168px;
-  top: 118px;
-  width: 152px;
-}
-
-.ao-pres-node[data-node="toolset"] {
-  left: 340px;
-  top: 118px;
-  width: 152px;
-}
-
-/* Beside the toolset, not below it: the allowlist and the servers are a PAIR —
-   which tools may be called, and where those tools live — and the reach row
-   under both is what the pair grants. */
-.ao-pres-node[data-node="mcpconfig"] {
-  left: 502px;
-  top: 118px;
-  width: 152px;
+  line-height: 1.18;
 }
 
 /* What the wiring granted, and what it did not. The denied chips are the half
-   that makes the granted ones a claim rather than a list. */
+   that makes the granted ones a claim rather than a list. Position and width
+   are set inline, per story — a Pipeline's reach row and a Coordinator's sit
+   at different points in the drawing. */
 .ao-pres-reach {
   position: absolute;
-  left: 340px;
-  top: 186px;
   display: flex;
   flex-wrap: wrap;
   gap: 0.28rem;
-  width: 314px;
   opacity: 0.28;
-  transition: opacity 0.35s ease;
+  transition: opacity 0.35s ease, left 0.4s ease, top 0.4s ease, width 0.4s ease;
 }
 
 .ao-pres-reach.is-on {
@@ -1387,17 +1429,15 @@ a:hover {
    LABEL cleared the Pipeline node by 0.8px across that node's whole width —
    boxes that do not technically intersect and read as though they do. Two
    borders on one pixel is a rendering accident to the eye, whatever the
-   geometry says. */
+   geometry says. Position and size are set inline — both stories currently
+   share one frame, but neither is required to. */
 .ao-pres-frame {
   position: absolute;
-  left: 212px;
-  top: -16px;
-  width: 456px;
-  height: 261px;
   border: 1px dashed var(--ao-border-strong);
   border-radius: 10px;
   opacity: 0;
-  transition: opacity 0.45s ease;
+  transition: opacity 0.45s ease, left 0.4s ease, top 0.4s ease, width 0.4s ease,
+    height 0.4s ease;
   pointer-events: none;
 }
 
@@ -1418,28 +1458,17 @@ a:hover {
   text-transform: uppercase;
 }
 
-.ao-pres-conv {
-  position: absolute;
-  left: 0;
-  top: 150px;
-  width: 160px;
-  padding: 0.4rem 0.55rem 0.5rem;
-  background: transparent;
-  border: 1px dashed var(--ao-border);
-  border-radius: var(--ao-radius);
-  opacity: 0.3;
-  transition: opacity 0.4s ease, border-color 0.3s ease, border-style 0.3s ease,
-    background 0.3s ease, box-shadow 0.3s ease;
-}
-
-.ao-pres-conv.is-on {
-  background: var(--ao-surface);
-  border-color: var(--ao-brand);
-  border-style: solid;
-  opacity: 1;
+/* The conversation's own box is narrower than a declared object's, so its
+   content keeps a tighter side margin than `.ao-pres-content`'s default. */
+.ao-pres-conv .ao-pres-content {
+  padding: 0 14%;
 }
 
 .ao-pres-conv .ao-pres-kind {
+  color: var(--ao-text-subtle);
+}
+
+.ao-pres-conv.is-lit .ao-pres-kind {
   color: var(--ao-brand-strong);
 }
 
@@ -1449,21 +1478,22 @@ a:hover {
 
 .ao-pres-conv i {
   display: block;
+  width: 55%;
   height: 4px;
-  margin-top: 0.25rem;
+  margin: 0.2rem auto 0;
   background: var(--ao-border);
   border-radius: 3px;
 }
 
-.ao-pres-conv i + i {
-  width: 55%;
+.ao-pres-conv i:first-of-type {
+  width: 72%;
 }
 
 .ao-pres-dot {
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-right: 0.28rem;
+  margin-right: 0.1rem;
   background: var(--ao-success);
   border-radius: 50%;
 }
