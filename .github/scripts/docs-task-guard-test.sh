@@ -127,7 +127,7 @@ plan() {  # plan <name> <implementation-state> <docs-state> [test-state]
   local d="$r/openspec/changes/$1"; mkdir -p "$d"
   { printf '## 1. The work\n\n- [%s] 1.1 do the thing\n\n' "$2"
     printf '## 2. Unit tests\n\n- [%s] 2.1 cover it\n\n' "${4:-x}"
-    printf '## 3. E2E tests\n\n- [%s] 3.1 not applicable, nothing a cluster decides\n\n' "${4:-x}"
+    printf '## 3. System tests\n\n- [%s] 3.1 not applicable, nothing a cluster decides\n\n' "${4:-x}"
     printf '## 4. Documentation\n\n- [%s] 4.1 docs/concepts.md\n' "$3"; } > "$d/tasks.md"
 }
 

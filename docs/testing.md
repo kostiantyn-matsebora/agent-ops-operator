@@ -8,7 +8,7 @@ that chain — see below.
 |---|---|---|---|
 | **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
 | **Contract conformance** | every adapter's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter | anything about the cluster |
-| **End to end** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
+| **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
 | **Console browser e2e** (`e2e-live`, manual) | Playwright driving a real browser against an ALREADY-RUNNING install — the real console, the real manager, `kubectl` against a real context | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
 
 **Every change declares its first and third tiers in its own task list.**
@@ -18,7 +18,7 @@ that chain — see below.
 An openspec change's `tasks.md` ends with, in order:
 
 1. a unit-test section
-2. an e2e-test section — one ticked line states when nothing a cluster decides was touched
+2. a system-test section — one ticked line states when nothing a cluster decides was touched
 3. a documentation section
 
 ## The console's browser tier (`e2e-live`), and why it exists beside the other three
@@ -33,7 +33,7 @@ together, could expose:
   sub-second component the mark-unread rewind needs.
 - A freshly-read message could therefore count as unread forever, in
   ordinary, continuous operation.
-- `platform/manager/test/e2e/lifecycle_test.go`'s
+- `platform/manager/test/system/lifecycle_test.go`'s
   `TestConsoleMarkReadThenUnreadRewind` is this defect's own regression test.
 - `internal/integration/channelread_test.go`'s
   `TestChannelReadPreservesSubSecondPrecision` now pins the same round-trip
@@ -41,7 +41,7 @@ together, could expose:
 
 - **It is a BLACK-BOX reader of the rendered page**, never a second way to
   arrange state — setup goes straight at `kubectl` and the manager's own HTTP
-  surface (`support/kube.ts`, `support/manager.ts`), exactly as the Go e2e
+  surface (`support/kube.ts`, `support/manager.ts`), exactly as the Go system
   pack's typed client does, and every assertion reads the console's own
   rendering.
 - **It is NOT CI-gated, and no workflow dispatches it.** No job under
@@ -69,7 +69,7 @@ together, could expose:
   installs no `k3d`/docker and deploys nothing, so a remote session cannot
   satisfy it.
 - **It owns no cluster lifecycle.** Point it at any already-running install —
-  the Go e2e pack's own cluster (`E2E_REUSE=1`), a local `rancher-desktop`
+  the Go system pack's own cluster (`SYSTEM_REUSE=1`), a local `rancher-desktop`
   deploy, anything reachable — it arranges its own fixtures through
   `global-setup.ts` and tears down only what it opened (a port-forward to the
   manager).
@@ -172,20 +172,20 @@ cd platform/manager; go test -tags conformance -count=1 -v ./test/conformance/
 The pack needs Docker, `k3d`, `kubectl` and `helm` on the PATH:
 
 ```sh
-cd platform/manager && go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
+cd platform/manager && go test -tags system -count=1 -timeout 45m -v ./test/system/
 ```
 
 ```powershell
-cd platform/manager; go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
+cd platform/manager; go test -tags system -count=1 -timeout 45m -v ./test/system/
 ```
 
 | Variable | Does |
 |---|---|
-| `E2E_TIER` | `smoke` (default) or `full` — `full` adds the real-runtime lane and the slow lanes |
-| `E2E_REUSE=1` | keep an existing cluster and leave it running afterwards — the loop for local iteration |
-| `E2E_SKIP_BUILD=1` | with `E2E_REUSE`, images are already built and imported |
-| `E2E_ARTIFACT_DIR` | where failure diagnostics land — manager and adapter logs, the pod list, cluster events, every agentops CR as YAML |
-| `E2E_BUDGET` | wall-clock budget of the gating tier (default `20m`) — exceeding it fails the run, so growth is visible rather than gradual |
+| `SYSTEM_TIER` | `smoke` (default) or `full` — `full` adds the real-runtime lane and the slow lanes |
+| `SYSTEM_REUSE=1` | keep an existing cluster and leave it running afterwards — the loop for local iteration |
+| `SYSTEM_SKIP_BUILD=1` | with `SYSTEM_REUSE`, images are already built and imported |
+| `SYSTEM_ARTIFACT_DIR` | where failure diagnostics land — manager and adapter logs, the pod list, cluster events, every agentops CR as YAML |
+| `SYSTEM_BUDGET` | wall-clock budget of the gating tier (default `20m`) — exceeding it fails the run, so growth is visible rather than gradual |
 | `CLAUDE_CODE_OAUTH_TOKEN` | the real-runtime lane's credential — absent, that lane reports itself skipped |
 
 On any failure the diagnostics are written unconditionally: a cluster that no
@@ -193,7 +193,7 @@ longer exists is unreproducible, and a failure that did not capture its own
 context costs a full re-run to learn anything.
 
 **Every CI run of the pack — pass or fail — also appends a report to the
-Actions run's own summary page**, built by `.github/scripts/e2e-report.py`
+Actions run's own summary page**, built by `.github/scripts/system-report.py`
 from the pack's `go test -json` output. A result is readable without opening
 the job log.
 
@@ -207,14 +207,14 @@ reading in full:
 
 ## What the repository must hold
 
-Three workflows share one definition, `.github/workflows/e2e.yml`, and `ci.yml` runs conformance on its own:
+Three workflows share one definition, `.github/workflows/system.yml`, and `ci.yml` runs conformance on its own:
 
 | Workflow | Runs | When |
 |---|---|---|
 | `ci.yml` | contract conformance only — no cluster | every pull request, reporting through `ci-green` |
 | `release.yml` | the smoke tier — once per COMMIT, reused across every tag of a release | on the tagged commit, before anything is published |
-| `e2e-smoke.yml` | the smoke tier | on demand, on any branch |
-| `e2e-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
+| `system-smoke.yml` | the smoke tier | on demand, on any branch |
+| `system-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
 
 The code review reaches the merge box three ways, and only the first is a
 check:
@@ -228,22 +228,22 @@ check:
 Resolving a thread unblocks the merge at once, and nothing needs re-running.
 
 ```sh
-gh workflow run e2e-smoke.yml --ref my-branch
-gh workflow run e2e-full.yml
+gh workflow run system-smoke.yml --ref my-branch
+gh workflow run system-full.yml
 ```
 
 ```powershell
-gh workflow run e2e-smoke.yml --ref my-branch
-gh workflow run e2e-full.yml
+gh workflow run system-smoke.yml --ref my-branch
+gh workflow run system-full.yml
 ```
 
 One thing exists already and one is a decision:
 
 1. **The repository secret `CLAUDE_CODE_OAUTH_TOKEN`** — the same Claude Code
    token the review workflow already runs on, and the credential the claude
-   bundle projects into the runtime. Read only by `e2e-full.yml`. Pull
+   bundle projects into the runtime. Read only by `system-full.yml`. Pull
    requests never see it. Without it the real-runtime lane reports itself
    skipped and every other lane still runs.
-2. **The cadence.** The cron lives in `e2e-full.yml` and nowhere else. A
+2. **The cadence.** The cron lives in `system-full.yml` and nowhere else. A
    night on which master did not move is skipped, so the spend tracks the
    change rate rather than the calendar.

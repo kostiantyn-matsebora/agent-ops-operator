@@ -254,8 +254,8 @@ starts a cluster ([the tier model](docs/testing.md)):
 cd platform/manager
 # contract conformance — every adapter's built binary against a fake manager
 go test -tags conformance -count=1 -v ./test/conformance/
-# the end-to-end pack — k3s under k3d; needs docker, k3d, kubectl and helm
-go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
+# the system pack — k3s under k3d, needs docker, k3d, kubectl and helm
+go test -tags system -count=1 -timeout 45m -v ./test/system/
 ```
 
 On every pull request CI runs the module, operator, UI and chart checks above,
@@ -265,8 +265,8 @@ over the published tree, below.
 Of the two tiers, a pull request meets CONFORMANCE only — no pull request
 provisions a cluster. The cluster smoke gates a release, on the tagged commit
 before anything is published, and runs on demand on any branch
-(`e2e-smoke.yml`). The `full` tier — the real agent runtime with a real
-credential — runs nightly when master moved and on dispatch (`e2e-full.yml`),
+(`system-smoke.yml`). The `full` tier — the real agent runtime with a real
+credential — runs nightly when master moved and on dispatch (`system-full.yml`),
 and gates nothing.
 
 `platform/manager/` and `runtimes/ollama/` need Go 1.25. The others declare
@@ -389,9 +389,9 @@ Code impact severity scale this organisation reads issues under, not the
 retired five-level one — keeps its rating below B, so reaching B means fixing
 those, never relaxing the threshold.
 
-**`test/e2e/**` AND `test/conformance/**` ARE EXCLUDED FROM COVERAGE, NOT FROM
+**`test/system/**` AND `test/conformance/**` ARE EXCLUDED FROM COVERAGE, NOT FROM
 ANALYSIS** (`sonar.coverage.exclusions` in `.github/actions/sonar-scan`). Both
-are build-tag gated (`e2e`, `conformance`), so the plain `go test ./...` that
+are build-tag gated (`system`, `conformance`), so the plain `go test ./...` that
 produces `coverage.out` never runs them — a diff touching `cluster.go`,
 `install.go`, `wiring.go` or `runner.go` there has no coverage data at all,
 which the new-code condition reads as uncovered regardless of what the
@@ -556,7 +556,7 @@ and it fails if any job that DID run failed.
 | `publication` | the tree names a private deployment |
 | `retired-vocabulary` | it asserts a name this project stopped using |
 | `openspec` | a published specification is invalid, or a change your diff touched is |
-| `docs-task` | a change your diff FINISHES does not end in unit tests, e2e tests and documentation — three sections, in that order, every task ticked |
+| `docs-task` | a change your diff FINISHES does not end in unit tests, system tests and documentation — three sections, in that order, every task ticked |
 | `scripts` | the workflow's own scripts fail their suite, or their analysis could not be submitted or fails its quality gate — see *Code analysis* |
 | `pr-title` | the title would not read as a commit subject |
 | `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |

@@ -93,7 +93,7 @@ images() {
   # ever copies across a component boundary.
   # `test/` is EXCLUDED, explicitly. The stub runtime and the fake Bot API
   # under it carry a Dockerfile and a go.mod because they run in a cluster
-  # during the e2e pack — and the union above would otherwise publish
+  # during the system pack — and the union above would otherwise publish
   # `agentops-stubruntime` on the next release tag and hand every matrix two
   # more components. The exclusion is asserted by a test, not trusted.
   dirs="$( { find . -name Dockerfile -not -path '*/node_modules/*' -not -path './.github/*' -not -path './test/*' -printf '%h\n'
@@ -124,7 +124,7 @@ images() {
 }
 
 modules() {
-  # test/ is excluded here too: its modules are built by the e2e pack and the
+  # test/ is excluded here too: its modules are built by the system pack and the
   # conformance suite, never by the per-module CI matrix.
   find . -name go.mod -not -path '*/node_modules/*' -not -path './test/*' -mindepth 2 \
     | sed 's|/go.mod$||; s|^\./||' | sort | jq -Rsc 'split("\n") | map(select(length > 0))'

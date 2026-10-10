@@ -23,11 +23,11 @@ cd platform/manager
 # contract conformance: every adapter's BUILT BINARY, black-box, against a fake
 # manager. Go toolchain only — no cluster, no network, no credential.
 go test -tags conformance -count=1 -v ./test/conformance/
-# the e2e pack: k3s under k3d, the chart from the working tree, images from
-# this commit. Needs docker, k3d, kubectl and helm. E2E_TIER=full adds the
-# real-runtime lane (CLAUDE_CODE_OAUTH_TOKEN) and the slow lanes; E2E_REUSE=1 keeps
-# the cluster between runs.
-go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
+# the system pack: k3s under k3d, the chart from the working tree, images from
+# this commit. Needs docker, k3d, kubectl and helm. SYSTEM_TIER=full adds the
+# real-runtime lane (CLAUDE_CODE_OAUTH_TOKEN) and the slow lanes; SYSTEM_REUSE=1
+# keeps the cluster between runs.
+go test -tags system -count=1 -timeout 45m -v ./test/system/
 ```
 
 - **ON THIS WORKSTATION THE PACK RUNS FROM THE CONTAINER'S BUILD AND THE
@@ -38,9 +38,9 @@ go test -tags e2e -count=1 -timeout 45m -v ./test/e2e/
   ```sh
   # from platform/manager, as everything above is:
   docker exec -i -w "$PWD" agentops-go \
-    sh -c 'CGO_ENABLED=0 go test -c -tags e2e -o /tmp/e2e.test ./test/e2e/'
-  docker cp agentops-go:/tmp/e2e.test /tmp/e2e.test
-  (cd test/e2e && E2E_REUSE=1 /tmp/e2e.test -test.v -test.timeout 45m)
+    sh -c 'CGO_ENABLED=0 go test -c -tags system -o /tmp/system.test ./test/system/'
+  docker cp agentops-go:/tmp/system.test /tmp/system.test
+  (cd test/system && SYSTEM_REUSE=1 /tmp/system.test -test.v -test.timeout 45m)
   ```
 
   `repoRoot()` is resolved from the compiled-in source path, which the

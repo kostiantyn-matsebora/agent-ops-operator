@@ -491,7 +491,7 @@ func TestChannelReadRewindRequiresAReader(t *testing.T) {
 }
 
 // Regression test for the production defect
-// `platform/manager/test/e2e/lifecycle_test.go`'s `TestConsoleMarkReadThenUnreadRewind`
+// `platform/manager/test/system/lifecycle_test.go`'s `TestConsoleMarkReadThenUnreadRewind`
 // found against a real deployed cluster: `ThreadBinding.ReadAt` /
 // `ReaderMark.ReadAt` used to be `*metav1.Time`, which the Kubernetes API
 // serializes at SECOND granularity — any sub-second component was silently
@@ -530,7 +530,7 @@ func TestChannelReadPreservesSubSecondPrecision(t *testing.T) {
 	// `TestConsoleMarkReadThenUnreadRewind` exercises end to end. Pinned here
 	// too so a regression to second-granularity storage fails fast, in the
 	// envtest suite every pull request runs, rather than only in the manual
-	// e2e-live/e2e pack.
+	// e2e-live/system pack.
 	preciseRewind := base.Add(30*time.Minute + 987654321*time.Nanosecond)
 	code, out = postRead(t, srv, "chan-precision", []map[string]any{
 		{"threadId": "pr1", "readAt": preciseRewind.Format(time.RFC3339Nano), "reader": "sha256:precise-reader", "rewind": true},

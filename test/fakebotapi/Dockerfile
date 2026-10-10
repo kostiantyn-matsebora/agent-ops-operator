@@ -1,4 +1,4 @@
-# TEST IMAGE. Built by the e2e pack and imported into its cluster; published by
+# TEST IMAGE. Built by the system pack and imported into its cluster; published by
 # no release tag (.github/components.sh excludes test/). The name it is built
 # under says so: agentops-test-fake-bot-api.
 FROM --platform=$BUILDPLATFORM golang:1.27 AS build

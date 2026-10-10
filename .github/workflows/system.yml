@@ -1,15 +1,15 @@
-# The end-to-end tiers — ONE definition, three entry points.
+# The system tiers — ONE definition, three entry points.
 #
 # This workflow is the definition and is only ever CALLED (workflow_call). The
 # entry points are thin workflows that name a tier:
 #
-#   release.yml    calls it with tier=smoke on the tagged commit, and publishes
-#                  nothing until it passes.
-#   e2e-smoke.yml  the smoke tier on demand, on any branch.
-#   e2e-full.yml   the full tier — the real-runtime lane included — nightly
-#                  when master moved, and on demand. It NEVER gates a pull
-#                  request: its lane spends real tokens and its flakiness must
-#                  not block work while it is tuned.
+#   release.yml       calls it with tier=smoke on the tagged commit, and
+#                      publishes nothing until it passes.
+#   system-smoke.yml  the smoke tier on demand, on any branch.
+#   system-full.yml   the full tier — the real-runtime lane included —
+#                      nightly when master moved, and on demand. It NEVER
+#                      gates a pull request: its lane spends real tokens and
+#                      its flakiness must not block work while it is tuned.
 #
 #   smoke a thin k3s run on the stub runtime. No secret, deterministic,
 #         bounded in wall clock. Contract conformance is NOT here: ci.yml owns
@@ -22,7 +22,7 @@
 # WHAT THIS WORKFLOW OWNS is the cluster-based jobs only. Per-module build, vet
 # and test, the envtest suite and chart lint stay in ci.yml — one definition
 # per tier, stated in both openspec capabilities.
-name: e2e
+name: system
 
 on:
   workflow_call:
@@ -43,17 +43,17 @@ jobs:
   # The k3s pack. THE PACK ITSELF creates the k3d cluster, builds every image
   # from THIS commit and imports it into the node, installs the chart from the
   # working tree and tears the cluster down — this job only supplies the tools
-  # and runs `go test`. See platform/manager/test/e2e/harness_test.go.
+  # and runs `go test`. See platform/manager/test/system/harness_test.go.
   pack:
-    name: e2e / ${{ inputs.tier }}
+    name: system / ${{ inputs.tier }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
       run:
         working-directory: ${{ env.MANAGER_MODULE }}
     env:
-      E2E_TIER: ${{ inputs.tier }}
-      E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+      SYSTEM_TIER: ${{ inputs.tier }}
+      SYSTEM_ARTIFACT_DIR: ${{ github.workspace }}/system-artifacts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -82,22 +82,22 @@ jobs:
           # Without it, this pipeline's exit code would be jq's (always 0),
           # so a failing `go test` would report the job green.
           set -o pipefail
-          mkdir -p "$E2E_ARTIFACT_DIR"
+          mkdir -p "$SYSTEM_ARTIFACT_DIR"
           # -json alongside -v: the live log stays human-readable (jq prints
           # each Output event's text; a non-JSON line — a build failure, before
           # go test ever reaches test2json — passes through unchanged instead
           # of erroring), while the raw event stream is kept for the report
           # below and for the diagnostics upload.
-          go test -tags e2e -count=1 -timeout 55m -v -json ./test/e2e/ \
-            | tee "$E2E_ARTIFACT_DIR/events.jsonl" \
+          go test -tags system -count=1 -timeout 55m -v -json ./test/system/ \
+            | tee "$SYSTEM_ARTIFACT_DIR/events.jsonl" \
             | jq -rR '. as $raw | try (fromjson | select(.Action == "output") | .Output) catch $raw'
       # if: always() — a report saying WHY nothing ran is owed on a build
       # failure too. Never fails the job itself: "Run the pack" already does.
-      - name: Write e2e report
+      - name: Write system report
         if: always()
         run: |
-          python3 "$GITHUB_WORKSPACE/.github/scripts/e2e-report.py" \
-            --events "$E2E_ARTIFACT_DIR/events.jsonl" \
+          python3 "$GITHUB_WORKSPACE/.github/scripts/system-report.py" \
+            --events "$SYSTEM_ARTIFACT_DIR/events.jsonl" \
             --level ${{ inputs.tier == 'full' && 'summary' || 'full' }} \
             >> "$GITHUB_STEP_SUMMARY"
       # Unconditional: a failure that did not capture its own context costs a
@@ -106,6 +106,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-${{ inputs.tier }}-${{ github.run_id }}
-          path: ${{ github.workspace }}/e2e-artifacts
+          name: system-${{ inputs.tier }}-${{ github.run_id }}
+          path: ${{ github.workspace }}/system-artifacts
           if-no-files-found: ignore

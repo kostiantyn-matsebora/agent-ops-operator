@@ -103,8 +103,8 @@ func TestNoApproversMeansAnyone(t *testing.T) {
 // TestTopicMessageCarriesItsThreadID: the thread id is what makes this a
 // CONTINUATION — /channel/inbound now rejects a message without one.
 func TestTopicMessageCarriesItsThreadID(t *testing.T) {
-	// The CANONICAL captured topic update, shared with the e2e pack: the fake
-	// Bot API replays exactly this and the router forwards it verbatim.
+	// The CANONICAL captured topic update, shared with the system pack: the
+	// fake Bot API replays exactly this and the router forwards it verbatim.
 	// Test-only relative read, no go.mod entry.
 	raw, err := os.ReadFile("../../test/fixtures/telegram-update-topic.json")
 	if err != nil {

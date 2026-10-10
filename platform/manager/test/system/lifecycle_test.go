@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build system
 
-package e2e
+package system
 
 import (
 	"context"
@@ -205,7 +205,7 @@ func TestConsolePlainConversationBulkCloseAndDelete(t *testing.T) {
 // 9.3.2 The console's mark-unread rewind (design D-E), against a REAL
 // manager and a REAL console reading its own live activity feed.
 //
-// THIS TEST PINNED A CONFIRMED PRODUCTION DEFECT THIS E2E PASS FOUND, AND IS
+// THIS TEST PINNED A CONFIRMED PRODUCTION DEFECT THIS SYSTEM PASS FOUND, AND IS
 // NOW THE FIX'S OWN ACCEPTANCE CHECK.
 //
 // `ThreadBinding.ReadAt` / `ReaderMark.ReadAt` were `*metav1.Time`

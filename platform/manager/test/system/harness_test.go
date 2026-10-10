@@ -1,25 +1,25 @@
-//go:build e2e
+//go:build system
 
-// Package e2e is the end-to-end pack: a real single-node cluster (k3s under
+// Package system is the system pack: a real single-node cluster (k3s under
 // k3d), the chart installed from the working tree with images built from the
 // same commit, and assertions against the live cluster. Its subject is the
 // SUBSTRATE — what envtest structurally cannot decide because it runs no
 // kubelet, no scheduler, no CSI and no authorizer against real subjects.
 //
-// Behind the `e2e` build tag so `go test ./...` never provisions a cluster:
+// Behind the `system` build tag so `go test ./...` never provisions a cluster:
 //
-//	cd platform/manager && go test -tags e2e -timeout 40m ./test/e2e/
+//	cd platform/manager && go test -tags system -timeout 40m ./test/system/
 //
 // Knobs (environment):
 //
-//	E2E_CLUSTER        k3d cluster name (default agentops-e2e)
-//	E2E_REUSE=1        keep an existing cluster and leave it running afterwards
-//	E2E_SKIP_BUILD=1   images are already built and imported (with E2E_REUSE)
-//	E2E_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
-//	E2E_TIER           smoke (default) or full — full adds the real-runtime lane
-//	E2E_BUDGET         wall-clock budget of the gating tier (default 20m)
+//	SYSTEM_CLUSTER        k3d cluster name (default agentops-e2e)
+//	SYSTEM_REUSE=1        keep an existing cluster and leave it running afterwards
+//	SYSTEM_SKIP_BUILD=1   images are already built and imported (with SYSTEM_REUSE)
+//	SYSTEM_ARTIFACT_DIR   where failure diagnostics are written (default $TMPDIR/agentops-e2e)
+//	SYSTEM_TIER           smoke (default) or full — full adds the real-runtime lane
+//	SYSTEM_BUDGET         wall-clock budget of the gating tier (default 20m)
 //	CLAUDE_CODE_OAUTH_TOKEN  the real-runtime lane's credential; absent, the lane is SKIPPED
-package e2e
+package system
 
 import (
 	"context"
@@ -62,11 +62,11 @@ func TestMain(m *testing.M) {
 }
 
 func run(m *testing.M) int {
-	tier = os.Getenv("E2E_TIER")
+	tier = os.Getenv("SYSTEM_TIER")
 	if tier == "" {
 		tier = "smoke"
 	}
-	artifact := os.Getenv("E2E_ARTIFACT_DIR")
+	artifact := os.Getenv("SYSTEM_ARTIFACT_DIR")
 	if artifact == "" {
 		artifact = filepath.Join(os.TempDir(), "agentops-e2e")
 	}
@@ -75,7 +75,7 @@ func run(m *testing.M) int {
 	defer cancel()
 
 	started = time.Now()
-	cluster, err := EnsureCluster(ctx, clusterName(), os.Getenv("E2E_REUSE") == "1")
+	cluster, err := EnsureCluster(ctx, clusterName(), os.Getenv("SYSTEM_REUSE") == "1")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cluster:", err)
 		return 1
@@ -85,11 +85,11 @@ func run(m *testing.M) int {
 		if code != 0 {
 			cluster.Dump(artifact)
 		}
-		if os.Getenv("E2E_REUSE") != "1" {
+		if os.Getenv("SYSTEM_REUSE") != "1" {
 			cluster.Delete()
 		}
 	}()
-	if os.Getenv("E2E_SKIP_BUILD") != "1" {
+	if os.Getenv("SYSTEM_SKIP_BUILD") != "1" {
 		if err := BuildAndImport(ctx, cluster, neededImages(tier)); err != nil {
 			fmt.Fprintln(os.Stderr, "images:", err)
 			return 1
@@ -109,7 +109,7 @@ func run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "readiness:", err)
 		return 1
 	}
-	if os.Getenv("E2E_REUSE") == "1" {
+	if os.Getenv("SYSTEM_REUSE") == "1" {
 		if err := resetReusedInstall(ctx, cluster, k); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -187,7 +187,7 @@ func enforceSmokeBudget(code int) int {
 		return code
 	}
 	budget := 20 * time.Minute
-	if v := os.Getenv("E2E_BUDGET"); v != "" {
+	if v := os.Getenv("SYSTEM_BUDGET"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			budget = d
 		}
@@ -205,7 +205,7 @@ func enforceSmokeBudget(code int) int {
 }
 
 func clusterName() string {
-	if n := os.Getenv("E2E_CLUSTER"); n != "" {
+	if n := os.Getenv("SYSTEM_CLUSTER"); n != "" {
 		return n
 	}
 	return "agentops-e2e"
@@ -231,6 +231,6 @@ func requireEnv(t *testing.T) *Env {
 func fullTier(t *testing.T) {
 	t.Helper()
 	if tier != "full" {
-		t.Skip("full tier only (E2E_TIER=full)")
+		t.Skip("full tier only (SYSTEM_TIER=full)")
 	}
 }

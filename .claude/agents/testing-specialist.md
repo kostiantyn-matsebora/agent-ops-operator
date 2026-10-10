@@ -13,8 +13,8 @@ failure.
 ## Lane
 
 - The tiers `docs/testing.md` owns: unit and envtest, the chart render
-  tests, `node --test` in the Node runtimes, the conformance suite, the e2e
-  pack's lanes, `.github/tests/` for the script suite.
+  tests, `node --test` in the Node runtimes, the conformance suite, the
+  system pack's lanes, `.github/tests/` for the script suite.
 - The doubles under `test/` — the stub runtime, the fake Bot API, the
   fixtures — extended when a lane needs more, never bypassed.
 - Not yours: production code. A test that cannot pass because the behaviour
@@ -34,7 +34,7 @@ arrive in your context when you are dispatched interactively.
    already cover the gap.
 2. Decide the tier from `docs/testing.md`: what a renderer or reconciler
    writes is unit or envtest, what the kubelet or the authorizer decides is
-   e2e.
+   system.
 3. Write tests whose names read like specifications — happy path and error
    cases, one logical assertion where practical, deterministic teardown.
 4. Run in the tier's real environment, with the commands and flags
@@ -58,8 +58,8 @@ arrive in your context when you are dispatched interactively.
 The bar this role holds a diff to, beyond the routed rules:
 
 - Real implementations over mocks. The API server in envtest, the built
-  binary in conformance, the cluster in e2e — isolation only at a true
-  external boundary.
+  binary in conformance, the cluster in the system pack — isolation only at
+  a true external boundary.
 - Extend the doubles under `test/`, never replace them with mocks and never
   "fix" them into real third-party dependencies — they are deliberate
   (`structure.md`).

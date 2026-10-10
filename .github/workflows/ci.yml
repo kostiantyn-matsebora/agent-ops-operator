@@ -65,7 +65,7 @@ jobs:
       chart: ${{ steps.list.outputs.chart }}
       docs: ${{ steps.list.outputs.docs }}
       site: ${{ steps.list.outputs.site }}
-      e2e: ${{ steps.list.outputs.e2e }}
+      system: ${{ steps.list.outputs.system }}
       scripts: ${{ steps.list.outputs.scripts }}
     steps:
       # FULL HISTORY, because the filter below diffs against a base commit.
@@ -108,7 +108,7 @@ jobs:
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator chart docs site e2e scripts; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator chart docs site system scripts; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -139,7 +139,7 @@ jobs:
             echo "site=$(m '^docs/')"
             # Anything a running install is built from: every component
             # group, the chart, the test doubles and the pack itself.
-            echo "e2e=$(m '^(platform/|runtimes/|signals/|channels/|gateways/|chart/|test/|\.github/workflows/e2e\.yml)')"
+            echo "system=$(m '^(platform/|runtimes/|signals/|channels/|gateways/|chart/|test/|\.github/workflows/system\.yml)')"
             # The workflow's own scripts, their suite, and the hooks the suite
             # exercises. The workflow files are the everything case above.
             echo "scripts=$(m '^(\.github/scripts/|\.github/tests/|\.github/\.coveragerc|\.claude/hooks/)')"
@@ -1044,11 +1044,12 @@ jobs:
 
   # CONTRACT CONFORMANCE: every adapter's built binary, black-box, against a
   # fake manager — a minute, no cluster, no secret. It is the one thing from
-  # the e2e change that gates a pull request. The k3s smoke does NOT: it runs
-  # before a release (release.yml) and on demand on any branch (e2e-smoke.yml).
+  # the e2e-testing change that gates a pull request. The k3s smoke does NOT:
+  # it runs before a release (release.yml) and on demand on any branch
+  # (system-smoke.yml).
   conformance:
     needs: discover
-    if: needs.discover.outputs.e2e == 'true'
+    if: needs.discover.outputs.system == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

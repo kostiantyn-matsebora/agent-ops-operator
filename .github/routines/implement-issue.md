@@ -109,7 +109,7 @@ written to a branch is not a judgement call anywhere else in this project.
    component inventory and breaks the tree's own tests.
 
 4. **Implement.** `/opsx:apply`, through every task, including the three
-   trailing sections every change here owes: unit tests, e2e tests (or one
+   trailing sections every change here owes: unit tests, system tests (or one
    ticked line saying why a cluster decides nothing here), then documentation.
    The gate refuses an archive without them, and CI reports the change pending.
 
@@ -126,7 +126,7 @@ written to a branch is not a judgement call anywhere else in this project.
 6. **Dispatch the cluster tier, and DO NOT WAIT FOR IT.**
 
    ```sh
-   gh workflow run e2e-smoke.yml --ref change/<name>
+   gh workflow run system-smoke.yml --ref change/<name>
    ```
 
    **Do not idle waiting for it.** The first live run of this file dispatched
@@ -135,8 +135,8 @@ written to a branch is not a judgement call anywhere else in this project.
    is what makes it visible.
 
    - **Dispatch it, name the run in the pull request, and CARRY ON to step 7.**
-   - **The e2e pack needs docker, k3d and a cluster**, which this machine does
-     not have; that tier already runs on a runner of this shape.
+   - **The system pack needs docker, k3d and a cluster**, which this machine
+     does not have. That tier already runs on a runner of this shape.
    - If you genuinely need its verdict first, POLL it in a foreground command
      that exits — `until`, with a bound — rather than ending your turn and
      hoping to be woken.
