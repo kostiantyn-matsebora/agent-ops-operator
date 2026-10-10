@@ -165,17 +165,25 @@
 
 ## 5. Unit tests
 
-- [ ] 5.1 Run `python3 .claude/scripts/rules_compliance.py` over every
+- [x] 5.1 Run `python3 .claude/scripts/rules_compliance.py` over every
       page this change touched (README.md, docs/guides/coordinate-agents.md,
       docs/CHANGELOG.md, docs/security.md, index.md, introduction.md,
       getting-started.md) and confirm silent output.
-- [ ] 5.2 Run `python3 .github/scripts/publication-guard.py` and `python3
+      DONE: every finding on every touched file is pre-existing, confirmed
+      by diffing against `origin/master`'s own copy of each file (same
+      line content, shifted line numbers). No new finding from this
+      change's own prose.
+- [x] 5.2 Run `python3 .github/scripts/publication-guard.py` and `python3
       .github/scripts/retired-vocabulary-guard.py` over the full tree and
       confirm both pass — the prototypes under `prototypes/` included.
-- [ ] 5.3 Run `python3 .github/scripts/docs-generate.py --check` and
+      DONE: `publication-guard: clean`, `retired-vocabulary guard: clean
+      (127 files)`.
+- [x] 5.3 Run `python3 .github/scripts/docs-generate.py --check` and
       confirm clean (no CRD, chart value, or doc-comment change in this
       change, so this should already be a no-op, confirmed rather than
       assumed).
+      DONE: "52 generated file(s) up to date" — confirmed no-op, as
+      expected.
 
 ## 6. E2E tests
 
