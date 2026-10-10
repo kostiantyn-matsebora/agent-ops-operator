@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -198,27 +199,34 @@ func TestReplicasThreeDeliversEveryConsoleThreadInParallel(t *testing.T) {
 			if err != nil {
 				return false, err
 			}
-			got := 0
-			for i := range items {
-				c := &items[i]
-				if c.Spec.Signal == nil || c.Spec.Signal.SourceRef == nil ||
-					c.Spec.Signal.SourceRef.Name != SourceConsole || !c.CreationTimestamp.Time.After(start) {
-					continue
-				}
-				if tid := c.ThreadFor("console"); tid == nil || *tid == "" {
-					continue
-				}
-				delivered := false
-				for _, r := range c.Status.Runs {
-					if r.DeliveredTo("console") {
-						delivered = true
-						break
-					}
-				}
-				if delivered {
-					got++
-				}
-			}
-			return got >= n, nil
+			return countDeliveredConsoleConversations(items, start) >= n, nil
 		})
+}
+
+// countDeliveredConsoleConversations counts console-started conversations
+// created after start that hold a real thread and a delivered reply.
+func countDeliveredConsoleConversations(items []agentopsv1alpha1.Conversation, start time.Time) int {
+	got := 0
+	for i := range items {
+		if consoleConversationDelivered(&items[i], start) {
+			got++
+		}
+	}
+	return got
+}
+
+func consoleConversationDelivered(c *agentopsv1alpha1.Conversation, start time.Time) bool {
+	if c.Spec.Signal == nil || c.Spec.Signal.SourceRef == nil ||
+		c.Spec.Signal.SourceRef.Name != SourceConsole || !c.CreationTimestamp.Time.After(start) {
+		return false
+	}
+	if tid := c.ThreadFor("console"); tid == nil || *tid == "" {
+		return false
+	}
+	for _, r := range c.Status.Runs {
+		if r.DeliveredTo("console") {
+			return true
+		}
+	}
+	return false
 }

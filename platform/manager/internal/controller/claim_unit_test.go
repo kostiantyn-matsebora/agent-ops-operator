@@ -280,7 +280,7 @@ func TestDeliverRunRepliesDeliversOnceTheThreadIsReal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if op := r.Ops.Claim("slack"); op == nil {
+	if r.Ops.Claim("slack") == nil {
 		t.Fatal("a bound real thread must get the reply enqueued")
 	}
 }
