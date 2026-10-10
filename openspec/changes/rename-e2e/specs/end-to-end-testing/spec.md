@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: The end-to-end pack runs against a real single-node cluster`
+- TO: `### Requirement: The system pack runs against a real single-node cluster`
+
 ## MODIFIED Requirements
 
 ### Requirement: The system pack runs against a real single-node cluster
