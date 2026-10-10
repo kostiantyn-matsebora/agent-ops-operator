@@ -98,6 +98,21 @@ type FakeManager struct {
 
 	rejectSignals int // HTTP status to answer /signal/inbound with; 0 = accept
 	rejectInbound int
+	// rejectOpsAsNonLeader counts down the next /channel/ops polls answered
+	// with 503 before falling back to the ordinary 204/200 behavior —
+	// durable-chat-ops-broker's non-leader rejection, simulated without a
+	// second manager process.
+	rejectOpsAsNonLeader int
+}
+
+// RejectOpsAsNonLeader makes the fake answer the next n GET /channel/ops
+// polls with 503 (Retry-After: 0), exactly as a manager replica that is not
+// the current leader does. A conforming adapter must retry at once rather
+// than treating it as a failure.
+func (f *FakeManager) RejectOpsAsNonLeader(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rejectOpsAsNonLeader = n
 }
 
 // NewFakeManager starts the fake. Every adapter-facing endpoint requires the
@@ -294,6 +309,14 @@ func (f *FakeManager) handleOps(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.opsRequests = append(f.opsRequests, req)
+	if f.rejectOpsAsNonLeader > 0 {
+		f.rejectOpsAsNonLeader--
+		f.mu.Unlock()
+		w.Header().Set("X-Agentops-Vocabulary-Revision", "r1")
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(503)
+		return
+	}
 	f.mu.Unlock()
 	w.Header().Set("X-Agentops-Vocabulary-Revision", "r1")
 	wait := req.Wait

@@ -570,6 +570,16 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			delete(q.recent, id)
 			q.mu.Unlock()
 		}
+	case op.Kind == OpSend && res.Error != "" && isRunReply(op.ID):
+		// The dedup entry was already released above, so reconciliation
+		// re-derives this send on the next pass regardless. This is the
+		// state-durability half: an owed reply is visible on the object
+		// itself, not only in manager logs.
+		if err := q.markUndelivered(ctx, op); err != nil {
+			log.FromContext(ctx).Error(err, "mark run reply undelivered", "conversation", op.Conversation, "op", op.ID)
+		}
+		log.FromContext(ctx).Info("run reply send failed; released for re-derivation",
+			"channel", op.Channel, "conversation", op.Conversation, "op", op.ID, "error", res.Error)
 	case op.Kind == OpDeleteConversation:
 		// Terminal either way, and never regenerated: the Conversation is on
 		// its way out, so there is no object left to carry a condition and
@@ -688,6 +698,13 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 			// is no longer recorded cannot be re-derived either.
 			return nil
 		}
+		// This reply just reached the thread, so whatever was owed to it is no
+		// longer owed — clear the marker regardless of which run it names: an
+		// older undelivered reply that is itself no longer recorded (aged out,
+		// same as `found` above) has nothing left to re-derive either.
+		if b := conv.Status.Thread(channel); b != nil {
+			b.UndeliveredReply = ""
+		}
 		err := q.Client.Status().Patch(ctx, &conv, patch)
 		if err == nil {
 			return nil
@@ -697,6 +714,41 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 		}
 	}
 	return fmt.Errorf("conflict marking run %s delivered on %s", runID, channel)
+}
+
+// markUndelivered records that a run's reply failed to reach one channel's
+// thread, so an empty-looking chat thread is diagnosable from the Conversation
+// object alone rather than only from manager logs (state-durability).
+//
+// The dedup entry for this op was already released by the caller, so
+// reconciliation re-derives the send on its own; this is purely the
+// observable half of that re-derivation, and never the thing re-derivation
+// depends on.
+func (q *OpQueue) markUndelivered(ctx context.Context, op *Op) error {
+	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
+	if !ok || q.Client == nil {
+		return nil
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		var conv agentopsv1alpha1.Conversation
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		binding := conv.Status.Thread(channel)
+		if binding == nil || binding.UndeliveredReply == runID {
+			return nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		binding.UndeliveredReply = runID
+		err := q.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("conflict marking run %s undelivered on %s", runID, channel)
 }
 
 // finishEnsureTopic records the thread an adapter created. Optimistically
@@ -733,13 +785,12 @@ func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
 		cond.Message = channelMsgPrefix + op.Channel + ": adapter completed ensure-topic without a thread id"
-	} else if existing := conv.ThreadFor(op.Channel); existing == nil {
-		binding := agentopsv1alpha1.ThreadBinding{
-			// ReadTracked for EVERY channel, whether or not its adapter reports
-			// reads: the backfill rule has to stay one rule, or "no readAt" would
-			// mean "pre-upgrade" on some channels and "never seen" on others.
-			Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true,
-		}
+	} else if binding := conv.Status.Thread(op.Channel); binding == nil || binding.ThreadID == "" {
+		// Brand new thread — including a binding that so far carries only a
+		// durable-chat-ops-broker claim, never a real thread id. Treated exactly
+		// as "no binding at all": a claim-only placeholder is bookkeeping about
+		// dispatch, not a prior thread.
+		var readers []agentopsv1alpha1.ReaderMark
 		// The person who STARTED this conversation has seen it — they typed it.
 		// Stamping their own watermark here, at the one moment their thread
 		// comes into existence, is what stops a conversation being presented
@@ -750,20 +801,36 @@ func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult
 			// Opaque RFC3339Nano string, never metav1.Time — see
 			// ThreadBinding.ReadAt's comment.
 			now := time.Now().UTC().Format(time.RFC3339Nano)
-			binding.Readers = []agentopsv1alpha1.ReaderMark{{Key: o.Key, ReadAt: &now}}
+			readers = []agentopsv1alpha1.ReaderMark{{Key: o.Key, ReadAt: &now}}
 		}
-		conv.Status.Threads = append(conv.Status.Threads, binding)
+		if binding == nil {
+			// ReadTracked for EVERY channel, whether or not its adapter reports
+			// reads: the backfill rule has to stay one rule, or "no readAt" would
+			// mean "pre-upgrade" on some channels and "never seen" on others.
+			conv.Status.Threads = append(conv.Status.Threads, agentopsv1alpha1.ThreadBinding{
+				Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true, Readers: readers,
+			})
+		} else {
+			binding.ThreadID = res.ThreadID
+			binding.ReadTracked = true
+			binding.Readers = readers
+			binding.Claim = nil
+		}
 	} else {
 		// A REOPEN re-establishing an archived thread. Whatever came back is
 		// the thread now: an adapter that honoured the hint returns the same id
 		// and the conversation continues where it left off, one that could not
 		// returns a fresh one. Both are recorded the same way, because both are
 		// the truth about that transport.
-		for i := range conv.Status.Threads {
-			if conv.Status.Threads[i].Channel == op.Channel {
-				conv.Status.Threads[i].ThreadID = res.ThreadID
-			}
-		}
+		binding.ThreadID = res.ThreadID
+		binding.Claim = nil
+	}
+	// The op completed one way or the other, so it is no longer in flight —
+	// clear a claim here too on the FAILURE paths above, or a claim that is
+	// still fresh (inside the staleness bound) would make the next reconcile
+	// pass wait it out instead of retrying at once.
+	if b := conv.Status.Thread(op.Channel); b != nil {
+		b.Claim = nil
 	}
 	if res.Error == "" && res.ThreadID != "" {
 		// No longer archived: there is a live thread here again.

@@ -116,6 +116,14 @@ type Server struct {
 	// Nil is usable: one is built lazily so a zero-valued Server works.
 	StorageBreaker *storagebreaker.Breaker
 
+	// ReplicaIdentity is this process's own identity, the same string the
+	// reconciler's claims carry (durable-chat-ops-broker). Compared against
+	// the leader-election Lease's holder to decide whether THIS replica may
+	// safely claim a channel op on /channel/ops. Empty disables the check
+	// (tests, and any Server built with no leader election behind it at
+	// all), so a zero-valued Server keeps answering as it always has.
+	ReplicaIdentity string
+
 	breakerOnce sync.Once
 }
 
@@ -987,8 +995,24 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	//
 	// Computed ONCE per request, before the wait: it is a read of the informer
 	// cache, and recomputing it every second of a 30-second poll would buy
-	// nothing an adapter can act on any sooner.
+	// nothing an adapter can act on any sooner. Set before the leader check
+	// below too — the revision rides EVERY poll response, a rejected one
+	// included, since the manager cannot dial an otherwise-idle adapter any
+	// other way.
 	s.setVocabularyRevision(r.Context(), w)
+
+	// durable-chat-ops-broker: a claim is written only by the current leader
+	// (the Conversation reconciler, leader-gated by construction), so a
+	// non-leader has no safe way to answer this poll from its own state —
+	// its in-memory OpQueue was never populated for ops this process did not
+	// claim, and proxying to the leader is exactly the complexity this design
+	// chose not to build. Distinguishable from 204 so a conforming adapter
+	// retries at once instead of waiting out its normal idle backoff.
+	if !s.isLeader(r.Context()) {
+		w.Header().Set("Retry-After", "0")
+		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader"})
+		return
+	}
 
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {

@@ -122,6 +122,23 @@ CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
 
 ### Changed
 
+- **`manager.replicas` is a value again, default `2`.** It was hardcoded at
+  `1`, because `internal/chat.OpQueue` was in-memory and per-process,
+  populated only by the leader's reconciler — and `/channel/ops` served
+  every replica, so a poll landing on the non-leader saw a permanently
+  empty queue. `ensure-topic` silently never completed for roughly half of
+  all new chat-bound conversations.
+  - The reconciler now writes a claim on the Conversation CR itself before
+    dispatching an op, and a non-leader rejects a poll with `503` (retried
+    at once) instead of answering from that queue.
+  - A crashed leader's in-flight claim recovers through the same
+    leader-election failover every reconciler already uses.
+  - New value: `claimStalenessSeconds` (default `90`), the bound past which
+    the current leader treats its own claim as abandoned and retries.
+  - **Breaking for a hand-rolled channel adapter.** `GET /channel/ops` may
+    now answer `503`. A conforming adapter retries at once, the same way it
+    already retries an empty `204`, and never logs it as a failure. Both
+    shipped adapters (`channels/telegram`, `platform/console`) do this.
 - **Closing or deleting a conversation now cascades to every conversation it
   caused**, for every originator — a human `/close`, the console's bulk
   close, the idle timer, and a bulk delete — not only the coordinator's own

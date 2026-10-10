@@ -2,15 +2,19 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -81,6 +85,194 @@ func TestTryFinishEnsureTopicRecordsAMissingThreadID(t *testing.T) {
 	cond := apimeta.FindStatusCondition(got.Status.Conditions, ConditionTopicReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "AdapterError" {
 		t.Fatalf("condition = %+v, want False/AdapterError", cond)
+	}
+}
+
+// A brand new thread — no binding at all for the channel yet — is appended
+// rather than updated in place. This is distinct from the claim-only
+// placeholder case tryFinishEnsureTopic also treats as "new": here there is
+// nothing on the conversation for this channel to begin with.
+func TestTryFinishEnsureTopicAppendsABindingWhenNoneExistedAtAll(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	done, err := q.tryFinishEnsureTopic(context.Background(),
+		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{ThreadID: "t1"})
+	if !done || err != nil {
+		t.Fatalf("done=%v err=%v, want success", done, err)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	binding := got.Status.Thread("c1")
+	if binding == nil || binding.ThreadID != "t1" || !binding.ReadTracked {
+		t.Fatalf("binding = %+v, want a new tracked thread t1", binding)
+	}
+	if binding.Claim != nil {
+		t.Fatalf("a completed op must not leave a claim behind: %+v", binding.Claim)
+	}
+}
+
+// A REOPEN: the channel already carries an archived thread, and whatever the
+// adapter returns becomes the thread now, with the claim cleared the same way
+// the brand-new path does.
+func TestTryFinishEnsureTopicReestablishesAnArchivedThread(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "old-thread"}}
+	conv.Status.ThreadsArchived = []string{"c1"}
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	done, err := q.tryFinishEnsureTopic(context.Background(),
+		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{ThreadID: "new-thread"})
+	if !done || err != nil {
+		t.Fatalf("done=%v err=%v, want success", done, err)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	binding := got.Status.Thread("c1")
+	if binding == nil || binding.ThreadID != "new-thread" {
+		t.Fatalf("binding = %+v, want the re-established thread id", binding)
+	}
+	if binding.Claim != nil {
+		t.Fatalf("a completed reopen must not leave a claim behind: %+v", binding.Claim)
+	}
+	for _, c := range got.Status.ThreadsArchived {
+		if c == "c1" {
+			t.Fatalf("a re-established thread must no longer be archived: %+v", got.Status.ThreadsArchived)
+		}
+	}
+}
+
+// markUndelivered is the observable half of a failed run-reply send: the
+// binding alone says a thread looks empty for a reason, from the object
+// itself.
+func TestMarkUndeliveredRecordsTheRunOnTheChannelsBinding(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1"}}
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
+	if err := q.markUndelivered(context.Background(), op); err != nil {
+		t.Fatal(err)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	if binding := got.Status.Thread("c1"); binding == nil || binding.UndeliveredReply != "run-1" {
+		t.Fatalf("binding = %+v, want UndeliveredReply = run-1", binding)
+	}
+}
+
+// No binding for the channel yet means there is nothing to mark against —
+// markUndelivered must not invent one, unlike setClaim.
+func TestMarkUndeliveredIsANoOpWithNoBindingYet(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
+	if err := q.markUndelivered(context.Background(), op); err != nil {
+		t.Fatal(err)
+	}
+
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(conv), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Status.Threads) != 0 {
+		t.Fatalf("no binding must be created: %+v", got.Status.Threads)
+	}
+}
+
+// A conversation gone by the time the mark is attempted (deleted between the
+// send and its completion) is tolerated, exactly as markThreadArchived
+// tolerates it.
+func TestMarkUndeliveredToleratesAMissingConversation(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
+	if err := q.markUndelivered(context.Background(), op); err != nil {
+		t.Fatalf("a missing conversation must not error: %v", err)
+	}
+}
+
+// A non-conflict error writing the undelivered marker is returned rather
+// than retried — and Complete only logs it, since the send-failure itself
+// was already released for re-derivation regardless.
+func TestMarkUndeliveredReturnsANonConflictPatchError(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1"}}
+	boom := errors.New("boom")
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, cli client.Client, subResourceName string,
+				obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				return boom
+			},
+		}).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
+	if err := q.markUndelivered(context.Background(), op); err == nil || !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the patch error returned, not retried", err)
+	}
+
+	// Complete must not panic when the mark itself fails -- the send-failure's
+	// own release already happened, so this is purely the observable half.
+	ch := testChannel("c1", "slack")
+	q.EnqueueRunReply(context.Background(), ch, "conv-1", "run-1", nil, AnswerMessage("a", "s"))
+	q.Claim("slack")
+	q.Complete(context.Background(), op.ID, OpResult{Error: "sendMessage: Too Many Requests"})
+}
+
+// Every retry conflicting is the abandoned-after-5-attempts case: markUndelivered
+// gives up and names both the run and the channel.
+func TestMarkUndeliveredGivesUpAfterRepeatedConflicts(t *testing.T) {
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1"}}
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, cli client.Client, subResourceName string,
+				obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				return apierrors.NewConflict(schema.GroupResource{Resource: "conversations"}, "conv-1", errors.New("stale"))
+			},
+		}).Build()
+	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+
+	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
+	err := q.markUndelivered(context.Background(), op)
+	if err == nil || !strings.Contains(err.Error(), "conflict") || !strings.Contains(err.Error(), "run-1") {
+		t.Fatalf("err = %v, want a conflict error naming the run", err)
 	}
 }
 

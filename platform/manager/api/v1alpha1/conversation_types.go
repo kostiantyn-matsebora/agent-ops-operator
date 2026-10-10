@@ -693,10 +693,46 @@ type ThreadBinding struct {
 	// who has never reported does.
 	// +optional
 	Readers []ReaderMark `json:"readers,omitempty"`
+	// UndeliveredReply names the run whose reply failed delivery to this
+	// thread and has not yet succeeded — the run id, not the text, exactly
+	// as this project never stores rendered text on the CR. Cleared the
+	// moment delivery to this thread succeeds.
+	//
+	// Durable state, not telemetry: it is what lets an operator diagnose an
+	// empty-looking chat thread from the object alone, without reading
+	// manager logs, and it is what reconciliation re-derives the "send" op
+	// from after a restart or a transient transport failure.
+	// +optional
+	UndeliveredReply string `json:"undeliveredReply,omitempty"`
+	// Claim records which manager replica currently owns dispatching this
+	// thread's outstanding ensure-topic op to a polling adapter, and when.
+	// Written and cleared ONLY by the current leader-election Lease holder
+	// (durable-chat-ops-broker) — never by a non-leader, however current its
+	// own cached view of this object looks.
+	//
+	// Absent: no claim outstanding and no replica currently owns dispatching
+	// it.
+	// +optional
+	Claim *OpClaim `json:"claim,omitempty"`
 }
 
 // MaxReadersPerThread bounds the per-identity overlay on one binding.
 const MaxReadersPerThread = 50
+
+// OpClaim records which replica is dispatching a thread's pending
+// ensure-topic op, and since when. The durable, restart-surviving substitute
+// for what used to live only in a dead process's in-memory OpQueue.
+type OpClaim struct {
+	// Holder identifies the replica that wrote this claim — the same identity
+	// the leader-election Lease records. Compared against the CURRENT Lease
+	// holder on every reconcile: a mismatch means the writing replica is no
+	// longer leader, and the claim is cleared at once rather than waited out.
+	Holder string `json:"holder"`
+	// ClaimedAt is when the claim was written. A claim older than the
+	// configured staleness bound, on a thread still carrying no threadId, is
+	// treated as abandoned and cleared by the current leader.
+	ClaimedAt metav1.Time `json:"claimedAt"`
+}
 
 // ReaderMark is one identity's watermark on a thread.
 type ReaderMark struct {
@@ -1095,9 +1131,14 @@ func (c *Conversation) SetContextID(id string) {
 }
 
 // ThreadFor returns the thread id bound for a channel, or nil.
+//
+// An empty ThreadID is treated the same as no binding at all: a binding may
+// now exist carrying only a Claim (durable-chat-ops-broker) while its topic is
+// still being created, and every caller here answers "has a thread to post
+// to", never "is there bookkeeping for this channel yet".
 func (c *Conversation) ThreadFor(channel string) *string {
 	for i := range c.Status.Threads {
-		if c.Status.Threads[i].Channel == channel {
+		if c.Status.Threads[i].Channel == channel && c.Status.Threads[i].ThreadID != "" {
 			return &c.Status.Threads[i].ThreadID
 		}
 	}

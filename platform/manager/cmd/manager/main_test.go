@@ -80,6 +80,22 @@ func TestEnvDurationOrFallsBackToTheDefaultNotZero(t *testing.T) {
 	}
 }
 
+// envSeconds reads a plain integer seconds value, never a Go duration
+// string, and zero or unset defers to the caller's own default.
+func TestEnvSecondsReadsWholeSecondsAndDefersOnZeroOrUnset(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want time.Duration
+	}{
+		{"", 0}, {"0", 0}, {"-5", 0}, {"nope", 0}, {"90", 90 * time.Second},
+	} {
+		t.Setenv("AGENTOPS_TEST_ENVSECONDS", tc.val)
+		if got := envSeconds("AGENTOPS_TEST_ENVSECONDS"); got != tc.want {
+			t.Fatalf("envSeconds(%q) = %v, want %v", tc.val, got, tc.want)
+		}
+	}
+}
+
 // maxActiveConversations reports the DEPRECATED spelling was used only when
 // it was the one that actually supplied the value -- the new name always
 // wins when both are set.

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -172,25 +173,48 @@ func (c *Cluster) Import(ctx context.Context, images ...string) error {
 	return nil
 }
 
-// Forward is a kubectl port-forward to one Service.
+// Forward is a kubectl port-forward to one Service. `kubectl port-forward
+// svc/<name>` pins itself to ONE backing pod's IP for its whole life — a
+// pod churned out from under it (a replica lane force-deleting the manager's
+// pods, as scaleManagerReplicas does) makes the kubectl process exit, and
+// every later request through this Forward fails with "connection refused"
+// forever, naming a port nothing listens on. Measured live: three unrelated
+// tests failed this way after TestReplicasThreeDeliversEveryConsoleThreadInParallel's
+// own cleanup restored the replica count, which is exactly the kind of churn
+// this forward cannot survive on its own. A supervisor goroutine relaunches
+// it on the SAME local port whenever the process exits before Stop is
+// called, so a caller's URL() never needs to change.
 type Forward struct {
 	Port int
-	cmd  *exec.Cmd
+
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	stopped bool
+
+	namespace  string
+	target     string
+	remotePort int
+	kubeconfig string
 }
 
 // URL is the local base URL.
 func (f *Forward) URL() string { return fmt.Sprintf("http://127.0.0.1:%d", f.Port) }
 
-// Stop ends the port-forward.
+// Stop ends the port-forward and its supervisor.
 func (f *Forward) Stop() {
-	if f.cmd != nil && f.cmd.Process != nil {
-		_ = f.cmd.Process.Kill()
+	f.mu.Lock()
+	f.stopped = true
+	cmd := f.cmd
+	f.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
 	}
 }
 
 var forwardingRE = regexp.MustCompile(`Forwarding from 127\.0\.0\.1:(\d+)`)
 
-// Forward opens a port-forward on a free local port and waits for it.
+// Forward opens a port-forward on a free local port, waits for it, and
+// keeps it alive across a backing pod's death for the rest of this run.
 func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -198,16 +222,27 @@ func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, e
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
-	cmd := exec.Command(kubectlBin, kubeconfigFlag, c.Kubeconfig, "-n", namespace, "port-forward", target,
-		fmt.Sprintf("%d:%d", port, remotePort))
+	f := &Forward{Port: port, namespace: namespace, target: target, remotePort: remotePort, kubeconfig: c.Kubeconfig}
+	if err := f.start(); err != nil {
+		return nil, err
+	}
+	go f.supervise()
+	return f, nil
+}
+
+// start launches kubectl port-forward on f.Port and waits for it to report
+// ready, storing the running *exec.Cmd under f.mu.
+func (f *Forward) start() error {
+	cmd := exec.Command(kubectlBin, kubeconfigFlag, f.kubeconfig, "-n", f.namespace, "port-forward", f.target,
+		fmt.Sprintf("%d:%d", f.Port, f.remotePort))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return err
 	}
 	ready := make(chan bool, 1)
 	go func() {
@@ -223,9 +258,46 @@ func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, e
 	case <-ready:
 	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("port-forward %s never came up: %s", target, stderr.String())
+		return fmt.Errorf("port-forward %s never came up: %s", f.target, stderr.String())
 	}
-	return &Forward{Port: port, cmd: cmd}, nil
+	f.mu.Lock()
+	f.cmd = cmd
+	f.mu.Unlock()
+	return nil
+}
+
+// supervise relaunches the port-forward whenever its process exits on its
+// own, until Stop marks it intentional. A relaunch that fails to come back
+// up (the Service genuinely has no endpoint yet) is retried rather than
+// given up on — the backing pod it lost is usually mid-replacement.
+func (f *Forward) supervise() {
+	for {
+		f.mu.Lock()
+		cmd, stopped := f.cmd, f.stopped
+		f.mu.Unlock()
+		if stopped || cmd == nil {
+			return
+		}
+		_ = cmd.Wait()
+		f.mu.Lock()
+		stopped = f.stopped
+		f.mu.Unlock()
+		if stopped {
+			return
+		}
+		for {
+			if err := f.start(); err == nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
+			f.mu.Lock()
+			stopped = f.stopped
+			f.mu.Unlock()
+			if stopped {
+				return
+			}
+		}
+	}
 }
 
 // Dump writes the unconditional failure diagnostics: manager and adapter

@@ -95,6 +95,11 @@ thread as success. Redelivery is normal.
 Report a failure as `{"error":"…"}` and the manager surfaces it as a Conversation
 condition and regenerates the operation.
 
+**A `503` means this replica is not the manager's current leader.** Only the
+leader claims an op, and the manager may run more than one pod. Retry at
+once, the same way you already retry an empty `204`. Never log it as a
+failure.
+
 ## Render the message
 
 `send` carries `op.message`, one of four kinds:

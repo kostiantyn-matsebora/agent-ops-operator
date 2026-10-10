@@ -1655,6 +1655,13 @@ payload is not copied into the conversation object.
   well as what the agent answered), adapter cursors, delivery markers and
   suppression windows. Recovered by reading. Survives any restart and any
   rescheduling.
+  - **A thread binding's `claim` (holder, claimedAt) and `undeliveredReply`
+    ride the same home.** The claim records which manager replica is
+    dispatching that channel's `ensure-topic` op, so a crashed leader's
+    in-flight work is recoverable rather than lost to a dead process's
+    memory — a claim held by a replica other than the current leader is
+    cleared on the next reconcile. `undeliveredReply` names a run whose
+    reply failed delivery, cleared once delivery succeeds.
   - **Coordination state rides the same home.** `causedBy`, `coordinatorRef`,
     `status.budget` (per-level counts against the snapshotted limits),
     `escalatedAt`, `closeReason` and `brief` are all ordinary Conversation

@@ -153,6 +153,36 @@ type ConversationReconciler struct {
 	// common configuration, and must not require declining the destructive half.
 	AutoDeleteEnabled   bool
 	AutoDeleteClosedAge time.Duration
+	// ReplicaIdentity names THIS process for the claim this reconciler writes
+	// (durable-chat-ops-broker). It needs no relation to the leader-election
+	// Lease's own HolderIdentity string: this reconciler runs ONLY while this
+	// process holds that Lease (controller-runtime gates every reconciler on
+	// it), so any claim this process did not itself write was written by a
+	// FORMER leader, by construction — comparing against "me" is exactly
+	// comparing against "the current leader". Empty is tolerated (tests) and
+	// behaves as a single, unvarying identity.
+	ReplicaIdentity string
+	// ClaimStaleness bounds how long an ensure-topic claim may sit with no
+	// thread yet before the current leader treats it as abandoned and
+	// re-dispatches — the SAME leader's own claim running legitimately slow,
+	// never a second writer. Zero means DefaultClaimStalenessSeconds.
+	ClaimStaleness time.Duration
+}
+
+// DefaultClaimStalenessSeconds is the fallback claim staleness bound when the
+// chart's claimStalenessSeconds value is unset. Sized with margin over a
+// measured ensure-topic round-trip against the slowest shipped adapter
+// (Telegram, forum-topic creation): comfortably longer than any observed
+// single call, short enough that a genuinely abandoned claim (the leader that
+// wrote it crashed, rather than merely answering slowly) does not leave a
+// conversation topic-less for long.
+const DefaultClaimStalenessSeconds = 90
+
+func (r *ConversationReconciler) claimStaleness() time.Duration {
+	if r.ClaimStaleness > 0 {
+		return r.ClaimStaleness
+	}
+	return DefaultClaimStalenessSeconds * time.Second
 }
 
 // Reconcile implements the reconciliation loop.
@@ -996,14 +1026,93 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 		if ch.Spec.Adapter == "" {
 			continue
 		}
+		pending = true
+		// durable-chat-ops-broker: only a channel binding with no LIVE claim —
+		// none at all, one held by a former leader, or one of this leader's own
+		// gone stale — is dispatched this pass. One already claimed and fresh is
+		// an op genuinely in flight with an adapter; re-enqueuing it here would
+		// not change what the in-memory queue already holds, but it would race
+		// the claim write against nothing, for no reason. See claimEnsureTopic.
+		claimed, err := r.claimEnsureTopic(ctx, conv.Namespace, conv.Name, ref.Name)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if !claimed {
+			continue
+		}
 		d := r.topicDescriptor(ctx, conv)
 		if existing != nil {
 			d.PreviousThreadID = *existing
 		}
 		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv, d)
-		pending = true
 	}
 	return pending, firstErr
+}
+
+// claimEnsureTopic writes (or refreshes) THIS leader's claim on one channel
+// binding's ensure-topic dispatch, so a crashed leader's in-flight work is
+// recoverable from the Conversation's own status rather than from a second,
+// hand-rolled heartbeat (durable-chat-ops-broker).
+//
+// Returns claimed=true when the caller should (re-)dispatch the op now: no
+// claim existed, the existing one belongs to a replica that is not this one
+// (a former leader — this reconciler runs only while its process holds the
+// leader-election Lease, so any claim it did not itself write is by
+// construction a former leader's), or this leader's own claim has sat past
+// the staleness bound with no thread yet. Returns false when a live claim
+// already held by this leader is outstanding — the op is genuinely in flight
+// with an adapter and nothing new is dispatched this pass.
+//
+// Does its own fresh Get/patch retry rather than reusing the caller's
+// (possibly several-reconcile-functions-old) copy: every other writer in this
+// file that touches Conversation status does the same, for the same
+// optimistic-concurrency reason (see finishEnsureTopic, markDelivered).
+func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, namespace, name, channel string) (bool, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		var conv agentopsv1alpha1.Conversation
+		if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &conv); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+		if r.holdsLiveClaim(&conv, channel) {
+			return false, nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		r.setClaim(&conv, channel)
+		err := r.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return true, nil
+		}
+		if !apierrors.IsConflict(err) {
+			return false, client.IgnoreNotFound(err)
+		}
+	}
+	return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s", channel, name)
+}
+
+// holdsLiveClaim reports whether THIS replica's claim on the channel's
+// ensure-topic is still inside the staleness bound.
+func (r *ConversationReconciler) holdsLiveClaim(conv *agentopsv1alpha1.Conversation, channel string) bool {
+	existing := conv.Status.Thread(channel)
+	if existing == nil || existing.Claim == nil {
+		return false
+	}
+	return existing.Claim.Holder == r.ReplicaIdentity &&
+		time.Since(existing.Claim.ClaimedAt.Time) <= r.claimStaleness()
+}
+
+// setClaim stamps this replica's claim on the channel's binding, creating the
+// binding when none exists yet.
+func (r *ConversationReconciler) setClaim(conv *agentopsv1alpha1.Conversation, channel string) {
+	claim := &agentopsv1alpha1.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: metav1.Time{Time: time.Now()}}
+	if binding := conv.Status.Thread(channel); binding != nil {
+		binding.Claim = claim
+		return
+	}
+	conv.Status.Threads = append(conv.Status.Threads,
+		agentopsv1alpha1.ThreadBinding{Channel: channel, Claim: claim})
 }
 
 // deliverEscalation posts the digest an `escalate` call snapshotted
@@ -1116,6 +1225,18 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 				continue
 			}
 			owed[t.Channel] = true
+			// durable-chat-ops-broker: a binding carrying only a claim — no
+			// ThreadID yet — is bookkeeping about a dispatch in flight, not a
+			// topic. EnqueueRunReply would still accept the empty id and the
+			// adapter would park the reply on a channel-level pseudo-thread,
+			// marking it delivered there PERMANENTLY: once DeliveredTo is
+			// true this run is never re-enqueued, so the real thread
+			// ensureTopics creates moments later would never receive the
+			// answer the person is waiting for. Leaving it owed (above) is
+			// what brings this reconcile back once the thread exists.
+			if t.ThreadID == "" {
+				continue
+			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil ||
 				ch.Spec.Adapter == "" {
