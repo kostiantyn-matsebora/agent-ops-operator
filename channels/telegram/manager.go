@@ -213,7 +213,17 @@ func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds in
 	// never a failure to surface or back off from, and distinguished from an
 	// ordinary 204 ONLY so the caller can retry at once rather than pacing
 	// itself as it would after a genuine error.
+	//
+	// "Retry at once" only reaches a different replica if the retry actually
+	// dials one: a Kubernetes Service picks a backend per TCP CONNECTION, not
+	// per request, so an HTTP/1.1 keep-alive connection that happened to land
+	// on a non-leader stays pinned to it — every subsequent poll on that same
+	// connection gets the same non-leader's 503, forever, with no error ever
+	// surfacing (see platform/console's identical fix, where this was
+	// measured live). Closing the idle connection here is what makes the NEXT
+	// poll dial fresh and gives it a new chance to land on the leader.
 	if code == http.StatusServiceUnavailable {
+		m.HTTP.CloseIdleConnections()
 		return nil, rev, nil
 	}
 	if err != nil {

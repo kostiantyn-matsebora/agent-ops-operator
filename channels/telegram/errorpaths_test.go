@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,31 @@ func TestNextOpTreats503AsNoOpRatherThanAnError(t *testing.T) {
 	}
 	if op != nil {
 		t.Fatalf("503 must not be read as a delivered op: %+v", op)
+	}
+}
+
+// "Retry at once" is theatre if the retry reuses the same connection: a
+// Kubernetes Service picks a backend per TCP connection, not per request, so
+// a keep-alive connection pinned to a non-leader would ask that same
+// non-leader forever (measured live in platform/console's identical case).
+// NextOp must close the connection it just got a 503 on, so the next call
+// dials fresh and has a new chance to land elsewhere.
+func TestNextOpClosesTheConnectionOnANonLeaderAnswer(t *testing.T) {
+	mgr := nonLeaderManager(t)
+	if _, _, err := mgr.NextOp(context.Background(), "telegram-ops", 0); err != nil {
+		t.Fatalf("first poll: %v", err)
+	}
+
+	reused := true
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+	}
+	ctx := httptrace.WithClientTrace(context.Background(), trace)
+	if _, _, err := mgr.NextOp(ctx, "telegram-ops", 0); err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+	if reused {
+		t.Fatal("the poll after a 503 reused the same connection — a pin to a non-leader would never clear")
 	}
 }
 

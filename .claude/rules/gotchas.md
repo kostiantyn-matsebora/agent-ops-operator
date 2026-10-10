@@ -940,3 +940,89 @@ Service, a poll landing on the non-leader saw a permanently empty queue.
   hardcoded version argued FOR safety: the number now means something,
   because the thing that made raising it dangerous is what changed.
 
+**THE LEADER CHECK THAT SHIPPED FOR THE ABOVE NEVER MATCHED, EVEN FOR THE
+REAL LEADER — MEASURED LIVE, 2026-10-10.** `isLeader()` compared
+`ReplicaIdentity` (bare `os.Hostname()`) against the Lease's
+`HolderIdentity` for EQUALITY.
+
+- **The two strings can never equal, on any install, at any replica
+  count.** controller-runtime's own `leaderelection.NewResourceLock` mints
+  the Lease's holder as `os.Hostname() + "_" + a per-process uuid` —
+  confirmed reading `leader_election.go` itself.
+- **Every poll 503'd forever, unconditionally** — not the ~50% silent drop
+  this whole feature exists to fix, a 100% chat outage.
+
+- **CI never caught it because nothing exercises a real Lease.** Both the
+  unit tests and envtest construct a `Server` with `ReplicaIdentity` set by
+  hand, comparing against a hand-set `HolderIdentity` with no uuid suffix —
+  the fixture matched the bug's own wrong assumption.
+- **Fixed to a PREFIX match**: `holder == identity ||
+  strings.HasPrefix(holder, identity+"_")`. Safe because a Kubernetes pod
+  hostname is a DNS-1123 name — no `_` — so the delimiter rules out `pod-1`
+  false-matching `pod-10_<uuid>`.
+- **FOUND BY A SECOND, INDEPENDENT SESSION ON THE SAME MACHINE, CONCURRENTLY
+  WORKING THE SAME WORKTREE.** `worktree-delivery.md`'s one-session-per-
+  worktree rule is why that is noted rather than normal — the fix landed,
+  verified, and pushed (`b49a617c`) before the session that first reported
+  the live symptom had finished writing it up.
+
+**FIXING THE IDENTITY CHECK UNMASKED A SECOND, DEEPER BUG THE FIRST ONE HAD
+BEEN HIDING: A NON-LEADER'S CONNECTION STAYS PINNED TO THAT NON-LEADER
+FOREVER.** "Retry at once" (section 4 above) assumes the retry reaches a
+different replica.
+
+- **It does not, over a kept-alive HTTP/1.1 connection.** A Kubernetes
+  Service picks a backend per TCP CONNECTION, not per request.
+- **A connection that happened to dial a non-leader keeps asking that SAME
+  non-leader on every later poll.** kube-proxy is never consulted again
+  until the connection closes for some unrelated reason.
+
+- **Invisible at 2 replicas on good luck, certain to surface harsher.**
+  Asked for explicitly: raising the live-verification install from 2 to 3
+  replicas (to make the non-leader landing MORE likely, not less) turned an
+  occasional stall into a reliable repro — 0/10 conversations delivered,
+  for minutes, surviving a full pod restart of the adapter (a fresh process
+  dials fresh too, and can pin just as badly).
+- **Silent, because the first fix made 503 deliberately unlogged.** The two
+  defects compounded: a livelock that never once reports an error.
+- **Fixed with `m.HTTP.CloseIdleConnections()` on the 503 path**, in BOTH
+  shipped adapters (`platform/console/manager.go`,
+  `channels/telegram/manager.go`) — closing the just-used connection forces
+  the NEXT poll to dial fresh, giving kube-proxy another chance. Verified
+  with `httptrace.ClientTrace.GotConn.Reused`: false after the fix, true
+  (and the regression test fails) without it.
+- **A HAND-PATCHED DEPLOYMENT IMAGE REVERTS ON ITS OWN, AND IT IS NOT HELM'S
+  DOING.** `kubectl set image deployment/agentops-adapter-console ...`
+  appeared to work and then silently reverted to the old tag within
+  seconds. The `ChannelAdapter` reconciler owns that Deployment
+  (`adapters.md`) and re-applies the CR's own `spec.image` on its next
+  reconcile — a different mechanism from the Helm three-way-merge gotcha
+  above, same symptom. Patch the `ChannelAdapter` CR's `spec.image`, never
+  the Deployment it renders.
+
+**A THIRD BUG, ONLY REACHABLE ONCE THE FIRST TWO WERE FIXED: A RUN'S REPLY
+CAN BE MARKED DELIVERED WITHOUT EVER REACHING THE THREAD.**
+`deliverRunReplies` iterated `conv.Status.Threads` directly rather than
+through `ThreadFor`, which already treats an empty `ThreadID` as "does not
+exist."
+
+- **`setClaim` writes a `ThreadBinding` carrying a `Claim` but no
+  `ThreadID` BEFORE `ensureTopics` completes** — durable-chat-ops-broker's
+  own mechanism, introduced by this same change.
+
+- **The reply was enqueued with an empty thread id anyway.** The adapter's
+  own fallback (`thread := "channel:" + op.Channel` when the id is empty,
+  meant for a channel-level notice with no specific thread) accepted it,
+  delivered it to a pseudo-thread nobody reads, and marked the run
+  `Delivered` — which `deliverRunReplies` never re-checks once true. The
+  real thread `ensureTopics` created moments later never received the
+  answer the person was waiting for.
+- **Measured at roughly 1 in 10** under the 3-replica parallel lane
+  (`TestReplicasThreeDeliversEveryConsoleThreadInParallel`) — the specific
+  hit rate needs both ops racing in the SAME reconcile pass, which plain
+  sequential starts (the original `TestReplicasTwoDeliversEveryConsoleThread`)
+  essentially never produces.
+- **Fixed by skipping delivery while `ThreadID == ""`**, while still marking
+  the channel `owed` in the `DeliveryPending` condition — the difference
+  between "not yet" and "never coming."
+

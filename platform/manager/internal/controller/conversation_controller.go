@@ -1225,6 +1225,18 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 				continue
 			}
 			owed[t.Channel] = true
+			// durable-chat-ops-broker: a binding carrying only a claim — no
+			// ThreadID yet — is bookkeeping about a dispatch in flight, not a
+			// topic. EnqueueRunReply would still accept the empty id and the
+			// adapter would park the reply on a channel-level pseudo-thread,
+			// marking it delivered there PERMANENTLY: once DeliveredTo is
+			// true this run is never re-enqueued, so the real thread
+			// ensureTopics creates moments later would never receive the
+			// answer the person is waiting for. Leaving it owed (above) is
+			// what brings this reconcile back once the thread exists.
+			if t.ThreadID == "" {
+				continue
+			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil ||
 				ch.Spec.Adapter == "" {
