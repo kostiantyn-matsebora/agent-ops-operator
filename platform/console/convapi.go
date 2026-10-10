@@ -131,9 +131,10 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		s.Runs = nil
 		// Counted BEFORE the filter, always: a count that moved because the
 		// view narrowed would let a filter hide a backlog without saying so.
+		accumulateScopeCounts(scopes, s)
 		if s.Unread {
 			unreadTotal++
-			accumulateScopeCounts(scopes, s)
+			accumulateUnreadScopeCounts(scopes, s)
 		}
 		if filter.matches(s, 0) {
 			all = append(all, s)
@@ -174,23 +175,29 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// accumulateScopeCounts folds one UNREAD row into the inbox's per-scope
-// badges: the fixed scopes the inbox always shows, plus one entry keyed by
-// name for every pipeline and coordinator a row attributes to — "the count
-// per scope SHALL be available for the inbox" (console-unread spec), read
-// the same way the badge itself is: unread, never total.
+// accumulateScopeCounts folds EVERY row into the inbox's Working, Mine and
+// Errored badges. Each is counted over its own filter predicate alone —
+// phase, ownership or error state — exactly as ChatView.tsx's TREE_PREDICATE
+// defines that scope's list, never additionally restricted to unread rows.
 func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
-	switch {
-	case strings.EqualFold(s.Phase, "Working"):
+	if strings.EqualFold(s.Phase, "Working") {
 		scopes["working"]++
-	case strings.EqualFold(s.Phase, "Closed"):
-		scopes["closed"]++
 	}
 	if s.Mine {
 		scopes["mine"]++
 	}
 	if s.Errored {
 		scopes["errored"]++
+	}
+}
+
+// accumulateUnreadScopeCounts folds one UNREAD row into the inbox's Closed
+// badge, plus one entry keyed by name for every pipeline and coordinator a
+// row attributes to — read the same way the sidebar presents them: an
+// unread count, never a total.
+func accumulateUnreadScopeCounts(scopes map[string]int, s ConversationSummary) {
+	if strings.EqualFold(s.Phase, "Closed") {
+		scopes["closed"]++
 	}
 	if s.Coordinator != "" {
 		scopes[s.Coordinator]++

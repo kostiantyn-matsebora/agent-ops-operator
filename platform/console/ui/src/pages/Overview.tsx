@@ -1,7 +1,7 @@
 import {
   Alert, Card, CardBody, CardTitle, DescriptionList, DescriptionListDescription,
   DescriptionListGroup, DescriptionListTerm, Gallery, Label, PageSection, Progress,
-  ProgressMeasureLocation, Stack, StackItem, Title,
+  ProgressMeasureLocation, Stack, StackItem, Title, Tooltip,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
@@ -9,7 +9,18 @@ import { Empty, ErrorState, Loading } from '../components/States'
 import { Crumbs } from '../components/Crumbs'
 import { healthVariant, useCharts, useOverview } from '../api/hooks'
 import { PlainText } from '../components/Text'
+import { relativeAge } from './chat/format'
 import type { Overview, Problem, ProblemSource, StreamHealth } from '../api/types'
+
+// Problem.since is a condition's lastTransitionTime — absent on a pod- or
+// console-derived row, which carries no condition to date. An em dash names
+// that absence rather than a blank cell reading as a missed render.
+function sinceAge(since?: string): string {
+  if (!since) return '—'
+  const ms = Date.now() - new Date(since).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  return `${relativeAge(ms / 1000)} ago`
+}
 
 const SOURCE_LABEL: Record<ProblemSource, { text: string; color: 'blue' | 'grey' | 'purple' }> = {
   // A condition a reconciler wrote and a cross-reference the console derived
@@ -350,7 +361,7 @@ function TelemetryCard({ stream }: { stream: Overview['stream'] }) {
  * displaying — a Display filter can simplify a graph but must never remove a
  * failure from this list.
  */
-function ProblemsCard({ problems }: { problems: Problem[] }) {
+export function ProblemsCard({ problems }: { problems: Problem[] }) {
   return (
     <Card>
       <CardTitle>Problems ({problems.length})</CardTitle>
@@ -368,6 +379,7 @@ function ProblemsCard({ problems }: { problems: Problem[] }) {
                 <Th>Reason</Th>
                 <Th>Message</Th>
                 <Th>Source</Th>
+                <Th>Since</Th>
               </Tr>
             </Thead>
             <Tbody>
@@ -391,6 +403,15 @@ function ProblemsCard({ problems }: { problems: Problem[] }) {
                   </Td>
                   <Td dataLabel="Source">
                     <Label color={SOURCE_LABEL[p.source].color}>{SOURCE_LABEL[p.source].text}</Label>
+                  </Td>
+                  <Td dataLabel="Since">
+                    {p.since ? (
+                      <Tooltip content={p.since}>
+                        <span>{sinceAge(p.since)}</span>
+                      </Tooltip>
+                    ) : (
+                      <PlainText>—</PlainText>
+                    )}
                   </Td>
                 </Tr>
               ))}

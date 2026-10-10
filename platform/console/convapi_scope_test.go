@@ -76,6 +76,62 @@ func TestMineFilterAndPerCoordinatorScopeCount(t *testing.T) {
 	}
 }
 
+// convWithPhase builds a conversation bound to the console with the given
+// phase and last-run status, read up to readAt ("" for never read) — the
+// shape accumulateScopeCounts' Working/Mine/Errored tallies must now see
+// whether or not the row has been read.
+func convWithPhase(name, phase, readAt, runStatus string) *Object {
+	binding := `{"channel":"console","threadId":"console-uid-` + name + `","readTracked":true`
+	if readAt != "" {
+		binding += `,"readAt":"` + readAt + `"`
+	}
+	binding += `}`
+	status := `{"phase":"` + phase + `","threads":[` + binding + `],` +
+		`"runs":[{"runId":"r0","status":"` + runStatus + `","result":"x","finishedAt":"` + tLate + `"}],` +
+		`"lastActivity":"` + tLate + `"}`
+	return obj("conversations", name,
+		"1", `{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`, status)
+}
+
+// The Working, Mine and Errored badges undercounted relative to their own
+// scope's list: they only folded in UNREAD rows, while opening any of the
+// three scopes filters on phase/mine/error state alone (ChatView.tsx's
+// TREE_PREDICATE), read or unread. A scope's badge must equal its own list.
+func TestScopeCountsIncludeReadConversations(t *testing.T) {
+	keyer := NewAdapter(nil, nil, nil, "console")
+	withSalt(keyer, "pepper")
+	aliceKey := keyer.ReaderKey("alice@example.com")
+
+	workingRead := convWithPhase("working-read", "Working", tLate, "succeeded")
+	workingUnread := convWithPhase("working-unread", "Working", "", "succeeded")
+	erroredRead := convWithPhase("errored-read", "Idle", tLate, "failed")
+	mineRead := withOriginReader(convWithPhase("mine-read", "Idle", tLate, "succeeded"), "console", aliceKey)
+
+	api, _, _, _ := apiWithOptions(t, "tok", true, workingRead, workingUnread, erroredRead, mineRead)
+	withSalt(api.adapter, "pepper")
+	h := api.Handler(http.NotFoundHandler())
+
+	var scoped struct {
+		Scopes map[string]int `json:"scopes"`
+	}
+	rec := identified(t, h, "GET", "/api/conversations?count=1", "", "alice@example.com")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("count-only: %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &scoped); err != nil {
+		t.Fatal(err)
+	}
+	if scoped.Scopes["working"] != 2 {
+		t.Fatalf("working scope must count the read row too: %+v", scoped.Scopes)
+	}
+	if scoped.Scopes["errored"] != 1 {
+		t.Fatalf("errored scope must count the read row: %+v", scoped.Scopes)
+	}
+	if scoped.Scopes["mine"] != 1 {
+		t.Fatalf("mine scope must count the read row: %+v", scoped.Scopes)
+	}
+}
+
 // getListAs is getList, but as a named identity rather than the shared token.
 func getListAs(t *testing.T, h http.Handler, path, who string) listResponse {
 	t.Helper()

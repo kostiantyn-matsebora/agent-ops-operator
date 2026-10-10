@@ -587,7 +587,7 @@ export function Graph({ topology, events, bufferStart, conversation, emptyMessag
                     const at = pos.get(n.id)
                     if (!at) return null
                     const active = activeByPipeline.get(n.id) ?? 0
-                    const badge = n.count ? `×${n.count}` : n.collapsed ? '+' : n.cls === 'pipelines' && active > 0 ? String(active) : undefined
+                    const badge = n.count ? `×${n.count}` : n.collapsed ? '+' : (n.cls === 'pipelines' || n.cls === 'coordinators') && active > 0 ? String(active) : undefined
                     return (
                       <NodeMark
                         key={n.id}
