@@ -14,7 +14,7 @@ and renders one of two things, chosen by `--level`:
             and worth reading in full from the summary page alone.
 
 Which tier gets which level is a decision the CALLER makes (see
-openspec/changes/e2e-report-levels/design.md) — this script only renders the
+openspec/changes/archive/2026-09-05-e2e-report-levels/design.md) — this script only renders the
 level it is given.
 
     system-report.py --events events.jsonl --level summary >> "$GITHUB_STEP_SUMMARY"
