@@ -40,6 +40,11 @@ adapter.
    manager's current leader, and only the leader claims an op (multiple manager
    pods share one `/channel/ops`).
 
+   **The claim is recorded on the Conversation** as `status.threads[].claim`
+   (`holder`, `claimedAt`), written only by the leader. A claim older than
+   `claimStalenessSeconds` is cleared and the op dispatched again. A claim held
+   by a former leader is cleared at once.
+
    **Retry at once**, exactly as you already do on an empty `204`, and never
    surface it as an error. The claim may well exist, this replica simply cannot
    see it.
