@@ -51,12 +51,15 @@
 
 ## 2. Elevate Coordinator in the adopter narrative — frontend-developer
 
-- [ ] 2.1 Add the one clause to README.md's "How it works" step 3 naming
+- [x] 2.1 Add the one clause to README.md's "How it works" step 3 naming
       `Coordinator` as the other route, and align the "Compose agents,
       another seam" bullet's wording with the orchestrator framing from
       task 1.2. Verify `wc -l README.md` stays within the file's stated
       budget (`.claude/rules/documentation.md`, README section).
-- [ ] 2.2 Redraw `docs/diagrams/readme-flow.py` to branch into Pipeline
+      DONE: `wc -l README.md` → 211 (budget 215). The diagram's `alt`
+      text also rewritten, since the diagram itself now shows both
+      routes.
+- [x] 2.2 Redraw `docs/diagrams/readme-flow.py` to branch into Pipeline
       and Coordinator after "you declare it", PORTING the composition from
       `prototypes/readme-diagram-mockup.html` — the branch shape, the
       member fan-out, the result-returns loop, and escalate as its own
@@ -65,7 +68,16 @@
       regenerated `assets/img/readme-flow-{light,dark}.svg`. Verify by
       opening both SVGs and confirming no connector stops short of its
       box (the exact defect class the prototype was debugged against).
-- [ ] 2.3 Rework `index.md`'s `.ao-presentation` list and
+      DONE: second full-width row added below the (verbatim) Pipeline
+      row — hub-and-spoke fan-out to three member chips, a dashed
+      "a result returns first" loop, and a dashed escalate path rising
+      to the channel card from underneath. Opened both regenerated SVGs
+      (light/dark): every arrowhead touches its target box edge. Also
+      caught and fixed a caption left over from before the redraw —
+      the Pipeline card still said "the only place wiring lives",
+      which the new row directly underneath it would have contradicted
+      — now "the wiring, for one agent".
+- [x] 2.3 Rework `index.md`'s `.ao-presentation` list and
       `assets/js/presentation.js` to carry Coordinator as a second story,
       PORTING the composition from
       `prototypes/landing-presentation-mockup.html`. Carry forward: the
@@ -75,6 +87,18 @@
       deliberately for the Coordinator hub. Verify by building the site
       per `docs/CLAUDE.md`'s "Build it and LOOK" step and confirming the
       Pipeline tab still renders unchanged.
+      DONE: built with the native Jekyll gem (no docker in this
+      environment), screenshotted both tabs in light and dark with
+      Playwright. Pipeline tab verified BEHAVIORALLY unchanged (same
+      geometry, same story) rather than byte-identical — the shape
+      system (rect/circle/diamond/cylinder/hexagon) now applies to
+      BOTH stories uniformly, per design.md's own requirement that the
+      drawing be "built from the site's own tokens and the console's
+      per-kind shapes". Applying it to Coordinator alone would have
+      left two inconsistent visual vocabularies on one page. Confirmed
+      no horizontal overflow in either theme, reduced-motion renders
+      paused with the existing "press to play" contract, and
+      `node --check` passes on `presentation.js`.
 
 ## 3. Review introduction.md and getting-started.md
 
