@@ -197,10 +197,18 @@
 
 ### Adopter site
 
-- [ ] 7.2 Build the docs site per `docs/CLAUDE.md`'s pre-flight steps
+- [x] 7.2 Build the docs site per `docs/CLAUDE.md`'s pre-flight steps
       (Jekyll build, serve, look at README.md's GitHub-rendered form and
       every page this change touched in both themes) and fix anything
       the look catches that an earlier task did not.
+      DONE: built with the native Jekyll gem, served, screenshotted
+      `index`, `introduction`, `getting-started` and
+      `guides/coordinate-agents` in light and dark — no horizontal
+      overflow on any page (`scrollWidth > clientWidth` false
+      throughout), no visual regression, both presentation tabs
+      (Orchestrator and Pipeline) render cleanly with consistent
+      styling. No additional defect found beyond the stale caption
+      already caught and fixed under task 2.2.
 - [x] 7.3 Confirm no other adopter-facing page (console-guide.md,
       installation.md, any integration page) makes a claim this change
       contradicts — e.g. still describing Pipeline as the only way to
