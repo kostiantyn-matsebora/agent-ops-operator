@@ -40,6 +40,17 @@ for the source and the reference material beside this file.
   replies sat undelivered for 9+ hours — see
   `.claude/rules/invariants.md` and `.claude/rules/gotchas.md` for the
   detail.
+- **`GET /activity`, `GET /activity/stream` and `POST /activity` get the
+  same dumb-proxy treatment**, for a different reason: the activity log is a
+  per-process, in-memory ring buffer with no cross-replica fan-out, and a
+  hop the Conversation reconciler emits (reconciliation is leader-elected)
+  only ever lands in the leader's own buffer. A console SSE connection
+  pinned to a non-leader replica would silently stop seeing reconciler-
+  driven events — invoked agents, final answers — for the life of that
+  connection, looking exactly like "the coordinator stopped reasoning."
+  Unlike `/channel/ops` there is no correctness reason to refuse when the
+  leader is unreachable, so these three fall back to serving/recording
+  locally instead of a 503.
 
 **Not yet releasable.** `chart/charts/telegram/values.yaml` still names the
 LAST released `channelAdapter.image.tag` and `router.image.tag` — those

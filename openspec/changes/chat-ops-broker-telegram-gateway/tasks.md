@@ -5,6 +5,7 @@
 - [x] 1.3 Leave the claim and `OpQueue` exactly as `durable-chat-ops-broker` built them — leader-identity gated, no change. Verify: every existing claim test in `internal/controller`/`internal/integration` passes unmodified.
 - [x] 1.4 Verify the proxy actually works end to end: `TestChannelOpsProxiesToLeaderWhenReachable` (`internal/integration/claim_test.go`) — two real `httptest.Server`s with SEPARATE `OpQueue`s, a real envtest Pod carrying the leader's IP, and a real Lease. Polling the FOLLOWER returns the LEADER's own op, and the follower's own queue is never touched.
 - [x] 1.5 Verify the fallback still holds: `TestChannelOpsRejectsNonLeader` passes unmodified — with no reachable pod behind the Lease holder's identity, the proxy finds nothing and falls back to the same 503 it always returned.
+- [x] 1.6 Found live while testing 1.4's fix on a 3-replica install: `/activity`, `/activity/stream` and `POST /activity` have the SAME connection-pinning exposure for a different reason (`internal/activity.Log` is a per-process ring buffer, and a reconciler-emitted hop only ever lands in the leader's own buffer). Reuse `proxyToLeader` unmodified in all three handlers (`internal/httpapi/activity.go`), falling back to serving/recording locally rather than a 503 when the leader is unreachable — unlike `/channel/ops`, a partial local view is never wrong here. Verify: `TestActivityProxiesToLeaderWhenReachable` (`internal/integration/claim_test.go`), proving a non-leader relays an event only the leader's log holds, and the follower's own log stays empty.
 
 ## 2. Gateway becomes the sole Telegram credential holder — backend-developer
 
@@ -29,8 +30,8 @@
 ## 5. Documentation
 
 ### Reference docs
-- [x] 5.1 `.claude/rules/invariants.md`: rewrite "HTTP API is NOT leader-gated — WITH ONE EXCEPTION" — the exception is now a proxy, not a 503.
-- [x] 5.2 `.claude/rules/gotchas.md`: one new dated entry (2026-10-11) recording the measured incident, the abandoned leaderless alternative, and the shipped proxy fix — appended after the existing `durable-chat-ops-broker` saga entries (kept as history, not edited).
+- [x] 5.1 `.claude/rules/invariants.md`: rewrite "HTTP API is NOT leader-gated — WITH TWO EXCEPTIONS" — `/channel/ops` proxies instead of 503ing, and `/activity`/`/activity/stream`/`POST /activity` now proxy too, for the per-process-buffer reason.
+- [x] 5.2 `.claude/rules/gotchas.md`: one new dated entry (2026-10-11) recording the measured incident, the abandoned leaderless alternative, and the shipped proxy fix — appended after the existing `durable-chat-ops-broker` saga entries (kept as history, not edited). A second entry, same date, records the `/activity/stream` exposure found live while testing the first fix.
 - [x] 5.3 `.claude/rules/structure.md`: move "Bot API sending lives HERE" from `channels/telegram/`'s entry to `gateways/telegram/`'s.
 - [x] 5.4 `docs/contracts.md`, `docs/concepts.md`, `docs/configuration.md`: UNCHANGED. The adapter-facing contract (200/204/503-retry-immediately) and the claim's published semantics are exactly `durable-chat-ops-broker`'s own — nothing publishable moved.
 - [x] 5.5 Re-run `python3 .github/scripts/docs-generate.py` — `docs/integrations/telegram.md`, `docs/guides/channel-adapter.md` are generated from the chart/CRD changes in section 2. `--check` passes, 52 files up to date. No CRD regen needed in this version: the claim fields and doc comments are untouched from `durable-chat-ops-broker`.

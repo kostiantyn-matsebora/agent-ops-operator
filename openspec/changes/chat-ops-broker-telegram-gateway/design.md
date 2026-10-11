@@ -91,6 +91,28 @@ The information was already being fetched.
 (`API_ADDR`, one value, one Deployment, one image) — only the leader's POD
 IP differs. No second port lookup, no annotation on the pod.
 
+### `/activity*` reuses the proxy, but refuses nothing
+
+**Found live** while testing the `/channel/ops` fix on a 3-replica
+install: the console's "reasoning disappeared" reports traced to
+`internal/activity.Log` being a per-process ring buffer.
+
+A hop the reconciler emits only ever lands in the leader's buffer. A
+console's SSE connection to `/activity/stream` pins to one replica, exactly
+like a `/channel/ops` poll.
+
+**Chosen**: `handleActivity`, `handleActivityStream` and
+`handleActivityReport` all call the SAME `proxyToLeader` on `!isLeader`,
+with no new helper.
+
+**Where this differs from `/channel/ops`**: there is no correctness reason
+to refuse when the leader is unreachable. A locally-served, partial
+activity view is never WRONG, only incomplete.
+
+All three fall through to local behavior instead of a 503. `/channel/ops`
+cannot do this — serving from an unpopulated local `OpQueue` would be an
+actual wrong answer, not merely a partial one.
+
 ## Risks / Trade-offs
 
 - **[Risk]** A non-leader proxying blind could mask a leader that is

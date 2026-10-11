@@ -461,12 +461,14 @@ configuration, defaulting to the real one.
   single-`getUpdates` rule is about how many pollers exist, not where they
   point.
 
-### HTTP API is NOT leader-gated — WITH ONE EXCEPTION
+### HTTP API is NOT leader-gated — WITH TWO EXCEPTIONS
 
-`NeedLeaderElection()=false` — webhooks must serve during rollouts.
+`NeedLeaderElection()=false` — webhooks must serve during rollouts. Both
+exceptions below proxy a non-leader to the leader rather than answering
+locally, and both reuse the SAME `proxyToLeader` helper.
 
-**`/channel/ops` is the one endpoint that answers differently off the
-leader** (durable-chat-ops-broker).
+**`/channel/ops` is the first — the one endpoint that answers differently
+off the leader** (durable-chat-ops-broker).
 
 - **Claiming an outbound channel op is written only by the current
   leader-election Lease holder**, on the Conversation's own
@@ -498,6 +500,25 @@ leader** (durable-chat-ops-broker).
   (chart-configurable) staleness bound.
 - **Every other endpoint is unaffected.** `/channel/ops/{id}/done` is an
   ordinary, unconditional write, safe from any replica.
+
+**`/activity`, `/activity/stream` and `POST /activity` are the second**
+(chat-ops-broker-telegram-gateway), for a different reason than the claim
+above.
+
+- **The activity log is a per-process, in-memory ring buffer with no
+  cross-replica fan-out.** A hop the Conversation reconciler emits only
+  ever lands in the LEADER's own buffer, since reconciliation is
+  leader-elected. A non-leader's buffer never receives it, no matter how
+  long a reader stays connected.
+- **A console's `/activity/stream` connection is SSE — one long-lived TCP
+  connection, pinned to whichever replica it first dialed**, same shape as
+  the `/channel/ops` incident above. Pinned to a non-leader, it would
+  silently stop seeing reconciler-driven hops — invoked agents, final
+  answers — for the life of that connection.
+- **Unlike `/channel/ops`, there is no correctness reason to refuse when
+  the leader is unreachable.** A locally-served, partial view is strictly
+  better than none for telemetry, so all three fall back to serving or
+  recording from this replica's own buffer instead of a 503.
 
 **Exactly one getUpdates consumer per bot token, ever.** That consumer is
 `gateway-telegram`: ONE poll loop per Deployment and ONE Deployment per token

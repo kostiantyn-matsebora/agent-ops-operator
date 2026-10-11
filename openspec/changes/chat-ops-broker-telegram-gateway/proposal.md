@@ -48,6 +48,13 @@ credential, no second place a bot token can leak from or be misused.
 - `channel-telegram` holds no Telegram credential at all any more. It
   resolves a gateway binding (`gatewayUrl`/`gatewayToken`) per channel
   instead of a bot token, and issues every Bot API call through the gateway.
+- Found live while testing the fix above on a 3-replica install:
+  `GET /activity`, `GET /activity/stream` and `POST /activity` get the
+  same dumb-proxy treatment, for a different reason — the activity log is a
+  per-process ring buffer, and a reconciler-emitted hop only ever lands in
+  the leader's own buffer. A console's SSE connection pinned to a
+  non-leader silently stopped seeing reconciler-driven events for the life
+  of that connection.
 
 A fully leaderless design (any replica derives and serves independently) was
 built, tested, and set aside in favor of this simpler one — see `design.md`'s
@@ -57,7 +64,9 @@ Context.
 
 **Capabilities**: `durable-chat-ops-broker` (MODIFIED — one requirement
 renamed from "rejects rather than proxies" to "proxies"), `telegram-ingest-
-router` (MODIFIED), `telegram-channel-adapter` (MODIFIED).
+router` (MODIFIED), `telegram-channel-adapter` (MODIFIED),
+`activity-telemetry` (MODIFIED — the replay/stream requirement gains the
+same proxy behavior).
 `channel-adapter-contract` and `state-durability` are UNCHANGED: the
 adapter-facing contract (200/204/503-retry-immediately) and the claim's
 crash-recovery semantics are exactly what `durable-chat-ops-broker` already
@@ -65,6 +74,7 @@ published.
 
 **Code**: `platform/manager/internal/httpapi/server.go` (`proxyToLeader`),
 `platform/manager/internal/httpapi/status.go` (`leaderProxyTarget`),
+`platform/manager/internal/httpapi/activity.go` (reuses `proxyToLeader`),
 `channels/telegram/`, `gateways/telegram/`, `chart/charts/telegram/`.
 
 **Reference docs**: `docs/CHANGELOG.md`, `docs/integrations/telegram.md`
@@ -73,9 +83,11 @@ published.
 **Adopter site**: none. No new install-time decision, no new chart value.
 
 **Rules**: `.claude/rules/invariants.md` (the "HTTP API is NOT leader-gated"
-section's one exception now describes a proxy, not a 503), `.claude/rules/
-structure.md` (the Telegram trio's credential ownership), `.claude/rules/
-gotchas.md` (one new dated entry, naming the abandoned alternative and why).
+section now names two exceptions, `/channel/ops` and the activity
+endpoints), `.claude/rules/structure.md` (the Telegram trio's credential
+ownership), `.claude/rules/gotchas.md` (two new dated entries — the
+abandoned alternative and why, and the `/activity/stream` exposure found
+while testing).
 
 This is a manager-only correctness fix plus a Telegram credential
 consolidation. No new release is cut as part of this change — chart,

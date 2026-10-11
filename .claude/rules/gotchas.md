@@ -1309,3 +1309,26 @@ holder.
   always `<leaderPodIP><thisProcess'sOwnAddr>`, never a port looked up
   per-pod.
 
+**THE SAME CONNECTION-PINNING FAILURE HIT `/activity/stream` TOO, FOUND LIVE
+WHILE TESTING THE FIX ABOVE ON THE SAME 3-REPLICA INSTALL, 2026-10-11.**
+
+- **`internal/activity.Log` is a per-process, in-memory ring buffer with no
+  cross-replica fan-out.** A reconciler-emitted hop only ever lands in the
+  LEADER's own buffer, since reconciliation is leader-elected.
+- **A console's SSE connection to `/activity/stream` is one long-lived TCP
+  connection**, pinned exactly like a `/channel/ops` poll. Pinned to a
+  non-leader, a browser tab would silently stop seeing invoked-agent and
+  final-answer events for the life of that connection — the console's "no
+  more reasoning" reports traced here.
+- **Fixed the same way: `GET /activity`, `GET /activity/stream` and
+  `POST /activity` all proxy to the leader on `!isLeader`**, reusing the
+  SAME `proxyToLeader` helper unmodified — `httputil.ReverseProxy` flushes
+  `text/event-stream` writes immediately (stdlib default since Go 1.20), so
+  the proxied SSE stream relays live rather than batched.
+- **Unlike `/channel/ops`, falling back to 503 would be WRONG here.** A
+  locally-served, partial activity view is strictly better than none for
+  telemetry, so all three fall through to serving or recording from this
+  replica's own buffer when the leader can't be reached, instead of
+  refusing. Verify: `TestActivityProxiesToLeaderWhenReachable` in
+  `internal/integration/claim_test.go`.
+
