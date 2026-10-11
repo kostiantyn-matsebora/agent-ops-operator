@@ -84,8 +84,8 @@ and AgentCapability, which have no guide and link to the reference.
   {: .ao-icon-capability}
 
   **A named capability, declared once** — profile, runtime, identity, tools,
-  persistence. A Pipeline or a Coordinator references it with
-  `capabilityRef` instead of inlining the same six fields. Carries no wiring
+  persistence. A Pipeline or a Coordinator references it by
+  name instead of inlining the same six fields. Carries no wiring
   of its own.
 
 - [Coordinator]({{ '/guides/coordinate-agents/' | relative_url }})

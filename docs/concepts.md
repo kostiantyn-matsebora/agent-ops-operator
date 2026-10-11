@@ -548,8 +548,8 @@ invokes named members from `spec.agents[]`.
 - **It claims sources with `signalSourceRefs`**, shareable exactly as a
   Pipeline's are.
 - **Each `agents[]` entry names ONE of `capabilityRef` or `coordinatorRef`.**
-  The second nests: the member is that Coordinator's own root. Its
-  `description` is required and capped at 2048 bytes.
+  The second nests: the member is that Coordinator's own root. Every
+  entry's `description` is required and capped at 2048 bytes.
 - **It declares its own capability inline**, the same `AgentCapabilitySpec`
   fields as a Pipeline: `profileRef`, `runtimeRef`, `serviceAccountName`,
   `toolsets`, `mcpConfigs` and `persistence`.

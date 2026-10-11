@@ -91,6 +91,7 @@ you control and conversations you stay in.
       ```text
       $ kubectl get conversations
       alert-cluster-events-2   Running   2m
+      k8s-observe-7f3a1        Running   1m
       ```
 
   The first story composed several agents under a Coordinator. The second
@@ -173,7 +174,7 @@ you control and conversations you stay in.
 
   [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, the box to reply in, and a Coordinator's root conversation with the members it invoked.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
 
-- **What you write** — One `Pipeline`. It is the whole route, and it is the only place wiring lives.
+- **What you write** — One `Pipeline`. It is the whole route.
 
   ```yaml
   apiVersion: agentops.dev/v1alpha1
