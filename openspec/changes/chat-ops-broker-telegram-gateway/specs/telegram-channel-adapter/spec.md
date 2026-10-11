@@ -103,7 +103,10 @@ The relayed response SHALL be parsed exactly as a direct Bot API response would 
 ### Requirement: Adapter owns its credentials and config parsing
 **Reason**: renamed and rewritten to "Adapter owns its gateway binding and config parsing". The adapter no longer resolves a bot token at all, only a gateway binding.
 
-**Migration**: a served Channel's credential Secret now projects `gatewayUrl`/`gatewayToken` instead of `botToken`. The chart renders this automatically for the telegram bundle.
+**Migration**: a served Channel's `credentialsSecretRef` now points at a
+separate, chart-generated gateway-binding Secret (`gatewayUrl`/
+`gatewayToken`) instead of the bot credential Secret's `botToken` key. The
+chart renders this automatically for the telegram bundle.
 
 ### Requirement: pollingEnabled channel setting
 **Reason**: this adapter never polls. The telegram-ingest-router is the only `getUpdates` consumer, so the setting selects nothing.
