@@ -225,7 +225,7 @@
 
 - [x] 6.1 Not applicable. Nothing in this change is decided by a
       cluster beyond the coordinator-deployment-mode verification tracked
-      in section 4 (4.2 is still open, its verdict pending), which belongs
+      in section 4 (4.1 and 4.2 are still open, their verdicts pending), which belongs
       to that change's own e2e task (8.1) and is run, not re-specified,
       here.
 

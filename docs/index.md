@@ -93,8 +93,9 @@ you control and conversations you stay in.
       alert-cluster-events-2   Running   2m
       ```
 
-  The second story, on the same install: a Pipeline routes straight to one
-  agent.
+  The first story composed several agents under a Coordinator. The second
+  story, on the same install, is the simpler shape: a Pipeline routes
+  straight to one agent.
 
   {: .ao-presentation}
   1. Something happens.
