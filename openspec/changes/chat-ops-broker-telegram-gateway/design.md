@@ -120,10 +120,10 @@ a time was itself the pattern to stop. Generalized into
 `leaderProxyMiddleware`, wrapping the whole mux rather than one more
 per-handler check.
 
-**Chosen**: on `!isLeader`, proxy EVERY route except `/healthz`, `/channel/ops` and `/activity*` included, before it
-reaches a handler. A handler reached anyway — the proxy failed, or this
-replica is the leader — falls through to its own unchanged local
-behavior.
+**Chosen**: on `!isLeader`, proxy EVERY route except `/healthz` before it
+reaches a handler. `/channel/ops` and `/activity*` are proxied too, not
+exempted — a handler reached anyway (the proxy failed, or this replica is
+the leader) falls through to its own unchanged local behavior.
 
 **Why this is safe for routes that never needed a leader check**: most
 endpoints read or write the Kubernetes API, consistent regardless of

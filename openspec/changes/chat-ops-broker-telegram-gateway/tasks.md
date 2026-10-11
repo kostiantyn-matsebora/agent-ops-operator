@@ -45,4 +45,4 @@
 - [x] 5.7 `docs/CHANGELOG.md`: entry noting this is code only, not a cut release.
 
 ### Adopter site
-- [x] 5.8 None beyond the CHANGELOG entry — no new install-time decision, no new chart value an adopter sets.
+- [x] 5.8 `router.callPort`, `gatewayUrl` and `gatewayToken` are new reversible values, documented in `docs/configuration.md`'s new "Telegram router" section (5.4). No new install-time decision otherwise.

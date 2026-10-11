@@ -105,12 +105,12 @@ Everything below is under `telegram:`.
 | `surface.credentials.botToken` | empty | the token inline, which then lives in your values *and* the release |
 | `surface.approvers` | none | numeric user ids allowed to approve, never `@names` |
 | `surface.feedThreadId` | none | an existing topic to post unthreaded notices into |
-| `apiBase` | empty | the Bot API root the router calls — a self-hosted Bot API server or a test double. Empty renders nothing and the real host is used |
+| `apiBase` | empty | the Bot API root `gateway-telegram` calls — a self-hosted Bot API server or a test double. Empty renders nothing and the real host is used |
 
-**`apiBase` is deployment-level on purpose, and it is now the ROUTER's alone.**
+**`apiBase` is deployment-level on purpose, and it is now `gateway-telegram`'s alone.**
 The channel adapter no longer calls the Bot API at all.
 
-Every outbound call goes through the router's own `POST /telegram/call/{method}`
+Every outbound call goes through `gateway-telegram`'s own `POST /telegram/call/{method}`
 endpoint instead. The adapter has nothing left to point at a self-hosted server.
 
 The channel adapter carries a `gatewayUrl`/`gatewayToken` binding instead.

@@ -34,12 +34,12 @@ for the source and the reference material beside this file.
   - **The cap.** `Coordinator.spec.agents[].description` rises from 512 to
     2048 bytes, since the new shape did not fit the old one.
 
-- **Breaking.** The router (`gateway-telegram`) is now the SOLE holder of the Telegram bot
+- **Breaking.** `gateway-telegram` is now the SOLE holder of the Telegram bot
   credential, inbound and outbound alike. The telegram bundle's
   `surface.credentials` Secret no longer carries an `apiBase` key, and the
   channel adapter reads a new `gatewayUrl`/`gatewayToken` Secret instead.
   Hand-built Secrets must change.
-- **Not yet releasable.** The router and `channel-telegram` need new
+- **Not yet releasable.** `gateway-telegram` and `channel-telegram` need new
   image releases before this is installable.
 - **`channel-telegram` no longer calls `api.telegram.org` directly.** Every
   send, document upload, forum topic operation and command registration is
