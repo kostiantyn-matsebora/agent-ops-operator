@@ -120,7 +120,7 @@ a time was itself the pattern to stop. Generalized into
 `leaderProxyMiddleware`, wrapping the whole mux rather than one more
 per-handler check.
 
-**Chosen**: on `!isLeader`, proxy EVERY route except `/healthz` before it
+**Chosen**: on `!isLeader`, proxy EVERY route except `/healthz`, `/channel/ops` and `/activity*` before it
 reaches a handler. A handler reached anyway — the proxy failed, or this
 replica is the leader — falls through to its own unchanged local
 behavior.

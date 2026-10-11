@@ -58,7 +58,7 @@ credential, no second place a bot token can leak from or be misused.
   of that connection.
 - That per-endpoint fix is generalized into one `leaderProxyMiddleware`
   wrapping the whole mux. A non-leader proxies every route except
-  `/healthz` to the leader, and a handler reached anyway serves locally.
+  `/healthz`, `/channel/ops` and `/activity*` to the leader, and a handler reached anyway serves locally.
   The manager's `NetworkPolicy` also admits its own replicas, or the proxy
   dial is dropped.
 
@@ -95,7 +95,7 @@ generated, prose by hand).
 **Rules**:
 
 - `.claude/rules/invariants.md`: the "HTTP API is NOT leader-gated" section
-  now covers every route except `/healthz`, through one all-routes
+  now covers every route except `/healthz`, `/channel/ops` and `/activity*`, through one all-routes
   leader-proxy middleware. `/channel/ops` and the activity endpoints keep
   their own differing fallbacks.
 - `.claude/rules/structure.md`: the Telegram trio's credential ownership.
