@@ -23,6 +23,17 @@ A non-leader SHALL reject the request, distinguishably from "no work is currentl
 - **WHEN** a channel adapter built against this contract receives the rejection
 - **THEN** it retries exactly as it already does on an empty, timed-out poll, never surfacing the rejection as an adapter-side error
 
+## ADDED Requirements
+
+### Requirement: The manager's network policy admits its own replicas
+
+The chart's `NetworkPolicy` for the manager SHALL admit ingress from pods labelled `app.kubernetes.io/name: agentops-manager`, alongside the callers it already admits, so a non-leader's proxy dial to the leader is not dropped.
+
+#### Scenario: A non-leader's proxy dial is admitted
+
+- **WHEN** a non-leader replica dials the leader's pod on the API port with the network policy enforced
+- **THEN** the connection is admitted and the proxy relays the leader's response
+
 ## REMOVED Requirements
 
 ### Requirement: A non-leader rejects rather than proxies a poll it cannot safely answer
