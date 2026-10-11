@@ -29,6 +29,8 @@ A non-leader SHALL reject the request, distinguishably from "no work is currentl
 
 The chart's `NetworkPolicy` for the manager SHALL admit ingress from pods labelled `app.kubernetes.io/name: agentops-manager` in the release's own namespace, alongside the callers it already admits, so a non-leader's proxy dial to the leader is not dropped.
 
+The admitted port is the manager's API port `8080`, a fixed literal with no settable chart value (unlike `router.callPort`).
+
 #### Scenario: A non-leader's proxy dial is admitted
 
 - **WHEN** a non-leader replica dials the leader's pod on the API port with the network policy enforced

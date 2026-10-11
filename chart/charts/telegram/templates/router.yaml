@@ -58,7 +58,9 @@ spec:
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  # the SAME Secret the Channel sends with: one bot, one token
+                  # the bot credential Secret, now read ONLY here
+                  # (chat-ops-broker-telegram-gateway) -- the Channel sends
+                  # through the separate gateway-binding Secret instead.
                   name: {{ include "telegram.secretName" . }}
                   key: botToken
             - name: LISTEN_ADDR
