@@ -106,7 +106,7 @@ def build(t):
     c = THEMES[t]
     o = []
     o.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
-             f'width="{W}" height="{H}" role="img" aria-label="{LABEL}" font-family="system-ui,-apple-system,'
+             f'width="{W}" height="{H}" role="img" aria-label="{esc(LABEL)}" font-family="system-ui,-apple-system,'
              f'Segoe UI,Helvetica,Arial,sans-serif">')
     o.append('<defs>'
              f'<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" '

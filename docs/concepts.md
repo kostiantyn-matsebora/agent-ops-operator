@@ -422,7 +422,7 @@ within the list.
 see [below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
 `serviceAccountName`, see [below](#execution-is-wiring-too)).
 
-A `Coordinator` (below) declares the same two fields for its OWN coordinating
+A `Coordinator` (below) declares the same `AgentCapabilitySpec` fields for its OWN coordinating
 agent, inline on itself, and an `AgentCapability` declares them standalone.
 A Pipeline is where an ordinary, single-agent route declares them inline.
 

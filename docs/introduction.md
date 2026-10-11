@@ -30,7 +30,8 @@ different signals, has two different reaches.
 
 ## Understand the concepts
 
-Nine kinds. Each card links to the guide that teaches it.
+Nine kinds. Each card links to the guide that teaches it, except Conversation
+and AgentCapability, which have no guide and link to the reference.
 
 {: .ao-cards}
 - [AgentProfile]({{ '/guides/agent-profile/' | relative_url }})

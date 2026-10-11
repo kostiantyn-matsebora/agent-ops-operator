@@ -480,6 +480,7 @@
           btn.type = 'button';
           btn.setAttribute('role', 'tab');
           btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+          btn.id = panelId + '-tab-' + i;
           btn.setAttribute('aria-controls', panelId);
           btn.tabIndex = i === 0 ? 0 : -1;
           btn.textContent = STORIES[i].tabLabel;
@@ -674,9 +675,11 @@
         btn.setAttribute('aria-selected', bi === i ? 'true' : 'false');
         btn.tabIndex = bi === i ? 0 : -1;
       });
+      if (multi) wrap.setAttribute('aria-labelledby', tabs[i].id);
       mount(i);
     }
 
+    if (multi) wrap.setAttribute('aria-labelledby', tabs[0].id);
     mount(0);
 
     // REDUCED MOTION IS THE COMPOSED DRAWING, PAUSED, WITH A CUE INSTEAD OF A
