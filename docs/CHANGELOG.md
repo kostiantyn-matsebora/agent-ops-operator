@@ -10,7 +10,7 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
-## [14.0.2] — 2026-10-11
+## [15.0.0] — 2026-10-11
 
 ### Changed
 

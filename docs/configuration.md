@@ -616,3 +616,13 @@ CRDs *and* the Pipelines and Channels that are instances of them.
 **Helm never upgrades them either.** When a release changes a CRD field, its
 entry in [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md) says so and gives you the `kubectl apply`
 line. Nothing else in the chart needs that treatment.
+
+## Telegram router
+
+Set under the `telegram` bundle. Every key is reversible with a `helm upgrade`.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `router.callPort` | `8080` | the port the router's Service and NetworkPolicy serve `POST /telegram/call/{method}` on |
+| `gatewayUrl` | rendered | the router URL, a key of the chart-managed Secret `agentops-telegram-gateway` the channel adapter reads |
+| `gatewayToken` | generated | the call token, a key of the same Secret. A hand-built Secret must carry both |

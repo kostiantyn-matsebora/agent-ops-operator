@@ -42,7 +42,9 @@ A non-leader manager replica SHALL reverse-proxy every route except `/healthz` t
 - A handler reached anyway SHALL fall through to its own unchanged local behavior.
 - A handler is reached anyway when the proxy failed or the replica is the leader.
 
-The routes this middleware covers read or write the Kubernetes API, which is consistent on any replica. The proxy therefore changes no response a client could already receive.
+Most routes this middleware covers read or write the Kubernetes API, which is consistent on any replica. The proxy therefore changes no response a client could already receive.
+
+`/activity*` is the exception. Its ring buffer is per-process with no cross-replica fan-out, so it is proxied to reach the leader's buffer, where reconciler-driven events land.
 
 #### Scenario: A non-leader proxies an ordinary route
 
