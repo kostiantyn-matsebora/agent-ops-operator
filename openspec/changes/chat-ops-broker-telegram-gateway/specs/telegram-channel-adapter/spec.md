@@ -76,7 +76,7 @@ This generalizes the standing rule — **an adapter's outbound base URL is confi
 ## ADDED Requirements
 
 ### Requirement: Outbound Bot API calls are relayed through the router
-The adapter SHALL issue every Bot API call it composes to the resolved gateway's `POST /telegram/call/{method}`, bearing the resolved `gatewayToken`, instead of calling the Bot API directly.
+The adapter SHALL issue every Bot API call it composes to the resolved gateway's `POST /telegram/call/{method}`, bearing the resolved `gatewayToken` as a bearer token in the `Authorization` header, instead of calling the Bot API directly.
 
 The relayed response SHALL be parsed exactly as a direct Bot API response would be, including `parameters.retry_after` on a `429`.
 

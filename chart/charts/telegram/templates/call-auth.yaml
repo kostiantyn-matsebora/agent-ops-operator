@@ -32,7 +32,7 @@ nothing random may reach the upgrade path.
 {{- if and $existing $existing.data }}
 {{- $existingVal = index $existing.data "gatewayToken" | default "" }}
 {{- end }}
-{{- include "agentops.generatedSecretGuard" (dict "root" . "name" $name "explicit" "" "existing" $existing "existingVal" $existingVal "key" "gatewayToken" "setting" "(none -- this Secret is internal wiring between the router and channel-telegram, never operator-supplied)") }}
+{{- include "agentops.generatedSecretGuard" (dict "root" . "name" $name "explicit" "" "existing" $existing "existingVal" $existingVal "key" "gatewayToken" "setting" "") }}
 {{- /* Always renders: an upgrade re-renders too (lookup sees the token), so gatewayUrl follows router.callPort. A Secret that is absent, or lacks the gatewayToken key, gets a fresh token. A cluster-less renderer sees none and renders a fresh token each time. */ -}}
 apiVersion: v1
 kind: Secret

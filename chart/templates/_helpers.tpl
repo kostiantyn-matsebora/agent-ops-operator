@@ -652,7 +652,7 @@ silent guard there is correct.
 {{- if and (not .explicit) (not $root.Release.IsInstall) .existingVal -}}
 {{- $ann := (.existing.metadata).annotations | default dict -}}
 {{- if ne (index $ann "helm.sh/resource-policy" | default "") "keep" -}}
-{{- fail (printf "Secret %q in namespace %q holds a chart-generated credential that this chart version no longer renders on upgrade. Helm reads helm.sh/resource-policy off the live object, so dropping it from the manifest DELETES it — and with it every session or adapter credential derived from key %q. Annotate it once, then upgrade again:\n\n  kubectl -n %s annotate secret %s helm.sh/resource-policy=keep\n\nOr take the credential under release management instead by setting %s to its current value." .name $root.Release.Namespace .key $root.Release.Namespace .name .setting) -}}
+{{- fail (printf "Secret %q in namespace %q holds a chart-generated credential that this chart version no longer renders on upgrade. Helm reads helm.sh/resource-policy off the live object, so dropping it from the manifest DELETES it — and with it every session or adapter credential derived from key %q. Annotate it once, then upgrade again:\n\n  kubectl -n %s annotate secret %s helm.sh/resource-policy=keep%s" .name $root.Release.Namespace .key $root.Release.Namespace .name (ternary (printf "\n\nOr take the credential under release management instead by setting %s to its current value." .setting) "" (ne (.setting | default "") "")) ) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

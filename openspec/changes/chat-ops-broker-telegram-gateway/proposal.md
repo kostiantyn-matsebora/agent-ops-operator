@@ -103,7 +103,7 @@ generated, prose by hand).
   alternative and why, and the `/activity/stream` exposure found while
   testing.
 
-This is a manager-only correctness fix plus a Telegram credential
+This is a manager correctness fix plus a Telegram credential
 consolidation. No new release is cut as part of this change — chart,
 `agentops-channel-telegram`, and `agentops-gateway-telegram` image versions are bumped but not
 tagged or published here, since that is a separate, deliberate release step.

@@ -74,13 +74,11 @@ preserved. Enable it on a quiet install, or reset the conversations that fail.
 restores the direct mount, and handles written under the per-conversation path
 are not found there.
 
-### The cost of the default, stated rather than discovered
-
-**`$HOME` is pod-local on every conversation now.** It is not only transcripts
-that live there — caches, tool state and anything else the agent writes home are
-node ephemeral storage, and they die with the pod.
-`runtimeDefaults.contextSync.liveSizeLimit` bounds it at `4Gi` per conversation.
-Budget node ephemeral storage for `maxActiveConversations` × that.
+- **`$HOME` is pod-local on every conversation now.** It is not only transcripts
+  that live there — caches, tool state and anything else the agent writes home are
+  node ephemeral storage, and they die with the pod.
+  `runtimeDefaults.contextSync.liveSizeLimit` bounds it at `4Gi` per conversation.
+  Budget node ephemeral storage for `maxActiveConversations` × that.
 
 ### Upgrade
 
