@@ -24,7 +24,7 @@
 
 - [ ] 4.1 Add `create`/`update` verbs on `RoleGrant` to console's existing `apiGroups: ["agentops.dev"]` block in `chart/templates/console.yaml`, adding no verb to any other kind. Verify with `helm template` diffing only the expected block.
 - [ ] 4.2 Add a chart value for bootstrap administrators under external authentication (e.g. `console.rbac.bootstrapAdmins`), read once, documented in its own values comment. Verify with a chart render test asserting the value reaches the console's config as designed.
-- [ ] 4.3 Verify `kubectl apply -f chart/crds/` is required on upgrade for the new CRD, per the Migration Plan in `design.md`, and note it in NOTES.txt if this chart surfaces upgrade notes elsewhere for new CRDs.
+- [ ] 4.3 Record that `kubectl apply -f chart/crds/` is required on upgrade for the new CRD in `docs/installation.md` and `docs/CHANGELOG.md`, per the Migration Plan in `design.md`. `chart/templates/NOTES.txt` gets no entry, since it carries no per-CRD upgrade notes.
 
 ## 5. Console UI: role assignment — frontend-developer
 

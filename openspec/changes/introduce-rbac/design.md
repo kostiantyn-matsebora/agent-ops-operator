@@ -174,7 +174,10 @@ rather than reverting to "no object" on demotion.
 ## Migration Plan
 
 1. Ship the CRD. Zero existing objects — every identity defaults to `user`
-   from the moment this lands, until an administrator is bootstrapped.
+   from the moment this lands, until an administrator is bootstrapped. The
+   shared-token identity is `administrator` by construction. Under external
+   authentication the chart value `console.rbac.bootstrapAdmins` names the
+   first administrators (see `specs/access-control/spec.md`).
 2. `helm upgrade` re-renders the console's `ClusterRole` with the new verbs.
    `kubectl apply -f chart/crds/` is required on the upgrade path, same as
    any new CRD (`gotchas.md`: Helm installs a CRD only when absent).

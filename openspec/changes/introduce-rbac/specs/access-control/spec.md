@@ -79,10 +79,14 @@ creating anything.
 The console's shared-token identity (`identity == "token"`) SHALL be treated
 as role `administrator` by construction, requiring no `RoleGrant` object.
 
-Under external authentication, where no shared token is configured, a chart
-value SHALL name a list of initial administrator identities. That list SHALL
-be read once, so an install has at least one administrator from first boot
-with no `RoleGrant` object created by hand.
+Under external authentication, where no shared token is configured, the chart
+value `console.rbac.bootstrapAdmins` SHALL name the initial administrators.
+
+Each entry is a bare identity string on the `console` channel, such as
+`administrator@example.com`. It is not a `{channel, key}` pair.
+
+The list SHALL be read once. An install then has an administrator from first
+boot, with no `RoleGrant` object created by hand.
 
 #### Scenario: The shared-token identity is administrator
 
