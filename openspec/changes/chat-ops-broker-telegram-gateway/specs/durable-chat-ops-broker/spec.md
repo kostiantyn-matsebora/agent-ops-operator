@@ -46,7 +46,7 @@ The routes this middleware covers read or write the Kubernetes API, which is con
 
 #### Scenario: A non-leader proxies an ordinary route
 
-- **WHEN** any route other than `/healthz` is served by a non-leader replica and the leader is reachable
+- **WHEN** any route other than `/healthz`, `/channel/ops` and `/activity*` is served by a non-leader replica and the leader is reachable
 - **THEN** that replica forwards the request and relays the leader's response
 
 #### Scenario: A failed proxy falls through to the local handler
