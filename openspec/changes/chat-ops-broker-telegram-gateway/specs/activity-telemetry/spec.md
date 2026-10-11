@@ -17,7 +17,7 @@ Unlike a channel op poll, a non-leader SHALL NOT refuse an activity request when
 - **THEN** the response tells it to resync, and the client is expected to re-read snapshots rather than assume continuity
 
 #### Scenario: Unauthenticated access is refused
-- **WHEN** either endpoint is called without a valid adapter token
+- **WHEN** any of the three endpoints is called without a valid adapter token
 - **THEN** the request is rejected with 401 and no events are disclosed
 
 #### Scenario: A non-leader proxies an activity request to the leader

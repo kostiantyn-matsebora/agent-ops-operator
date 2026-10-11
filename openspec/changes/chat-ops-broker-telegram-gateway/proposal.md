@@ -49,8 +49,9 @@ credential, no second place a bot token can leak from or be misused.
   resolves a gateway binding (`gatewayUrl`/`gatewayToken`) per channel
   instead of a bot token, and issues every Bot API call through the gateway.
 - Found live while testing the fix above on a 3-replica install:
-  `GET /activity`, `GET /activity/stream` and `POST /activity` get the
-  same dumb-proxy treatment, for a different reason — the activity log is a
+  `GET /activity`, `GET /activity/stream` and `POST /activity` proxy to the
+  leader like `/channel/ops`, but fall back to the local buffer instead of
+  503 when the leader is unreachable. The reason differs too — the activity log is a
   per-process ring buffer, and a reconciler-emitted hop only ever lands in
   the leader's own buffer. A console's SSE connection pinned to a
   non-leader silently stopped seeing reconciler-driven events for the life

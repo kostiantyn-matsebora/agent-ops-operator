@@ -81,4 +81,4 @@ This endpoint can SEND, with the live bot credential, any Bot API method at all.
 
 #### Scenario: A missing or wrong token is refused
 - **WHEN** a call to `/telegram/call/{method}` carries no bearer token, or the wrong one
-- **THEN** the router refuses it before making any call to the real Bot API
+- **THEN** the router refuses it with 401 before making any call to the real Bot API

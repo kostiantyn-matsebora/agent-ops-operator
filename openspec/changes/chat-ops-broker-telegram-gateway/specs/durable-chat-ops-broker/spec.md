@@ -26,7 +26,7 @@ A non-leader SHALL reject the request, distinguishably from "no work is currentl
 ## REMOVED Requirements
 
 ### Requirement: A non-leader rejects rather than proxies a poll it cannot safely answer
-**Reason**: renamed to "A non-leader proxies a poll it cannot safely answer". Proxying was considered and rejected by `durable-chat-ops-broker`'s own design as unneeded complexity. Measured live, the alternative (503-and-redial) could still take many redials to land on the leader by chance.
+**Reason**: renamed to "A non-leader proxies a poll it cannot safely answer". `durable-chat-ops-broker`'s own design first rejected proxying as unneeded complexity. Measured live, 503-and-redial could take many redials to land on the leader by chance, so proxying was adopted.
 
 **Migration**: none for a conforming adapter. It already retries a 503 immediately, and now mostly never sees one.
 
