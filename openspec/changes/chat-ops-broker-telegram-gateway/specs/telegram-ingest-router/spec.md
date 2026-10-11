@@ -82,6 +82,8 @@ The router SHALL serve `POST /telegram/call/{method}`, relaying the request body
 
 This is the outbound half of the router holding the bot credential alone (chat-ops-broker-telegram-gateway). The channel adapter composes a Bot API call exactly as before. It issues the call to this endpoint instead of to `api.telegram.org` directly, and holds no copy of the token.
 
+The router SHALL listen for the endpoint on the port set by the chart value `router.callPort` (default `8080`), and the chart's NetworkPolicy SHALL admit the channel adapter on that port.
+
 The endpoint SHALL require the gateway token, a bearer token distinct from the router's inbound push to the channel adapter's `POST /updates`, which carries no bearer token.
 
 It is the `gatewayToken` the channel adapter sends (Requirement: Adapter owns its gateway binding and config parsing).
