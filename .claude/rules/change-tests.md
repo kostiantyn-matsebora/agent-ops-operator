@@ -1,3 +1,9 @@
+---
+paths:
+  - "openspec/changes/**/tasks.md"
+  - "openspec/changes/**/proposal.md"
+---
+
 ## Tests are tasks (every change ends with unit, system, then documentation)
 
 **THE TWO SECTIONS BEFORE THE DOCUMENTATION SECTION ARE TESTS.** In this
@@ -15,7 +21,7 @@ is finished:
   documentation task exists for, one section up.
 - **THE SYSTEM SECTION IS OWED EVEN WHERE IT DOES NOT APPLY.** Then it holds ONE
   task stating why — "nothing here is decided by a cluster" — and it is ticked.
-  An absent section and a forgotten one look identical; a stated "not
+  An absent section and a forgotten one look identical. A stated "not
   applicable" is a claim a reviewer can dispute.
 - **`docs/testing.md` owns what each tier can decide**, which is what settles
   whether the system tier applies. Rendering, parsing and what a reconciler

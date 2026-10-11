@@ -8,6 +8,30 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+### Changed
+
+- **The chart-rendered Coordinator's own agent is an orchestrator, not a
+  dispatcher.**
+  - **The old failure.** Asked to act, it answered that it had no tools while
+    an acting entry sat in its own `agents[]`. Its prompt picked an entry
+    whose description matched what arrived. Every shipped description was a
+    trigger ("a cluster event", "once the cause is known"), so a person's
+    instruction matched none of them.
+  - **The new prompt.** It analyses what arrived, delegates to the
+    `agents[]` entry whose purpose covers it, and reads the result back
+    before deciding what to do next.
+  - **Authority.** A person's instruction authorises its own action. A
+    change the agent discovers on its own is proposed first.
+  - **Descriptions.** Every bundle route's description now states what that
+    agent IS, what it CAN do, what it CANNOT, and what to HAND it. That
+    covers `kubernetes`'s `k8s-observe`/`k8s-operate`, `home-assistant`'s
+    `ha-control`/`ha-ops` and `prometheus`'s `alert-investigator`.
+    `ha-control` stops being described as read-only, which it never was.
+  - **The cap.** `Coordinator.spec.agents[].description` rises from 512 to
+    2048 bytes, since the new shape did not fit the old one.
+
 ## [14.0.2] — 2026-10-11
 
 - `gateway-telegram` and `channel-telegram` need new image releases before
@@ -67,7 +91,6 @@ for the source and the reference material beside this file.
 LAST released `channelAdapter.image.tag` and `router.image.tag` — those
 binaries do not yet implement this change. Tag and release both components,
 then bump both tags, before this chart version is installed anywhere.
-
 ## [14.0.1] — 2026-10-10
 
 - `signal-cron` 0.2.0.

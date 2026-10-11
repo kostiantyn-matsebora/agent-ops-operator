@@ -1,3 +1,9 @@
+---
+paths:
+  - ".claude/rules/**"
+  - "docs/.claude/**"
+---
+
 ## Authoring rules (binding)
 
 **They govern every `.claude/rules/*.md` file and `docs/.claude/`, not only the
@@ -24,9 +30,8 @@ of the rule, never its why.
 **ONE TOPIC PER FILE, under `.claude/rules/`.** `CLAUDE.md` is the index.
 
 **IT HOLDS A SHORT LIST OF NAMED EXCEPTIONS, AND THEY ARE NOT DRIFT.** A rule
-earns a line there when being LOST AT COMPACTION would cost something the index
-cannot recover — the statement itself has to be in scope, not merely findable.
-Each one is a sentence or two that NAMES the rules file holding the detail:
+earns a line there only when losing it at compaction costs something the index
+cannot recover. Each one names the rules file holding the detail:
 
 | In `CLAUDE.md` | Detail in |
 |---|---|

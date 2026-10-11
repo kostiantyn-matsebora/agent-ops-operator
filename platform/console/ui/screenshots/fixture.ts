@@ -300,7 +300,10 @@ const pipelineDetail: Detail = {
 // The one root, its three direct members and one member's own two — design
 // D-G's fixture requirement (task 5.4): "one root with three members, one of
 // which is itself a sub-coordinator with two members of its own."
-const INCIDENT_ROOT = 'incident-response-4a8f21'
+//
+// Exported: the landing-page demo recording (`demo/story.ts`) reuses this
+// same root as its own Coordinator beat, rather than inventing a second one.
+export const INCIDENT_ROOT = 'incident-response-4a8f21'
 const INCIDENT_MITIGATE = `${INCIDENT_ROOT}-mitigate`
 
 const conversations: ConversationPage = {

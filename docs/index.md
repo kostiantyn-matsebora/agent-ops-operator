@@ -15,6 +15,89 @@ you control and conversations you stay in.
 {: .ao-tabs #tour}
 - **How it works**
 
+  Two shapes of wiring, same install: a Coordinator that decides who
+  answers, or a Pipeline that routes straight to one agent.
+
+  {: .ao-presentation}
+  1. Something happens — or someone just asks.
+
+     ```yaml
+     # nothing declared yet
+     ```
+
+  2. The same install can wire a Coordinator instead.
+
+     ```text
+     helm install agent-ops agentops/agent-ops
+     ```
+
+  3. You declare the route. One Coordinator.
+
+     ```yaml
+     kind: Coordinator
+     metadata:
+       name: k8s-triage
+     ```
+
+  4. What starts it — exactly like a Pipeline's signalSourceRefs.
+
+     ```yaml
+       signalSourceRefs:
+         - name: cluster-events
+     ```
+
+  5. Each agent it may invoke is listed by purpose.
+
+     ```yaml
+       agents:
+         - name: log-reader
+           description: Reads logs. Cannot change anything.
+           capabilityRef:
+             name: log-reader
+     ```
+
+  6. It reads what each one returns, then decides what is next.
+
+     ```yaml
+         - name: remediator
+           description: Restarts or scales. Needs a known cause.
+           capabilityRef:
+             name: remediator
+     ```
+
+  7. An entry can itself be a Coordinator, nested as deep as it needs.
+
+     ```yaml
+         - name: home-triage
+           coordinatorRef:
+             name: home-triage
+     ```
+
+  8. Only the root escalates — its own path, when it decides to.
+
+     ```yaml
+       channelRefs:
+         - name: telegram
+     ```
+
+  9. Then it runs. One root conversation, each member its own pod.
+
+     ```yaml
+     # one root Conversation, each invoked member its own pod
+     ```
+
+  10. Same install. A different shape of wiring.
+
+      ```text
+      $ kubectl get conversations
+      alert-cluster-events-2   Running   2m
+      k8s-observe-7f3a1        Running   1m
+      ```
+
+  The first story composed several agents under a Coordinator. The second
+  story, on the same install, is the simpler shape: a Pipeline routes
+  straight to one agent.
+
   {: .ao-presentation}
   1. Something happens.
 
@@ -86,11 +169,12 @@ you control and conversations you stay in.
       cluster-events-7c1d4e   Running   2m
       ```
 
-- **Watch it work** — One signal, start to finish. A minute, no sound.
+- **Watch it work** — One signal, start to finish, plus a Coordinator composing
+  several agents. A minute, no sound.
 
-  [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, and the box to reply in.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
+  [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, the box to reply in, and a Coordinator's root conversation with the members it invoked.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
 
-- **What you write** — One `Pipeline`. It is the whole route, and it is the only place wiring lives.
+- **What you write** — One `Pipeline`. It is the whole route.
 
   ```yaml
   apiVersion: agentops.dev/v1alpha1

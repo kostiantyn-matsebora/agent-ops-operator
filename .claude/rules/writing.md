@@ -1,3 +1,8 @@
+---
+paths:
+  - "**/*.md"
+---
+
 ## Writing (every markdown file)
 
 Everything in a repository is written to be SCANNED: a rule, a page, a README,
