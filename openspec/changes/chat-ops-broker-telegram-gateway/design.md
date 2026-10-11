@@ -175,7 +175,7 @@ indistinguishable from inside the process that hit either.
    claim fields and their semantics are exactly `durable-chat-ops-broker`'s
    own, untouched.
 2. Deploy the new `channel-telegram`/`gateway-telegram` images together
-   with the chart update rendering the new gateway-binding Secret. The two
+   with the chart update rendering the new credential Secret keys. The two
    MUST move together: an old `channel-telegram` expects a bot token no
    longer in the Channel's credential Secret, and a new one expects a
    gateway binding an old chart does not render.

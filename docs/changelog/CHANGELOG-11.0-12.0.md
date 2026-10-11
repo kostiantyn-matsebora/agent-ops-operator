@@ -13,7 +13,6 @@ pod it cannot serve.
 
 ### Changed
 
-
 **The reference runtime declares its context paths, so a default install runs
 synchronised.** `chart/charts/claude/values.yaml` ships
 `contextSync.paths: [".claude/projects/-data-workspace/**"]`.
