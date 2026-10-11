@@ -59,10 +59,7 @@ spec:
     required:
       - chatId
   credentialKeys:
-    # documentation only — the manager never reads Secrets. This adapter
-    # holds no Telegram credential at all (chat-ops-broker-telegram-gateway):
-    # it sends through gateway-telegram's outbound relay, so what it needs
-    # projected is the GATEWAY BINDING, never the bot token.
+    # documentation only — the manager never reads Secrets.
     - key: gatewayUrl
       required: false
       description: >-

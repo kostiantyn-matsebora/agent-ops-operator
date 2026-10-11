@@ -261,10 +261,7 @@ spec:
     required:
       - chatId
   credentialKeys:
-    # documentation only — the manager never reads Secrets. This adapter
-    # holds no Telegram credential at all (chat-ops-broker-telegram-gateway):
-    # it sends through gateway-telegram's outbound relay, so what it needs
-    # projected is the GATEWAY BINDING, never the bot token.
+    # documentation only — the manager never reads Secrets.
     - key: gatewayUrl
       required: false
       description: >-
@@ -279,6 +276,11 @@ spec:
         also accepts TELEGRAM_GATEWAY_TOKEN from its environment.
 ```
 <!-- /generated -->
+
+**The Telegram adapter holds no Telegram credential.**
+
+- It sends through `gateway-telegram`'s outbound relay.
+- What it needs projected is the gateway binding, `gatewayUrl` and `gatewayToken`, never the bot token.
 
 ## Declare a Channel
 
@@ -321,13 +323,7 @@ spec:
   adapter: telegram
   # projected into the adapter pod as env by the reconciler, kubelet-resolved —
   # nothing reads the Secret through the API.
-  #
-  # THIS IS THE GATEWAY BINDING SECRET, NOT THE BOT TOKEN
-  # (chat-ops-broker-telegram-gateway): channel-telegram holds no Telegram
-  # credential at all any more, only the gatewayUrl/gatewayToken it needs to
-  # reach gateway-telegram's outbound relay. It is independent of how the bot
-  # token itself is supplied (surface.credentials.existingSecret or not),
-  # since channel-telegram no longer reads that Secret.
+  # The gateway binding Secret, not the bot token.
   credentialsSecretRef:
     name: agentops-telegram-gateway
   # opaque to the operator; this shape is what channel-telegram parses
@@ -335,6 +331,11 @@ spec:
     chatId: "-1001234567890"
 ```
 <!-- /generated -->
+
+**`credentialsSecretRef` names the gateway binding Secret, not the bot token.**
+
+- `channel-telegram` reads only `gatewayUrl` and `gatewayToken` from it.
+- It is independent of how the bot token itself is supplied, including `surface.credentials.existingSecret`.
 
 {: .ao-callout}
 > **That chat id is a PLACEHOLDER**, as is every identifier in every example on

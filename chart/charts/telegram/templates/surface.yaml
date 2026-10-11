@@ -53,13 +53,7 @@ spec:
   adapter: {{ .Values.channelAdapter.name }}
   # projected into the adapter pod as env by the reconciler, kubelet-resolved —
   # nothing reads the Secret through the API.
-  #
-  # THIS IS THE GATEWAY BINDING SECRET, NOT THE BOT TOKEN
-  # (chat-ops-broker-telegram-gateway): channel-telegram holds no Telegram
-  # credential at all any more, only the gatewayUrl/gatewayToken it needs to
-  # reach gateway-telegram's outbound relay. It is independent of how the bot
-  # token itself is supplied (surface.credentials.existingSecret or not),
-  # since channel-telegram no longer reads that Secret.
+  # The gateway binding Secret, not the bot token.
   credentialsSecretRef:
     name: {{ include "telegram.gatewaySecretName" . }}
   # opaque to the operator; this shape is what channel-telegram parses
