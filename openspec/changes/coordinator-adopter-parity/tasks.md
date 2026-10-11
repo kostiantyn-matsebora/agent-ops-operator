@@ -98,6 +98,43 @@
       no horizontal overflow in either theme, reduced-motion renders
       paused with the existing "press to play" contract, and
       `node --check` passes on `presentation.js`.
+- [x] 2.4 Review feedback on this pull request: task 3.1's fix (the
+      stale "only" claim) left `introduction.md`'s card grid itself
+      untouched — Coordinator and AgentCapability were still the only
+      two kinds with no card, reachable only as a paragraph read after
+      the grid, and the numbered "Follow the guides" path never
+      mentioned `coordinate-agents.md` at all. Add a card for each
+      (`.ao-icon-coordinator` / `.ao-icon-capability` in
+      `agentops.css`, glyphs translated from `coordinators` /
+      `agentcapabilities` in `platform/console/ui/src/graph/shapes.tsx`
+      the same way every existing card icon is — `+12,+12` off the
+      console's origin-centred path), add step 8 ("Compose agents") to
+      the guide path, and trim the now-redundant prose paragraph below
+      the grid to one sentence.
+      Also investigated the open complaint that the landing page's
+      console recording (`assets/video/console-demo-*.mp4`) shows no
+      Coordinator beat. FOUND: re-recording it is blocked by a
+      PRE-EXISTING, UNRELATED break — `demo/record.spec.ts` waits on
+      `[data-testid="pipeline-typeahead"]`, a selector that no longer
+      exists anywhere in `src/` (confirmed by `grep`). The "Start
+      conversation" UI was rewritten under `destination-*` testids by
+      #298 (chat-shaped-conversations, 2026-10-09), and nobody re-ran
+      `npm run demo` after — exactly the gap
+      `docs/CLAUDE.md`'s own rule ("re-run BOTH npm run screenshots and
+      npm run demo... not done until both match") exists to catch, and
+      it was missed on an unrelated change. Reproduced on a clean
+      `npm ci && npm run build` with NO changes from this pull request
+      applied, so it is not something this change caused or can fix in
+      scope — recorded here rather than silently left for whoever next
+      touches the demo harness. NOT FIXED HERE: left as a separate,
+      pre-existing defect.
+      Verify: built the site, screenshotted `introduction/` in both
+      themes with Playwright (`document.documentElement.scrollWidth >
+      clientWidth` false in both), confirmed the 9-card grid lays out
+      with Coordinator alone in the final row exactly as
+      `docs/CLAUDE.md`'s "odd count leaves the last card at normal
+      width" describes, and `rules_compliance.py` is clean on
+      `introduction.md`.
 
 ## 3. Review introduction.md and getting-started.md
 

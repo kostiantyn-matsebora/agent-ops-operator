@@ -1004,6 +1004,14 @@ a:hover {
   --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6 h7 a4 4 0 0 1 4 4 v4 a4 4 0 0 0 4 4 h3 M18 15 l3 3 -3 3'/%3E%3C/svg%3E");
 }
 
+.ao-icon-capability {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5 a2 2 0 1 0 0.01 0 M9 7 v9 M9 14 h3 M9 17 h2'/%3E%3C/svg%3E");
+}
+
+.ao-icon-coordinator {
+  --ao-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12 h4 M9 12 l5 -6 M9 12 l5 0 M9 12 l5 6'/%3E%3C/svg%3E");
+}
+
 /* The title carries the card's colour, not the link colour: the whole card is
    the affordance, so a teal underlined phrase inside it would read as a second,
    narrower target. */
