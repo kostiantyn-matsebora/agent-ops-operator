@@ -202,27 +202,28 @@
       does not have and cannot dispatch as a CI run — unlike 4.2, this one
       is not an automated test. Left open for whoever runs the
       workstation-only verification.
-- [ ] 4.2 Run task 8.1 from the same file (the already-written e2e
-      coordinator lane, `go test -tags e2e ./test/e2e/` from this working
-      copy's `platform/manager/`, against a cluster built from this
-      working copy's chart) and tick it there once the verdict is
-      recorded.
-      DISPATCHED, VERDICT PENDING: this remote session has no docker
-      daemon and no k3d, so the pack cannot run directly here. First
-      dispatched `e2e-smoke.yml` (run 38072406832) — the coordinator
-      tests (`TestCoordinatorModeInvokeAndMemberResultRouting` and
-      siblings) all logged "full tier only (E2E_TIER=full)" and were
-      SKIPPED under the smoke tier, correcting the assumption they used
-      the stub runtime and ran under smoke. That run also failed on two
-      unrelated, known-flaky lanes
-      (`TestConsolePlainConversationBulkCloseAndDelete`,
+- [x] 4.2 Run task 8.1 from the same file (the already-written
+      coordination lane — `test/e2e/` was renamed `test/system/` by
+      `rename-e2e` since this was last written. The lane now runs as
+      `go test -tags system ./test/system/` from this working copy's
+      `platform/manager/`, against a cluster built from this working
+      copy's chart) and tick it there once the verdict is recorded.
+      DONE: the dispatched `e2e-full.yml` run (38074304800, linked in
+      pull request #335) completed. All four coordinator-specific
+      lanes PASSED against a live cluster:
+      `TestCoordinatorModeInvokeAndMemberResultRouting` (11.06s),
+      `TestCoordinatorSelfHealSurveyExcludesAncestorRoot` (57.02s),
+      `TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates`
+      (13.04s), `TestCoordinatorCloseAndDeleteCascadeThroughConsole`
+      (17.19s). The same run failed on two unrelated, pre-existing
+      flaky lanes (`TestConsolePlainConversationBulkCloseAndDelete`,
       `TestReplicasThreeDeliversEveryConsoleThreadInParallel` — the
-      second has a documented flakiness history in `gotchas.md`). Not
-      this change's doing, since it touches no code — master's last
-      scheduled full run (38042912111, same day) passed both.
-      Dispatched `e2e-full.yml` (run 38074304800) to actually exercise
-      the coordinator lane. Per `implement-issue.md` step 6, not waited
-      on here. Both runs are linked in the pull request.
+      second has a documented flakiness history in `gotchas.md`) —
+      not this change's doing: it touches no code, and master's own
+      scheduled full run the same day (38042912111, before this one)
+      passed both. Ticked 8.1 in
+      `openspec/changes/coordinator-deployment-mode/tasks.md` with
+      this verdict.
 - [x] 4.3 Resolve task 9b.5 from the same file: confirm whether the
       conditional screenshot/demo re-check is actually needed (expected
       no-op, since that change touched no console code) and tick it with
@@ -255,13 +256,14 @@
       DONE: "52 generated file(s) up to date" — confirmed no-op, as
       expected.
 
-## 6. E2E tests
+## 6. System tests
 
 - [x] 6.1 Not applicable. Nothing in this change is decided by a
       cluster beyond the coordinator-deployment-mode verification tracked
-      in section 4 (4.1 and 4.2 are still open, their verdicts pending), which belongs
-      to that change's own e2e task (8.1) and is run, not re-specified,
-      here.
+      in section 4. 4.2 landed with its verdict. 4.1 is still open — a
+      workstation-only hand smoke this remote session cannot dispatch,
+      unlike 4.2's automated lane. Both belong to that change's own
+      tasks (5.1, 8.1) and are run, not re-specified, here.
 
 ## 7. Documentation
 
@@ -271,8 +273,10 @@
       `docs/CHANGELOG.md`, and `docs/security.md` as finished pages (not
       diffs) and confirm each reads correctly on its own, now that every
       other task in this change has landed.
-      OPEN until 4.1 and 4.2 land: the precondition above is not yet met.
-      The three pages were re-read once and read correctly as finished pages.
+      OPEN until 4.1 lands too: the precondition above is not yet fully
+      met. The three pages were re-read once, after 4.2 landed, and
+      read correctly as finished pages — nothing in 4.2's verdict
+      touched their content, so the re-read still stands.
 
 ### Adopter site
 

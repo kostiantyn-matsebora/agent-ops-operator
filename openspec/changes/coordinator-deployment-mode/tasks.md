@@ -153,7 +153,7 @@
 
 ## 8. E2E tests
 
-- [ ] 8.1 Add or extend a coordination lane in
+- [x] 8.1 Add or extend a coordination lane in
       `platform/manager/test/e2e/` covering: coordinator mode end to end
       (source claim, invoke, member-result routing), the reaper's hourly
       survey against a live cluster (kubelet-backed conversation lifecycle,
@@ -191,11 +191,17 @@
       `caller.Spec.CoordinatorRef` directly — the same walk `close` and
       `list_open_roots` already use. `docs/contracts.md`'s `invoke` bound
       row and refusal table updated to match.
-      NOT RUN against a live cluster: this session has no docker daemon and
-      no `k3d` — workstation/CI-only per `remote-session.md`. Left
-      UNTICKED for that reason alone — the lane is written, compiles, and
-      (per the fix above) should pass end to end once actually run against
-      a cluster, but "should pass" is not a verdict this session can claim.
+      RUN against a live cluster, from `coordinator-adopter-parity`'s own
+      task 4.2: no docker daemon or `k3d` in a remote session
+      (`remote-session.md`), so dispatched `e2e-full.yml` (run
+      38074304800) rather than run directly. Note `test/e2e/` above is
+      now `test/system/`, renamed by `rename-e2e` after this lane was
+      written — the dispatched run already built against that rename.
+      VERDICT: `TestCoordinatorModeInvokeAndMemberResultRouting`
+      (11.06s), `TestCoordinatorSelfHealSurveyExcludesAncestorRoot`
+      (57.02s, including the ancestor-root exclusion and the reaper's
+      `invoke` re-check asserted above) and the lane's sibling
+      coordinator tests all PASSED against the live cluster. Ticked.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
