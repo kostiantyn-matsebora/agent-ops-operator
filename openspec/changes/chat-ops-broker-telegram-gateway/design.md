@@ -91,6 +91,11 @@ The information was already being fetched.
 (`API_ADDR`, one value, one Deployment, one image) — only the leader's POD
 IP differs. No second port lookup, no annotation on the pod.
 
+**This is why the NetworkPolicy's admitted port can be a literal `8080`**:
+the chart never sets `API_ADDR`, so every replica's own `Server.Addr`
+defaults to it. A chart release that started exposing `API_ADDR` as a
+value would owe the NetworkPolicy port the same change.
+
 ### `/activity*` reuses the proxy, but refuses nothing
 
 **Found live** while testing the `/channel/ops` fix on a 3-replica

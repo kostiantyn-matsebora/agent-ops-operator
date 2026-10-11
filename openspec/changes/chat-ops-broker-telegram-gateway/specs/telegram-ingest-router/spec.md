@@ -61,6 +61,8 @@ The router SHALL resolve the Bot API base URL from the environment variable `TEL
 
 The chart that owns the router's Deployment SHALL inject it alongside the existing forwarding targets and bot token, rendering no entry when unset.
 
+This value SHALL never be settable on the channel adapter (`telegram-channel-adapter`'s own requirement for this capability is REMOVED): the router is the only Bot API caller left, so it is the only process with a base URL to configure.
+
 An absent `TELEGRAM_API_BASE` is a normal configuration and SHALL take the default without comment, unlike the forwarding targets and the bot token, whose absence exits the process at startup.
 
 #### Scenario: Default installs are unchanged
