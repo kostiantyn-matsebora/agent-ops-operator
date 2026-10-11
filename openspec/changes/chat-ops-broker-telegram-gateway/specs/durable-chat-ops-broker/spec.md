@@ -6,7 +6,7 @@ A manager replica that is not the current leader, on receiving a poll for a chan
 
 The proxy SHALL forward the request and relay the response verbatim — it claims nothing, derives nothing, and reads none of its own `OpQueue`, which was never populated for ops this process did not claim.
 
-A non-leader SHALL reject the request, distinguishably from "no work is currently available," only when the leader is unknown or unreachable from here — never by answering from its own state.
+A non-leader SHALL reject the request with `503`, distinguishably from the `204` an empty poll already returns, only when the leader is unknown or unreachable from here — never by answering from its own state.
 
 #### Scenario: A non-leader proxies to the leader
 
@@ -16,7 +16,7 @@ A non-leader SHALL reject the request, distinguishably from "no work is currentl
 #### Scenario: An unreachable leader falls back to rejection
 
 - **WHEN** a non-leader cannot resolve or reach the current leader — the `Lease` is unread, or the leader's pod cannot be dialed
-- **THEN** that replica rejects the request, distinguishably from "nothing to do," and the adapter retries rather than treating the rejection as such
+- **THEN** that replica rejects the request with `503`, distinguishably from the `204` an empty poll returns, and the adapter retries rather than treating the rejection as such
 
 #### Scenario: A conforming adapter tolerates the rejection
 

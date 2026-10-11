@@ -619,10 +619,13 @@ line. Nothing else in the chart needs that treatment.
 
 ## Telegram router
 
-Set under the `telegram` bundle. Every key is reversible with a `helm upgrade`.
+Set under the `telegram` bundle. `router.callPort` is reversible with a
+`helm upgrade`. `gatewayUrl`/`gatewayToken` are not values you set — they
+are keys of the chart-generated Secret `agentops-telegram-gateway`,
+listed here for completeness.
 
 | Key | Default | Consequence |
 |---|---|---|
 | `router.callPort` | `8080` | the port the router's Service and NetworkPolicy serve `POST /telegram/call/{method}` on |
-| `gatewayUrl` | rendered | the router URL, a key of the chart-managed Secret `agentops-telegram-gateway` the channel adapter reads |
-| `gatewayToken` | generated | the call token, a key of the same Secret. A hand-built Secret must carry both |
+| `gatewayUrl` | rendered | the router URL, re-rendered from `router.callPort` on every upgrade `lookup` can see the Secret |
+| `gatewayToken` | generated once | the call token, generated at install and left untouched by every later upgrade. A hand-built Secret must carry both keys |

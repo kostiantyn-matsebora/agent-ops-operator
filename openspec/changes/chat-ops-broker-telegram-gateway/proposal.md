@@ -86,13 +86,16 @@ published.
 
 **Reference docs**: `docs/CHANGELOG.md`, `docs/contracts.md` (the router
 endpoint and leader-proxy behavior), `docs/security.md` (the bot-token
-trust boundary moves to the gateway), `docs/integrations/telegram.md`
+trust boundary moves to the gateway — `threat-model.py` re-run, byte-
+identical SVGs since it draws no Telegram component), `docs/configuration.md`
+(a new "Telegram router" section), `docs/integrations/telegram.md`
 (generated blocks only), `docs/guides/channel-adapter.md` (yaml blocks
 generated, prose by hand).
 
 **Adopter site**: `docs/configuration.md` gains a "Telegram router" section
-for `router.callPort`, `gatewayUrl` and `gatewayToken` — reversible values,
-no new install-time decision.
+for `router.callPort` (reversible), `gatewayUrl` and `gatewayToken`
+(chart-generated Secret keys, listed for completeness). No new
+install-time decision.
 
 **Rules**:
 
