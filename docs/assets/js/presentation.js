@@ -615,11 +615,20 @@
     // leaves the ordinary paused figure, exactly as it would for any other
     // reader who has already said what they want.
     var engaged = false;
+
+    // aria-labelledby WINS over aria-label, so while the still's cue is shown
+    // the reference is dropped and the cue-bearing aria-label is what is read.
+    function labelWrap() {
+      if (multi && !stillNow) wrap.setAttribute('aria-labelledby', tabs[storyIndex].id);
+      else wrap.removeAttribute('aria-labelledby');
+      wrap.setAttribute('aria-label', stillNow ? BASE_LABEL + ' — press to play' : BASE_LABEL);
+    }
+
     function engage() {
       engaged = true;
       stillNow = false;
       wrap.classList.remove('is-still');
-      wrap.setAttribute('aria-label', BASE_LABEL);
+      labelWrap();
       goTo(0);
       start();
     }
@@ -659,13 +668,13 @@
         pause();
         stillNow = true;
         wrap.classList.add('is-still');
-        wrap.setAttribute('aria-label', BASE_LABEL + ' — press to play');
       } else {
         stillNow = false;
         wrap.classList.remove('is-still');
         goTo(0);
         if (wasPaused || reduced) pause(); else start();
       }
+      labelWrap();
     }
 
     function select(i) {
@@ -675,11 +684,9 @@
         btn.setAttribute('aria-selected', bi === i ? 'true' : 'false');
         btn.tabIndex = bi === i ? 0 : -1;
       });
-      if (multi) wrap.setAttribute('aria-labelledby', tabs[i].id);
       mount(i);
     }
 
-    if (multi) wrap.setAttribute('aria-labelledby', tabs[0].id);
     mount(0);
 
     // REDUCED MOTION IS THE COMPOSED DRAWING, PAUSED, WITH A CUE INSTEAD OF A

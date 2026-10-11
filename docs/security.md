@@ -331,8 +331,10 @@ claim that the rest is handled too.
 
 **The consent boundary is the agent honoring an instruction.** The manager
 enforces WHO may be invoked, never WHAT the invoked agent then does with the
-task. Several rounds of prompt tuning, reverted twice, preceded the current
-wording (#296), so it is stated as open rather than assumed solid.
+task.
+
+Several rounds of prompt tuning, reverted twice, preceded the current wording
+(#296). It is stated as open rather than assumed solid.
 
 **None of this is a surprise to the project.** These are decisions with reasons,
 and the reasons are in
