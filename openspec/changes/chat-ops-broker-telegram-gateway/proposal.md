@@ -92,12 +92,16 @@ generated, prose by hand).
 
 **Adopter site**: none. No new install-time decision, no new chart value.
 
-**Rules**: `.claude/rules/invariants.md` (the "HTTP API is NOT leader-gated"
-section now names two exceptions, `/channel/ops` and the activity
-endpoints), `.claude/rules/structure.md` (the Telegram trio's credential
-ownership), `.claude/rules/gotchas.md` (two new dated entries — the
-abandoned alternative and why, and the `/activity/stream` exposure found
-while testing).
+**Rules**:
+
+- `.claude/rules/invariants.md`: the "HTTP API is NOT leader-gated" section
+  now covers every route except `/healthz`, through one all-routes
+  leader-proxy middleware. `/channel/ops` and the activity endpoints keep
+  their own differing fallbacks.
+- `.claude/rules/structure.md`: the Telegram trio's credential ownership.
+- `.claude/rules/gotchas.md`: two new dated entries, the abandoned
+  alternative and why, and the `/activity/stream` exposure found while
+  testing.
 
 This is a manager-only correctness fix plus a Telegram credential
 consolidation. No new release is cut as part of this change — chart,

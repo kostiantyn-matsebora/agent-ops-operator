@@ -36,13 +36,13 @@ The chart's `NetworkPolicy` for the manager SHALL admit ingress from pods labell
 
 ### Requirement: A non-leader proxies every other route through one middleware
 
-A non-leader manager replica SHALL reverse-proxy every route except `/healthz` to the leader.
+A non-leader manager replica SHALL reverse-proxy every route except `/healthz`, `/channel/ops` and `/activity*` to the leader. The excluded routes keep their own proxy and fallback behavior, specified elsewhere.
 
 - It does so before the request reaches a handler, through one middleware wrapping the whole mux.
 - A handler reached anyway SHALL fall through to its own unchanged local behavior.
 - A handler is reached anyway when the proxy failed or the replica is the leader.
 
-Routes beyond `/channel/ops` and `/activity*` read or write the Kubernetes API, which is consistent on any replica. The proxy therefore changes no response a client could already receive.
+The routes this middleware covers read or write the Kubernetes API, which is consistent on any replica. The proxy therefore changes no response a client could already receive.
 
 #### Scenario: A non-leader proxies an ordinary route
 

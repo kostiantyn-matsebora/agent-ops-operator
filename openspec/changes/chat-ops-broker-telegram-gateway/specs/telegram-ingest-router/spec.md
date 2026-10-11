@@ -88,7 +88,7 @@ It is the `gatewayToken` the channel adapter sends (Requirement: Adapter owns it
 
 The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects that from the `gatewayToken` key of the credential Secret, generated once at install.
 
-The channel adapter's `POST /updates` can only inject a fabricated inbound message, which the adapter still filters before acting on it — network-level trust is enough there.
+The channel adapter's existing inbound endpoint (`POST /updates` in `channels/telegram/main.go`, the router's push target, unchanged by this change) can only inject a fabricated inbound message, which the adapter still filters before acting on it — network-level trust is enough there.
 
 This endpoint can SEND, with the live bot credential, any Bot API method at all. A caller must additionally prove it was handed the token.
 

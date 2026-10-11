@@ -10,6 +10,8 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+## [14.0.2] — 2026-10-11
+
 ### Changed
 
 - **The chart-rendered Coordinator's own agent is an orchestrator, not a
