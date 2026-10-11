@@ -11,7 +11,7 @@
 
 - [x] 1.9 Update `openspec/specs/durable-chat-ops-broker/spec.md` and `openspec/specs/activity-telemetry/spec.md` via this change's delta specs (never edited directly) for the leader-proxy work of 1.1–1.8.
 
-## 2. Gateway becomes the sole Telegram credential holder — backend-developer
+## 2. Router becomes the sole Telegram credential holder — backend-developer
 
 - [x] 2.1 Add `gateways/telegram/call.go`: `POST /telegram/call/{method}`, a verbatim relay (body, `Content-Type`, status, response body) to the real Bot API, gated by a bearer token (`TELEGRAM_CALL_TOKEN`). Verify: `call_test.go`.
 - [x] 2.2 Remove `Token`/`apiBase()`-to-`api.telegram.org` from `channels/telegram/telegram.go`. Every outbound call (`API`, `SendDocument`) now posts to `<gatewayURL>/telegram/call/<method>` with a bearer header. Verify: `gatewaycall_test.go` replaces `apibase_test.go`.
