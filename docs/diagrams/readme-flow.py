@@ -98,11 +98,15 @@ def band_label(x, y, s, c):
     return text(x, y, s, c, size=10.5, weight=700, spacing="1.4")
 
 
+LABEL = ("How agent-ops works: signal sources start a conversation, a Pipeline or "
+         "Coordinator wires it to an agent, and channels carry the replies")
+
+
 def build(t):
     c = THEMES[t]
     o = []
     o.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
-             f'width="{W}" height="{H}" role="img" font-family="system-ui,-apple-system,'
+             f'width="{W}" height="{H}" role="img" aria-label="{LABEL}" font-family="system-ui,-apple-system,'
              f'Segoe UI,Helvetica,Arial,sans-serif">')
     o.append('<defs>'
              f'<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" '
@@ -178,7 +182,9 @@ def build(t):
     # provisioned per unit of work and may not exist when the reply lands.
     o.append(f'<path d="M744 312 H772 V90 H748" stroke="{c["edge"]}" '
              f'stroke-width="1.3" fill="none" stroke-dasharray="4 4" marker-end="url(#a)"/>')
-    o.append(text(548, 378, "you reply, and the SAME conversation continues", c["subtle"], 10.5))
+    # Two short lines: one line ran past x=758, where escalate's vertical run is.
+    o.append(text(548, 374, "you reply, and the SAME", c["subtle"], 10.5))
+    o.append(text(548, 388, "conversation continues", c["subtle"], 10.5))
 
     # ---- row 2: the Coordinator, below the Pipeline row -----------------
     o.append(band_label(COORD_X, COORD_Y - 14, "YOU DECLARE IT — OR A COORDINATOR", c["subtle"]))

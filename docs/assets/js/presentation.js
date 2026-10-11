@@ -8,8 +8,8 @@
 // by a tablist rather than drawn as two separate pictures. `index.md` writes
 // the Orchestrator's ten beats then the Pipeline's ten, in that order, under
 // the same "How it works" bullet — and that order is what puts Orchestrator
-// first in the tablist. A single list is still the whole single-story
-// component this always was; nothing about that path changed.
+// first in the tablist. A single list renders STORIES[0], the Orchestrator
+// story, not the Pipeline one it once did.
 //
 // IT IS ONE FIGURE, AND THE FIGURE IS THE CONTROL. The drawing carries its own
 // caption and clicking it pauses. There was a transport — a play button, a beat
