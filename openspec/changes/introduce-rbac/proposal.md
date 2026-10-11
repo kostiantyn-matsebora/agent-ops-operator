@@ -115,10 +115,9 @@ handing them the ability to act on, or delete, everyone else's.
   be corrected, as a stated reversal, not silently dropped.
 - `docs/security.md` — a new trust-boundary entry: the console can now
   mutate who is an administrator, and what bounds that.
-- `docs/installation.md` or `docs/configuration.md` — the bootstrap-admins
-  value, placed by the irreversibility rule. This is set once and not
-  undoable by a later `helm upgrade`, so it likely belongs on
-  `installation.md`. Confirmed during design.
+- `docs/installation.md` — the bootstrap-admins value. It is set once and
+  not undoable by a later `helm upgrade`, so the irreversibility rule places
+  it here and not on `configuration.md`.
 
 **Not impacted**: the in-flight `pause-maintenance-mode` change is left
 entirely as its own design, with its own manager `/admin/*` endpoint for its

@@ -82,8 +82,9 @@ as role `administrator` by construction, requiring no `RoleGrant` object.
 Under external authentication, where no shared token is configured, the chart
 value `console.rbac.bootstrapAdmins` SHALL name the initial administrators.
 
-Each entry is a bare identity string on the `console` channel, such as
-`administrator@example.com`. It is not a `{channel, key}` pair.
+Each entry is a bare string, such as `administrator@example.com`. It is read
+as the identity pair `{channel: console, key: <entry>}`, so the per-pair role
+lookup stays uniform.
 
 The list SHALL be read once. An install then has an administrator from first
 boot, with no `RoleGrant` object created by hand.
