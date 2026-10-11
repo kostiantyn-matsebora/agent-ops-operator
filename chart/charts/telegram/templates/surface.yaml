@@ -23,8 +23,8 @@ notes print the Pipeline to apply.
 {{- $sourceName := include "telegram.sourceName" . }}
 {{- $secretName := include "telegram.secretName" . }}
 {{- if include "telegram.createSecret" . }}
-# Created because surface.credentials.botToken was supplied. Both the Channel
-# and the router Deployment reference it by NAME only — nothing in the operator reads it.
+# Created because surface.credentials.botToken was supplied. The router
+# Deployment references it by NAME only — nothing in the operator reads it.
 apiVersion: v1
 kind: Secret
 metadata:

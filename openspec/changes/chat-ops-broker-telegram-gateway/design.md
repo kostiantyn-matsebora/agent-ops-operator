@@ -148,6 +148,9 @@ existing ingress rule's caller list, alongside the others.
 back to its own local behavior on a bare `false`. It now logs the dial
 failure's reason before that fallback.
 
+`/channel/ops` is the one route excluded from that fallback. When its
+proxy fails it is rejected, never answered from the non-leader's own state.
+
 A NetworkPolicy DROP and a genuinely unreachable leader are
 indistinguishable from inside the process that hit either.
 

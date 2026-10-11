@@ -94,6 +94,10 @@ The relayed response SHALL be parsed exactly as a direct Bot API response would 
 - **WHEN** the dial to the gateway fails or times out for a relayed call
 - **THEN** the adapter surfaces the call as failed and retries it on the same terms as a failed direct Bot API call, never reporting it as sent
 
+#### Scenario: A gateway 401 is a binding failure, not a dial failure
+- **WHEN** the gateway answers a relayed call with `401`
+- **THEN** the adapter surfaces the call as failed without retrying it as a transient error, and reports the rejected `gatewayToken` on the Channel's status condition
+
 ## REMOVED Requirements
 
 ### Requirement: Adapter owns its credentials and config parsing
