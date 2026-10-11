@@ -2,64 +2,19 @@
 
 **ONE SESSION, ONE CHANGE, ONE WORKTREE, ONE BRANCH, ONE PULL REQUEST.**
 
-`session-naming.md` already names a session `<phase> <change>`. This is the
-other half: the session also OWNS a working copy, and that is what makes
-branching safe here.
+A session named `<phase> <change>` (`session-naming.md`) OWNS a working
+copy — own HEAD, own files, own index. Sharing one checkout once let a
+cleanup in one session delete another's unstaged work.
 
-### THE SHARED WORKING COPY WAS THE DEFECT. IT COST WORK TWICE
-
-Several sessions run this repository at once. While they shared one checkout
-they shared one HEAD **and one set of files**:
-
-| Date | What happened |
-|---|---|
-| 2026-08-23 | a session created a branch, a concurrent session's commit landed on it, the branches diverged, `--ff-only` refused, the fix was cherry-picked back |
-| 2026-08-24 | a session cleaned the tree and **deleted another session's entire unstaged change directory** — four artifacts, no branch and no stash to recover from |
-
-- **The old rule — commit straight to `master`, never branch — contained the
-  first and not the second.** It is RETIRED, and the history is kept because the
-  argument was correct under the conditions that produced it: anyone who meets
-  one shared checkout again will re-derive it.
-- **A worktree removes the CAUSE.** Own HEAD, own files, own index.
-
-### A REMOTE SESSION'S CLONE IS THE OTHER WORKING COPY
-
-**A change is worked in a working copy dedicated to it, and there are exactly
-two shapes of that** — a worktree on this workstation, or a cloud session's own
-clone with `change/<name>` checked out IN PLACE.
-
-- **The clone IS the isolation the worktree rule was written to create.** Own
-  HEAD, own files, own index, by construction.
-- **NEVER `git worktree add` in a remote session.** A second copy of the tree
-  there breaks the two readers below for no isolation it did not already have.
-- **`.claude/rules/remote-session.md` owns the rest** — what that environment
-  installs, what a label on an issue starts, and what stays workstation-only.
-
-### PLACEMENT IS FORCED, NOT PREFERRED
+A remote session's clone IS that same isolation, in place on
+`change/<name>`. NEVER `git worktree add` there (`remote-session.md`).
 
 ```
 ../agent-ops-worktrees/<change>/        branch: change/<change>
 ```
 
-**A worktree INSIDE the repository breaks two things that read the tree, and
-both fail silently:**
-
-| Reader | Breaks how |
-|---|---|
-| `.github/components.sh` | it finds components with `find . -name go.mod -mindepth 2` and `find . -name Dockerfile`, so a second copy reports **26** components and hands every CI matrix twice the work, publishing under names that describe nothing |
-| `structure.md`'s standing test | `find . -type d -name docs` must return ONE line |
-
-- **That test needs `-not -path '*/node_modules/*'` to be run honestly**, exactly
-  as `components.sh` does. An installed console tree carries five vendored
-  `docs/` directories, so the bare command already returns six and a worktree
-  would be lost in the noise rather than caught by it.
-- **`.gitignore` does not help.** `find` does not read it. An ignore entry makes
-  the copy invisible to `git status` and leaves it visible to everything that
-  actually breaks.
-- **The tell is a matrix that grew**, which reads as a new component rather than
-  as a working copy.
-
-### THE COMMANDS OWN THE LIFECYCLE
+A worktree INSIDE the repo silently breaks `components.sh`'s component
+count and `structure.md`'s one-`docs/` test. `.gitignore` doesn't help.
 
 | Command | Does |
 |---|---|
@@ -73,445 +28,94 @@ git worktree remove ../agent-ops-worktrees/<name>      # after archive
 git worktree list                                      # what is in flight
 ```
 
-### THE MERGE IS A SQUASH, AND THE TITLE IS THE SUBJECT
+**THE MERGE IS A SQUASH. THE PR TITLE BECOMES THE COMMIT SUBJECT** (CI checks
+the commit-convention format) — one change, one `git log --oneline` line.
+`change/<name>` is the only record of which openspec change a PR belongs to.
 
-**One change is ONE line of `git log --oneline`**, which `CONTRIBUTING.md` says
-is meant to read as an account of the project.
+**ARCHIVE INSIDE THE PULL REQUEST, ON THE BRANCH, BEFORE MERGE** — so the diff
+shows the contract changing.
 
-- **The pull request TITLE becomes the commit subject**, so it obeys the commit
-  convention — `type(scope): what it does, as a sentence`. A CI check enforces
-  that, because a title is the one field nobody proofreads.
-- **A merge commit adds a line describing nothing.** A rebase of the working
-  history adds twenty describing the writing rather than the change.
+The archive PR must say `Closes #<n>`. Every earlier PR of that change
+must say `Refs #<n>` (a `Closes` on a proposing/applying PR is refused).
+`/opsx:archive` is refused while a round is running or a dispute is
+unanswered.
 
-### THE BRANCH IS THE STATEMENT OF PROVENANCE
+**BRANCH PROTECTION'S ONLY STATUS CHECK IS `ci-green`.** Every real gate
+reports through its `needs:`. The one exception is conversation
+resolution — evaluated LIVE at merge time, not a job, so an open review
+thread blocks the merge without racing replies.
 
-`change/<name>` names the change, so **nothing asks for it again**. The pull
-request template does not carry a "which openspec change" field, and anything
-needing the name reads the branch.
+### The review and the fixing loop
 
-### ARCHIVE INSIDE THE PULL REQUEST
+`claude-review.yml` posts findings as threads. An open one blocks the merge.
 
-**THE FIXING LOOP ARCHIVES NOTHING, AND A PERSON MERGES.**
+`queue` marks each path READ/CARRIED. `read` builds and reads each
+component blind, one `claude -p` per file. `consolidate` (the only poster)
+folds blind findings against open/dismissed/fixed threads. `reconcile`
+resolves recorded threads, failing on nothing else. Nothing the review
+runs comes from the PR — scripts/prompts restore from the BASE branch.
 
-- Under a standing `conveyor:run`, the ARCHIVE STATION's session archives on
-  the branch once the pull request merged (`remote-session.md`), and opens the
-  archive pull request for a person to merge.
-- Where no instruction stands, a person archives by hand.
-- `/opsx:archive` is refused while a round is running or a dispute is
-  unanswered.
-
-`openspec archive` folds the delta specs into `openspec/specs/`, so doing it on
-the branch means **the diff shows the contract changing** — which is what a
-reviewer of this project should be looking at, since `openspec/specs/` is the
-answer to "is this behaviour intended".
-
-- **Archiving on `master` after the merge was rejected**: the spec change would
-  reach the published contract reviewed by nobody, and it puts direct commits
-  back on the default branch in the one change meant to stop them.
-- **Cost, accepted:** an archive commit that must reflect review feedback needs
-  an amend or a follow-up commit on the branch.
-- **THE ARCHIVE PULL REQUEST MUST SAY `Closes #<n>`**, and the `pr-closes` check
-  refuses one that does not. GitHub closes on the keyword and on nothing else;
-  the script's `close` is a second step, and #38 and #67 stayed open under
-  `opsx:archived` because both were skipped.
-- **AND EVERY EARLIER PULL REQUEST OF THAT CHANGE MUST SAY `Refs #<n>`.** The
-  same check refuses a `Closes` that would end a tracking issue whose change is
-  merely being PROPOSED or APPLIED — the issue has to follow the change through
-  review and archiving, and merging is not where it ends. The two halves are one
-  rule read from both sides, and typing `Closes` out of habit on an applying
-  pull request is how it is broken: #198 did exactly that and the check caught
-  it.
-
-### THE GATES ARE ALREADY REQUIRED — THROUGH ONE CHECK
-
-Branch protection names **`ci-green`** as its only status check. Every real gate
-reports through it, so **adding a required gate is a line in that job's
-`needs:`**, never a settings change somebody has to remember.
-
-That is what `continuous-integration`'s always-present-check requirement is for:
-a protection rule names a check by NAME, and a job skipped for untouched paths
-never reports that name.
-
-**THE ONE GATE NOT REPORTED THROUGH IT IS CONVERSATION RESOLUTION**, and it is
-not an inconsistency to fix. Branch protection ALSO requires every review thread
-resolved before merging (`required_conversation_resolution`, verified live on
-2026-08-26). It cannot be a job in `needs:` because it is not a check at all —
-it is a property of the pull request, evaluated by GitHub at merge time, and a
-job asserting it would race every reply. It is what makes an untriaged review
-finding block the merge, below.
-
-### THE REVIEW FOUND SOMETHING. NOW WHAT
-
-`claude-review.yml` posts findings as review threads, and an open thread blocks
-the merge. **The review is four jobs and three roles** — `queue` is a program
-(`review-input.py` over `review-queue.py`) that also decides, per changed
-path, READ or CARRIED (below). `read` is a matrix of one job per component
-with a read path, all at once. EACH JOB BUILDS ITS COMPONENT FIRST —
-`review-build.sh`, the SAME RECIPE CI uses, no credential in that step's env —
-and a failed build SKIPS EVERY READER: the job writes the reading itself,
-`unbuilt` with the build's own tail, and no model runs. A built component is
-then read ONE `claude -p` PROCESS PER FILE, blind — no thread, no previous
-finding — several at once from the shell (`xargs -P $REVIEW_READERS`), each
-holding the `file-reviewer` role, the `## Review criteria` of the role agent
-`review-rules.py` routes to the component's paths (`ROLE_TABLE` — the five
-role agents in `.claude/agents/`, restored from the base branch with the
-reader) and the rules it routes there, as a SHARED SYSTEM PREFIX
-(`review-prompt.py reader-system`) — the same bytes for every file, paid
-once and served from cache after. NO CONTEXT INHERITS A RULE FILE, and
-`review-context.py` prints what each one holds at the top of the job. A file carrying an UNRESOLVED
-THREAD also gets a second, primed process — the `thread-verdict` role, no
-rules — judging `fixed`/`standing`/`gone`/`detached` for that thread alone; a
-`detached` verdict's relocated finding folds into the file's findings.
-`review-reading-check.py` merges a job's file and verdict readings into the
-component's (or, unbuilt, passes through the build step's own reading).
-`consolidate` runs the `review-coordinator` — the only role that posts,
-holding the readings and threads and no rules — which is where "not made
-again" now lives: a blind finding matching an OPEN thread is folded in
-(`carried over`), one matching a DISMISSED thread is dropped (`dismissed`),
-one matching a thread judged `fixed` is posted (the fix did not hold). It
-cross-reviews from what the files declare and reference, never re-reads the
-diff, and posts everything through ONE command, `review-post.py`, which
-RECORDS each addressed thread with `mark-thread-resolved.sh` (a list, no
-privilege) and APPENDS THE COVERAGE MARKER — a hidden HTML comment on the
-summary, `{"sha", "paths": {path: {"quiet": N}}}` — so the NEXT run knows
-what it read and how many consecutive reads found nothing new. The model and
-its effort are the workflow's (`--model`, `--effort` — `gotchas.md` has why);
-`reconcile` RESOLVES the recorded threads with no model and the one
-`contents: write` — and FAILS THE RUN ON NOTHING ELSE: the review run's
-conclusion means "the review ran and posted", which is the one question
-`ci.yml`'s `review-clean` job asks of it (`review-is-green.py`). WHETHER A
-REVIEW-AUTHORED THREAD IS STILL OPEN IS NOT A CHECK'S QUESTION, ANYWHERE.
-Branch protection's required conversation resolution blocks the merge on an
-open thread and is evaluated LIVE at merge time, so a person dismissing a
-finding unblocks the merge at once. A check carrying that question FREEZES
-IT — `reconcile` did, on #220: the loop disputed the red check (correctly, no
-tree edit could fix it), the owner resolved the thread, and nothing re-ran
-anything for days. The repair of re-running the check on the thread event
-DOES NOT EXIST: `pull_request_review_thread` is a webhook event and not an
-Actions trigger, and a workflow naming it is refused (`gotchas.md`).
-`review-not-clean.py` survives for the conveyor's STATE: `carry.py`
-asks it before marking a green pull request `loop:mergeable`. It runs by hand too: `gh workflow run claude-review.yml -f
-number=<pr>` (`-f dry_run=true` posts nothing; `-f full=true` ignores the
-coverage record and reads every changed path from the base — the same
-override `REVIEW_QUIET_READS`, a workflow variable, tunes: how many
-consecutive quiet reads of an unchanged path earn a CARRY, default one).
-NOTHING THE REVIEW RUNS COMES FROM THE PULL REQUEST: `queue` restores
-`review-input.py`, `review-queue.py` and `components.sh` from the BASE
-branch before building the queue; `read` restores the composite action,
-`review-build.sh`, `review-prompt.py`, `review-reading-check.py`,
-`review-rules.py`, `review-context.py` and `review-trace.py`, and
-`consolidate` the action, `review-prompt.py`, `review-reading-check.py`,
-`review-rules.py`, `review-context.py`, `review-trace.py`, `review-post.py`
-and `mark-thread-resolved.sh`; both then install the CLI through
-`.github/actions/claude-cli`, which restores the job's role files (`read`
-restores `file-reviewer.md`, `thread-verdict.md` AND the five role agents
-whose criteria ride the prefix); `reconcile` checks out
-the base branch itself. So a pull request cannot rewrite the review that
-judges it, shrink its own queue, or resolve a thread it did not earn. The
-fan-out is the matrix and not a pool inside one session: `gotchas.md` has the
-measurement, and the per-file loop replaces the retired `review-component.js`
-saved workflow entirely — the loop is the job's shell now, one level in from
-where it was. A component the build step could not build is `unbuilt`,
-DISTINCT from `unreviewed` (the job itself failed) and `unread` (a file's own
-reader returned nothing) — three different gaps, in the summary's table by
-name. Triage happens IN THE THREAD, in a stated vocabulary, and one
-comment acts on everything accepted:
-
-| You type | Where | It means |
+| You type | Where | Means |
 |---|---|---|
-| `fix it` (or another phrase from `.github/review-triage.json`) | a reply in the finding's thread | ACCEPTED — the next dispatch fixes it |
-| anything else, or nothing | the thread | not accepted; the thread and the code stay as they are |
-| `/fix-accepted` | a comment on the pull request | DISPATCH — one run, one commit, over everything accepted |
-| resolve the thread yourself | the thread | dismissed; the review counts it and does not raise it again |
-| the `conveyor:fix` LABEL | a pull request | APPROVED AS A WHOLE — every open finding, every open SonarCloud issue AND every FAILED REQUIRED CHECK on the head is fixed or DISPUTED by CI, round after round, no reply and no dispatch needed. Placed by a person with WRITE access, or CARRIED forward by a workflow relaying a `conveyor:run` instruction still standing on the issue it opened from (the tracking issue on the opsx lane, the plain issue itself on the plain lane) — never by a session |
-| the `conveyor:implement` LABEL | an ISSUE | APPROVED TO BE BUILT, ONE STATION — a remote session proposes, implements and opens the pull request, UNLABELLED. Placed by a person with WRITE access. Anyone else's is removed with a comment |
-| the `conveyor:run` LABEL | an ISSUE | THE STANDING INSTRUCTION — implement, drive the pull request to mergeable, archive once merged: the whole line for that issue's LANE, read at every transition rather than recorded at the first. Removing it halts the line at the next station |
-| the `conveyor:archive` LABEL | the tracking ISSUE of a MERGED pull request | ARCHIVE, ONE STATION — placed by a person with write access, or carried forward the same way `conveyor:fix` is. It STARTS A SESSION (`remote-implement.yml`, the same fire as implement, `archive-change.md`) that archives on the branch and opens the archive pull request with `Closes #<n>`, unlabelled; the loop drives that pull request to mergeable and a person merges it. Only the OPSX LANE has this station, bound to an openspec change (`remote-session.md`) — the PLAIN LANE, implemented straight from the issue, ends its line at the merge |
-| a `station:<x>` LABEL | the ISSUE | STATE, NOT A GRANT — which station the line is at: `implement`, `fix`, `merge`, `stalled`, `archive`, `done`. Moved by the workflow performing the transition (`conveyor-state.py`), one value at a time, read by nobody but people. Removing one changes nothing. `stalled` is set by `carry.py` itself when a merge lands with nothing to carry the line onward — the ordinary `station:merge` label would otherwise describe a precondition ("mergeable, waits for a person") that the merge has already made false |
-| a `loop:<x>` LABEL | a pull request | STATE, NOT A GRANT — what the fixing loop is doing: `running` (a round started), `waiting` (a person is owed an answer: every item left is a dispute, or a thread is open), `stalled` (the machine stopped on its own: no report, a fixer that failed or timed out, no next round), `capped`, `mergeable` (`ci` green on the head). Same rules. `waiting` and `stalled` were one label until #259, where `stalled` beside a red pull request and a "clean" summary told nobody whether the loop had given up or was waiting on them |
-| the `conveyor:keep-going` LABEL | a pull request whose loop stopped on the round cap | GRANTS ANOTHER SET of rounds, and is REMOVED the moment a round runs under it — one placement, one grant |
-| a reply under `<!-- conveyor:disputed -->` | a thread (or a pull request comment, for a Sonar issue) | THE LOOP DISAGREES — the code is untouched, the thread stays open, you are mentioned. Answer it (a reply, or resolve to dismiss); nothing re-disputes it |
+| `fix it` (or `.github/review-triage.json`) | a finding's thread | ACCEPTED |
+| `/fix-accepted` | a PR comment | DISPATCH — fixes everything accepted |
+| resolve it yourself | the thread | dismissed, not raised again |
+| `conveyor:fix` | a PR | fix every finding/Sonar issue/failed check, round after round |
+| `conveyor:run` | an issue | STANDING: implement → mergeable → archive |
+| `conveyor:implement` / `conveyor:archive` | issue | one station each |
+| `station:<x>` / `loop:<x>` | issue/PR | STATE only, set by the workflow |
+| `conveyor:keep-going` | a capped PR | one more set of rounds |
 
-**A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.**
-Every label above that authorises unattended work is placed by a person whose
-write access the platform confirms.
+**A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE.
 
-It is placed directly, or CARRIED forward by `.github/scripts/carry.py`.
-That program records whose instruction it relayed. The gate RE-CHECKS it at
-every start, never trusting that a workflow placed it before.
+IT MAY NEVER MINT ONE.** A label is placed by a write-access person, or
+CARRIED by `carry.py`, re-checked at every start (#201). A session opens
+its own PRs unlabelled.
 
-- **THIS IS THE WHOLE FIX FOR #201.** A remote session opened its pull request
-  carrying `autofix` because its own instructions said to. It acts as an
-  application with no write access, so the gate that checks who labelled
-  removed the label and refused, and the pull request sat green, reviewed and
-  unlabelled with no session left to act. The gate was right. The instruction
-  was wrong. The session now opens its pull request with NO LABEL, and a
-  workflow reads the issue's `conveyor:run` again once the pull request opens
-  (or merges) and carries it forward.
-- **THE BOUND IS A NAMED CONSTANT**, `max_rounds` in `.github/review-triage.json`,
-  default 5 — read once by the gate and passed down, rather than a static
-  workflow constant, because a workflow's `env:` block cannot read a file.
+Dispatch is a trigger, not an instruction — the work list comes from the
+threads, and only write access may dispatch.
 
-- **THE VOCABULARY IS A FILE, MATCHED BY A PROGRAM** —
-  `.github/review-triage.json`, read by `accepted-findings.py`. Whole reply,
-  trimmed, trailing punctuation dropped, case-insensitive. "Sure, if you think
-  so" is not an acceptance, and neither is `fix it` inside a longer sentence:
-  what decides that code is written to a branch may not be a judgement call.
-- **THE DISPATCH IS A TRIGGER, NEVER AN INSTRUCTION.** The work list is derived
-  by walking the threads; nothing reads the dispatch comment's text. A dispatch
-  "asking for" work no thread accepted performs none of it.
-- **WHO MAY DISPATCH: write access**, from the comment's own author
-  association. A fork's pull request is refused. Both refusals are posted on
-  the pull request, because a silent no-op reads as a broken bot.
-- **THE MODEL CANNOT PUSH.** `review-dispatch.yml` produces the fix under
-  `contents: read` as a patch artifact; a model-free job applies it, pushes,
-  replies `Fixed in <sha>` in each fixed thread, and only then hands the ids to
-  `resolve-review-threads.py`. A thread is resolved only where its patch landed;
-  a stale patch pushes nothing, resolves nothing, and says so — rebase and
-  dispatch again.
-  - **A NEW FILE CROSSES ONLY WHERE THE REPORT DECLARES IT.** The patch is cut
-    by `dispatch-patch.py` (read from the base branch, as the landing programs
-    are): every change to a tracked file, plus the new files the report's
-    `created` list names. An undeclared new file is the fixer's SCRATCH — it is
-    deleted before the cut, recorded in `dropped.json`, and named in the
-    landing comment and the summary as not landed.
-  - **It was `git add -N .` and it landed the scratch.** Six rounds on #243
-    each committed a helper script at the repository root (`.tmp_getenv.py`,
-    `.worklist_reader.sh`, ...). The review then found the scratch, the next
-    round disputed the finding, and `docs-task` refused the head until a
-    person answered — see `gotchas.md`.
-  - **The prompt names the work list, the report and a scratch directory by
-    their REAL PATHS**, under `$RUNNER_TEMP/dispatch/`. The helpers existed
-    because it said `$WORK_LIST`, which a model with no shell cannot expand.
-- **A RED PULL REQUEST IS THE LOOP'S TO FIX, AND EVERY FAILED CHECK IS A WORK
-  ITEM.** Under the label, `review-dispatch.yml` also runs on a `ci` run that
-  COMPLETED — `success` or `failure` — and `collect` reads the head's failed
-  required checks (`failed-checks.py`, under `actions: read`, where no model
-  runs). Which checks count is read from `ci-green`'s own `needs:`, never
-  restated; the review's jobs and `ci-green` itself are excluded, the one being
-  another reviewer and the other the aggregate. NO OTHER CHECK IS EXEMPT: the
-  loop's own dispute guard used to make `docs-task` red and be exempted as
-  "waiting", and on #259 that red was one no fixer could clear, so the loop
-  ended beside a blocked pull request. The guard left CI (below).
-  - **A ROUND STARTS ONLY ON A HEAD WHOSE CI RUN AND REVIEW RUN HAVE BOTH
-    CONCLUDED** (`conveyor.round_may_start`, asked by `dispatch-gate.py`
-    through `gh run list --commit`). Whichever concludes second starts it. A
-    label or a hand run placed mid-run is deferred with one notice per head,
-    and `failed-checks.py` reports the checks consulted only once every
-    required check run has COMPLETED — a check run exists queued from the
-    moment its run starts, so on #259 "every job has a check run" was true 38
-    seconds into a ten-minute run and the summary said "0 failures".
-  - **The fixer REPRODUCES a check before fixing it**, with the job's own
-    command, and re-runs it before the patch is cut. A failure the tree does
-    not explain — an outage, a rate limit, a flake — is DISPUTED with the log's
-    reason, because a false fix for a flake is worse than the flake.
-    - **A QUALITY GATE'S VERDICT IS ALWAYS THE TREE'S, and reproduce-first
-      does not apply to it** — the gate has no local command, which is
-      exactly why the fixer disputed one as not-the-tree on #272 and froze
-      the loop on a coverage shortfall only tests could clear.
-      `failed-checks.py` marks such an item with a `gate` field naming the
-      failing conditions (read anonymously, failure-tolerant), and the
-      prompt says what each condition means in tree work.
-  - **A DISPUTE'S REASON IS BOUND BY THIS REPOSITORY'S OWN ANSWERING AND
-    WRITING RULES**, since it is posted verbatim to a thread or a pull
-    request comment: at most 40 words, no timeline, no log excerpt. The
-    fixing step's prompt asks for it. `land-dispatch.py`'s `shorten_reason`
-    is the second wall, replacing an over-length reason with a short notice
-    rather than posting or truncating it. Measured live: an early reason ran
-    to several paragraphs, reproducing an investigation nobody asked to read
-    to decide `fix it` or leave it.
-  - **A fixed check gets no reply.** There is no thread to reply in, and the
-    check's next run on the landed commit is its verdict; the round's summary
-    is where it is accounted for.
-  - **One start per head**, by whichever run concludes second. Two starts for
-    one head used to run in sequence, each counting toward `max_rounds`, and
-    the first read a CI run that had not spoken.
-  - **A RED CHECK THE FIXER CANNOT EXPLAIN IS RE-RUN EVERY ROUND THE BUDGET
-    ALLOWS, BEFORE ANYONE IS ASKED.** Each disputing round `land` pushes an
-    EMPTY commit and posts `<!-- conveyor:refreshed -->` instead of the
-    dispute, so CI judges the head again under the merged workflows. The
-    dispute is posted only by the budget's LAST round, and the loop then
-    waits. Measured on #259: the red was a check step deleted from `ci.yml`
-    since the head last ran, and a fresh run was the verdict.
-    - **The gate was once per label placement, and #269 measured the cost.**
-      An external service failed for hours, round 1 spent the one re-run,
-      and round 2 froze the loop on a dispute a person had to notice and
-      diagnose — the intervention the conveyor exists to remove. A red the
-      fixer itself judged not-the-tree is a retryable event, and the round
-      CAP is its bound.
-  - **THE FIXING STEP RUNS THE DEFAULT BRANCH'S COPY OF ITS OWN WORKFLOW
-    FILE.** `claude-code-action` validates the CHECKED-OUT
-    `review-dispatch.yml` against the default branch's and refuses any
-    difference, so a branch cut before that file last changed on master was
-    refused without editing it — every fixing round on #259 died there the
-    night the loop's own change merged. The `fix` job checks out the default
-    branch's copy for the action and puts the branch's own back before the
-    patch is cut.
-  - **A CHECK AN EARLIER ROUND DISPUTED IS NOT DISPUTED TWICE.** Its dispute
-    comment names it in a hidden line (`<!-- conveyor:disputed-item check:<job> -->`),
-    `failed-checks.py` reports it as AWAITING the person rather than as work,
-    and a person's later comment makes it work again.
-    - **Only disputes since the label's placement hold a check awaiting.**
-      Re-placing `conveyor:fix` is a fresh start, and the round and grant
-      counters already read that bound. This memory did not, measured on
-      #269: a re-label with a fresh budget still reported every check as
-      awaiting, on a dispute the removed label's loop had posted.
-- **AN UNTRIAGED FINDING KEEPS ITS THREAD OPEN, AND THE MERGE BLOCKED.** That
-  is the feature: a finding nobody accepted and nobody dismissed is a decision
-  still owed.
-- **ON AN UNLABELLED PULL REQUEST THE LANDED COMMIT HAS NO CI AND NO REVIEW
-  UNTIL YOU PUSH AGAIN.** A push made with the workflow token starts no
-  `pull_request` workflow — GitHub withholds `synchronize` from it — so the
-  dispatch says so on the pull request. An empty commit is enough.
-- **ON A LABELLED ONE THE LOOP PUSHES FOR YOU, THROUGH A WRITE DEPLOY KEY.**
-  `land` pushes over SSH with `AUTOFIX_DEPLOY_KEY` — repository-scoped,
-  `contents` only, read by that model-free job and no other — so the commit
-  is an ordinary push: `ci-green` and the review run on it, and the review's
-  completion is the next round's trigger. Self-dispatching `ci.yml` was
-  measured first and REJECTED: a `workflow_dispatch` run's check runs never
-  reach the merge box (#131, `gotchas.md`). Without the secret the round
-  lands with the token and the summary says the loop cannot go on.
-- **THE LOOP IS BOUNDED AND EVERY ENDING IS ONE SUMMARY.** `max_rounds`
-  (`.github/review-triage.json`, default 5) is read once by `review-dispatch.yml`'s
-  gate and passed down, counted from the landing comments' `<!-- conveyor:round
-  N -->` markers since the label was placed — so removing and re-adding the
-  label starts the count afresh. A round that changes nothing (every item
-  disputed, or a stale patch) ends it early. The summary names what was fixed,
-  what was disputed, what was UNADDRESSED (an item the fixing step's report
-  never named — worded as such, never as a dispute nobody made), the rounds
-  used and the approver — and, at the cap, that `conveyor:keep-going` grants
-  another set, consumed the moment a round runs under it.
-- **A CARRIED ROUND IS STARTED BY A BOT, AND THE FIXING STEP NAMES THAT ONE
-  BOT.** `remote-implement.yml`'s `open` job dispatches `review-dispatch.yml`
-  after carrying `conveyor:fix`, so the run's actor is `github-actions[bot]`
-  — and `claude-code-action` refuses any bot by default. Every carried round
-  died there before a model ran, measured on #220 (three days, nothing
-  posted). The step now sets `allowed_bots: github-actions`, and nothing
-  wider: the gate has already re-read the standing instruction the bot
-  relayed, and `*` would let an external App start the step on a public
-  repository.
-- **A LABEL SET BY ONE PATH IS CORRECTED BY ANOTHER.** `loop:mergeable`, set
-  when `ci` succeeds with no thread open, can go stale on a pull request the
-  loop is not driving.
-  - A LATER review completion may post new findings, and nothing without the
-    `conveyor:fix` grant ever re-checked the label.
-  - Measured live on #226 (manually driven, since it edits this very
-    workflow): the label said mergeable for over an hour after three
-    findings landed.
-  - The gate's `mode=none` path now calls `refresh-loop-state.py` on every
-    review completion, which re-reads `review-not-clean.py` and corrects the
-    label to `stalled` if it lied.
-  - This is STATE, never a check's verdict — the same distinction that
-    keeps `review-not-clean.py` out of `ci-green`.
-- **NO CHECK READS A PERSON'S ANSWER. A PERSON'S COMMENT STARTS A ROUND.**
-  `docs-task` used to fail while a dispute the loop posted had no answer
-  (`autofix-guard.py --purpose ci`), and `dispute-answered.yml` re-ran it on
-  the person's comment (`rerun-ci-job.py`). Both are RETIRED (#259): the
-  check was a red no fixer could clear, so the loop stopped on its own
-  refusal while the open thread already held the merge, live, through branch
-  protection. Now `review-dispatch.yml` runs on every PERSON's comment (never
-  a bot's — the loop's own replies arrive on the same event), and the gate
-  starts a round when the pull request carries `conveyor:fix` and
-  `loop:waiting` and the commenter MAY PUSH here — the bound a dispatch and
-  an acceptance already carry. The round re-reads the threads (`accepted-findings.py`): a
-  disputed thread a person answered is back on the work list, their words
-  with it, and one nobody answered stays awaiting.
-  - **A RESOLVED THREAD FIRES NO EVENT**, so `conveyor-sweep.yml` reads every
-    `loop:waiting` pull request every fifteen minutes (`conveyor-sweep.py`,
-    no model, `actions: write` for the one dispatch) and starts a round once
-    no dispute is unanswered. That is the dismissal the triage table
-    advertises, and nothing else could hear it.
-- **A FAILED FIX IS NOT A DISPUTE, AND A ROUND THAT LANDS NOTHING STARTS THE
-  NEXT ONE.** An item the report claims fixed while the patch touches nothing
-  that could fix it is UNADDRESSED, with that reason in the summary, no thread
-  reply, and eligible again. On #259 the landing step posted it as a dispute,
-  and the loop then waited for a person to answer a question the fixing step
-  never asked. A round that fixed nothing while items remain eligible
-  (`unaddressed`, `stale patch`) counts, posts its summary, and dispatches
-  the next round itself (`land`, `actions: write`, `review-dispatch.yml`
-  only — never `ci.yml`, whose dispatched checks never reach the merge box).
-  A dispatch that fails is the ending `could not start the next round`,
-  `stalled`. The bound is the only brake, and that is the ceiling's job.
-- **A DEAD FIXING JOB IS A ROUND TOO.** `land` runs when `fix` FAILED, and
-  posts the ending `fixing step failed` with the run linked, counting no
-  round and disputing nothing; the loop label says `stalled`. It was skipped,
-  and the pull request showed nothing at all.
-- **SILENCE IS NOT A DECISION.** A round whose fixing step wrote NO report at
-  all ends as its own outcome, `no report`, disputing nothing — distinct from
-  a report that named every item disputed. Reading a missing report as "every
-  item disputed" tells a person the machine considered each finding and
-  declined it, when nobody looked. Measured while this rule's own change was
-  under review, where three findings on a proposal-only pull request came back
-  "disputed... not addressed" and no model had spoken.
-- **THE SECOND REVIEWER IS SONARCLOUD, AND ITS GATE IS REQUIRED.** `collect`
-  reads its open issues per component project (`sonar-issues.py`, the token in
-  the model-free job only) beside the threads; the scan step waits on the
-  quality gate and fails the component's job on `ERROR`, so it reports through
-  `ci-green`. The loop never marks anything in Sonar — a disputed issue is a
-  comment for you, and the service's state is yours to change in its UI.
-- **`/opsx:archive` IS REFUSED WHILE THE LOOP IS OPEN** — a round running, or
-  a dispute no person has answered. `autofix-guard.py` (the script keeps its
-  original filename. It reads `approve_label` — `conveyor:fix` — from the
-  vocabulary file rather than a hardcoded name), in the same hook as the
-  documentation gate. IT IS THE HOOK'S ALONE: no CI job asks it, since #259.
-  It fails open on anything it cannot read.
+The model never pushes — a model-free job applies the patch via a scoped
+deploy key, resolving threads only where it landed. New files land only
+where the report declares them (#243).
 
-### THE LINE IS ONE STATE MACHINE, AND EVERY PROGRAM ASKS IT
+Every failed required check is a work item (read from `ci-green`'s
+`needs:`). The fixer reproduces and re-runs each before patching, disputing
+what the tree doesn't explain, and re-runs an unexplained red every round
+the budget allows before asking anyone.
 
-**`.github/scripts/conveyor.py` DECIDES. NOTHING ELSE DOES.** It holds the
-station table, the loop table and every decision the workflows make. It is pure:
-facts in, a `Decision` out, no `gh` and no clock.
+`max_rounds` (default 5) is bounded, a round changing nothing ends it
+early. A carried round runs as `github-actions` only.
 
-Ten places disagreed before it existed (#248, #254, #255). Each fix had
-changed one copy of a rule and left the others.
+A person's comment — never a check — restarts a waiting round, and a
+15-minute sweep catches a resolved thread (fires no event).
+
+A failed fix is UNADDRESSED, not a dispute. SonarCloud is the second
+required reviewer. `/opsx:archive` is refused while any of this is open.
+
+### `conveyor.py` decides. Nothing else does
+
+One pure function, facts in, a `Decision` out — ten places once disagreed
+(#248/254/255) with the rule copied into several scripts.
 
 | Decision | Asked by |
 |---|---|
-| `standing_grant`, `carry_fix`, `carry_archive` | `carry.py`, from `remote-implement.yml`'s `open` and `archive` jobs |
+| `standing_grant`, `carry_fix`, `carry_archive` | `carry.py` |
 | `fire` | `remote-implement.py` |
-| `gate`, `round_may_start` | `dispatch-gate.py`, the whole gate of `review-dispatch.yml` |
+| `gate`, `round_may_start` | `dispatch-gate.py` |
 | `ending`, `check_is_work`, `cap_for` | `land-dispatch.py`, `failed-checks.py` |
-| `guard` | `autofix-guard.py`, the archive hook alone |
-| `unanswered_after_marker` | `autofix-guard.py`, `accepted-findings.py`, `failed-checks.py`, `conveyor-sweep.py` — one reading of "is this dispute answered" |
-| `recover`, `refresh` | `recover-loop-state.py`, `refresh-loop-state.py` |
+| `guard` | the archive hook |
 
-- **A PROGRAM IS AN ADAPTER.** It gathers facts, asks, and does what the answer
-  says. A rule appearing in a workflow's shell or in a second script is the
-  defect this section exists to prevent.
-- **A STATE LABEL IS WRITTEN BY AN EVENT.** `conveyor-state.py` takes
-  `--station-event` or `--loop-event`, reads the live label and writes what the
-  table gives. It accepts no value, so no caller can put the line in a state
-  the machine has no path to.
-- **THE TABLES ARE WALKED.** `conveyor.test.py` runs every state against every
-  event and every combination of each decision's facts. A new state or event
-  that is not wired fails there.
-- **ONE GRANT RULE.** `conveyor:run` stands for every station.
-  `conveyor:archive` stands for the archive station and for the fix station of
-  a pull request that says `Closes #<n>`. The carry, the gate and the fire
-  all read it from `standing_grant`.
-- **THE GATE RE-CHECKS EVERY START**, a review or CI completion included, when
-  the fix label was placed by the workflow. Removing `conveyor:run` from the
-  issue stops a loop already running, and the carried label is removed.
-- **EVERY ROUND THAT RAN A MODEL COUNTS**, a timed-out one too. A clean round
-  and a fixing job that never started do not.
-- **THE CAP IS ENFORCED BEFORE THE ROUND.** A round starts while rounds used
-  are below `max_rounds`, or while `conveyor:keep-going` stands.
-- **NO CHECK CARRIES THE RUNNING-ROUND QUESTION.** `docs-task` runs the guard
-  with `--purpose ci` and asks about an unanswered dispute alone. Only the
-  `/opsx:archive` hook asks whether a round runs. A red made of the guard
-  alone is `waiting`, and starts no round.
-- **THE ARCHIVE CARRY NEEDS A FINISHED CHANGE.** A proposal merge and an
-  applying merge carry nothing.
-- **UNREADABLE FACTS FAIL CLOSED.** If the fire records or the open pull
-  requests cannot be read, the machine is told a session is at work.
+State labels are written only by the event that earns them, never a
+caller-supplied value. A table test walks every state against every event.
 
-### WHAT THE MAIN CHECKOUT IS STILL FOR
+`conveyor:run` stands for every station, and `conveyor:archive` also stands
+for the fix station of a `Closes #<n>` PR. Unreadable facts fail CLOSED
+(told a session is at work).
 
-Reading, reviewing, and work with no change behind it — a typo, a broken link.
+### The main checkout
 
-- **A `PreToolUse` hook refuses a commit there that belongs to a change owning a
-  branch**, and FAILS OPEN on anything it cannot read. A hook that blocks work it
-  does not understand gets disabled, and then it enforces nothing.
-- **The CI check is what makes failing open safe**, by asserting the same
-  decision where it cannot be skipped.
+Still for reading, reviewing, and work with no change behind it. A
+`PreToolUse` hook refuses a commit there that belongs to a branch-owning
+change, failing OPEN on anything unreadable — CI asserts the same decision
+where the hook can't be skipped.
