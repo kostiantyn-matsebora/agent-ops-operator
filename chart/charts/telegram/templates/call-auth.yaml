@@ -33,8 +33,7 @@ nothing random may reach the upgrade path.
 {{- $existingVal = index $existing.data "gatewayToken" | default "" }}
 {{- end }}
 {{- include "agentops.generatedSecretGuard" (dict "root" . "name" $name "explicit" "" "existing" $existing "existingVal" $existingVal "key" "gatewayToken" "setting" "(none -- this Secret is internal wiring between the router and channel-telegram, never operator-supplied)") }}
-{{- /* an upgrade on a live cluster re-renders too (lookup sees the token), so gatewayUrl follows router.callPort. An upgrade that finds NO Secret is surface.enabled turned on after install, so it generates one. A cluster-less renderer also sees none and renders a fresh token each time. */ -}}
-{{- if or .Release.IsInstall $existingVal (not $existing) }}
+{{- /* Always renders: an upgrade re-renders too (lookup sees the token), so gatewayUrl follows router.callPort. A Secret that is absent, or lacks the gatewayToken key, gets a fresh token. A cluster-less renderer sees none and renders a fresh token each time. */ -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -52,5 +51,4 @@ data:
   {{- else }}
   gatewayToken: {{ randAlphaNum 32 | b64enc }}
   {{- end }}
-{{- end }}
 {{- end }}

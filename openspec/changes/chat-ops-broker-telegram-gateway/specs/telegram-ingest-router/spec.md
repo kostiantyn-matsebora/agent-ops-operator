@@ -63,7 +63,13 @@ The router SHALL serve `POST /telegram/call/{method}`, relaying the request body
 
 This is the outbound half of the router holding the bot credential alone (chat-ops-broker-telegram-gateway). The channel adapter composes a Bot API call exactly as before. It issues the call to this endpoint instead of to `api.telegram.org` directly, and holds no copy of the token.
 
-The endpoint SHALL require a shared bearer token, distinct from the inbound `/updates` push. `/updates` can only inject a fabricated inbound message, which the receiving adapter still filters before acting on it — network-level trust is enough there.
+The endpoint SHALL require the gateway token, a bearer token distinct from the inbound `/updates` push.
+
+It is the `gatewayToken` the channel adapter sends (Requirement: Adapter owns its gateway binding and config parsing).
+
+The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects that from the `gatewayToken` key of the gateway binding Secret, generated once at install.
+
+`/updates` can only inject a fabricated inbound message, which the receiving adapter still filters before acting on it — network-level trust is enough there.
 
 This endpoint can SEND, with the live bot credential, any Bot API method at all. A caller must additionally prove it was handed the token.
 
