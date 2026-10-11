@@ -43,11 +43,11 @@ for the source and the reference material beside this file.
   image releases before this is installable.
 - **`channel-telegram` no longer calls `api.telegram.org` directly.** Every
   send, document upload, forum topic operation and command registration is
-  relayed through the router's new `POST /telegram/call/{method}`,
+  relayed through `gateway-telegram`'s new `POST /telegram/call/{method}`,
   authenticated with a shared token the chart generates. A new chart-managed
   Secret (`agentops-telegram-gateway`) carries the binding through the same
   `credentialsSecretRef` projection.
-- **The router gains a Service and a NetworkPolicy** for its new call
+- **`gateway-telegram` gains a Service and a NetworkPolicy** for its new call
   endpoint, on `router.callPort` (default `8080`).
 
 ### Removed
@@ -83,8 +83,10 @@ for the source and the reference material beside this file.
 - **The proxy is now the DEFAULT for every manager route**, not two
   endpoints fixed one at a time. `leaderProxyMiddleware` wraps the whole
   mux: a non-leader proxies any request to the leader before it reaches a
-  handler, exempting only `/healthz`, `/channel/ops` and `/activity*`. A handler the proxy didn't reach
-  keeps its own unchanged local behavior.
+  handler, exempting only `/healthz`. `/channel/ops` and `/activity*` are
+  proxied like every other route — they just keep their own unchanged local
+  fallback (refuse, or serve/record locally) when the leader can't be
+  reached.
 - **The manager's own `NetworkPolicy` now admits its own kind.** The proxy
   needs manager-to-manager traffic on port 8080, a pattern nothing
   previously needed — without this rule the whole fix was a silent no-op
@@ -99,7 +101,11 @@ for the source and the reference material beside this file.
    yet implement this change.
 2. Tag and release both components.
 3. Bump both tags before this chart version is installed anywhere.
-4. Rebuild any hand-made channel Secret for the new shape. It carries `gatewayUrl`, the router's call endpoint, and `gatewayToken`, which must equal the router's `TELEGRAM_CALL_TOKEN`. It no longer carries `botToken` or `apiBase`.
+4. Rebuild any hand-made channel Secret for the new shape. It carries
+   `gatewayUrl`, `gateway-telegram`'s call endpoint, and `gatewayToken`,
+   which must equal `gateway-telegram`'s `TELEGRAM_CALL_TOKEN`. It no longer
+   carries `botToken` or `apiBase` — a chart-rendered Secret picks up the new
+   shape automatically.
 
 ## [14.0.1] — 2026-10-10
 

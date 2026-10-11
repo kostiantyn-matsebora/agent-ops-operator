@@ -247,9 +247,11 @@ SignalSource/k8s-ops
 - **The gateway is not an adapter.** It speaks no agent-ops contract, emits no
   signals and never contacts the manager, so it has no CR — the chart owns its
   Deployment directly.
-- **The gateway Service and Secret.**
-  - `Service/agentops-gateway-telegram` fronts the gateway's outbound relay.
-  - `Secret/agentops-telegram-gateway` holds the relay's URL and a chart-generated call token. The channel adapter uses it in place of the bot credential.
+- **The gateway Service.** `Service/agentops-gateway-telegram` fronts the
+  gateway's outbound relay.
+- **The gateway Secret.** `Secret/agentops-telegram-gateway` holds the
+  relay's URL and a chart-generated call token, which the channel adapter
+  uses in place of the bot credential.
 - **The `Channel` and the `SignalSource` share one name**, so a pipeline binds
   the same word as its source and its channel.
 - **No `Pipeline` is rendered at all**, which is the whole of why the wiring is
