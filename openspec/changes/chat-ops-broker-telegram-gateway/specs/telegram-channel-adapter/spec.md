@@ -99,6 +99,11 @@ The relayed response SHALL be parsed exactly as a direct Bot API response would 
 
 **Migration**: a served Channel's credential Secret now projects `gatewayUrl`/`gatewayToken` instead of `botToken`. The chart renders this automatically for the telegram bundle.
 
+### Requirement: pollingEnabled channel setting
+**Reason**: this adapter never polls. The telegram-ingest-router is the only `getUpdates` consumer, so the setting selects nothing.
+
+**Migration**: delete `pollingEnabled` from the Channel's `spec.config`. A leftover key is ignored.
+
 ### Requirement: The Bot API endpoint is configuration, not a compiled-in constant
 **Reason**: renamed and rewritten to "The gateway endpoint is configuration, not a compiled-in constant". This adapter no longer calls the Bot API directly, so it has no base URL of its own to configure. `telegram-ingest-router` owns the Bot API root now.
 
