@@ -168,9 +168,10 @@ you control and conversations you stay in.
       cluster-events-7c1d4e   Running   2m
       ```
 
-- **Watch it work** — One signal, start to finish. A minute, no sound.
+- **Watch it work** — One signal, start to finish, plus a Coordinator composing
+  several agents. A minute, no sound.
 
-  [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, and the box to reply in.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
+  [![The console showing one conversation: the cluster-events signal that opened it, the agent's answer explaining an OOM-killed container, the box to reply in, and a Coordinator's root conversation with the members it invoked.]({{ '/assets/video/console-demo-poster-light.png' | relative_url }})]({{ '/assets/video/console-demo-light.mp4' | relative_url }}){: .ao-demo data-captions="{{ '/assets/video/console-demo.vtt' | relative_url }}"}
 
 - **What you write** — One `Pipeline`. It is the whole route, and it is the only place wiring lives.
 

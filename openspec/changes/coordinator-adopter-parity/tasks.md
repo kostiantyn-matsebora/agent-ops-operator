@@ -111,30 +111,64 @@
       console's origin-centred path), add step 8 ("Compose agents") to
       the guide path, and trim the now-redundant prose paragraph below
       the grid to one sentence.
-      Also investigated the open complaint that the landing page's
-      console recording (`assets/video/console-demo-*.mp4`) shows no
-      Coordinator beat. FOUND: re-recording it is blocked by a
-      PRE-EXISTING, UNRELATED break — `demo/record.spec.ts` waits on
-      `[data-testid="pipeline-typeahead"]`, a selector that no longer
-      exists anywhere in `src/` (confirmed by `grep`). The "Start
-      conversation" UI was rewritten under `destination-*` testids by
-      #298 (chat-shaped-conversations, 2026-10-09), and nobody re-ran
-      `npm run demo` after — exactly the gap
-      `docs/CLAUDE.md`'s own rule ("re-run BOTH npm run screenshots and
-      npm run demo... not done until both match") exists to catch, and
-      it was missed on an unrelated change. Reproduced on a clean
-      `npm ci && npm run build` with NO changes from this pull request
-      applied, so it is not something this change caused or can fix in
-      scope — recorded here rather than silently left for whoever next
-      touches the demo harness. NOT FIXED HERE: left as a separate,
-      pre-existing defect.
-      Verify: built the site, screenshotted `introduction/` in both
+      Also investigated and then FIXED the open complaint that the
+      landing page's console recording (`assets/video/console-demo-*.mp4`)
+      shows no Coordinator beat.
+      FOUND two separate things: (1) re-recording was blocked by a
+      PRE-EXISTING, UNRELATED break — `demo/record.spec.ts`'s `start`
+      beat waited on `[data-testid="pipeline-typeahead"]`, a selector
+      that no longer exists anywhere in `src/`. The "Start conversation"
+      UI was rewritten as a destination-picker MODAL under `destination-*`
+      testids by #298 (chat-shaped-conversations, 2026-10-09), and nobody
+      re-ran `npm run demo` after — exactly the gap `docs/CLAUDE.md`'s
+      own rule ("re-run BOTH npm run screenshots and npm run demo... not
+      done until both match") exists to catch, missed on an unrelated
+      change. (2) `screenshots/fixture.ts` already carries a full,
+      ready-built Coordinator tree fixture (`INCIDENT_ROOT`, design D-G's
+      "one root, three members, one itself a sub-coordinator") that the
+      console screenshots already use — nothing new had to be invented.
+      FIXED: rewrote the `start` beat in `demo/record.spec.ts` against
+      the actual modal (click `new-conversation`, wait for
+      `destination-cards`, click `destination-${ADDRESSED}`, assert
+      `aria-checked`, type into the `task` field, click
+      `start-conversation`) and removed `ADDRESS_PREFIX` from both files
+      — it answered nothing after the rewrite, the in-thread composer
+      spells it separately. Exported `INCIDENT_ROOT` from
+      `screenshots/fixture.ts` and added one beat to `demo/story.ts`
+      navigating to `/conversations/${INCIDENT_ROOT}` (ready text "Agents
+      invoked" — `ThreadPane.tsx`'s `CoordinatorBody` budget panel),
+      reusing that existing fixture rather than inventing a second
+      incident. Updated `docs/index.md`'s "Watch it work" blurb and the
+      video's `alt` text to name it.
+      Verify: `npm ci`, `npm run build`, `npm test -- --run` (532 tests,
+      unchanged), `npm run typecheck` (clean) all pass first. Baseline
+      (unmodified) `npm run demo` run FIRST and confirmed it failed on
+      the stale selector, to isolate the break from this change's own
+      beat. After the fix, `npm run demo` passes end to end, under
+      every budget:
+
+      | | light | dark | budget |
+      |---|---|---|---|
+      | duration | 70.2s | 70.2s | 75s |
+      | video | 1554KB | 1475KB | 4MB |
+      | poster | 148KB | 152KB | 400KB |
+
+      Read the captured frame for the new beat directly (not inferred
+      from the MP4): shows "Elevated 5xx rate on checkout-api", "Agents
+      invoked 3 of 5", "Turns 9 of 30", and the three inline member
+      invocations (notify/done, triage/Idle, mitigate/Running), in both
+      themes.
+      `console-demo.vtt` carries 11 cues now, the new one at
+      00:42–00:47. Built the site and screenshotted the landing page's
+      "Watch it work" tab: the player embeds and no horizontal overflow
+      in either theme.
+      Separately: built the site, screenshotted `introduction/` in both
       themes with Playwright (`document.documentElement.scrollWidth >
       clientWidth` false in both), confirmed the 9-card grid lays out
       with Coordinator alone in the final row exactly as
       `docs/CLAUDE.md`'s "odd count leaves the last card at normal
       width" describes, and `rules_compliance.py` is clean on
-      `introduction.md`.
+      `introduction.md` and `index.md`.
 
 ## 3. Review introduction.md and getting-started.md
 

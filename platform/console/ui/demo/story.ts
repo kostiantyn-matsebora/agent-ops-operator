@@ -19,7 +19,7 @@
 // the whole point — a recording of the console working, rather than of a
 // recorder painting.
 
-import { NOW, install, type Install } from '../screenshots/fixture'
+import { INCIDENT_ROOT, NOW, install, type Install } from '../screenshots/fixture'
 
 /** The conversation the story is about. */
 export const CONVERSATION = 'cluster-events-7c1d4e'
@@ -30,19 +30,8 @@ export const REPLY = 'Does the same setting affect the other two services in tha
 /** What the person asks when they start work themselves. */
 export const TASK = 'Check the memory limits across the rest of the namespace.'
 
-/** The pipeline they address, which is one of the three the typeahead lists. */
+/** The destination they pick, one of the cards the "Start a conversation" modal lists. */
 export const ADDRESSED = 'k8s-observe'
-
-/**
- * What opens the typeahead.
- *
- * The console spells this once, in `NewConversation.tsx`, and this is a second
- * spelling of it — deliberately, because importing a React page into the
- * recorder to borrow one character would pull the whole component tree into a
- * fixture. It cannot drift silently: a changed prefix means the menu never
- * opens and the beat fails on its own wait.
- */
-export const ADDRESS_PREFIX = '/'
 
 /** A moment, as seconds past the pinned clock. */
 const at = (seconds: number) => new Date(NOW.getTime() + seconds * 1000).toISOString()
@@ -212,6 +201,19 @@ export const beats: Beat[] = [
     label: 'Or you start it yourself, addressing the pipeline that answers',
     act: 'start',
     clock: 92,
+    hold: 6,
+  },
+  {
+    // THE OTHER SHAPE OF WIRING. Every beat so far is one Pipeline answering
+    // one signal. This reuses the SAME root conversation the console-page
+    // screenshots already show (`screenshots/fixture.ts`'s INCIDENT_ROOT,
+    // design D-G's "one root, three members, one of which is itself a
+    // sub-coordinator") — nothing invented for this beat alone, so the two
+    // recordings can never drift into two different incidents.
+    label: 'Or a Coordinator composes several agents, and decides what to invoke next',
+    path: `/conversations/${INCIDENT_ROOT}`,
+    ready: 'Agents invoked',
+    clock: 98,
     hold: 6,
   },
   {
