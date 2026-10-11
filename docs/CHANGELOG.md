@@ -77,7 +77,7 @@ for the source and the reference material beside this file.
 - **The proxy is now the DEFAULT for every manager route**, not two
   endpoints fixed one at a time. `leaderProxyMiddleware` wraps the whole
   mux: a non-leader proxies any request to the leader before it reaches a
-  handler, exempting only `/healthz`. A handler the proxy didn't reach
+  handler, exempting only `/healthz`, `/channel/ops` and `/activity*`. A handler the proxy didn't reach
   keeps its own unchanged local behavior.
 - **The manager's own `NetworkPolicy` now admits its own kind.** The proxy
   needs manager-to-manager traffic on port 8080, a pattern nothing

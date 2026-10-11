@@ -51,7 +51,7 @@ The routes this middleware covers read or write the Kubernetes API, which is con
 
 #### Scenario: A failed proxy falls through to the local handler
 
-- **WHEN** a non-leader cannot reach the leader for a route other than `/channel/ops`
+- **WHEN** a non-leader cannot reach the leader for a route other than `/healthz`, `/channel/ops` and `/activity*`
 - **THEN** the route's own handler serves the request locally
 
 ## REMOVED Requirements
