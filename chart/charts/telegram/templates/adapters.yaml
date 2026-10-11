@@ -6,7 +6,9 @@ configured. The reconcilers own every Deployment and Service.
 {{- if include "telegram.active" . }}
 {{- $ca := .Values.channelAdapter }}
 # CONTINUATION and delivery. Does NOT poll: gateway-telegram owns the single
-# getUpdates loop and pushes topic updates here.
+# getUpdates loop and pushes topic updates here. It also does not SEND
+# directly any more (chat-ops-broker-telegram-gateway): every Bot API call
+# goes through gateway-telegram's outbound relay instead.
 apiVersion: agentops.dev/v1alpha1
 kind: ChannelAdapter
 metadata:
@@ -57,13 +59,22 @@ spec:
     required:
       - chatId
   credentialKeys:
-    # documentation only — the manager never reads Secrets
-    - key: botToken
+    # documentation only — the manager never reads Secrets. This adapter
+    # holds no Telegram credential at all (chat-ops-broker-telegram-gateway):
+    # it sends through gateway-telegram's outbound relay, so what it needs
+    # projected is the GATEWAY BINDING, never the bot token.
+    - key: gatewayUrl
       required: false
       description: >-
-        Bot API token for this surface, used to SEND. The same Secret backs the
-        router, which uses it to poll. Optional because the adapter also
-        accepts TELEGRAM_BOT_TOKEN from its environment.
+        gateway-telegram's in-cluster base URL for this surface. Optional
+        because the adapter also accepts TELEGRAM_GATEWAY_URL from its
+        environment.
+    - key: gatewayToken
+      required: false
+      description: >-
+        Shared secret authenticating this surface's calls to
+        gateway-telegram's POST /telegram/call. Optional because the adapter
+        also accepts TELEGRAM_GATEWAY_TOKEN from its environment.
 ---
 {{- $sa := .Values.signalAdapter }}
 # ORIGINATION. A message on a chat's general surface is a signal like any

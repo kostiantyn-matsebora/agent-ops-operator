@@ -16,6 +16,13 @@
 // filtering stay in the receiving adapters, each against its own contract
 // listing.
 //
+// It now ALSO holds the OUTBOUND half (chat-ops-broker-telegram-gateway):
+// channel-telegram no longer keeps its own copy of the bot token to send
+// with. Every Bot API call it makes — sendMessage, sendDocument, the forum
+// topic lifecycle, setMyCommands — is relayed through this process' own
+// POST /telegram/call/{method} (see call.go), so this is the SOLE holder of
+// the bot credential, both directions. See gotchas.md, 2026-10-11.
+//
 // This is PLUMBING, not an adapter. It produces no signals, so it is not a
 // SignalAdapter and has no served CR: the chart that renders the two real
 // adapters also renders this Deployment and injects the two Service URLs it
@@ -33,15 +40,18 @@
 //
 // Environment (all required except where noted):
 //
-//	TELEGRAM_API_BASE   optional: the Bot API root, default https://api.telegram.org
-//	TELEGRAM_BOT_TOKEN  the bot to poll; or AGENTOPS_CRED_<PREFIX>botToken
-//	SIGNAL_TARGET       base URL of signal-telegram  (originations)
-//	CHANNEL_TARGET      base URL of channel-telegram (continuations + offset)
+//	TELEGRAM_API_BASE    optional: the Bot API root, default https://api.telegram.org
+//	TELEGRAM_BOT_TOKEN   the bot to poll and send as; or AGENTOPS_CRED_<PREFIX>botToken
+//	SIGNAL_TARGET        base URL of signal-telegram  (originations)
+//	CHANNEL_TARGET       base URL of channel-telegram (continuations + offset)
+//	TELEGRAM_CALL_TOKEN  shared secret channel-telegram authenticates /telegram/call with
+//	LISTEN_ADDR          optional: where /telegram/call is served, default :8080
 package main
 
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -66,6 +76,12 @@ type config struct {
 	// absent is the real host, and a missing value is a normal configuration
 	// rather than the misconfiguration the three above are.
 	APIBase string
+	// CallToken authenticates channel-telegram's calls to /telegram/call. See
+	// call.go's validCallToken for why this leg, unlike the /updates push in
+	// the other direction, needs one at all.
+	CallToken string
+	// ListenAddr is where /telegram/call is served.
+	ListenAddr string
 }
 
 type router struct {
@@ -84,6 +100,11 @@ func loadConfig() config {
 		ChannelTarget: strings.TrimSuffix(os.Getenv("CHANNEL_TARGET"), "/"),
 		Token:         os.Getenv("TELEGRAM_BOT_TOKEN"),
 		APIBase:       resolveAPIBase(),
+		CallToken:     os.Getenv("TELEGRAM_CALL_TOKEN"),
+		ListenAddr:    os.Getenv("LISTEN_ADDR"),
+	}
+	if c.ListenAddr == "" {
+		c.ListenAddr = ":8080"
 	}
 	// The chart projects the bot Secret with a prefix; accept either the plain
 	// name or exactly one projected AGENTOPS_CRED_*botToken.
@@ -106,6 +127,9 @@ func loadConfig() config {
 	if c.ChannelTarget == "" {
 		missing = append(missing, "CHANNEL_TARGET (base URL of the telegram channel adapter)")
 	}
+	if c.CallToken == "" {
+		missing = append(missing, "TELEGRAM_CALL_TOKEN (shared secret for POST /telegram/call)")
+	}
 	if len(missing) > 0 {
 		log.Fatalf("gateway-telegram is misconfigured, missing: %s", strings.Join(missing, ", "))
 	}
@@ -124,7 +148,23 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("gateway-telegram starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
+	log.Printf("gateway-telegram starting (signal=%s channel=%s listen=%s)",
+		cfg.SignalTarget, cfg.ChannelTarget, cfg.ListenAddr)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /telegram/call/{method}", r.handleCall)
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("telegram call server: %v", err)
+		}
+	}()
 
 	r.poll(ctx)
 }

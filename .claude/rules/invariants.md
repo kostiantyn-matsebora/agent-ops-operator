@@ -471,9 +471,21 @@ leader** (durable-chat-ops-broker).
 - **Claiming an outbound channel op is written only by the current
   leader-election Lease holder**, on the Conversation's own
   `status.threads[].claim`. So is deciding a previous claim is abandoned.
-- **A non-leader rejects the poll with 503.** Answering from its own state
-  would read an `OpQueue` the leader-gated reconciler never populated on
-  that process.
+- **A non-leader is a DUMB PROXY to whoever the Lease says is leader**
+  (chat-ops-broker-telegram-gateway), not a second decision-maker. It
+  resolves the leader's pod from its own identity (the Lease holder's
+  hostname, matched against pods carrying `app.kubernetes.io/name:
+  agentops-manager`) and reverse-proxies the request there — no claiming,
+  no deriving, no reading its own `OpQueue`, which was never populated for
+  ops this process did not claim.
+- **A poll falls back to 503 only when the leader is unreachable from
+  here** — unknown, a handoff in progress, a dial failure — never by
+  silently answering from this replica's own state. A conforming adapter
+  already retries a 503 at once.
+- **Why a proxy, not every replica deriving independently**: measured
+  live, 2026-10-11 — a 503-and-redial alone still needed many redials in a
+  row to land on the one leader by chance. Proxying removes the chance
+  entirely: every poll, on any replica, reaches the leader in one hop.
 
 - **This is the SAME staleness pattern as "a runtime pod that never starts is
   reaped"** two sections up: a bound after which something unclaimed-but-stuck

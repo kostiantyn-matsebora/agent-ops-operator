@@ -34,8 +34,9 @@ func TestExecuteReopensTopicFromPreviousThreadID(t *testing.T) {
 	defer srv.Close()
 
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token", apiBase: srv.URL}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, gatewayURL: srv.URL, gatewayToken: "gw-token"}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	op := &Op{Channel: "tg", Kind: "ensure-topic", Topic: &TopicDescriptor{
 		Conversation: "conv-1", PreviousThreadID: "99",
@@ -56,8 +57,9 @@ func TestExecuteReopensTopicFromPreviousThreadID(t *testing.T) {
 // reported rather than panic on a nil dereference.
 func TestExecuteEnsureTopicWithoutADescriptorIsReported(t *testing.T) {
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token"}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "ensure-topic"})
 	if opErr == "" {
@@ -83,8 +85,9 @@ func TestExecuteSendsAnOrdinaryMessage(t *testing.T) {
 	defer srv.Close()
 
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token", apiBase: srv.URL}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, gatewayURL: srv.URL, gatewayToken: "gw-token"}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	tid := "5"
 	msg := Message{Kind: MsgAnswer, Body: "the fix landed"}
@@ -109,8 +112,9 @@ func TestExecuteSendsAnOrdinaryMessage(t *testing.T) {
 // empty string.
 func TestExecuteSendWithoutAMessageIsReported(t *testing.T) {
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token"}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "send"})
 	if opErr == "" {
@@ -140,8 +144,9 @@ func TestExecuteSendsAnOversizedSignalAsADocument(t *testing.T) {
 	defer srv.Close()
 
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token", apiBase: srv.URL}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, gatewayURL: srv.URL, gatewayToken: "gw-token"}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	big := strings.Repeat("line\n", 3000) // well past documentThreshold (3*4096)
 	msg := Message{Kind: MsgSignal, Source: "prom", Title: "PodCrashLooping", Body: big}
@@ -173,8 +178,9 @@ func TestExecuteClosesATopic(t *testing.T) {
 	defer srv.Close()
 
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token", apiBase: srv.URL}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, gatewayURL: srv.URL, gatewayToken: "gw-token"}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	tid := "42"
 	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "close-topic", ThreadID: &tid})
@@ -189,8 +195,9 @@ func TestExecuteClosesATopic(t *testing.T) {
 // A close-topic with no thread id names nothing to archive.
 func TestExecuteCloseTopicWithoutAThreadIsReported(t *testing.T) {
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token"}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "close-topic"})
 	if opErr == "" {
@@ -202,8 +209,9 @@ func TestExecuteCloseTopicWithoutAThreadIsReported(t *testing.T) {
 // execute() must report it rather than pass a garbage id to the Bot API).
 func TestExecuteCloseTopicWithAnUnparsableThreadIsReported(t *testing.T) {
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token"}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	tid := "not-a-number"
 	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "close-topic", ThreadID: &tid})
@@ -219,8 +227,9 @@ func TestExecuteCloseTopicWithAnUnparsableThreadIsReported(t *testing.T) {
 // reached by any existing test.
 func TestExecuteReportsAnUnknownOpKind(t *testing.T) {
 	a := &adapter{
-		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, token: "bot-token"}},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "reticulate-splines"})
 	if !strings.Contains(opErr, "reticulate-splines") {
@@ -401,7 +410,8 @@ func TestSendWithDegradesAndRetriesOnAnUnsupportedQuoteTag(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tg := &Telegram{Token: "bot-token", HTTP: srv.Client(), BaseURL: srv.URL}
+	tg := NewTelegram(srv.URL, "gw-token")
+	tg.HTTP = srv.Client()
 	html := "<blockquote expandable>hidden</blockquote>"
 	if err := tg.SendWith(context.Background(), "-100", nil, html, SendExtras{}); err != nil {
 		t.Fatalf("must degrade and retry rather than fail outright: %v", err)

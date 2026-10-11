@@ -58,10 +58,19 @@ signalAdapter:
 # The single getUpdates consumer. NOT an adapter CR: it produces no signals, so
 # this chart owns its Deployment directly and injects the two forwarding URLs as
 # env. It reaches the Kubernetes API not at all.
+#
+# It is now ALSO the SOLE holder of the bot credential outbound
+# (chat-ops-broker-telegram-gateway): channel-telegram no longer calls
+# api.telegram.org directly, it calls this process' POST
+# /telegram/call/{method}, so this chart renders a Service for it too.
 router:
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-gateway-telegram
     tag: 0.6.1
+  # Where POST /telegram/call/{method} is served. The chart renders the
+  # router's Service on this port too, since the reconciler owns no Service
+  # for it (it is not an adapter CR).
+  callPort: 8080
   # Extra env passthrough (appended after SIGNAL_TARGET, CHANNEL_TARGET and the
   # projected bot token).
   env: []

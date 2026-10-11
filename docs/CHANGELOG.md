@@ -8,6 +8,44 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [14.0.2] — 2026-10-11
+
+- `gateway-telegram` and `channel-telegram` need new image releases before
+  this version is installable — see the note at the end of this entry.
+
+### Changed
+
+- **`gateway-telegram` is now the SOLE holder of the Telegram bot credential**,
+  inbound and outbound alike. `channel-telegram` no longer calls
+  `api.telegram.org` directly — every send, document upload, forum topic
+  operation and command registration is relayed through the router's new
+  `POST /telegram/call/{method}`, authenticated with a shared token the chart
+  generates.
+- **The telegram bundle's `surface.credentials` Secret no longer carries an
+  `apiBase` key.** That value moved entirely to the router. A new
+  chart-managed Secret (`agentops-telegram-gateway`) carries the
+  `gatewayUrl`/`gatewayToken` binding the channel adapter reads instead,
+  through the same `credentialsSecretRef` projection the old `botToken`/
+  `apiBase` keys used.
+- **The router gains a Service and a NetworkPolicy** for its new call
+  endpoint, on `router.callPort` (default `8080`).
+- **`GET /channel/ops` no longer refuses a non-leader manager replica with
+  `503`.** A non-leader now reverse-proxies the poll to whichever replica
+  the leader-election Lease names, instead of rejecting it, so a channel
+  adapter's long-poll connection pinned to a non-leader pod is answered
+  instead of starved. The leader stays the sole claimant and dispatcher —
+  only the HTTP routing changed. Falls back to the old 503 only when the
+  leader cannot be resolved or reached. Fixes a measured incident on a
+  3-replica install where a Telegram topic was never created and three
+  replies sat undelivered for 9+ hours — see
+  `.claude/rules/invariants.md` and `.claude/rules/gotchas.md` for the
+  detail.
+
+**Not yet releasable.** `chart/charts/telegram/values.yaml` still names the
+LAST released `channelAdapter.image.tag` and `router.image.tag` — those
+binaries do not yet implement this change. Tag and release both components,
+then bump both tags, before this chart version is installed anywhere.
+
 ## [14.0.1] — 2026-10-10
 
 - `signal-cron` 0.2.0.

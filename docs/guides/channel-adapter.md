@@ -212,7 +212,9 @@ metadata, so an operator learns what `config` needs without reading the source:
 ```yaml
 # Source: agent-ops-operator/charts/telegram/templates/adapters.yaml
 # CONTINUATION and delivery. Does NOT poll: gateway-telegram owns the single
-# getUpdates loop and pushes topic updates here.
+# getUpdates loop and pushes topic updates here. It also does not SEND
+# directly any more (chat-ops-broker-telegram-gateway): every Bot API call
+# goes through gateway-telegram's outbound relay instead.
 apiVersion: agentops.dev/v1alpha1
 kind: ChannelAdapter
 metadata:
@@ -220,7 +222,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
-    helm.sh/chart: "telegram-0.4.0"
+    helm.sh/chart: "telegram-0.5.0"
 spec:
   image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.25.1"
   # Receives forwarded topic updates: the reconciler owns Service
@@ -259,13 +261,22 @@ spec:
     required:
       - chatId
   credentialKeys:
-    # documentation only — the manager never reads Secrets
-    - key: botToken
+    # documentation only — the manager never reads Secrets. This adapter
+    # holds no Telegram credential at all (chat-ops-broker-telegram-gateway):
+    # it sends through gateway-telegram's outbound relay, so what it needs
+    # projected is the GATEWAY BINDING, never the bot token.
+    - key: gatewayUrl
       required: false
       description: >-
-        Bot API token for this surface, used to SEND. The same Secret backs the
-        router, which uses it to poll. Optional because the adapter also
-        accepts TELEGRAM_BOT_TOKEN from its environment.
+        gateway-telegram's in-cluster base URL for this surface. Optional
+        because the adapter also accepts TELEGRAM_GATEWAY_URL from its
+        environment.
+    - key: gatewayToken
+      required: false
+      description: >-
+        Shared secret authenticating this surface's calls to
+        gateway-telegram's POST /telegram/call. Optional because the adapter
+        also accepts TELEGRAM_GATEWAY_TOKEN from its environment.
 ```
 <!-- /generated -->
 
@@ -303,15 +314,22 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
-    helm.sh/chart: "telegram-0.4.0"
+    helm.sh/chart: "telegram-0.5.0"
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below
   adapter: telegram
   # projected into the adapter pod as env by the reconciler, kubelet-resolved —
-  # nothing reads the Secret through the API
+  # nothing reads the Secret through the API.
+  #
+  # THIS IS THE GATEWAY BINDING SECRET, NOT THE BOT TOKEN
+  # (chat-ops-broker-telegram-gateway): channel-telegram holds no Telegram
+  # credential at all any more, only the gatewayUrl/gatewayToken it needs to
+  # reach gateway-telegram's outbound relay. It is independent of how the bot
+  # token itself is supplied (surface.credentials.existingSecret or not),
+  # since channel-telegram no longer reads that Secret.
   credentialsSecretRef:
-    name: k8s-ops-telegram
+    name: agentops-telegram-gateway
   # opaque to the operator; this shape is what channel-telegram parses
   config:
     chatId: "-1001234567890"

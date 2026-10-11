@@ -7,10 +7,13 @@ package integration
 
 import (
 	"context"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -332,7 +335,9 @@ func TestChannelOpsRejectsNonLeader(t *testing.T) {
 	}
 
 	// A different replica's suffixed identity must still be rejected — the
-	// prefix match must not widen into a substring match.
+	// prefix match must not widen into a substring match. No Pod named
+	// "replica-a" exists either, so proxyToLeader finds nothing to reach and
+	// this still falls back to the ordinary 503.
 	other := "replica-a_f47ac10b-58cc-4372-a567-0e02b2c3d479"
 	patched = patched.DeepCopy()
 	patched.Spec.HolderIdentity = &other
@@ -342,5 +347,76 @@ func TestChannelOpsRejectsNonLeader(t *testing.T) {
 	rec = adapterReq(srv, "GET", "/channel/ops?adapter=tg-leader&contract=2&wait=0", nil, testMasterToken)
 	if rec.Code != 503 {
 		t.Fatalf("a different replica's suffixed identity must not match, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// chat-ops-broker-telegram-gateway: a non-leader with a REACHABLE leader
+// proxies the poll there instead of rejecting it. The leader stays the only
+// process that ever claims or completes an op — this proves the HTTP layer
+// alone changed, by using two Servers with their OWN, separate OpQueues: the
+// op only ever exists in the leader's, and the follower must still return it.
+func TestChannelOpsProxiesToLeaderWhenReachable(t *testing.T) {
+	ctx := context.Background()
+
+	leaderSrv, _ := apiServerWithActivity()
+	leaderSrv.ReplicaIdentity = "proxy-leader"
+	leaderHTTP := httptest.NewServer(leaderSrv.Handler())
+	t.Cleanup(leaderHTTP.Close)
+
+	// Both replicas of one Deployment listen on the identical port in
+	// production (Server.Addr from one env var) — only the host differs.
+	// Modelling that here means pointing BOTH Servers' Addr at the leader's
+	// real httptest port, so leaderProxyTarget's own port-reuse assumption
+	// holds.
+	port := leaderHTTP.URL[strings.LastIndex(leaderHTTP.URL, ":"):]
+	leaderSrv.Addr = port
+
+	followerSrv, _ := apiServerWithActivity()
+	followerSrv.ReplicaIdentity = "proxy-follower"
+	followerSrv.Addr = port
+
+	pod := &corev1.Pod{}
+	pod.Name, pod.Namespace = "proxy-leader", ns
+	pod.Labels = map[string]string{"app.kubernetes.io/name": "agentops-manager"}
+	pod.Spec.Containers = []corev1.Container{{Name: "manager", Image: "busybox:stub"}}
+	if err := k8sClient.Create(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), pod) })
+	pod.Status.PodIP = strings.TrimPrefix(leaderHTTP.URL[:strings.LastIndex(leaderHTTP.URL, ":")], "http://")
+	if err := k8sClient.Status().Update(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+
+	lease := &coordinationv1.Lease{}
+	lease.Name, lease.Namespace = httpapi.LeaseName, ns
+	holder := "proxy-leader"
+	lease.Spec.HolderIdentity = &holder
+	if err := k8sClient.Create(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), lease) })
+
+	mkProfile(t, "prof-proxy")
+	mkChannel(t, "proxy-chan", "tg-proxy")
+	conv := claimConv(t, "proxy-conv", "prof-proxy", "proxy-chan")
+
+	rc := reconcilerAs(leaderSrv.Ops, "proxy-leader", time.Minute)
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: conv.Name}}); err != nil {
+		t.Fatal(err)
+	}
+
+	recResp := adapterReq(followerSrv, "GET", "/channel/ops?adapter=tg-proxy&contract=2&wait=0", nil, testMasterToken)
+	if recResp.Code != 200 {
+		t.Fatalf("a non-leader with a reachable leader must proxy and return its op, got %d: %s", recResp.Code, recResp.Body.String())
+	}
+	if !strings.Contains(recResp.Body.String(), "ensure-topic") {
+		t.Fatalf("the proxied response must be the leader's own ensure-topic op: %s", recResp.Body.String())
+	}
+
+	// The follower's OWN OpQueue never saw this op — proving the response
+	// really came from the leader's process, not a local, independent claim.
+	if followerSrv.Ops.Claim("tg-proxy") != nil {
+		t.Fatalf("the follower must never have claimed anything itself")
 	}
 }

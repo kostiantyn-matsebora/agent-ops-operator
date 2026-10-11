@@ -246,22 +246,33 @@ tools; the runtime translates, permits and reports.
 ### The Telegram trio
 
 **`channels/telegram/`** — the reference channel adapter, implementing the
-`/channel` contract. Bot API sending lives HERE.
+`/channel` contract. **It holds NO Telegram credential of its own**
+(chat-ops-broker-telegram-gateway) — every Bot API call it composes (send,
+document upload, the forum topic lifecycle, command registration) is issued
+to `gateways/telegram/`'s outbound relay instead of `api.telegram.org`
+directly.
 
 **It does NOT poll.** It receives topic updates pushed by the router
 (`POST /updates`, `ChannelAdapter spec.port`) and persists the router's offset
 (`GET/PUT /offset` → state API).
 
-**`gateways/telegram/`** — the ONLY getUpdates consumer.
+**`gateways/telegram/`** — the ONLY getUpdates consumer, and now the SOLE
+holder of the bot credential, inbound and outbound alike.
 
 - **It classifies each update on `is_topic_message` and forwards it VERBATIM.**
   No topic → `signal-telegram` (origination). Topic → `channel-telegram`
   (continuation).
+- **Bot API sending lives HERE.** `POST /telegram/call/{method}` relays
+  `channel-telegram`'s composed calls to the real Bot API and relays the
+  response back verbatim, authenticated by a shared token distinct from the
+  (unauthenticated, network-trust-only) `/updates` push the other direction —
+  this leg can SEND with the live credential, which is a bigger grant.
 - **It holds no channel config, persists nothing, needs no RBAC.**
 - **NOT AN ADAPTER.** It emits no signals, so it has no `SignalAdapter` CR and
   no served CR.
-  - **The telegram chart owns its Deployment**, injecting
-    `SIGNAL_TARGET` / `CHANNEL_TARGET` / the bot token as env.
+  - **The telegram chart owns its Deployment AND, now, a Service** for the
+    call endpoint, injecting `SIGNAL_TARGET` / `CHANNEL_TARGET` / the bot
+    token / the call token as env.
   - **It never contacts the manager.**
 - **One Deployment per bot token makes the single-consumer rule structural.** A
   missing env var exits at startup.

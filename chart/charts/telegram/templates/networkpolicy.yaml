@@ -9,6 +9,12 @@
   RENDERED BY THIS BUNDLE, not the parent, for one reason: an adapter's port is
   declared here. A parent-side policy would have to hardcode one, and an install
   that moved a port would find its chat lane silently severed.
+
+  The THIRD policy below is the new reverse leg (chat-ops-broker-telegram-gateway):
+  channel-telegram now calls BACK into the router's POST /telegram/call, which
+  can send with the live bot credential — a bigger grant than /updates carries,
+  which is also why that leg additionally needs the shared token
+  (gateways/telegram/call.go), on top of this NetworkPolicy.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -53,4 +59,27 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.signalAdapter.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentops-telegram-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agentops-gateway-telegram
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: agentops.dev/adapter
+                operator: In
+                values: [{{ .Values.channelAdapter.name | default "telegram" }}]
+      ports:
+        - protocol: TCP
+          port: {{ .Values.router.callPort }}
 {{- end }}

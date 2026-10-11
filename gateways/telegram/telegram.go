@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -156,6 +157,43 @@ func classifyUpdate(raw json.RawMessage) (update, error) {
 func (t *Telegram) Acknowledge(ctx context.Context, callbackID string) error {
 	_, err := t.API(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": callbackID})
 	return err
+}
+
+// Call performs an arbitrary Bot API method on channel-telegram's behalf —
+// the consolidation that makes this process the SOLE holder of the bot
+// token, inbound and outbound alike (see gotchas.md, 2026-10-11:
+// chat-ops-broker-telegram-gateway).
+//
+// Body and contentType are forwarded VERBATIM, and so is the response's
+// status and body: a JSON method call and a multipart sendDocument upload
+// both pass through unchanged, and the caller's own tgResponse parsing
+// (including `parameters.retry_after`) needs nothing new to read. Unlike
+// API, this does not retry, inspect `ok`, or unwrap `result` — the caller
+// already owns a retry budget keyed off a manager claim this process knows
+// nothing about, and retrying here as well would let the two bounds race.
+func (t *Telegram) Call(ctx context.Context, method, contentType string, body []byte) (status int, respBody []byte, respContentType string, err error) {
+	base := t.BaseURL
+	if base == "" {
+		base = telegramAPIBase
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		base+"/bot"+t.Token+"/"+method, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, "", err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := t.HTTP.Do(req)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	return resp.StatusCode, out, resp.Header.Get("Content-Type"), nil
 }
 
 // GetUpdates long-polls for message updates from the given offset, preserving

@@ -12,7 +12,7 @@ type: application
 sources:
   - https://github.com/kostiantyn-matsebora/agent-ops-operator
 home: https://kostiantyn-matsebora.github.io/agent-ops-operator/
-version: 14.0.1
+version: 14.0.2
 appVersion: "0.54.0"
 dependencies:
   # embedded subchart (chart/charts/prometheus); templates are
@@ -31,7 +31,7 @@ dependencies:
   # embedded subchart (chart/charts/telegram); templates are
   # additionally self-gated on telegram.enabled
   - name: telegram
-    version: 0.4.0
+    version: 0.5.0
     repository: ""
     condition: telegram.enabled
   # embedded subchart (chart/charts/home-assistant); templates are additionally

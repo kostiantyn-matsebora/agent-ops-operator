@@ -72,3 +72,11 @@ http://agentops-signal-{{ .Values.signalAdapter.name }}.{{ .Release.Namespace }}
 {{- define "telegram.channelTarget" -}}
 http://agentops-adapter-{{ .Values.channelAdapter.name }}.{{ .Release.Namespace }}.svc:{{ .Values.channelAdapter.port }}
 {{- end -}}
+
+{{- /* In-cluster base URL of the router's own call endpoint
+(chat-ops-broker-telegram-gateway) -- the reconciler owns neither this
+Service nor this Deployment, so the chart renders and names both itself,
+exactly as it already does for the router's Deployment. */ -}}
+{{- define "telegram.gatewayURL" -}}
+http://agentops-gateway-telegram.{{ .Release.Namespace }}.svc:{{ .Values.router.callPort }}
+{{- end -}}

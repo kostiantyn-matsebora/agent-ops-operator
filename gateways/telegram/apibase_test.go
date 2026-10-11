@@ -32,6 +32,7 @@ func TestGetUpdatesHonoursTheOverride(t *testing.T) {
 	t.Setenv("SIGNAL_TARGET", "http://signal/")
 	t.Setenv("CHANNEL_TARGET", "http://channel")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "t")
+	t.Setenv("TELEGRAM_CALL_TOKEN", "call-token")
 
 	cfg := loadConfig()
 	if cfg.APIBase != srv.URL {

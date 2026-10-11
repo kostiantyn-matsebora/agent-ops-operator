@@ -21,6 +21,7 @@ func TestLoadConfigDiscoversProjectedBotToken(t *testing.T) {
 	t.Setenv("CHANNEL_TARGET", "http://channel")
 	t.Setenv("AGENTOPS_CRED_TELEGRAM_botToken", "projected-token")
 	t.Setenv(apiBaseEnv, "")
+	t.Setenv("TELEGRAM_CALL_TOKEN", "call-token")
 
 	cfg := loadConfig()
 	if cfg.Token != "projected-token" {
@@ -309,6 +310,8 @@ func TestMainStartsAndStopsOnContextCancellation(t *testing.T) {
 	t.Setenv("CHANNEL_TARGET", channelSrv.URL)
 	t.Setenv("TELEGRAM_BOT_TOKEN", "t")
 	t.Setenv(apiBaseEnv, tgSrv.URL)
+	t.Setenv("TELEGRAM_CALL_TOKEN", "call-token")
+	t.Setenv("LISTEN_ADDR", ":0")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	origBaseContext := baseContext

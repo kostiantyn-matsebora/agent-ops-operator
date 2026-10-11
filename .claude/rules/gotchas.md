@@ -1232,3 +1232,80 @@ get a claim.
 - **Fixed by widening THIS wait alone to 5m**, sized to three cycles,
   not by touching the staleness constant itself or the admission fix.
 
+**`gateway-telegram` SPLIT ITS CREDENTIAL CUSTODY FROM ITS OWN NAME —
+CONSOLIDATED 2026-10-11 (chat-ops-broker-telegram-gateway).** The router held
+the bot token to poll `getUpdates`. `channel-telegram` held a SEPARATE copy to
+send with. Two components could act as the bot.
+
+- **The split was an oversight the component's own name already argued
+  against.** "Gateway" implied the sole contact point from the start. Nothing
+  enforced it for the outbound half until this change added
+  `POST /telegram/call/{method}` and deleted every Bot API call
+  `channel-telegram` made directly.
+- **`ChannelAdapter` carries no general `env` field**, so the per-channel
+  credential projection (`credentialsSecretRef` → `AGENTOPS_CRED_<prefix>_*`)
+  already used for `botToken`/`apiBase` is the ONLY path by which
+  `channel-telegram` learns the gateway's URL and shared call token — there
+  is no chart-level way to hand an implementation-specific env var to an
+  adapter pod the reconciler owns. The new `gatewayUrl`/`gatewayToken` keys
+  ride the exact same seam the old ones did.
+- **The reverse leg needed its own auth, unlike `/updates`.** The inbound
+  push can only inject a fake message, filtered by the adapter before
+  anything happens. The outbound relay can SEND with the live credential, so
+  it carries a shared bearer token the chart generates once, on top of the
+  NetworkPolicy both legs already had.
+
+**`/channel/ops` LEADER-GATING WAS THE INCIDENT, NOT THE SAFEGUARD IT LOOKED
+LIKE — MEASURED LIVE ON A 3-REPLICA INSTALL, 2026-10-11
+(chat-ops-broker-telegram-gateway).**
+
+`durable-chat-ops-broker`'s design made `internal/chat.OpQueue` a plain
+in-memory map, populated ONLY by the leader-elected Conversation reconciler.
+
+`/channel/ops` 503'd at once on any replica that was not the current Lease
+holder.
+
+- **A Kubernetes Service picks a backend per CONNECTION, not per request.**
+  A channel adapter's long-poll could dial, and stay pinned to, a non-leader
+  replica for its whole life. `CloseIdleConnections()` on the 503 path (an
+  earlier fix, `gotchas.md` above) forces a fresh dial on EVERY 503, but with
+  3 replicas that is still only a 1/3 chance per redial of landing on the
+  leader — measured taking dozens of redials in a row to succeed. A Telegram
+  topic never got created and three agent replies sat undelivered for 9+
+  hours, with no error anywhere.
+- **TWO FIXES WERE TRIED. THE FIRST WAS BUILT, MEASURED CORRECT, AND
+  DISCARDED FOR A SIMPLER ONE.** The first made `ensure-topic`/`send`/
+  `close-topic` derivable by ANY replica from Conversation CR state directly
+  (moving the derivation into `internal/chat`, generalizing the claim to
+  pure staleness with no leader-identity check) — matching the archived
+  proposal's own stated intent, "a cache of CR state rather than the sole
+  owner of it", which the merged `durable-chat-ops-broker` code had never
+  actually delivered. It built, passed every test including a concurrency
+  race test, and was abandoned anyway because it is NOT what was asked for:
+  the simpler, agreed design keeps the leader as the SOLE broker and fixes
+  only the ROUTING.
+- **THE SHIPPED FIX: a non-leader is a DUMB PROXY, nothing more.** The claim
+  and `OpQueue` stay exactly as `durable-chat-ops-broker` built them —
+  leader-only, identity-gated, unchanged. `handleChannelOps`, on `!isLeader`,
+  resolves the Lease holder's pod (hostname before the per-process uuid
+  controller-runtime appends, matched against pods labelled
+  `app.kubernetes.io/name: agentops-manager`) and reverse-proxies the
+  request there with `httputil.ReverseProxy`, byte for byte. It falls back
+  to the ordinary 503-and-retry only when the leader is unreachable from
+  here — a dial failure, a handoff in progress — never by answering from
+  its own, unpopulated state.
+- **Why proxy rather than let every replica derive independently:** a
+  503-and-redial alone still needed many redials in a row to land on the
+  one leader by chance, with 3 replicas. A proxy removes the chance
+  entirely — every poll, on any replica, reaches the leader in ONE hop,
+  with no new distributed-claim surface and no change to crash-recovery
+  semantics `durable-chat-ops-broker` already proved. Verify:
+  `TestChannelOpsProxiesToLeaderWhenReachable` in
+  `internal/integration/claim_test.go`, using two real `httptest.Server`s
+  with SEPARATE `OpQueue`s to prove the follower's own queue is never
+  touched.
+- **Every replica listens on the SAME port** (`API_ADDR`, one Deployment,
+  one image), so only the leader's POD IP differs — the proxy target is
+  always `<leaderPodIP><thisProcess'sOwnAddr>`, never a port looked up
+  per-pod.
+
