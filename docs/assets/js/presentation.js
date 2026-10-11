@@ -672,7 +672,9 @@
         stillNow = false;
         wrap.classList.remove('is-still');
         goTo(0);
-        if (wasPaused || reduced) pause(); else start();
+        // Reduced motion reaches this branch only once engaged, so only a
+        // manual pause keeps the figure paused across a tab switch.
+        if (wasPaused) pause(); else start();
       }
       labelWrap();
     }

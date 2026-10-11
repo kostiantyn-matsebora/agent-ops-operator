@@ -83,10 +83,9 @@ and AgentCapability, which have no guide and link to the reference.
 - [AgentCapability](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#agentcapability)
   {: .ao-icon-capability}
 
-  **A named capability, declared once** — profile, runtime, identity, tools,
-  persistence. A Pipeline or a Coordinator references it by
-  name instead of inlining the same six fields. Carries no wiring
-  of its own.
+  **A named capability, declared once.** A Pipeline or a Coordinator
+  references it by name instead of inlining the same fields. Carries no
+  wiring of its own.
 
 - [Coordinator]({{ '/guides/coordinate-agents/' | relative_url }})
   {: .ao-icon-coordinator}
