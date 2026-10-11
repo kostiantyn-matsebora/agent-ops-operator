@@ -90,7 +90,7 @@ The endpoint SHALL require the gateway token, a bearer token distinct from the r
 
 It is the `gatewayToken` the channel adapter sends (Requirement: Adapter owns its gateway binding and config parsing).
 
-The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects that from the `gatewayToken` key of the credential Secret, generated once at install.
+The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects that from the `gatewayToken` key of the credential Secret, generated once at install. An unset `TELEGRAM_CALL_TOKEN` SHALL exit the process at startup, naming it, the same as the forwarding targets and the bot token.
 
 The channel adapter's existing inbound endpoint (`POST /updates` in `channels/telegram/main.go`, the router's push target, unchanged by this change) can only inject a fabricated inbound message, which the adapter still filters before acting on it — network-level trust is enough there.
 

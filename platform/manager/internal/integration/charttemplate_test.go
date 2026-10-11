@@ -2953,6 +2953,49 @@ func defaultRuntimeDoc(out string) (string, string) {
 	return "", ""
 }
 
+// call-auth.yaml's gatewayToken is generated the same way adapterAuth.token
+// and console.auth.uiToken are, so it owes the SAME property
+// TestUpgradeRendersNoGeneratedCredential pins for those two: a cluster-less
+// upgrade render must mint no fresh Secret at all, or a GitOps sync (or any
+// `helm template --is-upgrade` with no cluster to `lookup`) would rotate the
+// binding every time it ran, breaking channel-telegram's calls to the router
+// until both sides picked up the same new token.
+func TestTelegramGatewayTokenRendersNoGeneratedCredentialOnUpgrade(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	out := helmTemplate(t, append(append([]string{}, surface...), "--is-upgrade")...)
+	if doc := secretDoc(out, "agentops-telegram-gateway"); doc != "" {
+		t.Fatalf("an upgrade with no existing Secret for lookup to see must render no gateway-binding Secret, got:\n%s", doc)
+	}
+}
+
+// ...and the install side: a fresh install still must generate the Secret,
+// carrying the keep policy so an upgrade dropping it from the manifest does
+// not delete the live object.
+func TestTelegramGatewayTokenGeneratesOnInstall(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	out := helmTemplate(t, surface...)
+	doc := secretDoc(out, "agentops-telegram-gateway")
+	if doc == "" {
+		t.Fatal("agentops-telegram-gateway must be generated on install")
+	}
+	if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
+		t.Fatalf("agentops-telegram-gateway must carry the keep policy, or the first upgrade deletes it:\n%s", doc)
+	}
+	if !strings.Contains(doc, "gatewayToken: ") {
+		t.Fatalf("agentops-telegram-gateway must carry gatewayToken:\n%s", doc)
+	}
+}
+
 // The Bot API root is configuration on the telegram bundle, and UNSET renders
 // nothing: the default install must be byte-identical to the one before the
 // value existed, or a render test on the router would be the only thing that

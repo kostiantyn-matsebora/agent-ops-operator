@@ -250,8 +250,9 @@ SignalSource/k8s-ops
 - **The gateway Service.** `Service/agentops-gateway-telegram` fronts the
   gateway's outbound relay.
 - **The gateway Secret.** `Secret/agentops-telegram-gateway` holds the
-  relay's URL and a chart-generated call token, which the channel adapter
-  uses in place of the bot credential.
+  relay's URL and a chart-generated call token. The `Channel`'s own
+  `credentialsSecretRef` points at it, projecting both keys into the
+  channel adapter's own env in place of the bot credential.
 - **The `Channel` and the `SignalSource` share one name**, so a pipeline binds
   the same word as its source and its channel.
 - **No `Pipeline` is rendered at all**, which is the whole of why the wiring is

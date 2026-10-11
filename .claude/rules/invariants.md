@@ -17,7 +17,7 @@
 | Housekeeping's listing is phase-blind | A CLOSED conversation still has a CR, so no phase check, or it reclaims kept state |
 | Filesystem state on a PVC, else Kubernetes API | THE MANAGER MOUNTS NOTHING. State is a cache, DERIVABLE, or declared-lossy telemetry |
 | Conversations originate only from served sources | A channel CARRIES, never starts one. `/channel/inbound` is reply-only. No channel default profile |
-| Adapter outbound URL is config, never a constant | `TELEGRAM_API_BASE`, default `https://api.telegram.org`. Precedence: Secret key, then env var, then real host. NEVER `Channel.spec.config` |
+| The Bot API root is the router's config, never a constant | `TELEGRAM_API_BASE`, default `https://api.telegram.org` — the router's own env var, chart-injected, never the channel adapter's (chat-ops-broker-telegram-gateway). NEVER `Channel.spec.config` |
 | HTTP API not leader-gated, with one exception | `/channel/ops` claims are written only by the current Lease holder (`status.threads[].claim`) — non-leader returns 503. Every other endpoint is an ordinary write |
 | One getUpdates consumer per bot token, ever | `gateway-telegram`, one poll loop per Deployment, one Deployment per token. A second poller produces 409s and stolen updates |
 | Channel config is opaque to the operator | Never parsed manager-side. `configSchema` applies mechanically (advisory `ConfigValid` only) |
