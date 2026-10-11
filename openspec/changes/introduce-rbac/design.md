@@ -51,10 +51,10 @@ apiVersion: agentops.dev/v1alpha1
 kind: RoleGrant
 spec:
   channel: console          # or telegram, etc — matches OriginReader.Channel
-  key: alice@company.com    # RAW identity, see below — never hashed
+  key: administrator@example.com    # RAW identity, see below — never hashed
   role: administrator       # user | responder | administrator
 status:
-  lastModifiedBy: bob@company.com
+  lastModifiedBy: operator@example.com
   lastModifiedAt: "2026-10-11T12:00:00Z"
 ```
 
@@ -68,7 +68,7 @@ grant to exactly two verbs (`create`, `update`) rather than three.
 These are two different needs on the same identity:
 
 - An administrator must be able to type or pick a specific person
-  (`alice@company.com`). That requires the raw string.
+  (`administrator@example.com`). That requires the raw string.
 - `OriginReader` deliberately stores only a salted hash, so a conversation
   object never carries a raw identity — a privacy property this design does
   not touch.

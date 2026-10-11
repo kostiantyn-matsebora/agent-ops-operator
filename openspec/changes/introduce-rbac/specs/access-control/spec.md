@@ -58,7 +58,7 @@ wrote it and when.
 #### Scenario: A grant names one identity pair and one role
 
 - **WHEN** a `RoleGrant` is created with `spec.channel: console`,
-  `spec.key: alice@company.com`, `spec.role: administrator`
+  `spec.key: administrator@example.com`, `spec.role: administrator`
 - **THEN** exactly that identity pair resolves to `administrator`, and no
   other identity pair is affected
 
