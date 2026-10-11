@@ -63,8 +63,10 @@ fallback.
 
 #### Scenario: A failed proxy falls through to the local handler
 
-- **WHEN** a non-leader cannot reach the leader for a route other than `/healthz` and `/channel/ops`
-- **THEN** the route's own handler serves the request locally
+- **WHEN** a non-leader cannot reach the leader for a route other than `/healthz`
+- **THEN** the route's own handler runs locally, keeping its own unchanged
+  behavior — for `/channel/ops` that behavior is the distinguishable
+  rejection the requirement above defines, never answering from local state
 
 ## REMOVED Requirements
 
