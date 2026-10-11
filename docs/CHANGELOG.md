@@ -32,10 +32,13 @@ for the source and the reference material beside this file.
   - **The cap.** `Coordinator.spec.agents[].description` rises from 512 to
     2048 bytes, since the new shape did not fit the old one.
 
-## [14.0.2] — 2026-10-11
+## [14.0.2] — Unreleased
 
 ### Changed
 
+- **Breaking.** The telegram bundle's `surface.credentials` Secret no longer
+  carries an `apiBase` key, and the channel adapter reads a new
+  `gatewayUrl`/`gatewayToken` Secret instead. Hand-built Secrets must change.
 - **Not yet releasable.** `gateway-telegram` and `channel-telegram` need new
   image releases before this version is installable. See the upgrade note at
   the end of this entry.

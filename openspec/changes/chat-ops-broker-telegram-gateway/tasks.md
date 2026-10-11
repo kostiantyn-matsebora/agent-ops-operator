@@ -41,6 +41,7 @@
 - [x] 5.3 `.claude/rules/structure.md`: move "Bot API sending lives HERE" from `channels/telegram/`'s entry to `gateways/telegram/`'s.
 - [x] 5.4 `docs/contracts.md`, `docs/concepts.md`, `docs/configuration.md`: UNCHANGED. The adapter-facing contract (200/204/503-retry-immediately) and the claim's published semantics are exactly `durable-chat-ops-broker`'s own — nothing publishable moved. `POST /telegram/call/{method}` is absent from `contracts.md` on purpose: it is served by `gateway-telegram`, not the manager, and is private wiring between the two Telegram components of one bundle, never an adapter-facing contract.
 - [x] 5.5 Re-run `python3 .github/scripts/docs-generate.py` — `docs/integrations/telegram.md`, `docs/guides/channel-adapter.md` are generated from the chart/CRD changes in section 2. `--check` passes, 52 files up to date. No CRD regen needed in this version: the claim fields and doc comments are untouched from `durable-chat-ops-broker`.
+- [ ] 5.6a `docs/security.md`: record the moved trust boundaries. The bot credential is now held by `gateway-telegram` alone, the channel adapter holds only a chart-generated call token, and the router's NetworkPolicy ingress widens to admit the channel adapter on `router.callPort`. Re-run `python3 docs/diagrams/threat-model.py` and commit the regenerated SVGs.
 - [x] 5.6 `docs/CHANGELOG.md`: entry noting this is code only, not a cut release.
 
 ### Adopter site

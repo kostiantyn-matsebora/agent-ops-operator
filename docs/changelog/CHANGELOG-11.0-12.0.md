@@ -19,24 +19,30 @@ synchronised.** `chart/charts/claude/values.yaml` ships
 `contextSync.paths: [".claude/projects/-data-workspace/**"]`.
 
 The mechanism existed because a node reboot corrupted the shared context
-filesystem on 2026-08-20, taking every conversation's context AND stopping every
-runtime pod from starting. It shipped inert: the correct value sat commented out
+filesystem on 2026-08-20. That took every conversation's context AND stopped
+every runtime pod from starting.
+
+It shipped inert: the correct value sat commented out
 two lines beneath an empty list, waiting for an operator to type a fact the
 runtime already holds.
 
 **It is in the VENDOR'S BUNDLE, not `global.agentops.runtimeDefaults`** — beside
 that runtime's image and model credential, which moved there in 11.0.0 for the
-same reason. An include list is one vendor's filesystem layout: it describes
-where claude-code files transcripts and means nothing to another backend.
-Running one means replacing the paths with its own, in the same section.
+same reason.
+
+An include list is one vendor's filesystem layout. It describes where
+claude-code files transcripts and means nothing to another backend. Running one
+means replacing the paths with its own, in the same section.
 
 ### Fixed
 
 **A runtime declaring `contextSync` on an install with no context volume built a
 pod that could not start.** The sidecar branch mounted the durable claim
-unconditionally, so with persistence off it rendered a `PersistentVolumeClaim`
-reference whose name was the empty string — refused at admission, no pod, and a
-conversation with no phase.
+unconditionally.
+
+With persistence off it rendered a `PersistentVolumeClaim` reference whose name
+was the empty string. Admission refused it, so there was no pod and the
+conversation had no phase.
 
 Two things hid it. Every test shared one config that set a claim, so the
 combination was never constructed.
@@ -82,6 +88,7 @@ are not found there.
 **`$HOME` is pod-local on every conversation now.** It is not only transcripts
 that live there — caches, tool state and anything else the agent writes home are
 node ephemeral storage, and they die with the pod.
+
 `runtimeDefaults.contextSync.liveSizeLimit` bounds it at `4Gi` per conversation.
 Budget node ephemeral storage for `maxActiveConversations` × that.
 
@@ -184,8 +191,9 @@ and the parent `values.yaml` now carries a documented `claude:` section so
 **A bundle renders a route's ServiceAccount only where it also grants that route
 something.** `agentops-ha-ops`, `agentops-ha-control` and the `kubernetes`
 bundle's route accounts held no RBAC at all — indistinguishable from the floor
-every unnamed route already inherits, while adding names to every audit. Those
-routes now name nothing and inherit the floor.
+every unnamed route already inherits, while adding names to every audit.
+
+Those routes now name nothing and inherit the floor.
 
 **The MCP servers for `home-assistant` and `prometheus` render no ServiceAccount.**
 Both mount no token, so the identity was never presented to the API server.
@@ -193,12 +201,15 @@ Both mount no token, so the identity was never presented to the API server.
 
 **Adapter ServiceAccounts are the CHART's now, not the manager's.** The adapter
 reconciler was the only one in the project that created a ServiceAccount, and it
-was forbidden from binding RBAC to what it created. The chart that grants an
-adapter renders the account beside the grant, and the CR names it.
+was forbidden from binding RBAC to what it created.
+
+The chart that grants an adapter renders the account beside the grant, and the
+CR names it.
 
 **ORPHANED, NOT DELETED:** accounts the manager created carried an ownerRef on
-the adapter CR. After this upgrade nothing creates or owns them. Nothing is bound
-to them either, so nothing breaks — remove them when convenient:
+the adapter CR. After this upgrade nothing creates or owns them.
+
+Nothing is bound to them either, so nothing breaks. Remove them when convenient:
 
 ```sh
 kubectl -n <ns> delete sa agentops-adapter-telegram agentops-signal-home-assistant \
