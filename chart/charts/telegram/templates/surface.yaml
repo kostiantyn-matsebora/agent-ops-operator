@@ -61,7 +61,7 @@ spec:
   # token itself is supplied (surface.credentials.existingSecret or not),
   # since channel-telegram no longer reads that Secret.
   credentialsSecretRef:
-    name: agentops-telegram-gateway
+    name: {{ include "telegram.gatewaySecretName" . }}
   # opaque to the operator; this shape is what channel-telegram parses
   config:
     chatId: {{ $s.chatId | quote }}

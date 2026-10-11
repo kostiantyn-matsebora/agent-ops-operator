@@ -957,7 +957,7 @@
     },
     {
       "id": "telegram-channel-adapter-bot-token",
-      "pattern": "channel[- ]telegram.{0,80}(calls|sends to|holds).{0,40}(api\\.telegram\\.org|bot token)",
+      "pattern": "channel[- ]telegram.{0,80}(calls|sends to|posts to|talks to|reads|uses|holds).{0,40}(api\\.telegram\\.org|bot[- ]?token|Bot API credential)",
       "says": "channel-telegram holds no Telegram credential and relays every Bot API call through gateway-telegram's /telegram/call instead",
       "allow": [
         "removed",

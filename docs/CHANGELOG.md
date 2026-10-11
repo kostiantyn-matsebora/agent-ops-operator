@@ -91,6 +91,7 @@ for the source and the reference material beside this file.
 LAST released `channelAdapter.image.tag` and `router.image.tag` — those
 binaries do not yet implement this change. Tag and release both components,
 then bump both tags, before this chart version is installed anywhere.
+
 ## [14.0.1] — 2026-10-10
 
 - `signal-cron` 0.2.0.

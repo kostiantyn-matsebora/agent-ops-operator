@@ -60,6 +60,8 @@ type tgResponse struct {
 	Result      json.RawMessage `json:"result"`
 }
 
+const headerContentType = "Content-Type"
+
 // API calls a Bot API method with a JSON body.
 func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMessage, error) {
 	b, err := json.Marshal(body)
@@ -75,7 +77,7 @@ func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, "application/json")
 	resp, err := t.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -182,7 +184,7 @@ func (t *Telegram) Call(ctx context.Context, method, contentType string, body []
 		return 0, nil, "", err
 	}
 	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+		req.Header.Set(headerContentType, contentType)
 	}
 	resp, err := t.HTTP.Do(req)
 	if err != nil {
@@ -193,7 +195,7 @@ func (t *Telegram) Call(ctx context.Context, method, contentType string, body []
 	if err != nil {
 		return 0, nil, "", err
 	}
-	return resp.StatusCode, out, resp.Header.Get("Content-Type"), nil
+	return resp.StatusCode, out, resp.Header.Get(headerContentType), nil
 }
 
 // GetUpdates long-polls for message updates from the given offset, preserving

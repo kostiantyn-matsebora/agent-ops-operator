@@ -69,7 +69,7 @@ spec:
                   # the gateway binding Secret -- the SAME value
                   # channel-telegram's projected credential carries, so its
                   # calls authenticate here.
-                  name: agentops-telegram-gateway
+                  name: {{ include "telegram.gatewaySecretName" . }}
                   key: gatewayToken
             {{- with .Values.apiBase }}
             # optional: absent takes the real host silently, unlike the three above

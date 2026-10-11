@@ -80,3 +80,9 @@ exactly as it already does for the router's Deployment. */ -}}
 {{- define "telegram.gatewayURL" -}}
 http://agentops-gateway-telegram.{{ .Release.Namespace }}.svc:{{ .Values.router.callPort }}
 {{- end -}}
+
+{{- /* Name of the gateway binding Secret: call-auth.yaml renders it, the
+router and the surface reference it. */ -}}
+{{- define "telegram.gatewaySecretName" -}}
+agentops-telegram-gateway
+{{- end -}}

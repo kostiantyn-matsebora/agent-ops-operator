@@ -4,7 +4,7 @@
 
 The manager SHALL serve `GET /activity?since=<cursor>&limit=<n>` returning events after a cursor. It SHALL serve `GET /activity/stream` as SSE, delivering events as they occur, each carrying its cursor.
 
-Both SHALL be authenticated with the adapter bearer scheme. A client reconnecting with a cursor older than the buffer's oldest SHALL receive an explicit resync signal rather than a silent gap.
+Both, and `POST /activity`, SHALL be authenticated with the adapter bearer scheme. A client reconnecting with a cursor older than the buffer's oldest SHALL receive an explicit resync signal rather than a silent gap.
 
 The activity log is a per-process ring buffer with no cross-replica fan-out. A hop the reconciler emits only ever lands in the leader's own buffer, since reconciliation is leader-elected.
 

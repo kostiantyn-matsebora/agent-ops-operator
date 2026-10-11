@@ -26,14 +26,15 @@ adapter-auth.yaml uses: `lookup` is blind on any cluster-less renderer, so
 nothing random may reach the upgrade path.
 */ -}}
 {{- if and (include "telegram.active" .) (include "telegram.surfaceEnabled" .) }}
-{{- $name := "agentops-telegram-gateway" }}
+{{- $name := include "telegram.gatewaySecretName" . }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
 {{- $existingVal := "" }}
 {{- if and $existing $existing.data }}
 {{- $existingVal = index $existing.data "gatewayToken" | default "" }}
 {{- end }}
 {{- include "agentops.generatedSecretGuard" (dict "root" . "name" $name "explicit" "" "existing" $existing "existingVal" $existingVal "key" "gatewayToken" "setting" "(none -- this Secret is internal wiring between the router and channel-telegram, never operator-supplied)") }}
-{{- if .Release.IsInstall }}
+{{- /* an upgrade on a live cluster re-renders too (lookup sees the token), so gatewayUrl follows router.callPort */ -}}
+{{- if or .Release.IsInstall $existingVal }}
 apiVersion: v1
 kind: Secret
 metadata:
