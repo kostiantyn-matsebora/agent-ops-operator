@@ -10,12 +10,6 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
-### Removed
-
-- **`Channel.spec.config.pollingEnabled` is deleted for the Telegram
-  channel adapter.** It never polls, so the setting selected nothing. Delete
-  the key from the Channel's `spec.config`. A leftover key is ignored.
-
 ## [14.0.2] — 2026-10-11
 
 ### Changed
@@ -55,6 +49,12 @@ for the source and the reference material beside this file.
   `credentialsSecretRef` projection.
 - **The router gains a Service and a NetworkPolicy** for its new call
   endpoint, on `router.callPort` (default `8080`).
+
+### Removed
+
+- **`Channel.spec.config.pollingEnabled` is deleted for the Telegram
+  channel adapter.** It never polls, so the setting selected nothing. Delete
+  the key from the Channel's `spec.config`. A leftover key is ignored.
 
 ### Fixed
 
