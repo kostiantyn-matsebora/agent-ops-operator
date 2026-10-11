@@ -27,7 +27,7 @@ A non-leader SHALL reject the request, distinguishably from "no work is currentl
 
 ### Requirement: The manager's network policy admits its own replicas
 
-The chart's `NetworkPolicy` for the manager SHALL admit ingress from pods labelled `app.kubernetes.io/name: agentops-manager`, alongside the callers it already admits, so a non-leader's proxy dial to the leader is not dropped.
+The chart's `NetworkPolicy` for the manager SHALL admit ingress from pods labelled `app.kubernetes.io/name: agentops-manager` in the release's own namespace, alongside the callers it already admits, so a non-leader's proxy dial to the leader is not dropped.
 
 #### Scenario: A non-leader's proxy dial is admitted
 

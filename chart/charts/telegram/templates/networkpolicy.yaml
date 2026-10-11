@@ -81,5 +81,5 @@ spec:
                 values: [{{ .Values.channelAdapter.name | default "telegram" }}]
       ports:
         - protocol: TCP
-          port: {{ .Values.router.callPort }}
+          port: {{ int (.Values.router.callPort | default 8080) }}
 {{- end }}

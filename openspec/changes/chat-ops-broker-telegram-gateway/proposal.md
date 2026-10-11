@@ -56,6 +56,11 @@ credential, no second place a bot token can leak from or be misused.
   the leader's own buffer. A console's SSE connection pinned to a
   non-leader silently stopped seeing reconciler-driven events for the life
   of that connection.
+- That per-endpoint fix is generalized into one `leaderProxyMiddleware`
+  wrapping the whole mux. A non-leader proxies every route except
+  `/healthz` to the leader, and a handler reached anyway serves locally.
+  The manager's `NetworkPolicy` also admits its own replicas, or the proxy
+  dial is dropped.
 
 A fully leaderless design (any replica derives and serves independently) was
 built, tested, and set aside in favor of this simpler one — see `design.md`'s

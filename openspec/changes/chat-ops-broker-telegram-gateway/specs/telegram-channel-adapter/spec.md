@@ -88,6 +88,10 @@ The relayed response SHALL be parsed exactly as a direct Bot API response would 
 - **WHEN** the gateway relays a `429` with `parameters.retry_after`
 - **THEN** the adapter waits and retries on the same terms this capability already specifies for a direct Bot API response
 
+#### Scenario: An unreachable gateway is an explicit failure
+- **WHEN** the dial to the gateway fails or times out for a relayed call
+- **THEN** the adapter surfaces the call as failed and retries it on the same terms as a failed direct Bot API call, never reporting it as sent
+
 ## REMOVED Requirements
 
 ### Requirement: Adapter owns its credentials and config parsing
