@@ -72,6 +72,24 @@ func TestGatewayRelayedTelegramErrorIsReported(t *testing.T) {
 	}
 }
 
+// The gateway's OWN rejection (bad bearer token, missing method, upstream
+// dial failure) is plain text via http.Error, never Telegram's JSON shape.
+// A naive JSON decode of that body produces an opaque parse error — the
+// status and body must surface instead, so a rotated gatewayToken reads as
+// an auth problem, not a cryptic "invalid character" failure.
+func TestGatewayOwnRejectionIsReportedNotDecoded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing or invalid bearer token", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	tg := NewTelegram(srv.URL, "wrong-token")
+	err := tg.Send(context.Background(), "-100", nil, "hi")
+	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "missing or invalid bearer token") {
+		t.Fatalf("err = %v, want it to name the gateway's status and body", err)
+	}
+}
+
 // A served channel's spec.config MUST NOT choose its gateway binding: anyone
 // able to edit a Channel would otherwise redirect that bot's calls to a host
 // of their choosing. Only the credential Secret — which already holds the

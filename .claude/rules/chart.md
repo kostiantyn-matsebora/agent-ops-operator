@@ -163,8 +163,7 @@ the chat SignalSource and the router's credential source.
   render.
 - **Credentials either way:** `credentials.existingSecret` OR
   `credentials.botToken`, where the bundle creates the Secret.
-- **One Secret serves both** — the Channel sends with it, the router's source
-  polls.
+- **The bot credential Secret now serves ONE reader, not two** (chat-ops-broker-telegram-gateway) — only the router's source polls with it. The Channel sends through a separate chart-generated gateway-binding Secret (`agentops-telegram-gateway`) instead, never the bot credential.
 - **Ships NO Pipeline on purpose**, because wiring drags in a profile, a runtime
   and credentials. The sources sit unclaimed until the installer wires them, so
   NOTES.txt prints the exact Pipeline to apply.

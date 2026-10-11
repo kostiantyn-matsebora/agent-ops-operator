@@ -121,11 +121,19 @@ func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMe
 		if err != nil {
 			return nil, err
 		}
-		var out tgResponse
-		decErr := json.NewDecoder(resp.Body).Decode(&out)
+		raw, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if decErr != nil {
-			return nil, decErr
+		if readErr != nil {
+			return nil, readErr
+		}
+		var out tgResponse
+		// A real Bot API response is always JSON, win or lose. A body that
+		// fails to parse can only be the gateway's OWN rejection (401 bad
+		// token, 400 missing method, 502 upstream dial failure), written as
+		// plain text by http.Error — name the status so it reads as an
+		// auth/gateway problem, not a cryptic JSON error.
+		if decErr := json.Unmarshal(raw, &out); decErr != nil {
+			return nil, fmt.Errorf("telegram %s: gateway returned %s: %s", method, resp.Status, strings.TrimSpace(string(raw)))
 		}
 		if out.OK {
 			return out.Result, nil
