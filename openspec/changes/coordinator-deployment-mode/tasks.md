@@ -154,14 +154,14 @@
 ## 8. E2E tests
 
 - [x] 8.1 Add or extend a coordination lane in
-      `platform/manager/test/e2e/` covering: coordinator mode end to end
+      `platform/manager/test/system/` covering: coordinator mode end to end
       (source claim, invoke, member-result routing), the reaper's hourly
       survey against a live cluster (kubelet-backed conversation lifecycle,
       not just unit-level routing), and the ancestor-root exclusion against
       real conversation objects — the one behavior a real API server's
       `causedBy` chain must be walked against, not a fake. Run the pack and
       record the verdict.
-      `test/e2e/coordinator.go` + `test/e2e/coordinator_test.go` added:
+      `test/system/coordinator.go` + `test/system/coordinator_test.go` added:
       `TestCoordinatorModeInvokeAndMemberResultRouting` (source claim,
       invoke, member-result routing, over hand-authored
       Coordinator/AgentCapability CRs — legitimate per `wiring-mode`'s own
@@ -174,7 +174,7 @@
       REAL conversation objects over the LIVE deployed manager, the reaper's
       own re-check `invoke` on the domain capability, ancestor-root
       exclusion asserted, widened `close` asserted both ways). Both compile
-      under `-tags e2e` (`go test -tags e2e -c -o /dev/null ./test/e2e/`),
+      under `-tags system` (`go test -tags system -c -o /dev/null ./test/system/`),
       `go vet ./...` and the untagged `go test ./...` stay green.
       A gap surfaced while writing the second lane and was fixed, not
       merely noted: `coordinator-self-heal` requires the reaper (a plain
@@ -193,10 +193,10 @@
       row and refusal table updated to match.
       RUN against a live cluster, from `coordinator-adopter-parity`'s own
       task 4.2: no docker daemon or `k3d` in a remote session
-      (`remote-session.md`), so dispatched `e2e-full.yml` (run
-      38074304800) rather than run directly. Note `test/e2e/` above is
-      now `test/system/`, renamed by `rename-e2e` after this lane was
-      written — the dispatched run already built against that rename.
+      (`remote-session.md`), so dispatched `system-full.yml` (run
+      38074304800) rather than run directly. The lane was written under
+      the pack's earlier directory name, renamed to `test/system/` by
+      `rename-e2e` — the dispatched run already built against that rename.
       VERDICT: `TestCoordinatorModeInvokeAndMemberResultRouting`
       (11.06s), `TestCoordinatorSelfHealSurveyExcludesAncestorRoot`
       (57.02s, including the ancestor-root exclusion and the reaper's
