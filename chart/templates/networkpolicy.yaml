@@ -52,6 +52,18 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: agentops-mcp-aops
+        # A REPLICA OF ITSELF (chat-ops-broker-telegram-gateway). A non-leader
+        # reverse-proxies /channel/ops and /activity* to the leader, so with
+        # this rule missing every such proxy attempt is DROPPED — invisible
+        # from the manager's own logs (proxyToLeader's ErrorHandler swallows
+        # the dial failure), surfacing only as the caller's own ordinary
+        # "leader could not be reached" fallback, indistinguishable from the
+        # leader genuinely being down. Measured live: with this rule absent,
+        # EVERY poll that landed on a non-leader fell back to 503 forever,
+        # which is the pre-fix behavior wearing the proxy's error message.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-manager
         {{- with $np.extraIngress }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

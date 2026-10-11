@@ -174,7 +174,41 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /status", s.anyAdapterAuth(s.handleStatus))
 	mux.HandleFunc("GET /pipelines/{name}/resolved", s.anyAdapterAuth(s.handlePipelineResolved))
 	s.RegisterCoordinateRoutes(mux)
-	return mux
+	return s.leaderProxyMiddleware(mux)
+}
+
+// leaderProxyMiddleware is the ONE place every route becomes a dumb proxy on
+// a non-leader (hardcode-manager-replicas, generalized from the single
+// /channel/ops exception chat-ops-broker-telegram-gateway shipped first).
+//
+// Every endpoint here ultimately reads or writes the Kubernetes API, which is
+// consistent regardless of which replica answers — so in principle any
+// replica could serve any of them correctly. In practice, repeatedly fixing
+// ONE more endpoint at a time (first /channel/ops, then /activity*) was
+// exactly the whack-a-mole this exists to stop: a replica this request
+// happens to land on is an implementation detail no caller should have to
+// route around, and the next endpoint nobody thought to check is the one
+// that breaks next.
+//
+// /healthz is the one exemption — it answers liveness/readiness for THIS
+// pod, and proxying it would report on a different pod's health entirely.
+//
+// A handler reached despite this (the proxy attempt failed, or none applied)
+// falls through to its OWN local behavior unchanged — for `/channel/ops`
+// that is still the leader-only refusal `durable-chat-ops-broker` requires;
+// for everything else it is ordinary, replica-safe handling that needed no
+// leader at all.
+func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || s.isLeader(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.proxyToLeader(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // anyAdapterAuth accepts the master token or ANY derived adapter token, channel
@@ -1019,11 +1053,10 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	// Falls back to the 503-and-retry a conforming adapter already tolerates
 	// only when the leader is unknown or unreachable from here (a handoff in
 	// progress, a network blip) — never by silently serving from this
-	// replica's own, unpopulated state.
+	// replica's own, unpopulated state. The proxy ATTEMPT itself now happens
+	// one layer up, in leaderProxyMiddleware, uniformly for every route —
+	// reaching this check at all already means that attempt failed.
 	if !s.isLeader(r.Context()) {
-		if s.proxyToLeader(w, r) {
-			return
-		}
 		w.Header().Set("Retry-After", "0")
 		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader, and the leader could not be reached"})
 		return

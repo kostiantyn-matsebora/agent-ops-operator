@@ -51,6 +51,17 @@ for the source and the reference material beside this file.
   Unlike `/channel/ops` there is no correctness reason to refuse when the
   leader is unreachable, so these three fall back to serving/recording
   locally instead of a 503.
+- **The proxy is now the DEFAULT for every manager route**, not two
+  endpoints fixed one at a time. `leaderProxyMiddleware` wraps the whole
+  mux: a non-leader proxies any request to the leader before it reaches a
+  handler, exempting only `/healthz`. A handler the proxy didn't reach
+  keeps its own unchanged local behavior.
+- **The manager's own `NetworkPolicy` now admits its own kind.** The proxy
+  needs manager-to-manager traffic on port 8080, a pattern nothing
+  previously needed — without this rule the whole fix was a silent no-op
+  on any install enforcing `networkPolicy.enabled: true`, confirmed live
+  (every poll from the console fell back to its pre-fix local behavior for
+  15+ minutes across a stable leader).
 
 **Not yet releasable.** `chart/charts/telegram/values.yaml` still names the
 LAST released `channelAdapter.image.tag` and `router.image.tag` — those

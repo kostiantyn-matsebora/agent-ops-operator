@@ -461,14 +461,43 @@ configuration, defaulting to the real one.
   single-`getUpdates` rule is about how many pollers exist, not where they
   point.
 
-### HTTP API is NOT leader-gated — WITH TWO EXCEPTIONS
+### EVERY ROUTE IS A DUMB PROXY ON A NON-LEADER, EXCEPT `/healthz`
 
-`NeedLeaderElection()=false` — webhooks must serve during rollouts. Both
-exceptions below proxy a non-leader to the leader rather than answering
-locally, and both reuse the SAME `proxyToLeader` helper.
+`NeedLeaderElection()=false` — webhooks must serve during rollouts, so the
+HTTP server itself runs on every replica.
 
-**`/channel/ops` is the first — the one endpoint that answers differently
-off the leader** (durable-chat-ops-broker).
+`leaderProxyMiddleware` (chat-ops-broker-telegram-gateway, generalized from
+two endpoint-specific fixes shipped first) wraps the WHOLE mux. On
+`!isLeader`, it reverse-proxies to whoever the Lease names before the
+request reaches ANY handler. It falls through to that handler's own local
+behavior only when the proxy itself fails.
+
+- **Why blanket, not per-endpoint.** Fixing `/channel/ops`, then
+  `/activity*`, one at a time was the failure this generalizes away from —
+  the NEXT endpoint nobody thought to check is the one that breaks next. A
+  replica this request happens to land on is an implementation detail no
+  caller should route around.
+- **`/healthz` is the one exemption.** It answers liveness/readiness for
+  THIS pod — proxying it would report a different pod's health.
+- **A handler reached anyway (the proxy failed, or this replica IS the
+  leader) falls through to its OWN unchanged local behavior** — most
+  endpoints read or write the Kubernetes API, which is consistent
+  regardless of replica, so they needed no leader check at all. The two
+  exceptions below are the ones whose LOCAL behavior genuinely differs by
+  leader status.
+- **THE PROXY NEEDS A PEER-TO-PEER NETWORK RULE, AND SHIPPING IT WITHOUT
+  ONE IS A SILENT NO-OP.** Found live, 2026-10-11: with `networkPolicy.
+  enabled: true`, the manager's own ingress policy admitted callers by
+  KIND (`agentops-runtime`, `agentops-adapter`, …) but never `agentops-
+  manager` itself — so a non-leader's dial to the leader was DROPPED,
+  silently, indistinguishable from the leader genuinely being unreachable.
+  Every proxy attempt failed, every poll fell back to its local behavior,
+  which for `/channel/ops` is the pre-fix 503 — the whole fix was a no-op
+  on any install enforcing NetworkPolicy. `chart/templates/networkpolicy.
+  yaml`'s `agentops-manager` ingress rule now admits its own kind on 8080.
+
+**`/channel/ops` is the first of the two exceptions — the one endpoint
+that answers differently off the leader** (durable-chat-ops-broker).
 
 - **Claiming an outbound channel op is written only by the current
   leader-election Lease holder**, on the Conversation's own
@@ -498,8 +527,9 @@ off the leader** (durable-chat-ops-broker).
   holds the Lease — so it is cleared and re-dispatched AT ONCE, never waited
   out. Only the SAME leader's own claim going quiet waits for the
   (chart-configurable) staleness bound.
-- **Every other endpoint is unaffected.** `/channel/ops/{id}/done` is an
-  ordinary, unconditional write, safe from any replica.
+- **Every other endpoint's LOCAL behavior is unaffected** — the proxy
+  attempt still happens first, but `/channel/ops/{id}/done` itself is an
+  ordinary, unconditional write, safe from any replica that reaches it.
 
 **`/activity`, `/activity/stream` and `POST /activity` are the second**
 (chat-ops-broker-telegram-gateway), for a different reason than the claim

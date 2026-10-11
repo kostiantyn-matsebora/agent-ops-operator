@@ -1332,3 +1332,38 @@ WHILE TESTING THE FIX ABOVE ON THE SAME 3-REPLICA INSTALL, 2026-10-11.**
   refusing. Verify: `TestActivityProxiesToLeaderWhenReachable` in
   `internal/integration/claim_test.go`.
 
+**TWO ENDPOINT-SPECIFIC FIXES BECAME ONE MIDDLEWARE, THEN THE MIDDLEWARE
+ITSELF TURNED OUT TO BE SILENTLY DEAD ON THIS INSTALL — BOTH FOUND LIVE,
+2026-10-11 (chat-ops-broker-telegram-gateway).**
+
+- **Fixing `/channel/ops`, then `/activity*`, one endpoint at a time was
+  itself the failure.** Generalized into `leaderProxyMiddleware`
+  (`internal/httpapi/server.go`): wraps the WHOLE mux, proxies any
+  non-leader request to the leader before it reaches a handler, exempting
+  only `/healthz`. A handler the proxy didn't reach falls through to its
+  own unchanged local behavior — `/channel/ops` still refuses, the
+  activity endpoints still serve locally, everything else just answers as
+  it always safely could.
+- **Shipping the middleware alone changed NOTHING on this install.** The
+  manager's own `NetworkPolicy` (`chart/templates/networkpolicy.yaml`)
+  admitted callers by KIND — `agentops-runtime`, `agentops-adapter`,
+  `agentops-signal-adapter`, `agentops-mcp-aops` — but never `agentops-
+  manager` itself. A non-leader's dial to the leader was DROPPED, with no
+  log anywhere: `proxyToLeader`'s `ErrorHandler` swallows the dial failure,
+  so it surfaced only as the caller's own ordinary "leader could not be
+  reached" fallback — indistinguishable from the leader genuinely being
+  down. Confirmed live: the manager's own `GET /activity` poll from
+  `platform/console` 503'd every ~35s for 15+ minutes straight, across a
+  STABLE leader with no re-election in that window.
+- **The fix is one more `podSelector` in the SAME ingress rule** — pods
+  labelled `app.kubernetes.io/name: agentops-manager` now admitted on
+  8080, alongside the existing caller kinds. `TestEveryWiredFlowIsAllowed`
+  (`internal/integration/charttemplate_networkpolicy_test.go`) pins it:
+  the label value must appear 3 times in the rendered policy, not 2.
+- **The lesson, not just the fix**: a dumb-proxy design INTRODUCES a new
+  traffic pattern (a component calling its own kind) that nothing
+  previously needed, and a NetworkPolicy's allow-list is blind to new
+  patterns by construction — it has to be told. Verify a proxy fix's
+  actual network reachability on an install that enforces policy, not just
+  that the code compiles and the unit tests pass.
+

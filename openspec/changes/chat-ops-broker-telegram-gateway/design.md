@@ -113,6 +113,43 @@ All three fall through to local behavior instead of a 503. `/channel/ops`
 cannot do this — serving from an unpopulated local `OpQueue` would be an
 actual wrong answer, not merely a partial one.
 
+### The per-endpoint fix generalized into one middleware
+
+**Found live**: fixing `/channel/ops`, then `/activity*`, one endpoint at
+a time was itself the pattern to stop. Generalized into
+`leaderProxyMiddleware`, wrapping the whole mux rather than one more
+per-handler check.
+
+**Chosen**: on `!isLeader`, proxy EVERY route except `/healthz` before it
+reaches a handler. A handler reached anyway — the proxy failed, or this
+replica is the leader — falls through to its own unchanged local
+behavior.
+
+**Why this is safe for routes that never needed a leader check**: most
+endpoints read or write the Kubernetes API, consistent regardless of
+replica.
+
+Proxying them anyway costs one extra same-node-network hop on the
+fraction of requests landing on a non-leader. It changes nothing about
+correctness.
+
+### The NetworkPolicy gap that made the middleware a no-op
+
+**Found live**, testing the middleware on this install: the manager's own
+`NetworkPolicy` admitted callers by kind — runtime, adapter, signal
+adapter, the aops MCP server — but never admitted `agentops-manager`
+itself. A non-leader's proxy dial to the leader was DROPPED.
+
+**Chosen**: add `app.kubernetes.io/name: agentops-manager` to the
+existing ingress rule's caller list, alongside the others.
+
+**Why this was invisible from the manager's own logs**: `proxyToLeader`'s
+`ErrorHandler` swallows the dial failure by design, and the caller falls
+back to its own local behavior on a bare `false`.
+
+A NetworkPolicy DROP and a genuinely unreachable leader are
+indistinguishable from inside the process that hit either.
+
 ## Risks / Trade-offs
 
 - **[Risk]** A non-leader proxying blind could mask a leader that is

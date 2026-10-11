@@ -44,18 +44,14 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
-	// The activity log is a per-process ring buffer (chat-ops-broker-telegram-
-	// gateway's gotcha, below): a hop the RECONCILER emitted — reconciliation is
-	// leader-elected — only ever lands in the LEADER's own buffer. A non-leader
-	// proxies there first, same dumb-proxy shape as /channel/ops, so a reader
-	// pinned to any replica sees the same history. Unlike /channel/ops there is
-	// no correctness reason to refuse when the leader can't be reached — a
-	// locally-served, partial view is strictly better than none for telemetry —
-	// so an unproxiable request simply falls through to serving this replica's
-	// own buffer instead of a 503.
-	if !s.isLeader(r.Context()) && s.proxyToLeader(w, r) {
-		return
-	}
+	// leaderProxyMiddleware already tried proxying this to the leader — the
+	// activity log is a per-process ring buffer (hardcode-manager-replicas'
+	// gotcha), and a hop the RECONCILER emitted only ever lands in the
+	// LEADER's own buffer, since reconciliation is leader-elected. Reaching
+	// this line means that attempt failed (or this replica IS the leader),
+	// so — unlike /channel/ops — serve from THIS replica's own buffer rather
+	// than refuse: a partial view is strictly better than none for
+	// telemetry.
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	events, resync := s.Activity.Since(r.URL.Query().Get("since"), limit)
 	if events == nil {
@@ -73,14 +69,13 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
-	// Same reasoning as handleActivity: proxy to the leader first, fall back to
-	// serving locally. httputil.ReverseProxy flushes text/event-stream writes
-	// immediately (stdlib default since Go 1.20), so the SSE stream itself
-	// relays live, not batched — ServeHTTP simply blocks here for as long as
-	// the leader keeps the connection open, exactly as a direct dial would.
-	if !s.isLeader(r.Context()) && s.proxyToLeader(w, r) {
-		return
-	}
+	// Same reasoning as handleActivity: leaderProxyMiddleware already tried
+	// the leader. httputil.ReverseProxy flushes text/event-stream writes
+	// immediately (stdlib default since Go 1.20), so when that attempt DOES
+	// succeed the SSE stream relays live, not batched — ServeHTTP blocks for
+	// as long as the leader keeps the connection open, exactly as a direct
+	// dial would. Reaching this line means it didn't, so this replica serves
+	// its own buffer instead.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
@@ -177,13 +172,9 @@ func (s *Server) handleActivityReport(w http.ResponseWriter, r *http.Request) {
 	}
 	// Same reasoning as the two read endpoints above, for the write side: a
 	// report landing on a non-leader's own buffer would never reach a reader
-	// proxied (or pinned) to the leader. Proxying it there first keeps every
-	// hop in the one buffer every reader eventually converges on. Falling back
-	// to recording it HERE when the leader can't be reached is still strictly
-	// better than dropping the report.
-	if !s.isLeader(r.Context()) && s.proxyToLeader(w, r) {
-		return
-	}
+	// proxied (or pinned) to the leader. leaderProxyMiddleware already tried
+	// forwarding this to the leader; recording it HERE when that fails is
+	// still strictly better than dropping the report.
 	scope, _ := r.Context().Value(adapterScopeKey{}).(string)
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in reportedEvent
