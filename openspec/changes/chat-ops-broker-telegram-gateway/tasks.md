@@ -19,6 +19,8 @@
 - [x] 2.4 Render `chart/charts/telegram/templates/call-auth.yaml`: Secret `agentops-telegram-gateway` (`gatewayUrl` + chart-generated `gatewayToken`), install-only generation guarded by `agentops.generatedSecretGuard`. Point the Channel's `credentialsSecretRef` at it instead of the bot Secret. Inject `TELEGRAM_CALL_TOKEN`/`LISTEN_ADDR` on the router. Verify: `helm lint`, `helm template` across surface on/off and apiBase-override permutations.
 - [x] 2.5 Update `openspec/specs/telegram-ingest-router/spec.md` and `openspec/specs/telegram-channel-adapter/spec.md` via this change's delta specs (never edited directly — see `.claude/rules/documentation.md` on when published specs change).
 
+- [x] 2.6 Add the `telegram-channel-adapter-api-base` term to `.github/retired-vocabulary.json` in this same change, retiring `TELEGRAM_API_BASE`/`apiBase` on the channel adapter (`.claude/rules/retired-vocabulary.md`). Verify: `python3 .github/scripts/retired-vocabulary-guard.py --counts`.
+
 ## 3. Unit tests
 
 - [x] 3.1 `platform/manager`: `go build ./... && go vet ./... && KUBEBUILDER_ASSETS=... go test ./...`. Every package green, including `internal/integration` (envtest) and the new proxy test.

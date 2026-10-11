@@ -969,9 +969,9 @@
       ]
     },
     {
-      "id": "telegram-channel-adapter-bot-token",
-      "pattern": "channel[- ]telegram.{0,80}(calls|sends to|posts to|talks to|reads|uses|holds).{0,40}(api\\.telegram\\.org|bot[- ]?token|Bot API credential)",
-      "says": "channel-telegram holds no Telegram credential and relays every Bot API call through gateway-telegram's /telegram/call instead",
+      "id": "telegram-channel-adapter-api-base",
+      "pattern": "(channel[- ]telegram|channel adapter).{0,80}(reads|uses|honou?rs|takes|carries).{0,40}(TELEGRAM_API_BASE|apiBase)",
+      "says": "apiBase is the router's alone, and channel-telegram reaches the Bot API only through the gateway binding",
       "allow": [
         "removed",
         "retired",
@@ -982,9 +982,9 @@
       ]
     },
     {
-      "id": "telegram-direct-bot-api-call",
-      "pattern": "(calls|sends to|posts to|talks to|reaches) (api\\.telegram\\.org|the Bot API) directly",
-      "says": "only gateway-telegram reaches the Bot API, and channel-telegram relays every call through its /telegram/call/{method}",
+      "id": "telegram-channel-adapter-bot-token",
+      "pattern": "channel[- ]telegram.{0,80}(calls|sends to|posts to|talks to|reads|uses|holds).{0,40}(api\\.telegram\\.org|bot[- ]?token|Bot API credential)",
+      "says": "channel-telegram holds no Telegram credential and relays every Bot API call through gateway-telegram's /telegram/call instead",
       "allow": [
         "removed",
         "retired",

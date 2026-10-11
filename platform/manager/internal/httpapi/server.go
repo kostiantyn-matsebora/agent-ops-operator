@@ -1097,8 +1097,9 @@ func (s *Server) proxyToLeader(w http.ResponseWriter, r *http.Request) bool {
 			pr.SetURL(u)
 			pr.Out.Host = u.Host
 		},
-		ErrorHandler: func(http.ResponseWriter, *http.Request, error) {
-			// Swallowed: the caller falls back to 503-and-retry on a false
+		ErrorHandler: func(_ http.ResponseWriter, req *http.Request, err error) {
+			log.FromContext(req.Context()).Info("leader proxy failed, falling back", "target", target, "error", err.Error())
+			// No response written: the caller falls back to 503-and-retry on a false
 			// return, so nothing more needs writing here. Writing a second
 			// response on top of one ReverseProxy may have started would
 			// panic on a non-empty body already flushed.

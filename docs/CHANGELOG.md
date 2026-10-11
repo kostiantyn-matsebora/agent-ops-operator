@@ -46,7 +46,7 @@ for the source and the reference material beside this file.
   `POST /telegram/call/{method}`, authenticated with a shared token the chart
   generates.
 - **The telegram bundle's `surface.credentials` Secret no longer carries an
-  `apiBase` key.** That value moved entirely to the router. A new
+  `apiBase` key.** That value is retired on the channel adapter. A new
   chart-managed Secret (`agentops-telegram-gateway`) carries the
   `gatewayUrl`/`gatewayToken` binding the channel adapter reads instead,
   through the same `credentialsSecretRef` projection the old `botToken`/

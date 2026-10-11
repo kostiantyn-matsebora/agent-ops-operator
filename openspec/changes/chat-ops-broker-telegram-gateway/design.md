@@ -144,8 +144,9 @@ itself. A non-leader's proxy dial to the leader was DROPPED.
 existing ingress rule's caller list, alongside the others.
 
 **Why this was invisible from the manager's own logs**: `proxyToLeader`'s
-`ErrorHandler` swallows the dial failure by design, and the caller falls
-back to its own local behavior on a bare `false`.
+`ErrorHandler` wrote no response and logged nothing, and the caller falls
+back to its own local behavior on a bare `false`. It now logs the dial
+failure's reason before that fallback.
 
 A NetworkPolicy DROP and a genuinely unreachable leader are
 indistinguishable from inside the process that hit either.
