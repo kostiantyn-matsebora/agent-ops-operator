@@ -78,7 +78,7 @@ http://agentops-adapter-{{ .Values.channelAdapter.name }}.{{ .Release.Namespace 
 Service nor this Deployment, so the chart renders and names both itself,
 exactly as it already does for the router's Deployment. */ -}}
 {{- define "telegram.gatewayURL" -}}
-http://agentops-gateway-telegram.{{ .Release.Namespace }}.svc:{{ .Values.router.callPort }}
+http://agentops-gateway-telegram.{{ .Release.Namespace }}.svc:{{ .Values.router.callPort | default 8080 }}
 {{- end -}}
 
 {{- /* Name of the gateway binding Secret: call-auth.yaml renders it, the

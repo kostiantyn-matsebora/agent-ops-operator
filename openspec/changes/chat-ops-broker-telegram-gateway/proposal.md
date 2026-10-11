@@ -79,7 +79,8 @@ published.
 `channels/telegram/`, `gateways/telegram/`, `chart/charts/telegram/`.
 
 **Reference docs**: `docs/CHANGELOG.md`, `docs/integrations/telegram.md`
-(generated), `docs/guides/channel-adapter.md` (generated).
+(generated blocks only), `docs/guides/channel-adapter.md` (yaml blocks
+generated, prose by hand).
 
 **Adopter site**: none. No new install-time decision, no new chart value.
 

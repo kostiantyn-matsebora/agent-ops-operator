@@ -39,9 +39,11 @@ reference whose name was the empty string — refused at admission, no pod, and 
 conversation with no phase.
 
 Two things hid it. Every test shared one config that set a claim, so the
-combination was never constructed. And continuity resolution got it RIGHT — it
-reports no promise without a volume — so the manager correctly told the
-conversation it would answer fresh, then failed to provide one.
+combination was never constructed.
+
+And continuity resolution got it RIGHT. It reports no promise without a volume,
+so the manager correctly told the conversation it would answer fresh. Then the
+pod failed to provide one.
 
 **The fix is one conjunct**: no durable volume means no sidecar, and the pod is
 exactly today's unsynchronised pod with ephemeral context. One fallback rule,
@@ -108,9 +110,11 @@ credential in the block every vendor reads.
 render FAILS naming what to write instead.
 
 Release 10.0.0 deleted `global.agentops.runtime.rbacMode` and wrote "there shall
-be no preset posture" into the spec — then shipped the identical mechanism one
-level down. A reviewer reading `rbacMode: full` sees a word, not the verbs, and
-declaring the account rather than defaulting it does not make the word readable.
+be no preset posture" into the spec. Then it shipped the identical mechanism one
+level down.
+
+A reviewer reading `rbacMode: full` sees a word, not the verbs. Declaring the
+account rather than defaulting it does not make the word readable.
 
 It was also a second cluster-write path: the runtime pod mounts its token and an
 acting route binds a shell, while the runtime image ships no kubectl precisely
