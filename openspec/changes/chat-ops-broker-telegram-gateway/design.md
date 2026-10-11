@@ -179,4 +179,9 @@ indistinguishable from inside the process that hit either.
    MUST move together: an old `channel-telegram` expects a bot token no
    longer in the Channel's credential Secret, and a new one expects a
    gateway binding an old chart does not render.
-3. No chart version is tagged or published as part of this change.
+3. Deploy the chart's NetworkPolicy updates in the same upgrade. The
+   manager's ingress rule admits `agentops-manager` callers (the leader
+   proxy). The telegram bundle's router policy admits the channel adapter
+   on `router.callPort`. Without them the proxy dial and the relay call are
+   DROPPED, indistinguishable from an unreachable peer.
+4. No chart version is tagged or published as part of this change.

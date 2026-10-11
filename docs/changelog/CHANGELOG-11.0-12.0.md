@@ -153,7 +153,6 @@ absent and never upgrades one. The API server prunes an unknown field silently.
 
 ### Changed
 
-
 **The reference runtime's image and model credential moved to the `claude:`
 bundle.** The render FAILS on either key left in `global.agentops.runtimeDefaults`.
 

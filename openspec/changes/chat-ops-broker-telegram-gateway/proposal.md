@@ -76,6 +76,7 @@ published.
 **Code**: `platform/manager/internal/httpapi/server.go` (`proxyToLeader`),
 `platform/manager/internal/httpapi/status.go` (`leaderProxyTarget`),
 `platform/manager/internal/httpapi/activity.go` (reuses `proxyToLeader`),
+`chart/templates/networkpolicy.yaml` (manager ingress admits its own kind),
 `channels/telegram/`, `gateways/telegram/`, `chart/charts/telegram/`.
 
 **Reference docs**: `docs/CHANGELOG.md`, `docs/integrations/telegram.md`

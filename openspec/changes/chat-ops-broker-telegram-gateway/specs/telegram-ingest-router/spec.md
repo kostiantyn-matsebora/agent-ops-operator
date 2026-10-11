@@ -67,7 +67,7 @@ An absent `TELEGRAM_API_BASE` is a normal configuration and SHALL take the defau
 - **WHEN** the router runs with `TELEGRAM_API_BASE` unset
 - **THEN** it polls and relays to `https://api.telegram.org` and starts normally, since the value is optional rather than required
 
-#### Scenario: Polling and relaying honour the override
+#### Scenario: The poll loop honours the override
 - **WHEN** `TELEGRAM_API_BASE` is set to a local endpoint
 - **THEN** `getUpdates` and every relayed call are issued against that endpoint, and the router's classification and verbatim forwarding are unchanged
 
@@ -86,7 +86,7 @@ The endpoint SHALL require the gateway token, a bearer token distinct from the i
 
 It is the `gatewayToken` the channel adapter sends (Requirement: Adapter owns its gateway binding and config parsing).
 
-The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects that from the `gatewayToken` key of the gateway binding Secret, generated once at install.
+The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects that from the `gatewayToken` key of the credential Secret, generated once at install.
 
 `/updates` can only inject a fabricated inbound message, which the receiving adapter still filters before acting on it — network-level trust is enough there.
 
