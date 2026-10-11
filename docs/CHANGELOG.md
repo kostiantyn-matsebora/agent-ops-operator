@@ -38,7 +38,10 @@ for the source and the reference material beside this file.
   channel adapter reads a new `gatewayUrl`/`gatewayToken` Secret instead.
   Hand-built Secrets must change.
 - **Not yet releasable.** `gateway-telegram` and `channel-telegram` need new
-  image releases before this is installable.
+  image releases before this is installable. `Chart.yaml` and
+  `docs/installation.md`'s quick-start already name `15.0.0` ahead of that
+  release, since the generated install docs always mirror the chart's
+  current declared version — the OCI artifact itself is not pushed yet.
 - **`channel-telegram` no longer calls `api.telegram.org` directly.** Every
   send, document upload, forum topic operation and command registration is
   relayed through `gateway-telegram`'s new `POST /telegram/call/{method}`,

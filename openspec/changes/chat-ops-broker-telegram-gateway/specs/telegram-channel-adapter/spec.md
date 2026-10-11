@@ -113,4 +113,9 @@ The relayed response SHALL be parsed exactly as a direct Bot API response would 
 ### Requirement: The Bot API endpoint is configuration, not a compiled-in constant
 **Reason**: renamed and rewritten to "The gateway endpoint is configuration, not a compiled-in constant". This adapter no longer calls the Bot API directly, so it has no base URL of its own to configure. `telegram-ingest-router` owns the Bot API root now.
 
-**Migration**: drop `telegram.apiBase`'s effect on the channel adapter. Set it on the router side only — already true, since `telegram-ingest-router`'s own requirement for this value is unchanged by this delta.
+**Migration**: drop `telegram.apiBase`'s effect on the channel adapter. Set
+it on the router side only — the router already honored it for its own
+polling, so only the scoping is new.
+
+`telegram-ingest-router`'s own requirement for this value is MODIFIED, to
+make explicit it is the router's alone, never the adapter's.
