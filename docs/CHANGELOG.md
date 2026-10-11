@@ -53,6 +53,9 @@ for the source and the reference material beside this file.
   `apiBase` keys used.
 - **The router gains a Service and a NetworkPolicy** for its new call
   endpoint, on `router.callPort` (default `8080`).
+
+### Fixed
+
 - **`GET /channel/ops` no longer refuses a non-leader manager replica with
   `503`.** A non-leader now reverse-proxies the poll to whichever replica
   the leader-election Lease names, instead of rejecting it, so a channel

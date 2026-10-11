@@ -86,7 +86,7 @@ Budget node ephemeral storage for `maxActiveConversations` × that.
 ### Upgrade
 
 1. `helm upgrade`. Nothing to restate — the default arrives with the chart.
-2. Expect conversations holding a context handle to fail their next run; reset
+2. Expect conversations holding a context handle to fail their next run. Reset
    each with the verb above.
 3. Turning it back off is `claude.contextSync.paths: []`, with the same
    relocation cost in reverse.
@@ -145,7 +145,7 @@ are gated by `runtimeDefaults.allowPodExecution`, and a hand-written copy is not
 **`SignalAdapter.spec.kubernetesAccess` and `ChannelAdapter.spec.kubernetesAccess`
 are DELETED.** Replaced by `spec.serviceAccountName`, and naming an account is
 what mounts its token — the two were always one decision. `POD_NAMESPACE` is now
-injected unconditionally; it is a downward-API field, not a permission.
+injected unconditionally. It is a downward-API field, not a permission.
 
 **A CRD FIELD WAS DELETED, so `kubectl apply -f chart/crds/` is a step for this
 upgrade AND for a fresh install.** Helm installs CRDs from `crds/` only when

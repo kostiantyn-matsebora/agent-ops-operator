@@ -9,6 +9,8 @@
 - [x] 1.7 Fixing one endpoint at a time (1.4, then 1.6) was itself the failure: generalized into `Server.leaderProxyMiddleware` (`internal/httpapi/server.go`), wrapping the WHOLE mux so every route proxies to the leader on `!isLeader` before reaching a handler, exempting only `/healthz`. A handler the proxy didn't reach keeps its own unchanged local behavior — `handleChannelOps` still refuses when unreachable, the activity handlers still serve locally. Removed the now-redundant per-handler proxy calls in `activity.go` and `handleChannelOps`.
 - [x] 1.8 Found live while testing 1.7: the middleware was a silent no-op on this install. `chart/templates/networkpolicy.yaml`'s `agentops-manager` ingress rule admitted callers by kind but never its own kind, so every non-leader's dial to the leader was DROPPED by NetworkPolicy — invisible from the manager's logs, surfacing only as the caller's ordinary "leader could not be reached" fallback. Added a `podSelector` admitting `app.kubernetes.io/name: agentops-manager` on port 8080, alongside the existing caller kinds. Verify: `TestEveryWiredFlowIsAllowed` (`internal/integration/charttemplate_networkpolicy_test.go`) pins the label appearing 3 times in the rendered policy.
 
+- [x] 1.9 Update `openspec/specs/durable-chat-ops-broker/spec.md` and `openspec/specs/activity-telemetry/spec.md` via this change's delta specs (never edited directly) for the leader-proxy work of 1.1–1.8.
+
 ## 2. Gateway becomes the sole Telegram credential holder — backend-developer
 
 - [x] 2.1 Add `gateways/telegram/call.go`: `POST /telegram/call/{method}`, a verbatim relay (body, `Content-Type`, status, response body) to the real Bot API, gated by a bearer token (`TELEGRAM_CALL_TOKEN`). Verify: `call_test.go`.

@@ -980,6 +980,19 @@
         "holds no",
         "RETIRED"
       ]
+    },
+    {
+      "id": "telegram-direct-bot-api-call",
+      "pattern": "(calls|sends to|posts to|talks to|reaches) (api\\.telegram\\.org|the Bot API) directly",
+      "says": "only gateway-telegram reaches the Bot API, and channel-telegram relays every call through its /telegram/call/{method}",
+      "allow": [
+        "removed",
+        "retired",
+        "no longer",
+        "never",
+        "holds no",
+        "RETIRED"
+      ]
     }
   ]
 }
