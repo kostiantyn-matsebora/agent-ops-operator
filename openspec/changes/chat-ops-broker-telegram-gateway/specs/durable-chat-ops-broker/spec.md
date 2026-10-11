@@ -34,6 +34,26 @@ The chart's `NetworkPolicy` for the manager SHALL admit ingress from pods labell
 - **WHEN** a non-leader replica dials the leader's pod on the API port with the network policy enforced
 - **THEN** the connection is admitted and the proxy relays the leader's response
 
+### Requirement: A non-leader proxies every other route through one middleware
+
+A non-leader manager replica SHALL reverse-proxy every route except `/healthz` to the leader.
+
+- It does so before the request reaches a handler, through one middleware wrapping the whole mux.
+- A handler reached anyway SHALL fall through to its own unchanged local behavior.
+- A handler is reached anyway when the proxy failed or the replica is the leader.
+
+Routes beyond `/channel/ops` and `/activity*` read or write the Kubernetes API, which is consistent on any replica. The proxy therefore changes no response a client could already receive.
+
+#### Scenario: A non-leader proxies an ordinary route
+
+- **WHEN** any route other than `/healthz` is served by a non-leader replica and the leader is reachable
+- **THEN** that replica forwards the request and relays the leader's response
+
+#### Scenario: A failed proxy falls through to the local handler
+
+- **WHEN** a non-leader cannot reach the leader for a route other than `/channel/ops`
+- **THEN** the route's own handler serves the request locally
+
 ## REMOVED Requirements
 
 ### Requirement: A non-leader rejects rather than proxies a poll it cannot safely answer

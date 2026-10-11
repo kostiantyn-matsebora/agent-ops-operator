@@ -79,7 +79,9 @@ published.
 `chart/templates/networkpolicy.yaml` (manager ingress admits its own kind),
 `channels/telegram/`, `gateways/telegram/`, `chart/charts/telegram/`.
 
-**Reference docs**: `docs/CHANGELOG.md`, `docs/integrations/telegram.md`
+**Reference docs**: `docs/CHANGELOG.md`, `docs/contracts.md` (the router
+endpoint and leader-proxy behavior), `docs/security.md` (the bot-token
+trust boundary moves to the gateway), `docs/integrations/telegram.md`
 (generated blocks only), `docs/guides/channel-adapter.md` (yaml blocks
 generated, prose by hand).
 

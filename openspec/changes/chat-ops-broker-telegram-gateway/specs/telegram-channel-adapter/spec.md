@@ -29,7 +29,7 @@ Routing-visible behavior (commands, adoption, busy-acks) SHALL be whatever the s
 
 #### Scenario: Oversized message is split, not failed
 - **WHEN** a message renders longer than Telegram's per-message limit
-- **THEN** the adapter splits or truncates it and the operation completes successfully
+- **THEN** the adapter splits it into consecutive messages at Telegram's limit, truncating only a single unsplittable run, and the operation completes successfully
 
 #### Scenario: Markup in a payload does not break the post
 - **WHEN** a signal payload contains `<`, `>`, or `&`
