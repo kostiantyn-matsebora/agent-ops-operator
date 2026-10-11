@@ -9,6 +9,8 @@ It SHALL consume the channel adapter contract: offset persistence on behalf of t
 
 The adapter SHALL hold NO Telegram credential of its own (chat-ops-broker-telegram-gateway). Every Bot API call it composes SHALL be issued to the telegram-ingest-router's `POST /telegram/call/{method}` endpoint, never directly to the Bot API. The router is the sole holder of the bot token, both directions.
 
+The call SHALL carry `gatewayToken` as a bearer header, the same token the router's own endpoint requires.
+
 The adapter SHALL render each typed outbound message for Telegram: composing HTML from markdown bodies, escaping payload content so markup-bearing text cannot break parsing, splitting or truncating oversized messages, and deriving forum-topic names from the `ensure-topic` descriptor within Telegram's own naming limit.
 
 It MAY present an oversized `signal` payload as a document rather than text.

@@ -90,14 +90,16 @@ trust boundary moves to the gateway), `docs/integrations/telegram.md`
 (generated blocks only), `docs/guides/channel-adapter.md` (yaml blocks
 generated, prose by hand).
 
-**Adopter site**: none. No new install-time decision, no new chart value.
+**Adopter site**: `docs/configuration.md` gains a "Telegram router" section
+for `router.callPort`, `gatewayUrl` and `gatewayToken` — reversible values,
+no new install-time decision.
 
 **Rules**:
 
 - `.claude/rules/invariants.md`: the "HTTP API is NOT leader-gated" section
-  now covers every route except `/healthz`, `/channel/ops` and `/activity*`, through one all-routes
-  leader-proxy middleware. `/channel/ops` and the activity endpoints keep
-  their own differing fallbacks.
+  now covers every route except `/healthz`, through one all-routes
+  leader-proxy middleware. `/channel/ops` and the activity endpoints are
+  proxied too, each keeping its own differing local fallback.
 - `.claude/rules/structure.md`: the Telegram trio's credential ownership.
 - `.claude/rules/gotchas.md`: two new dated entries, the abandoned
   alternative and why, and the `/activity/stream` exposure found while
