@@ -190,7 +190,8 @@ restricted to `administrator`.
 ### Requirement: The console is RoleGrant's sole writer, and never deletes one
 
 The console SHALL be the only component granted `create` and `update` on
-`RoleGrant`. The manager SHALL hold read-only `list`/`watch`/`get` on
+`RoleGrant` and `update` on `rolegrants/status`. The console SHALL stamp
+`status.lastModifiedBy` and `status.lastModifiedAt` on every write. The manager SHALL hold read-only `list`/`watch`/`get` on
 `RoleGrant` and SHALL NEVER write one.
 
 Neither the console nor any other component SHALL be granted `delete` on

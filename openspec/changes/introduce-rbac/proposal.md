@@ -15,13 +15,13 @@ handing them the ability to act on, or delete, everyone else's.
 - Add three roles — `user`, `responder`, `administrator` — scoped per
   `{channel, key}` identity pair, the same shape
   `Conversation.spec.originReader` already uses. This is per identity pair,
-  not per bare identity string. A Telegram sender and a console OIDC identity
-  for the same human hold independent grants unless linked later.
+  not per bare identity string. A Telegram sender and a console external-authentication
+  identity for the same human hold independent grants unless linked later.
 - Add a new CRD, one object per `{channel, key}` → role binding. This follows
   the existing one-object-per-binding convention (`Channel`, `SignalSource`,
   etc.) rather than a singleton holding a map.
 - Any `{channel, key}` with no explicit binding defaults to `user`. This is
-  what makes "an OIDC login gets `user` automatically" true with no
+  what makes "an externally authenticated login gets `user` automatically" true with no
   provisioning step.
 - **BREAKING (deliberate invariant reversal)**: the console gains its own,
   narrowly-scoped Kubernetes write RBAC: `create`/`update` on this one new
@@ -106,7 +106,6 @@ handing them the ability to act on, or delete, everyone else's.
 **Reference docs**:
 - `docs/concepts.md` — the new CRD and role semantics.
 - `docs/contracts.md` — the inbound contract's new refusal case.
-- `docs/configuration.md` — the bootstrap-admins value.
 
 **Adopter site**:
 - `docs/console-guide.md` — a role-assignment section alongside the

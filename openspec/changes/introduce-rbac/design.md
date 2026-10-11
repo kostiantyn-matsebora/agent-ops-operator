@@ -63,6 +63,9 @@ No `delete` verb is granted to the console. Demoting someone back to
 keeps a record of who was demoted and when, and keeps the console's RBAC
 grant to exactly two verbs (`create`, `update`) rather than three.
 
+The console also stamps `status.lastModifiedBy`/`lastModifiedAt`, so it holds
+`update` on `rolegrants/status`.
+
 ### `RoleGrant.spec.key` is RAW. `OriginReader.key` stays a SALTED HASH
 
 These are two different needs on the same identity:
