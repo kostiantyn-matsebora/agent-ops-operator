@@ -67,6 +67,10 @@ An absent `TELEGRAM_API_BASE` is a normal configuration and SHALL take the defau
 - **WHEN** the router runs with `TELEGRAM_API_BASE` unset
 - **THEN** it polls and relays to `https://api.telegram.org` and starts normally, since the value is optional rather than required
 
+#### Scenario: The poll loop honours the override
+- **WHEN** `TELEGRAM_API_BASE` is set to a local endpoint
+- **THEN** `getUpdates` is issued against that endpoint, and the router's classification and verbatim forwarding are unchanged
+
 #### Scenario: Polling and relaying honour the override
 - **WHEN** `TELEGRAM_API_BASE` is set to a local endpoint
 - **THEN** `getUpdates` and every relayed call are issued against that endpoint, and the router's classification and verbatim forwarding are unchanged

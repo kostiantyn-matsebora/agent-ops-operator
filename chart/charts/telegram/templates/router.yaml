@@ -49,7 +49,7 @@ spec:
             # existed here before this: the router used to have nothing
             # pushed TO it.
             - name: call
-              containerPort: {{ $r.callPort | default 8080 }}
+              containerPort: {{ int ($r.callPort | default 8080) }}
           env:
             - name: SIGNAL_TARGET
               value: {{ include "telegram.signalTarget" . | quote }}
@@ -99,6 +99,6 @@ spec:
     app.kubernetes.io/name: agentops-gateway-telegram
   ports:
     - name: call
-      port: {{ $r.callPort | default 8080 }}
+      port: {{ int ($r.callPort | default 8080) }}
       targetPort: call
 {{- end }}

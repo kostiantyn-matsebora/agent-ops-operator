@@ -32,28 +32,19 @@ for the source and the reference material beside this file.
   - **The cap.** `Coordinator.spec.agents[].description` rises from 512 to
     2048 bytes, since the new shape did not fit the old one.
 
-## [14.0.2] — Unreleased
-
-### Changed
-
-- **Breaking.** The telegram bundle's `surface.credentials` Secret no longer
-  carries an `apiBase` key, and the channel adapter reads a new
-  `gatewayUrl`/`gatewayToken` Secret instead. Hand-built Secrets must change.
+- **Breaking.** `gateway-telegram` is now the SOLE holder of the Telegram bot
+  credential, inbound and outbound alike. The telegram bundle's
+  `surface.credentials` Secret no longer carries an `apiBase` key, and the
+  channel adapter reads a new `gatewayUrl`/`gatewayToken` Secret instead.
+  Hand-built Secrets must change.
 - **Not yet releasable.** `gateway-telegram` and `channel-telegram` need new
-  image releases before this version is installable. See the upgrade note at
-  the end of this entry.
-- **`gateway-telegram` is now the SOLE holder of the Telegram bot credential**,
-  inbound and outbound alike. `channel-telegram` no longer calls
-  `api.telegram.org` directly — every send, document upload, forum topic
-  operation and command registration is relayed through the router's new
-  `POST /telegram/call/{method}`, authenticated with a shared token the chart
-  generates.
-- **The telegram bundle's `surface.credentials` Secret no longer carries an
-  `apiBase` key.** That value is retired on the channel adapter. A new
-  chart-managed Secret (`agentops-telegram-gateway`) carries the
-  `gatewayUrl`/`gatewayToken` binding the channel adapter reads instead,
-  through the same `credentialsSecretRef` projection the old `botToken`/
-  `apiBase` keys used.
+  image releases before this is installable.
+- **`channel-telegram` no longer calls `api.telegram.org` directly.** Every
+  send, document upload, forum topic operation and command registration is
+  relayed through the router's new `POST /telegram/call/{method}`,
+  authenticated with a shared token the chart generates. A new chart-managed
+  Secret (`agentops-telegram-gateway`) carries the binding through the same
+  `credentialsSecretRef` projection.
 - **The router gains a Service and a NetworkPolicy** for its new call
   endpoint, on `router.callPort` (default `8080`).
 
