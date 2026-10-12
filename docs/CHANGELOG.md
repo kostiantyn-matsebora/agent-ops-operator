@@ -8,7 +8,9 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [15.0.0] — 2026-10-12
+
+- `manager` 0.58.0, `channel-telegram` 0.26.0, `gateway-telegram` 0.7.0.
 
 ### Changed
 
@@ -37,11 +39,6 @@ for the source and the reference material beside this file.
   `surface.credentials` Secret no longer carries an `apiBase` key, and the
   channel adapter reads a new `gatewayUrl`/`gatewayToken` Secret instead.
   Hand-built Secrets must change.
-- **Not yet releasable.** `gateway-telegram` and `channel-telegram` need new
-  image releases before this is installable. `Chart.yaml` and
-  `docs/installation.md`'s quick-start already name `15.0.0` ahead of that
-  release, since the generated install docs always mirror the chart's
-  current declared version — the OCI artifact itself is not pushed yet.
 - **`channel-telegram` no longer calls `api.telegram.org` directly.** Every
   send, document upload, forum topic operation and command registration is
   relayed through `gateway-telegram`'s new `POST /telegram/call/{method}`,
@@ -97,12 +94,7 @@ for the source and the reference material beside this file.
 
 ### Upgrade
 
-1. `chart/charts/telegram/values.yaml` still names the LAST released
-   `channelAdapter.image.tag` and `router.image.tag`. Those binaries do not
-   yet implement this change.
-2. Tag and release both components.
-3. Bump both tags before this chart version is installed anywhere.
-4. Rebuild any hand-made channel Secret for the new shape. It carries
+1. Rebuild any hand-made channel Secret for the new shape. It carries
    `gatewayUrl`, `gateway-telegram`'s call endpoint, and `gatewayToken`,
    which must equal `gateway-telegram`'s `TELEGRAM_CALL_TOKEN`. It no longer
    carries `botToken` or `apiBase` — a chart-rendered Secret picks up the new
