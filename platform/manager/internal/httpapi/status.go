@@ -173,6 +173,57 @@ func (s *Server) isLeader(ctx context.Context) bool {
 	return holder == s.ReplicaIdentity || strings.HasPrefix(holder, s.ReplicaIdentity+"_")
 }
 
+// managerPodLabel is the Deployment's own pod-template label (chart
+// deployment.yaml), used only to resolve the CURRENT leader's address so a
+// non-leader can reverse-proxy a poll to it — never to select a target by
+// identity, which leaderProxyTarget already does.
+const managerPodLabel = "app.kubernetes.io/name"
+const managerPodLabelValue = "agentops-manager"
+
+// leaderProxyTarget resolves "host:port" for the pod currently holding the
+// leader-election Lease, so /channel/ops can reverse-proxy a non-leader's
+// poll there instead of rejecting it. Empty when the leader is unknown, or
+// its pod cannot be found with an IP yet.
+//
+// Every replica runs the identical image on the identical listen address, so
+// the leader's port is simply this process's own (Server.Addr) — only the
+// host differs.
+func (s *Server) leaderProxyTarget(ctx context.Context) string {
+	holder := s.leaderIdentity(ctx)
+	if holder == "" {
+		return ""
+	}
+	// controller-runtime mints the Lease holder as
+	// os.Hostname()+"_"+a per-process uuid (isLeader's own comment). The pod
+	// name is set as the Pod's hostname by Kubernetes for an ordinary
+	// Deployment, so splitting on the LAST "_" recovers it.
+	podName := holder
+	if i := strings.LastIndex(holder, "_"); i > 0 {
+		podName = holder[:i]
+	}
+	var pods corev1.PodList
+	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespace),
+		client.MatchingLabels{managerPodLabel: managerPodLabelValue}); err != nil {
+		return ""
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Name == podName && p.Status.PodIP != "" {
+			return p.Status.PodIP + s.listenPort()
+		}
+	}
+	return ""
+}
+
+// listenPort is this process's own ":<port>" (Server.Addr, e.g. ":8080"),
+// identical on every replica of the same Deployment.
+func (s *Server) listenPort() string {
+	if i := strings.LastIndex(s.Addr, ":"); i >= 0 {
+		return s.Addr[i:]
+	}
+	return ":8080"
+}
+
 // runtimeSlots counts capacity the way admission does: live pods against the
 // ceiling, and conversations that want a pod and have none.
 func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {

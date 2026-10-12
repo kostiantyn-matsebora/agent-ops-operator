@@ -105,17 +105,18 @@ Everything below is under `telegram:`.
 | `surface.credentials.botToken` | empty | the token inline, which then lives in your values *and* the release |
 | `surface.approvers` | none | numeric user ids allowed to approve, never `@names` |
 | `surface.feedThreadId` | none | an existing topic to post unthreaded notices into |
-| `apiBase` | empty | the Bot API root both the router and the channel adapter call — a self-hosted Bot API server or a test double. Empty renders nothing and the real host is used |
+| `apiBase` | empty | the Bot API root `gateway-telegram` calls — a self-hosted Bot API server or a test double. Empty renders nothing and the real host is used |
 
-**`apiBase` is deployment-level on purpose.** It reaches the router as an
-environment variable and the channel adapter as the `apiBase` key of the bot
-Secret this bundle renders — never a `Channel` field, which would let a channel
-edit redirect its own token. With `existingSecret`, add the same value as the
-Secret's `apiBase` key yourself.
+**`apiBase` is deployment-level on purpose, and it is now `gateway-telegram`'s alone.**
+The channel adapter no longer calls the Bot API at all.
 
-Precedence on the channel adapter: the Secret's `apiBase` key, then this value,
-then the real host. The router polls `TELEGRAM_API_BASE` alone — it serves no
-surface and holds no Secret key.
+Every outbound call goes through `gateway-telegram`'s own `POST /telegram/call/{method}`
+endpoint instead. The adapter has nothing left to point at a self-hosted server.
+
+The channel adapter carries a `gatewayUrl`/`gatewayToken` binding instead.
+The bundle generates it.
+
+It is never a `Channel` field, because a channel edit could then redirect it.
 
 ### What things are called
 
@@ -236,14 +237,22 @@ SignalAdapter/telegram
 # Surface  (surface.enabled)
 Channel/k8s-ops
 Deployment/agentops-gateway-telegram
+Secret/agentops-telegram-gateway
 Secret/k8s-ops-telegram
+Service/agentops-gateway-telegram
 SignalSource/k8s-ops
 ```
 <!-- /generated -->
 
 - **The gateway is not an adapter.** It speaks no agent-ops contract, emits no
   signals and never contacts the manager, so it has no CR — the chart owns its
-  Deployment directly.
+  Deployment directly. Its resources carry the `gateway` name.
+- **The gateway Service.** `Service/agentops-gateway-telegram` fronts the
+  gateway's outbound relay.
+- **The gateway Secret.** `Secret/agentops-telegram-gateway` holds the
+  relay's URL and a chart-generated call token. The `Channel`'s own
+  `credentialsSecretRef` points at it, projecting both keys into the
+  channel adapter's own env in place of the bot credential.
 - **The `Channel` and the `SignalSource` share one name**, so a pipeline binds
   the same word as its source and its channel.
 - **No `Pipeline` is rendered at all**, which is the whole of why the wiring is

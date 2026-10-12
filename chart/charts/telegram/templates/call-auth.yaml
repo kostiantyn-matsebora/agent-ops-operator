@@ -1,0 +1,60 @@
+{{- /*
+The GATEWAY BINDING: where gateway-telegram is, and the shared secret that
+authenticates channel-telegram's outbound calls to its POST /telegram/call
+endpoint (chat-ops-broker-telegram-gateway).
+
+ONE Secret, read by BOTH sides for DIFFERENT reasons:
+  - the router reads `gatewayToken` as TELEGRAM_CALL_TOKEN, to CHECK it.
+  - the Channel's credentialsSecretRef projects both keys into
+    channel-telegram as AGENTOPS_CRED_<CHANNEL>_gatewayUrl /
+    AGENTOPS_CRED_<CHANNEL>_gatewayToken, to SEND it.
+
+This is NOT the bot credential Secret (telegram.secretName), and deliberately
+so: that one may be surface.credentials.existingSecret, which this chart does
+not own and will not add keys to. channel-telegram no longer needs the bot
+token at all -- only this binding -- so it is independent of how the bot
+token itself is supplied.
+
+`ChannelAdapter` carries no general `env` field (adapters.md: "pure
+implementation... no env"), and the reconciler owns its Deployment -- so the
+Channel's own credential projection is the ONE path by which this reaches
+the pod. The gatewayUrl key rides the same projection purely because that
+mechanism takes exactly one Secret per Channel.
+
+Same guard the parent chart's adapter-auth.yaml uses, and the same gate:
+`lookup` is blind on any cluster-less renderer, so the Secret body only
+renders on a fresh install or where `lookup` actually saw the existing
+token — never on a cluster-less upgrade render, or nothing random would
+stop a GitOps sync or `helm template` from minting a fresh token and
+breaking the binding every time it ran.
+*/ -}}
+{{- if and (include "telegram.active" .) (include "telegram.surfaceEnabled" .) }}
+{{- $name := include "telegram.gatewaySecretName" . }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- $existingVal := "" }}
+{{- if and $existing $existing.data }}
+{{- $existingVal = index $existing.data "gatewayToken" | default "" }}
+{{- end }}
+{{- include "agentops.generatedSecretGuard" (dict "root" . "name" $name "explicit" "" "existing" $existing "existingVal" $existingVal "key" "gatewayToken" "setting" "") }}
+{{- if or $existingVal .Release.IsInstall }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-telegram
+  annotations:
+    # not rendering when $existingVal is blind is only safe because leaving
+    # the manifest would otherwise DELETE the object (adapter-auth.yaml)
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  gatewayUrl: {{ include "telegram.gatewayURL" . | b64enc }}
+  {{- if $existingVal }}
+  gatewayToken: {{ $existingVal }}
+  {{- else }}
+  gatewayToken: {{ randAlphaNum 32 | b64enc }}
+  {{- end }}
+{{- end }}
+{{- end }}

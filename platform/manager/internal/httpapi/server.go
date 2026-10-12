@@ -40,6 +40,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -172,7 +174,41 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /status", s.anyAdapterAuth(s.handleStatus))
 	mux.HandleFunc("GET /pipelines/{name}/resolved", s.anyAdapterAuth(s.handlePipelineResolved))
 	s.RegisterCoordinateRoutes(mux)
-	return mux
+	return s.leaderProxyMiddleware(mux)
+}
+
+// leaderProxyMiddleware is the ONE place every route becomes a dumb proxy on
+// a non-leader (hardcode-manager-replicas, generalized from the single
+// /channel/ops exception chat-ops-broker-telegram-gateway shipped first).
+//
+// Every endpoint here ultimately reads or writes the Kubernetes API, which is
+// consistent regardless of which replica answers — so in principle any
+// replica could serve any of them correctly. In practice, repeatedly fixing
+// ONE more endpoint at a time (first /channel/ops, then /activity*) was
+// exactly the whack-a-mole this exists to stop: a replica this request
+// happens to land on is an implementation detail no caller should have to
+// route around, and the next endpoint nobody thought to check is the one
+// that breaks next.
+//
+// /healthz is the one exemption — it answers liveness/readiness for THIS
+// pod, and proxying it would report on a different pod's health entirely.
+//
+// A handler reached despite this (the proxy attempt failed, or none applied)
+// falls through to its OWN local behavior unchanged — for `/channel/ops`
+// that is still the leader-only refusal `durable-chat-ops-broker` requires;
+// for everything else it is ordinary, replica-safe handling that needed no
+// leader at all.
+func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || s.isLeader(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.proxyToLeader(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // anyAdapterAuth accepts the master token or ANY derived adapter token, channel
@@ -1005,12 +1041,24 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	// (the Conversation reconciler, leader-gated by construction), so a
 	// non-leader has no safe way to answer this poll from its own state —
 	// its in-memory OpQueue was never populated for ops this process did not
-	// claim, and proxying to the leader is exactly the complexity this design
-	// chose not to build. Distinguishable from 204 so a conforming adapter
-	// retries at once instead of waiting out its normal idle backoff.
+	// claim.
+	//
+	// A non-leader is a DUMB PROXY to whoever the Lease says is leader, not a
+	// second decision-maker: it does no claiming, no deriving, it just
+	// forwards the request and relays the response byte for byte. The leader
+	// keeps being the ONLY process that ever touches OpQueue or writes a
+	// claim — this changes who answers the HTTP request, not who does the
+	// work.
+	//
+	// Falls back to the 503-and-retry a conforming adapter already tolerates
+	// only when the leader is unknown or unreachable from here (a handoff in
+	// progress, a network blip) — never by silently serving from this
+	// replica's own, unpopulated state. The proxy ATTEMPT itself now happens
+	// one layer up, in leaderProxyMiddleware, uniformly for every route —
+	// reaching this check at all already means that attempt failed.
 	if !s.isLeader(r.Context()) {
 		w.Header().Set("Retry-After", "0")
-		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader"})
+		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader, and the leader could not be reached"})
 		return
 	}
 
@@ -1030,6 +1078,39 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// proxyToLeader reverse-proxies the request to whichever pod the Lease says
+// is leader, reporting whether it managed to. A failed proxy (leader
+// unknown, dial refused, a handoff mid-flight) is reported false so the
+// caller falls back to the ordinary 503-and-retry — never serves a half
+// answer from this replica's own state.
+func (s *Server) proxyToLeader(w http.ResponseWriter, r *http.Request) bool {
+	target := s.leaderProxyTarget(r.Context())
+	if target == "" {
+		return false
+	}
+	u := &url.URL{Scheme: "http", Host: target}
+	proxied := false
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(u)
+			pr.Out.Host = u.Host
+		},
+		ErrorHandler: func(_ http.ResponseWriter, req *http.Request, err error) {
+			log.FromContext(req.Context()).Info("leader proxy failed, falling back", "target", target, "error", err.Error())
+			// No response written: the caller falls back to 503-and-retry on a false
+			// return, so nothing more needs writing here. Writing a second
+			// response on top of one ReverseProxy may have started would
+			// panic on a non-empty body already flushed.
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			proxied = true
+			return nil
+		},
+	}
+	proxy.ServeHTTP(w, r)
+	return proxied
 }
 
 func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {

@@ -62,8 +62,8 @@ All three are optional bundles under `chart/charts/<name>/`, off by default.
 
 | Component | Is |
 |---|---|
-| `channels/telegram/` | reference channel adapter. Does NOT poll — receives router-pushed updates |
-| `gateways/telegram/` | the ONLY getUpdates consumer — not an adapter, emits no signals |
+| `channels/telegram/` | reference channel adapter. Does NOT poll — receives router-pushed updates. Holds NO Telegram credential (chat-ops-broker-telegram-gateway) — every Bot API call is issued through `gateways/telegram/`'s relay |
+| `gateways/telegram/` | the ONLY getUpdates consumer — not an adapter, emits no signals. Now the SOLE holder of the bot credential, inbound AND outbound: `POST /telegram/call/{method}` relays `channels/telegram/`'s composed calls to the real Bot API |
 | `signals/telegram/` | chat origination adapter, holds no credentials |
 | `signals/cron/` | reference signal adapter, 5-field cron parser |
 | `signals/alertmanager/` | webhook adapter, standard Alertmanager payload (renamed from `signal-vmalertmanager`, `register.go` keeps `VMAlertmanagerConfig`) |

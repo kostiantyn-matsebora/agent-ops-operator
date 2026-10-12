@@ -272,7 +272,8 @@ func TestSendUsesTheReplyHandleWhenPresent(t *testing.T) {
 	var body map[string]any
 	srv := botAPI(t, &body)
 	defer srv.Close()
-	tg := &Telegram{Token: "t", HTTP: srv.Client(), BaseURL: srv.URL}
+	tg := NewTelegram(srv.URL, "gw-token")
+	tg.HTTP = srv.Client()
 
 	if err := tg.SendWith(context.Background(), "-100", nil, "hi", SendExtras{ReplyTo: "314"}); err != nil {
 		t.Fatal(err)
@@ -295,7 +296,8 @@ func TestSendOmitsTheLinkageWhenAbsent(t *testing.T) {
 	var body map[string]any
 	srv := botAPI(t, &body)
 	defer srv.Close()
-	tg := &Telegram{Token: "t", HTTP: srv.Client(), BaseURL: srv.URL}
+	tg := NewTelegram(srv.URL, "gw-token")
+	tg.HTTP = srv.Client()
 
 	if err := tg.SendWith(context.Background(), "-100", nil, "hi", SendExtras{}); err != nil {
 		t.Fatal(err)
@@ -314,7 +316,8 @@ func TestSetCommandsIsScopedToTheChat(t *testing.T) {
 	var body map[string]any
 	srv := botAPI(t, &body)
 	defer srv.Close()
-	tg := &Telegram{Token: "t", HTTP: srv.Client(), BaseURL: srv.URL}
+	tg := NewTelegram(srv.URL, "gw-token")
+	tg.HTTP = srv.Client()
 
 	if err := tg.SetCommands(context.Background(), "-100", []BotCommand{{Command: "pipelines", Description: "d"}}); err != nil {
 		t.Fatal(err)
@@ -329,7 +332,7 @@ func TestSetCommandsIsScopedToTheChat(t *testing.T) {
 // is the signal path's, and this adapter must never start a conversation. A
 // forwarded callback is therefore inert here.
 func TestForwardedSelectionIsInertInTheChannelAdapter(t *testing.T) {
-	a := &adapter{channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{}}
+	a := &adapter{channels: map[string]servedChannel{}, reported: map[string]string{}}
 	var upd tgUpdate
 	mustJSON(t, `{"update_id":30,"callback_query":{"id":"cb-1","data":"p:k8s-observe",
 		"message":{"message_id":9,"chat":{"id":-100}}}}`, &upd)
@@ -424,8 +427,10 @@ func TestSyncCommandsRegistersForEveryServedChat(t *testing.T) {
 		reported: map[string]string{},
 		clients:  map[string]*Telegram{},
 	}
-	a.channels["home-ops"] = servedChannel{cfg: channelConfig{ChatID: "-1001234567890"}, token: "bot-token"}
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: bot.Client(), BaseURL: bot.URL}
+	a.channels["home-ops"] = servedChannel{
+		cfg:        channelConfig{ChatID: "-1001234567890"},
+		gatewayURL: bot.URL, gatewayToken: "gw-token",
+	}
 
 	a.syncCommands(context.Background(), "rev-1")
 
@@ -459,7 +464,7 @@ func TestSyncCommandsRetriesAfterAFailedRun(t *testing.T) {
 
 	a := &adapter{
 		mgr: NewManager(fail.URL, "tok"), menu: newMenu(),
-		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{}, reported: map[string]string{},
 	}
 	a.syncCommands(context.Background(), "rev-1")
 	if !a.menu.stale("rev-1") {

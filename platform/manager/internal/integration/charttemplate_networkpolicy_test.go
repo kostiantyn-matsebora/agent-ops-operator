@@ -41,6 +41,16 @@ func TestEveryWiredFlowIsAllowed(t *testing.T) {
 			t.Errorf("the manager policy does not admit %q; that lane breaks when policy is enforced", caller)
 		}
 	}
+	// chat-ops-broker-telegram-gateway: a non-leader replica proxies to the
+	// leader, so the manager's OWN kind must be admitted too — missing this
+	// silently reverts the proxy fix to the pre-fix 503 everywhere a caller's
+	// connection lands on a non-leader. The full label (as opposed to the
+	// bare `name: agentops-manager` metadata field) otherwise appears
+	// exactly twice (metadata.labels, spec.podSelector), so a 3rd occurrence
+	// is the ingress `from` entry this test exists to pin.
+	if n := strings.Count(manager, "app.kubernetes.io/name: agentops-manager"); n < 3 {
+		t.Errorf("the manager policy does not admit its own kind for the leader-proxy lane (saw %d, want >= 3): %s", n, manager)
+	}
 
 	// The adapters' policy is the BUNDLE's, because only it knows their ports.
 	tg := helmTemplate(t,

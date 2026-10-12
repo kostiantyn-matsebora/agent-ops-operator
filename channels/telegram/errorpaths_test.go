@@ -28,8 +28,8 @@ func failingManager(t *testing.T) *Manager {
 func TestDispatchLogsAndSwallowsAFailedInbound(t *testing.T) {
 	a := &adapter{
 		mgr:      failingManager(t),
-		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}, token: "bot-token"}},
-		reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}}},
+		reported: map[string]string{},
 	}
 	// Must not panic even though the manager call fails -- dispatch has no
 	// response to check, only that a bad Inbound never brings the handler down.
@@ -40,8 +40,8 @@ func TestDispatchLogsAndSwallowsAFailedInbound(t *testing.T) {
 func TestOffsetPutReturnsBadGatewayOnAFailedWrite(t *testing.T) {
 	a := &adapter{
 		mgr:      failingManager(t),
-		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}, token: "bot-token"}},
-		reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}}},
+		reported: map[string]string{},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/offset", strings.NewReader(`{"value":"123"}`))
@@ -55,7 +55,7 @@ func TestRefreshChannelsLogsAndSwallowsAFailedList(t *testing.T) {
 	a := &adapter{
 		mgr:      failingManager(t),
 		channels: map[string]servedChannel{},
-		reported: map[string]string{}, clients: map[string]*Telegram{},
+		reported: map[string]string{},
 	}
 	// Must not panic even though a.mgr.Channels fails, and must leave the
 	// served set untouched rather than clearing it on a transient error.
@@ -68,8 +68,8 @@ func TestRefreshChannelsLogsAndSwallowsAFailedList(t *testing.T) {
 func TestOffsetGetReturnsBadGatewayOnAFailedRead(t *testing.T) {
 	a := &adapter{
 		mgr:      failingManager(t),
-		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}, token: "bot-token"}},
-		reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}}},
+		reported: map[string]string{},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/offset", nil)
@@ -100,7 +100,7 @@ func opAndFailingComplete(t *testing.T, op Op) *Manager {
 func TestPollOnceLogsAndSleepsOnAFailedPoll(t *testing.T) {
 	a := &adapter{
 		mgr: failingManager(t), pace: newPacer(), completed: newCompletedOps(16),
-		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{}, reported: map[string]string{},
 	}
 	// The 5s sleep on a failed poll is cut short by the context deadline
 	// rather than waited out -- pollOnce must not panic either way.
@@ -163,7 +163,7 @@ func TestNextOpClosesTheConnectionOnANonLeaderAnswer(t *testing.T) {
 func TestPollOnceDoesNotSleepOnANonLeaderRejection(t *testing.T) {
 	a := &adapter{
 		mgr: nonLeaderManager(t), pace: newPacer(), completed: newCompletedOps(16),
-		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{}, reported: map[string]string{},
 	}
 	done := make(chan struct{})
 	go func() {
@@ -181,7 +181,7 @@ func TestPollOnceLogsAndSwallowsAFailedCompleteOp(t *testing.T) {
 	op := Op{ID: "op-2", Channel: "not-served", Kind: "send"}
 	a := &adapter{
 		mgr: opAndFailingComplete(t, op), pace: newPacer(), completed: newCompletedOps(16),
-		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{}, reported: map[string]string{},
 	}
 	// op.Channel names no served channel, so execute() returns an opErr
 	// without touching Telegram -- CompleteOp is then the one call that fails.
@@ -192,7 +192,7 @@ func TestPollOnceLogsAndSwallowsAFailedCompleteOnARedeliveredOp(t *testing.T) {
 	op := Op{ID: "op-1", Channel: "not-served", Kind: "send"}
 	a := &adapter{
 		mgr: opAndFailingComplete(t, op), pace: newPacer(), completed: newCompletedOps(16),
-		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+		channels: map[string]servedChannel{}, reported: map[string]string{},
 	}
 	a.completed.add("op-1", "thread-1") // already completed once
 	a.pollOnce(context.Background())
@@ -222,13 +222,13 @@ func fakeBotAPI(t *testing.T, fail ...string) string {
 
 func TestExecuteLogsAndSwallowsAFailedPointAtTopicSend(t *testing.T) {
 	sc := servedChannel{
-		cfg:     channelConfig{ChatID: "-1001234567890"},
-		token:   "bot-token",
-		apiBase: fakeBotAPI(t, "sendMessage"),
+		cfg:        channelConfig{ChatID: "-1001234567890"},
+		gatewayURL: fakeBotAPI(t, "sendMessage"), gatewayToken: "gw-token",
 	}
 	a := &adapter{
 		channels: map[string]servedChannel{"telegram-ops": sc},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	op := &Op{Channel: "telegram-ops", Kind: "ensure-topic", Topic: &TopicDescriptor{
 		Conversation: "conv-1", Kind: "chat", Title: "t",
@@ -251,12 +251,12 @@ func TestExecuteLogsAndSwallowsAFailedDeleteConversationNote(t *testing.T) {
 			ChatID:                          "-1001234567890",
 			DeleteTopicOnConversationDelete: true,
 		},
-		token:   "bot-token",
-		apiBase: fakeBotAPI(t, "sendMessage"),
+		gatewayURL: fakeBotAPI(t, "sendMessage"), gatewayToken: "gw-token",
 	}
 	a := &adapter{
 		channels: map[string]servedChannel{"telegram-ops": sc},
-		clients:  map[string]*Telegram{}, reported: map[string]string{},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
 	}
 	tid := "7"
 	op := &Op{Channel: "telegram-ops", Kind: "delete-conversation", Conversation: "conv-1", ThreadID: &tid}

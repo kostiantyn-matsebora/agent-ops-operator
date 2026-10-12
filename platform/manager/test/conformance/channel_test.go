@@ -5,6 +5,7 @@ package conformance
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -93,8 +94,53 @@ func botCallsFor(t *testing.T, bot *Process, method string) []map[string]any {
 	return calls
 }
 
+// tgStartGateway starts gateway-telegram as a BINARY, the same one the
+// system pack and the chart deploy — chat-ops-broker-telegram-gateway made it
+// the sole holder of the bot credential, so channel-telegram no longer talks
+// to `bot` directly; it relays every Bot API call through this process'
+// POST /telegram/call/{method} instead.
+//
+// SIGNAL_TARGET is unused by this suite (nothing exercises getUpdates/
+// origination here) but is required at startup, so it points at a port
+// nothing serves — the gateway never calls it unless an update actually
+// arrives from `bot`, which this test never sends. CHANNEL_TARGET is the
+// real channel-telegram URL, since a reopen/offset round trip would need it
+// if this suite ever grows one.
+func tgStartGateway(t *testing.T, bot *Process, channelTarget string, callToken string) *Process {
+	t.Helper()
+	port := freePort(t)
+	env := []string{
+		"TELEGRAM_API_BASE=" + bot.URL(),
+		"TELEGRAM_BOT_TOKEN=123:gateway-token",
+		"SIGNAL_TARGET=http://127.0.0.1:" + fmt.Sprint(freePort(t)),
+		"CHANNEL_TARGET=" + channelTarget,
+		"TELEGRAM_CALL_TOKEN=" + callToken,
+		fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d", port),
+	}
+	g := start(t, "gateway-telegram", build(t, "gateways/telegram"), env)
+	g.Port = port
+	// No /healthz on this process (it serves exactly one route, POST
+	// /telegram/call/{method}) — waitHealthy would hang forever. A dial is
+	// enough: the call server and the getUpdates poll loop start together in
+	// main(), so a listening port means the call route is live too.
+	waitFor(t, g.Name+" to listen", 10*time.Second, func() bool {
+		if g.Exited() {
+			t.Fatalf("%s exited before it was listening:\n%s", g.Name, g.Output())
+		}
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+		if err != nil {
+			return false
+		}
+		conn.Close()
+		return true
+	})
+	return g
+}
+
 // tgStartAdapterWithTwoChannels serves one good surface with a projected
-// credential, and one whose config the adapter cannot accept.
+// credential, and one whose config the adapter cannot accept. Both channels'
+// credentials now carry a GATEWAY binding (gatewayUrl/gatewayToken), never a
+// bot token — channel-telegram holds none, see tgStartGateway.
 func tgStartAdapterWithTwoChannels(t *testing.T, mgr *FakeManager, bot *Process) *Process {
 	t.Helper()
 	mgr.ServeChannels(
@@ -102,10 +148,14 @@ func tgStartAdapterWithTwoChannels(t *testing.T, mgr *FakeManager, bot *Process)
 		ChannelInfo{Name: "broken", Config: json.RawMessage(`{"feedThreadId":1}`), CredentialEnvPrefix: "AGENTOPS_CRED_BROKEN_"},
 	)
 	port := freePort(t)
+	channelURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	const callToken = "gateway-call-token"
+	gw := tgStartGateway(t, bot, channelURL, callToken)
 	env := append(contractEnv(mgr, "telegram", port),
-		"TELEGRAM_API_BASE="+bot.URL(),
-		"AGENTOPS_CRED_OPS_botToken=123:ops-token",
-		"AGENTOPS_CRED_BROKEN_botToken=123:broken-token",
+		"AGENTOPS_CRED_OPS_gatewayUrl="+gw.URL(),
+		"AGENTOPS_CRED_OPS_gatewayToken="+callToken,
+		"AGENTOPS_CRED_BROKEN_gatewayUrl="+gw.URL(),
+		"AGENTOPS_CRED_BROKEN_gatewayToken="+callToken,
 	)
 	p := start(t, "channel-telegram", build(t, "channels/telegram"), env)
 	p.Port = port
@@ -169,8 +219,14 @@ func tgSendAndAssertRendered(t *testing.T, mgr *FakeManager, bot *Process, topic
 	if text, _ := body["text"].(string); !strings.Contains(text, "found it") || strings.Contains(text, "**") {
 		t.Fatalf("the typed body must be RENDERED from markdown, not posted raw: %q", text)
 	}
-	if sends[0]["token"] != "123:ops-token" {
-		t.Fatalf("the send must use the surface's projected credential, got %v", sends[0]["token"])
+	// chat-ops-broker-telegram-gateway: channel-telegram no longer holds a
+	// bot token at all — it relayed this send through gateway-telegram's
+	// POST /telegram/call, and the TOKEN THE BOT API SAW IS THE GATEWAY'S
+	// OWN (tgStartGateway's TELEGRAM_BOT_TOKEN), never a per-channel one.
+	// That is the whole point of the consolidation: one credential, one
+	// holder, for every channel sharing this bot.
+	if sends[0]["token"] != "123:gateway-token" {
+		t.Fatalf("the send must be relayed through the gateway's own credential, got %v", sends[0]["token"])
 	}
 	return send
 }
