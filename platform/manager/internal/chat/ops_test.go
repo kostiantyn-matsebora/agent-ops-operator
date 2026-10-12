@@ -12,6 +12,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -29,6 +30,7 @@ func testChannel(name, typ string) *agentopsv1alpha1.Channel {
 func testConv(name string) *agentopsv1alpha1.Conversation {
 	c := &agentopsv1alpha1.Conversation{}
 	c.Name = name
+	c.UID = types.UID("uid-" + name)
 	c.Spec.Title = "t: " + name
 	return c
 }
@@ -282,7 +284,7 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 	ch := testChannel("c1", "slack")
 	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{})
 	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{}) // reconcile-driven repeat
-	if op := q.Claim("slack"); op == nil || op.ID != "topic:conv-1:c1" || op.Kind != OpEnsureTopic {
+	if op := q.Claim("slack"); op == nil || op.ID != "topic:conv-1:uid-conv-1:c1" || op.Kind != OpEnsureTopic {
 		t.Fatalf("first claim: %+v", op)
 	}
 	if op := q.Claim("slack"); op != nil {
@@ -292,6 +294,39 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{})
 	if op := q.Claim("slack"); op != nil {
 		t.Fatalf("re-enqueue while claimed must dedup: %+v", op)
+	}
+}
+
+// AllocateName reuses a name once its holder is deleted (namewords.go), so a
+// brand-new Conversation object can share an exact name with one whose
+// ensure-topic already completed in this same manager process. Measured
+// live: the smoke suite's "chat-echo-console" recreated across two
+// sequential tests never got a thread id, because a name-derived-only id
+// collided with the first conversation's entry in the completed-ops dedup
+// window, silently dropping the second's own enqueue forever.
+func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *testing.T) {
+	q := &OpQueue{Registry: NewRegistry()}
+	ctx := context.Background()
+	ch := testChannel("c1", "slack")
+
+	first := testConv("chat-echo-console")
+	q.EnqueueEnsureTopic(ctx, ch, first, TopicDescriptor{})
+	op := q.Claim("slack")
+	if op == nil {
+		t.Fatal("first conversation's ensure-topic never queued")
+	}
+	// Marks it settled directly, as Complete would, without needing a fake
+	// client wired for tryFinishEnsureTopic's CR patch — irrelevant here.
+	q.mu.Lock()
+	q.recent[op.ID] = true
+	q.mu.Unlock()
+
+	// A second, distinct object (different UID) reuses the exact same name.
+	second := testConv("chat-echo-console")
+	second.UID = types.UID("uid-chat-echo-console-reborn")
+	q.EnqueueEnsureTopic(ctx, ch, second, TopicDescriptor{})
+	if op := q.Claim("slack"); op == nil {
+		t.Fatal("a conversation reusing a deleted one's name must still get its own ensure-topic queued")
 	}
 }
 

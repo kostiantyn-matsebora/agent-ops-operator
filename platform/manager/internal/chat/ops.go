@@ -181,7 +181,16 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	// while making each reopen's request distinct — without it a reopen's
 	// ensure-topic dedups against the original topic creation and never reaches
 	// the adapter.
-	id := "topic:" + conv.Name + ":" + ch.Name
+	//
+	// UID, not just name: AllocateName reuses a name once its holder is
+	// deleted, and `recent`'s dedup window outlives any one Conversation. A
+	// freshly created object sharing a deleted one's exact name would
+	// otherwise derive the SAME id as that deleted conversation's already-
+	// completed ensure-topic, silently dropping the new one's own enqueue —
+	// measured live: `chat-echo-console` recreated across two sequential
+	// smoke tests never got a thread id, because the manager process (and its
+	// in-memory `recent` map) outlived the first one.
+	id := "topic:" + conv.Name + ":" + string(conv.UID) + ":" + ch.Name
 	if conv.Status.Reopens > 0 {
 		id += ":r" + strconv.Itoa(int(conv.Status.Reopens))
 	}
