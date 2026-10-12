@@ -101,7 +101,13 @@ func assertConsoleFirstRunDelivered(t *testing.T, e *Env, name, stamp string) {
 	// created (ThreadFor's own contract). A caller about to act on the
 	// thread (closing it, continuing it) needs the real thing, not just the
 	// transcript's own view of it.
-	waitFor(t, "the console thread to carry a real id, not just a binding", time.Minute, func() (bool, error) {
+	//
+	// 5m, not 1m: an ensure-topic op can sit CLAIMED but undelivered for a
+	// whole ClaimStaleness cycle (90s default) before the next reconcile
+	// retries it, and measured live this can take more than one cycle under
+	// load — the same bound TestReplicasThreeDeliversEveryConsoleThread-
+	// InParallel's own comment already documents and widens to 5m for.
+	waitFor(t, "the console thread to carry a real id, not just a binding", 5*time.Minute, func() (bool, error) {
 		c, err := e.K.Conversation(ctx, name)
 		if err != nil {
 			return false, err
