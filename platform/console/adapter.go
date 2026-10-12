@@ -358,7 +358,13 @@ func (a *Adapter) ThreadFor(conversation string) (channel, thread string, ok boo
 		return "", "", false
 	}
 	for _, t := range conversationView(obj).Status.Threads {
-		if t.Channel == ch {
+		// A bound-but-not-yet-established thread carries an empty ThreadID
+		// (ensure-topic queued, not yet answered) — reporting ok=true for it
+		// anyway sends an empty threadId downstream, which the manager's
+		// /channel/inbound correctly refuses as "threadId is required".
+		// Measured live: a bulk close hit exactly this window and failed
+		// with that error instead of the ordinary "not joined" skip.
+		if t.Channel == ch && t.ThreadID != "" {
 			return ch, t.ThreadID, true
 		}
 	}
