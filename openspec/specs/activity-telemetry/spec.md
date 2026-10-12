@@ -6,10 +6,11 @@ The manager's record of every HOP it mediates — signal admitted, conversation
 opened, work dispatched, answer delivered — served for replay and as a stream.
 
 It is the declared-LOSSY class of state, deliberately: a bounded in-memory ring
-buffer, never persisted, never blocking the operation it records. That is why two
-rules matter more than the rest — emission is never itself a signal, and a gap is
-REPORTED rather than rendered as silence, because a cursor answered with an empty
-list reads as "nothing happened".
+buffer, never persisted, never blocking the operation it records.
+
+That is why two rules matter more than the rest. Emission is never itself a
+signal, and a gap is REPORTED rather than rendered as silence — a cursor
+answered with an empty list reads as "nothing happened".
 
 The one fact that is NOT telemetry is the latest context checkpoint, which is
 durable state on the Conversation: whether a conversation can continue after a
@@ -64,7 +65,9 @@ op's message) SHALL NOT be copied onto the event.
 - **THEN** the completion event carries the run's id, exit and duration, and the result is read from the conversation's status
 
 ### Requirement: The activity log is bounded, in-memory and lossy by design
-The activity log SHALL be a fixed-size in-memory ring buffer, evicting oldest-first, never persisted and never written to any Kubernetes object. Emission SHALL NOT block the operation being recorded: if the buffer is full the oldest event is dropped, and no dispatch, reconcile or HTTP handler waits on it.
+The activity log SHALL be a fixed-size in-memory ring buffer, evicting oldest-first, never persisted and never written to any Kubernetes object.
+
+Emission SHALL NOT block the operation being recorded. If the buffer is full, the oldest event is dropped, and no dispatch, reconcile or HTTP handler waits on it.
 
 The durable record of what happened SHALL remain `Conversation.status.runs[]`.
 
@@ -77,18 +80,39 @@ The durable record of what happened SHALL remain `Conversation.status.runs[]`.
 - **THEN** no Kubernetes object is created or updated as a result
 
 ### Requirement: Activity is served over replay and stream endpoints
-The manager SHALL serve `GET /activity?since=<cursor>&limit=<n>` returning events after a cursor, and `GET /activity/stream` as SSE delivering events as they occur, each carrying its cursor. Both SHALL be authenticated with the adapter bearer scheme. A client reconnecting with a cursor older than the buffer's oldest SHALL receive an explicit resync signal rather than a silent gap.
+
+The manager SHALL serve `GET /activity?since=<cursor>&limit=<n>` returning events after a cursor. It SHALL serve `GET /activity/stream` as SSE, delivering events as they occur, each carrying its cursor.
+
+Both, and `POST /activity`, SHALL be authenticated with the per-adapter derived token. A client reconnecting with a cursor older than the buffer's oldest SHALL receive an explicit resync signal rather than a silent gap.
+
+The activity log is a per-process ring buffer with no cross-replica fan-out. A hop the reconciler emits only ever lands in the leader's own buffer, since reconciliation is leader-elected.
+
+A manager replica that is not the current leader SHALL reverse-proxy `GET /activity`, `GET /activity/stream` and `POST /activity` to whichever replica the leader-election Lease currently names as holder. A client pinned to a non-leader would otherwise silently miss a leader-only hop for the life of its connection.
+
+Unlike a channel op poll, a non-leader SHALL NOT refuse an activity request when the leader cannot be reached. It SHALL serve or record from its own buffer instead. A partial, locally-served view is strictly better than none for telemetry.
 
 #### Scenario: Reconnect after a gap is explicit
 - **WHEN** a client reconnects with a cursor that has been evicted
 - **THEN** the response tells it to resync, and the client is expected to re-read snapshots rather than assume continuity
 
 #### Scenario: Unauthenticated access is refused
-- **WHEN** either endpoint is called without a valid adapter token
+- **WHEN** any of the three endpoints is called without a valid adapter token
 - **THEN** the request is rejected with 401 and no events are disclosed
 
+#### Scenario: A non-leader proxies an activity request to the leader
+- **WHEN** `GET /activity`, `GET /activity/stream` or `POST /activity` is served by a manager replica that is not the current leader, and the leader is reachable
+- **THEN** that replica forwards the request to the leader and relays its response, including a live SSE stream relayed as it arrives rather than batched
+
+#### Scenario: An unreachable leader still answers, from local state
+- **WHEN** a non-leader cannot resolve or reach the current leader
+- **THEN** the request is served from, or recorded into, that replica's own activity buffer rather than refused
+
 ### Requirement: Adapters may report their own delivery hops
-Adapters SHALL be able to `POST /activity` to report hops only they observe — notably `channel.op.completed` with real delivery latency — authenticated with the per-adapter derived token they already hold. An adapter SHALL only be able to report events attributed to itself. Reporting is OPTIONAL: an adapter that reports nothing still appears in the graph via manager-side events.
+Adapters SHALL be able to `POST /activity` to report hops only they observe — notably `channel.op.completed` with real delivery latency. This is authenticated with the per-adapter derived token they already hold.
+
+An adapter SHALL only be able to report events attributed to itself.
+
+Reporting is OPTIONAL. An adapter that reports nothing still appears in the graph via manager-side events.
 
 #### Scenario: Delivery confirmation upgrades an edge
 - **WHEN** an adapter reports `channel.op.completed` for an op the manager enqueued
@@ -112,9 +136,10 @@ each be emitted as an activity event against the conversation they belong to,
 carrying at least the duration and the volume of data transferred.
 
 They SHALL be emitted through the existing activity log rather than through a
-separate telemetry path, so that the console's per-conversation view and the
-metrics registry continue to derive from ONE instrumentation pass. Adding a
-second path would allow a metric and its event to disagree, which is precisely
+separate telemetry path. This keeps the console's per-conversation view and
+the metrics registry deriving from ONE instrumentation pass.
+
+Adding a second path would let a metric and its event disagree — precisely
 what the single-observer arrangement exists to prevent.
 
 A skipped checkpoint SHALL be emitted, because "nothing changed" and "nothing
