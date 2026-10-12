@@ -88,12 +88,25 @@ func consoleStartAndFindConversation(t *testing.T, ctx context.Context, e *Env, 
 // the transcript shows the answer.
 func assertConsoleFirstRunDelivered(t *testing.T, e *Env, name, stamp string) {
 	t.Helper()
+	ctx := context.Background()
 	conv := e.WaitRun(t, name, 1, 4*time.Minute)
 	if got := conv.Status.Runs[0].Result; !strings.Contains(got, "[stub] console "+stamp) {
 		t.Fatalf("first run result: %q", got)
 	}
 	waitFor(t, "the answer in the console thread", 2*time.Minute, func() (bool, error) {
 		return strings.Contains(e.ConsoleTranscript(t, name), "[stub] console "+stamp), nil
+	})
+	// The transcript can show the answer before Status.Threads carries a real
+	// ThreadID for it — a binding may exist with its topic still being
+	// created (ThreadFor's own contract). A caller about to act on the
+	// thread (closing it, continuing it) needs the real thing, not just the
+	// transcript's own view of it.
+	waitFor(t, "the console thread to carry a real id, not just a binding", time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, name)
+		if err != nil {
+			return false, err
+		}
+		return c.ThreadFor(SourceConsole) != nil, nil
 	})
 }
 
