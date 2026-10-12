@@ -26,9 +26,9 @@
 - [x] 5.4 Add or update a frontend test for `ProblemsCard` rendering the Since column, covering a row with `since` set and one without. Run `npm test` in `platform/console/ui`.
 - [x] 5.5 Run the full suite for every module touched: `cd platform/console && go build ./... && go vet ./... && go test ./...`, and `cd platform/console/ui && npm test`, all against this worktree's tree.
 
-## 6. E2E tests
+## 6. System tests
 
-- [x] 6.1 Not applicable: these are console-side aggregation and display fixes over data the Kubernetes watch cache and the manager's `/status` endpoint already supply. No kubelet, RBAC, informer or pod-lifecycle behavior is decided or changed, so no lane is added to `platform/manager/test/e2e/`.
+- [x] 6.1 Not applicable: these are console-side aggregation and display fixes over data the Kubernetes watch cache and the manager's `/status` endpoint already supply. No kubelet, RBAC, informer or pod-lifecycle behavior is decided or changed, so no lane is added to `platform/manager/test/system/`.
 
 ## 7. Documentation
 
