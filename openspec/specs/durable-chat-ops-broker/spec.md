@@ -125,7 +125,7 @@ no settable chart value (unlike `router.callPort`).
 - **THEN** the connection is admitted and the proxy relays the leader's
   response
 
-### Requirement: A non-leader proxies every other route through one middleware
+### Requirement: A non-leader proxies every route through one middleware
 
 A non-leader manager replica SHALL reverse-proxy every route except
 `/healthz` to the leader, `/channel/ops` and `/activity*` included. No

@@ -165,7 +165,7 @@ The `ChannelAdapter` reconciler owns the workload, auth injection, and credentia
 - **THEN** the rendered output contains the telegram `ChannelAdapter` and no Deployment for it (the reconciler creates the workload)
 
 ### Requirement: Chart-shipped ChannelAdapter declares the telegram config schema
-The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract on its spec: a JSON Schema for `spec.config` declaring `chatId` (string, required), `feedThreadId` (integer), `approvers` (array of integers), and `deleteTopicOnConversationDelete` (boolean), plus `credentialKeys` documenting `botToken` (not required — the `TELEGRAM_BOT_TOKEN` fallback exists).
+The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract on its spec: a JSON Schema for `spec.config` declaring `chatId` (string, required), `feedThreadId` (integer), `approvers` (array of integers), and `deleteTopicOnConversationDelete` (boolean), plus `credentialKeys` documenting `gatewayUrl` and `gatewayToken` (chat-ops-broker-telegram-gateway), neither required — the `TELEGRAM_GATEWAY_URL`/`TELEGRAM_GATEWAY_TOKEN` fallback exists for both.
 
 The declaration SHALL live beside the `image` reference in the same template so an image bump and its schema update travel in one diff.
 
