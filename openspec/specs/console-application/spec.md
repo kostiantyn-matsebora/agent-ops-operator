@@ -4,9 +4,10 @@
 
 What the agent-ops console IS as an application: one Go service that fans in
 every source a browser must not touch — the Kubernetes CR watch, the manager's
-activity stream, install facts and the channel and signal contracts — and serves
-a read-mostly browser API plus the frontend over snapshots and one cursored
-stream.
+activity stream, install facts and the channel and signal contracts.
+
+It serves a read-mostly browser API plus the frontend over snapshots and one
+cursored stream.
 
 It covers the views that answer "is this install healthy" (overview, queues,
 configuration browser), how agent output is rendered as structure rather than
@@ -20,7 +21,9 @@ application itself.
 ## Requirements
 
 ### Requirement: One service fans in every source the browser must not touch
-The console SHALL be a single Go service that aggregates Kubernetes CR list/watch, the manager's activity stream, install facts (Deployments and pods), and the manager's channel and signal contracts, and serves a browser API plus the frontend. The browser SHALL NOT hold Kubernetes credentials or reach the Kubernetes API, the manager, or the activity stream directly.
+The console SHALL be a single Go service that aggregates Kubernetes CR list/watch, the manager's activity stream, install facts (Deployments and pods), and the manager's channel and signal contracts, and serves a browser API plus the frontend.
+
+The browser SHALL NOT hold Kubernetes credentials or reach the Kubernetes API, the manager, or the activity stream directly.
 
 The service SHALL make no write to the Kubernetes API. Its only writes SHALL be `POST /channel/inbound` (reply) and `POST /signal/inbound` (originate), both through existing contracts.
 
@@ -33,11 +36,15 @@ The service SHALL make no write to the Kubernetes API. Its only writes SHALL be 
 - **THEN** no Kubernetes object is created, updated or deleted by the console
 
 ### Requirement: Snapshots are authoritative and the stream carries cursors
-The console SHALL serve a snapshot endpoint per view and a single SSE stream carrying CR deltas, activity events and transcript appends, each with a monotonic cursor. The browser SHALL treat snapshots as authoritative and re-fetch on RESYNC; a missed event SHALL cost staleness, never a wrong screen. First connect and reconnect SHALL follow the same path.
+The console SHALL serve a snapshot endpoint per view and a single SSE stream carrying CR deltas, activity events and transcript appends, each with a monotonic cursor.
 
-**A DELTA CARRIES ITS OBJECT, AND IS APPLIED.** An event SHALL carry the changed object as the console would have fetched it, and the browser SHALL apply it to what it already holds. Re-fetching on every delta was the mechanism, and it cost a request and a blank page per change while the answer was already on the wire.
+The browser SHALL treat snapshots as authoritative and re-fetch on RESYNC. A missed event SHALL cost staleness, never a wrong screen. First connect and reconnect SHALL follow the same path.
 
-A snapshot stays AUTHORITATIVE, which is what makes applying safe: a resync replaces applied state wholesale, so an applier that is ever wrong is corrected by the next reconnect rather than persisting.
+**A DELTA CARRIES ITS OBJECT, AND IS APPLIED.** An event SHALL carry the changed object as the console would have fetched it, and the browser SHALL apply it to what it already holds.
+
+Re-fetching on every delta was the mechanism, and it cost a request and a blank page per change while the answer was already on the wire.
+
+A snapshot stays AUTHORITATIVE, which is what makes applying safe. A resync replaces applied state wholesale, so an applier that is ever wrong is corrected by the next reconnect rather than persisting.
 
 #### Scenario: A sleeping tab converges
 - **WHEN** a browser is disconnected while many changes occur, then reconnects
@@ -52,7 +59,21 @@ A snapshot stays AUTHORITATIVE, which is what makes applying safe: a resync repl
 - **THEN** the browser renders the fields it knows and ignores the rest, exactly as it does from a snapshot
 
 ### Requirement: The overview page reports the installation and what is wrong with it
-The console SHALL serve an overview covering: chart version and `appVersion`; the manager's image, readiness, replica state and uptime; every adapter with its image, readiness, port and served-CR count; every runtime image; `MAX_ACTIVE_CONVERSATIONS` against runtime pods in use; active conversations and queued inputs; and a rollup of EVERY condition across every watched kind that is not `True`, newest first, each linking to its object.
+The console SHALL serve an overview covering:
+
+- Chart version and `appVersion`.
+- The manager's image, readiness, replica state and uptime.
+- Every adapter with its image, readiness, port and served-CR count.
+- Every runtime image.
+- `MAX_ACTIVE_CONVERSATIONS` against runtime pods in use.
+- Active conversations and queued inputs.
+
+It SHALL also serve a rollup of EVERY condition across every watched kind
+that is not `True`, newest first, each linking to its object.
+
+Each rollup row SHALL carry the time its condition has held since, where
+the object reports one, so the operator can tell a fresh failure from one
+that has stood for days without opening the object.
 
 #### Scenario: Health is answerable on one page
 - **WHEN** any component reports a failing condition, or a pod is not ready
@@ -62,13 +83,24 @@ The console SHALL serve an overview covering: chart version and `appVersion`; th
 - **WHEN** the overview is loaded
 - **THEN** it names the image and version of the manager, every adapter and every runtime present in the namespace
 
+#### Scenario: A stale failure is distinguishable from a fresh one
+- **WHEN** two conditions appear in the rollup, one that started seconds ago and one that has held for days
+- **THEN** each row shows its own condition's start time, and the newest-first order matches what the rows display
+
 ### Requirement: Queue state is a first-class view that separates queued from stalled
 The console SHALL present work and delivery queues as their own view, keeping the two distinct:
 
 - **Work queue** — conversations waiting for a runtime slot against `MAX_ACTIVE_CONVERSATIONS`, and inputs waiting behind an inflight run because dispatch is strictly serial per conversation.
 - **Delivery queue** — channel ops queued for an adapter to claim, and ops claimed but not completed, per adapter.
 
-Every entry SHALL carry an age, and the view SHALL flag stuck items explicitly — ops queued with nothing claiming them, ops claimed and never completed beyond a threshold, and conversations inflight far beyond typical run duration — rather than leaving the operator to compare timestamps. Active cooldowns SHALL be shown here, because a suppressed signal lane is otherwise indistinguishable from an idle one.
+Every entry SHALL carry an age, and the view SHALL flag stuck items
+explicitly, rather than leaving the operator to compare timestamps:
+
+- Ops queued with nothing claiming them.
+- Ops claimed and never completed beyond a threshold.
+- Conversations inflight far beyond typical run duration.
+
+Active cooldowns SHALL be shown here, because a suppressed signal lane is otherwise indistinguishable from an idle one.
 
 Each row SHALL link to the conversation, adapter or pipeline it concerns.
 
@@ -91,7 +123,9 @@ Each row SHALL link to the conversation, adapter or pipeline it concerns.
 - **THEN** the view updates over the stream the browser already holds, and per-conversation queueing derives from the CR watch rather than polling
 
 ### Requirement: A metrics backend extends history and is optional
-The console SHALL support an optional metrics backend query URL. When configured, it SHALL serve time ranges beyond the activity buffer as aggregates read from that backend, and SHALL label them as aggregate — rates, percentiles and depths carrying no per-item identity — so a long window is never mistaken for the exact per-hop record.
+The console SHALL support an optional metrics backend query URL. When configured, it SHALL serve time ranges beyond the activity buffer as aggregates read from that backend, and SHALL label them as aggregate — rates, percentiles and depths carrying no per-item identity.
+
+This is so a long window is never mistaken for the exact per-hop record.
 
 The console SHALL store no time series of its own, and SHALL remain fully functional with no backend configured, offering buffer-length windows and stating that longer ones are unavailable rather than rendering empty charts.
 
@@ -108,9 +142,11 @@ The console SHALL store no time series of its own, and SHALL remain fully functi
 - **THEN** it is labeled as aggregate, and per-item drill-down is offered only within the range the activity buffer covers
 
 ### Requirement: The configuration browser renders and cross-checks every CR
-The console SHALL list every `agentops.dev` kind with a per-kind summary, and offer a detail view carrying conditions, the full spec, the raw YAML, and inbound references. It SHALL surface cross-object findings — references resolving to nothing, SignalSources no Pipeline claims, Channels whose adapter is absent, `configSchema` violations, and profiles whose `runtimeRef` resolves to nothing (including the case where it names none and no `AgentRuntime` called `default` exists).
+The console SHALL list every `agentops.dev` kind with a per-kind summary, and offer a detail view carrying conditions, the full spec, the raw YAML, and inbound references.
 
-Findings sourced from a reconciler condition SHALL be presented as such; findings the console derives by cross-reference SHALL be marked as the console's own. Configuration SHALL be read-only.
+It SHALL surface cross-object findings — references resolving to nothing, SignalSources no Pipeline claims, Channels whose adapter is absent, `configSchema` violations, and profiles whose `runtimeRef` resolves to nothing (including the case where it names none and no `AgentRuntime` called `default` exists).
+
+Findings sourced from a reconciler condition SHALL be presented as such. Findings the console derives by cross-reference SHALL be marked as the console's own. Configuration SHALL be read-only.
 
 #### Scenario: YAML matches the cluster
 - **WHEN** a CR's detail view is opened
@@ -172,12 +208,18 @@ source stated plainly, labels as a table, the payload behind its own control.
 - **THEN** the reader sees which source it came from without expanding
   anything, and its payload does not fill the view
 
-### Requirement: Reads are authenticated; writes require identity and can be disabled
-Read access SHALL require a bearer token or a session established from it, UNLESS the deployment declares that authentication is performed upstream. Write actions — replying in a conversation and originating one — SHALL additionally require `console.write.enabled` and a resolved identity, taken from a trusted forward-auth header when present and recorded as the token identity otherwise. An unconfigured token SHALL authorize nobody, and SHALL be indistinguishable from a wrong token.
+### Requirement: Reads are authenticated, writes require identity and can be disabled
+Read access SHALL require a bearer token or a session established from it, UNLESS the deployment declares that authentication is performed upstream.
 
-The two states SHALL remain independent: an absent or empty token SHALL NEVER be interpreted as "authentication not required". Only an explicit declaration that an external authenticator fronts the console SHALL relax the token requirement.
+Write actions — replying in a conversation and originating one — SHALL additionally require `console.write.enabled` and a resolved identity, taken from a trusted forward-auth header when present and recorded as the token identity otherwise.
 
-When authentication is declared external, writes SHALL require an identity resolved from a forward-auth header and SHALL be refused when none resolves. The token identity SHALL NOT be used as a fallback in that mode, because no token was proven and a write log naming one would assert something untrue.
+An unconfigured token SHALL authorize nobody, and SHALL be indistinguishable from a wrong token.
+
+The two states SHALL remain independent. An absent or empty token SHALL NEVER be interpreted as "authentication not required." Only an explicit declaration that an external authenticator fronts the console SHALL relax the token requirement.
+
+When authentication is declared external, writes SHALL require an identity resolved from a forward-auth header and SHALL be refused when none resolves.
+
+The token identity SHALL NOT be used as a fallback in that mode, because no token was proven and a write log naming one would assert something untrue.
 
 Every write SHALL be logged with the resolved identity.
 
@@ -208,16 +250,20 @@ Every write SHALL be logged with the resolved identity.
 ### Requirement: The set of trusted identity headers is a published interface
 
 The identity headers the console reads from a fronting proxy are the interface
-between the console and whatever authenticates in front of it. That set SHALL be
-treated as published: it SHALL be documented for an operator in full, in the
-order the console prefers them, on the adopter-facing page that tells an operator
-how to expose the console.
+between the console and whatever authenticates in front of it.
 
-Changing the set — adding a header, removing one, or reordering preference —
-SHALL be accompanied by the documentation change in the same change, because an
-operator's proxy configuration is written from that list. A header the console
-trusts but the documentation omits is a header an install will not strip, and a
-client-supplied copy of it then reaches the console unopposed.
+That set SHALL be treated as published: it SHALL be documented for an
+operator in full, in the order the console prefers them, on the
+adopter-facing page that tells an operator how to expose the console.
+
+Changing the set — adding a header, removing one, or reordering
+preference — SHALL be accompanied by the documentation change in the
+same change, because an operator's proxy configuration is written from
+that list.
+
+A header the console trusts but the documentation omits is a header an
+install will not strip, and a client-supplied copy of it then reaches
+the console unopposed.
 
 The console SHALL NOT gain a second, undocumented way to assert an identity.
 
