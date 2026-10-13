@@ -269,14 +269,13 @@
 
 ### Reference docs
 
-- [ ] 7.1 Re-read `docs/guides/coordinate-agents.md`,
+- [x] 7.1 Re-read `docs/guides/coordinate-agents.md`,
       `docs/CHANGELOG.md`, and `docs/security.md` as finished pages (not
       diffs) and confirm each reads correctly on its own, now that every
       other task in this change has landed.
-      OPEN until 4.1 lands too: the precondition above is not yet fully
-      met. The three pages were re-read once, after 4.2 landed, and
-      read correctly as finished pages — nothing in 4.2's verdict
-      touched their content, so the re-read still stands.
+      DONE: the three pages were re-read after 4.2 landed and read
+      correctly as finished pages. Task 4.1 is a workstation-only smoke
+      that changes none of their content, so the re-read stands.
 
 ### Adopter site
 
