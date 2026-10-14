@@ -10,7 +10,6 @@
 - [ ] 2.1 Add a read-only watch/cache of `RoleGrant`, scoped to the release namespace only (one in any other namespace is never read), keyed by `{channel, key}`, wired into `cmd/manager/main.go` alongside the manager's existing informers.
 - [ ] 2.2 Enforce the decision function from 1.4 on `POST /channel/inbound` in `internal/httpapi`, per `specs/channel-adapter-contract/spec.md`'s `## MODIFIED Requirements`.
 - [ ] 2.3 Apply the same check when addressing an EXISTING conversation in `internal/chat` (`router.go`'s `HandleCommand`), leaving addressing a Pipeline fresh ungated, per `specs/chat-addressing-discovery/spec.md`.
-- [ ] 2.4 Add manager RBAC (`get`/`list`/`watch` only, never write) on `RoleGrant` to the manager's chart-rendered role.
 
 ## 3. Console backend: control-plane route and siloed reads — backend-developer
 
@@ -24,8 +23,9 @@
 
 ## 4. Chart and RBAC — deployment-engineer
 
-- [ ] 4.1 Add `rolegrants` to the console's existing read-only (`get`/`list`/`watch`) resource list, and add `create`/`update` on `rolegrants` and `update` on `rolegrants/status` as a separate rule, in the console's namespaced `Role` in `chart/templates/console.yaml`, adding no verb to any other kind.
-- [ ] 4.2 Add a chart value for bootstrap administrators under external authentication (e.g. `console.rbac.bootstrapAdmins`), read once, documented in its own values comment.
+- [ ] 4.1 Add manager RBAC (`get`/`list`/`watch` only, never write) on `RoleGrant` to the manager's chart-rendered role.
+- [ ] 4.2 Add `rolegrants` to the console's existing read-only (`get`/`list`/`watch`) resource list, and add `create`/`update` on `rolegrants` and `update` on `rolegrants/status` as a separate rule, in the console's namespaced `Role` in `chart/templates/console.yaml`, adding no verb to any other kind.
+- [ ] 4.3 Add a chart value for bootstrap administrators under external authentication (e.g. `console.rbac.bootstrapAdmins`), read once, documented in its own values comment.
 
 ## 5. Console UI: role assignment — frontend-developer
 
