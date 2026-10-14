@@ -56,5 +56,5 @@
 ### Adopter site
 - [ ] 8.6 Update `docs/console-guide.md` with a role-assignment section alongside the existing authentication-decision section.
 - [ ] 8.7 Correct `docs/console.md`'s "there is no write path to the Kubernetes API anywhere in the module" claim, as a stated reversal naming what changed and why, not a silent edit.
-- [ ] 8.8 Update `docs/security.md` with the new trust-boundary entry: the console can now mutate who is an administrator, and what bounds that, per `design.md`'s Risks section.
+- [ ] 8.8 Update `docs/security.md` with the new trust-boundary entry: the console can now mutate who is an administrator, and what bounds that, per `design.md`'s Risks section. Re-run `threat-model.py`, since this moves a trust boundary.
 - [ ] 8.9 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui`, since this change alters the console UI.

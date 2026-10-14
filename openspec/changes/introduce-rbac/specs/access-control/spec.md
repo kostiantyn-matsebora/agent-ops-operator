@@ -87,8 +87,9 @@ for the first time SHALL be treated as `user` without an administrator
 creating anything.
 
 Two exemptions apply to this default. The console's shared-token
-identity and every `console.rbac.bootstrapAdmins` entry resolve to
-`administrator` instead, as the next requirement states.
+identity resolves to `administrator`. So does every
+`console.rbac.bootstrapAdmins` entry, but only under external authentication
+with no shared token configured. The next requirement states both.
 
 #### Scenario: A first-time identity is a user
 
