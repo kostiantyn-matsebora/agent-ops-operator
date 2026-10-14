@@ -119,7 +119,8 @@ The list SHALL be read once. An install then has an administrator from first
 boot, with no `RoleGrant` object created by hand.
 
 A `bootstrapAdmins` entry SHALL stay `administrator` even when a `RoleGrant`
-for the same pair says `user`. Only removing the entry and upgrading the
+for the same pair says `user`, so the exemption always wins over an explicit
+`RoleGrant`. Only removing the entry and upgrading the
 release demotes it, so a demotion through the console cannot lock out the
 last administrator.
 

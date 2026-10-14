@@ -44,8 +44,8 @@ For a `user`-role requester, a Conversation node for a conversation that
 requester cannot see under the console-application siloing rule SHALL be
 OMITTED ENTIRELY from the Model view — never anonymized, never relabeled.
 
-The Infrastructure view SHALL likewise omit the pod of such a conversation.
-The pod's name and attributes carry the conversation's name.
+The Infrastructure view SHALL likewise omit the pod of such a conversation,
+since its name and attributes carry the conversation's name.
 
 `Conversation.metadata.name` is a deterministic word-chain derived from the
 conversation's own text, so it is not a safe label to show for a

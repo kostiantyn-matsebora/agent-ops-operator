@@ -55,6 +55,11 @@ delay a refusal, never open a hole.
   `console`, defaulting to `user` when no `RoleGrant` names it, except the shared-token
   identity, which resolves to `administrator`
 
+#### Scenario: The session response carries the role
+- **WHEN** an authenticated client calls `GET /api/session`
+- **THEN** the response includes a `role` field holding the resolved role,
+  so the UI can read it without a second lookup
+
 #### Scenario: The console's own role check is a courtesy, not the authority
 - **WHEN** the console's own role check would refuse a write
 - **THEN** removing that check would only replace the console's refusal
