@@ -14,7 +14,7 @@
 ## 3. Console backend: control-plane route and siloed reads — backend-developer
 
 - [ ] 3.1 Add the `/api/control-plane/...` route namespace in `platform/console`, gated to `administrator` only, with role assignment (list/create/update `RoleGrant`) as its first handler. Verify with a handler test asserting `responder` and `user` both get 403, and another asserting a create for an identity pair that already has a `RoleGrant` is refused and the existing object is updated instead.
-- [ ] 3.2 Resolve the requester's role in `auth.go` alongside the existing `Identity(r)` resolution, defaulting to `user` when no `RoleGrant` matches. Verify with a unit test covering the token-identity-is-administrator bootstrap and the external-auth chart-seeded admins path.
+- [ ] 3.2 Resolve the requester's role in `auth.go` alongside the existing `Identity(r)` resolution, defaulting to `user` when no `RoleGrant` matches. Return the resolved role in the `GET /api/session` response (`handleSession` in `auth.go`) so the UI can read it. Verify with a unit test covering the token-identity-is-administrator bootstrap and the external-auth chart-seeded admins path.
 - [ ] 3.3 Filter conversation list and detail (`conversations.go`, `convapi.go`) to the requester's own `{channel: "console", key}` for `user`, unfiltered for `responder`/`administrator`. Verify with the scenarios in `specs/console-application/spec.md`'s `## ADDED Requirements`.
 - [ ] 3.4 Hide (never anonymize) conversation nodes a `user` cannot see from Topology's Model view (`topology.go`). Verify with the scenarios in `specs/console-topology/spec.md`.
 - [ ] 3.5 Extend the console's write-action log line (`console write: action=%s identity=%s path=%s`) to cover role assignment, and stamp `status.lastModifiedBy`/`.lastModifiedAt` on every `RoleGrant` write. Verify with a test asserting both are present after a write.
@@ -22,13 +22,13 @@
 
 ## 4. Chart and RBAC — deployment-engineer
 
-- [ ] 4.1 Add `create`/`update` verbs on `RoleGrant` and `update` on `rolegrants/status` to console's existing `apiGroups: ["agentops.dev"]` block in `chart/templates/console.yaml`, adding no verb to any other kind. Verify with `helm template` diffing only the expected block.
+- [ ] 4.1 Add `rolegrants` to the console's existing read-only (`get`/`list`/`watch`) resource list, and add `create`/`update` on `rolegrants` and `update` on `rolegrants/status` as a separate rule, in the console's namespaced `Role` in `chart/templates/console.yaml`, adding no verb to any other kind. Verify with `helm template` diffing only the expected block.
 - [ ] 4.2 Add a chart value for bootstrap administrators under external authentication (e.g. `console.rbac.bootstrapAdmins`), read once, documented in its own values comment. Verify with a chart render test asserting the value reaches the console's config as designed.
 
 ## 5. Console UI: role assignment — frontend-developer
 
 - [ ] 5.1 Add an `administrator`-only role-assignment page in `platform/console/ui` calling the `/api/control-plane/...` routes from 3.1. Verify by screenshot against the dev server per `visual-check.md`, showing the role list and a working promote/demote action.
-- [ ] 5.2 Hide bulk-delete and role-assignment affordances from `user` and `responder` sessions, and bulk-close from `user` alone, reading the role from the existing session endpoint. Verify by screenshot for each of the three roles.
+- [ ] 5.2 Hide bulk-delete and role-assignment affordances from `user` and `responder` sessions, and bulk-close from `user` alone, reading the role from `GET /api/session`, which 3.2 extends. Verify by screenshot for each of the three roles.
 - [ ] 5.3 Confirm the Conversations list and Topology pages render correctly for a `user` session seeing only their own conversations, with no foreign nodes in Topology. Verify by screenshot per `visual-check.md`.
 
 ## 6. Unit tests
@@ -40,7 +40,7 @@
 
 ## 7. System tests
 
-- [ ] 7.1 Extend a lane in `platform/manager/test/system/` asserting the console's ServiceAccount, under the real chart-rendered `ClusterRole`, can `create`/`update` `RoleGrant` against a live API server and is refused `delete` and every verb on every other kind it did not already hold. This is an RBAC question a real cluster decides, per `change-tests.md`.
+- [ ] 7.1 Extend a lane in `platform/manager/test/system/` asserting the console's ServiceAccount, under the real chart-rendered namespaced `Role`, can `get`/`list`/`watch`/`create`/`update` `RoleGrant` against a live API server and is refused `delete` and every verb on every other kind it did not already hold. This is an RBAC question a real cluster decides, per `change-tests.md`.
 - [ ] 7.2 Extend the same or a sibling lane asserting the manager's informer picks up a `RoleGrant` created or updated live, and that a `user`-role sender's reply to a foreign conversation is refused end to end (adapter to manager to refusal), covering the case this change's own write path uniquely exercises.
 
 ## 8. Documentation

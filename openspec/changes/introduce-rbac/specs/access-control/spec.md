@@ -232,7 +232,8 @@ restricted to `administrator`.
 
 ### Requirement: The console is RoleGrant's sole writer, and never deletes one
 
-The console SHALL be the only component granted `create` and `update` on
+The console SHALL hold `get`, `list` and `watch` on `RoleGrant`, since role
+lookup reads it, and SHALL be the only component granted `create` and `update` on
 `RoleGrant` and `update` on `rolegrants/status`. The console SHALL stamp
 `status.lastModifiedBy` and `status.lastModifiedAt` on every write. The manager SHALL hold read-only `list`/`watch`/`get` on
 `RoleGrant` and SHALL NEVER write one.
