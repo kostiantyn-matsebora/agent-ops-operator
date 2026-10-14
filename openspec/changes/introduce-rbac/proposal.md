@@ -40,7 +40,8 @@ handing them the ability to act on, or delete, everyone else's.
 - Console: filter conversation list/detail to the requester's own
   `{channel, key}` for `user`. `responder` and `administrator` see all.
   Hide, rather than anonymize, conversations the requester cannot see from
-  Topology's Model view. `Conversation.metadata.name` is a deterministic
+  Topology's Model view, and likewise omit their pods from the Infrastructure
+  view. `Conversation.metadata.name` is a deterministic
   word-chain derived from the conversation's own text, so it is not a safe
   label to show for a conversation someone cannot otherwise see.
 - Manager: enforce role plus ownership on `POST /channel/inbound` (a reply)
