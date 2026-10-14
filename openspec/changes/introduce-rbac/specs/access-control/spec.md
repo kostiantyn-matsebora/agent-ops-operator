@@ -86,6 +86,10 @@ Any `{channel, key}` pair with no matching `RoleGrant` SHALL default to role
 for the first time SHALL be treated as `user` without an administrator
 creating anything.
 
+Two identities are exempt from this default. The console's shared-token
+identity and every `console.rbac.bootstrapAdmins` entry resolve to
+`administrator` instead, as the next requirement states.
+
 #### Scenario: A first-time identity is a user
 
 - **WHEN** an identity pair with no `RoleGrant` object acts

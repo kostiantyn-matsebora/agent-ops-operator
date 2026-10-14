@@ -18,7 +18,8 @@
 - [ ] 3.3 Filter conversation list and detail (`conversations.go`, `convapi.go`) to the requester's own `{channel: "console", key}` for `user`, unfiltered for `responder`/`administrator`. Verify with the scenarios in `specs/console-application/spec.md`'s `## ADDED Requirements`.
 - [ ] 3.4 Hide (never anonymize) conversation nodes a `user` cannot see from Topology's Model view (`topology.go`). Verify with the scenarios in `specs/console-topology/spec.md`.
 - [ ] 3.5 Extend the console's write-action log line (`console write: action=%s identity=%s path=%s`) to cover role assignment, and stamp `status.lastModifiedBy`/`.lastModifiedAt` on every `RoleGrant` write. Verify with a test asserting both are present after a write.
-- [ ] 3.6 Keep the existing `a.write()` gate on `handleSend` etc. as a fail-fast check (now also consulting role for ownership), documented in-code as a courtesy ahead of the manager's authoritative check from 2.2. Verify existing write-gate tests still pass unmodified in intent.
+- [ ] 3.6 Enforce the role server-side on the console's bulk-close route (`responder` or `administrator`) and bulk-delete route (`administrator`), refusing with 403 naming the required role, per `specs/access-control/spec.md`'s bulk requirement. Verify with a handler test asserting `user` is refused bulk-close and `user` and `responder` are refused bulk-delete.
+- [ ] 3.7 Keep the existing `a.write()` gate on `handleSend` etc. as a fail-fast check (now also consulting role for ownership), documented in-code as a courtesy ahead of the manager's authoritative check from 2.2. Verify existing write-gate tests still pass unmodified in intent.
 
 ## 4. Chart and RBAC — deployment-engineer
 
