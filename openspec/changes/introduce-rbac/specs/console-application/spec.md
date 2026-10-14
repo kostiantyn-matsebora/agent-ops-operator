@@ -66,9 +66,11 @@ delay a refusal, never open a hole.
   so the UI can read it without a second lookup
 
 #### Scenario: The console's own role check is a courtesy, not the authority
-- **WHEN** the console's own role check would refuse a write
+- **WHEN** the console's own role check would refuse a reply or originate write
 - **THEN** removing that check would only replace the console's refusal
   with the manager's own, never open a hole
+- **AND** a bulk or role-assignment refusal has no manager backstop, so the
+  console's check alone is its authority
 
 ## ADDED Requirements
 
