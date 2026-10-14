@@ -118,6 +118,11 @@ lookup stays uniform.
 The list SHALL be read once. An install then has an administrator from first
 boot, with no `RoleGrant` object created by hand.
 
+A `bootstrapAdmins` entry SHALL stay `administrator` even when a `RoleGrant`
+for the same pair says `user`. Only removing the entry and upgrading the
+release demotes it, so a demotion through the console cannot lock out the
+last administrator.
+
 #### Scenario: The shared-token identity is administrator
 
 - **WHEN** a console write is authenticated by the shared token with no
