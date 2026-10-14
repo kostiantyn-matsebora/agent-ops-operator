@@ -13,6 +13,9 @@ role lookup uses the raw `sender` string. The ownership comparison hashes it
 with the function `originReader.key` is stamped with, as the access-control
 spec states.
 
+A conversation whose `spec.originReader` is absent has no owner. Every role,
+including `user`, MAY address it, as the access-control spec states.
+
 Addressing a Pipeline fresh SHALL remain ungated.
 
 #### Scenario: A user addresses someone else's conversation
@@ -21,6 +24,12 @@ Addressing a Pipeline fresh SHALL remain ungated.
   different identity pair
 - **THEN** the router refuses it with a message naming ownership as the
   reason, and the conversation is not touched
+
+#### Scenario: A user addresses an ownerless conversation
+
+- **WHEN** a `user`-role sender addresses an existing conversation carrying no
+  `originReader`
+- **THEN** the router admits it, exactly as for `responder` or `administrator`
 
 #### Scenario: A user starts a new conversation
 

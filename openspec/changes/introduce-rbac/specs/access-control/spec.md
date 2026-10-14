@@ -63,6 +63,19 @@ Its spec SHALL carry:
 Its status SHALL carry `lastModifiedBy` and `lastModifiedAt`, recording who last
 wrote it and when.
 
+The `key` SHALL be treated as an opaque string.
+
+- It is compared by exact equality only.
+- It is never interpolated into a name, a selector or a log format.
+- It is non-empty, at most 320 characters, with no control characters.
+- The CRD schema enforces these bounds, so the API server refuses a malformed key.
+- Only an `administrator` may write one, so no unauthenticated request reaches the format.
+
+#### Scenario: A malformed key is refused
+
+- **WHEN** a `RoleGrant` is created with an empty key, an over-long key, or a key containing a control character
+- **THEN** the API server refuses it and no role binding exists
+
 #### Scenario: A grant names one identity pair and one role
 
 - **WHEN** a `RoleGrant` is created with `spec.channel: console`,
