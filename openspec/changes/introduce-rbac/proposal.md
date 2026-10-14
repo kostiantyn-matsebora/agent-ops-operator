@@ -98,7 +98,8 @@ handing them the ability to act on, or delete, everyone else's.
 **Code**:
 - A new CRD type under `platform/manager/api/v1alpha1/`, plus generated
   deepcopy and CRD YAML.
-- A read-only manager-side watch and lookup for it.
+- A read-only manager-side watch and lookup for it, with the manager
+  chart's RBAC gaining `get`/`list`/`watch` on `rolegrants`.
 - An authorization check in `internal/httpapi` (inbound) and
   `internal/chat` (addressing an existing conversation).
 - Role-aware filtering in `platform/console/auth.go` and `conversations.go`.

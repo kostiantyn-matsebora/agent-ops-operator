@@ -136,8 +136,8 @@ Rejected:
 
 The chart-rendered `ClusterRole` in `chart/templates/console.yaml` already
 carries a dedicated `apiGroups: ["agentops.dev"]` block for console's
-read-only grants. This adds `create`/`update` on `RoleGrant` to that same
-block. Every other kind, and the Configuration page's existing read-only
+read-only grants. This adds `get`/`list`/`watch` plus `create`/`update` on
+`RoleGrant` to that same block. Every other kind, and the Configuration page's existing read-only
 position, is untouched.
 
 This is a stated reversal of `docs/console.md`'s "there is no write path to

@@ -70,7 +70,7 @@ The `key` SHALL be treated as an opaque string.
 - It is non-empty, at most 320 characters, with no control characters.
 - The CRD schema enforces these bounds, so the API server refuses a malformed key.
 - The console's control-plane role check, not the API server, admits only an `administrator` to write one.
-- No unauthenticated request therefore reaches the format.
+- Because the key is never interpolated, a hostile key cannot inject into a name, selector or log line.
 
 #### Scenario: A malformed key is refused
 
