@@ -1,6 +1,7 @@
 ## 1. RoleGrant CRD and generated code — api-architect
 
 - [ ] 1.1 Add `RoleGrant` type under `platform/manager/api/v1alpha1/` (`spec.channel`, `spec.key`, `spec.role` with the three-value enum, `status.lastModifiedBy`, `status.lastModifiedAt`), namespaced, per `design.md`'s "A new CRD, `RoleGrant`, not `RoleBinding`".
+- [ ] 1.1a Add kubebuilder validation markers on `spec.key` (non-empty, at most 320 characters, no control characters) so the CRD schema refuses a malformed key, per `specs/access-control/spec.md`'s "A malformed key is refused" scenario.
 - [ ] 1.2 Add a name-derivation helper beside the type: `metadata.name` is `rolegrant-` plus the lowercase hex SHA-256 of `<channel>\n<key>` truncated to 40 characters, per `specs/access-control/spec.md`'s "One RoleGrant per identity pair".
 - [ ] 1.3 Regenerate deepcopy and CRD YAML with `controller-gen` per `build-test.md`'s commands.
 - [ ] 1.4 Add the manager-side role+ownership decision function (hash the inbound `sender` with the existing `OriginReader`-stamping hash for ownership, use `sender` raw for the `RoleGrant` lookup, apply the "no `originReader` means no owner" rule from `design.md`).
