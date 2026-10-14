@@ -14,7 +14,7 @@ Each `{channel, key}` identity pair SHALL hold exactly one role: `user`,
 
 The role SHALL be looked up per identity pair, never per bare identity
 string. A Telegram sender and a console identity for the same person SHALL
-hold independent roles unless an administrator links them.
+hold independent roles.
 
 The three roles SHALL carry this capability matrix:
 

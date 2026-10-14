@@ -88,6 +88,9 @@ handing them the ability to act on, or delete, everyone else's.
   /channel/inbound`) gains a role and ownership check against the target
   conversation's `originReader`, applied uniformly to every implementing
   adapter rather than console-specific.
+- `chat-addressing-discovery`: addressing an existing conversation by name
+  (`/<name> <task>`) is refused for a `user` whose identity is not the
+  conversation's `originReader`. Addressing a Pipeline fresh stays ungated.
 
 ## Impact
 
