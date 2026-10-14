@@ -264,6 +264,29 @@ global:
   demo:
     enabled: false
 
+    # THE DEMO-ONLY SHOWCASE PIPELINE (demo-dual-wiring-showcase): whether the
+    # kubernetes bundle renders its own observing route a SECOND time, as a
+    # plain Pipeline, alongside whatever `global.agentops.wiringMode` already
+    # renders for that bundle — so a demo install exhibits BOTH wiring
+    # primitives (Pipeline and Coordinator) at once, not the Coordinator alone.
+    # See the kubernetes bundle's k8s-bundle capability spec:
+    # openspec/changes/demo-dual-wiring-showcase/specs/k8s-bundle/spec.md.
+    #
+    # `null` — DEFAULT, nullable for the SAME reason `wiringMode` below is: left
+    # unset, the render FOLLOWS `demo.enabled` AND the resolved `wiringMode` —
+    # it defaults to rendering the showcase Pipeline ONLY where `demo.enabled`
+    # is true AND `wiringMode` resolves "coordinator" (demo mode's own default).
+    # An EXPLICIT value here is absolute in BOTH directions — `true` renders it
+    # even where some future default would not, and `false` declines it even
+    # under demo mode, which is the one case a plain (non-nullable) value could
+    # not express.
+    #
+    # Outside `demo.enabled: true`, or wherever the resolved `wiringMode` is
+    # "pipelines", it has NO EFFECT: the bundle's ordinary `pipelines`-mode
+    # route already supplies the Pipeline primitive, and a second one would
+    # duplicate it for no reason.
+    wiringShowcase: null
+
   # The release-wide facts declared in the ONE scope a subchart can read.
   # kubernetes's MCP server derives its own identity and posture from the
   # runtime keys, and both bundles render their MCP servers' network policies

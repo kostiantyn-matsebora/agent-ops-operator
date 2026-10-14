@@ -321,15 +321,23 @@ helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
   claim the same source at once, and the API server fans it out to each.
 
 {: .ao-callout}
-> **The console does not auto-wire itself under this mode, yet.** A
-> `Pipeline`-rendering bundle claims the console's signal source and binds
-> its channel for you (Installation's demo). An `AgentCapability` carries no
-> subscription of its own, and no chart template lists the console's channel
-> in the rendered `Coordinator`'s own `channelRefs` — a chart-wiring gap,
-> not a manager-level restriction: a Coordinator whose `channelRefs` DID name
-> the console would bind it at creation exactly like a Pipeline's. Asking the
-> console something will not reach the chart-rendered Coordinator until you
-> claim its source AND its channel by hand.
+> **The console is wired for you.** The chart-rendered `Coordinator` claims
+> the console's signal source and binds its channel in its own
+> `channelRefs`, exactly like a `Pipeline`'s. Asking the console something
+> reaches it with no hand-wiring step.
+>
+> **Delivery itself does not differ from a `Pipeline`'s.** The root
+> conversation's own completed runs post to its bound channel
+> unconditionally, `escalate` or not — gating delivery on it was retired
+> (`coordinator-unconditional-channels`). What differs is who ever REACHES
+> that channel: a member binds no channel of its own, so its domain work
+> never posts there directly. `escalate` is how a member's result bubbles
+> up to the root instead, one hop at a time, landing as an ordinary
+> message once it arrives. Demo mode's own showcase `Pipeline`
+> (`k8s-observe-pipeline`, see
+> [Getting started]({{ '/getting-started/' | relative_url }})) answers the
+> same observing route directly, with no coordinating decision or bubbling
+> in between.
 
 ## Self-heal: the hourly reaper
 

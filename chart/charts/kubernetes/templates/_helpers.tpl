@@ -213,6 +213,27 @@ and naming is not creating. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- /* Whether demo mode asked for the showcase Pipeline (demo-dual-wiring-showcase).
+Returns "true" or "". Mirrors `kubernetes.wiringActive`'s exact nullable
+pattern, but demo-only: nothing renders without `demo.enabled`; under it an
+explicit `wiringShowcase` wins in both directions and unset follows demo.
+
+Answers ONLY "did demo ask for the showcase" — never "does the showcase make
+sense right now". `pipeline-showcase.yaml` ANDs this with
+`agentops.wiringMode` resolving `coordinator`, so an explicit
+`wiringMode: pipelines` under demo never renders the showcase even though this
+helper alone would say true. */ -}}
+{{- define "kubernetes.demoShowcaseActive" -}}
+{{- $g := .Values.global | default dict -}}
+{{- if dig "demo" "enabled" false $g -}}
+{{- if kindIs "bool" (dig "demo" "wiringShowcase" "" $g) -}}
+{{- if dig "demo" "wiringShowcase" false $g }}true{{ end -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): the sources
 this bundle's wiring would claim and the AgentCapability entries it would list
 in a Coordinator's `agents[]`, mirroring EXACTLY the gating `pipelines.yaml`

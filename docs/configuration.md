@@ -432,6 +432,7 @@ A wrong credential fails late and quietly. The pod is created, then sits in
 | Key | Default | Consequence |
 |---|---|---|
 | `global.agentops.wiringMode` | `null`, which resolves to `pipelines` — or `coordinator` when `global.demo.enabled` is `true` | whether an enabled bundle renders an inline `Pipeline` per route (`pipelines`) or a standalone `AgentCapability` gathered under one chart-rendered `Coordinator` (`coordinator`) |
+| `global.demo.wiringShowcase` | `null`, which resolves to `true` only under `demo.enabled: true` with a resolved `wiringMode` of `coordinator` | whether the kubernetes bundle also renders a plain, always-in-thread `Pipeline` (`k8s-observe-pipeline`) beside the chart-rendered `Coordinator`, reusing the observing route's profile and toolset. Explicit `true`/`false` wins both ways. No effect outside demo mode |
 | `reaper.enabled` | `false` | under `coordinator` mode, an hourly self-heal survey conversation over every open root. Real LLM cost, so it is opt-in |
 
 - **Chart rendering only.** It adds no CRD validation or CEL rule making a
