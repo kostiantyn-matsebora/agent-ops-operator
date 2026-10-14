@@ -10,6 +10,11 @@
   list (`pipeline_types.go`) to include it. Verify: `go build ./...`, and
   the existing CEL unit test for the `capabilityRef`/inline exclusivity
   still passes with the new field included.
+- [ ] 1.2a Add `RuntimeClassName string` to `CoordinatorSpec`'s inline
+  capability fields (`coordinator_types.go`) and add it to the CEL
+  `capabilityRef` mutual-exclusivity rule's field list and message. Verify:
+  `go build ./...`, and a CEL unit test that `capabilityRef` plus an inline
+  `runtimeClassName` on a Coordinator is refused.
 - [ ] 1.3 Add `RuntimeClassName string` to `Conversation.Spec`
   (`conversation_types.go`), the frozen snapshot field. Verify: `go build
   ./...`.
