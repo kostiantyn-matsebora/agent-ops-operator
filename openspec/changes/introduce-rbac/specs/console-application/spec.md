@@ -12,7 +12,9 @@ Every write SHALL be logged with the resolved identity.
 The resolved identity SHALL additionally resolve to a role — `user`,
 `responder`, or `administrator` — looked up by `{channel: "console", key:
 identity}` against `RoleGrant` (access-control), defaulting to `user` when
-none exists.
+none exists. The shared-token identity (`identity == "token"`) is the
+exception: it SHALL resolve to `administrator` by construction, with no
+`RoleGrant` (access-control).
 
 A console-handled write that a role beyond `user` restricts SHALL be
 checked for role before being forwarded, as a fail-fast courtesy. The
@@ -46,7 +48,8 @@ the console's own check would only delay a refusal, never open a hole.
 #### Scenario: Identity resolves to a role
 - **WHEN** a request is admitted with a resolved identity
 - **THEN** the console looks up that identity's role under channel
-  `console`, defaulting to `user` when no `RoleGrant` names it
+  `console`, defaulting to `user` when no `RoleGrant` names it, except the shared-token
+  identity, which resolves to `administrator`
 
 #### Scenario: The console's own role check is a courtesy, not the authority
 - **WHEN** the console's own role check would refuse a write

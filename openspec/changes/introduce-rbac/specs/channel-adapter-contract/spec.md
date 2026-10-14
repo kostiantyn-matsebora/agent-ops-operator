@@ -47,7 +47,8 @@ by name.
 
 - **WHEN** a `user`-role sender posts an inbound reply whose thread
   resolves to a conversation owned by a different identity pair
-- **THEN** the request is refused, and no reply input is appended
+- **THEN** the request is refused with a message naming ownership as the
+  reason, and no reply input is appended
 
 #### Scenario: A user's reply to an unowned conversation is accepted
 
@@ -65,5 +66,5 @@ by name.
 
 - **WHEN** a `user`-role sender addresses, by name, an existing
   conversation they do not own
-- **THEN** the request is refused, exactly as an inbound reply to that
-  conversation would be
+- **THEN** the request is refused with a message naming ownership as the
+  reason, exactly as an inbound reply to that conversation would be
