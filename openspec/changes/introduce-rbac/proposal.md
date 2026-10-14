@@ -16,7 +16,7 @@ handing them the ability to act on, or delete, everyone else's.
   `{channel, key}` identity pair, the same shape
   `Conversation.spec.originReader` already uses. This is per identity pair,
   not per bare identity string. A Telegram sender and a console external-authentication
-  identity for the same human hold independent grants unless linked later.
+  identity for the same human hold independent grants.
 - Add a new CRD, one object per `{channel, key}` → role binding. This follows
   the existing one-object-per-binding convention (`Channel`, `SignalSource`,
   etc.) rather than a singleton holding a map.

@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Reads are authenticated; writes require identity and can be disabled
+### Requirement: Reads are authenticated, writes require identity and can be disabled
 Read access SHALL require a bearer token or a session established from it, UNLESS the deployment declares that authentication is performed upstream. Write actions — replying in a conversation and originating one — SHALL additionally require `console.write.enabled` and a resolved identity, taken from a trusted forward-auth header when present and recorded as the token identity otherwise. An unconfigured token SHALL authorize nobody, and SHALL be indistinguishable from a wrong token.
 
 The two states SHALL remain independent: an absent or empty token SHALL NEVER be interpreted as "authentication not required". Only an explicit declaration that an external authenticator fronts the console SHALL relax the token requirement.
