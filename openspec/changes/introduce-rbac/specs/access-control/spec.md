@@ -49,6 +49,9 @@ role binding, namespaced like every other `agentops.dev` kind, following
 the one-object-per-binding convention `Channel` and `SignalSource` already
 use.
 
+Lookup and uniqueness SHALL be scoped to the release namespace. A
+`RoleGrant` in any other namespace SHALL NOT be read.
+
 Its spec SHALL carry `channel` (matching the value space of
 `Conversation.spec.originReader.channel`), `key` (the RAW identity string,
 never hashed), and `role` (one of `user`, `responder`, `administrator`). Its
@@ -64,7 +67,8 @@ wrote it and when.
 
 ### Requirement: One RoleGrant per identity pair
 
-At most one `RoleGrant` SHALL exist for any `{channel, key}` pair. The
+At most one `RoleGrant` SHALL exist for any `{channel, key}` pair in the
+release namespace. The
 console SHALL refuse to create a second `RoleGrant` for a pair that already
 has one, and SHALL update the existing object instead.
 
@@ -192,6 +196,26 @@ against this matrix in the meantime.
 - **WHEN** a `user`-role sender addresses a conversation owned by a
   different identity pair
 - **THEN** the router's `HandleCommand` refuses it under this matrix
+
+### Requirement: Bulk and role-assignment capabilities are gated at the console
+
+The bulk-close, bulk-delete and role-assignment capabilities SHALL each be
+checked against the resolved role at the console, before the request is
+forwarded or written.
+
+| Capability | Gated at | Requires |
+|---|---|---|
+| Bulk-close | the console's bulk-close route | `responder` or `administrator` |
+| Bulk-delete | the console's bulk-delete route | `administrator` |
+| Assign roles | `/api/control-plane/...` (console-application) | `administrator` |
+
+The manager SHALL NOT gate these, as it receives no human requester for them.
+
+#### Scenario: A user's bulk-close is refused
+
+- **WHEN** a `user`-role identity requests a bulk-close
+- **THEN** the console refuses it, naming `responder` as the role it
+  requires
 
 ### Requirement: Starting a new conversation is open to every role
 

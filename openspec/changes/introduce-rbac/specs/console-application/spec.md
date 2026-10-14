@@ -90,11 +90,13 @@ there too, but this requirement governs only what exists today.
 For a requester whose resolved role is `user`, the console SHALL filter
 conversation list and detail reads to conversations whose
 `spec.originReader` names that requester's own `{channel: "console", key}`
-pair — the same comparison `ConversationSummary.Mine` already makes.
+pair. This is the same comparison `ConversationSummary.Mine` already makes.
 
-A conversation owned by a different identity, or carrying no
-`originReader` at all, SHALL be absent from a `user`'s list, and SHALL read
-as not found on direct detail access.
+A conversation carrying no `originReader` has no owner (access-control).
+The console SHALL also serve it to a `user`, who may reply to it.
+
+A conversation owned by a different identity SHALL be absent from a
+`user`'s list, and SHALL read as not found on direct detail access.
 
 For a requester whose resolved role is `responder` or `administrator`, the
 console SHALL serve every conversation, unfiltered, exactly as it does
@@ -108,7 +110,13 @@ the only read path and a manager-side read check has nothing to guard.
 
 - **WHEN** a `user`-role requester lists conversations
 - **THEN** only conversations whose `originReader` names that requester's
-  own identity pair are returned
+  own identity pair, or that carry no `originReader`, are returned
+
+#### Scenario: A user sees unowned conversations
+
+- **WHEN** a `user`-role requester lists conversations and one carries no
+  `originReader`
+- **THEN** that conversation is returned and its detail is readable
 
 #### Scenario: A responder sees everything
 
