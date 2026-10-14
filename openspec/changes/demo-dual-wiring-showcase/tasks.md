@@ -86,8 +86,12 @@
   posture, to mention the showcase `Pipeline`.
 - [x] 4.3 Update `.claude/rules/chart.md`'s kubernetes bundle section and
   "THE DEMO WIRES THE CONSOLE" section for the new showcase branch.
-- [ ] 4.4 Re-run `python3 .github/scripts/docs-generate.py` (this change
+- [x] 4.4 Re-run `python3 .github/scripts/docs-generate.py` (this change
   adds a chart value) and verify it reports no stale generated block.
+
+  Ran it — "52 generated file(s) already up to date", no diff. The new
+  value is a plain nullable boolean, not a new CRD field or resource
+  template, so it adds no generated block of its own.
 
 ## 5. Documentation — adopter site
 
@@ -102,5 +106,7 @@
   escalation-only channel behavior as a deliberate difference from a
   `Pipeline`, and point at the showcase `Pipeline` as the always-in-thread
   counterpart.
-- [ ] 5.3 Re-run `python3 .github/scripts/docs-generate.py --check` and
+- [x] 5.3 Re-run `python3 .github/scripts/docs-generate.py --check` and
   verify it passes.
+
+  Passes — "52 generated file(s) up to date".
