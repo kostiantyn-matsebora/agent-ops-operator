@@ -69,7 +69,7 @@
   showcase route touches. No existing test needed updating. Full
   `go test ./...` confirmed green (see 2.1).
 
-## 3. E2E tests
+## 3. System tests
 
 - [x] 3.1 Not applicable — ticked. This change is chart-template rendering
   only. It adds no new kubelet, RBAC, informer, or pod-lifecycle behavior:
@@ -77,7 +77,9 @@
   claimants are pre-existing, already-covered cluster mechanisms this
   change does not alter.
 
-## 4. Documentation — reference
+## 4. Documentation
+
+### Reference docs
 
 - [x] 4.1 Add a row for `global.demo.wiringShowcase` to
   `docs/configuration.md`, beside the existing
@@ -93,7 +95,7 @@
   value is a plain nullable boolean, not a new CRD field or resource
   template, so it adds no generated block of its own.
 
-## 5. Documentation — adopter site
+### Adopter site
 
 - [x] 5.1 Update `docs/getting-started.md`: drop the
   `--set global.agentops.wiringMode=pipelines` pin and its stale
@@ -101,11 +103,11 @@
   default, and walk through addressing both the coordinator and the
   showcase pipeline by name.
 - [x] 5.2 Update `docs/guides/coordinate-agents.md`'s callout to reflect
-  that the console source and escalation channel are now claimed for the
-  chart-rendered `Coordinator` (#296), restate the remaining
-  escalation-only channel behavior as a deliberate difference from a
-  `Pipeline`, and point at the showcase `Pipeline` as the always-in-thread
-  counterpart.
+  that the console source and channel are now claimed for the
+  chart-rendered `Coordinator` (#296) exactly as a `Pipeline`'s — every
+  ordinary run reply delivers to it, not only `escalate()` output
+  (`coordinator-unconditional-channels`) — and point at the showcase
+  `Pipeline` as the always-in-thread counterpart.
 - [x] 5.3 Re-run `python3 .github/scripts/docs-generate.py --check` and
   verify it passes.
 

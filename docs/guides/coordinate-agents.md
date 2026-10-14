@@ -326,14 +326,18 @@ helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
 > `channelRefs`, exactly like a `Pipeline`'s. Asking the console something
 > reaches it with no hand-wiring step.
 >
-> **The channel's use still differs from a `Pipeline`'s.** `escalate` posts
-> into it — it does not open it — so a member's own domain work stays off
-> the thread until the coordinating agent decides to escalate. A `Pipeline`
-> posts every reply into every bound channel instead. Demo mode's own
-> showcase `Pipeline` (`k8s-observe-pipeline`, see
-> [Getting started]({{ '/getting-started/' | relative_url }})) is the
-> always-in-thread counterpart, answering the same observing route directly
-> rather than through a coordinating decision.
+> **Delivery itself does not differ from a `Pipeline`'s.** The root
+> conversation's own completed runs post to its bound channel
+> unconditionally, `escalate` or not — gating delivery on it was retired
+> (`coordinator-unconditional-channels`). What differs is who ever REACHES
+> that channel: a member binds no channel of its own, so its domain work
+> never posts there directly. `escalate` is how a member's result bubbles
+> up to the root instead, one hop at a time, landing as an ordinary
+> message once it arrives. Demo mode's own showcase `Pipeline`
+> (`k8s-observe-pipeline`, see
+> [Getting started]({{ '/getting-started/' | relative_url }})) answers the
+> same observing route directly, with no coordinating decision or bubbling
+> in between.
 
 ## Self-heal: the hourly reaper
 
