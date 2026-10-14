@@ -11,8 +11,8 @@ conversation started by a chat command on a surface binds to the addressed
 Pipeline's channels PLUS the surface it was typed on, which is where the
 person is looking.
 
-The Pipeline SHALL be the SOLE source of its conversations' capabilities,
-via two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset`
+The Pipeline, inline or through its `capabilityRef`, SHALL be the SOLE
+source of its conversations' capabilities, via two optional stanzas of ordered refs: `spec.toolsets` (→ `MCPToolset`
 CRs, the allowlist) and `spec.mcpConfigs` (→ `MCPConfig` CRs, the MCP
 servers).
 
@@ -29,8 +29,9 @@ fields:
 - `spec.runtimeRef` — the `AgentRuntime`. Absent, the runtime named
   `default`.
 - `spec.serviceAccountName` — the identity that runtime executes under,
-  OVERRIDING the runtime's own. **Absent, the MINIMUM-PRIVILEGE floor
-  account, which holds no RBAC at all.**
+  OVERRIDING the runtime's own. **Absent, the runtime's own account, and
+  absent there too, the MINIMUM-PRIVILEGE floor account, which holds no RBAC
+  at all.**
 - `spec.runtimeClassName` — the pod's `RuntimeClassName`, OVERRIDING the
   runtime's own. Absent, the runtime's value applies, and absent there too,
   the cluster's default kernel.

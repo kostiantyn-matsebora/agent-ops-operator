@@ -20,7 +20,8 @@ partial support for. Its compatibility is unknown, not designed around here.
 
 **Goals:**
 - A cascading, frozen-at-creation `runtimeClassName` for conversation pods:
-  `AgentCapability` overrides `AgentRuntime`, which is the floor.
+  capability fields (inline on the Pipeline or via `AgentCapability`)
+  override `AgentRuntime`, which is the floor.
 - A global-plus-per-component `runtimeClassName` default reaching every
   other chart-rendered workload, full coverage in this one change.
 - Zero validation of the class name by the operator. A bad name fails at

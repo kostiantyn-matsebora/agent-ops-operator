@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: The page presents defence in depth as three controls, each with its threat and its cost
+### Requirement: The page presents defence in depth as four controls, each with its threat and its cost
 
 The page SHALL present the independent controls under the heading
 **defence in depth**, naming each by its standard term:
