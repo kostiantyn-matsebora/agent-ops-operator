@@ -27,6 +27,8 @@ still draw, as a `workload` node**, rather than being silently absent from a
 namespace it actually runs in.
 
 A runtime image running in several pods SHALL be one node carrying the count.
+For a `user`-role requester, the count SHALL exclude pods of conversations
+that requester cannot see, so it never discloses their existence.
 
 **Infrastructure.** Every pod, and the externals. Nothing from the model is a
 node, and a pod's pipeline and conversation SHALL be attributes in its panel.

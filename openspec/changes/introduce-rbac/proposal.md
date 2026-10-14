@@ -117,7 +117,8 @@ handing them the ability to act on, or delete, everyone else's.
 
 **Adopter site**:
 - `docs/console-guide.md` — a role-assignment section alongside the
-  existing authentication-decision section.
+  existing authentication-decision section. Its own "no write path"
+  claim is corrected too.
 - `docs/console.md` — the "no write path to the Kubernetes API" claim must
   be corrected, as a stated reversal, not silently dropped.
 - `docs/security.md` — a new trust-boundary entry: the console can now
