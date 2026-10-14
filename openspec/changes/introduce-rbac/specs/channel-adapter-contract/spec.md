@@ -67,6 +67,13 @@ this contract.
 - **THEN** the request is refused with a message naming ownership as the
   reason, and no reply input is appended
 
+#### Scenario: A reply with no sender is treated as a user
+
+- **WHEN** an inbound reply omits `sender` and its thread resolves to a
+  conversation carrying an `originReader`
+- **THEN** the request is refused as role `user` with no identity pair, and
+  the same reply to a conversation with no `originReader` is accepted
+
 #### Scenario: A user's reply to an unowned conversation is accepted
 
 - **WHEN** a `user`-role sender posts an inbound reply to a conversation

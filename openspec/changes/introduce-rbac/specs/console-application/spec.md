@@ -17,9 +17,13 @@ exception: it SHALL resolve to `administrator` by construction, with no
 `RoleGrant` (access-control).
 
 A console-handled write that a role beyond `user` restricts SHALL be
-checked for role before being forwarded, as a fail-fast courtesy. The
-manager's own enforcement of the same request is authoritative. Removing
-the console's own check would only delay a refusal, never open a hole.
+checked for role before being forwarded, as a fail-fast courtesy.
+
+The manager's own enforcement is authoritative for reply and originate
+writes only. It never gates role-management writes.
+
+Removing the console's own check on a reply or originate write would only
+delay a refusal, never open a hole.
 
 #### Scenario: Unconfigured is closed, not open
 - **WHEN** no token is configured

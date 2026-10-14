@@ -120,7 +120,7 @@ the console-side check would not create a hole, only a slower error.
 
 ### The manager gets read-only RBAC on `RoleGrant`. Never write
 
-Considered giving the manager write access too, for its own `/admin/roles`
+Considered giving the manager write access too, for its own role-management
 endpoint alongside the console's.
 
 Rejected:
