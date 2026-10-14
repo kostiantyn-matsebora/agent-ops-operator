@@ -19,7 +19,8 @@ Addressing a Pipeline fresh SHALL remain ungated.
 
 - **WHEN** a `user`-role sender addresses a conversation owned by a
   different identity pair
-- **THEN** the router refuses it and the conversation is not touched
+- **THEN** the router refuses it with a message naming ownership as the
+  reason, and the conversation is not touched
 
 #### Scenario: A user starts a new conversation
 
