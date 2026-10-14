@@ -13,7 +13,7 @@
 
 ## 3. Console backend: control-plane route and siloed reads — backend-developer
 
-- [ ] 3.1 Add the `/api/control-plane/...` route namespace in `platform/console`, gated to `administrator` only, with role assignment (list/create/update `RoleGrant`) as its first handler. Verify with a handler test asserting `responder` and `user` both get 403.
+- [ ] 3.1 Add the `/api/control-plane/...` route namespace in `platform/console`, gated to `administrator` only, with role assignment (list/create/update `RoleGrant`) as its first handler. Verify with a handler test asserting `responder` and `user` both get 403, and another asserting a create for an identity pair that already has a `RoleGrant` is refused and the existing object is updated instead.
 - [ ] 3.2 Resolve the requester's role in `auth.go` alongside the existing `Identity(r)` resolution, defaulting to `user` when no `RoleGrant` matches. Verify with a unit test covering the token-identity-is-administrator bootstrap and the external-auth chart-seeded admins path.
 - [ ] 3.3 Filter conversation list and detail (`conversations.go`, `convapi.go`) to the requester's own `{channel: "console", key}` for `user`, unfiltered for `responder`/`administrator`. Verify with the scenarios in `specs/console-application/spec.md`'s `## ADDED Requirements`.
 - [ ] 3.4 Hide (never anonymize) conversation nodes a `user` cannot see from Topology's Model view (`topology.go`). Verify with the scenarios in `specs/console-topology/spec.md`.

@@ -5,10 +5,6 @@ The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, 
 
 The ORIGINATION branch is removed: command parsing and default-profile conversation creation no longer occur here, and a message in an unrecognized thread is no longer adopted as a new conversation. A request without `threadId` SHALL be rejected with a message naming the signal path as the origination route. Channel implementations MAY omit inbound entirely when a separate component handles their ingest.
 
-A request that omits `sender` SHALL be treated as role `user` with no identity pair.
-
-It is therefore refused on a conversation carrying an `originReader`. It is accepted on one carrying none.
-
 A reply whose sender
 resolves to role `user` SHALL be refused when the target conversation's
 `spec.originReader` names a DIFFERENT `{channel, key}` pair than the
@@ -21,6 +17,9 @@ A reply to a target conversation carrying NO `originReader` at
 all SHALL be accepted regardless of the sender's role. A reply
 from a sender whose role is `responder` or `administrator` SHALL NEVER be
 refused by this rule.
+
+A request that omits `sender` SHALL be treated as role `user` with no identity pair.
+It is therefore refused on a conversation carrying an `originReader`. It is accepted on one carrying none.
 
 This is the role-and-ownership decision `access-control` defines, applied
 uniformly here for every channel this contract serves, for a reply on

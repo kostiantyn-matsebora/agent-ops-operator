@@ -37,6 +37,8 @@ write, and from pod phase for pods. The console SHALL compute no health of its
 own. References resolving to nothing SHALL render as broken edges to
 placeholder nodes rather than being omitted.
 
+This no-omission rule covers broken references only, not the role filtering below.
+
 For a `user`-role requester, a Conversation node for a conversation that
 requester cannot see under the console-application siloing rule SHALL be
 OMITTED ENTIRELY from the Model view — never anonymized, never relabeled.

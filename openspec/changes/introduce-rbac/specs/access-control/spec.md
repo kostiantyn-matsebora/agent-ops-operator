@@ -174,6 +174,25 @@ requester's own.
 - **THEN** a `user`-role requester is refused, and a `responder` or
   `administrator` requester is not
 
+### Requirement: Ownership is enforced at two named points
+
+The manager SHALL enforce ownership at exactly two points.
+
+| Point | Gates |
+|---|---|
+| `POST /channel/inbound` in `internal/httpapi` | a reply on a thread |
+| the router's `HandleCommand` in `internal/chat` | addressing an existing conversation by name |
+
+Only the first is specified by the `channel-adapter-contract` delta. The
+contract delta for addressing by name is deferred, and task 2.3 implements it
+against this matrix in the meantime.
+
+#### Scenario: Addressing is gated at the router
+
+- **WHEN** a `user`-role sender addresses a conversation owned by a
+  different identity pair
+- **THEN** the router's `HandleCommand` refuses it under this matrix
+
 ### Requirement: Starting a new conversation is open to every role
 
 Role SHALL gate only CONTINUING an existing conversation — a reply, or
