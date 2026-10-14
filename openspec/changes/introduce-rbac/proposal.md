@@ -121,7 +121,8 @@ handing them the ability to act on, or delete, everyone else's.
 - `docs/console.md` — the "no write path to the Kubernetes API" claim must
   be corrected, as a stated reversal, not silently dropped.
 - `docs/security.md` — a new trust-boundary entry: the console can now
-  mutate who is an administrator, and what bounds that.
+  mutate who is an administrator, and what bounds that. A moved trust
+  boundary re-runs `threat-model.py`.
 - `docs/installation.md` — the bootstrap-admins value. It is reversible
   by removing the entry and upgrading the release, so `configuration.md`
   owns it too, and `installation.md` carries the first-install step.

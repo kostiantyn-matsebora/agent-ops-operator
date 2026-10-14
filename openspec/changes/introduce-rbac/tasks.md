@@ -15,7 +15,7 @@
 ## 3. Console backend: control-plane route and siloed reads — backend-developer
 
 - [ ] 3.1 Add the `/api/control-plane/...` route namespace in `platform/console`, gated to `administrator` only, with role assignment (list/create/update `RoleGrant`) as its first handler. A create for a pair that already has a `RoleGrant` updates the existing object instead.
-- [ ] 3.2 Resolve the requester's role in `auth.go` alongside the existing `Identity(r)` resolution, defaulting to `user` when no `RoleGrant` matches. Return the resolved role in the `GET /api/session` response (`handleSession` in `auth.go`) so the UI can read it.
+- [ ] 3.2 Resolve the requester's role in `auth.go` alongside the existing `Identity(r)` resolution, defaulting to `user` when no `RoleGrant` matches. A token identity and a chart-seeded `bootstrapAdmins` entry resolve to `administrator`, overriding any `RoleGrant`. Return the resolved role in the `GET /api/session` response (`handleSession` in `auth.go`) so the UI can read it.
 - [ ] 3.3 Filter conversation list and detail (`conversations.go`, `convapi.go`) to the requester's own `{channel: "console", key}` for `user`, unfiltered for `responder`/`administrator`, per `specs/console-application/spec.md`'s `## ADDED Requirements`.
 - [ ] 3.4 Hide (never anonymize) conversation nodes a `user` cannot see from Topology's Model view, and omit their pods from the Infrastructure view (`topology.go`), per `specs/console-topology/spec.md`.
 - [ ] 3.5 Extend the console's write-action log line (`console write: action=%s identity=%s path=%s`) to cover role assignment, and stamp `status.lastModifiedBy`/`.lastModifiedAt` on every `RoleGrant` write.
