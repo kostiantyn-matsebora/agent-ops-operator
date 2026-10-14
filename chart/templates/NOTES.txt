@@ -437,6 +437,15 @@ itself:
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "kubernetes.demoShowcaseActive" $kbCtx) (include "kubernetes.wiringActive" $kbCtx) $kb.profile.enabled }}
+
+Demo showcase — Pipeline {{ $kb.pipelines.demoShowcase.name }}{{ if $wired }} ALSO claims SignalSource {{ $src }}{{ end }} alongside the
+chart-rendered Coordinator, reusing the k8s-observe route's own profile and
+read-only toolset.{{ if $wired }} Every admitted Warning event now opens TWO
+conversations, one per claimant, side by side.{{ end }}
+Decline it without giving up the Coordinator:
+  --set global.demo.wiringShowcase=false
+{{- end }}
 {{- end }}
 {{- $hb := index .Values "home-assistant" }}
 {{- if and $hb $hb.enabled }}

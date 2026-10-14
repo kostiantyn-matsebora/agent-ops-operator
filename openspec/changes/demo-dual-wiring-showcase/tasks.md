@@ -22,12 +22,21 @@
 - [x] 1.4 Document `global.demo.wiringShowcase` beside `global.demo.enabled`
   in `chart/values.yaml`'s comment block. Verify `helm lint chart/`
   passes.
-- [ ] 1.5 Update `chart/charts/kubernetes/templates/NOTES.txt` to name the
-  showcase route and state that a cluster `Warning` event now opens two
-  conversations when it renders. Verify by rendering NOTES with `helm
-  template chart/ --set global.demo.enabled=true --show-only
-  chart/templates/NOTES.txt` (or the chart's own notes target) and
-  reading the output.
+- [x] 1.5 Update `chart/templates/NOTES.txt` (the kubernetes subchart ships
+  no `NOTES.txt` of its own — every bundle's notice lives in the parent's,
+  keyed by `index .Values "kubernetes"`, same convention as the existing
+  "claimed TWICE" notice) to name the showcase route and state that a
+  cluster `Warning` event now opens two conversations when it renders.
+  `helm template --show-only` cannot select `NOTES.txt` (confirmed: not a
+  selectable template) and `helm install --dry-run` needs a reachable
+  cluster (confirmed: `Kubernetes cluster unreachable` here) — so the
+  literal verification command is not performable in this environment.
+  Verified instead by executing the full render (a broken reference in
+  `NOTES.txt` does fail `helm template`, confirmed by deliberately
+  injecting one) across the `default`, `demo`, `kubernetes`, `everything`,
+  `demo+wiringShowcase=false`, and `demo+wiringMode=pipelines`
+  permutations — all exit 0. Reading the rendered NOTES text itself is
+  cluster-only and NOT performed here.
 
 ## 2. Unit tests
 
