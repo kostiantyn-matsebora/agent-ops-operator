@@ -50,9 +50,8 @@ handing them the ability to act on, or delete, everyone else's.
   `originReader` is not theirs is refused. Starting a NEW conversation
   (`POST /signal/inbound`, or addressing a Pipeline fresh) stays open to
   every role. This change gates continuing someone else's conversation, not
-  starting one's own. Only the reply contract is specified in this change.
-  The contract delta for addressing by name is deferred, and task 2.3
-  implements it ahead of that delta.
+  starting one's own. Both contracts are specified in this change: the reply
+  contract and the addressing-by-name delta (`chat-addressing-discovery`).
 - `responder` may bulk-close (reversible via reopen) but not bulk-delete.
   Bulk-delete and role assignment are `administrator`-only.
 - Bootstrap: the console's shared-token identity (`identity == "token"`) is

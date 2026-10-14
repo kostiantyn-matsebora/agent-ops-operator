@@ -103,6 +103,12 @@ as today.
   entirely absent from the graph, with no placeholder or anonymized node
   left in their place
 
+#### Scenario: A user's Infrastructure view omits pods of conversations they cannot see
+
+- **WHEN** a `user`-role requester opens the Infrastructure view
+- **THEN** the pod of a conversation they cannot see is entirely absent,
+  with no placeholder or anonymized node left in its place
+
 #### Scenario: Responder and administrator see every conversation node
 
 - **WHEN** a `responder`-role or `administrator`-role requester opens the

@@ -133,3 +133,25 @@ the only read path and a manager-side read check has nothing to guard.
 - **WHEN** a `user`-role requester requests the detail of a conversation
   owned by a different identity
 - **THEN** the console responds as if the conversation does not exist
+
+### Requirement: Bulk routes are gated by the resolved role
+
+The console's bulk-close route SHALL require `responder` or `administrator`.
+The bulk-delete route SHALL require `administrator`. Each check SHALL run
+against the resolved role before the request is forwarded or written, and a
+refusal SHALL name the role it requires.
+
+#### Scenario: A user's bulk-close is refused
+
+- **WHEN** a `user`-role requester calls the bulk-close route
+- **THEN** the console refuses it, naming `responder` as the required role
+
+#### Scenario: A responder's bulk-delete is refused
+
+- **WHEN** a `responder`-role requester calls the bulk-delete route
+- **THEN** the console refuses it, naming `administrator` as the required role
+
+#### Scenario: An administrator may bulk-close and bulk-delete
+
+- **WHEN** an `administrator`-role requester calls either bulk route
+- **THEN** the console forwards the request
