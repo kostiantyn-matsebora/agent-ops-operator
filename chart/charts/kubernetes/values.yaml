@@ -628,6 +628,31 @@ pipelines:
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
+  # The demo-mode showcase route (demo-dual-wiring-showcase): the SAME observing
+  # route above, rendered a SECOND time as a plain Pipeline alongside whatever
+  # `global.agentops.wiringMode` already renders for this bundle — so a demo
+  # install exhibits both wiring primitives (Pipeline and Coordinator) at once.
+  #
+  # This is NOT a third route. It carries no `enabled`, `rbac` or `runtimeRef`
+  # override of its own — `pipeline-showcase.yaml` reads `pipelines.observe.*`
+  # directly for the profile, toolset and privilege level, so the showcase can
+  # never drift into configuring a route that no longer matches what it shows.
+  # The ONLY thing here is the one value that must differ: its own object name,
+  # so it never collides with the `k8s-observe` AgentCapability of the same
+  # underlying route under coordinator mode.
+  #
+  # Gated by `kubernetes.demoShowcaseActive` (global.demo.wiringShowcase) AND
+  # `global.agentops.wiringMode` resolving `coordinator` — see
+  # pipeline-showcase.yaml.
+  demoShowcase:
+    name: k8s-observe-pipeline
+    # Display only, same convention as observe.icon above.
+    icon: aops:observe
+    description: >-
+      The same read-only Kubernetes engineer as k8s-observe, reached directly
+      by name instead of through the coordinator — always replies in its own
+      thread, demonstrating the Pipeline primitive alongside the Coordinator
+      this demo also renders.
   # Channels to deliver to, BY NAME — the one class of object this bundle does
   # not render, so it is values-supplied and the key is omitted entirely when
   # this list is empty. Empty is a working configuration, not a degraded one:

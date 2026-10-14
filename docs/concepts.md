@@ -1437,6 +1437,15 @@ bundle renders its routes, release-wide:
   hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
   same cluster, whatever the chart last rendered. The API server accepts
   both and fans the source out to each.
+- **Demo mode exercises that many-to-many sharing by default.** Under a
+  resolved `coordinator` mode, the kubernetes bundle renders one additional,
+  plain `Pipeline` (`global.demo.wiringShowcase`, nullable like
+  `pipelines.enabled`) alongside the chart-rendered `Coordinator` — the SAME
+  observing route, reused rather than duplicated, claiming the same cluster
+  Events source and the console's chat source the Coordinator already
+  claims. A cluster `Warning` event then opens two conversations side by
+  side, demonstrating both wiring primitives at once instead of only the
+  orchestrator.
 
 ### The self-heal reaper
 

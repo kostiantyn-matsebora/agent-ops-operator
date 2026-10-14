@@ -1,0 +1,116 @@
+{{- /*
+Demo-only showcase wiring (demo-dual-wiring-showcase): renders the SAME
+observing route `pipelines.yaml` would render under `pipelines` mode, as a
+SECOND, additive Pipeline — this time alongside whatever
+`global.agentops.wiringMode` already renders for this bundle. See
+`pipelines.yaml` (the plain-Pipeline mode this clones the shape of) and
+`capabilities.yaml` (the coordinator-mode sibling this renders beside).
+
+UNDER `pipelines` MODE THIS FILE RENDERS NOTHING — the bundle already ships
+the observing route as a Pipeline there, and a second copy of the same route
+would be a literal duplicate, not a showcase. This file fires ONLY where
+`capabilities.yaml` also fires (coordinator mode), so the Pipeline it renders
+here is the one wiring primitive a demo install would otherwise never see.
+
+It reads `pipelines.observe.*` directly for the profile binding, toolset and
+privilege level — never its own parallel config surface — so it can only ever
+be the SAME route rendered a second time, never a route that has drifted from
+what it showcases. The one new value is its own object name/description/icon
+(`pipelines.demoShowcase`), which is the one thing that must differ so this
+object never collides with the `k8s-observe` AgentCapability of the same
+route.
+*/ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "kubernetes.demoShowcaseActive" .) (include "kubernetes.wiringActive" .) .Values.profile.enabled }}
+{{- $p := .Values.pipelines }}
+{{- $g := .Values.global | default dict }}
+{{- $ea := .Values.eventsAdapter }}
+{{- $mcp := .Values.mcp }}
+{{- /* Same construction as pipelines.yaml's own — see its comments for why
+each ref is emitted only when the object it names is rendered. */ -}}
+{{- $sources := list }}
+{{- if and $ea.enabled $ea.source.create }}{{ $sources = append $sources $ea.source.name }}{{ end }}
+{{- $gc := dig "agentops" "console" dict $g }}
+{{- with get $gc "signalSource" | default "" }}{{ $sources = append $sources . }}{{ end }}
+{{- $channels := $p.channels | default list }}
+{{- with get $gc "channel" | default "" }}
+{{- if not (has . $channels) }}{{ $channels = append $channels . }}{{ end }}
+{{- end }}
+{{- $readTools := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $readTools = append $readTools (dig "builtinToolsets" "observe" "name" "agentops-observe" $g) }}
+{{- end }}
+{{- $mcpConfigs := list }}
+{{- if $mcp.enabled }}
+{{- $readTools = append $readTools $mcp.toolsets.observe.name }}
+{{- $mcpConfigs = append $mcpConfigs $mcp.name }}
+{{- end }}
+{{- /* The observing route's own privilege level only — never the write
+toolset. Doubling the acting route would also double the mutating toolset's
+exposure in a demo cluster, for no demonstration value (design.md). */ -}}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ $p.demoShowcase.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  {{- with $p.demoShowcase.icon }}
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: {{ . | quote }}
+  {{- end }}
+  profileRef:
+    name: {{ .Values.profile.name }}
+  {{- with ($p.observe.runtimeRef | default $p.runtimeRef | default "") }}
+  # WHAT EXECUTES this route — the SAME binding `k8s-observe` resolves. Unset
+  # resolves the AgentRuntime named `default`, which the PARENT renders.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with (include "kubernetes.routeAccount" (dict "ctx" $ "cfg" $p.observe "p" $p)) }}
+  # UNDER WHOSE IDENTITY — the SAME account `k8s-observe` resolves, so this
+  # route runs at the SAME privilege level, costing no new identity.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. This bundle renders no ServiceAccount.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with $sources }}
+  # Wiring is pipeline-only: without this claim the source reports Wired=False
+  # and DROPS every event it admits. Shared, many-to-many, with the
+  # chart-rendered Coordinator's own independent claim on the same names — see
+  # design.md's "No de-duplication against the Coordinator's own claim".
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $channels }}
+  # A class of object this bundle does not render, so each is named from
+  # values and the key is absent when nobody named one.
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $readTools }}
+  # The observing route's toolset ONLY — read-only tools, never the
+  # admin/write toolset. Declared, not inherited: profiles carry no
+  # capabilities and nothing supplies a default.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}

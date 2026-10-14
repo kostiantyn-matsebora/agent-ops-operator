@@ -68,7 +68,6 @@ fifteen minutes, most of it the install.
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
      -n agent-ops --create-namespace \
      --set global.demo.enabled=true \
-     --set global.agentops.wiringMode=pipelines \
      --set console.auth.uiToken=demo
    ```
 
@@ -77,20 +76,18 @@ fifteen minutes, most of it the install.
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
      -n agent-ops --create-namespace `
      --set global.demo.enabled=true `
-     --set global.agentops.wiringMode=pipelines `
      --set console.auth.uiToken=demo
    ```
 
    {: .ao-callout}
-   > **Why `wiringMode=pipelines` is spelled out.** Demo mode alone now
-   > defaults to the newer `coordinator` posture, where a chart-rendered
-   > `Coordinator` stands in for the `Pipeline` below — but nothing yet
-   > auto-claims the console's source and channel for a `Coordinator` the way
-   > `pipelines` mode does. Left at the new default, the console in this
-   > walkthrough would come up with no route answering it. Pinning
-   > `pipelines` here keeps this walkthrough working. See
+   > **Demo mode's own default.** Left unset, demo mode resolves
+   > `global.agentops.wiringMode` to `coordinator`: a chart-rendered
+   > `Coordinator` claims the console's source and channel on its own, plus a
+   > second, plain `Pipeline` (`k8s-observe-pipeline`) claiming the same
+   > sources — so this walkthrough exercises both of the product's wiring
+   > primitives at once. See
    > [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }})
-   > to try `coordinator` mode and its hand-wiring step instead.
+   > for what the `Coordinator` adds beyond this.
 
 3. **Wait for the manager.**
 
@@ -116,26 +113,36 @@ fifteen minutes, most of it the install.
 
 2. **Open <http://localhost:8080>** and sign in with `demo`.
 
-3. **Press New conversation** and ask:
+3. **Press New conversation** and address one by name:
 
-   > How many nodes does this cluster have?
+   > /agentops-coordinator How many nodes does this cluster have?
 
-Your question is an ordinary signal, and the
-[route]({{ '/guides/pipeline/' | relative_url }}) claiming the console decides
-who answers.
+   Two routes claim the console's source — the chart-rendered `Coordinator`
+   and the showcase `Pipeline` — so an unaddressed message would show a
+   choice list instead of answering. Addressing one by name skips it. Try
+   the showcase route too:
+
+   > /k8s-observe-pipeline How many nodes does this cluster have?
+
+   Both answer from the same read-only toolset. The `Coordinator` always
+   decides which of its own `agents[]` to invoke first, even with only one
+   enabled bundle. The `Pipeline` answers directly, in its own thread, every
+   time.
 
 ## What you just installed
 
-That answer came from four objects the chart created:
+That answer came from objects the chart created:
 
 | Object | What it is |
 |---|---|
 | `SignalSource/console` | where your questions enter |
 | `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
-| `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
+| `AgentCapability/k8s-observe` | the coordinator-mode wiring: those sources, that profile, a read-only toolset, gathered under the `Coordinator`'s own `agents[]` |
+| `Pipeline/k8s-observe-pipeline` | the SAME route rendered a second time, as a plain `Pipeline` — demo mode's showcase of the simpler primitive |
+| `Coordinator/agentops-coordinator` | the orchestrator every enabled bundle's capability is gathered under |
 | `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
 
-The agent has no permissions of its own and reads your cluster through the
+Neither route has permissions of its own — both read your cluster through the
 bundle's read-only MCP server.
 
 ## What a good run looks like
