@@ -68,9 +68,16 @@ wrote it and when.
 ### Requirement: One RoleGrant per identity pair
 
 At most one `RoleGrant` SHALL exist for any `{channel, key}` pair in the
-release namespace. The
-console SHALL refuse to create a second `RoleGrant` for a pair that already
-has one, and SHALL update the existing object instead.
+release namespace.
+
+Its `metadata.name` SHALL be derived deterministically from the pair:
+`rolegrant-` followed by the lowercase hex SHA-256 of `<channel>\n<key>`,
+truncated to 40 characters. The raw key is never in the name. Two creates
+for one pair therefore collide on name, and the API server refuses the
+second.
+
+The console SHALL refuse to create a second `RoleGrant` for a pair that
+already has one, and SHALL update the existing object instead.
 
 #### Scenario: A second grant for the same pair is refused
 
