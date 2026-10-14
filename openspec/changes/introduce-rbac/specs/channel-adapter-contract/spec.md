@@ -23,9 +23,8 @@ from a sender whose role is `responder` or `administrator` SHALL NEVER be
 refused by this rule.
 
 This is the role-and-ownership decision `access-control` defines, applied
-uniformly here for every channel this contract serves, whether the traffic
-is a reply on `/channel/inbound` or an address of an existing conversation
-by name.
+uniformly here for every channel this contract serves, for a reply on
+`/channel/inbound`.
 
 #### Scenario: Threaded reply is queued serially
 - **WHEN** an adapter posts an inbound message whose thread id matches a conversation with an inflight unit
@@ -61,10 +60,3 @@ by name.
 - **WHEN** a `responder`-role sender posts an inbound reply to a
   conversation owned by a different identity pair
 - **THEN** the reply is routed normally
-
-#### Scenario: Addressing an existing conversation is refused the same way
-
-- **WHEN** a `user`-role sender addresses, by name, an existing
-  conversation they do not own
-- **THEN** the request is refused with a message naming ownership as the
-  reason, exactly as an inbound reply to that conversation would be

@@ -48,7 +48,7 @@
 
 ### Reference docs
 - [ ] 8.1 Update `docs/concepts.md` with the `RoleGrant` CRD and the three roles.
-- [ ] 8.2 Update `docs/contracts.md` with the `POST /channel/inbound` refusal case.
+- [ ] 8.2 Update `docs/contracts.md` with the `POST /channel/inbound` refusal case and the `/api/control-plane/...` route namespace.
 - [ ] 8.3 Update `docs/configuration.md` with the bootstrap-admins chart value, since it is a reversible parent chart value.
 - [ ] 8.4 Re-run `python3 .github/scripts/docs-generate.py` since this change adds a CRD field and a chart value, and verify it reports clean.
 
