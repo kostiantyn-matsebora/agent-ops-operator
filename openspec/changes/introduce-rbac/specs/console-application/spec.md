@@ -12,9 +12,13 @@ Every write SHALL be logged with the resolved identity.
 The resolved identity SHALL additionally resolve to a role — `user`,
 `responder`, or `administrator` — looked up by `{channel: "console", key:
 identity}` against `RoleGrant` (access-control), defaulting to `user` when
-none exists. The shared-token identity (`identity == "token"`) is the
-exception: it SHALL resolve to `administrator` by construction, with no
-`RoleGrant` (access-control).
+none exists.
+
+An identity named in `console.rbac.bootstrapAdmins` SHALL resolve to
+`administrator` even when a `RoleGrant` says otherwise (access-control).
+
+The shared-token identity (`identity == "token"`) SHALL resolve to
+`administrator` by construction, with no `RoleGrant` (access-control).
 
 A console-handled write that a role beyond `user` restricts SHALL be
 checked for role before being forwarded, as a fail-fast courtesy.
@@ -52,8 +56,9 @@ delay a refusal, never open a hole.
 #### Scenario: Identity resolves to a role
 - **WHEN** a request is admitted with a resolved identity
 - **THEN** the console looks up that identity's role under channel
-  `console`, defaulting to `user` when no `RoleGrant` names it, except the shared-token
-  identity, which resolves to `administrator`
+  `console`, defaulting to `user` when no `RoleGrant` names it, except a
+  `bootstrapAdmins` entry (always `administrator`, overriding any `RoleGrant`)
+  and the shared-token identity, which resolves to `administrator`
 
 #### Scenario: The session response carries the role
 - **WHEN** an authenticated client calls `GET /api/session`
