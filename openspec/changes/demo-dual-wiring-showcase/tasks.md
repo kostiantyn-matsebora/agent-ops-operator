@@ -40,7 +40,7 @@
 
 ## 2. Unit tests
 
-- [ ] 2.1 Add render-test scenarios covering four cases, then verify
+- [x] 2.1 Add render-test scenarios covering four cases, then verify
   `go test ./...` in `platform/manager` passes from this worktree:
   - demo defaults render both the `Coordinator` and the showcase
     `Pipeline`
@@ -49,10 +49,25 @@
     pipelines` renders no showcase and no `Coordinator`
   - a non-demo install renders no showcase object, whatever `wiringMode`
     is set to
-- [ ] 2.2 Audit existing chart render tests that assert demo mode's
+
+  Added `TestDemoModeAlsoShowcasesAPlainPipelineUnderCoordinator` in
+  `charttemplate_test.go`, covering all four. `KUBEBUILDER_ASSETS=` the
+  session's envtest path (`~/.envtest` resolved to the wrong `$HOME` in
+  this environment) `go test ./...` in `platform/manager` — all packages
+  pass, including `internal/integration`.
+- [x] 2.2 Audit existing chart render tests that assert demo mode's
   default manifest shape with no explicit `wiringMode` override, and
   update any expected object list or count for the new showcase
   `Pipeline`. Verify `go test ./...` in `platform/manager` stays green.
+
+  Audited every bare `global.demo.enabled=true` call across
+  `internal/integration/*_test.go` (`charttemplate_test.go`,
+  `charttemplate_identity_test.go`, `charttemplate_prometheus_test.go`,
+  `charttemplate_runtimes_test.go`). None assert a Pipeline/Coordinator
+  object list or count — each checks RBAC subjects, bundle presence/absence
+  by name, a guard's error text, or a PVC's access mode, none of which the
+  showcase route touches. No existing test needed updating. Full
+  `go test ./...` confirmed green (see 2.1).
 
 ## 3. E2E tests
 

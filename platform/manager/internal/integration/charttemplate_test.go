@@ -1098,6 +1098,63 @@ func TestDemoModeWiresTheObservingRoute(t *testing.T) {
 	}
 }
 
+// demo-dual-wiring-showcase: under coordinator mode, demo mode ALSO renders a
+// plain Pipeline (k8s-observe-pipeline) beside the chart-rendered Coordinator
+// — the SAME observing route, reused rather than duplicated, so a demo
+// install exhibits both of the product's wiring primitives at once.
+func TestDemoModeAlsoShowcasesAPlainPipelineUnderCoordinator(t *testing.T) {
+	// 1. Demo defaults (coordinator mode, left unset) render both the
+	// Coordinator and the showcase Pipeline.
+	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	pipes := bundlePipelines(out)
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe-pipeline" {
+		t.Fatalf("demo defaults must render exactly k8s-observe-pipeline, got %v", got)
+	}
+	doc := pipes["k8s-observe-pipeline"]
+	for _, needle := range []string{
+		"name: k8s-engineer",   // the SAME observing route's profile
+		"name: cluster-events", // claims the bundle's source
+		"- name: console",     // and the console's
+		"name: k8s-observability",
+	} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("the showcase route must bind %q:\n%s", needle, doc)
+		}
+	}
+	if strings.Contains(doc, "name: k8s-admin") {
+		t.Errorf("the showcase route must NOT bind the mutating toolset:\n%s", doc)
+	}
+
+	// 2. An explicit false declines it, leaving the Coordinator alone.
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.demo.wiringShowcase=false")
+	findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if got := pipelineNames(out); len(got) != 0 {
+		t.Errorf("wiringShowcase=false must render no showcase Pipeline, got %v", got)
+	}
+
+	// 3. An explicit wiringMode=pipelines under demo mode keeps today's
+	// single-Pipeline demo: no Coordinator, no showcase, just k8s-observe.
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.agentops.wiringMode=pipelines")
+	if strings.Contains(out, "\nkind: Coordinator\n") {
+		t.Errorf("wiringMode=pipelines under demo must render no Coordinator:\n%s", out)
+	}
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
+		t.Errorf("wiringMode=pipelines under demo must render k8s-observe, never the showcase, got %v", got)
+	}
+
+	// 4. Outside demo mode the showcase never renders, whatever wiringMode is.
+	for _, mode := range []string{"pipelines", "coordinator"} {
+		out = helmTemplate(t, "--set", "kubernetes.enabled=true",
+			"--set", "global.agentops.wiringMode="+mode)
+		if got := pipelineNames(out); len(got) != 0 {
+			t.Errorf("a non-demo install (wiringMode=%s) must render no showcase Pipeline, got %v", mode, got)
+		}
+	}
+}
+
 // ONE STATED SETTING, four consistent effects. `allowMutations` drops
 // --read-only, widens the server SA and renders k8s-admin; the route that binds
 // it has to move with them, or the setting grants a power no route can
