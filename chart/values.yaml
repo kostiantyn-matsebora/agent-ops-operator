@@ -269,7 +269,8 @@ global:
     # plain Pipeline, alongside whatever `global.agentops.wiringMode` already
     # renders for that bundle — so a demo install exhibits BOTH wiring
     # primitives (Pipeline and Coordinator) at once, not the Coordinator alone.
-    # See openspec/changes/demo-dual-wiring-showcase/specs/k8s-bundle/spec.md.
+    # See the kubernetes bundle's k8s-bundle capability spec:
+    # openspec/changes/demo-dual-wiring-showcase/specs/k8s-bundle/spec.md.
     #
     # `null` — DEFAULT, nullable for the SAME reason `wiringMode` below is: left
     # unset, the render FOLLOWS `demo.enabled` AND the resolved `wiringMode` —
