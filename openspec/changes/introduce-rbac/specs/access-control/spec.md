@@ -178,9 +178,11 @@ requester's own.
 - **THEN** a `user`-role requester is refused, and a `responder` or
   `administrator` requester is not
 
-### Requirement: Ownership is enforced at two named points
+### Requirement: Ownership is enforced on writes at two named points
 
-The manager SHALL enforce ownership at exactly two points.
+The manager SHALL enforce ownership on the write path at exactly two points.
+Ownership is also applied as a READ filter at the console, specified by the
+`console-application` delta.
 
 | Point | Gates |
 |---|---|

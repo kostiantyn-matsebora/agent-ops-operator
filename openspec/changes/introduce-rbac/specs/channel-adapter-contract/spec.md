@@ -1,9 +1,27 @@
 ## MODIFIED Requirements
 
 ### Requirement: Inbound messages enter through the shared router
-The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be delivered to every OTHER bound channel that did not already display it as a `relay` message carrying its attribution as fields rather than composed into the text. Whether the originating surface displayed it is the serving adapter's declaration (`ChannelAdapter.spec.echoesOwnMessages`), not a property of the message — the decision is made PER DESTINATION. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
+The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only. `threadId` is REQUIRED.
 
-The ORIGINATION branch is removed: command parsing and default-profile conversation creation no longer occur here, and a message in an unrecognized thread is no longer adopted as a new conversation. A request without `threadId` SHALL be rejected with a message naming the signal path as the origination route. Channel implementations MAY omit inbound entirely when a separate component handles their ingest.
+The message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations.
+
+The message SHALL be delivered to every OTHER bound channel that did not already display it. It is a `relay` message carrying its attribution as fields rather than composed into the text.
+
+Whether the originating surface displayed it is the serving adapter's declaration (`ChannelAdapter.spec.echoesOwnMessages`), not a property of the message.
+
+The decision is made PER DESTINATION.
+
+In-process (registry) providers SHALL use the same operation pipeline. Routing behavior is identical for built-in and external types.
+
+The ORIGINATION branch is removed:
+
+- Command parsing no longer occurs here.
+- Default-profile conversation creation no longer occurs here.
+- A message in an unrecognized thread is no longer adopted as a new conversation.
+
+A request without `threadId` SHALL be rejected with a message naming the signal path as the origination route.
+
+Channel implementations MAY omit inbound entirely when a separate component handles their ingest.
 
 A reply whose sender
 resolves to role `user` SHALL be refused when the target conversation's
