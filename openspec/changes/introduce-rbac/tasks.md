@@ -1,13 +1,14 @@
 ## 1. RoleGrant CRD and generated code — api-architect
 
 - [ ] 1.1 Add `RoleGrant` type under `platform/manager/api/v1alpha1/` (`spec.channel`, `spec.key`, `spec.role` with the three-value enum, `status.lastModifiedBy`, `status.lastModifiedAt`), namespaced, per `design.md`'s "A new CRD, `RoleGrant`, not `RoleBinding`". Verify it compiles: `go build ./...` in `platform/manager`.
-- [ ] 1.2 Regenerate deepcopy and CRD YAML with `controller-gen` per `build-test.md`'s commands. Verify `chart/crds/` gained one new file and `go vet ./...` is clean.
-- [ ] 1.3 Add the manager-side role+ownership decision function (hash the inbound `sender` with the existing `OriginReader`-stamping hash for ownership, use `sender` raw for the `RoleGrant` lookup, apply the "no `originReader` means no owner" rule from `design.md`). Verify with table-driven unit tests covering every `(role, ownership-present, ownership-match)` combination from `specs/access-control/spec.md`'s scenarios.
+- [ ] 1.2 Add a name-derivation helper beside the type: `metadata.name` is `rolegrant-` plus the lowercase hex SHA-256 of `<channel>\n<key>` truncated to 40 characters, per `specs/access-control/spec.md`'s "One RoleGrant per identity pair". Verify with a unit test asserting determinism, that distinct pairs differ, and that the raw key never appears in the name.
+- [ ] 1.3 Regenerate deepcopy and CRD YAML with `controller-gen` per `build-test.md`'s commands. Verify `chart/crds/` gained one new file and `go vet ./...` is clean.
+- [ ] 1.4 Add the manager-side role+ownership decision function (hash the inbound `sender` with the existing `OriginReader`-stamping hash for ownership, use `sender` raw for the `RoleGrant` lookup, apply the "no `originReader` means no owner" rule from `design.md`). Verify with table-driven unit tests covering every `(role, ownership-present, ownership-match)` combination from `specs/access-control/spec.md`'s scenarios.
 
 ## 2. Manager enforcement — backend-developer
 
 - [ ] 2.1 Add a read-only watch/cache of `RoleGrant`, keyed by `{channel, key}`, wired into `cmd/manager/main.go` alongside the manager's existing informers. Verify with an envtest case that a created/updated `RoleGrant` is observable through the lookup within the existing watch latency this manager already tolerates elsewhere.
-- [ ] 2.2 Enforce the decision function from 1.3 on `POST /channel/inbound` in `internal/httpapi`. Verify with the scenarios in `specs/channel-adapter-contract/spec.md`'s `## MODIFIED Requirements`: a `user`-role sender refused on a foreign conversation, accepted on an ownerless one, and never refused for `responder`/`administrator`.
+- [ ] 2.2 Enforce the decision function from 1.4 on `POST /channel/inbound` in `internal/httpapi`. Verify with the scenarios in `specs/channel-adapter-contract/spec.md`'s `## MODIFIED Requirements`: a `user`-role sender refused on a foreign conversation, accepted on an ownerless one, and never refused for `responder`/`administrator`.
 - [ ] 2.3 Apply the same check when addressing an EXISTING conversation in `internal/chat` (`router.go`'s `HandleCommand`), leaving addressing a Pipeline fresh ungated. Verify with an integration test asserting a `user`-role sender's address into someone else's thread is refused while starting a new one is not.
 - [ ] 2.4 Add manager RBAC (`get`/`list`/`watch` only, never write) on `RoleGrant` to the manager's chart-rendered role. Verify `kubectl auth can-i create rolegrants --as=system:serviceaccount:<ns>:agentops-manager` reports `no` against a rendered chart.
 
