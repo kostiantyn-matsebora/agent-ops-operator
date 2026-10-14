@@ -187,6 +187,7 @@ Properties of the product you cannot read off the values.
 | Property | What holds |
 |---|---|
 | **The manager reads no Secrets** | it holds no verb on `secrets` at all. Everything secret-shaped compiles to a pod-spec reference the kubelet resolves |
+| **The Telegram bot credential has one holder** | `agentops-gateway-telegram` alone holds the bot token. The channel adapter holds only a chart-generated call token and relays every Bot API call through the router, whose NetworkPolicy ingress admits the channel adapter on `router.callPort` |
 | **Adapter credentials are not stored** | a per-adapter token is an HMAC of a master key and the adapter's name, validated by re-deriving it. Nothing is minted, stored, or read back |
 | **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
@@ -327,6 +328,14 @@ claim that the rest is handled too.
 | **Conversation content in pod logs** | the runtime writes what the agent produced to its pod's stdout |
 | **Signing and attestation** | no image is signed, and the chart carries no attestation |
 | **Depth in a coordination** | a tree of agents invoking agents nests as deep as every level's own budget allows — nothing bounds the number of LEVELS, only a repeated Coordinator is refused |
+| **A member's consent boundary is a prompt, not a gate** | An instruction tells an invoked member not to act past its task, and nothing checks it at `/coordinate/invoke` |
+
+**The consent boundary is the agent honoring an instruction.** The manager
+enforces WHO may be invoked, never WHAT the invoked agent then does with the
+task.
+
+Several rounds of prompt tuning, reverted twice, preceded the current wording
+(#296). It is stated as open rather than assumed solid.
 
 **None of this is a surprise to the project.** These are decisions with reasons,
 and the reasons are in

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -73,10 +74,18 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 // creators for the SAME base name — the one retry case design.md describes
 // as legitimate — and expects every one of them to land on a distinct name
 // (base, base-2, base-3, ...) with no error, never a random fallback.
+//
+// n=10 reproduces the exact concurrency TestReplicasThreeDeliversEvery-
+// ConsoleThreadInParallel (test/system) measured live exhausting the
+// original MaxAllocateAttempts=5: ten creators racing one base, every
+// loser's List seeing the same stale snapshot as every other loser, so
+// they recomputed the identical "next free" slot and collided again on the
+// very next attempt. This pins the fix (20 attempts, jittered backoff)
+// against the scenario that broke it.
 func TestAllocateNameRetriesAGenuineCreateConflict(t *testing.T) {
 	ctx := context.Background()
 	const kind, words = "member", "allocate-race-abc"
-	const n = 3
+	const n = 10
 
 	var wg sync.WaitGroup
 	names := make([]string, n)
@@ -91,7 +100,10 @@ func TestAllocateNameRetriesAGenuineCreateConflict(t *testing.T) {
 	wg.Wait()
 
 	base := kind + "-" + words
-	want := map[string]bool{base: true, base + "-2": true, base + "-3": true}
+	want := map[string]bool{base: true}
+	for i := 2; i <= n; i++ {
+		want[fmt.Sprintf("%s-%d", base, i)] = true
+	}
 	seen := map[string]bool{}
 	for i, err := range errs {
 		if err != nil {

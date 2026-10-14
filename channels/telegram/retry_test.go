@@ -22,7 +22,7 @@ func stubBotAPI(t *testing.T, script ...string) (*httptest.Server, *[]string) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		body := script[len(script)-1]
 		if n < len(script) {
 			body = script[n]
@@ -39,7 +39,7 @@ const rateLimited = `{"ok":false,"error_code":429,"description":"Too Many Reques
 
 func TestRetryAfterIsHonouredThenSucceeds(t *testing.T) {
 	srv, calls := stubBotAPI(t, rateLimited, `{"ok":true,"result":{"message_id":7}}`)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	start := time.Now()
 	if err := tg.Send(context.Background(), "-100", nil, "hello"); err != nil {
@@ -63,7 +63,7 @@ func TestRetryAfterIsHonouredThenSucceeds(t *testing.T) {
 
 func TestSustainedRateLimitFailsInsideTheBudget(t *testing.T) {
 	srv, calls := stubBotAPI(t, rateLimited)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	// a 4-second budget against a 1s retry_after: it gives up rather than
 	// running past the claim window
@@ -88,7 +88,7 @@ func TestSustainedRateLimitFailsInsideTheBudget(t *testing.T) {
 // 2026-08-13 rejections.
 func TestCreateTopicHonoursRetryAfter(t *testing.T) {
 	srv, calls := stubBotAPI(t, rateLimited, `{"ok":true,"result":{"message_thread_id":4242}}`)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	id, err := tg.CreateTopic(context.Background(), "-100", "PodCrashLooping")
 	if err != nil {
@@ -106,7 +106,7 @@ func TestCreateTopicHonoursRetryAfter(t *testing.T) {
 // and let the manager re-derive.
 func TestNonRateLimitErrorIsNotRetried(t *testing.T) {
 	srv, calls := stubBotAPI(t, `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	if err := tg.Send(context.Background(), "-100", nil, "hello"); err == nil {
 		t.Fatal("a 400 must be reported")

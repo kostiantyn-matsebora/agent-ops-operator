@@ -432,6 +432,7 @@ A wrong credential fails late and quietly. The pod is created, then sits in
 | Key | Default | Consequence |
 |---|---|---|
 | `global.agentops.wiringMode` | `null`, which resolves to `pipelines` — or `coordinator` when `global.demo.enabled` is `true` | whether an enabled bundle renders an inline `Pipeline` per route (`pipelines`) or a standalone `AgentCapability` gathered under one chart-rendered `Coordinator` (`coordinator`) |
+| `global.demo.wiringShowcase` | `null`, which resolves to `true` only under `demo.enabled: true` with a resolved `wiringMode` of `coordinator` | whether the kubernetes bundle also renders a plain, always-in-thread `Pipeline` (`k8s-observe-pipeline`) beside the chart-rendered `Coordinator`, reusing the observing route's profile and toolset. Explicit `true`/`false` wins both ways. No effect outside demo mode |
 | `reaper.enabled` | `false` | under `coordinator` mode, an hourly self-heal survey conversation over every open root. Real LLM cost, so it is opt-in |
 
 - **Chart rendering only.** It adds no CRD validation or CEL rule making a
@@ -616,3 +617,16 @@ CRDs *and* the Pipelines and Channels that are instances of them.
 **Helm never upgrades them either.** When a release changes a CRD field, its
 entry in [CHANGELOG.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md) says so and gives you the `kubectl apply`
 line. Nothing else in the chart needs that treatment.
+
+## Telegram router
+
+Set under the `telegram` bundle. `router.callPort` is reversible with a
+`helm upgrade`. `gatewayUrl`/`gatewayToken` are not values you set — they
+are keys of the chart-generated Secret `agentops-telegram-gateway`,
+listed here for completeness.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `router.callPort` | `8080` | the port the router's Service and NetworkPolicy serve `POST /telegram/call/{method}` on |
+| `gatewayUrl` | rendered | the router URL, re-rendered from `router.callPort` on every upgrade `lookup` can see the Secret |
+| `gatewayToken` | generated once | the call token, generated at install and left untouched by every later upgrade. A hand-built Secret must carry both keys |

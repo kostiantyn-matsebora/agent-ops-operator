@@ -7,7 +7,7 @@ dependencies:
   version: 0.3.2
 - name: telegram
   repository: ""
-  version: 0.4.0
+  version: 0.5.0
 - name: home-assistant
   repository: ""
   version: 0.2.0
@@ -20,5 +20,5 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
-digest: sha256:2a053527aa98f9e7937ee30e959a6f5c484aa5a0af2a6f2af2e6b5df78962bea
-generated: "2026-09-12T18:12:38.072266304+03:00"
+digest: sha256:2509a9c6fef3df979de24989cbadf05f7c88d99b8f4f56e7e933d54aa1b9bcdd
+generated: "2026-10-11T14:18:13.969023387+03:00"

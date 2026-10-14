@@ -417,11 +417,14 @@ within the list.
 
 ### Pipeline
 
-**The wiring.** N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus
-the agent's **capabilities** (`toolsets` / `mcpConfigs`, see
-[below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
-`serviceAccountName`, see [below](#execution-is-wiring-too)) — the only place
-either is declared.
+**The wiring, for one agent.** N `signalSourceRefs` × M `channelRefs` + one
+`profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`,
+see [below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
+`serviceAccountName`, see [below](#execution-is-wiring-too)).
+
+A `Coordinator` (below) declares the same `AgentCapabilitySpec` fields for its OWN coordinating
+agent, inline on itself, and an `AgentCapability` declares them standalone.
+A Pipeline is where an ordinary, single-agent route declares them inline.
 
 **It is reached two ways and no others**:
 
@@ -440,8 +443,8 @@ What the wiring produces:
 - **A user message on one surface is delivered to every other bound channel** as
   attributed text.
 
-**Wiring lives ONLY here.** Sources route nothing until a Ready Pipeline lists
-them.
+**Wiring lives only in a Pipeline or a Coordinator.** Sources route nothing
+until a Ready one of either lists them.
 
 **Sources are shareable, exactly as channels are** — see
 [Sharing a source](#sharing-a-source).
@@ -545,7 +548,11 @@ invokes named members from `spec.agents[]`.
 - **It claims sources with `signalSourceRefs`**, shareable exactly as a
   Pipeline's are.
 - **Each `agents[]` entry names ONE of `capabilityRef` or `coordinatorRef`.**
-  The second nests: the member is that Coordinator's own root.
+  The second nests: the member is that Coordinator's own root. Every
+  entry's `description` is required and capped at 2048 bytes.
+- **It declares its own capability inline**, the same `AgentCapabilitySpec`
+  fields as a Pipeline: `profileRef`, `runtimeRef`, `serviceAccountName`,
+  `toolsets`, `mcpConfigs` and `persistence`.
 - **`spec.limits` bounds the tree**: `maxAgents`, `maxTurns` and `deadline`,
   enforced per level and never pooled across nesting.
 - **`channelRefs` are reached only by escalation.** A member binds no channel
@@ -1430,6 +1437,15 @@ bundle renders its routes, release-wide:
   hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
   same cluster, whatever the chart last rendered. The API server accepts
   both and fans the source out to each.
+- **Demo mode exercises that many-to-many sharing by default.** Under a
+  resolved `coordinator` mode, the kubernetes bundle renders one additional,
+  plain `Pipeline` (`global.demo.wiringShowcase`, nullable like
+  `pipelines.enabled`) alongside the chart-rendered `Coordinator` — the SAME
+  observing route, reused rather than duplicated, claiming the same cluster
+  Events source and the console's chat source the Coordinator already
+  claims. A cluster `Warning` event then opens two conversations side by
+  side, demonstrating both wiring primitives at once instead of only the
+  orchestrator.
 
 ### The self-heal reaper
 

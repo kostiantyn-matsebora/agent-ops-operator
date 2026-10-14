@@ -1098,6 +1098,63 @@ func TestDemoModeWiresTheObservingRoute(t *testing.T) {
 	}
 }
 
+// demo-dual-wiring-showcase: under coordinator mode, demo mode ALSO renders a
+// plain Pipeline (k8s-observe-pipeline) beside the chart-rendered Coordinator
+// — the SAME observing route, reused rather than duplicated, so a demo
+// install exhibits both of the product's wiring primitives at once.
+func TestDemoModeAlsoShowcasesAPlainPipelineUnderCoordinator(t *testing.T) {
+	// 1. Demo defaults (coordinator mode, left unset) render both the
+	// Coordinator and the showcase Pipeline.
+	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	pipes := bundlePipelines(out)
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe-pipeline" {
+		t.Fatalf("demo defaults must render exactly k8s-observe-pipeline, got %v", got)
+	}
+	doc := pipes["k8s-observe-pipeline"]
+	for _, needle := range []string{
+		"name: k8s-engineer",   // the SAME observing route's profile
+		"name: cluster-events", // claims the bundle's source
+		"- name: console",     // and the console's
+		"name: k8s-observability",
+	} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("the showcase route must bind %q:\n%s", needle, doc)
+		}
+	}
+	if strings.Contains(doc, "name: k8s-admin") {
+		t.Errorf("the showcase route must NOT bind the mutating toolset:\n%s", doc)
+	}
+
+	// 2. An explicit false declines it, leaving the Coordinator alone.
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.demo.wiringShowcase=false")
+	findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if got := pipelineNames(out); len(got) != 0 {
+		t.Errorf("wiringShowcase=false must render no showcase Pipeline, got %v", got)
+	}
+
+	// 3. An explicit wiringMode=pipelines under demo mode keeps today's
+	// single-Pipeline demo: no Coordinator, no showcase, just k8s-observe.
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.agentops.wiringMode=pipelines")
+	if strings.Contains(out, "\nkind: Coordinator\n") {
+		t.Errorf("wiringMode=pipelines under demo must render no Coordinator:\n%s", out)
+	}
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
+		t.Errorf("wiringMode=pipelines under demo must render k8s-observe, never the showcase, got %v", got)
+	}
+
+	// 4. Outside demo mode the showcase never renders, whatever wiringMode is.
+	for _, mode := range []string{"pipelines", "coordinator"} {
+		out = helmTemplate(t, "--set", "kubernetes.enabled=true",
+			"--set", "global.agentops.wiringMode="+mode)
+		if got := pipelineNames(out); len(got) != 0 {
+			t.Errorf("a non-demo install (wiringMode=%s) must render no showcase Pipeline, got %v", mode, got)
+		}
+	}
+}
+
 // ONE STATED SETTING, four consistent effects. `allowMutations` drops
 // --read-only, widens the server SA and renders k8s-admin; the route that binds
 // it has to move with them, or the setting grants a power no route can
@@ -2953,6 +3010,49 @@ func defaultRuntimeDoc(out string) (string, string) {
 	return "", ""
 }
 
+// call-auth.yaml's gatewayToken is generated the same way adapterAuth.token
+// and console.auth.uiToken are, so it owes the SAME property
+// TestUpgradeRendersNoGeneratedCredential pins for those two: a cluster-less
+// upgrade render must mint no fresh Secret at all, or a GitOps sync (or any
+// `helm template --is-upgrade` with no cluster to `lookup`) would rotate the
+// binding every time it ran, breaking channel-telegram's calls to the router
+// until both sides picked up the same new token.
+func TestTelegramGatewayTokenRendersNoGeneratedCredentialOnUpgrade(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	out := helmTemplate(t, append(append([]string{}, surface...), "--is-upgrade")...)
+	if doc := secretDoc(out, "agentops-telegram-gateway"); doc != "" {
+		t.Fatalf("an upgrade with no existing Secret for lookup to see must render no gateway-binding Secret, got:\n%s", doc)
+	}
+}
+
+// ...and the install side: a fresh install still must generate the Secret,
+// carrying the keep policy so an upgrade dropping it from the manifest does
+// not delete the live object.
+func TestTelegramGatewayTokenGeneratesOnInstall(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	out := helmTemplate(t, surface...)
+	doc := secretDoc(out, "agentops-telegram-gateway")
+	if doc == "" {
+		t.Fatal("agentops-telegram-gateway must be generated on install")
+	}
+	if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
+		t.Fatalf("agentops-telegram-gateway must carry the keep policy, or the first upgrade deletes it:\n%s", doc)
+	}
+	if !strings.Contains(doc, "gatewayToken: ") {
+		t.Fatalf("agentops-telegram-gateway must carry gatewayToken:\n%s", doc)
+	}
+}
+
 // The Bot API root is configuration on the telegram bundle, and UNSET renders
 // nothing: the default install must be byte-identical to the one before the
 // value existed, or a render test on the router would be the only thing that
@@ -2965,8 +3065,8 @@ func TestTelegramAPIBaseRendersOnlyWhenSet(t *testing.T) {
 		"--set", "telegram.surface.credentials.botToken=x",
 	}
 	base := helmTemplate(t, surface...)
-	if strings.Contains(base, "TELEGRAM_API_BASE") || strings.Contains(base, "apiBase:") {
-		t.Fatalf("an unset apiBase must render no env entry and no Secret key")
+	if strings.Contains(base, "TELEGRAM_API_BASE") {
+		t.Fatalf("an unset apiBase must render no env entry")
 	}
 	explicitEmpty := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=")...)
 	if telegramBundleDocs(explicitEmpty) != telegramBundleDocs(base) || telegramBundleDocs(base) == "" {
@@ -2980,25 +3080,33 @@ func TestTelegramAPIBaseRendersOnlyWhenSet(t *testing.T) {
 // telegramBundleDocs isolates the telegram bundle's own rendered documents:
 // generated credentials differ per render, so comparing the whole output
 // would never match even when the bundle itself is byte-identical.
+//
+// call-auth.yaml is excluded for the same reason, one level in: its
+// gatewayToken is `randAlphaNum 32` on every install-shaped render (no
+// existing release for `lookup` to reuse against), so two otherwise-identical
+// renders of this bundle would never compare equal while it stayed in scope.
 func telegramBundleDocs(out string) string {
 	var keep []string
 	for _, doc := range strings.Split(out, "\n---") {
-		if strings.Contains(doc, "/charts/telegram/templates/") {
+		if strings.Contains(doc, "/charts/telegram/templates/") &&
+			!strings.Contains(doc, "/charts/telegram/templates/call-auth.yaml") {
 			keep = append(keep, doc)
 		}
 	}
 	return strings.Join(keep, "\n---")
 }
 
+// assertTelegramAPIBaseRendered checks the router's own env only.
+// chat-ops-broker-telegram-gateway moved the bot credential (and apiBase
+// override) off the Channel's Secret entirely: channel-telegram no longer
+// holds a bot token, calls the gateway's POST /telegram/call instead of
+// Telegram directly, and the gateway (the router, this env var) is now the
+// sole place apiBase means anything.
 func assertTelegramAPIBaseRendered(t *testing.T, set string) {
 	t.Helper()
-	for _, needle := range []string{
-		"- name: TELEGRAM_API_BASE\n              value: \"http://fake-bot-api:8081/\"",
-		"apiBase: \"http://fake-bot-api:8081/\"",
-	} {
-		if !strings.Contains(set, needle) {
-			t.Errorf("a set apiBase must render %q", needle)
-		}
+	needle := "- name: TELEGRAM_API_BASE\n              value: \"http://fake-bot-api:8081/\""
+	if !strings.Contains(set, needle) {
+		t.Errorf("a set apiBase must render %q", needle)
 	}
 }
 

@@ -19,16 +19,25 @@
 // GET/PUT /offset and this adapter writes it to the contract's state API, so
 // restarts never replay updates and the router needs no RBAC of its own.
 //
-// Credentials are per channel: each served Channel's credentialsSecretRef is
-// projected into this pod's environment and located via the channel listing's
-// credentialEnvPrefix (key botToken); TELEGRAM_BOT_TOKEN remains the fallback
-// for channels without projected credentials (hand-deployed deployments). The
-// SAME Secret backs the router, which needs the token to poll.
+// It holds NO Telegram credential at all (chat-ops-broker-telegram-gateway).
+// Every Bot API call it makes — send, document upload, the forum topic
+// lifecycle, command registration — is relayed through gateway-telegram's
+// POST /telegram/call/{method}; that process is now the SOLE holder of the
+// bot token, both directions. See gotchas.md, 2026-10-11.
 //
-// Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
-// fallback), TELEGRAM_API_BASE (optional, default https://api.telegram.org —
-// the Bot API root every call goes to; a credential Secret's `apiBase` key
-// overrides it per channel, and Channel.spec.config never can), ADAPTER_NAME
+// Gateway binding is per channel: each served Channel's credentialsSecretRef
+// is projected into this pod's environment and located via the channel
+// listing's credentialEnvPrefix (keys gatewayUrl, gatewayToken);
+// TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN remain the fallback for
+// channels without projected credentials (hand-deployed deployments) — the
+// same role TELEGRAM_BOT_TOKEN/TELEGRAM_API_BASE used to play.
+//
+// `ChannelAdapter` carries no general `env` field (adapters.md), so the
+// credential projection the Channel already offers is the one sanctioned
+// path for this to reach the pod at all.
+//
+// Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_GATEWAY_URL (optional
+// fallback), TELEGRAM_GATEWAY_TOKEN (optional fallback), ADAPTER_NAME
 // (default "telegram"), LISTEN_ADDR (default ":8080" — in-cluster the
 // reconciler injects it from ChannelAdapter.spec.port), projected
 // AGENTOPS_CRED_* vars.
@@ -87,24 +96,32 @@ type channelConfig struct {
 	DeleteTopicOnConversationDelete bool `json:"deleteTopicOnConversationDelete,omitempty"`
 }
 
-// servedChannel is one validated channel with its resolved credentials.
+// servedChannel is one validated channel with its resolved gateway binding.
+//
+// There is no bot token here any more (chat-ops-broker-telegram-gateway):
+// gateway-telegram is the sole holder of it. What this adapter needs instead
+// is WHERE that gateway is and the shared secret that authenticates to it —
+// resolved exactly where the token used to be resolved from, because
+// `ChannelAdapter` carries no general `env` field (adapters.md: "pure
+// implementation... no env"). The Channel's `credentialsSecretRef` is the
+// one sanctioned path for implementation-specific configuration to reach
+// this pod, so the chart now projects `gatewayUrl`/`gatewayToken` through it
+// instead of `botToken`/`apiBase`.
 type servedChannel struct {
-	cfg   channelConfig
-	token string
-	// apiBase is the Bot API root this surface's token is sent to. From the
-	// credential Secret's `apiBase` key, else the process default — the same
-	// Secret that holds the token, so redirecting it grants nothing the token
-	// itself did not already.
-	apiBase string
+	cfg          channelConfig
+	gatewayURL   string
+	gatewayToken string
 }
 
 type adapter struct {
-	mgr           *Manager
-	channelType   string
-	fallbackToken string
-	listen        string
-	// apiBase is the process-level Bot API root (TELEGRAM_API_BASE resolved).
-	apiBase string
+	mgr         *Manager
+	channelType string
+	listen      string
+	// fallbackGatewayURL/Token are TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN,
+	// for a channel with no projected credential (hand-deployed back-compat) —
+	// the same role TELEGRAM_BOT_TOKEN used to play.
+	fallbackGatewayURL   string
+	fallbackGatewayToken string
 
 	// pace spreads outbound work across the Bot API's budgets. Telegram
 	// REJECTS rather than queues, so without this a burst is lost, not delayed.
@@ -118,7 +135,7 @@ type adapter struct {
 	mu       sync.Mutex
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
-	clients  map[string]*Telegram     // bot client per token
+	clients  map[string]*Telegram     // Bot API client per gateway binding
 
 	// completed remembers the op ids this process already acted on. Ops are
 	// at-least-once — a completion the manager never received comes back
@@ -216,17 +233,17 @@ func main() {
 		listen = ":8080"
 	}
 	a := &adapter{
-		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
-		channelType:   channelType,
-		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
-		apiBase:       resolveAPIBase(""),
-		listen:        listen,
-		pace:          newPacer(),
-		menu:          newMenu(),
-		channels:      map[string]servedChannel{},
-		reported:      map[string]string{},
-		clients:       map[string]*Telegram{},
-		completed:     newCompletedOps(1024),
+		mgr:                  NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
+		channelType:          channelType,
+		fallbackGatewayURL:   os.Getenv("TELEGRAM_GATEWAY_URL"),
+		fallbackGatewayToken: os.Getenv("TELEGRAM_GATEWAY_TOKEN"),
+		listen:               listen,
+		pace:                 newPacer(),
+		menu:                 newMenu(),
+		channels:             map[string]servedChannel{},
+		reported:             map[string]string{},
+		clients:              map[string]*Telegram{},
+		completed:            newCompletedOps(1024),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -259,9 +276,9 @@ func (a *adapter) handler() http.Handler {
 }
 
 // refreshChannels re-reads served channels, validates config, resolves each
-// channel's bot token (projected credentials via credentialEnvPrefix, key
-// botToken; TELEGRAM_BOT_TOKEN fallback), and reports validity changes as the
-// channel's Ready condition.
+// channel's gateway binding (projected credentials via credentialEnvPrefix,
+// keys gatewayUrl/gatewayToken; TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN
+// fallback), and reports validity changes as the channel's Ready condition.
 func (a *adapter) refreshChannels(ctx context.Context) {
 	infos, err := a.mgr.Channels(ctx, a.channelType)
 	if err != nil {
@@ -272,13 +289,16 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 	for _, info := range infos {
 		var cfg channelConfig
 		problem := ""
-		token, apiBase := "", ""
+		gatewayURL, gatewayToken := "", ""
 		if info.CredentialEnvPrefix != "" {
-			token = os.Getenv(info.CredentialEnvPrefix + "botToken")
-			apiBase = os.Getenv(info.CredentialEnvPrefix + "apiBase")
+			gatewayURL = os.Getenv(info.CredentialEnvPrefix + "gatewayUrl")
+			gatewayToken = os.Getenv(info.CredentialEnvPrefix + "gatewayToken")
 		}
-		if token == "" {
-			token = a.fallbackToken
+		if gatewayURL == "" {
+			gatewayURL = a.fallbackGatewayURL
+		}
+		if gatewayToken == "" {
+			gatewayToken = a.fallbackGatewayToken
 		}
 		if len(info.Config) == 0 {
 			problem = "spec.config is missing"
@@ -286,8 +306,8 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			problem = "spec.config is not valid JSON for the telegram adapter: " + err.Error()
 		} else if cfg.ChatID == "" {
 			problem = "spec.config.chatId is required"
-		} else if token == "" {
-			problem = "no bot token: set Channel.credentialsSecretRef (Secret key botToken) or provide the adapter a TELEGRAM_BOT_TOKEN fallback"
+		} else if gatewayURL == "" || gatewayToken == "" {
+			problem = "no gateway binding: set Channel.credentialsSecretRef (Secret keys gatewayUrl/gatewayToken) or provide the adapter TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN fallbacks"
 		}
 		a.mu.Lock()
 		last := a.reported[info.Name]
@@ -307,7 +327,7 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			a.reported[info.Name] = "ok"
 			a.mu.Unlock()
 		}
-		next[info.Name] = servedChannel{cfg: cfg, token: token, apiBase: a.baseFor(apiBase)}
+		next[info.Name] = servedChannel{cfg: cfg, gatewayURL: gatewayURL, gatewayToken: gatewayToken}
 	}
 	a.mu.Lock()
 	a.channels = next
@@ -321,29 +341,18 @@ func (a *adapter) channel(name string) (servedChannel, bool) {
 	return sc, ok
 }
 
-// baseFor resolves a channel's Bot API root: its credential Secret's value,
-// else the process default.
-func (a *adapter) baseFor(fromSecret string) string {
-	if b := strings.TrimRight(strings.TrimSpace(fromSecret), "/"); b != "" {
-		return b
-	}
-	return a.apiBase
-}
-
-// client returns (caching) the Bot API client for a served channel — one per
-// token at the default root, keyed token@root where a surface names its own.
+// client returns (caching) the Bot API client for a served channel's gateway
+// binding — one per distinct (gatewayURL, gatewayToken) pair, since most
+// installs serve every channel through the same one gateway-telegram
+// instance but a hand-deployed one may not.
 func (a *adapter) client(sc servedChannel) *Telegram {
-	base := sc.apiBase // resolved by baseFor when the channel was admitted
-	key := sc.token
-	if base != a.baseFor("") {
-		key = sc.token + "@" + base
-	}
+	key := sc.gatewayURL + "|" + sc.gatewayToken
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if c := a.clients[key]; c != nil {
 		return c
 	}
-	c := NewTelegram(sc.token, base)
+	c := NewTelegram(sc.gatewayURL, sc.gatewayToken)
 	a.clients[key] = c
 	return c
 }

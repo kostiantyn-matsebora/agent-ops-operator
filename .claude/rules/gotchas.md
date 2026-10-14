@@ -21,6 +21,7 @@
 | HA config-entry failures log under `config_entries` | parse the domain from the MESSAGE TEXT |
 | Telegram's `reply_to_message` never nests | name the addressed form in the menu text |
 | Two `getUpdates` consumers, one bot token | 409s — stop the old poller, confirm, then start new |
+| Two Telegram components held the same bot token, splitting custody the gateway's own name argued against | consolidate into the gateway — `POST /telegram/call/{method}` relay, one chart-generated shared call token |
 
 ### Wiring, review and CI mechanics
 
@@ -66,3 +67,8 @@
 | Idle conversations hold a GLOBAL slot, starving the next lane | each lane closes its own, waits for `Closed` |
 | `port-forward` doesn't survive its pod being deleted | a supervisor goroutine relaunches it |
 | Leader churn stalls a few conversations for whole staleness cycles | widen only that wait to 5m |
+| `/channel/ops` 503'd any non-leader unconditionally — a Service pins one connection to one replica for its whole life | non-leader reverse-proxies to the leader (`leaderProxyMiddleware`), refuses only if truly unreachable. A Telegram topic went uncreated 9+ hours before this was measured. Verify: `TestChannelOpsProxiesToLeaderWhenReachable` |
+| `/activity/stream`'s SSE connection has the same pinning, but the activity log is itself a per-process ring buffer a non-leader's copy never fills | proxy it too, but fall through to LOCAL state when unreachable — a partial activity view beats none, unlike `/channel/ops`. Verify: `TestActivityProxiesToLeaderWhenReachable` |
+| Fixing one endpoint at a time (`/channel/ops`, then `/activity*`) was itself the failure | generalized into ONE middleware proxying every route except `/healthz`, each handler keeping its own local fallback |
+| The middleware was silently a no-op: the manager's own NetworkPolicy never admitted its own kind, so every non-leader dial was DROPPED with no log anywhere — measured as a 503 every ~35s for 15+ minutes across one stable leader | admit `app.kubernetes.io/name: agentops-manager` in the existing ingress rule on 8080 — a dumb-proxy design needs a traffic pattern (a component calling its own kind) nothing else did, and a NetworkPolicy allow-list is blind to it until told. Verify: `TestEveryWiredFlowIsAllowed` |
+| `call-auth.yaml`'s Secret body rendered unconditionally, unlike `adapter-auth.yaml`'s own guard — a cluster-less upgrade (GitOps sync, `helm template --is-upgrade`) minted a fresh `gatewayToken` every run | gate the body on `$existingVal` or a fresh install, matching `adapter-auth.yaml`. Verify: `TestTelegramGatewayTokenRendersNoGeneratedCredentialOnUpgrade` |

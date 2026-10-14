@@ -8,61 +8,40 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
 // Telegram is a minimal Bot API client for a supergroup with Topics enabled.
+//
+// It holds no Telegram credential of its own. Every call is relayed through
+// gateway-telegram's POST /telegram/call/{method} (chat-ops-broker-telegram-gateway,
+// see gotchas.md 2026-10-11): that process is now the SOLE holder of the bot
+// token, inbound and outbound alike. This client only needs to know where the
+// gateway is and the shared secret that authenticates to it.
 type Telegram struct {
-	Token string
-	HTTP  *http.Client
-	// BaseURL is the Bot API root, resolved by NewTelegram from the explicit
-	// value, then TELEGRAM_API_BASE, then the real host. A literal built
-	// without one falls back to the real host at the point of use — the seam
-	// the tests use, because a Bot API call with no seam to exercise it is
-	// one that ships unverified.
-	BaseURL string
+	// GatewayURL is gateway-telegram's in-cluster base URL, resolved by
+	// main.go the same way MANAGER_URL already is: required, and a missing
+	// value fails startup naming it.
+	GatewayURL string
+	// GatewayToken authenticates every call to the gateway. Unlike the
+	// /updates push the gateway makes in the other direction (pure
+	// network-level trust — see telegram-ingest-router's spec), this leg can
+	// SEND with the live bot credential, so it carries a shared secret too.
+	GatewayToken string
+	HTTP         *http.Client
 }
 
-// telegramAPIBase is the real Bot API root — the DEFAULT, never the only
-// value. An adapter's outbound base URL is configuration: TELEGRAM_API_BASE on
-// the process, or the `apiBase` key of a channel's credential Secret, so the
-// outbound half can be exercised against a local double with no bot token.
-const telegramAPIBase = "https://api.telegram.org"
-
-// apiBaseEnv names the process-level override. Deployment-level on purpose:
-// a per-surface field in Channel.spec.config would let anyone who can edit a
-// served channel redirect that channel's bot token to a host of their choosing.
-const apiBaseEnv = "TELEGRAM_API_BASE"
-
-// resolveAPIBase picks the Bot API root from the explicit value, then the
-// process environment, then the real host. A trailing slash is dropped so the
-// "/bot<token>/<method>" suffix joins cleanly whatever an operator typed.
-func resolveAPIBase(explicit string) string {
-	base := strings.TrimSpace(explicit)
-	if base == "" {
-		base = strings.TrimSpace(os.Getenv(apiBaseEnv))
+// NewTelegram builds a client that posts every Bot API call through
+// gateway-telegram at gatewayURL, authenticating with gatewayToken. The HTTP
+// timeout leaves room for the gateway's own 429 retry_after waits.
+func NewTelegram(gatewayURL, gatewayToken string) *Telegram {
+	return &Telegram{
+		GatewayURL:   strings.TrimRight(gatewayURL, "/"),
+		GatewayToken: gatewayToken,
+		HTTP:         &http.Client{Timeout: 35 * time.Second},
 	}
-	if base == "" {
-		return telegramAPIBase
-	}
-	return strings.TrimRight(base, "/")
-}
-
-// apiBase returns the root this client posts to.
-func (t *Telegram) apiBase() string {
-	if t.BaseURL != "" {
-		return t.BaseURL
-	}
-	return telegramAPIBase
-}
-
-// NewTelegram builds a client posting to base (resolved through
-// resolveAPIBase); the HTTP timeout leaves room for 20s long-polls.
-func NewTelegram(token, base string) *Telegram {
-	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}, BaseURL: resolveAPIBase(base)}
 }
 
 type tgResponse struct {
@@ -107,7 +86,8 @@ func retryBudget(ctx context.Context) time.Duration {
 	return defaultRetryBudget
 }
 
-// API calls a Bot API method with a JSON body, absorbing rate limiting.
+// API calls a Bot API method through gateway-telegram's /telegram/call
+// endpoint, absorbing rate limiting.
 //
 // A 429 is BACKPRESSURE, not a failure: Telegram states how long to wait, we
 // wait exactly that, and we retry the same call. Reporting it to the manager
@@ -115,7 +95,10 @@ func retryBudget(ctx context.Context) time.Duration {
 // could have ridden out — and the re-derivation arrives into the same limit.
 //
 // Retrying is safe because a rejected call posted nothing: there is no
-// half-sent message to duplicate.
+// half-sent message to duplicate. This still holds through the gateway: it
+// relays Telegram's own response verbatim rather than absorbing the retry
+// itself, so a 429 reaches this loop exactly as it would have direct from
+// Telegram.
 //
 // The budget bounds the whole thing, so an operation always completes or fails
 // while its claim is still ours. See WithRetryBudget.
@@ -128,20 +111,29 @@ func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMe
 	budget := retryBudget(ctx)
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			t.apiBase()+"/bot"+t.Token+"/"+method, bytes.NewReader(b))
+			t.GatewayURL+"/telegram/call/"+method, bytes.NewReader(b))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+t.GatewayToken)
 		resp, err := t.HTTP.Do(req)
 		if err != nil {
 			return nil, err
 		}
-		var out tgResponse
-		decErr := json.NewDecoder(resp.Body).Decode(&out)
+		raw, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if decErr != nil {
-			return nil, decErr
+		if readErr != nil {
+			return nil, readErr
+		}
+		var out tgResponse
+		// A real Bot API response is always JSON, win or lose. A body that
+		// fails to parse can only be the gateway's OWN rejection (401 bad
+		// token, 400 missing method, 502 upstream dial failure), written as
+		// plain text by http.Error — name the status so it reads as an
+		// auth/gateway problem, not a cryptic JSON error.
+		if decErr := json.Unmarshal(raw, &out); decErr != nil {
+			return nil, fmt.Errorf("telegram %s: gateway returned %s: %s", method, resp.Status, strings.TrimSpace(string(raw)))
 		}
 		if out.OK {
 			return out.Result, nil
@@ -379,11 +371,12 @@ func (t *Telegram) SendDocument(ctx context.Context, chatID string, threadID *in
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		t.apiBase()+"/bot"+t.Token+"/sendDocument", &buf)
+		t.GatewayURL+"/telegram/call/sendDocument", &buf)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+t.GatewayToken)
 	resp, err := t.HTTP.Do(req)
 	if err != nil {
 		return err

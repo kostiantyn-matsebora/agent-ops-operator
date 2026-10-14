@@ -65,7 +65,9 @@ named list of agents it may invoke:
    started the conversation and decides what to invoke.
 3. **`agents[]`** — the WHOLE outbound reach. Each entry names `capabilityRef`
    (an ordinary member) or `coordinatorRef` (nesting), plus a `description`
-   the coordinating agent reads to decide when to use it.
+   stating what that agent IS, what it CAN do, what it CANNOT, and what to
+   HAND it. The coordinating agent reads these descriptions to choose which
+   entry to `invoke`, and they are the only thing it reads to do so.
 4. **`limits`** — `maxAgents`, `maxTurns`, `deadline`, enforced on THIS
    conversation alone.
 5. **`channelRefs`** — bound to the root conversation at creation, exactly
@@ -73,7 +75,8 @@ named list of agents it may invoke:
    them.
 
 **An entry without a description is refused.** The coordinating agent has
-nothing else to read to decide which member answers which task.
+nothing else to read to match a person's instruction, or a signal it is
+investigating, to the agent that can act on it.
 
 ## Declare a member
 
@@ -141,14 +144,18 @@ spec:
   agents:
     - name: log-analyzer
       description: >-
-        Reads recent logs for the named workload and reports the likely
-        cause. Use first for anything that looks like a crash.
+        A log reader for one workload. Can tail and search its recent pod
+        logs, events, and resource usage, and report the likely cause of a
+        crash or a stuck rollout. Cannot change anything. Hand it a
+        workload name and what looks wrong.
       capabilityRef:
         name: log-analyzer
     - name: remediator
       description: >-
-        Restarts or scales the named workload. Use only once the cause is
-        known and the fix is routine.
+        A remediation agent for one workload. Can restart it by deleting
+        its pod so its controller recreates it, or scale it to a given
+        replica count. Cannot diagnose a cause on its own. Hand it a known
+        cause and the fix to apply, once one is decided.
       capabilityRef:
         name: remediator
   channelRefs:
@@ -171,7 +178,10 @@ conversation is then THAT Coordinator's own root, free to invoke its own
 ```yaml
   agents:
     - name: home-desk
-      description: Anything about the house rather than the cluster.
+      description: >-
+        A household coordinator. Can answer questions about the house and
+        operate or repair it, through its own members. Cannot act on the
+        cluster. Hand it anything about the house rather than the cluster.
       coordinatorRef:
         name: home-triage
 ```
@@ -311,15 +321,23 @@ helm upgrade agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-opera
   claim the same source at once, and the API server fans it out to each.
 
 {: .ao-callout}
-> **The console does not auto-wire itself under this mode, yet.** A
-> `Pipeline`-rendering bundle claims the console's signal source and binds
-> its channel for you (Installation's demo). An `AgentCapability` carries no
-> subscription of its own, and no chart template lists the console's channel
-> in the rendered `Coordinator`'s own `channelRefs` — a chart-wiring gap,
-> not a manager-level restriction: a Coordinator whose `channelRefs` DID name
-> the console would bind it at creation exactly like a Pipeline's. Asking the
-> console something will not reach the chart-rendered Coordinator until you
-> claim its source AND its channel by hand.
+> **The console is wired for you.** The chart-rendered `Coordinator` claims
+> the console's signal source and binds its channel in its own
+> `channelRefs`, exactly like a `Pipeline`'s. Asking the console something
+> reaches it with no hand-wiring step.
+>
+> **Delivery itself does not differ from a `Pipeline`'s.** The root
+> conversation's own completed runs post to its bound channel
+> unconditionally, `escalate` or not — gating delivery on it was retired
+> (`coordinator-unconditional-channels`). What differs is who ever REACHES
+> that channel: a member binds no channel of its own, so its domain work
+> never posts there directly. `escalate` is how a member's result bubbles
+> up to the root instead, one hop at a time, landing as an ordinary
+> message once it arrives. Demo mode's own showcase `Pipeline`
+> (`k8s-observe-pipeline`, see
+> [Getting started]({{ '/getting-started/' | relative_url }})) answers the
+> same observing route directly, with no coordinating decision or bubbling
+> in between.
 
 ## Self-heal: the hourly reaper
 

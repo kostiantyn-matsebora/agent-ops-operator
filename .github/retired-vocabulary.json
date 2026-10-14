@@ -954,6 +954,32 @@
         "replaced",
         "gone"
       ]
+    },
+    {
+      "id": "telegram-channel-adapter-api-base",
+      "pattern": "(channel[- ]telegram|channel adapter).{0,80}(reads|uses|honou?rs|takes|carries).{0,40}(TELEGRAM_API_BASE|apiBase)",
+      "says": "apiBase is the router's alone, and channel-telegram reaches the Bot API only through the gateway binding",
+      "allow": [
+        "removed",
+        "retired",
+        "no longer",
+        "never",
+        "holds no",
+        "RETIRED"
+      ]
+    },
+    {
+      "id": "telegram-channel-adapter-bot-token",
+      "pattern": "(channel[- ]telegram|channel adapter).{0,80}(calls|sends to|posts to|talks to|reaches|reads|uses|holds).{0,40}(api\\.telegram\\.org|bot[- ]?token|Bot API credential|Bot API directly)",
+      "says": "channel-telegram holds no Telegram credential and relays every Bot API call through the router's /telegram/call instead",
+      "allow": [
+        "removed",
+        "retired",
+        "no longer",
+        "never",
+        "holds no",
+        "RETIRED"
+      ]
     }
   ]
 }

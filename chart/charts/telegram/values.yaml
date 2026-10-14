@@ -30,12 +30,11 @@ channelAdapter:
     # are both agentops-adapter-<name>.
     # A workload named for the image does not exist.
     repository: ghcr.io/kostiantyn-matsebora/agentops-channel-telegram
-    # 0.24.2 stops a folded signal payload being cut in half. A payload over six
-    # lines is wrapped in `<blockquote expandable>`, which spans lines — and a
-    # message over 4096 characters was split inside it, so Telegram refused the
-    # whole message and the op retried forever. Cards larger than ~4KB never
-    # arrived on 0.24.1.
-    tag: 0.25.1
+    # 0.26.0 holds no Telegram credential at all (chat-ops-broker-telegram-
+    # gateway): every Bot API call is relayed through gateway-telegram's
+    # POST /telegram/call/{method} instead, authenticated with the
+    # gatewayUrl/gatewayToken binding rather than a bot token.
+    tag: 0.26.0
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -58,10 +57,19 @@ signalAdapter:
 # The single getUpdates consumer. NOT an adapter CR: it produces no signals, so
 # this chart owns its Deployment directly and injects the two forwarding URLs as
 # env. It reaches the Kubernetes API not at all.
+#
+# It is now ALSO the SOLE holder of the bot credential outbound
+# (chat-ops-broker-telegram-gateway): channel-telegram no longer calls
+# api.telegram.org directly, it calls this process' POST
+# /telegram/call/{method}, so this chart renders a Service for it too.
 router:
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-gateway-telegram
-    tag: 0.6.1
+    tag: 0.7.0
+  # Where POST /telegram/call/{method} is served. The chart renders the
+  # router's Service on this port too, since the reconciler owns no Service
+  # for it (it is not an adapter CR).
+  callPort: 8080
   # Extra env passthrough (appended after SIGNAL_TARGET, CHANNEL_TARGET and the
   # projected bot token).
   env: []

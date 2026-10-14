@@ -36,6 +36,17 @@ profile and toolsets, channels values-supplied and omitted when unset.
   pod is narrower than the `pods/exec` grant that flag already carries, so
   withholding it once that grant exists buys nothing. `capabilities.yaml`
   (coordinator mode) mirrors this exactly — the two files must not drift.
+- **`pipeline-showcase.yaml` renders a THIRD, additive route under
+  `coordinator` mode alone** — the demo-only `k8s-observe-pipeline`
+  `Pipeline`, reusing the observing route's profile, toolset and privilege
+  level rather than a new one. Gated on `kubernetes.demoShowcaseActive`
+  (`global.demo.wiringShowcase`, nullable like `pipelines.enabled`) AND the
+  resolved `wiringMode` being `coordinator` AND `kubernetes.wiringActive`.
+  Claims the same sources `pipelines.yaml` would — `cluster-events` plus the
+  console's — alongside the chart-rendered `Coordinator`'s own claim on them,
+  the many-to-many sharing `wiring.md` already allows. No de-duplication: a
+  demo install opens TWO conversations per cluster `Warning` event on
+  purpose.
 
 **NO substrate**: no AgentRuntime, no floor SA, no credential, no context
 volume. All of that is the parent's `global.agentops.runtimeDefaults` +
@@ -163,8 +174,7 @@ the chat SignalSource and the router's credential source.
   render.
 - **Credentials either way:** `credentials.existingSecret` OR
   `credentials.botToken`, where the bundle creates the Secret.
-- **One Secret serves both** — the Channel sends with it, the router's source
-  polls.
+- **The bot credential Secret now serves ONE reader, not two** (chat-ops-broker-telegram-gateway) — only the router's source polls with it. The Channel sends through a separate chart-generated gateway-binding Secret (`agentops-telegram-gateway`) instead, never the bot credential.
 - **Ships NO Pipeline on purpose**, because wiring drags in a profile, a runtime
   and credentials. The sources sit unclaimed until the installer wires them, so
   NOTES.txt prints the exact Pipeline to apply.
@@ -255,3 +265,8 @@ other parent scope, and helm cannot derive a value from a value.
   every console object with ONE value.
 - **The claim rides the EXISTING route.** A second claimant makes every
   unaddressed console message ambiguous.
+- **The showcase route (`pipeline-showcase.yaml`) rides it too** — a THIRD
+  claimant under `coordinator` mode, beside the chart-rendered Coordinator
+  and whichever other route claims it. An unaddressed console message under
+  the showcase then surfaces a choice list rather than routing silently —
+  the demonstration, not a bug.

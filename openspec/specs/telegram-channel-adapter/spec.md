@@ -7,9 +7,44 @@ The reference Telegram channel adapter: an external, dependency-free process ser
 ## Requirements
 
 ### Requirement: Telegram runs as an external reference adapter, not in the manager
-The manager SHALL contain no Telegram-specific code (no poller, no Bot API client, no bot-token reads) **and no Telegram-specific presentation**: HTML composition, entity escaping, the 4096-character message limit, and forum-topic naming limits SHALL live in the adapter alone. A reference adapter in `channels/telegram/` (own binary and image, precedent `runtimes/claude/`) SHALL serve Channels whose `spec.adapter` names its `ChannelAdapter` CR, consuming the channel adapter contract: offset persistence on behalf of the router, approver filtering by Telegram user id, topic creation via `createForumTopic`, and message sends with HTML parse mode and general-topic fallback.
 
-The adapter SHALL render each typed outbound message for Telegram: composing HTML from markdown bodies, escaping payload content so markup-bearing text cannot break parsing, splitting or truncating messages that exceed the transport limit, and deriving forum-topic names from the `ensure-topic` descriptor within Telegram's own naming limit. It MAY present an oversized `signal` payload as a document rather than text. Routing-visible behavior (commands, adoption, busy-acks) SHALL be whatever the shared router implements — the adapter adds no routing rules of its own, so a command naming a Pipeline reaches Telegram users through exactly the same path as any other surface.
+The manager SHALL contain no Telegram-specific code: no poller, no Bot
+API client, no bot-token reads. It SHALL also contain no
+Telegram-specific presentation — HTML composition, entity escaping, the
+4096-character message limit, and forum-topic naming limits SHALL live
+in the adapter alone.
+
+A reference adapter in `channels/telegram/` (own binary and image,
+precedent `runtimes/claude/`) SHALL serve Channels whose `spec.adapter`
+names its `ChannelAdapter` CR.
+
+It SHALL consume the channel adapter contract: offset persistence on
+behalf of the router, approver filtering by Telegram user id, topic
+creation via `createForumTopic`, and message sends with HTML parse mode
+and general-topic fallback.
+
+The adapter SHALL hold NO Telegram credential of its own
+(chat-ops-broker-telegram-gateway). Every Bot API call it composes
+SHALL be issued to the telegram-ingest-router's `POST
+/telegram/call/{method}` endpoint, never directly to the Bot API. The
+router is the sole holder of the bot token, both directions.
+
+The call SHALL carry `gatewayToken` as a bearer header, the same token
+the router's own endpoint requires.
+
+The adapter SHALL render each typed outbound message for Telegram:
+composing HTML from markdown bodies, escaping payload content so
+markup-bearing text cannot break parsing, splitting or truncating
+oversized messages, and deriving forum-topic names from the
+`ensure-topic` descriptor within Telegram's own naming limit.
+
+It MAY present an oversized `signal` payload as a document rather than
+text.
+
+Routing-visible behavior (commands, adoption, busy-acks) SHALL be
+whatever the shared router implements. The adapter adds no routing
+rules of its own, so a command naming a Pipeline reaches Telegram users
+through exactly the same path as any other surface.
 
 #### Scenario: End-to-end Telegram flow through the adapter
 - **WHEN** a Telegram user sends `/pipelines` to a bot whose adapter serves a Channel naming it
@@ -25,7 +60,7 @@ The adapter SHALL render each typed outbound message for Telegram: composing HTM
 
 #### Scenario: Oversized message is split, not failed
 - **WHEN** a message renders longer than Telegram's per-message limit
-- **THEN** the adapter splits or truncates it and the operation completes successfully
+- **THEN** the adapter splits it into consecutive messages at Telegram's limit, truncating only a single unsplittable run, and the operation completes successfully
 
 #### Scenario: Markup in a payload does not break the post
 - **WHEN** a signal payload contains `<`, `>`, or `&`
@@ -35,23 +70,70 @@ The adapter SHALL render each typed outbound message for Telegram: composing HTM
 - **WHEN** an `ensure-topic` descriptor would render a name longer than Telegram allows
 - **THEN** the adapter shortens it and creates the topic
 
-### Requirement: Adapter owns its credentials and config parsing
-The adapter SHALL resolve each served channel's bot token from the projected credential environment advertised by the contract's `credentialEnvPrefix` (env `<prefix>botToken`), falling back to the `TELEGRAM_BOT_TOKEN` environment variable for channels without `credentialsSecretRef` (hand-deployed back-compat). It SHALL parse its channel settings (`chatId`, `approvers`, `feedThreadId`, `deleteTopicOnConversationDelete`) from `spec.config` — there is no `pollingEnabled`, because this adapter never polls — of the Channels it serves, reporting config errors — including a missing token from both sources — on the Channel's status condition rather than crashing.
+### Requirement: Adapter owns its gateway binding and config parsing
 
-#### Scenario: Per-channel token resolved from projection
-- **WHEN** a served Channel's listing entry maps `botToken` to a projected env var
-- **THEN** the adapter uses that token for this channel's polling, topic creation, and sends
+The adapter SHALL resolve each served channel's GATEWAY BINDING — where
+the router is, and the shared secret that authenticates to it — from
+the projected credential environment (`<prefix>gatewayUrl`,
+`<prefix>gatewayToken`). It SHALL fall back to
+`TELEGRAM_GATEWAY_URL`/`TELEGRAM_GATEWAY_TOKEN` for channels without
+`credentialsSecretRef` (hand-deployed back-compat).
 
-#### Scenario: Fallback token preserved
-- **WHEN** a served Channel has no `credentialsSecretRef` and `TELEGRAM_BOT_TOKEN` is set
-- **THEN** the adapter serves it with the fallback token exactly as before
+This REPLACES resolving a bot token (chat-ops-broker-telegram-gateway):
+the adapter holds no Telegram credential at all now, only the binding
+to the router that does.
+
+It SHALL parse its channel settings (`chatId`, `approvers`,
+`feedThreadId`, `deleteTopicOnConversationDelete`) from `spec.config` —
+there is no `pollingEnabled`, because this adapter never polls — of the
+Channels it serves, reporting config errors — including an unresolved
+gateway binding — on the Channel's status condition rather than
+crashing.
+
+#### Scenario: Per-channel gateway binding resolved from projection
+- **WHEN** a served Channel's listing entry maps `gatewayUrl`/`gatewayToken` to projected env vars
+- **THEN** the adapter sends this channel's Bot API calls through that gateway, authenticated with that token
+
+#### Scenario: Fallback binding preserved
+- **WHEN** a served Channel has no `credentialsSecretRef` and `TELEGRAM_GATEWAY_URL`/`TELEGRAM_GATEWAY_TOKEN` are set
+- **THEN** the adapter serves it with the fallback binding exactly as before
 
 #### Scenario: Invalid config is surfaced on the Channel
-- **WHEN** a Channel naming the telegram adapter has a `config` lacking a required field (e.g. `chatId`) or no resolvable token
+- **WHEN** a Channel naming the telegram adapter has a `config` lacking a required field (e.g. `chatId`) or no resolvable gateway binding
 - **THEN** the adapter sets a not-ready condition with the reason on that Channel and continues serving other Channels
 
+### Requirement: Outbound Bot API calls are relayed through the router
+
+The adapter SHALL issue every Bot API call it composes to the resolved
+gateway's `POST /telegram/call/{method}`, bearing the resolved
+`gatewayToken` as a bearer token in the `Authorization` header, instead
+of calling the Bot API directly.
+
+The relayed response SHALL be parsed exactly as a direct Bot API
+response would be, including `parameters.retry_after` on a `429`.
+
+#### Scenario: Every outbound method is relayed
+- **WHEN** the adapter sends a message, uploads a document, creates, closes, reopens or deletes a forum topic, or registers commands
+- **THEN** each is issued as a call to the gateway's `/telegram/call/{method}` endpoint, never to `api.telegram.org`
+
+#### Scenario: A relayed 429 is retried exactly as before
+- **WHEN** the gateway relays a `429` with `parameters.retry_after`
+- **THEN** the adapter waits and retries on the same terms this capability already specifies for a direct Bot API response
+
+#### Scenario: An unreachable gateway is an explicit failure
+- **WHEN** the dial to the gateway fails or times out for a relayed call
+- **THEN** the adapter surfaces the call as failed and retries it on the same terms as a failed direct Bot API call, never reporting it as sent
+
+#### Scenario: The gateway's own rejection is distinguishable from a Telegram error
+- **WHEN** the gateway rejects the call itself (a bad or missing `gatewayToken`, or any response that is not Telegram's own JSON shape), rather than relaying a Bot API response
+- **THEN** the adapter surfaces the gateway's HTTP status and body, never attempting to parse it as a Telegram API error
+
 ### Requirement: Single getUpdates consumer preserved
-Exactly one getUpdates consumer per **bot token** SHALL hold at all times. The polling loop SHALL live in the telegram ROUTER component, not in the channel adapter: the router SHALL run one loop per distinct token, its workload SHALL run single-instance (replicas 1, Recreate), and the channel adapter SHALL NOT poll at all — it receives topic messages forwarded by the router and continues posting them to `/channel/inbound`. The documented migration SHALL sequence shutdown of the previously-polling adapter before the router starts, so two consumers of one token are never live simultaneously.
+Exactly one getUpdates consumer per **bot token** SHALL hold at all times. The polling loop SHALL live in the telegram ROUTER component, not in the channel adapter.
+
+The router SHALL run one loop per distinct token, its workload SHALL run single-instance (replicas 1, Recreate), and the channel adapter SHALL NOT poll at all. It receives topic messages forwarded by the router and continues posting them to `/channel/inbound`.
+
+The documented migration SHALL sequence shutdown of the previously-polling adapter before the router starts, so two consumers of one token are never live simultaneously.
 
 #### Scenario: Two bots poll independently, once each
 - **WHEN** the router serves two channels with distinct projected tokens
@@ -70,7 +152,9 @@ Exactly one getUpdates consumer per **bot token** SHALL hold at all times. The p
 - **THEN** the router resumes from the offset the previous adapter persisted, rather than re-reading old updates
 
 ### Requirement: Chart deploys the adapter opt-in
-The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `telegramAdapter.enabled`, default **false**) instead of a bespoke Deployment template; the chart SHALL contain no channel-type-specific workload templates. The `ChannelAdapter` reconciler owns the workload, auth injection, and credential projection; the chart's remaining role is the CRD and the gated CR.
+The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `telegramAdapter.enabled`, default **false**) instead of a bespoke Deployment template. The chart SHALL contain no channel-type-specific workload templates.
+
+The `ChannelAdapter` reconciler owns the workload, auth injection, and credential projection. The chart's remaining role is the CRD and the gated CR.
 
 #### Scenario: Disabled by default
 - **WHEN** the chart renders with default values
@@ -81,7 +165,11 @@ The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `te
 - **THEN** the rendered output contains the telegram `ChannelAdapter` and no Deployment for it (the reconciler creates the workload)
 
 ### Requirement: Chart-shipped ChannelAdapter declares the telegram config schema
-The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract on its spec: a JSON Schema for `spec.config` declaring `chatId` (string, required), `feedThreadId` (integer), `approvers` (array of integers), and `deleteTopicOnConversationDelete` (boolean), plus `credentialKeys` documenting `botToken` (not required — the `TELEGRAM_BOT_TOKEN` fallback exists). The declaration SHALL live beside the `image` reference in the same template so an image bump and its schema update travel in one diff. The adapter binary SHALL be unchanged — it plays no role in the declaration.
+The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract on its spec: a JSON Schema for `spec.config` declaring `chatId` (string, required), `feedThreadId` (integer), `approvers` (array of integers), and `deleteTopicOnConversationDelete` (boolean), plus `credentialKeys` documenting `gatewayUrl` and `gatewayToken` (chat-ops-broker-telegram-gateway), neither required — the `TELEGRAM_GATEWAY_URL`/`TELEGRAM_GATEWAY_TOKEN` fallback exists for both.
+
+The declaration SHALL live beside the `image` reference in the same template so an image bump and its schema update travel in one diff.
+
+The adapter binary SHALL be unchanged — it plays no role in the declaration.
 
 #### Scenario: Declaration matches the parser
 - **WHEN** the chart renders with `telegramAdapter.enabled=true`
@@ -99,7 +187,9 @@ The chart's gated telegram `ChannelAdapter` CR SHALL declare the config contract
 The Telegram channel adapter SHALL serve the `close-topic` operation by closing
 the corresponding forum topic through the Bot API (`closeForumTopic`) for the
 chat the Channel's config names, then completing the operation with an empty
-result. A Bot API failure SHALL be reported as the operation's error and SHALL
+result.
+
+A Bot API failure SHALL be reported as the operation's error and SHALL
 NOT be retried by the adapter — the manager treats a failed `close-topic` as
 terminal.
 
@@ -153,16 +243,19 @@ group's threads should survive their conversations is a property of that group �
 two surfaces served by one adapter may reasonably differ.
 
 Deleting SHALL REPLACE the notice rather than follow it. The tombstone exists so
-that a person returning to the thread understands why it stopped; a thread about
-to disappear has nobody to tell, and posting first would write a message into a
-topic being removed by the next call.
+that a person returning to the thread understands why it stopped.
+
+A thread about to disappear has nobody to tell, and posting first would
+write a message into a topic being removed by the next call.
 
 A failed deletion SHALL be reported as an operation failure and SHALL NOT fall
 back to marking and archiving. `deleteForumTopic` requires the bot to hold
 `can_delete_messages`, and a silent fallback would make the setting mean "delete
-the topic, or maybe not" — leaving an operator who enabled it to keep a group
-tidy with a growing list of archived topics and no signal that anything was
-wrong. Conversation deletion itself SHALL still proceed, bounded by the
+the topic, or maybe not."
+
+That would leave an operator who enabled it to keep a group tidy with a
+growing list of archived topics and no signal that anything was wrong.
+Conversation deletion itself SHALL still proceed, bounded by the
 finalizer's existing grace.
 
 The chart-shipped `ChannelAdapter.configSchema` SHALL declare the key, so a
@@ -172,14 +265,17 @@ declaration exists to catch.
 
 After a successful deletion the adapter SHALL post ONE line to the chat's
 GENERAL surface, naming the conversation. Deleting the topic destroys the only
-place that conversation was visible, and its `Conversation` object is gone too —
-so without this a thread simply vanishes and NOTHING anywhere records that
+place that conversation was visible, and its `Conversation` object is gone too.
+
+So without this a thread simply vanishes and NOTHING anywhere records that
 agent-ops did it. A reader would reasonably conclude somebody deleted it by hand.
 
-The note SHALL be posted AFTER the deletion, never before: announcing a removal
-that then failed is worse than silence. A failure to post the note SHALL be
-logged and SHALL NOT fail the operation, because the topic is already gone and
-retrying the operation would ask for a deletion that already succeeded.
+The note SHALL be posted AFTER the deletion, never before. Announcing a removal
+that then failed is worse than silence.
+
+A failure to post the note SHALL be logged and SHALL NOT fail the operation,
+because the topic is already gone and retrying the operation would ask for a
+deletion that already succeeded.
 
 The chart SHALL expose the setting as one value on the Telegram bundle's surface
 block, rendered into that Channel's config, and SHALL default it off.
@@ -215,8 +311,10 @@ block, rendered into that Channel's config, and SHALL default it off.
 ### Requirement: The adapter re-reads its channels periodically
 The Telegram adapter SHALL refresh its channel configuration from the manager on
 a recurring interval, not only at startup and on first sight of an unknown
-channel. `Channel.spec.config` is live configuration an operator edits, and an
-adapter that reads it once cannot see an edit until its pod restarts — which
+channel.
+
+`Channel.spec.config` is live configuration an operator edits, and an
+adapter that reads it once cannot see an edit until its pod restarts. That
 made enabling topic deletion on a running surface do nothing at all, with no
 error anywhere to explain why.
 
@@ -227,11 +325,12 @@ error anywhere to explain why.
 ### Requirement: Adapter paces its Bot API calls
 The Telegram adapter SHALL pace every outbound Bot API call against two
 independent budgets: a global per-bot rate and a per-chat rate, the per-chat
-budget being the tighter of the two for a group. Pacing SHALL cover
-`createForumTopic` as well as `sendMessage`, because a burst of new
-conversations spends the same budget as a burst of replies — an incident in
-which every topic was created but most stayed empty is the shape this
-requirement exists to prevent.
+budget being the tighter of the two for a group.
+
+Pacing SHALL cover `createForumTopic` as well as `sendMessage`, because a
+burst of new conversations spends the same budget as a burst of replies. An
+incident in which every topic was created but most stayed empty is the
+shape this requirement exists to prevent.
 
 The budgets SHALL be constants of the adapter, not manager-side configuration
 and not `Channel.spec.config` fields. They describe Telegram, which the adapter
@@ -265,7 +364,7 @@ manager's claim reclaim interval of five minutes. When that bound is reached the
 adapter SHALL report the operation as failed and let the manager re-derive it.
 
 A `429` on `createForumTopic` SHALL be retried on the same terms as one on
-`sendMessage`; both are ordinary backpressure, not errors.
+`sendMessage`. Both are ordinary backpressure, not errors.
 
 #### Scenario: 429 on send is retried transparently
 - **WHEN** `sendMessage` returns `429` with `retry_after: 30`
@@ -286,8 +385,10 @@ A `429` on `createForumTopic` SHALL be retried on the same terms as one on
 ### Requirement: The adapter registers the vocabulary Telegram can express
 The adapter SHALL register commands from the manager's vocabulary with Telegram,
 scoped to each chat it serves, so Telegram renders its own command control in
-the composer and completes what a person types. That control is the entry
-point: it appears without a message being posted and does not scroll away.
+the composer and completes what a person types.
+
+That control is the entry point. It appears without a message being posted
+and does not scroll away.
 
 Both kinds SHALL be registered — the built-in commands and the addressable
 Pipelines — because a person is choosing between them in one composer and a menu
@@ -296,7 +397,9 @@ exist.
 
 The adapter SHALL filter and adapt the vocabulary against Telegram's own rules
 for command names, description length and list size. Those rules SHALL live in
-the adapter. The manager SHALL publish names unchanged, and an entry Telegram
+the adapter.
+
+The manager SHALL publish names unchanged, and an entry Telegram
 cannot express SHALL be adapted or omitted locally — never renamed in the
 manager, never carried back as a constraint on the vocabulary, and never
 resolved by renaming the Pipeline itself.
@@ -332,7 +435,9 @@ are the same string.
 The mapping SHALL be INJECTIVE BY CONSTRUCTION rather than by detection. Only
 characters that cannot occur in a Kubernetes object name may be introduced, so
 the reverse is a pure function of the string and two Pipelines can never share
-one spelling. An entry the mapping cannot render injectively SHALL simply not be
+one spelling.
+
+An entry the mapping cannot render injectively SHALL simply not be
 registered — it stays typable, and nothing is refused, reported or conditioned
 on it.
 
@@ -422,12 +527,16 @@ the thread.
 
 ### Requirement: The adapter renders choices as inline controls
 The adapter SHALL render a message's `choices` as controls attached to that
-message, not as controls attached to the chat. A chat-wide control is shown to
-every member of a shared surface and replaces their own composer, which is not
-acceptable on an operations chat several people read.
+message, not as controls attached to the chat.
 
-Selecting a choice offered in answer to a message somebody wrote SHALL send that
-original message to the chosen Pipeline. The adapter SHALL recover the original
+A chat-wide control is shown to every member of a shared surface and
+replaces their own composer, which is not acceptable on an operations chat
+several people read.
+
+Selecting a choice offered in answer to a message somebody wrote SHALL send
+that original message to the chosen Pipeline.
+
+The adapter SHALL recover the original
 from the transport's own reply linkage rather than from state held for the
 purpose, so nothing is retained between the offer and the selection.
 
@@ -453,54 +562,29 @@ purpose, so nothing is retained between the offer and the selection.
 - **THEN** the person is told to send the addressed form, and nothing is
   delivered to any Pipeline
 
-### Requirement: The Bot API endpoint is configuration, not a compiled-in constant
-The adapter SHALL resolve the Bot API base URL from the environment variable
-`TELEGRAM_API_BASE`, defaulting to `https://api.telegram.org` when unset, and
-SHALL use it for every Bot API call it makes — message sends, document sends,
-and forum topic creation and closure alike. The chart SHALL expose it as an
-optional value on the telegram bundle that renders no environment entry when
-unset, so a default install is byte-identical to today's.
+### Requirement: The gateway endpoint is configuration, not a compiled-in constant
 
-This generalizes to a standing rule: **an adapter's outbound base URL is
-configuration, never a constant.** The adapter already parameterizes the manager
-URL it connects to; the third-party endpoint being the one hardcoded value is an
-inconsistency rather than a decision. The rule costs nothing at every other
-adapter — a self-hosted upstream has no fixed address and must be configured
-regardless — and without it the adapter's outbound half cannot be exercised
-without a real bot token and a real Telegram account.
+The adapter SHALL resolve the router's call endpoint per channel exactly
+as it resolves `gatewayToken` (Requirement: Adapter owns its gateway
+binding and config parsing). There is no Bot API base URL on this
+adapter any more (chat-ops-broker-telegram-gateway).
 
-The value SHALL be an operator-level setting supplied through the deployment,
-NOT a field of `Channel.spec.config`. Because a `ChannelAdapter` CR carries no
-`env` and the reconciler owns the adapter's Deployment, the chart reaches the
-pod through the bot's credential Secret: an `apiBase` key beside `botToken`,
-projected as `AGENTOPS_CRED_<CHANNEL>_apiBase`, overrides the process default
-for that surface. The Secret already holds the token, so redirecting it there
-grants nothing the token did not — unlike a `spec.config` field. Precedence is
-the Secret's key, then `TELEGRAM_API_BASE`, then the real host: a surface that
-names a root is served at that root whatever the process default says.
+`TELEGRAM_API_BASE` and the credential Secret's `apiBase` key are
+RETIRED on this component. The Bot API root is the ROUTER's concern
+now, specified by `telegram-ingest-router`'s own "The router's Bot API
+endpoint is configuration" requirement.
 
-What is forbidden is an override in `Channel.spec.config`. That field is
-editable by anyone who may edit a served channel, and an endpoint there would
-let them redirect that channel's bot token to a host of their choosing — a
-configuration edit turned into credential exfiltration. The Secret key is not
-that: whoever can write the Secret already holds the token.
+This generalizes the standing rule — **an adapter's outbound base URL
+is configuration, never a constant** — one level further.
 
-#### Scenario: Default installs are unchanged
-- **WHEN** the adapter runs with `TELEGRAM_API_BASE` unset
-- **THEN** it calls `https://api.telegram.org` exactly as before, and the rendered Deployment carries no additional environment entry
+The OUTBOUND CALL ITSELF, not merely its base URL, is now a
+credential-projected value, because the adapter has no third party
+left to address directly.
 
-#### Scenario: Every Bot API call honours the override
-- **WHEN** `TELEGRAM_API_BASE` is set to a local endpoint and the adapter sends a message, sends a document, creates a forum topic and closes one
-- **THEN** all four calls are made against the configured endpoint, with none falling back to the public host
+#### Scenario: No Bot API base URL on this adapter
+- **WHEN** the adapter's rendered Deployment or credential Secret is inspected
+- **THEN** neither carries `TELEGRAM_API_BASE` or an `apiBase` key — only `gatewayUrl`/`gatewayToken`
 
-#### Scenario: A channel cannot redirect its own token
-- **WHEN** a served `Channel`'s `spec.config` contains an API base or endpoint key
-- **THEN** it has no effect on where the adapter sends the bot token
-
-#### Scenario: The credential Secret may name the endpoint
-- **WHEN** a served `Channel`'s credential Secret carries an `apiBase` key
-- **THEN** that surface's token is sent to that root, since whoever can write the Secret already holds the token
-
-#### Scenario: The Secret's root wins over the process default
-- **WHEN** `TELEGRAM_API_BASE` is set AND a served `Channel`'s credential Secret carries a different `apiBase` key
-- **THEN** that surface's calls go to the Secret's root, and every other surface's to `TELEGRAM_API_BASE`
+#### Scenario: A channel cannot redirect its own gateway
+- **WHEN** a served `Channel`'s `spec.config` contains a `gatewayUrl`, `apiBase` or `endpoint` key
+- **THEN** it has no effect on where the adapter sends its calls

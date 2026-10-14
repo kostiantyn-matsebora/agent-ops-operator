@@ -153,15 +153,15 @@
 
 ## 8. E2E tests
 
-- [ ] 8.1 Add or extend a coordination lane in
-      `platform/manager/test/e2e/` covering: coordinator mode end to end
+- [x] 8.1 Add or extend a coordination lane in
+      `platform/manager/test/system/` covering: coordinator mode end to end
       (source claim, invoke, member-result routing), the reaper's hourly
       survey against a live cluster (kubelet-backed conversation lifecycle,
       not just unit-level routing), and the ancestor-root exclusion against
       real conversation objects — the one behavior a real API server's
       `causedBy` chain must be walked against, not a fake. Run the pack and
       record the verdict.
-      `test/e2e/coordinator.go` + `test/e2e/coordinator_test.go` added:
+      `test/system/coordinator.go` + `test/system/coordinator_test.go` added:
       `TestCoordinatorModeInvokeAndMemberResultRouting` (source claim,
       invoke, member-result routing, over hand-authored
       Coordinator/AgentCapability CRs — legitimate per `wiring-mode`'s own
@@ -174,7 +174,7 @@
       REAL conversation objects over the LIVE deployed manager, the reaper's
       own re-check `invoke` on the domain capability, ancestor-root
       exclusion asserted, widened `close` asserted both ways). Both compile
-      under `-tags e2e` (`go test -tags e2e -c -o /dev/null ./test/e2e/`),
+      under `-tags system` (`go test -tags system -c -o /dev/null ./test/system/`),
       `go vet ./...` and the untagged `go test ./...` stay green.
       A gap surfaced while writing the second lane and was fixed, not
       merely noted: `coordinator-self-heal` requires the reaper (a plain
@@ -191,11 +191,17 @@
       `caller.Spec.CoordinatorRef` directly — the same walk `close` and
       `list_open_roots` already use. `docs/contracts.md`'s `invoke` bound
       row and refusal table updated to match.
-      NOT RUN against a live cluster: this session has no docker daemon and
-      no `k3d` — workstation/CI-only per `remote-session.md`. Left
-      UNTICKED for that reason alone — the lane is written, compiles, and
-      (per the fix above) should pass end to end once actually run against
-      a cluster, but "should pass" is not a verdict this session can claim.
+      RUN against a live cluster, from `coordinator-adopter-parity`'s own
+      task 4.2: no docker daemon or `k3d` in a remote session
+      (`remote-session.md`), so dispatched `system-full.yml` (run
+      38074304800) rather than run directly. The lane was written under
+      the pack's earlier directory name, renamed to `test/system/` by
+      `rename-e2e` — the dispatched run already built against that rename.
+      VERDICT: `TestCoordinatorModeInvokeAndMemberResultRouting`
+      (11.06s), `TestCoordinatorSelfHealSurveyExcludesAncestorRoot`
+      (57.02s, including the ancestor-root exclusion and the reaper's
+      `invoke` re-check asserted above) and the lane's sibling
+      coordinator tests all PASSED against the live cluster. Ticked.
 
 ## 9. Documentation — THE LAST TASK, and it is not optional
 
@@ -283,11 +289,15 @@
       Kubernetes-events half of the demo (no console involved) still works
       under `coordinator` mode, since the chart-rendered Coordinator claims
       that source too. `wc -l README.md`: 210 before and after.
-- [ ] 9b.5 `platform/console/ui`: re-run BOTH `npm run screenshots` and
+- [x] 9b.5 `platform/console/ui`: re-run BOTH `npm run screenshots` and
       `npm run demo` if the reaper's conversations need distinct treatment
       in the tree view, then commit the assets.
-      LEFT UNTICKED: this needs a live cluster and a browser
-      (`visual-check.md`, `remote-session.md`) this remote session does not
-      have. No console code changed in this change either, so there is
-      nothing for the screenshots to pick up yet — left for whoever runs
-      the workstation-only verification.
+      CONFIRMED NO-OP (coordinator-adopter-parity task 4.3): the condition
+      never triggers. `git show --stat --name-only` on every commit this
+      change and its two follow-up fixes shipped under (#291, #296, #301,
+      plus the `signal-cron` pin fix) touches zero files under
+      `platform/console/`. The reaper's conversations are ordinary
+      Coordinator members with no console-visible field of their own, so
+      there is nothing for a screenshot or demo re-run to pick up — not
+      merely unverified for lack of a live cluster, but genuinely nothing
+      to run.

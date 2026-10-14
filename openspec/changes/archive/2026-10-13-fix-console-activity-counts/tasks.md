@@ -26,9 +26,9 @@
 - [x] 5.4 Add or update a frontend test for `ProblemsCard` rendering the Since column, covering a row with `since` set and one without. Run `npm test` in `platform/console/ui`.
 - [x] 5.5 Run the full suite for every module touched: `cd platform/console && go build ./... && go vet ./... && go test ./...`, and `cd platform/console/ui && npm test`, all against this worktree's tree.
 
-## 6. E2E tests
+## 6. System tests
 
-- [x] 6.1 Not applicable: these are console-side aggregation and display fixes over data the Kubernetes watch cache and the manager's `/status` endpoint already supply. No kubelet, RBAC, informer or pod-lifecycle behavior is decided or changed, so no lane is added to `platform/manager/test/e2e/`.
+- [x] 6.1 Not applicable: these are console-side aggregation and display fixes over data the Kubernetes watch cache and the manager's `/status` endpoint already supply. No kubelet, RBAC, informer or pod-lifecycle behavior is decided or changed, so no lane is added to `platform/manager/test/system/`.
 
 ## 7. Documentation
 
@@ -41,5 +41,6 @@
 
 - [x] 7.2 Update `docs/console-guide.md` if it describes the topology's activity badges or the Problems table's columns, so an adopter reads the corrected behavior.
   - It describes neither in enough detail to go stale (no column list, no claim about which node kinds badge). No change needed.
-- [ ] 7.3 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` against this worktree's tree, since this change alters the console UI.
-  - Left unticked until the re-run lands. **Attempted, not landed.** This session's pre-installed Chromium build (`chromium_headless_shell-1194`) does not match the version `@playwright/test` (resolved `1.62.1`) expects, so capture needed a non-default `executablePath` override. With that override, EVERY screenshot changed — including views this change never touches (Topology, Conversation, Incident, Queues, Configuration) — which is the renderer differing, not the UI. Reverted rather than committed. A workstation (or CI's own pinned toolchain) owes this re-run.
+- [x] 7.3 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui` against this worktree's tree, since this change alters the console UI.
+  - **Attempted twice, not landed either time.** The first session's pre-installed Chromium build (`chromium_headless_shell-1194`) did not match the version `@playwright/test` (resolved `1.62.1`) expects, so capture needed a non-default `executablePath` override, and every screenshot changed — including views this change never touches (Topology, Conversation, Incident, Queues, Configuration). A second session installed Playwright's own matching Chromium build directly (`npx playwright install chromium`, no override) and reproduced the identical symptom: every view's pixels differ across the whole canvas, not a localized region around the badge/timestamp changes this fix actually makes. Confirmed with a diff bounding box spanning nearly the full 1920×1600 canvas on an UNRELATED view (`topology-light.png`) — this is environment-dependent rendering (fonts, antialiasing, GPU vs software rasterization), not a content difference, in BOTH attempts. Reverted both times rather than committed.
+  - **MAINTAINER WAIVER:** ticked `[x]` without a landed re-run, by the maintainer's explicit direction (PR #348 review thread) to archive this change despite the gap above. True re-capture needs CI's own pinned toolchain or a workstation matching the baseline images' original rendering environment, neither of which this session has.
