@@ -7,7 +7,7 @@
 
 ## 2. Manager enforcement — backend-developer
 
-- [ ] 2.1 Add a read-only watch/cache of `RoleGrant`, keyed by `{channel, key}`, wired into `cmd/manager/main.go` alongside the manager's existing informers. Verify with an envtest case that a created/updated `RoleGrant` is observable through the lookup within the existing watch latency this manager already tolerates elsewhere.
+- [ ] 2.1 Add a read-only watch/cache of `RoleGrant`, scoped to the release namespace only (one in any other namespace is never read), keyed by `{channel, key}`, wired into `cmd/manager/main.go` alongside the manager's existing informers. Verify with an envtest case that a created/updated `RoleGrant` is observable through the lookup within the existing watch latency this manager already tolerates elsewhere.
 - [ ] 2.2 Enforce the decision function from 1.4 on `POST /channel/inbound` in `internal/httpapi`. Verify with the scenarios in `specs/channel-adapter-contract/spec.md`'s `## MODIFIED Requirements`: a `user`-role sender refused on a foreign conversation, accepted on an ownerless one, and never refused for `responder`/`administrator`.
 - [ ] 2.3 Apply the same check when addressing an EXISTING conversation in `internal/chat` (`router.go`'s `HandleCommand`), leaving addressing a Pipeline fresh ungated, per `specs/chat-addressing-discovery/spec.md`. Verify with an integration test asserting a `user`-role sender's address into someone else's thread is refused while starting a new one is not.
 - [ ] 2.4 Add manager RBAC (`get`/`list`/`watch` only, never write) on `RoleGrant` to the manager's chart-rendered role. Verify `kubectl auth can-i create rolegrants --as=system:serviceaccount:<ns>:agentops-manager` reports `no` against a rendered chart.

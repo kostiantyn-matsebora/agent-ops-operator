@@ -8,7 +8,8 @@ onto every view's nodes, so the same event animates each view.
 
 **Model.** The declared objects and what references what: SignalSources,
 SignalAdapters, Pipelines, AgentProfiles, AgentRuntimes, Channels,
-ChannelAdapters, MCPToolsets, MCPConfigs and Conversations.
+ChannelAdapters, MCPToolsets, MCPConfigs and Conversations. A RoleGrant SHALL NOT be a Model
+node — role assignment lives in the control-plane route, not the topology.
 
 Edges SHALL cover `feeds`, `answers`, `runs-on`, `posts`, `served-by`, `uses`
 and `opened`. The runtime edge SHALL run from the Pipeline, never from the

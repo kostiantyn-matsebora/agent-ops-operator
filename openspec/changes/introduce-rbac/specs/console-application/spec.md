@@ -14,7 +14,8 @@ The resolved identity SHALL additionally resolve to a role — `user`,
 identity}` against `RoleGrant` (access-control), defaulting to `user` when
 none exists.
 
-An identity named in `console.rbac.bootstrapAdmins` SHALL resolve to
+Under external authentication with no shared token, an identity named in
+`console.rbac.bootstrapAdmins` SHALL resolve to
 `administrator` even when a `RoleGrant` says otherwise (access-control).
 
 The shared-token identity (`identity == "token"`) SHALL resolve to
