@@ -193,9 +193,8 @@ Ownership is also applied as a READ filter at the console, specified by the
 | `POST /channel/inbound` in `internal/httpapi` | a reply on a thread |
 | the router's `HandleCommand` in `internal/chat` | addressing an existing conversation by name |
 
-Only the first is specified by the `channel-adapter-contract` delta. The
-contract delta for addressing by name is deferred, and task 2.3 implements it
-against this matrix in the meantime.
+The first is specified by the `channel-adapter-contract` delta. The second is
+specified by the `chat-addressing-discovery` delta.
 
 #### Scenario: Addressing is gated at the router
 
