@@ -104,8 +104,9 @@ handing them the ability to act on, or delete, everyone else's.
 - Role-aware filtering in `platform/console/auth.go` and `conversations.go`.
 - A new `/api/control-plane/...` route group and its first handler (role
   assignment) in `platform/console`.
-- New write verbs on `chart/templates/console.yaml`'s `ClusterRole`:
-  `create`/`update` on `rolegrants` and `update` on `rolegrants/status`.
+- New verbs on `chart/templates/console.yaml`'s `ClusterRole`:
+  `get`/`list`/`watch`/`create`/`update` on `rolegrants` and `update` on
+  `rolegrants/status`.
 - A new chart value for bootstrap administrators under external
   authentication.
 
