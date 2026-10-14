@@ -107,6 +107,8 @@ handing them the ability to act on, or delete, everyone else's.
 **Reference docs**:
 - `docs/concepts.md` — the new CRD and role semantics.
 - `docs/contracts.md` — the inbound contract's new refusal case.
+- `docs/CHANGELOG.md` — the breaking change and the `kubectl apply -f
+  chart/crds/` upgrade step for the new CRD.
 
 **Adopter site**:
 - `docs/console-guide.md` — a role-assignment section alongside the

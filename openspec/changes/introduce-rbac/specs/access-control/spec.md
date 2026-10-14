@@ -108,6 +108,17 @@ boot, with no `RoleGrant` object created by hand.
   forward-auth identity
 - **THEN** the resolved identity `token` is treated as role `administrator`
 
+If external authentication is configured with no shared token and an empty
+`console.rbac.bootstrapAdmins`, no identity is an administrator. Every
+identity is `user` until an operator sets the value and upgrades the release.
+
+#### Scenario: External authentication with no bootstrap administrators
+
+- **WHEN** a release runs external authentication and the bootstrap-admins
+  chart value is empty
+- **THEN** no identity is treated as `administrator`, and the console
+  offers no role assignment until the value is set
+
 #### Scenario: An externally authenticated install names its first administrators
 
 - **WHEN** a release runs external authentication and the bootstrap-admins

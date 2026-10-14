@@ -24,7 +24,6 @@
 
 - [ ] 4.1 Add `create`/`update` verbs on `RoleGrant` and `update` on `rolegrants/status` to console's existing `apiGroups: ["agentops.dev"]` block in `chart/templates/console.yaml`, adding no verb to any other kind. Verify with `helm template` diffing only the expected block.
 - [ ] 4.2 Add a chart value for bootstrap administrators under external authentication (e.g. `console.rbac.bootstrapAdmins`), read once, documented in its own values comment. Verify with a chart render test asserting the value reaches the console's config as designed.
-- [ ] 4.3 Record that `kubectl apply -f chart/crds/` is required on upgrade for the new CRD in `docs/installation.md` and `docs/CHANGELOG.md`, per the Migration Plan in `design.md`. `chart/templates/NOTES.txt` gets no entry, since it carries no per-CRD upgrade notes.
 
 ## 5. Console UI: role assignment — frontend-developer
 
@@ -51,9 +50,10 @@
 - [ ] 8.2 Update `docs/contracts.md` with the `POST /channel/inbound` refusal case and the `/api/control-plane/...` route namespace.
 - [ ] 8.3 Update `docs/configuration.md` with the bootstrap-admins chart value, since it is a reversible parent chart value.
 - [ ] 8.4 Re-run `python3 .github/scripts/docs-generate.py` since this change adds a CRD field and a chart value, and verify it reports clean.
+- [ ] 8.5 Record in `docs/installation.md` and `docs/CHANGELOG.md` that `kubectl apply -f chart/crds/` is required on upgrade for the new CRD, per the Migration Plan in `design.md`. `chart/templates/NOTES.txt` gets no entry, since it carries no per-CRD upgrade notes.
 
 ### Adopter site
-- [ ] 8.5 Update `docs/console-guide.md` with a role-assignment section alongside the existing authentication-decision section.
-- [ ] 8.6 Correct `docs/console.md`'s "there is no write path to the Kubernetes API anywhere in the module" claim, as a stated reversal naming what changed and why, not a silent edit.
-- [ ] 8.7 Update `docs/security.md` with the new trust-boundary entry: the console can now mutate who is an administrator, and what bounds that, per `design.md`'s Risks section.
-- [ ] 8.8 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui`, since this change alters the console UI.
+- [ ] 8.6 Update `docs/console-guide.md` with a role-assignment section alongside the existing authentication-decision section.
+- [ ] 8.7 Correct `docs/console.md`'s "there is no write path to the Kubernetes API anywhere in the module" claim, as a stated reversal naming what changed and why, not a silent edit.
+- [ ] 8.8 Update `docs/security.md` with the new trust-boundary entry: the console can now mutate who is an administrator, and what bounds that, per `design.md`'s Risks section.
+- [ ] 8.9 Re-run `npm run screenshots` and `npm run demo` in `platform/console/ui`, since this change alters the console UI.

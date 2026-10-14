@@ -9,22 +9,23 @@ A request that omits `sender` SHALL be treated as role `user` with no identity p
 
 It is therefore refused on a conversation carrying an `originReader`. It is accepted on one carrying none.
 
-A reply, or an address of an EXISTING conversation by name, whose sender
+A reply whose sender
 resolves to role `user` SHALL be refused when the target conversation's
 `spec.originReader` names a DIFFERENT `{channel, key}` pair than the
 sender's own.
 
-The refusal applies to the reply or address, not the thread. The request
+The refusal applies to the reply, not the thread. The request
 is rejected rather than accepted and delivered.
 
-A reply or address to a target conversation carrying NO `originReader` at
-all SHALL be accepted regardless of the sender's role. A reply or address
+A reply to a target conversation carrying NO `originReader` at
+all SHALL be accepted regardless of the sender's role. A reply
 from a sender whose role is `responder` or `administrator` SHALL NEVER be
 refused by this rule.
 
 This is the role-and-ownership decision `access-control` defines, applied
 uniformly here for every channel this contract serves, for a reply on
-`/channel/inbound`.
+`/channel/inbound`. Addressing an existing conversation by name is outside
+this contract.
 
 #### Scenario: Threaded reply is queued serially
 - **WHEN** an adapter posts an inbound message whose thread id matches a conversation with an inflight unit
