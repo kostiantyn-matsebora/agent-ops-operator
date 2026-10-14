@@ -215,7 +215,8 @@ and naming is not creating. */ -}}
 
 {{- /* Whether demo mode asked for the showcase Pipeline (demo-dual-wiring-showcase).
 Returns "true" or "". Mirrors `kubernetes.wiringActive`'s exact nullable
-pattern: explicit wins in both directions, unset follows `demo.enabled` alone.
+pattern, but demo-only: nothing renders without `demo.enabled`; under it an
+explicit `wiringShowcase` wins in both directions and unset follows demo.
 
 Answers ONLY "did demo ask for the showcase" — never "does the showcase make
 sense right now". `pipeline-showcase.yaml` ANDs this with
@@ -224,10 +225,12 @@ sense right now". `pipeline-showcase.yaml` ANDs this with
 helper alone would say true. */ -}}
 {{- define "kubernetes.demoShowcaseActive" -}}
 {{- $g := .Values.global | default dict -}}
+{{- if dig "demo" "enabled" false $g -}}
 {{- if kindIs "bool" (dig "demo" "wiringShowcase" "" $g) -}}
 {{- if dig "demo" "wiringShowcase" false $g }}true{{ end -}}
-{{- else if dig "demo" "enabled" false $g -}}
+{{- else -}}
 true
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

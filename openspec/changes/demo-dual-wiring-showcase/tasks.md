@@ -97,18 +97,18 @@
 
 ### Adopter site
 
-- [x] 5.1 Update `docs/getting-started.md`: drop the
+- [x] 4.5 Update `docs/getting-started.md`: drop the
   `--set global.agentops.wiringMode=pipelines` pin and its stale
   "console does not auto-wire" callout, install with demo mode's own
   default, and walk through addressing both the coordinator and the
   showcase pipeline by name.
-- [x] 5.2 Update `docs/guides/coordinate-agents.md`'s callout to reflect
+- [x] 4.6 Update `docs/guides/coordinate-agents.md`'s callout to reflect
   that the console source and channel are now claimed for the
   chart-rendered `Coordinator` (#296) exactly as a `Pipeline`'s — every
   ordinary run reply delivers to it, not only `escalate()` output
   (`coordinator-unconditional-channels`) — and point at the showcase
   `Pipeline` as the always-in-thread counterpart.
-- [x] 5.3 Re-run `python3 .github/scripts/docs-generate.py --check` and
+- [x] 4.7 Re-run `python3 .github/scripts/docs-generate.py --check` and
   verify it passes.
 
   Passes — "52 generated file(s) up to date".
