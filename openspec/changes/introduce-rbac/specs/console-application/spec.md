@@ -100,6 +100,10 @@ For a requester whose resolved role is `responder` or `administrator`, the
 console SHALL serve every conversation, unfiltered, exactly as it does
 today.
 
+Read siloing is enforced by the console alone. The manager exposes no
+conversation read route to a human requester, so the console's own watch is
+the only read path and a manager-side read check has nothing to guard.
+
 #### Scenario: A user sees only their own conversations
 
 - **WHEN** a `user`-role requester lists conversations

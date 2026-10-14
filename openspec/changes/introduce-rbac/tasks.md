@@ -22,7 +22,7 @@
 
 ## 4. Chart and RBAC — deployment-engineer
 
-- [ ] 4.1 Add `create`/`update` verbs on `RoleGrant` to console's existing `apiGroups: ["agentops.dev"]` block in `chart/templates/console.yaml`, adding no verb to any other kind. Verify with `helm template` diffing only the expected block.
+- [ ] 4.1 Add `create`/`update` verbs on `RoleGrant` and `update` on `rolegrants/status` to console's existing `apiGroups: ["agentops.dev"]` block in `chart/templates/console.yaml`, adding no verb to any other kind. Verify with `helm template` diffing only the expected block.
 - [ ] 4.2 Add a chart value for bootstrap administrators under external authentication (e.g. `console.rbac.bootstrapAdmins`), read once, documented in its own values comment. Verify with a chart render test asserting the value reaches the console's config as designed.
 - [ ] 4.3 Record that `kubectl apply -f chart/crds/` is required on upgrade for the new CRD in `docs/installation.md` and `docs/CHANGELOG.md`, per the Migration Plan in `design.md`. `chart/templates/NOTES.txt` gets no entry, since it carries no per-CRD upgrade notes.
 
@@ -49,7 +49,7 @@
 ### Reference docs
 - [ ] 8.1 Update `docs/concepts.md` with the `RoleGrant` CRD and the three roles.
 - [ ] 8.2 Update `docs/contracts.md` with the `POST /channel/inbound` refusal case.
-- [ ] 8.3 Update `docs/installation.md` with the bootstrap-admins chart value, as the proposal places it.
+- [ ] 8.3 Update `docs/configuration.md` with the bootstrap-admins chart value, since it is a reversible parent chart value.
 - [ ] 8.4 Re-run `python3 .github/scripts/docs-generate.py` since this change adds a CRD field and a chart value, and verify it reports clean.
 
 ### Adopter site

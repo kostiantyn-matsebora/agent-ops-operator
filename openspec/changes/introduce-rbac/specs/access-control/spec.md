@@ -62,6 +62,19 @@ wrote it and when.
 - **THEN** exactly that identity pair resolves to `administrator`, and no
   other identity pair is affected
 
+### Requirement: One RoleGrant per identity pair
+
+At most one `RoleGrant` SHALL exist for any `{channel, key}` pair. The
+console SHALL refuse to create a second `RoleGrant` for a pair that already
+has one, and SHALL update the existing object instead.
+
+#### Scenario: A second grant for the same pair is refused
+
+- **WHEN** a `RoleGrant` already names `{console, administrator@example.com}`
+  and another is created for the same pair
+- **THEN** the create is refused and the role is changed by updating the
+  existing object
+
 ### Requirement: An identity with no RoleGrant defaults to user
 
 Any `{channel, key}` pair with no matching `RoleGrant` SHALL default to role
