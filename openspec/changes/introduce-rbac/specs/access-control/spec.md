@@ -52,10 +52,15 @@ use.
 Lookup and uniqueness SHALL be scoped to the release namespace. A
 `RoleGrant` in any other namespace SHALL NOT be read.
 
-Its spec SHALL carry `channel` (matching the value space of
-`Conversation.spec.originReader.channel`), `key` (the RAW identity string,
-never hashed), and `role` (one of `user`, `responder`, `administrator`). Its
-status SHALL carry `lastModifiedBy` and `lastModifiedAt`, recording who last
+Its spec SHALL carry:
+
+- `channel`, the NAME of the `Channel` resource the sender arrived on.
+  It is the value `Conversation.spec.originReader.channel` holds and
+  `chat-addressing-discovery` uses for its identity pair.
+- `key`, the RAW identity string, never hashed.
+- `role`, one of `user`, `responder`, `administrator`.
+
+Its status SHALL carry `lastModifiedBy` and `lastModifiedAt`, recording who last
 wrote it and when.
 
 #### Scenario: A grant names one identity pair and one role
