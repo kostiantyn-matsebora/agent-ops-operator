@@ -37,7 +37,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -153,6 +152,19 @@ func (a *adapter) served(name string) (string, bool) {
 	return secret, ok
 }
 
+// servedName returns the manager-listed spelling of a served source, so a log
+// line carries the registry's own value rather than the caller's path segment.
+func (a *adapter) servedName(name string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for k := range a.sources {
+		if k == name {
+			return k
+		}
+	}
+	return ""
+}
+
 // report publishes a source's Ready state, skipping unchanged repeats so the
 // registration loop does not spam the status endpoint every tick.
 func (a *adapter) report(ctx context.Context, source, reason, message string) {
@@ -192,7 +204,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	signingSecret, served := a.served(name)
 	if !served {
 		// a retried Pulse delivery covers the source-poll lag
-		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown or unserved source %q", name)})
+		writeJSON(w, 404, map[string]string{"error": "unknown or unserved source"})
 		return
 	}
 
@@ -225,8 +237,8 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
-		// %q: name is a URL path segment a caller chose, so newlines in it must not forge log lines.
-		log.Printf("inbound %q: %v", name, err)
+		// the registry's own spelling, never the caller's path segment, so it cannot forge log lines.
+		log.Printf("inbound %q: %v", a.servedName(name), err)
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}
