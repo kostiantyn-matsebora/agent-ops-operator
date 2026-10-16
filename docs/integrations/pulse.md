@@ -203,14 +203,14 @@ hosts that may sit entirely outside Kubernetes, unlike Alertmanager, which
 this repository's other bundles can assume runs alongside the cluster it
 alerts on.
 
-The two lanes need different things from you:
+The two paths need different things from you:
 
 | Path | Direction | Works unmodified? |
 |---|---|---|
 | MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl` and `mcpServer.backend` already take any reachable URL — in-cluster or not |
 | Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The adapter registers its own in-cluster Service DNS name, which an external Pulse cannot resolve |
 
-Fix the webhook lane with `signal.ingress` — it points an Ingress at the
+Fix the webhook path with `signal.ingress` — it points an Ingress at the
 SignalAdapter reconciler's own Service, so the chart does the exposing for
 you if you already run an ingress controller:
 
