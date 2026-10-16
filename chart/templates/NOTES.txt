@@ -507,7 +507,7 @@ what you want when one agent should answer this source AND a chat surface.
 {{- $pubHasTLS := false }}
 {{- if kindIs "slice" $pubTls }}{{ if $pubTls }}{{ $pubHasTLS = true }}{{ end }}
 {{- else if $pubTls }}{{ if or $pubTls.secretName $pubTls.clusterIssuer $pubTls.existing }}{{ $pubHasTLS = true }}{{ end }}{{ end }}
-{{- if and $pubIng.enabled (not $pubHasTLS) }}
+{{- if and $pub.signal.enabled $pubIng.enabled (not $pubHasTLS) }}
 
 ACTION NEEDED — the pulse webhook endpoint is exposed over plain HTTP. The
 alert payload, and any header named in signal.defaultSource.webhookHeaders,

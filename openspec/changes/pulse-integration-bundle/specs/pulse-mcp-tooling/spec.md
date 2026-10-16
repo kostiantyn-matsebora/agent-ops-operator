@@ -37,7 +37,7 @@ scope. `mcp-pulse` makes no scope decision itself.
 
 ### Requirement: Two MCPConfig/MCPToolset pairs front the same server
 The bundle SHALL render two `MCPConfig`s, `pulse-observer-mcp` and
-`pulse-operator-mcp`, both naming the same `mcp-pulse` server key and the
+`pulse-operator-mcp`, both naming the same `pulse` server key and the
 same deployed Service URL. They SHALL differ only in which Secret-backed
 header each supplies as the forwarded bearer token.
 

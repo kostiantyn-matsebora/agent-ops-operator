@@ -39,8 +39,8 @@ Pulse API token plus the optional HMAC signing secret from
 `token`/`TOKEN` and `signingSecret`/`SIGNING_SECRET` key casings).
 
 This bundle still ships exactly one default source. The config shape is
-two flat fields — `{"baseUrl": "...", "webhookUrl": "..."}`, the second
-optional (see the delivery-URL requirement below) — never
+three flat fields — `{"baseUrl": "...", "webhookUrl": "...", "webhookHeaders": {...}}`,
+the last two optional (see the delivery-URL and header requirements below) — never
 `signals/alertmanager`'s `register` sub-block.
 
 Registration follows whichever source the adapter serves, not a

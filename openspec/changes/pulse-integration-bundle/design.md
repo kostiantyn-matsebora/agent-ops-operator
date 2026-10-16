@@ -95,6 +95,17 @@ pod restart.
 This is deliberately NOT a one-shot registration at startup only — see
 Risks below for why a true one-shot was rejected.
 
+### Decision 1a: `webhookHeaders` is a third flat field, independent of signing
+
+`spec.config.webhookHeaders`, when set, is registered verbatim as Pulse's
+own `WebhookConfig.Headers`.
+
+- Static headers PULSE attaches to every delivery.
+- Serves infra in front of the adapter (a WAF, a gateway) needing its own
+  shared-secret header.
+- Registered whether or not a signing secret is configured.
+- Read by the same mechanism as `baseUrl`.
+
 ### Decision 1b: the registered delivery URL is overridable, for a Pulse outside the cluster
 
 Pulse watches Proxmox/Docker/Kubernetes/TrueNAS hosts, which commonly sit

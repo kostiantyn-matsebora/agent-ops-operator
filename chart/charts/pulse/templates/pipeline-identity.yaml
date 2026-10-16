@@ -52,6 +52,9 @@ subjects:
     namespace: {{ $.Release.Namespace }}
 {{- end }}
 {{- range $rbac.bindClusterRoles | default list }}
+{{- if has . (list "cluster-admin" "admin" "edit" "view") }}
+{{- fail (printf "pulse: pipelines.%s.rbac.bindClusterRoles names the built-in ClusterRole %q — no binding uses a built-in role. Declare the rules under rbac.clusterRoles instead" $cfg.name .) }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

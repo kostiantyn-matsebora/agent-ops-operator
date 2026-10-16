@@ -49,6 +49,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set pulse.signal.credentials.token=<pulse-api-token> \
   --set pulse.mcpServer.enabled=true \
   --set pulse.mcp.observer.credentials.token=<read-scoped-token> \
+  --set pulse.mcp.operator.credentials.token=<write-scoped-token> \
   --set pulse.pipelines.enabled=true
 ```
 
@@ -61,6 +62,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set pulse.signal.credentials.token=<pulse-api-token> `
   --set pulse.mcpServer.enabled=true `
   --set pulse.mcp.observer.credentials.token=<read-scoped-token> `
+  --set pulse.mcp.operator.credentials.token=<write-scoped-token> `
   --set pulse.pipelines.enabled=true
 ```
 
@@ -137,7 +139,11 @@ Everything below is under `pulse:`.
 | `signal.defaultSource.webhookUrl` | empty, derives the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
 | `signal.ingress.enabled` | `false` | `true` to expose the webhook path through your ingress controller |
 | `signal.ingress.host` | **empty, required when enabled** | the hostname Pulse will call |
+| `signal.credentials.token` | empty | the Pulse API token that registers the webhook, or `existingSecret` for a Secret you manage |
+| `mcp.url` | empty, uses the deployed `mcp-pulse` Service | an `mcp-pulse` you already run elsewhere |
 | `mcp.observer.enabled` | `true` | `false` to drop the read-only MCP pair |
+| `mcp.observer.credentials.token` | empty | a `monitoring:read` token, or `existingSecret` |
+| `mcp.operator.credentials.token` | empty | a `monitoring:read`+`monitoring:write` token, or `existingSecret` |
 | `mcp.operator.enabled` | `true` | `false` to drop the write-capable MCP pair |
 | `mcpServer.enabled` | `false` | `true` to deploy `mcp-pulse` |
 | `mcpServer.backend` | **empty, required when `mcpServer.enabled`** | the Pulse endpoint the MCP server forwards to |
