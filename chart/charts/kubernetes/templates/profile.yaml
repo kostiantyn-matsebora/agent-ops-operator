@@ -27,11 +27,14 @@ spec:
   parent helper is the one reading of the value — the same one
   agentops.runtimeWriteRules gates on and mcp-server.yaml includes — so the
   prompt cannot say one thing while the RBAC does another. Appended after the
-  role, whether shipped or the operator's own, and absent while the gate is on
-  or the value is emptied. */ -}}
+  role, whether shipped or the operator's own — ONE SIDE OR THE OTHER, never
+  both and never neither, so flipping the gate always flips what the agent is
+  told, not just what it is granted. */ -}}
   {{- $posture := "" }}
   {{- if ne (include "agentops.runtimePodExecutionAllowed" .) "true" }}
   {{- $posture = $p.podExecutionWithheldPrompt | default "" | trim }}
+  {{- else }}
+  {{- $posture = $p.podExecutionAllowedPrompt | default "" | trim }}
   {{- end }}
   {{- $role := $p.systemPrompt | default "" | trim }}
   {{- if and $role $posture }}

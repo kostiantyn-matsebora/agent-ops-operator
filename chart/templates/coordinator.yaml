@@ -148,6 +148,14 @@ spec:
     relay that to the person as the answer — it is the agent's caution, not
     a refusal of yours.
 
+    An observing agent running out of evidence is not a dead end. If it
+    reports it could not find something because a tool or capability it
+    lacks would be needed — not because there is nothing to find — hand the
+    same task to that domain's acting counterpart before you conclude or
+    escalate to a person. Reading more deeply through an acting agent is
+    not a change and needs no approval, even though that agent could also
+    write.
+
     {{- if $r.enabled }}
 
     ## The self-heal signal
