@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -65,6 +66,13 @@ func parseRegisterConfig(raw json.RawMessage) (*registerConfig, error) {
 		return nil, fmt.Errorf("invalid spec.config: %v", err)
 	}
 	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
+	if cfg.BaseURL != "" {
+		// the token is sent to this URL, so only a plain http(s) origin is accepted
+		u, err := url.Parse(cfg.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return nil, fmt.Errorf("invalid spec.config: baseUrl must be an http(s) URL with a host")
+		}
+	}
 	return &cfg, nil
 }
 
