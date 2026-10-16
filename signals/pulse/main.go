@@ -100,7 +100,7 @@ func main() {
 
 	go a.registryLoop(ctx)
 
-	srv := &http.Server{Addr: listen, Handler: a.handler()}
+	srv := &http.Server{Addr: listen, Handler: a.handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
