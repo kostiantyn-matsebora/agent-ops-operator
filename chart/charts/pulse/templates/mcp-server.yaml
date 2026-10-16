@@ -1,0 +1,88 @@
+{{- /*
+The mcp-pulse server WORKLOAD, decoupled from the CRs in mcp.yaml. FIRST
+PARTY, unlike every prior bundle's MCP server: built and published by this
+repository from platform/mcp-pulse/ (design.md Decision 2).
+
+It runs under its own ServiceAccount and needs no Kubernetes RBAC — it reads
+Pulse's HTTP API, not the Kubernetes API server — so none is rendered for
+it. It mounts no token at all: see the equal-SA guard below for why naming
+one is still refused when it names the runtime's.
+
+DISTROLESS, NO SHELL: platform/mcp-pulse's image (gcr.io/distroless/static)
+carries no curl and no sh, so unlike prometheus's third-party mcp server this
+Deployment declares NO probes — an exec probe cannot run here, and a
+tcpSocket probe originates on the NODE, which crash-looped a sibling bundle's
+MCP server behind a restrictive NetworkPolicy once already (see
+chart/charts/prometheus/templates/mcp-server.yaml's own note). Same posture
+home-assistant's admin MCP server workload already takes.
+*/ -}}
+{{- if and (include "pulse.active" .) .Values.mcpServer.enabled }}
+{{- $s := .Values.mcpServer }}
+{{- $name := include "pulse.mcpServerName" . }}
+{{- $backend := include "pulse.mcpServerBackend" . }}
+{{- if not $backend }}
+{{- fail "pulse: mcpServer.backend is required when mcpServer.enabled=true (or set signal.defaultSource.baseUrl, which it defaults onto) — mcp-pulse has no in-cluster endpoint of its own to forward calls to" }}
+{{- end }}
+{{- /* NAMING ONE IS STILL REFUSED IF IT IS THE RUNTIME'S. The guard survives
+the account not being rendered: an install that points this workload at an
+account of its own must still not point it at the one agents run as. */ -}}
+{{- if and $s.serviceAccountName (eq $s.serviceAccountName (include "agentops.runtimeServiceAccount" .)) }}
+{{- fail (printf "pulse: mcpServer.serviceAccountName (%s) must NOT be the runtime's ServiceAccount — sharing one collapses two walls into one" $s.serviceAccountName) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      {{- /* Named only if the install names one — with no token mounted this
+      pod never authenticates, so the account changes nothing it can reach. */}}
+      {{- with $s.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      automountServiceAccountToken: false
+      containers:
+        - name: mcp-pulse
+          image: {{ printf "%s:%s" $s.image.repository (toString $s.image.tag) | quote }}
+          env:
+            - name: PULSE_URL
+              value: {{ $backend | quote }}
+            - name: LISTEN_ADDR
+              value: {{ printf ":%v" $s.port | quote }}
+            {{- with $s.env }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $s.port }}
+          {{- with $s.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: http
+      port: {{ $s.port }}
+      targetPort: http
+{{- end }}

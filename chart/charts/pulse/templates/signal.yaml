@@ -1,0 +1,115 @@
+{{- /*
+Ingest lane: the webhook-receiving SignalAdapter and (under
+defaultSource.enabled) the SignalSource itself.
+
+NOT the claim on that source. Wiring is pipeline-only — an unclaimed
+SignalSource reports Wired=False and DROPS every alert — but the
+Pipeline/AgentCapability is its own component (pipelines.yaml/
+capabilities.yaml), so this lane can be rendered for a route declared
+anywhere, including the parent chart's own `pipelines:`.
+
+Pulse sends outgoing webhooks only: there is no receiver-registration concept
+to call into, so "registering" means THIS adapter calling Pulse's own API
+(POST /api/notifications/webhooks) to tell it where to post. The
+SignalAdapter CRD carries no generic pod-env passthrough, so the registration
+config (Pulse's base URL, its API token, the optional HMAC signing secret)
+rides the served SignalSource's own spec.config/credentialsSecretRef instead
+— the same two mechanisms signals/alertmanager and signals/ha already use.
+See design.md Decision 1.
+*/ -}}
+{{- if and (include "pulse.active" .) .Values.signal.enabled }}
+{{- $sig := .Values.signal }}
+apiVersion: agentops.dev/v1alpha1
+kind: SignalAdapter
+metadata:
+  name: {{ $sig.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  image: {{ printf "%s:%s" $sig.image.repository (toString $sig.image.tag) | quote }}
+  # Webhook entry point (Service owned by the SignalAdapter reconciler):
+  #   http://agentops-signal-{{ $sig.name }}.{{ .Release.Namespace }}.svc:8080/webhook/<source>
+  port: 8080
+  # This adapter's registration call is Pulse's REST API, not the Kubernetes
+  # API — it mounts no ServiceAccount token and names none, inheriting the
+  # release floor (an identity denied every verb).
+  # Two sessions would both try to register the same webhook and could race
+  # each other's create-or-update.
+  singleton: true
+  {{- with $sig.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  externals:
+    - name: Pulse
+      kind: sender
+    - name: Pulse API
+      kind: api
+  # The config contract for SignalSources with `adapter: {{ $sig.name }}` —
+  # mirrors registerConfig in signals/pulse/register.go; bump both in one
+  # diff. Advisory only: violations surface as ConfigValid, never block
+  # ingest.
+  configSchema:
+    type: object
+    properties:
+      baseUrl:
+        type: string
+        description: >-
+          Pulse's own base URL, e.g. https://pulse.example.org. Required for
+          the adapter to self-register its webhook; without it the source
+          still serves, reporting RegistrationNotConfigured.
+    additionalProperties: false
+  # Documentation only — the manager reads no Secrets and can never verify
+  # this.
+  credentialKeys:
+    - key: token
+      required: true
+      description: >-
+        Pulse API token, scoped for POST /api/notifications/webhooks. Without
+        one the source still serves webhooks, but registration fails and the
+        source reports a degraded Ready reason until a token is supplied.
+    - key: signingSecret
+      required: false
+      description: >-
+        HMAC signing secret for X-Pulse-Timestamp/X-Pulse-Signature. Omit to
+        accept unsigned deliveries.
+{{- if $sig.defaultSource.enabled }}
+{{- $src := $sig.defaultSource }}
+{{- $secret := include "pulse.ingestSecret" . }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: SignalSource
+metadata:
+  name: {{ $src.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  # a REFERENCE to the SignalAdapter above — its implementation defines the
+  # schema of the config below
+  adapter: {{ $sig.name }}
+  {{- with $secret }}
+  # Referenced BY NAME and never created here. Projected into the adapter
+  # pod by the reconciler and resolved by the kubelet; the manager reads no
+  # Secrets. Absent = the source still serves, registration degraded until a
+  # token is supplied.
+  credentialsSecretRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with $src.grouping }}
+  grouping:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- $cfg := dict }}
+  {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
+  {{- with $cfg }}
+  config:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

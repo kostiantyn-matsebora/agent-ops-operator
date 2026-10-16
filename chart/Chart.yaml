@@ -40,6 +40,12 @@ dependencies:
     version: 0.2.0
     repository: ""
     condition: home-assistant.enabled
+  # embedded subchart (chart/charts/pulse); templates are additionally
+  # self-gated on pulse.enabled
+  - name: pulse
+    version: 0.1.0
+    repository: ""
+    condition: pulse.enabled
   # embedded subchart (chart/charts/claude) — the REFERENCE RUNTIME, and the one
   # bundle that is ON by default: it is what a fresh install executes on.
   # Disabling it with no replacement FAILS the render through

@@ -1189,6 +1189,39 @@ resources:
 home-assistant:
   enabled: false
 
+# Pulse bundle (embedded subchart, OFF by default; never enabled by demo
+# mode — it needs your own Pulse (rcourtman/pulse) instance and API tokens).
+# Ships a Community-edition-framed privilege split: pulse-observer
+# investigates alerts read-only, pulse-operator additionally records
+# operator-state annotations (maintenance windows, criticality tags) — Pulse's
+# governed plan/approve/execute flow stays Pro-gated and out of reach for
+# both. See chart/charts/pulse/values.yaml for the full surface and
+# docs/integrations/pulse.md. Typical enablement:
+# pulse:
+#   enabled: true
+#   signal:
+#     defaultSource:
+#       enabled: true                     # SignalSource (INERT until claimed)
+#       baseUrl: https://pulse.example.org
+#     credentials:
+#       token: <pulse-api-token>           # or existingSecret
+#   mcpServer:
+#     enabled: true                        # deploys mcp-pulse in-cluster
+#   mcp:
+#     observer:
+#       credentials:
+#         token: <read-scoped-pulse-token>
+#     operator:
+#       credentials:
+#         token: <write-scoped-pulse-token>
+#   # The bundle's own routes — OFF by default, the one component that spends
+#   # money and acts on its own:
+#   pipelines:
+#     enabled: true
+#     channels: [<your-channel>]           # optional; omitted when unset
+pulse:
+  enabled: false
+
 # CRD management (cert-manager pattern): templated, so upgrades work.
 # Conversation retention — TWO STAGES, two clocks, both OFF by default.
 # Closing is reversible and keeps the record; deleting is neither. Stage 2 is

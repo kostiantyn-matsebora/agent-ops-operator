@@ -1,0 +1,13 @@
+apiVersion: v2
+name: pulse
+description: >-
+  Pulse (rcourtman/pulse) agent bundle for the agent-ops operator: the Pulse
+  webhook signal source (adapter + source), the first-party mcp-pulse MCP
+  server with its two risk-split tool pairs, TWO Community-edition-framed
+  profiles — one that investigates and one that records operator-state
+  annotations — and the bundle's own opt-in wiring for both, in Pipeline mode
+  and Coordinator mode. The execution substrate is the parent chart's. Never
+  enabled by demo mode: every component needs a Pulse instance and a token no
+  demo cluster has.
+type: application
+version: 0.1.0

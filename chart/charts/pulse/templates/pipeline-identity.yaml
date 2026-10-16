@@ -1,0 +1,71 @@
+{{- /*
+ONE RUNTIME IDENTITY PER ROUTE THIS BUNDLE SHIPS, rendered only where that
+route is actually granted something.
+
+IT HOLDS NO KUBERNETES RBAC BY DEFAULT, AND THAT IS CORRECT: neither route
+touches the Kubernetes API — pulse-observer and pulse-operator both reach
+Pulse entirely through the MCP server's own HTTP calls, which has its own
+account (mcp-server.yaml). An agent investigating or annotating a Pulse
+resource needs no Kubernetes permission to do either.
+
+Add a grant with `pipelines.<route>.rbac.clusterRoles` / `.bindClusterRoles`,
+or name your own account with `pipelines.<route>.serviceAccountName`, which
+suppresses the one rendered here.
+*/ -}}
+{{- if include "pulse.wiringActive" . }}
+{{- $p := .Values.pipelines }}
+{{- $routes := list }}
+{{- if include "pulse.observerRouteEnabled" . }}{{- $routes = append $routes $p.observer -}}{{- end }}
+{{- if include "pulse.operatorRouteEnabled" . }}{{- $routes = append $routes $p.operator -}}{{- end }}
+{{- range $cfg := $routes }}
+{{- if include "pulse.routeAccountRendered" (dict "ctx" $ "cfg" $cfg "p" $p) }}
+{{- $sa := include "pulse.routeServiceAccount" (dict "ctx" $ "route" $cfg.name) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+{{- $rbac := $cfg.rbac | default dict }}
+{{- range $rbac.clusterRoles | default list }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}-{{ .name }}-{{ $.Release.Namespace }}
+rules:
+{{ toYaml .rules | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-{{ .name }}-{{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}-{{ .name }}-{{ $.Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- range $rbac.bindClusterRoles | default list }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-{{ . }}-{{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ . }}-{{ $.Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
