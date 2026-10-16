@@ -684,23 +684,22 @@ console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-**Every scope is an unread count, no exceptions.** A bare "All" that counted
-everyone, read or not, is gone, and so is Closed ever counting a READ closed
-conversation.
+**All is a total, not an unread count.** It is every conversation a person
+can open, read or not — unchanged from what it always meant.
 
-The Inbox used to carry both All and a separate Unread. Once every other
-scope turned unread-scoped too, that pair just counted the same backlog
-twice — the dedicated Unread scope is what was removed.
+Every OTHER fixed scope (Working, Mine, Errored), each Pipeline or
+Coordinator, and Closed are unread counts instead.
 
-`kind: 'all'` (unchanged internally) keeps its label too. It is still the
-one scope with no further predicate, it just means "all unread" now.
+That is what made the dedicated Unread scope redundant: every category
+already carried its own unread count one level down. It was removed. All
+was not, and is not an unread count either.
 
 An invoked member never counts, on any scope. It binds no console thread and
 no action of its own — the tree under its root is the only way to reach it.
 
 | Scope | Counts |
 |---|---|
-| All (`kind: 'all'`) | every unread root, no further filter |
+| All (`kind: 'all'`) | every root, read or not, no further filter |
 | Working, Mine, Errored, Closed, each Pipeline or Coordinator | unread roots its own filter admits |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
@@ -710,13 +709,23 @@ any pipeline's. There is no separate "Incidents" scope.
 never moves a count that belongs to a different one, computed before that
 filter applies.
 
+All is not exempt from this — it still excludes a closed root while the
+toggle is off, same as every unread-scoped one.
+
 The closed-row toggle is a different thing, not a scope. Every list but
 Closed's own hides a closed row while it is off, so a badge for one of those
 lists excludes that row too.
 
 Closed's own list is exempt from that one filter — it IS the closed view —
 so its count ignores the toggle too. It still requires unread, like every
-other scope here.
+scope here except All.
+
+**The navigation rail's own badge, outside the Inbox, is a plain unread
+count** — `unreadTotal`, every unread root, no further filter, the same
+number the removed Unread scope used to show.
+
+It answers "is there anything to read", a different question from what All
+answers now.
 
 Opening a conversation reports it read, at `max(the newest counted message's
 time, status.lastActivity)` — the second term keeps the report monotone

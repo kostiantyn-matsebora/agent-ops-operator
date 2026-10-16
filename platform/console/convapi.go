@@ -132,6 +132,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
 	unreadTotal := 0
+	rootTotal := 0
 	scopes := map[string]int{}
 	for _, o := range a.cache.List("conversations") {
 		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -147,6 +148,13 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// Counted BEFORE the filter, always: a count that moved because the
 		// view narrowed would let a filter hide a backlog without saying so.
 		accumulateScopeCounts(scopes, s, closedVisible)
+		// rootTotal is the Inbox's "All" badge — every conversation a person
+		// can open on its own, respecting showClosed like every scope but
+		// Closed, but NOT gated on read state: "All" means all of them, not
+		// "all unread". A member never counts, same reason as everywhere else.
+		if !isMember(s) && closedVisible {
+			rootTotal++
+		}
 		// A member is never Joined — it binds no console thread of its own
 		// (invariants.md) — so s.Unread is already always false for one; the
 		// explicit guard here is belt-and-braces, not load-bearing.
@@ -163,11 +171,12 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	total := len(all)
 	// count-only: the navigation badge wants the number, not a page of rows it
 	// would immediately throw away. The inbox's per-scope badges ride along —
-	// same reasoning as unreadTotal: computed over every conversation, never
-	// narrowed by the filter this same request may also carry.
+	// same reasoning as rootTotal/unreadTotal: computed over every
+	// conversation, never narrowed by the filter this same request may also
+	// carry.
 	if ok, _ := strconv.ParseBool(r.URL.Query().Get("count")); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items": []ConversationSummary{}, "total": total,
+			"items": []ConversationSummary{}, "total": total, "rootTotal": rootTotal,
 			"unreadTotal": unreadTotal,
 			"offset": 0, "limit": 0, "scopes": scopes,
 		})
@@ -185,7 +194,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		page = []ConversationSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page, "total": total, "offset": offset, "limit": limit,
+		"items": page, "total": total, "rootTotal": rootTotal, "offset": offset, "limit": limit,
 		"unreadTotal": unreadTotal,
 		// facets let the UI build filter dropdowns from what EXISTS rather than
 		// from a hardcoded list that drifts from the cluster

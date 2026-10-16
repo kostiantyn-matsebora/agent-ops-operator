@@ -13,12 +13,12 @@ import { INBOX_COLLAPSED_WIDTH } from './layout'
 //
 // `console-chat-layout` spec named this scope "All", counting every
 // conversation regardless of read state, with a separate "Unread" scope
-// beside it. A later decision made every scope an unread count (ChatView.tsx's
-// TREE_PREDICATE), which made the dedicated "Unread" scope count exactly what
-// "All" now did too, one level up — redundant, and removed. `kind: 'all'`
-// keeps both its internal name and its label: it is still the one scope with
-// no further category filter, just "all" of them — it only means "all
-// UNREAD" now, same as every other scope here means "unread, and —".
+// beside it. A later decision made every OTHER fixed scope (Working, Mine,
+// Errored), each Pipeline/Coordinator, and Closed an unread count
+// (ChatView.tsx's TREE_PREDICATE) — which made the dedicated "Unread" scope
+// redundant (every category already had its own unread count one level
+// down) and it was removed. All itself did NOT change: it is still every
+// conversation a person can open, read or not, same as it always was.
 
 export type Scope =
   | { kind: 'all' }
@@ -108,15 +108,17 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
   const entries = vocabulary.data?.entries ?? []
   const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
 
-  // Every count below is UNREAD, ANDed with its own scope's predicate — the
-  // dedicated Unread scope is GONE (it counted the same backlog "All" does
-  // once "All" went unread-scoped too), and `kind: 'all'` keeps its name:
-  // the row stays labeled All, it just means "all UNREAD" now. Every one of
-  // these matches its own list exactly (ChatView.tsx's TREE_PREDICATE ANDs
-  // the same `c.unread` into each, Closed included), so none of them needs a
-  // tooltip explaining a gap — there isn't one.
+  // All reads `rootTotal` — every conversation a person can open, read or
+  // not, respecting showClosed like every scope but its own list already
+  // does. Every OTHER count below is UNREAD, ANDed with its own scope's
+  // predicate: the dedicated Unread scope is GONE, because once Working,
+  // Mine, Errored, each Pipeline/Coordinator and Closed all carried their own
+  // unread count, a blanket one added nothing a category-scoped click
+  // couldn't already answer. Every one of these still matches its own list
+  // exactly (ChatView.tsx's TREE_PREDICATE), so none needs a tooltip
+  // explaining a gap — there isn't one.
   const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number }[] = [
-    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.unreadTotal },
+    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.rootTotal },
     { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, icon: <UserIcon />, label: 'Mine', count: scopes.mine },
     { scope: { kind: 'errored' }, icon: <ExclamationCircleIcon />, label: 'Errored', count: scopes.errored },

@@ -6,7 +6,7 @@ import { useInboxCounts } from '../../api/hooks'
 vi.mock('../../api/hooks', () => ({
   useInboxCounts: vi.fn(() => ({
     data: {
-      items: [], total: 9, unreadTotal: 2, offset: 0, limit: 0, facets: {},
+      items: [], total: 9, rootTotal: 5, unreadTotal: 2, offset: 0, limit: 0, facets: {},
       scopes: { working: 2, mine: 1, errored: 1, closed: 7, 'rollout-coordinator': 1, 'alert-triage': 1 },
     },
   })),
@@ -34,9 +34,10 @@ describe('the inbox, expanded', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
     const labels = order()
     const index = (s: string) => labels.findIndex((l) => l?.includes(s))
-    // There is no separate "Unread" scope any more — `kind: 'all'` is the
-    // one with no further predicate, and it keeps its label, All, now
-    // counting "all unread" since every other scope went unread-based too.
+    // There is no separate "Unread" scope any more — every other scope
+    // (Working, Mine, Errored, each Pipeline/Coordinator, Closed) already
+    // carries its own unread count, which made a blanket one redundant. All
+    // itself is unchanged: every conversation, read or not.
     expect(index('All')).toBeLessThan(index('Working'))
     expect(index('Working')).toBeLessThan(index('Mine'))
     expect(index('Mine')).toBeLessThan(index('Errored'))
@@ -50,9 +51,9 @@ describe('the inbox, expanded', () => {
     expect(labels.some((l) => l?.includes('Incidents'))).toBe(false)
   })
 
-  it('shows each scope its own unread count, Archive included', () => {
+  it('shows All its own total and every other scope its own unread count', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
-    expect(screen.getByTestId('scope-All')).toHaveTextContent('2')
+    expect(screen.getByTestId('scope-All')).toHaveTextContent('5')
     expect(screen.getByTestId('scope-Working')).toHaveTextContent('2')
     expect(screen.getByTestId('scope-Mine')).toHaveTextContent('1')
     expect(screen.getByTestId('scope-Archive')).toHaveTextContent('7')

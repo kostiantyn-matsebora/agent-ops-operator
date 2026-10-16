@@ -80,6 +80,29 @@ describe('both routes render the one view', () => {
   })
 })
 
+// A brand new conversation has nothing unread yet — nobody has replied, so
+// there is no counted message past the (nonexistent) watermark — and a read
+// one has nothing unread any more either. All must show both regardless: it
+// is every conversation a person can open, not every unread one. Twice
+// mistaken for an unread filter while this fix was built, each time breaking
+// the exact case a reader actually hits — a conversation disappearing from
+// the default view the moment it stops needing attention, or before it ever
+// does.
+describe('All shows every conversation, not only unread ones', () => {
+  it('still shows a conversation nobody has replied to yet', () => {
+    items = [conv('fresh', { unread: false, unreadCount: 0 })]
+    renderAt('/conversations')
+    expect(screen.getByTestId('scope-All')).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByTestId('row-fresh')).toBeInTheDocument()
+  })
+
+  it('still shows a conversation that has already been read', () => {
+    items = [conv('already-read', { unread: false })]
+    renderAt('/conversations')
+    expect(screen.getByTestId('row-already-read')).toBeInTheDocument()
+  })
+})
+
 describe('narrow windows show one column', () => {
   it('hides the list once a conversation is open', () => {
     window.innerWidth = 600

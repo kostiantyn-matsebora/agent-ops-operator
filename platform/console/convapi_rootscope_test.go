@@ -16,9 +16,10 @@ func withCausedBy(o *Object, parent, entry string) *Object {
 }
 
 type countedResponse struct {
-	Total  int            `json:"total"`
-	Unread int            `json:"unreadTotal"`
-	Scopes map[string]int `json:"scopes"`
+	Total     int            `json:"total"`
+	RootTotal int            `json:"rootTotal"`
+	Unread    int            `json:"unreadTotal"`
+	Scopes    map[string]int `json:"scopes"`
 }
 
 func getCounted(t *testing.T, h http.Handler, path string) countedResponse {
@@ -32,6 +33,27 @@ func getCounted(t *testing.T, h http.Handler, path string) countedResponse {
 		t.Fatalf("%s body %q: %v", path, rec.Body.String(), err)
 	}
 	return out
+}
+
+// "All" is the one scope that is NOT an unread count — a READ root still
+// counts, since All means every conversation a person can open, not every
+// unread one. It still excludes a member (the tree needs it in `items`, but
+// no sidebar count should), and it respects showClosed like every scope but
+// Closed's own — the thing it does NOT do is gate on read state at all.
+func TestRootTotalCountsReadRootsExcludesMembersRespectsShowClosed(t *testing.T) {
+	openRead := convWithRuns("open-read", tLate, [2]string{"x", tLate})
+	closedRead := convWithPhase("closed-read", "Closed", tLate, "succeeded")
+	member := withCausedBy(convWithRuns("member-of-open-read", "", [2]string{"x", tLate}), "open-read", "k8s-observe")
+
+	api, _, _, _ := apiWithOptions(t, "tok", true, openRead, closedRead, member)
+	h := api.Handler(http.NotFoundHandler())
+
+	if got := getCounted(t, h, "/api/conversations?count=1"); got.RootTotal != 2 {
+		t.Fatalf("rootTotal must count both READ roots (open and closed), excluding the member: %+v", got)
+	}
+	if got := getCounted(t, h, "/api/conversations?count=1&showClosed=false"); got.RootTotal != 1 {
+		t.Fatalf("showClosed=false must exclude the closed root, matching what the All list shows: %+v", got)
+	}
 }
 
 // The Archive badge is an unread count too, like every other scope — a READ

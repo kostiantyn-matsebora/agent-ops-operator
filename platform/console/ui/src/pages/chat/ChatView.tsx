@@ -322,15 +322,14 @@ export function ChatView() {
       const byName = new Map(raw.map((c) => [c.name, c]))
       raw = raw.filter((c) => byName.get(rootNameOf(raw, c))?.coordinator === scope.name)
     }
-    // Every scope is now an UNREAD filter, no exceptions — "All" is "all
-    // unread", Working/Mine/Errored/Coordinator each AND their own predicate
-    // with unread, and Closed does too: it used to show every closed
-    // conversation regardless of read state, which a badge that also counted
-    // every closed one (convapi.go) matched — but once every OTHER scope
-    // read "unread, no further compromise," a Closed that still meant
-    // "everything" was the one badge/list pair left inconsistent with itself.
+    // All is NOT an unread filter — it is every conversation a person can
+    // open, full stop, narrowed only by the generic "hide closed" rule below
+    // (so it still respects showClosed). Every OTHER scope here is unread,
+    // ANDed with its own predicate: Working/Mine/Errored/Coordinator check
+    // what they are named for plus unread, and Closed does too — it is the
+    // archive, not a dumping ground, so a READ closed conversation stays out
+    // of it the same way a read one stays out of Working or Mine.
     const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
-      all: (c) => Boolean(c.unread),
       working: (c) => c.phase === 'Working' && Boolean(c.unread),
       errored: (c) => Boolean(c.errored) && Boolean(c.unread),
       mine: (c) => Boolean(c.mine) && Boolean(c.unread),
