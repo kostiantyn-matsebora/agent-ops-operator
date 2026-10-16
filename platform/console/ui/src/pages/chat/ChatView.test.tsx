@@ -131,7 +131,7 @@ describe('a phone width turns the Inbox into a drawer, never a squeezed column',
     expect(screen.getByTestId('inbox')).toBeInTheDocument()
     // The list is replaced, not merely covered — nothing of it renders either.
     expect(screen.queryByRole('button', { name: 'conversation filters' })).toBeNull()
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    await userEvent.click(screen.getByTestId('scope-All'))
     expect(screen.queryByTestId('inbox')).toBeNull()
     expect(screen.getByRole('button', { name: 'conversation filters' })).toBeInTheDocument()
     window.innerWidth = 1440
@@ -192,10 +192,10 @@ describe('arrivals (console-thread-live-cues)', () => {
     await userEvent.click(screen.getByTestId('scope-Working'))
     expect(screen.getByTestId('row-a')).toBeInTheDocument()
     expect(screen.queryByTestId('row-b')).not.toBeInTheDocument()
-    // Now open Unread, wider still — every row here is unread, 'a' included.
-    // None of b/c/d/e actually just arrived — they existed the whole time,
-    // just outside the narrow scope's own set.
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    // Now open All (still unread-scoped, no further predicate) — every row
+    // here is unread, 'a' included. None of b/c/d/e actually just arrived —
+    // they existed the whole time, just outside the narrow scope's own set.
+    await userEvent.click(screen.getByTestId('scope-All'))
     expect(screen.getByTestId('row-b')).toBeInTheDocument()
     // The real claim: nothing is tagged "new" just from the scope widening.
     expect(screen.queryByText('new')).not.toBeInTheDocument()
@@ -230,7 +230,7 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
       conv('member-2', { causedBy: { parent: 'root-2', entry: 'diagnose' }, unread: true, unreadCount: 1 }),
     ]
     renderAt('/conversations')
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    await userEvent.click(screen.getByTestId('scope-All'))
     // Same fold default as above — not what this test is checking.
     await userEvent.click(screen.getByText('Expand all'))
     expect(screen.getByTestId('row-root-2')).toBeInTheDocument()

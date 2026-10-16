@@ -34,10 +34,10 @@ describe('the inbox, expanded', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
     const labels = order()
     const index = (s: string) => labels.findIndex((l) => l?.includes(s))
-    // There is no separate "All" scope any more — `kind: 'all'` is the one
-    // with no further predicate, and it renders as Unread, the scope that
-    // survives once every other count is unread-based too.
-    expect(index('Unread')).toBeLessThan(index('Working'))
+    // There is no separate "Unread" scope any more — `kind: 'all'` is the
+    // one with no further predicate, and it keeps its label, All, now
+    // counting "all unread" since every other scope went unread-based too.
+    expect(index('All')).toBeLessThan(index('Working'))
     expect(index('Working')).toBeLessThan(index('Mine'))
     expect(index('Mine')).toBeLessThan(index('Errored'))
     expect(index('Errored')).toBeLessThan(index('k8s-observe'))
@@ -50,9 +50,9 @@ describe('the inbox, expanded', () => {
     expect(labels.some((l) => l?.includes('Incidents'))).toBe(false)
   })
 
-  it('shows each scope its own unread count, and Archive its own total', () => {
+  it('shows each scope its own unread count, Archive included', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
-    expect(screen.getByTestId('scope-Unread')).toHaveTextContent('2')
+    expect(screen.getByTestId('scope-All')).toHaveTextContent('2')
     expect(screen.getByTestId('scope-Working')).toHaveTextContent('2')
     expect(screen.getByTestId('scope-Mine')).toHaveTextContent('1')
     expect(screen.getByTestId('scope-Archive')).toHaveTextContent('7')

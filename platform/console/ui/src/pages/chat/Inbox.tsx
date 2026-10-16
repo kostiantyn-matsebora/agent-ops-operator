@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Badge, Tooltip } from '@patternfly/react-core'
 import {
-  ArchiveIcon, BellIcon, ExclamationCircleIcon, InProgressIcon, UserIcon,
+  ArchiveIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, UserIcon,
 } from '@patternfly/react-icons'
 import { useInboxCounts, useVocabulary } from '../../api/hooks'
 import { Icon } from '../../components/Icon'
@@ -13,12 +13,12 @@ import { INBOX_COLLAPSED_WIDTH } from './layout'
 //
 // `console-chat-layout` spec named this scope "All", counting every
 // conversation regardless of read state, with a separate "Unread" scope
-// beside it. A later decision folded the two: every scope but Closed is now
-// an unread count (ChatView.tsx's TREE_PREDICATE), which made a blanket
-// "Unread" that counted the same thing a second named scope already did,
-// one level up, redundant. `kind: 'all'` keeps its name internally — it is
-// still "no category filter, just everything" — but the row it renders is
-// labeled and badged as Unread now, the one scope that survives for it.
+// beside it. A later decision made every scope an unread count (ChatView.tsx's
+// TREE_PREDICATE), which made the dedicated "Unread" scope count exactly what
+// "All" now did too, one level up — redundant, and removed. `kind: 'all'`
+// keeps both its internal name and its label: it is still the one scope with
+// no further category filter, just "all" of them — it only means "all
+// UNREAD" now, same as every other scope here means "unread, and —".
 
 export type Scope =
   | { kind: 'all' }
@@ -42,7 +42,7 @@ interface InboxProps {
   collapsed: boolean
   onToggleCollapsed: () => void
   /** The list's own "Show closed" preference (ChatView.tsx's layout.ts) —
-   * threaded through so the Unread/per-Pipeline/Coordinator badges can match
+   * threaded through so the All/per-Pipeline/Coordinator badges can match
    * what the list below actually shows instead of promising a closed-but-
    * unread row a reader cannot reach without checking that box first. */
   showClosed: boolean
@@ -108,16 +108,15 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
   const entries = vocabulary.data?.entries ?? []
   const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
 
-  // Every count below is UNREAD, ANDed with its own scope's predicate —
-  // `kind: 'all'` (unchanged internally, no further predicate) is the one
-  // with none, so it IS plain Unread now, not "All" — the old All/Unread
-  // pair counted the same backlog twice once every other scope went
-  // unread-scoped too, and the name that stayed accurate was Unread, not
-  // All. Every one of these matches its own list exactly (ChatView.tsx's
-  // TREE_PREDICATE ANDs the same `c.unread` into each, Closed included), so
-  // none of them needs a tooltip explaining a gap — there isn't one.
+  // Every count below is UNREAD, ANDed with its own scope's predicate — the
+  // dedicated Unread scope is GONE (it counted the same backlog "All" does
+  // once "All" went unread-scoped too), and `kind: 'all'` keeps its name:
+  // the row stays labeled All, it just means "all UNREAD" now. Every one of
+  // these matches its own list exactly (ChatView.tsx's TREE_PREDICATE ANDs
+  // the same `c.unread` into each, Closed included), so none of them needs a
+  // tooltip explaining a gap — there isn't one.
   const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number }[] = [
-    { scope: { kind: 'all' }, icon: <BellIcon />, label: 'Unread', count: counts.data?.unreadTotal },
+    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.unreadTotal },
     { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, icon: <UserIcon />, label: 'Mine', count: scopes.mine },
     { scope: { kind: 'errored' }, icon: <ExclamationCircleIcon />, label: 'Errored', count: scopes.errored },

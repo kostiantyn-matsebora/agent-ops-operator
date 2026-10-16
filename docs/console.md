@@ -560,7 +560,7 @@ thread pane in place — there is no navigation away from the list.
 | Column | Shows |
 |---|---|
 | Icon rail | the app's own sidebar, collapsed to icons on this view |
-| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
+| Inbox | scopes, in this order: All, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
 | List | the rows in the active scope, as a coordination tree by default |
 | Thread pane | the open conversation |
 
@@ -690,15 +690,17 @@ conversation.
 
 The Inbox used to carry both All and a separate Unread. Once every other
 scope turned unread-scoped too, that pair just counted the same backlog
-twice. `kind: 'all'` (unchanged internally) is the one scope with no further
-predicate, labeled **Unread** now.
+twice — the dedicated Unread scope is what was removed.
+
+`kind: 'all'` (unchanged internally) keeps its label too. It is still the
+one scope with no further predicate, it just means "all unread" now.
 
 An invoked member never counts, on any scope. It binds no console thread and
 no action of its own — the tree under its root is the only way to reach it.
 
 | Scope | Counts |
 |---|---|
-| Unread (`kind: 'all'`) | every unread root, no further filter |
+| All (`kind: 'all'`) | every unread root, no further filter |
 | Working, Mine, Errored, Closed, each Pipeline or Coordinator | unread roots its own filter admits |
 
 A Coordinator's own root conversations are reached through ITS scope, same as

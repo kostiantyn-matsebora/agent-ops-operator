@@ -654,8 +654,8 @@ export interface ConversationPage {
   /** Unread, non-member roots, counted BEFORE any filter except `showClosed`
    * — a count that moved because the view narrowed to one named scope would
    * let a filter hide a backlog, but `showClosed=false` means "and don't
-   * count what I can't currently reach either." What the Inbox's "Unread"
-   * row (`Scope` kind `'all'` — no further predicate) reads. */
+   * count what I can't currently reach either." What the Inbox's "All" row
+   * (`Scope` kind `'all'` — no further predicate) reads. */
   unreadTotal: number
   offset: number
   limit: number
