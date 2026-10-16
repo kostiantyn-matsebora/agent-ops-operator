@@ -109,13 +109,13 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
   const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
 
   // Every count below is UNREAD, ANDed with its own scope's predicate —
-  // "All" (kind: 'all' internally) is the one with no further predicate, so
-  // it reads as plain Unread now. Every one of these matches its own list
-  // exactly (ChatView.tsx's TREE_PREDICATE ANDs the same `c.unread` into
-  // each), so none of them needs a tooltip explaining a gap — there isn't
-  // one. Closed is the sole exception, rendered separately below: it counts
-  // every closed conversation regardless of read state, an archive you could
-  // only browse while it stayed unread being no archive at all.
+  // `kind: 'all'` (unchanged internally, no further predicate) is the one
+  // with none, so it IS plain Unread now, not "All" — the old All/Unread
+  // pair counted the same backlog twice once every other scope went
+  // unread-scoped too, and the name that stayed accurate was Unread, not
+  // All. Every one of these matches its own list exactly (ChatView.tsx's
+  // TREE_PREDICATE ANDs the same `c.unread` into each, Closed included), so
+  // none of them needs a tooltip explaining a gap — there isn't one.
   const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number }[] = [
     { scope: { kind: 'all' }, icon: <BellIcon />, label: 'Unread', count: counts.data?.unreadTotal },
     { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
