@@ -464,6 +464,7 @@ export function ChatView() {
             }}
             collapsed={false}
             onToggleCollapsed={() => undefined}
+            showClosed={showClosed}
           />
         </div>
       )}
@@ -477,6 +478,7 @@ export function ChatView() {
                   onSelectScope={setScope}
                   collapsed={layout.inboxCollapsed}
                   onToggleCollapsed={() => updateLayout({ inboxCollapsed: !layout.inboxCollapsed })}
+                  showClosed={showClosed}
                 />
               </div>
               {!narrow && (

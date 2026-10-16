@@ -684,20 +684,35 @@ console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-Every scope in the inbox carries a count matching what opening it lists.
+Every scope carries a count matching what opening it lists, with one
+exception. **All** counts every root whether or not it is closed, even
+though "Show closed" hides the closed ones below it.
+
+A tooltip says so. An install's true size should stay readable at a glance,
+and narrowing it to "visible rows" would drift with paging, search or the
+toggle.
+
+An invoked member never counts, on any scope. It binds no console thread and
+no action of its own — the tree under its root is the only way to reach it.
 
 | Scope | Counts |
 |---|---|
-| Working, Mine, Errored, Closed, each Pipeline or Coordinator | every conversation its own filter admits — phase, ownership, error state or wiring — read or unread |
-| Unread | unread rows only, since unread IS that scope |
+| All | every root, closed included, members excluded |
+| Working, Mine, Errored, Closed, each Pipeline or Coordinator | every root its own filter admits, read or unread |
+| Unread | unread roots only, since unread IS that scope |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
 
 The **Unread** scope narrows the list to conversations with a count.
 
-Every sum is computed before any filter, so narrowing the view never moves
-it.
+**"Show closed" moves every count but All's.** Switching scopes never moves
+a count that belongs to a different one, computed before that filter
+applies.
+
+The closed-row toggle is a different thing: not a scope, and every list but
+Closed's own hides a closed row while it is off. A badge for one of those
+lists excludes that row too, or it promises something the list cannot show.
 
 Opening a conversation reports it read, at `max(the newest counted message's
 time, status.lastActivity)` — the second term keeps the report monotone

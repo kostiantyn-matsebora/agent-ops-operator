@@ -141,9 +141,15 @@ export function useMarkUnread() {
  * carries `scopes` (console-unread: "the count per scope SHALL be available
  * for the inbox"). One query, one cache entry, one `apply.ts` invalidation
  * rule for both readers.
+ *
+ * `showClosed` rides in the query key: the server's unread-facing counts
+ * (`unreadTotal`, the per-Pipeline/Coordinator scopes) exclude a closed
+ * conversation when it is false, so toggling the list's own "Show closed"
+ * checkbox must refetch rather than reuse a cached answer computed the other
+ * way.
  */
-export function useInboxCounts() {
-  return useUnreadCount()
+export function useInboxCounts(showClosed: boolean) {
+  return useUnreadCount(showClosed)
 }
 
 /**
@@ -151,13 +157,16 @@ export function useInboxCounts() {
  *
  * count=1 asks for the totals only — the badge wants a number, and a page of
  * conversations it would throw away is the wrong thing to fetch on every route.
- * The count is computed server-side BEFORE any filter, so it is the same number
- * whatever the list page is currently showing.
+ * `rootTotal` and the fixed Working/Mine/Errored/Closed scopes are computed
+ * BEFORE any filter, so they read the same whatever the list page currently
+ * shows. `unreadTotal` and the per-Pipeline/Coordinator scopes are the one
+ * exception: `showClosed=false` excludes a closed conversation from THOSE
+ * alone, so a badge never promises a row the list is hiding.
  */
-export function useUnreadCount() {
+export function useUnreadCount(showClosed: boolean) {
   return useQuery({
-    queryKey: ['conversationCount'],
-    queryFn: () => api.conversations(new URLSearchParams({ count: '1' })),
+    queryKey: ['conversationCount', showClosed],
+    queryFn: () => api.conversations(new URLSearchParams({ count: '1', showClosed: String(showClosed) })),
   })
 }
 

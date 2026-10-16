@@ -23,6 +23,7 @@ import { QueuesPage } from './pages/Queues'
 import { ConfigPage, ConfigDetailPage, ConfigKindPage } from './pages/Config'
 import { TopologyPage } from './pages/Topology'
 import { ChatView } from './pages/chat/ChatView'
+import { readLayout } from './pages/chat/layout'
 
 /**
  * An error boundary per route. A large graph or a malformed object must degrade
@@ -66,10 +67,12 @@ const NAV = [
 export function App() {
   const session = useSession()
   const connected = useLiveStream()
-  // The badge is the count-only form of the list query: it is computed
-  // server-side BEFORE any filter, so it says the same thing wherever you are
-  // and whatever the list page happens to be showing.
-  const unread = useUnreadCount()
+  // The badge is the count-only form of the list query: computed server-side
+  // before any filter except the chat page's own "Show closed" preference,
+  // which this nav lives outside of — read directly from storage so the
+  // rail's badge matches the in-page Unread one rather than promising a
+  // closed row the chat page itself is hiding.
+  const unread = useUnreadCount(readLayout().showClosed)
   const location = useLocation()
   // Mirrors PatternFly's OWN mobile breakpoint (`Page`'s `isMobile()`), since
   // `onPageResize` fires only on an actual resize EVENT, never at mount — an

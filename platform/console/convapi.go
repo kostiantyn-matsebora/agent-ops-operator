@@ -112,6 +112,16 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
+	// showClosed mirrors the list's own display preference (ChatView.tsx's
+	// layout.ts, default false) for the SAME reason the list itself hides a
+	// closed row by default: a count the reader cannot reach without first
+	// flipping that switch is not a count of anything they can act on.
+	// Absent entirely — an older client — behaves as true, the behaviour
+	// before this parameter existed.
+	showClosed := true
+	if v := r.URL.Query().Get("showClosed"); v != "" {
+		showClosed, _ = strconv.ParseBool(v)
+	}
 
 	pipelines := a.cache.List("pipelines")
 	coordinators := a.cache.List("coordinators")
@@ -122,6 +132,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
 	unreadTotal := 0
+	rootTotal := 0
 	scopes := map[string]int{}
 	for _, o := range a.cache.List("conversations") {
 		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -129,12 +140,22 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// Run history is DROPPED from list rows: a result is a whole agent
 		// message, and thousands of them do not belong in a listing.
 		s.Runs = nil
+		// closedVisible mirrors ChatView.tsx's own generic rule — every scope's
+		// list except the dedicated Closed one hides a closed row unless
+		// showClosed is on — so a badge for one of those scopes counts the
+		// same rows its list actually shows.
+		closedVisible := showClosed || !strings.EqualFold(s.Phase, "Closed")
 		// Counted BEFORE the filter, always: a count that moved because the
 		// view narrowed would let a filter hide a backlog without saying so.
-		accumulateScopeCounts(scopes, s)
-		if s.Unread {
+		accumulateScopeCounts(scopes, s, closedVisible)
+		if !isMember(s) {
+			rootTotal++
+		}
+		// A member is never Joined — it binds no console thread of its own
+		// (invariants.md) — so s.Unread is already always false for one; the
+		// explicit guard here is belt-and-braces, not load-bearing.
+		if s.Unread && !isMember(s) && closedVisible {
 			unreadTotal++
-			accumulateUnreadScopeCounts(scopes, s)
 		}
 		if filter.matches(s, 0) {
 			all = append(all, s)
@@ -150,7 +171,8 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	// narrowed by the filter this same request may also carry.
 	if ok, _ := strconv.ParseBool(r.URL.Query().Get("count")); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items": []ConversationSummary{}, "total": total, "unreadTotal": unreadTotal,
+			"items": []ConversationSummary{}, "total": total, "rootTotal": rootTotal,
+			"unreadTotal": unreadTotal,
 			"offset": 0, "limit": 0, "scopes": scopes,
 		})
 		return
@@ -167,7 +189,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		page = []ConversationSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page, "total": total, "offset": offset, "limit": limit,
+		"items": page, "total": total, "rootTotal": rootTotal, "offset": offset, "limit": limit,
 		"unreadTotal": unreadTotal,
 		// facets let the UI build filter dropdowns from what EXISTS rather than
 		// from a hardcoded list that drifts from the cluster
@@ -175,29 +197,47 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// accumulateScopeCounts folds EVERY row into the inbox's Working, Mine and
-// Errored badges. Each is counted over its own filter predicate alone —
-// phase, ownership or error state — exactly as ChatView.tsx's TREE_PREDICATE
-// defines that scope's list, never additionally restricted to unread rows.
-func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
+// isMember reports whether s was itself invoked as a causedBy member — it
+// binds no console thread and no conversation-level action of its own
+// (docs/console.md), and the only way to reach it is through its root's
+// tree, never a sidebar count on its own. `total`/`items` still carry every
+// member (ChatView.tsx's withTreeContext rebuilds the tree client-side from
+// the full flat page), so this only ever excludes a member from a COUNT,
+// never from the list a count is meant to describe.
+func isMember(s ConversationSummary) bool {
+	return s.CausedBy != nil && s.CausedBy.Parent != ""
+}
+
+// accumulateScopeCounts folds every row into the inbox's Working, Mine,
+// Errored, Closed and per-Pipeline/Coordinator badges — never additionally
+// restricted to unread rows, exactly as none of those scopes' own lists are
+// (ChatView.tsx's TREE_PREDICATE has no entry for 'pipeline'/'coordinator' at
+// all, and the coordinator scope walks every root's member tree regardless
+// of read state).
+//
+// closedVisible mirrors the ONE filter every one of those lists DOES apply:
+// ChatView.tsx hides a closed row everywhere except the dedicated Closed
+// scope, unless showClosed is on. Working needs no gate — Closed and Working
+// are different phases, so a closed row was never counted there — but Mine
+// and Errored can both be true on a closed conversation, and so can a
+// Pipeline/Coordinator attribution. Closed's OWN badge is the one
+// exception, unconditional by definition: hiding Closed from Closed would
+// defeat the scope that exists to show it.
+func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedVisible bool) {
 	if strings.EqualFold(s.Phase, "Working") {
 		scopes["working"]++
 	}
-	if s.Mine {
+	if s.Mine && closedVisible {
 		scopes["mine"]++
 	}
-	if s.Errored {
+	if s.Errored && closedVisible {
 		scopes["errored"]++
 	}
-}
-
-// accumulateUnreadScopeCounts folds one UNREAD row into the inbox's Closed
-// badge, plus one entry keyed by name for every pipeline and coordinator a
-// row attributes to — read the same way the sidebar presents them: an
-// unread count, never a total.
-func accumulateUnreadScopeCounts(scopes map[string]int, s ConversationSummary) {
-	if strings.EqualFold(s.Phase, "Closed") {
+	if strings.EqualFold(s.Phase, "Closed") && !isMember(s) {
 		scopes["closed"]++
+	}
+	if isMember(s) || !closedVisible {
+		return
 	}
 	if s.Coordinator != "" {
 		scopes[s.Coordinator]++

@@ -37,6 +37,11 @@ interface InboxProps {
   onSelectScope: (s: Scope) => void
   collapsed: boolean
   onToggleCollapsed: () => void
+  /** The list's own "Show closed" preference (ChatView.tsx's layout.ts) —
+   * threaded through so the Unread/per-Pipeline/Coordinator badges can match
+   * what the list below actually shows instead of promising a closed-but-
+   * unread row a reader cannot reach without checking that box first. */
+  showClosed: boolean
 }
 
 function Section({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
@@ -97,23 +102,22 @@ function Row({
   )
 }
 
-export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed }: Readonly<InboxProps>) {
-  const counts = useInboxCounts()
+export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed, showClosed }: Readonly<InboxProps>) {
+  const counts = useInboxCounts(showClosed)
   const vocabulary = useVocabulary()
   const scopes = counts.data?.scopes ?? {}
   const entries = vocabulary.data?.entries ?? []
   const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
 
-  // Item 24: "All"'s count is the server's total BEFORE any filter — every
-  // conversation, closed ones and invoked members included — while the list
-  // beneath it hides closed conversations by default (the "Show closed"
-  // checkbox) and may have roots collapsed. The gap is real, not a bug in
-  // the count, so it is named rather than silently narrowed: narrowing it to
-  // "visible rows" would drift the moment paging, search or another scope
-  // changes what is on screen.
-  const ALL_COUNT_TOOLTIP = 'Every conversation, including closed ones and invoked members — not all are visible in the list below by default.'
+  // "All" counts every ROOT conversation a person can actually open — never
+  // an invoked member, which the list below never shows on its own either —
+  // but still includes closed ones, since "All" is what that word means. The
+  // list beneath it hides closed conversations by default (the "Show closed"
+  // checkbox) and may have roots collapsed, so the badge can still read
+  // higher than what is on screen without scrolling.
+  const ALL_COUNT_TOOLTIP = 'Every conversation you can open, including closed ones — not all are visible in the list below by default.'
   const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number; countTooltip?: string }[] = [
-    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.total, countTooltip: ALL_COUNT_TOOLTIP },
+    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.rootTotal, countTooltip: ALL_COUNT_TOOLTIP },
     { scope: { kind: 'unread' }, icon: <BellIcon />, label: 'Unread', count: counts.data?.unreadTotal },
     { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, icon: <UserIcon />, label: 'Mine', count: scopes.mine },
