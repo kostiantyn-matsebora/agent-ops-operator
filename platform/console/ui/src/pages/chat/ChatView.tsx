@@ -33,14 +33,20 @@ const PAGE_SIZE = 100
 function scopeParams(scope: Scope, search: string): URLSearchParams {
   const p = new URLSearchParams()
   if (scope.kind === 'closed') p.set('phase', 'Closed')
-  else if (scope.kind === 'pipeline') p.set('pipeline', scope.name)
+  else if (scope.kind === 'pipeline') {
+    p.set('pipeline', scope.name)
+    // A Pipeline conversation never causes a member (only a Coordinator
+    // invokes — terminology.md), so there is no tree for `?unread=true` to
+    // break here the way it would for the scopes below.
+    p.set('unread', 'true')
+  }
   // A Coordinator scope has no server-side filter param (the backend tracks
   // it only as a `scopes` count, console.go/convapi.go — not mine to add):
   // narrowed CLIENT-SIDE below instead of widening the request shape here.
   //
-  // Unread, Working, Errored and Mine are the SAME shape of problem: each is
-  // an independent per-row predicate server-side (convapi.go's `matches`),
-  // with no tree awareness at all. `?mine=true` kept a root but dropped every
+  // All, Working, Errored and Mine are the SAME shape of problem: each is an
+  // independent per-row predicate server-side (convapi.go's `matches`), with
+  // no tree awareness at all. `?mine=true` kept a root but dropped every
   // member (a member is never Mine — it was invoked, never originated, so it
   // carries no OriginReader). `?unread=true` would just as readily keep an
   // unread MEMBER while dropping its own root, or the reverse — either way
@@ -316,11 +322,17 @@ export function ChatView() {
       const byName = new Map(raw.map((c) => [c.name, c]))
       raw = raw.filter((c) => byName.get(rootNameOf(raw, c))?.coordinator === scope.name)
     }
+    // Every scope is now an UNREAD filter — "All" is "all unread", and
+    // Working/Mine/Errored/Coordinator each AND their own predicate with
+    // unread, so a badge never promises a row the list does not also show.
+    // Closed is the one exception: an archive you can only browse while it
+    // stays unread would empty out the moment you had read everything in it.
     const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
-      unread: (c) => Boolean(c.unread),
-      working: (c) => c.phase === 'Working',
-      errored: (c) => Boolean(c.errored),
-      mine: (c) => Boolean(c.mine),
+      all: (c) => Boolean(c.unread),
+      working: (c) => c.phase === 'Working' && Boolean(c.unread),
+      errored: (c) => Boolean(c.errored) && Boolean(c.unread),
+      mine: (c) => Boolean(c.mine) && Boolean(c.unread),
+      coordinator: (c) => Boolean(c.unread),
     }
     const predicate = TREE_PREDICATE[scope.kind]
     if (predicate) {

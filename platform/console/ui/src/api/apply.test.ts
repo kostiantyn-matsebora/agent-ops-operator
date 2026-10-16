@@ -25,7 +25,7 @@ const summary = (over: Partial<ConversationSummary> = {}): ConversationSummary =
 
 const page = (items: ConversationSummary[], params = 'limit=50&offset=0'): [string, ConversationPage] => [
   params,
-  { items, total: items.length, rootTotal: items.length, unreadTotal: 0, offset: 0, limit: 50, facets: {} },
+  { items, total: items.length, unreadTotal: 0, offset: 0, limit: 50, facets: {} },
 ]
 
 const detail = (over: Partial<ConversationDetail> = {}): ConversationDetail =>

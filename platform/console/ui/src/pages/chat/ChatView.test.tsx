@@ -6,9 +6,13 @@ import { api } from '../../api/client'
 import { ChatView } from './ChatView'
 import type { ConversationSummary, VocabularyEntry } from '../../api/types'
 
+// unread defaults true: the default scope (`{kind: 'all'}`) is now an UNREAD
+// filter (ChatView.tsx's TREE_PREDICATE), so a fixture most tests here treat
+// as an ordinary, not-yet-dealt-with row needs to still be one. A test about
+// read/unread specifically overrides it per row.
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
-    name, title: name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    name, title: name, runCount: 0, queued: 0, joined: true, errored: false, unread: true,
     ageSeconds: 10, deleting: false, phase: 'Idle', ...over,
   }
 }
@@ -177,16 +181,21 @@ describe('arrivals (console-thread-live-cues)', () => {
   // the narrow scope's small set and tagged everything the narrow scope
   // never had as "new" — even though nothing had actually arrived.
   it('does not tag every row as new just from switching to a wider scope', async () => {
-    items = [conv('a', { unread: true }), conv('b'), conv('c'), conv('d'), conv('e')]
+    items = [
+      conv('a', { phase: 'Working', unread: true }),
+      conv('b', { unread: true }), conv('c', { unread: true }),
+      conv('d', { unread: true }), conv('e', { unread: true }),
+    ]
     renderAt('/conversations')
-    // Narrow the view first (Unread: only 'a' qualifies), establishing a
+    // Narrow the view first (Working: only 'a' qualifies), establishing a
     // small "seen" set for that scope.
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    await userEvent.click(screen.getByTestId('scope-Working'))
     expect(screen.getByTestId('row-a')).toBeInTheDocument()
     expect(screen.queryByTestId('row-b')).not.toBeInTheDocument()
-    // Now open the wide scope. None of b/c/d/e actually just arrived — they
-    // existed the whole time, just outside the narrow scope's own set.
-    await userEvent.click(screen.getByTestId('scope-All'))
+    // Now open Unread, wider still — every row here is unread, 'a' included.
+    // None of b/c/d/e actually just arrived — they existed the whole time,
+    // just outside the narrow scope's own set.
+    await userEvent.click(screen.getByTestId('scope-Unread'))
     expect(screen.getByTestId('row-b')).toBeInTheDocument()
     // The real claim: nothing is tagged "new" just from the scope widening.
     expect(screen.queryByText('new')).not.toBeInTheDocument()

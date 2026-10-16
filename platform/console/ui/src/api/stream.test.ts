@@ -208,7 +208,7 @@ describe('what each event does', () => {
     }
     client.setQueryData<ConversationPage>(['conversations', 'limit=50&offset=0'], {
       items: [summary as ConversationPage['items'][number]],
-      total: 1, rootTotal: 1, unreadTotal: 0, offset: 0, limit: 50, facets: {},
+      total: 1, unreadTotal: 0, offset: 0, limit: 50, facets: {},
     })
     client.setQueryData(['conversation', 'conv-1'], {
       conversation: summary, object: {}, yaml: '', transcript: [{ id: 'm1' }], archived: false, events: [],

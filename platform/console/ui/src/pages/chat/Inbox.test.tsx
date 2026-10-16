@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
 import { Inbox } from './Inbox'
 import { useInboxCounts } from '../../api/hooks'
 
 vi.mock('../../api/hooks', () => ({
   useInboxCounts: vi.fn(() => ({
     data: {
-      items: [], total: 9, rootTotal: 7, unreadTotal: 2, offset: 0, limit: 0, facets: {},
-      scopes: { working: 2, mine: 1, errored: 1, 'rollout-coordinator': 1, 'alert-triage': 1 },
+      items: [], total: 9, unreadTotal: 2, offset: 0, limit: 0, facets: {},
+      scopes: { working: 2, mine: 1, errored: 1, closed: 7, 'rollout-coordinator': 1, 'alert-triage': 1 },
     },
   })),
   useVocabulary: () => ({
@@ -35,7 +34,9 @@ describe('the inbox, expanded', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
     const labels = order()
     const index = (s: string) => labels.findIndex((l) => l?.includes(s))
-    expect(index('All')).toBeLessThan(index('Unread'))
+    // There is no separate "All" scope any more — `kind: 'all'` is the one
+    // with no further predicate, and it renders as Unread, the scope that
+    // survives once every other count is unread-based too.
     expect(index('Unread')).toBeLessThan(index('Working'))
     expect(index('Working')).toBeLessThan(index('Mine'))
     expect(index('Mine')).toBeLessThan(index('Errored'))
@@ -49,12 +50,12 @@ describe('the inbox, expanded', () => {
     expect(labels.some((l) => l?.includes('Incidents'))).toBe(false)
   })
 
-  it('shows each scope its own unread count', () => {
+  it('shows each scope its own unread count, and Archive its own total', () => {
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
-    expect(screen.getByTestId('scope-All')).toHaveTextContent('7')
     expect(screen.getByTestId('scope-Unread')).toHaveTextContent('2')
     expect(screen.getByTestId('scope-Working')).toHaveTextContent('2')
     expect(screen.getByTestId('scope-Mine')).toHaveTextContent('1')
+    expect(screen.getByTestId('scope-Archive')).toHaveTextContent('7')
   })
 
   it('narrows the list when a pipeline scope is chosen', async () => {
@@ -72,33 +73,6 @@ describe('the unread-facing counts follow the list\'s own "Show closed" preferen
 
     render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
     expect(vi.mocked(useInboxCounts)).toHaveBeenCalledWith(false)
-  })
-})
-
-describe('the "All" count explains the gap to visible rows (item 24)', () => {
-  it('names closed conversations on hover, never a bare number with no explanation', async () => {
-    render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
-    await userEvent.hover(screen.getByTestId('scope-All').querySelector('.pf-v6-c-badge')!)
-    await waitFor(() => {
-      expect(screen.getByText(/including closed ones/)).toBeInTheDocument()
-    })
-  })
-
-  it('carries no such explanation on an ordinary scope — that count really does match its rows', async () => {
-    render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed={false} onToggleCollapsed={vi.fn()} showClosed={false} />)
-    await userEvent.hover(screen.getByTestId('scope-Working').querySelector('.pf-v6-c-badge')!)
-    // No tooltip at all is wired to an ordinary scope's badge in the expanded
-    // list — unlike the collapsed icon strip below, which tips every entry.
-    expect(screen.queryByText(/including closed ones/)).not.toBeInTheDocument()
-  })
-
-  it('still names the gap on the collapsed icon strip, beside its own label · count tip', async () => {
-    render(<Inbox activeScope={{ kind: 'all' }} onSelectScope={vi.fn()} collapsed onToggleCollapsed={vi.fn()} showClosed={false} />)
-    const strip = screen.getByTestId('inbox-collapsed')
-    await userEvent.hover(strip.querySelectorAll('button')[0])
-    await waitFor(() => {
-      expect(screen.getByText(/including closed ones/)).toBeInTheDocument()
-    })
   })
 })
 

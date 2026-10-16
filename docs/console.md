@@ -684,35 +684,37 @@ console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-Every scope carries a count matching what opening it lists, with one
-exception. **All** counts every root whether or not it is closed, even
-though "Show closed" hides the closed ones below it.
+**Every scope but Closed is an unread count.** A bare "All" that counted
+everyone, read or not, is gone.
 
-A tooltip says so. An install's true size should stay readable at a glance,
-and narrowing it to "visible rows" would drift with paging, search or the
-toggle.
+The Inbox used to carry both All and a separate Unread. Once every other
+scope turned unread-scoped too, that pair just counted the same backlog
+twice. `kind: 'all'` (unchanged internally) is the one scope with no further
+predicate, labeled **Unread** now.
 
 An invoked member never counts, on any scope. It binds no console thread and
 no action of its own — the tree under its root is the only way to reach it.
 
 | Scope | Counts |
 |---|---|
-| All | every root, closed included, members excluded |
-| Working, Mine, Errored, Closed, each Pipeline or Coordinator | every root its own filter admits, read or unread |
-| Unread | unread roots only, since unread IS that scope |
+| Unread (`kind: 'all'`) | every unread root, no further filter |
+| Working, Mine, Errored, each Pipeline or Coordinator | unread roots its own filter admits |
+| Closed | every closed root, read or not — the one exception |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
 
-The **Unread** scope narrows the list to conversations with a count.
+**Closed is unconditional on purpose.** An archive a person could only browse
+while everything in it stayed unread would empty out the moment they had
+read it, defeating what an archive is for.
 
-**"Show closed" moves every count but All's.** Switching scopes never moves
-a count that belongs to a different one, computed before that filter
+**"Show closed" moves every count but Closed's.** Switching scopes never
+moves a count that belongs to a different one, computed before that filter
 applies.
 
-The closed-row toggle is a different thing: not a scope, and every list but
-Closed's own hides a closed row while it is off. A badge for one of those
-lists excludes that row too, or it promises something the list cannot show.
+The closed-row toggle is a different thing, not a scope. Every list but
+Closed's own hides a closed row while it is off, so a badge for one of those
+lists excludes that row too — or it promises something the list cannot show.
 
 Opening a conversation reports it read, at `max(the newest counted message's
 time, status.lastActivity)` — the second term keeps the report monotone

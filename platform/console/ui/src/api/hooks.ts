@@ -157,11 +157,12 @@ export function useInboxCounts(showClosed: boolean) {
  *
  * count=1 asks for the totals only — the badge wants a number, and a page of
  * conversations it would throw away is the wrong thing to fetch on every route.
- * `rootTotal` and the fixed Working/Mine/Errored/Closed scopes are computed
- * BEFORE any filter, so they read the same whatever the list page currently
- * shows. `unreadTotal` and the per-Pipeline/Coordinator scopes are the one
- * exception: `showClosed=false` excludes a closed conversation from THOSE
- * alone, so a badge never promises a row the list is hiding.
+ * Every count is UNREAD — `unreadTotal` and the fixed Working/Mine/Errored
+ * scopes, plus every per-Pipeline/Coordinator one. `showClosed=false`
+ * excludes a closed conversation from all of them, so a badge never promises
+ * a row the list is hiding. `closed` alone is the one exception: a TOTAL,
+ * regardless of read state or `showClosed` — an archive you could only
+ * browse while it stayed unread would empty out the moment you had read it.
  */
 export function useUnreadCount(showClosed: boolean) {
   return useQuery({

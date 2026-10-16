@@ -132,7 +132,6 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
 	unreadTotal := 0
-	rootTotal := 0
 	scopes := map[string]int{}
 	for _, o := range a.cache.List("conversations") {
 		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -148,9 +147,6 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// Counted BEFORE the filter, always: a count that moved because the
 		// view narrowed would let a filter hide a backlog without saying so.
 		accumulateScopeCounts(scopes, s, closedVisible)
-		if !isMember(s) {
-			rootTotal++
-		}
 		// A member is never Joined — it binds no console thread of its own
 		// (invariants.md) — so s.Unread is already always false for one; the
 		// explicit guard here is belt-and-braces, not load-bearing.
@@ -171,7 +167,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	// narrowed by the filter this same request may also carry.
 	if ok, _ := strconv.ParseBool(r.URL.Query().Get("count")); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items": []ConversationSummary{}, "total": total, "rootTotal": rootTotal,
+			"items": []ConversationSummary{}, "total": total,
 			"unreadTotal": unreadTotal,
 			"offset": 0, "limit": 0, "scopes": scopes,
 		})
@@ -189,7 +185,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		page = []ConversationSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page, "total": total, "rootTotal": rootTotal, "offset": offset, "limit": limit,
+		"items": page, "total": total, "offset": offset, "limit": limit,
 		"unreadTotal": unreadTotal,
 		// facets let the UI build filter dropdowns from what EXISTS rather than
 		// from a hardcoded list that drifts from the cluster
@@ -209,34 +205,39 @@ func isMember(s ConversationSummary) bool {
 }
 
 // accumulateScopeCounts folds every row into the inbox's Working, Mine,
-// Errored, Closed and per-Pipeline/Coordinator badges — never additionally
-// restricted to unread rows, exactly as none of those scopes' own lists are
-// (ChatView.tsx's TREE_PREDICATE has no entry for 'pipeline'/'coordinator' at
-// all, and the coordinator scope walks every root's member tree regardless
-// of read state).
+// Errored, Closed and per-Pipeline/Coordinator badges.
 //
-// closedVisible mirrors the ONE filter every one of those lists DOES apply:
-// ChatView.tsx hides a closed row everywhere except the dedicated Closed
-// scope, unless showClosed is on. Working needs no gate — Closed and Working
-// are different phases, so a closed row was never counted there — but Mine
-// and Errored can both be true on a closed conversation, and so can a
-// Pipeline/Coordinator attribution. Closed's OWN badge is the one
-// exception, unconditional by definition: hiding Closed from Closed would
-// defeat the scope that exists to show it.
+// Every one of these is an UNREAD count, ANDed with its own predicate —
+// phase, ownership, error state or wiring — matching ChatView.tsx's
+// TREE_PREDICATE exactly (each entry there also ANDs its own condition with
+// `c.unread`). A read conversation never inflates a badge whose whole point
+// is "something here still needs you."
+//
+// closedVisible mirrors the ONE further filter every one of those lists
+// applies: ChatView.tsx hides a closed row everywhere except the dedicated
+// Closed scope, unless showClosed is on. Closed's OWN badge is the one
+// exception to BOTH rules — unconditional on read state AND on showClosed:
+// an archive a person can only browse while every item in it stays unread
+// would empty out the moment they had read it, defeating what an archive is
+// for.
 func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedVisible bool) {
-	if strings.EqualFold(s.Phase, "Working") {
-		scopes["working"]++
-	}
-	if s.Mine && closedVisible {
-		scopes["mine"]++
-	}
-	if s.Errored && closedVisible {
-		scopes["errored"]++
-	}
 	if strings.EqualFold(s.Phase, "Closed") && !isMember(s) {
 		scopes["closed"]++
 	}
-	if isMember(s) || !closedVisible {
+	unreadVisible := s.Unread && closedVisible
+	if !unreadVisible {
+		return
+	}
+	if strings.EqualFold(s.Phase, "Working") {
+		scopes["working"]++
+	}
+	if s.Mine {
+		scopes["mine"]++
+	}
+	if s.Errored {
+		scopes["errored"]++
+	}
+	if isMember(s) {
 		return
 	}
 	if s.Coordinator != "" {

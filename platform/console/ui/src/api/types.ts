@@ -649,25 +649,24 @@ export interface ConversationPage {
   items: ConversationSummary[]
   /** Every conversation, root or invoked member — what `items`/pagination
    * count against, since the tree is rebuilt client-side from the full flat
-   * page. Never what a badge should read; see `rootTotal`. */
+   * page. Never what a badge should read; every badge below is unread-based. */
   total: number
-  /** Every conversation a person can actually open on its own — same as
-   * `total` minus every invoked member, which binds no console thread and no
-   * conversation-level action of its own. What the "All" badge reads. */
-  rootTotal: number
-  /** Unread across every ROOT conversation, counted BEFORE any filter except
-   * `showClosed` — a count that moved because the view narrowed to one named
-   * scope would let a filter hide a backlog, but `showClosed=false` means
-   * "and don't count what I can't currently reach either." */
+  /** Unread, non-member roots, counted BEFORE any filter except `showClosed`
+   * — a count that moved because the view narrowed to one named scope would
+   * let a filter hide a backlog, but `showClosed=false` means "and don't
+   * count what I can't currently reach either." What the Inbox's "Unread"
+   * row (`Scope` kind `'all'` — no further predicate) reads. */
   unreadTotal: number
   offset: number
   limit: number
   facets: Record<string, string[]>
   /**
-   * Present on the count-only form alone: the total count (regardless of read
-   * state) for `closed`, plus the UNREAD count within each other fixed inbox
-   * scope (`working`, `mine`, `errored`), plus one entry keyed by name for
-   * every pipeline and coordinator a row attributes to — what the inbox's
+   * Present on the count-only form alone: the TOTAL count, regardless of
+   * read state, for `closed` alone — an archive you could only browse while
+   * it stayed unread would empty out the moment you had read it — plus the
+   * UNREAD count within each other fixed inbox scope (`working`, `mine`,
+   * `errored`), plus one entry keyed by name for every pipeline and
+   * coordinator a row attributes to, also unread-gated. What the inbox's
    * per-scope badges read. There is no `incidents` scope: that concept was
    * removed from the inbox outright.
    */
