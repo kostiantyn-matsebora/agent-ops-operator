@@ -135,6 +135,8 @@ Everything below is under `pulse:`.
 | `signal.defaultSource.enabled` | `false` | `true`, or the route claims nothing |
 | `signal.defaultSource.baseUrl` | **empty** | your Pulse instance's base URL |
 | `signal.defaultSource.webhookURL` | empty, derives the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
+| `signal.ingress.enabled` | `false` | `true` to expose the webhook path through your ingress controller |
+| `signal.ingress.host` | **empty, required when enabled** | the hostname Pulse will call |
 | `mcp.observer.enabled` | `true` | `false` to drop the read-only MCP pair |
 | `mcp.operator.enabled` | `true` | `false` to drop the write-capable MCP pair |
 | `mcpServer.enabled` | `false` | `true` to deploy `mcp-pulse` |
@@ -208,27 +210,43 @@ The two lanes need different things from you:
 | MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl`/`mcpServer.backend` already take any reachable URL — in-cluster or not |
 | Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The adapter registers its own in-cluster Service DNS name, which an external Pulse cannot resolve |
 
-Fix the webhook lane by exposing `signals/pulse`'s `/webhook/pulse-alerts`
-path yourself — a `LoadBalancer` Service, a `NodePort`, an Ingress, or a
-tunnel you already run — then tell the adapter what you called it:
+Fix the webhook lane with `signal.ingress` — it points an Ingress at the
+SignalAdapter reconciler's own Service, so the chart does the exposing for
+you if you already run an ingress controller:
 
 ```sh
---set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
+helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  -n agent-ops --create-namespace \
+  --set pulse.signal.ingress.enabled=true \
+  --set pulse.signal.ingress.host=pulse-adapter.example.org \
+  --set pulse.signal.ingress.tls.clusterIssuer=letsencrypt-prod \
+  --set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
 ```
 
 ```powershell
---set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
+helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  -n agent-ops --create-namespace `
+  --set pulse.signal.ingress.enabled=true `
+  --set pulse.signal.ingress.host=pulse-adapter.example.org `
+  --set pulse.signal.ingress.tls.clusterIssuer=letsencrypt-prod `
+  --set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
 ```
 
-> **This chart renders no Ingress of its own.** It cannot safely guess your
-> ingress class, your TLS cert issuer or your hostname — the same reason
-> `mcpServer.backend` is never derived either. Exposing the adapter is your
-> network decision. `webhookURL` only says what to register with Pulse once
-> that exposure exists.
-{: .ao-callout}
+**Both lines matter.** The Ingress makes the path *reachable*. `webhookURL`
+is the separate step of telling Pulse to actually use it — without it the
+adapter still registers its own unreachable in-cluster URL, Ingress or not.
 
-Left unset, `webhookURL` registers the derived in-cluster URL exactly as
-before — no change for a Pulse instance that already runs inside the
+No ingress controller? Expose the adapter's own `agentops-signal-pulse`
+Service (port 8080) another way instead — a `LoadBalancer` Service, a
+`NodePort`, or a tunnel you already run — and point `webhookURL` at
+whatever that gives you.
+
+This chart does not render those forms. An Ingress has one shape this
+chart can target uniformly. A `LoadBalancer`'s annotations and a tunnel's
+whole setup are specific to your cloud or your tooling.
+
+Left unset, both `signal.ingress.enabled` and `webhookURL` keep today's
+behavior — no change for a Pulse instance that already runs inside the
 cluster.
 
 If `global.agentops.networkPolicy` is on, also add the external Pulse's
@@ -331,6 +349,9 @@ Secret/agentops-pulse-operator
 # MCP server  (mcpServer.enabled)
 Deployment/agentops-mcp-pulse
 Service/agentops-mcp-pulse
+
+# Webhook exposure  (signal.ingress.enabled)
+Ingress/agentops-signal-pulse
 
 # Wiring  (pipelines.enabled)
 Pipeline/pulse-observer

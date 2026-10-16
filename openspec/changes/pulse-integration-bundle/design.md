@@ -110,22 +110,45 @@ URL Pulse can never reach once it lives outside the cluster.
 mechanism as `baseUrl`. Set, it is registered verbatim. Empty, the adapter
 derives the in-cluster URL exactly as before.
 
-**Alternative considered**: render an Ingress for the webhook path.
-Rejected — this chart cannot safely guess an ingress class, a TLS cert
-issuer or a hostname, the same reason `prometheus`'s query backend is
-never derived either.
+`webhookUrl` only says what to register. Saying it is not the same as
+making it true — a config field with nothing behind it would read as
+working and silently deliver nothing, which is worse than the gap it
+claims to close.
 
-Exposing the adapter is the operator's own network decision. This field
-only says what to tell Pulse once that exposure exists.
+So the chart ALSO renders `signal.ingress`, an Ingress in front of the
+SignalAdapter reconciler's own ClusterIP Service
+(`agentops-signal-<name>:8080`) — never a second Service of this chart's
+own.
 
-**Trade-off accepted**: an operator with an external Pulse must expose the
-adapter's Service themselves (LoadBalancer, NodePort, Ingress, or a
-tunnel) before `webhookUrl` has anything correct to name.
+Shaped exactly like the parent chart's existing `console.ingress`, same
+field names and TLS forms. An Ingress is the one exposure shape this
+chart CAN target uniformly: a host, a class, a cert, same fields on every
+provider.
 
-Undocumented, this reads as "registration silently points nowhere" —
-`docs/integrations/pulse.md` states the two-lane split explicitly. MCP
-already works outbound-only for an external Pulse. The webhook direction
-needs this field.
+**Alternative considered**: render nothing, leave the whole exposure to
+the operator. Rejected on exactly the trade-off above.
+
+A chart that only describes the gap, in a product whose primary subject
+(Proxmox/Docker hosts) routinely sits outside the cluster, is asking every
+adopter to solve the same problem by hand on day one.
+
+**Alternative considered**: also render a `LoadBalancer`/`NodePort`
+Service option. Deferred, not rejected.
+
+Unlike an Ingress, those forms vary by cloud — annotations, IP allocation
+— in ways this chart cannot express uniformly.
+
+An operator without an ingress controller still has `webhookUrl` to point
+at whatever they expose another way (their own Service, a tunnel) — the
+same escape hatch `prometheus`'s query backend already relies on.
+
+**Trade-off accepted**: `signal.ingress` and `webhookUrl` are two separate
+values an operator must set TOGETHER. The Ingress makes the path
+reachable. `webhookUrl` is the separate act of telling Pulse to use it.
+
+Setting only one leaves either an unreachable registration or a reachable
+path Pulse was never told about. `docs/integrations/pulse.md` states this
+pairing explicitly, in one command block setting both.
 
 ### Decision 2: `mcp-pulse` is a first-party wrapper, not a vendored stdio binary
 

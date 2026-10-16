@@ -47,6 +47,7 @@ each SHALL ship an inline role.
 Both roles SHALL state plainly that Pulse's governed-action
 plan/approve/execute flow is Pro-gated and out of reach on Community
 edition. `pulse-observer`'s role SHALL frame investigation only.
+
 `pulse-operator`'s role SHALL additionally frame the operator-state
 annotations (maintenance windows, criticality tags) as the only mutating
 actions available, never as a stand-in for an actual fix.
@@ -109,6 +110,37 @@ names one), bound no Kubernetes RBAC by default.
 - **THEN** a ServiceAccount for that route renders with no RBAC bound,
   while the runtime defaults, the floor account and the context volume
   still come from the parent chart
+
+### Requirement: The webhook path is externally exposable through a chart-rendered Ingress
+The bundle SHALL render an Ingress, gated on `signal.ingress.enabled`,
+pointing at the SignalAdapter reconciler's own ClusterIP Service
+(`agentops-signal-<signal.name>:8080`) rather than a Service this chart
+creates of its own.
+
+Shaped like the parent chart's `console.ingress` — the same `host`,
+`extraHosts`, `className`, `annotations`, `tls` fields and TLS forms.
+
+The bundle SHALL render no `LoadBalancer`/`NodePort` Service and no other
+exposure form. An operator without an ingress controller still has
+`signal.defaultSource.webhookUrl` (`pulse-signal-adapter` spec) to point
+at whatever they expose another way.
+
+#### Scenario: Default install renders no Ingress
+- **WHEN** `signal.ingress.enabled` is unset or false
+- **THEN** no Ingress renders, matching every other component's off
+  default
+
+#### Scenario: The Ingress targets the reconciler's Service, never a new one
+- **WHEN** `signal.ingress.enabled` is true
+- **THEN** the rendered Ingress's backend names
+  `agentops-signal-<signal.name>` on port 8080, and the bundle renders no
+  Service of its own
+
+#### Scenario: A missing host fails the render
+- **WHEN** `signal.ingress.enabled` is true and `signal.ingress.host` is
+  empty
+- **THEN** the render fails naming the required value, rather than
+  rendering an Ingress with no rule any controller could route
 
 ### Requirement: This bundle's deployed MCP server is first-party, unlike every prior bundle's
 Where `kubernetes` and `prometheus` reference a third party's published MCP

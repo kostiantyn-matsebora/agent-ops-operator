@@ -136,6 +136,14 @@ server's RBAC-equal guard references it. */ -}}
 agentops-mcp-pulse
 {{- end -}}
 
+{{- /* The SignalAdapter reconciler's OWN Service name
+(platform/manager/internal/controller/signaladapter_controller.go's
+SignalAdapterDeploymentName) — never created by this chart, only
+REFERENCED, by ingress.yaml's Ingress backend. */ -}}
+{{- define "pulse.adapterServiceName" -}}
+agentops-signal-{{ .Values.signal.name }}
+{{- end -}}
+
 {{- /* The shared MCP endpoint both pairs point at: the configured URL, or the
 deployed Service. An enabled MCP pair with NEITHER fails the render rather
 than rendering an MCPConfig that points nowhere. */ -}}

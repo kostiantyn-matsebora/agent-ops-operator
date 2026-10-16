@@ -77,6 +77,7 @@ NAMESPACE = "agent-ops"
 DOCUMENTED_PLACEHOLDERS = {
     "https://ha.example.org",           # home-assistant/values.yaml, homeAssistant.endpoint
     "https://pulse.example.org",        # pulse/values.yaml, mcpServer.backend
+    "pulse-adapter.example.org",        # pulse/values.yaml, signal.ingress.host
     "http://metrics.example:8428",      # RFC 2606 reserved domain
     "-1001234567890",                   # telegram/values.yaml, surface.chatId
     # prometheus/values.yaml, mcpServers.backend — the chart's OWN example, and
@@ -306,6 +307,10 @@ BUNDLES = {
                 # in-cluster endpoint to default onto, since Pulse is always
                 # operator-supplied.
                 "sets": {"mcpServer.backend": "https://pulse.example.org"},
+            },
+            "Webhook exposure": {
+                "flag": "signal.ingress.enabled",
+                "sets": {"signal.ingress.host": "pulse-adapter.example.org"},
             },
             "Wiring": {
                 "flag": "pipelines.enabled",

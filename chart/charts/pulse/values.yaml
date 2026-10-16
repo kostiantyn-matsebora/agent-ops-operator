@@ -52,6 +52,47 @@ signal:
   #         matchLabels:
   #           kubernetes.io/metadata.name: pulse
   webhookFrom: []
+  # EXPOSES THE WEBHOOK ENDPOINT OUTSIDE THE CLUSTER, for a Pulse instance
+  # that is not in-cluster (the common case — Pulse watches Proxmox/Docker
+  # hosts that may sit entirely outside Kubernetes).
+  #
+  # Points at the SignalAdapter reconciler's OWN ClusterIP Service
+  # (agentops-signal-<signal.name>:8080) — the same Service `defaultSource
+  # .webhookURL` would otherwise derive, never a second Service this chart
+  # renders. Off by default: a cluster-internal Pulse needs neither this
+  # nor `webhookURL`.
+  #
+  # Shaped exactly like the parent chart's `console.ingress` — same field
+  # names, same TLS forms — since that is this repository's one other
+  # operator-supplied external endpoint.
+  ingress:
+    enabled: false
+    # REQUIRED when enabled — a hostname cannot be guessed, e.g.
+    # pulse-adapter.example.org.
+    host: ""
+    # Additional hostnames serving the same endpoint. Each gets its own
+    # rule, and each is covered by the derived certificate below.
+    extraHosts: []
+    className: ""
+    annotations: {}
+    # Merged onto the Ingress alongside the chart's own labels.
+    labels: {}
+    # Scoped to the webhook path alone — this adapter's only OTHER route is
+    # /healthz, which costs nothing to also expose, but there is no reason
+    # to widen past what Pulse actually calls.
+    path: /webhook
+    pathType: Prefix
+    # TLS. Nothing here is required, and leaving it empty renders no `tls`
+    # section — legitimate when TLS terminates upstream at a load balancer.
+    # `tls` also accepts a raw list of Ingress tls entries, rendered
+    # verbatim.
+    tls:
+      # Existing certificate Secret. The tls[] hosts are DERIVED from
+      # `host` + `extraHosts`, so hostnames are never restated.
+      secretName: ""
+      # cert-manager issuer: adds the issuer annotation and derives
+      # secretName when it is unset.
+      clusterIssuer: ""
   # The alert source. INERT until a Pipeline/AgentCapability claims it — the
   # `pipelines:` component below, or a route under the parent chart's own
   # `pipelines:`.
@@ -75,12 +116,14 @@ signal:
     #
     # PULSE IS COMMONLY NOT IN-CLUSTER — it watches Proxmox/Docker hosts
     # that may sit entirely outside Kubernetes. Set this to whatever you
-    # exposed this adapter's own /webhook/pulse-alerts path as: a
-    # LoadBalancer Service, a NodePort, an Ingress, or a tunnel you already
-    # run. Exposing it is on you — this chart renders no Ingress, since it
-    # cannot safely guess your ingress class, TLS cert issuer or hostname,
-    # the same posture every other operator-supplied endpoint in this
-    # repository takes.
+    # exposed this adapter's own /webhook/pulse-alerts path as.
+    #
+    # `signal.ingress` below renders that exposure for you when you already
+    # run an ingress controller — set its `host` and this to
+    # https://<that host>/webhook/pulse-alerts. Exposing it any OTHER way
+    # (a LoadBalancer Service, a NodePort, a tunnel) is still on you; this
+    # field only says what to tell Pulse once the exposure exists, by
+    # whichever path you chose.
     webhookURL: ""
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     grouping: {}

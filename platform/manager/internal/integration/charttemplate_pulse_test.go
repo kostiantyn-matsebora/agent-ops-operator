@@ -534,3 +534,110 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// ---- webhook exposure (Pulse outside the cluster) --------------------------
+
+// pulseIngress returns the rendered Ingress document, failing if there is not
+// exactly one.
+func pulseIngress(t *testing.T, out string) string {
+	t.Helper()
+	var found []string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: Ingress") {
+			found = append(found, doc)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected exactly 1 Ingress, found %d:\n%s", len(found), out)
+	}
+	return found[0]
+}
+
+// No Ingress unless asked for — Pulse in-cluster needs neither it nor
+// webhookURL, and the default install must stay silent about the whole
+// question.
+func TestPulseIngressIsOptIn(t *testing.T) {
+	out := helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.defaultSource.enabled=true",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org")
+	if strings.Contains(out, "kind: Ingress") {
+		t.Fatal("ingress.enabled=false must render no Ingress")
+	}
+	// disabling the whole bundle must still render nothing, even with
+	// ingress values set
+	out = helmTemplate(t, "--set", "pulse.enabled=false",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org")
+	if strings.Contains(out, "kind: Ingress") {
+		t.Fatal("pulse.enabled=false must render no Ingress even with ingress values set")
+	}
+}
+
+// The backend is the Service the SignalAdapter reconciler owns — a Service
+// this chart renders of its own would be a second, competing Service for the
+// same pods.
+func TestPulseIngressTargetsTheReconcilersService(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org"))
+	for _, want := range []string{"name: agentops-signal-pulse", "number: 8080"} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("Ingress backend missing %q:\n%s", want, doc)
+		}
+	}
+	if strings.Contains(doc, "kind: Service") {
+		t.Fatalf("this chart must render no Service of its own for the adapter:\n%s", doc)
+	}
+}
+
+// Scoped to the webhook path by default — the adapter's only other route
+// (/healthz) gains nothing from external exposure.
+func TestPulseIngressDefaultsToTheWebhookPath(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org"))
+	if !strings.Contains(doc, "path: /webhook") {
+		t.Fatalf("expected the default path to be /webhook:\n%s", doc)
+	}
+}
+
+// extraHosts serve the same adapter: one rule each, all to the same backend.
+func TestPulseIngressExtraHosts(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org",
+		"--set", "pulse.signal.ingress.extraHosts={alt.example.org}"))
+	for _, want := range []string{"pulse-adapter.example.org", "alt.example.org"} {
+		if !strings.Contains(doc, `host: "`+want+`"`) {
+			t.Fatalf("missing rule for %s:\n%s", want, doc)
+		}
+	}
+	// 1 occurrence from metadata.name, plus one per rule's backend (2 hosts)
+	if n := strings.Count(doc, "name: agentops-signal-pulse"); n != 3 {
+		t.Fatalf("expected 1 metadata name + 2 backend refs, found %d:\n%s", n, doc)
+	}
+}
+
+// cert-manager in one value: the annotation plus a derived Secret name.
+func TestPulseIngressClusterIssuer(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org",
+		"--set", "pulse.signal.ingress.tls.clusterIssuer=letsencrypt"))
+	if !strings.Contains(doc, "cert-manager.io/cluster-issuer: letsencrypt") {
+		t.Fatalf("missing issuer annotation:\n%s", doc)
+	}
+	if !strings.Contains(doc, "secretName: agentops-signal-pulse-tls") {
+		t.Fatalf("clusterIssuer must derive a secretName:\n%s", doc)
+	}
+}
+
+// Missing host fails loudly rather than rendering an Ingress with no rule a
+// hostname-less controller could ever route.
+func TestPulseIngressMissingHostFailsRender(t *testing.T) {
+	out := helmTemplateErr(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true")
+	if !strings.Contains(out, "pulse.signal.ingress.host is required") {
+		t.Fatalf("expected the missing-host message, got:\n%s", out)
+	}
+}
