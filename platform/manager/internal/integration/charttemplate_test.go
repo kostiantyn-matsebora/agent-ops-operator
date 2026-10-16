@@ -2483,6 +2483,9 @@ func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
 		"Do not ask the person to confirm",
 		"A change YOU conclude is worth making",
 		"is proposed, not made",
+		"An observing agent running out of evidence is not a dead end",
+		"same task to that domain's acting counterpart",
+		"needs no approval",
 	} {
 		if !strings.Contains(role, phrase) {
 			t.Errorf("the coordinating agent's role lacks %q:\n%s", phrase, role)
@@ -2625,6 +2628,7 @@ func k8sEngineerRole(t *testing.T, args ...string) string {
 }
 
 const postureMarker = "This install withholds pod execution"
+const allowedPostureMarker = "This install allows pod execution"
 
 // selfCloseMarker is coordinator-deployment-mode's self-close instruction
 // (chart/templates/_helpers.tpl's `agentops.selfCloseInstruction`), appended
@@ -2676,6 +2680,9 @@ func TestK8sProfilePostureFollowsTheGate(t *testing.T) {
 	if strings.Contains(role, postureMarker) {
 		t.Fatalf("with the gate on the RBAC grants the writes, so the role must not say they are withheld:\n%s", role)
 	}
+	if !strings.Contains(role, allowedPostureMarker) {
+		t.Fatalf("with the gate on the role must say pod execution is available, not fall silent on it:\n%s", role)
+	}
 	if !strings.Contains(role, "You are a Kubernetes site reliability engineer") {
 		t.Errorf("turning the gate on must leave the shipped role in place:\n%s", role)
 	}
@@ -2701,6 +2708,55 @@ func TestK8sProfilePostureCanBeDeclined(t *testing.T) {
 	// The self-close instruction (coordinator-deployment-mode) always follows
 	// the shipped role now — declining the posture paragraph leaves the role
 	// itself untouched, right up to that addition.
+	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
+	if !ok {
+		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)
+	}
+	if !strings.HasSuffix(before, "Lead with the finding, then the evidence.") {
+		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", before)
+	}
+}
+
+// THE OTHER SIDE OF THE SAME WALL: an agent must be told what it gained, not
+// just left to infer it from a tool appearing in its allowlist.
+func TestK8sProfileStatesTheAllowedPosture(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	at := strings.Index(role, allowedPostureMarker)
+	if at < 0 {
+		t.Fatalf("with allowPodExecution on the role must state the posture:\n%s", role)
+	}
+	if job := strings.Index(role, "You are a Kubernetes site reliability engineer"); job < 0 || job > at {
+		t.Errorf("the posture paragraph must follow the shipped role, not replace or precede it:\n%s", role)
+	}
+	selfCloseAt := strings.Index(role, selfCloseMarker)
+	if selfCloseAt < 0 {
+		t.Fatalf("the self-close instruction must follow the posture paragraph:\n%s", role)
+	}
+	paragraph := role[at:selfCloseAt]
+	if strings.Contains(strings.TrimRight(paragraph, "\n"), "\n\n") {
+		t.Errorf("the posture paragraph must be the last thing before the self-close instruction:\n%s", paragraph)
+	}
+	for _, phrase := range []string{
+		"pods_exec",
+		"has no dedicated API or MCP",
+		"granted you for exactly this case",
+		"global.agentops.runtimeDefaults.allowPodExecution",
+	} {
+		if !strings.Contains(paragraph, phrase) {
+			t.Errorf("the posture paragraph lacks %q:\n%s", phrase, paragraph)
+		}
+	}
+}
+
+// Emptying the value is how an install declines the paragraph on the allowed
+// side too, and the role then renders exactly as it did before the value
+// existed.
+func TestK8sProfileAllowedPostureCanBeDeclined(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true",
+		"--set", "kubernetes.profile.podExecutionAllowedPrompt=")
+	if strings.Contains(role, allowedPostureMarker) {
+		t.Fatalf("an emptied value must render no posture paragraph:\n%s", role)
+	}
 	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
 	if !ok {
 		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)
