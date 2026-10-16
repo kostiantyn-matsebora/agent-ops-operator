@@ -249,7 +249,7 @@ func (c *pulseClient) ensureWebhook(ctx context.Context, desired pulseWebhookCon
 			return nil
 		}
 		desired.ID = cur.ID
-		code, body, err = c.do(ctx, "PUT", "/api/notifications/webhooks/"+cur.ID, desired)
+		code, body, err = c.do(ctx, "PUT", "/api/notifications/webhooks/"+url.PathEscape(cur.ID), desired)
 		if err != nil {
 			return fmt.Errorf("update webhook %s: %v", cur.ID, err)
 		}
