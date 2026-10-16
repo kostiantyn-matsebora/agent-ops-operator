@@ -264,6 +264,7 @@ SignalAdapter/pulse
 
 # Ingest lane  (signal.defaultSource.enabled)
 SignalSource/pulse-alerts
+Secret/agentops-pulse-ingest
 
 # Profiles  (profiles.observer.enabled / profiles.operator.enabled)
 AgentProfile/pulse-observer

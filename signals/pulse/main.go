@@ -225,7 +225,8 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
-		log.Printf("inbound %s: %v", name, err)
+		// %q: name is a URL path segment a caller chose, so newlines in it must not forge log lines.
+		log.Printf("inbound %q: %v", name, err)
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}
