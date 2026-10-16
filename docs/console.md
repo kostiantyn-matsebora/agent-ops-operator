@@ -674,6 +674,10 @@ the counted messages — `signal`, `agent`, `relay` — newer than the reader's
 watermark. Acks, notices, listings, refusals and run events never count, and
 a phase change is not a message at all.
 
+Neither does a coordinator's reply to a causedBy member's report alone —
+real content, delivered like any other answer, but internal to the
+coordination loop, never new for a person.
+
 The source is `status.runs[]` — a run's inputs and its result — merged with
 the live buffer for a message not yet recorded. A member conversation has no
 console thread and so no count of its own.
