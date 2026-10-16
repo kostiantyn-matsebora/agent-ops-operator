@@ -130,7 +130,9 @@
       `helm install --dry-run`, which needs a cluster this environment
       does not have) via a temporary `fail (printf ...)` probe confirming
       the computed condition for both the all-plain-HTTP and the
-      all-HTTPS-with-TLS-configured cases.
+      all-HTTPS-with-TLS-configured cases. No automated unit test applies:
+      no render test in the suite evaluates NOTES.txt, and the warnings
+      are advisory text with no effect on any rendered object.
 
 ## 4. Unit tests
 

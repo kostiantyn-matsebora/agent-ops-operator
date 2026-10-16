@@ -140,6 +140,7 @@ Everything below is under `pulse:`.
 | `signal.ingress.enabled` | `false` | `true` to expose the webhook path through your ingress controller |
 | `signal.ingress.host` | **empty, required when enabled** | the hostname Pulse will call |
 | `signal.credentials.token` | empty | the Pulse API token that registers the webhook, or `existingSecret` for a Secret you manage |
+| `signal.credentials.signingSecret` | empty | the HMAC secret Pulse signs each webhook delivery with, so the adapter can verify it |
 | `mcp.url` | empty, uses the deployed `mcp-pulse` Service | an `mcp-pulse` you already run elsewhere |
 | `mcp.observer.enabled` | `true` | `false` to drop the read-only MCP pair |
 | `mcp.observer.credentials.token` | empty | a `monitoring:read` token, or `existingSecret` |

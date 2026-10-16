@@ -518,7 +518,7 @@ or let cert-manager issue one:
 (Ignore this if TLS already terminates upstream at a load balancer or a
 service mesh — the chart cannot see what sits in front of it.)
 {{- end }}
-{{- if and $pub.signal.defaultSource.baseUrl (hasPrefix "http://" $pub.signal.defaultSource.baseUrl) }}
+{{- if and $pub.signal.defaultSource.enabled $pub.signal.defaultSource.baseUrl (hasPrefix "http://" $pub.signal.defaultSource.baseUrl) }}
 
 ACTION NEEDED — signal.defaultSource.baseUrl is plain HTTP. Every
 registration call sends your Pulse API token as a bearer header on this
