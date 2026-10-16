@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,26 +103,39 @@ func parseFilter(r *http.Request) ConversationFilter {
 // conversationPageSize bounds one page.
 const conversationPageSize = 50
 
-func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
-	filter := parseFilter(r)
-	limit := conversationPageSize
-	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+// parsePaging reads the page window: limit (1..500, default one page) and a
+// non-negative offset.
+func parsePaging(q url.Values) (limit, offset int) {
+	limit = conversationPageSize
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
 		limit = n
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	offset, _ = strconv.Atoi(q.Get("offset"))
 	if offset < 0 {
 		offset = 0
 	}
-	// showClosed mirrors the list's own display preference (ChatView.tsx's
-	// layout.ts, default false) for the SAME reason the list itself hides a
-	// closed row by default: a count the reader cannot reach without first
-	// flipping that switch is not a count of anything they can act on.
-	// Absent entirely — an older client — behaves as true, the behaviour
-	// before this parameter existed.
-	showClosed := true
-	if v := r.URL.Query().Get("showClosed"); v != "" {
-		showClosed, _ = strconv.ParseBool(v)
+	return limit, offset
+}
+
+// parseShowClosed mirrors the list's own display preference (ChatView.tsx's
+// layout.ts, default false) for the SAME reason the list itself hides a
+// closed row by default: a count the reader cannot reach without first
+// flipping that switch is not a count of anything they can act on.
+// Absent entirely — an older client — behaves as true, the behaviour
+// before this parameter existed.
+func parseShowClosed(q url.Values) bool {
+	v := q.Get("showClosed")
+	if v == "" {
+		return true
 	}
+	b, _ := strconv.ParseBool(v)
+	return b
+}
+
+func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
+	filter := parseFilter(r)
+	limit, offset := parsePaging(r.URL.Query())
+	showClosed := parseShowClosed(r.URL.Query())
 
 	pipelines := a.cache.List("pipelines")
 	coordinators := a.cache.List("coordinators")

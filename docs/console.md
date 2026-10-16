@@ -699,7 +699,7 @@ no action of its own — the tree under its root is the only way to reach it.
 
 | Scope | Counts |
 |---|---|
-| All (`kind: 'all'`) | every root, read or not, no further filter |
+| All (`kind: 'all'`) | every root, read or not, excluding a closed root while "Show closed" is off |
 | Working, Mine, Errored, Closed, each Pipeline or Coordinator | unread roots its own filter admits |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
