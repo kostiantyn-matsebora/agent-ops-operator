@@ -40,35 +40,57 @@ criticality tags, `scope_only` policy) are not gated.
 
 ## Decisions
 
-### Decision 1: Registration is pod-start, env-driven — not SignalSource-driven
+### Decision 1: Registration config rides the bundle's one default SignalSource
 
-`signals/alertmanager` reads its sender-registration config from
-`SignalSource.spec.config.register`, polled every 15s via
-`GET /signal/sources?adapter=`, so any number of hand-authored sources can
-each carry their own registration.
+`SignalAdapterSpec` has no generic env/envFrom passthrough. Its whole field
+set is `image`, `servedBy`, `port`, `serviceAccountName`, `singleton`,
+`resources`, `configSchema`, `credentialKeys`, `externals`.
 
-This bundle ships exactly one default source. Carrying that same
-indirection would add a CR-mediation layer with nothing to mediate.
+A literal `PULSE_URL`/`PULSE_API_TOKEN` "rendered onto the pod by the
+bundle chart" has no delivery path. The reconciler alone owns the adapter
+Deployment's env — `MANAGER_URL`, `ADAPTER_TOKEN`, `ADAPTER_NAME`,
+`LISTEN_ADDR`, `POD_NAMESPACE`, plus per-source `credentialsSecretRef`
+projection — and no chart can add to that list.
 
-Registration config instead comes straight from the pod's own
-environment, rendered there by the bundle chart: Pulse base URL, API
-token, source name, optional HMAC signing secret.
+Two mechanisms DO reach the pod, the same ones `signals/alertmanager` and
+`signals/ha` already use:
 
-**Alternative considered**: keep the SignalSource-driven path, just made
-eager at startup instead of waiting for the first poll tick. Rejected —
-it would still require threading registration config through
-`SignalSource.spec.config` for a bundle that only ever renders one source,
-buying generality nothing in this bundle uses.
+| Need | Delivered via |
+|---|---|
+| Pulse base URL (non-sensitive) | `SignalSource.spec.config`, polled via `GET /signal/sources?adapter=` |
+| API token, optional signing secret | `SignalSource.spec.credentialsSecretRef`, kubelet-resolved `envFrom` |
+
+The adapter reads both off the served `SourceInfo`, accepting `token`/
+`TOKEN` and `signingSecret`/`SIGNING_SECRET` key casings — `signals/ha`'s
+`credentialToken` pattern.
+
+This bundle still ships exactly one default source. The registration path
+is still NOT generalized to arbitrary hand-authored sources — the adapter
+registers whichever source it is currently serving, always the one the
+chart renders.
+
+`spec.config` here is one flat field (`{"baseUrl": "..."}`), not
+`signals/alertmanager`'s `register` sub-block. No per-source registration
+knobs beyond what this one bundle needs.
+
+**Alternative considered**: a new `env`/`envFrom` field on
+`SignalAdapterSpec`, a direct pod-env passthrough for every adapter.
+Rejected for this change — a CRD/reconciler change with its own regen,
+RBAC and migration surface, for a need `spec.config`/`credentialsSecretRef`
+already meets.
 
 **Trade-off accepted**: a second, hand-authored Pulse SignalSource outside
-the bundle's own would never get registered, since nothing reads its
-`spec.config`. Acceptable because the bundle contract is one default
-source, same as `prometheus-bundle`.
+the bundle's own would also get registered, since registration follows
+whichever source is served rather than one pinned pod identity. Smaller
+than the trade-off the original decision accepted here, not larger.
 
-The adapter still keeps a background retry loop. Not for CR polling, but
-to retry registration itself on a fixed interval until it succeeds, and to
-keep re-checking afterward so a rotated token or a transient Pulse outage
-heals without a pod restart.
+The adapter still keeps a background retry loop, run on the same poll
+tick that refreshes the served-source list. Not a separate CR-polling
+concern.
+
+It retries registration until it succeeds, and keeps re-checking
+afterward, so a rotated token or a transient Pulse outage heals without a
+pod restart.
 
 This is deliberately NOT a one-shot registration at startup only — see
 Risks below for why a true one-shot was rejected.

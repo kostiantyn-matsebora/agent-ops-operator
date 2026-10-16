@@ -26,21 +26,33 @@ contract:
   matches
 - **THEN** the adapter returns 404 naming the source and pushes nothing
 
-### Requirement: Registration config comes from the pod's own environment, not a SignalSource
-This adapter's registration config SHALL be read from the adapter pod's own
-environment, rendered there by the bundle chart: the Pulse base URL, the
-Pulse API token, the source name, and the optional HMAC signing secret.
+### Requirement: Registration config comes from the served SignalSource, never a pod env var
+`SignalAdapterSpec` SHALL carry no generic env/envFrom passthrough a chart
+could use to render `PULSE_URL`/`PULSE_API_TOKEN` directly onto the pod —
+the reconciler alone owns the adapter Deployment's env.
 
-This differs from `signals/alertmanager`'s `SignalSource.spec.config.register`
-block. This bundle ships exactly one default source, so the generalized,
-per-source, CR-carried registration path adds indirection this adapter has
-no use for.
+This adapter's registration config SHALL instead be read from the served
+SignalSource itself: the Pulse base URL from `spec.config.baseUrl`
+(schema-less JSON, polled via `GET /signal/sources?adapter=`), and the
+Pulse API token plus the optional HMAC signing secret from
+`spec.credentialsSecretRef` (kubelet-resolved `envFrom`, accepting both
+`token`/`TOKEN` and `signingSecret`/`SIGNING_SECRET` key casings).
 
-#### Scenario: Registration needs no SignalSource config
-- **WHEN** the adapter starts with its registration env vars set and the
-  bundle's default source carries no `register` block of its own
-- **THEN** registration still proceeds, driven entirely by the pod's
-  environment
+This bundle still ships exactly one default source. The config shape is
+one flat field — `{"baseUrl": "..."}` — never `signals/alertmanager`'s
+`register` sub-block.
+
+Registration follows whichever source the adapter serves, not a
+hardcoded identity. A second, hand-authored Pulse SignalSource would also
+register — a smaller trade-off than a pod-env mechanism that does not
+exist.
+
+#### Scenario: Registration needs the source's own config
+- **WHEN** the adapter starts and the bundle's default source carries
+  `spec.config.baseUrl` and a `credentialsSecretRef` holding a Pulse API
+  token
+- **THEN** registration proceeds, driven entirely by that source's own
+  config and credential
 
 ### Requirement: The adapter registers its webhook with Pulse at pod start, and keeps healing it
 At pod start the adapter SHALL call Pulse's `POST /api/notifications/webhooks`
