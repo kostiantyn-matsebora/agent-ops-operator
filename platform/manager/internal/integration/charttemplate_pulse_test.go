@@ -641,3 +641,88 @@ func TestPulseIngressMissingHostFailsRender(t *testing.T) {
 		t.Fatalf("expected the missing-host message, got:\n%s", out)
 	}
 }
+
+// Pulse's real WebhookConfig supports a Headers map it attaches to every
+// delivery, confirmed against Pulse's own source — independent of HMAC
+// signing, for infra reasons signing doesn't reach (a WAF/gateway in front
+// of the adapter requiring its own shared-secret header).
+func TestPulseWebhookHeadersRideSourceConfig(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pulse.enabled=true",
+		"--set", "pulse.signal.defaultSource.enabled=true",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
+		"--set", "pulse.signal.defaultSource.webhookHeaders.X-Gateway-Key=secretvalue")
+	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
+	if !strings.Contains(doc, "X-Gateway-Key: secretvalue") {
+		t.Errorf("expected webhookHeaders to ride spec.config.webhookHeaders, got:\n%s", doc)
+	}
+}
+
+// A named Secret alone (no clusterIssuer) still derives the tls entry's
+// hosts, exactly as the clusterIssuer form does — the two are independent
+// knobs on the same derivation.
+func TestPulseIngressSecretNameAlone(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org",
+		"--set", "pulse.signal.ingress.tls.secretName=my-cert"))
+	if !strings.Contains(doc, "secretName: my-cert") {
+		t.Fatalf("expected the named secret to be used, got:\n%s", doc)
+	}
+	if strings.Contains(doc, "cert-manager.io/cluster-issuer") {
+		t.Fatalf("a bare secretName must add no cert-manager annotation:\n%s", doc)
+	}
+}
+
+// The raw escape hatch wins over the derived form — for a TLS shape
+// derivation cannot express (per-host secrets, a non-cert-manager issuer
+// convention), derivation must not fight it.
+func TestPulseIngressExistingTLSWins(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org",
+		"--set", "pulse.signal.ingress.tls.secretName=derived",
+		`--set-json`, `pulse.signal.ingress.tls.existing=[{"secretName":"raw","hosts":["only.example.org"]}]`))
+	if !strings.Contains(doc, "secretName: raw") || strings.Contains(doc, "secretName: derived") {
+		t.Fatalf("tls.existing must render verbatim and suppress derivation:\n%s", doc)
+	}
+}
+
+// The pre-6.x LIST form (console's own --reuse-values tolerance) renders
+// verbatim here too, since ingress.yaml mirrors console.yaml's TLS
+// handling line for line.
+func TestPulseIngressLegacyTLSListStillRenders(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org",
+		`--set-json`, `pulse.signal.ingress.tls=[{"secretName":"legacy","hosts":["old.example.org"]}]`))
+	if !strings.Contains(doc, "secretName: legacy") || !strings.Contains(doc, "old.example.org") {
+		t.Fatalf("legacy list form of tls must render verbatim:\n%s", doc)
+	}
+}
+
+// className, annotations, labels and a custom path/pathType are each an
+// independent passthrough — a cluster-specific ingress controller (Traefik,
+// a cloud LB's own annotations, a non-default className) needs all of
+// them, not just the host.
+func TestPulseIngressClusterSpecificSettingsPassThrough(t *testing.T) {
+	doc := pulseIngress(t, helmTemplate(t, "--set", "pulse.enabled=true",
+		"--set", "pulse.signal.ingress.enabled=true",
+		"--set", "pulse.signal.ingress.host=pulse-adapter.example.org",
+		"--set", "pulse.signal.ingress.className=traefik",
+		"--set", `pulse.signal.ingress.annotations.traefik\.ingress\.kubernetes\.io/router\.entrypoints=websecure`,
+		"--set", "pulse.signal.ingress.labels.team=platform",
+		"--set", "pulse.signal.ingress.path=/webhook/pulse-alerts",
+		"--set", "pulse.signal.ingress.pathType=Exact"))
+	for _, want := range []string{
+		"ingressClassName: traefik",
+		"traefik.ingress.kubernetes.io/router.entrypoints: websecure",
+		"team: platform",
+		"path: /webhook/pulse-alerts",
+		"pathType: Exact",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("missing %q in rendered Ingress:\n%s", want, doc)
+		}
+	}
+}

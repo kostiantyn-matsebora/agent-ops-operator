@@ -71,6 +71,18 @@ spec:
           when Pulse is NOT in-cluster: an externally reachable URL for a
           LoadBalancer, NodePort, Ingress or tunnel you expose this
           adapter's own /webhook/<source> path through.
+      webhookHeaders:
+        type: object
+        additionalProperties:
+          type: string
+        description: >-
+          Static headers PULSE attaches to every delivery to this adapter —
+          Pulse's own WebhookConfig.Headers field, confirmed against
+          Pulse's source. For infra reasons HMAC signing does not reach: a
+          WAF or gateway in front of this adapter's Ingress requiring its
+          own shared-secret header, for instance. Independent of
+          credentials.signingSecret, and Pulse's own signing headers win on
+          a name collision.
     additionalProperties: false
   # Documentation only — the manager reads no Secrets and can never verify
   # this.
@@ -117,6 +129,7 @@ spec:
   {{- $cfg := dict }}
   {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
   {{- with $src.webhookURL }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
+  {{- with $src.webhookHeaders }}{{ $_ := set $cfg "webhookHeaders" . }}{{ end }}
   {{- with $cfg }}
   config:
 {{ toYaml . | indent 4 }}

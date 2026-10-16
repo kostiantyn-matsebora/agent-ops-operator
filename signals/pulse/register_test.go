@@ -82,7 +82,7 @@ func TestEnsureWebhookCreateThenUpdateIdempotent(t *testing.T) {
 	srv := f.server(t)
 	client := newPulseClient(srv.URL, "tok")
 
-	desired := desiredWebhook("pulse-default", "http://agentops-signal-pulse.ns.svc:8080/webhook/pulse-default", "s3cret")
+	desired := desiredWebhook("pulse-default", "http://agentops-signal-pulse.ns.svc:8080/webhook/pulse-default", "s3cret", nil)
 	if err := client.ensureWebhook(context.Background(), desired); err != nil {
 		t.Fatalf("first ensureWebhook (create): %v", err)
 	}
@@ -104,7 +104,7 @@ func TestEnsureWebhookCreateThenUpdateIdempotent(t *testing.T) {
 
 	// a changed desired state (different URL) must update the existing
 	// webhook in place, never create a second one
-	changed := desiredWebhook("pulse-default", "http://agentops-signal-pulse.ns.svc:9090/webhook/pulse-default", "s3cret")
+	changed := desiredWebhook("pulse-default", "http://agentops-signal-pulse.ns.svc:9090/webhook/pulse-default", "s3cret", nil)
 	if err := client.ensureWebhook(context.Background(), changed); err != nil {
 		t.Fatalf("third ensureWebhook (update): %v", err)
 	}
@@ -119,6 +119,29 @@ func TestEnsureWebhookCreateThenUpdateIdempotent(t *testing.T) {
 	}
 }
 
+// TestDesiredWebhookCarriesCustomHeaders closes the gap this adapter used
+// to have against Pulse's real WebhookConfig.Headers field (confirmed
+// against Pulse's own internal/notifications/notifications.go) — a header
+// a WAF or gateway in front of this adapter requires, independent of HMAC
+// signing, must actually reach the registered object.
+func TestDesiredWebhookCarriesCustomHeaders(t *testing.T) {
+	f := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+	srv := f.server(t)
+	client := newPulseClient(srv.URL, "tok")
+
+	headers := map[string]string{"X-Gateway-Key": "shared-secret"}
+	desired := desiredWebhook("pulse-default", "http://x/webhook/pulse-default", "s3cret", headers)
+	if err := client.ensureWebhook(context.Background(), desired); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	got := f.webhooks["agentops-pulse-default"].Headers
+	if got["X-Gateway-Key"] != "shared-secret" {
+		t.Fatalf("expected the custom header to reach the registered webhook, got: %+v", got)
+	}
+}
+
 // TestEnsureWebhookSigningSecretNeverCompared asserts the secret-blind
 // comparison register.go documents: Pulse not echoing the secret back on
 // read must never be mistaken for drift that re-triggers an update every
@@ -128,7 +151,7 @@ func TestEnsureWebhookSigningSecretNeverCompared(t *testing.T) {
 	srv := f.server(t)
 	client := newPulseClient(srv.URL, "tok")
 
-	desired := desiredWebhook("pulse-default", "http://x/webhook/pulse-default", "s3cret")
+	desired := desiredWebhook("pulse-default", "http://x/webhook/pulse-default", "s3cret", nil)
 	if err := client.ensureWebhook(context.Background(), desired); err != nil {
 		t.Fatalf("create: %v", err)
 	}

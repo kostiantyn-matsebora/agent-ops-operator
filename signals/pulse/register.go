@@ -67,6 +67,17 @@ type registerConfig struct {
 	// (prometheus's query backend is never derived either) — this field
 	// only says what to tell Pulse once the exposure exists.
 	WebhookURL string `json:"webhookUrl,omitempty"`
+	// WebhookHeaders are registered as the Generic webhook's own Headers
+	// field (confirmed real against Pulse's own
+	// internal/notifications/notifications.go WebhookConfig.Headers) —
+	// static headers PULSE attaches to every delivery to this adapter.
+	//
+	// Independent of SigningSecret: HMAC verification needs no header
+	// Pulse's own source doesn't already send unconditionally. This exists
+	// for infra reasons HMAC does not reach — a WAF or gateway in front of
+	// this adapter's Ingress requiring its own shared-secret header, for
+	// instance. Pulse's own signing headers win on a name collision.
+	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty"`
 }
 
 // parseRegisterConfig extracts this adapter's config block. No config at
@@ -162,7 +173,7 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) st
 		url = a.endpoint(info.Name)
 	}
 	client := newPulseClient(cfg.BaseURL, token)
-	desired := desiredWebhook(info.Name, url, signingSecret)
+	desired := desiredWebhook(info.Name, url, signingSecret, cfg.WebhookHeaders)
 	if err := client.ensureWebhook(ctx, desired); err != nil {
 		a.report(ctx, info.Name, "PulseRegistrationFailed",
 			fmt.Sprintf("served, but could not register the webhook with Pulse: %v", err))
@@ -226,17 +237,25 @@ func (c *pulseClient) do(ctx context.Context, method, path string, in any) (int,
 	return resp.StatusCode, b, nil
 }
 
-// pulseWebhookConfig is Pulse's own Generic notification-webhook object
-// shape, as far as this adapter needs it: enough to create or repair the
-// receiver pointing at this adapter's own /webhook/<source> endpoint.
+// pulseWebhookConfig is Pulse's own WebhookConfig object shape
+// (internal/notifications/notifications.go in Pulse's own source), as far
+// as this adapter needs it. Fields this adapter never sets — Method
+// (defaults to POST), Service (platform-specific formatting for
+// discord/slack/teams, irrelevant to a custom Template), CustomFields,
+// TagFilter and friends — are left off the struct entirely rather than
+// guessed at.
 type pulseWebhookConfig struct {
-	ID            string `json:"id,omitempty"`
-	Name          string `json:"name"`
-	Type          string `json:"type"` // "generic"
-	URL           string `json:"url"`
-	Template      string `json:"template"`
-	SigningSecret string `json:"signingSecret,omitempty"`
-	Enabled       bool   `json:"enabled"`
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Template string `json:"template"`
+	// Headers are attached by PULSE to every delivery to this adapter —
+	// e.g. a static header a WAF or gateway in front of the adapter
+	// requires, independent of the HMAC signing below. Never how a caller
+	// authenticates INTO Pulse; this is the opposite direction.
+	Headers       map[string]string `json:"headers,omitempty"`
+	SigningSecret string            `json:"signingSecret,omitempty"`
+	Enabled       bool              `json:"enabled"`
 }
 
 // webhookName is the deterministic identity this adapter owns in Pulse's
@@ -244,12 +263,12 @@ type pulseWebhookConfig struct {
 func webhookName(source string) string { return "agentops-" + source }
 
 // desiredWebhook renders the webhook object this adapter wants registered.
-func desiredWebhook(source, webhookURL, signingSecret string) pulseWebhookConfig {
+func desiredWebhook(source, webhookURL, signingSecret string, headers map[string]string) pulseWebhookConfig {
 	return pulseWebhookConfig{
 		Name:          webhookName(source),
-		Type:          "generic",
 		URL:           webhookURL,
 		Template:      pulseWebhookTemplate,
+		Headers:       headers,
 		SigningSecret: signingSecret,
 		Enabled:       true,
 	}

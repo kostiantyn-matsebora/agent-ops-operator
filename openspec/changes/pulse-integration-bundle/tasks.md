@@ -12,8 +12,12 @@
       the template's field set and the parser's expected fields agree.
 - [x] 1.4 Implement HMAC signature verification
       (`X-Pulse-Timestamp`/`X-Pulse-Signature`) with a bounded timestamp
-      tolerance, gated on an optional signing secret. Verify unit tests
-      cover valid, invalid, missing-signature and unsigned-mode cases.
+      tolerance, gated on an optional signing secret. `X-Pulse-Signature`
+      is always `v1=`-prefixed — confirmed against Pulse's own
+      `internal/notifications/webhook_signing_test.go` — and a first draft
+      compared the bare digest, which would have rejected every genuinely
+      signed delivery. Verify unit tests cover valid, invalid, a missing
+      `v1=` prefix, missing-signature and unsigned-mode cases.
 - [x] 1.5 Implement firing/resolved normalization: a firing event produces
       one fingerprinted signal, a resolved event produces none (200
       response, nothing pushed). Verify with unit tests for both event
@@ -35,6 +39,12 @@
       that cannot resolve the adapter's own in-cluster Service DNS name
       (see design.md Decision 1b). Verify with a unit test asserting the
       override is registered verbatim instead of the derived URL.
+- [x] 1.9 Register `spec.config.webhookHeaders` as Pulse's own
+      `WebhookConfig.Headers` field (confirmed real against Pulse's
+      `internal/notifications/notifications.go`) — static headers Pulse
+      attaches to every delivery, independent of HMAC signing, for infra
+      (a WAF, a gateway) signing doesn't reach. Verify with a unit test
+      asserting the headers reach the registered webhook object verbatim.
 
 ## 2. Pulse MCP server (`mcp-pulse`) — backend-developer
 
@@ -104,8 +114,23 @@
       chart's `console.ingress`. `webhookURL` alone names a URL with
       nothing behind it — Pulse outside the cluster needs the path made
       reachable too. Verify render tests for opt-in, the reconciler's
-      Service as backend, the default `/webhook` path, extraHosts, the
-      cert-manager issuer form, and the missing-host render failure.
+      Service as backend, the default `/webhook` path, extraHosts, every
+      TLS form (`secretName` alone, `clusterIssuer`, the raw `existing`
+      escape hatch, the legacy list form), className/annotations/labels/
+      pathType passthrough for a cluster-specific ingress controller, and
+      the missing-host render failure.
+- [x] 3.11 Render `signal.defaultSource.webhookHeaders` onto
+      `SignalSource.spec.config.webhookHeaders`. Verify a render test
+      asserting the headers ride the config.
+- [x] 3.12 Add the install-notes clear-text warnings: `signal.ingress`
+      enabled with no TLS, `signal.defaultSource.baseUrl` as `http://`,
+      and `mcpServer`'s resolved backend as `http://` — never a hard
+      failure, since this project accepts whichever scheme the operator
+      supplies. Verified by hand (NOTES.txt renders only through
+      `helm install --dry-run`, which needs a cluster this environment
+      does not have) via a temporary `fail (printf ...)` probe confirming
+      the computed condition for both the all-plain-HTTP and the
+      all-HTTPS-with-TLS-configured cases.
 
 ## 4. Unit tests
 

@@ -11,18 +11,19 @@ import (
 	"time"
 )
 
-// sign independently computes the signature a correctly-configured Pulse
-// would send for a given secret, timestamp and body — HMAC-SHA256 over
-// timestamp + "." + body, per the documented scheme — so a bug shared
-// between this fixture and verifySignature's own construction could not
-// hide a broken check.
+// sign independently computes the header value a correctly-configured
+// Pulse would send for a given secret, timestamp and body — HMAC-SHA256
+// over timestamp + "." + body, "v1=" prefixed — so a bug shared between
+// this fixture and verifySignature's own construction could not hide a
+// broken check. The "v1=" prefix is confirmed against Pulse's own
+// internal/notifications/webhook_signing_test.go, never a bare digest.
 func sign(t *testing.T, secret, timestamp string, body []byte) string {
 	t.Helper()
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(timestamp))
 	mac.Write([]byte("."))
 	mac.Write(body)
-	return hex.EncodeToString(mac.Sum(nil))
+	return signaturePrefix + hex.EncodeToString(mac.Sum(nil))
 }
 
 func TestVerifySignatureValidIsAccepted(t *testing.T) {
@@ -39,13 +40,31 @@ func TestVerifySignatureInvalidIsRejected(t *testing.T) {
 	now := time.Now()
 	ts := strconv.FormatInt(now.Unix(), 10)
 	body := []byte(firingBody("x"))
-	if verifySignature("s3cret", ts, "deadbeef", body, now) {
+	if verifySignature("s3cret", ts, "v1=deadbeef", body, now) {
 		t.Fatal("a mismatched signature must be rejected")
 	}
 	// signed with the wrong secret
 	wrongSecretSig := sign(t, "wrong", ts, body)
 	if verifySignature("s3cret", ts, wrongSecretSig, body, now) {
 		t.Fatal("a signature computed with a different secret must be rejected")
+	}
+}
+
+// TestVerifySignatureMissingPrefixIsRejected closes the one place this
+// module's behavior had to match Pulse's own source exactly rather than a
+// best guess: X-Pulse-Signature is always "v1=<hex>", confirmed against
+// Pulse's internal/notifications/webhook_signing_test.go. A correctly
+// computed digest with the prefix stripped must still be rejected — that
+// bare-digest comparison is the bug this test exists to catch a regression
+// of.
+func TestVerifySignatureMissingPrefixIsRejected(t *testing.T) {
+	now := time.Now()
+	ts := strconv.FormatInt(now.Unix(), 10)
+	body := []byte(firingBody("x"))
+	withPrefix := sign(t, "s3cret", ts, body)
+	bareDigest := strings.TrimPrefix(withPrefix, signaturePrefix)
+	if verifySignature("s3cret", ts, bareDigest, body, now) {
+		t.Fatal("a correctly computed digest with no v1= prefix must still be rejected")
 	}
 }
 

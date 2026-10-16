@@ -125,6 +125,15 @@ signal:
     # field only says what to tell Pulse once the exposure exists, by
     # whichever path you chose.
     webhookURL: ""
+    # Static headers PULSE attaches to every delivery to this adapter —
+    # Pulse's own WebhookConfig.Headers field. Independent of the HMAC
+    # signing secret below: this exists for infra reasons signing doesn't
+    # reach, such as a WAF or gateway in front of `signal.ingress`
+    # requiring its own shared-secret header.
+    #
+    #   webhookHeaders:
+    #     X-Gateway-Key: <shared secret your gateway checks>
+    webhookHeaders: {}
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     grouping: {}
   # The adapter's registration credential: a Pulse API token (to call

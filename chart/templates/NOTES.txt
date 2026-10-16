@@ -500,6 +500,41 @@ or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
+{{- $pub := index .Values "pulse" }}
+{{- if and $pub $pub.enabled }}
+{{- $pubIng := $pub.signal.ingress }}
+{{- $pubTls := $pubIng.tls }}
+{{- $pubHasTLS := false }}
+{{- if kindIs "slice" $pubTls }}{{ if $pubTls }}{{ $pubHasTLS = true }}{{ end }}
+{{- else if $pubTls }}{{ if or $pubTls.secretName $pubTls.clusterIssuer $pubTls.existing }}{{ $pubHasTLS = true }}{{ end }}{{ end }}
+{{- if and $pubIng.enabled (not $pubHasTLS) }}
+
+ACTION NEEDED — the pulse webhook endpoint is exposed over plain HTTP. The
+alert payload, and any header named in signal.defaultSource.webhookHeaders,
+cross the network in CLEAR TEXT. Terminate TLS:
+  --set pulse.signal.ingress.tls.secretName=<secret>
+or let cert-manager issue one:
+  --set pulse.signal.ingress.tls.clusterIssuer=<issuer>
+(Ignore this if TLS already terminates upstream at a load balancer or a
+service mesh — the chart cannot see what sits in front of it.)
+{{- end }}
+{{- if and $pub.signal.defaultSource.baseUrl (hasPrefix "http://" $pub.signal.defaultSource.baseUrl) }}
+
+ACTION NEEDED — signal.defaultSource.baseUrl is plain HTTP. Every
+registration call sends your Pulse API token as a bearer header on this
+connection, in CLEAR TEXT — unlike the HMAC-signed inbound webhook, a
+stolen bearer token can simply be replayed by whoever captured it. Use an
+https:// URL unless this traffic never leaves a trusted network.
+{{- end }}
+{{- $pubMcpBackend := $pub.mcpServer.backend | default $pub.signal.defaultSource.baseUrl }}
+{{- if and $pub.mcpServer.enabled $pubMcpBackend (hasPrefix "http://" $pubMcpBackend) }}
+
+ACTION NEEDED — mcp-pulse's backend is plain HTTP. Every tool call forwards
+the CALLING agent's own Pulse API token to it, in CLEAR TEXT on this
+connection. Use an https:// URL unless this traffic never leaves a trusted
+network.
+{{- end }}
+{{- end }}
 
 {{- $np := (.Values.global.agentops).networkPolicy | default dict }}
 {{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) }}

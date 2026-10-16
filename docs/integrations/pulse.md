@@ -261,6 +261,60 @@ pulse:
           cidr: 203.0.113.4/32
 ```
 
+### TLS, and what a header can and cannot protect
+
+**This chart accepts whichever scheme you supply, on every URL — it never
+rejects `http://`.** A trusted internal network legitimately runs plain
+HTTP, the same posture `home-assistant` already takes.
+
+It DOES warn, in the install notes, wherever a connection carrying a real
+credential is plain HTTP:
+
+| Connection | What it carries | Risk if plain HTTP |
+|---|---|---|
+| `signal.ingress` with no TLS | the alert payload, any `webhookHeaders` | read in clear text by anyone on the path |
+| `signal.defaultSource.baseUrl` | the Pulse API token, every registration call | a captured bearer token can simply be replayed |
+| `mcpServer`'s resolved backend | the calling agent's own Pulse API token, every tool call | same — a bearer token is a static secret, not a signature |
+
+**The inbound webhook itself is already the stronger case.** Pulse signs
+each delivery (`X-Pulse-Signature`, HMAC-SHA256) rather than sending a
+bearer token.
+
+The signing secret itself never crosses the wire, only a per-request
+digest of it. Even an eavesdropper who reads the signature learns nothing
+reusable.
+
+A bearer token, by contrast, IS the whole secret, sent again on every
+call — exactly why the table above calls out `baseUrl` and the MCP
+backend, not the webhook's own signature.
+
+Terminate TLS on the Ingress with either form:
+
+```sh
+--set pulse.signal.ingress.tls.secretName=<secret>
+# or
+--set pulse.signal.ingress.tls.clusterIssuer=<cert-manager issuer>
+```
+
+### A static header for infra HMAC signing doesn't reach
+
+`signal.defaultSource.webhookHeaders` registers a static header Pulse
+attaches to every delivery — confirmed real against Pulse's own
+`WebhookConfig.Headers` field. Useful when a WAF or gateway in front of
+`signal.ingress` requires its own shared-secret header, independent of
+whether `token`/`signingSecret` are also configured:
+
+```yaml
+pulse:
+  signal:
+    defaultSource:
+      webhookHeaders:
+        X-Gateway-Key: <shared secret your gateway checks>
+```
+
+This is a static value, not a signature — closer to the bearer-token risk
+above than to HMAC signing. Pair it with TLS, same as the other two.
+
 ## What neither agent can do
 
 Pulse's plan/approve/execute governed-action flow is **Pro-gated** and out of

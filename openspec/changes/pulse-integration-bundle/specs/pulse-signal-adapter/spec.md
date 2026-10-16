@@ -142,29 +142,56 @@ registered webhook SHALL set it as Pulse's `signingSecret`.
 
 Every inbound POST SHALL then be verified before the body is parsed:
 HMAC-SHA256 over `timestamp + "." + body`, checked against
-`X-Pulse-Timestamp` and `X-Pulse-Signature`, per Pulse's own webhook
-documentation.
+`X-Pulse-Timestamp` and `X-Pulse-Signature`.
 
-A missing or invalid signature SHALL be rejected with 401 and push
-nothing. The timestamp SHALL be bound to a tolerance window to reject
-stale replays.
+`X-Pulse-Signature` SHALL always carry a `v1=` prefix before the hex
+digest, confirmed against Pulse's own
+`internal/notifications/webhook_signing_test.go`.
+
+A digest compared without accounting for the prefix SHALL reject every
+genuinely signed delivery. This is not a cosmetic detail — it is the one
+place this adapter's behavior has to match Pulse's actual source rather
+than a best guess at the Generic webhook contract.
+
+A missing or invalid signature, or a signature missing the `v1=` prefix,
+SHALL be rejected with 401 and push nothing. The timestamp SHALL be bound
+to a tolerance window to reject stale replays.
 
 With no signing secret configured, the endpoint accepts unsigned posts —
 parity with `signals/alertmanager`'s opt-in-per-source credential posture.
 
 #### Scenario: Valid signature is accepted
-- **WHEN** a webhook arrives with a signature computed from the configured
-  signing secret, inside the timestamp tolerance
+- **WHEN** a webhook arrives with a `v1=`-prefixed signature computed from
+  the configured signing secret, inside the timestamp tolerance
 - **THEN** the adapter parses the body and pushes the normalized signal
 
 #### Scenario: Invalid signature is refused before parsing
-- **WHEN** a webhook arrives with a signature that does not match, or
-  outside the timestamp tolerance
+- **WHEN** a webhook arrives with a signature that does not match, that is
+  missing the `v1=` prefix, or outside the timestamp tolerance
 - **THEN** the adapter returns 401 and never parses the body
 
 #### Scenario: Unsigned mode accepts any body
 - **WHEN** no signing secret is configured
 - **THEN** the adapter accepts an inbound post carrying no signature headers
+
+### Requirement: Pulse-attached headers are registered independently of signing
+`spec.config.webhookHeaders`, when set, SHALL be registered verbatim as
+Pulse's own `WebhookConfig.Headers` field (confirmed real against Pulse's
+`internal/notifications/notifications.go`) — static headers PULSE attaches
+to every delivery to this adapter.
+
+This is the opposite direction from HMAC signing and serves a different
+need: infra in front of this adapter (a WAF, a gateway) that requires its
+own shared-secret header, independent of whether a signing secret is also
+configured.
+
+Pulse's own signing headers win on a name collision, by Pulse's own
+behavior, not this adapter's.
+
+#### Scenario: Custom headers reach the registered webhook
+- **WHEN** the served source carries `spec.config.webhookHeaders`
+- **THEN** the webhook object registered with Pulse carries the same
+  headers verbatim
 
 ### Requirement: Firing alerts normalize into the signal contract, resolved alerts do not
 Matching `signals/alertmanager`'s firing-only parity, the adapter SHALL

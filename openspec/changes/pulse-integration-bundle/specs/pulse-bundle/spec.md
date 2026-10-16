@@ -142,6 +142,36 @@ at whatever they expose another way.
 - **THEN** the render fails naming the required value, rather than
   rendering an Ingress with no rule any controller could route
 
+### Requirement: The install notes warn when a credential-carrying connection is plain HTTP
+This project's own posture is to accept whichever scheme the operator
+supplies — `signals/ha` accepts both `http://` and `https://`, since a
+trusted internal network legitimately runs plain HTTP. The bundle SHALL
+NOT reject `http://` on any of its operator-supplied URLs.
+
+The install notes SHALL instead name the risk, mirroring the parent
+chart's own `console.ingress` clear-text warning:
+
+- `signal.ingress.enabled` true with no TLS configured — the alert
+  payload and any `webhookHeaders` cross the network in clear text.
+- `signal.defaultSource.baseUrl` set to `http://` — the Pulse API token
+  this adapter sends on every registration call crosses the network in
+  clear text, and unlike the HMAC-signed inbound webhook, a captured
+  bearer token can simply be replayed.
+- `mcpServer.enabled` true with its resolved backend (`mcpServer.backend`,
+  defaulting to `signal.defaultSource.baseUrl`) set to `http://` — every
+  tool call forwards the CALLING agent's own Pulse API token over that
+  connection.
+
+#### Scenario: Plain HTTP still renders, with a warning
+- **WHEN** any of the three conditions above holds
+- **THEN** the chart renders exactly as it would over HTTPS, and the
+  install notes name which connection is at risk and why
+
+#### Scenario: HTTPS and a terminated Ingress draw no warning
+- **WHEN** `signal.ingress.enabled` is true with TLS configured, and every
+  operator-supplied URL is `https://`
+- **THEN** the install notes carry none of the three warnings
+
 ### Requirement: This bundle's deployed MCP server is first-party, unlike every prior bundle's
 Where `kubernetes` and `prometheus` reference a third party's published MCP
 server image, and `home-assistant` points at a vendor-served endpoint,
