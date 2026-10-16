@@ -35,6 +35,8 @@ groups:
         url: /integrations/prometheus/
       - title: Home Assistant
         url: /integrations/home-assistant/
+      - title: Pulse
+        url: /integrations/pulse/
       - title: Telegram
         url: /integrations/telegram/
   - title: Runtimes

@@ -7,23 +7,24 @@ description: >-
 
 next:
   eyebrow: Next
-  title: Ask it from chat
+  title: Investigate a monitoring alert
   body: >-
-    The same shape for Telegram — where a person types, and where every agent
-    answers back.
-  url: /agent-ops-operator/integrations/telegram/
+    The same shape for Pulse — one source, two agents split by what they may
+    write.
+  url: /agent-ops-operator/integrations/pulse/
 ---
 
 **Not everything worth watching is a cluster.** Home Assistant reports its own
-failures — an integration that stopped setting up, a device that will not
-answer, a problem it has already diagnosed as a repair, a package behind — in
-its log, its config entries, its repairs and its entities, and nobody reads
+failures in its log, its config entries, its repairs and its entities.
+
+An integration that stopped setting up, a device that will not answer, a
+problem it has already diagnosed as a repair, a package behind — nobody reads
 those either.
 
 This bundle reads all of them, and gives you **two agents**: one that can use
 the house, one that can repair it.
 
-![A Home Assistant record — a log error here, the same path for a failed integration, a repair or a faulting sensor — is re-checked by the rules, and opens a conversation on one of two routes: one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
+![A Home Assistant record is re-checked by the rules, then opens a conversation on one of two routes — one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
 
 ## What you get
 
@@ -80,8 +81,10 @@ That is why the split is two users rather than two settings.
 
 **Mint the operator user for the job, never from your own account.** The log
 lane drops any record whose text names its own user, so it cannot report an
-error an agent caused — and a token minted from the household owner's account
-silences every error that mentions them.
+error an agent caused.
+
+A token minted from the household owner's account silences every error that
+mentions them.
 
 > **The operator token is a prerequisite twice over.** Without it neither the
 > repair agent nor its route renders — and the **log lane needs it too**, because
