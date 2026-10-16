@@ -42,10 +42,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
+
+// sanitizeLogText strips CR/LF before a value reaches a log line, so a
+// manager response or a source name cannot forge a second line (the
+// analyzer's S5145 recognizes chained ReplaceAll, not %q).
+func sanitizeLogText(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", "_"), "\r", "_")
+}
 
 type adapter struct {
 	mgr        *Manager
@@ -130,7 +138,7 @@ func (a *adapter) registryLoop(ctx context.Context) {
 func (a *adapter) refreshSources(ctx context.Context) {
 	infos, err := a.mgr.Sources(ctx, a.sourceType)
 	if err != nil {
-		log.Printf("list sources: %q", err.Error())
+		log.Printf("list sources: %q", sanitizeLogText(err.Error()))
 		return
 	}
 	next := map[string]string{}
@@ -176,7 +184,7 @@ func (a *adapter) report(ctx context.Context, source, reason, message string) {
 		return
 	}
 	if err := a.mgr.ReportStatus(ctx, source, true, reason, message); err != nil {
-		log.Printf("report status %q: %q", source, err.Error())
+		log.Printf("report status %q: %q", sanitizeLogText(source), sanitizeLogText(err.Error()))
 		return
 	}
 	a.mu.Lock()
@@ -238,7 +246,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
 		// the registry's own spelling, never the caller's path segment, so it cannot forge log lines.
-		log.Printf("inbound %q: %q", a.servedName(name), err.Error())
+		log.Printf("inbound %q: %q", sanitizeLogText(a.servedName(name)), sanitizeLogText(err.Error()))
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}

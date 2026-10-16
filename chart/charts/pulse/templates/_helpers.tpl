@@ -198,11 +198,13 @@ patterns; fails the render on the first one containing "*". */ -}}
 {{- end -}}
 {{- end -}}
 
-{{- /* The server's own Pulse backend — mcp-pulse's PULSE_URL. Defaults onto
-the ingest lane's own base URL, since the common case is one Pulse instance
-serving both lanes; never derived further than that. */ -}}
+{{- /* The server's own Pulse backend — mcp-pulse's PULSE_URL. REQUIRED, never
+derived: the render fails when the server is enabled and this is empty. */ -}}
 {{- define "pulse.mcpServerBackend" -}}
-{{- or .Values.mcpServer.backend .Values.signal.defaultSource.baseUrl | default "" -}}
+{{- if and .Values.mcpServer.enabled (not .Values.mcpServer.backend) -}}
+{{- fail "pulse: mcpServer.backend is required when mcpServer.enabled=true — mcp-pulse has no in-cluster endpoint of its own to forward calls to" -}}
+{{- end -}}
+{{- .Values.mcpServer.backend | default "" -}}
 {{- end -}}
 
 {{- /* The runtime identity for one of this bundle's routes, named after it. */ -}}
@@ -220,30 +222,19 @@ object. Disagreeing means a Pipeline naming an account nothing created, which
 fails at POD ADMISSION: no pod, a conversation with no phase, and nothing in
 the render to look at.
 
-AN ACCOUNT IS RENDERED ONLY WHERE THE ROUTE IS GRANTED SOMETHING — neither
-route needs Kubernetes RBAC by default, since Pulse is reached entirely over
-HTTP/MCP, so nothing renders unless an install adds a grant. */ -}}
+EVERY ACTIVE ROUTE GETS ITS OWN ACCOUNT unless the install names one. It is
+bound no Kubernetes RBAC by default, since Pulse is reached entirely over
+HTTP/MCP — a grant is added with `rbac.clusterRoles`/`.bindClusterRoles`. */ -}}
 {{- define "pulse.routeAccount" -}}
 {{- $cfg := .cfg -}}
 {{- $p := .p -}}
-{{- $explicit := $cfg.serviceAccountName | default ($p.serviceAccountName | default "") -}}
-{{- if $explicit -}}
-{{ $explicit }}
-{{- else -}}
-{{- $rbac := $cfg.rbac | default dict -}}
-{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}
-{{ include "pulse.routeServiceAccount" (dict "ctx" .ctx "route" $cfg.name) }}
-{{- end -}}
-{{- end -}}
+{{- $cfg.serviceAccountName | default ($p.serviceAccountName | default (include "pulse.routeServiceAccount" (dict "ctx" .ctx "route" $cfg.name))) -}}
 {{- end -}}
 
+{{- /* Rendered only where routeAccount resolved to the name this bundle gives
+itself — an explicit account is the install's own to create. */ -}}
 {{- define "pulse.routeAccountRendered" -}}
-{{- $cfg := .cfg -}}
-{{- $p := .p -}}
-{{- if not ($cfg.serviceAccountName | default ($p.serviceAccountName | default "")) -}}
-{{- $rbac := $cfg.rbac | default dict -}}
-{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
-{{- end -}}
+{{- if eq (include "pulse.routeAccount" .) (include "pulse.routeServiceAccount" (dict "ctx" .ctx "route" .cfg.name)) -}}true{{- end -}}
 {{- end -}}
 
 {{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): see

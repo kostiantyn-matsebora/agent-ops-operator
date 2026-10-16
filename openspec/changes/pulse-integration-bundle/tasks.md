@@ -104,14 +104,14 @@
       build matrix entries the script's output says are missing. Verify
       `.github/components.sh images` and `.github/components.sh modules`
       list both new components.
-- [x] 3.9 Render `signal.defaultSource.webhookURL` onto
+- [x] 3.9 Render `signal.defaultSource.webhookUrl` onto
       `SignalSource.spec.config.webhookUrl`, omitted entirely when unset.
       Verify render tests for both the override riding the config and the
       key's absence by default.
 - [x] 3.10 Render `signal.ingress`: an Ingress targeting the SignalAdapter
       reconciler's own ClusterIP Service (`agentops-signal-<name>:8080`),
       never a second Service of this chart's own, shaped like the parent
-      chart's `console.ingress`. `webhookURL` alone names a URL with
+      chart's `console.ingress`. `webhookUrl` alone names a URL with
       nothing behind it — Pulse outside the cluster needs the path made
       reachable too. Verify render tests for opt-in, the reconciler's
       Service as backend, the default `/webhook` path, extraHosts, every
@@ -124,9 +124,9 @@
       asserting the headers ride the config.
 - [x] 3.12 Add the install-notes clear-text warnings: `signal.ingress`
       enabled with no TLS, `signal.defaultSource.baseUrl` as `http://`,
-      and `mcpServer`'s resolved backend as `http://` — never a hard
-      failure, since this project accepts whichever scheme the operator
-      supplies. Verified by hand (NOTES.txt renders only through
+      and `mcpServer.backend` as `http://` — never a hard failure, since
+      this project accepts whichever scheme the operator supplies.
+      Verified by hand (NOTES.txt renders only through
       `helm install --dry-run`, which needs a cluster this environment
       does not have) via a temporary `fail (printf ...)` probe confirming
       the computed condition for both the all-plain-HTTP and the

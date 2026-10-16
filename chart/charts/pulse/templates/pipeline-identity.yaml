@@ -1,6 +1,6 @@
 {{- /*
-ONE RUNTIME IDENTITY PER ROUTE THIS BUNDLE SHIPS, rendered only where that
-route is actually granted something.
+ONE RUNTIME IDENTITY PER ROUTE THIS BUNDLE SHIPS, unless the install names
+its own account for the route.
 
 IT HOLDS NO KUBERNETES RBAC BY DEFAULT, AND THAT IS CORRECT: neither route
 touches the Kubernetes API — pulse-observer and pulse-operator both reach
@@ -60,7 +60,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ . }}-{{ $.Release.Namespace }}
+  name: {{ . }}
 subjects:
   - kind: ServiceAccount
     name: {{ $sa }}

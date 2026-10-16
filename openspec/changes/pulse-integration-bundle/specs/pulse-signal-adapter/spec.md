@@ -39,8 +39,9 @@ Pulse API token plus the optional HMAC signing secret from
 `token`/`TOKEN` and `signingSecret`/`SIGNING_SECRET` key casings).
 
 This bundle still ships exactly one default source. The config shape is
-one flat field — `{"baseUrl": "..."}` — never `signals/alertmanager`'s
-`register` sub-block.
+two flat fields — `{"baseUrl": "...", "webhookUrl": "..."}`, the second
+optional (see the delivery-URL requirement below) — never
+`signals/alertmanager`'s `register` sub-block.
 
 Registration follows whichever source the adapter serves, not a
 hardcoded identity. A second, hand-authored Pulse SignalSource would also
@@ -76,8 +77,7 @@ here.
 
 #### Scenario: No override still derives the in-cluster URL
 - **WHEN** the served source carries no `spec.config.webhookUrl`
-- **THEN** the adapter registers its own derived in-cluster Service URL,
-  exactly as before this requirement existed
+- **THEN** the adapter registers its own derived in-cluster Service URL
 
 ### Requirement: The adapter registers its webhook with Pulse at pod start, and keeps healing it
 At pod start the adapter SHALL call Pulse's `POST /api/notifications/webhooks`

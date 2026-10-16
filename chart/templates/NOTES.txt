@@ -526,8 +526,7 @@ connection, in CLEAR TEXT — unlike the HMAC-signed inbound webhook, a
 stolen bearer token can simply be replayed by whoever captured it. Use an
 https:// URL unless this traffic never leaves a trusted network.
 {{- end }}
-{{- $pubMcpBackend := $pub.mcpServer.backend | default $pub.signal.defaultSource.baseUrl }}
-{{- if and $pub.mcpServer.enabled $pubMcpBackend (hasPrefix "http://" $pubMcpBackend) }}
+{{- if and $pub.mcpServer.enabled (hasPrefix "http://" $pub.mcpServer.backend) }}
 
 ACTION NEEDED — mcp-pulse's backend is plain HTTP. Every tool call forwards
 the CALLING agent's own Pulse API token to it, in CLEAR TEXT on this

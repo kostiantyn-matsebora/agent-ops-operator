@@ -88,7 +88,7 @@ spec:
   # this.
   credentialKeys:
     - key: token
-      required: true
+      required: false
       description: >-
         Pulse API token, scoped for POST /api/notifications/webhooks. Without
         one the source still serves webhooks, but registration fails and the
@@ -128,7 +128,7 @@ spec:
   {{- end }}
   {{- $cfg := dict }}
   {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
-  {{- with $src.webhookURL }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
+  {{- with $src.webhookUrl }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
   {{- with $src.webhookHeaders }}{{ $_ := set $cfg "webhookHeaders" . }}{{ end }}
   {{- with $cfg }}
   config:

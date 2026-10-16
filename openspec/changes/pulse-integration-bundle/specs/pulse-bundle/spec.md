@@ -157,10 +157,9 @@ chart's own `console.ingress` clear-text warning:
   this adapter sends on every registration call crosses the network in
   clear text, and unlike the HMAC-signed inbound webhook, a captured
   bearer token can simply be replayed.
-- `mcpServer.enabled` true with its resolved backend (`mcpServer.backend`,
-  defaulting to `signal.defaultSource.baseUrl`) set to `http://` — every
-  tool call forwards the CALLING agent's own Pulse API token over that
-  connection.
+- `mcpServer.enabled` true with `mcpServer.backend` set to `http://` —
+  every tool call forwards the CALLING agent's own Pulse API token over
+  that connection.
 
 #### Scenario: Plain HTTP still renders, with a warning
 - **WHEN** any of the three conditions above holds
