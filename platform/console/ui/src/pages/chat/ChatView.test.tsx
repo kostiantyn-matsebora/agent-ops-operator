@@ -202,7 +202,7 @@ describe('arrivals (console-thread-live-cues)', () => {
   })
 })
 
-describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored)', () => {
+describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored, Closed)', () => {
   // Each of these used to be an independent per-row filter: a member is
   // never literally "mine" (it was invoked, never originated), never
   // literally "errored" just because its root is, and so on — so opening
@@ -239,6 +239,17 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     // the same claim as every row in it being unread.
     expect(screen.queryByTestId('unread-root-2')).not.toBeInTheDocument()
     expect(screen.getByTestId('unread-member-2')).toBeInTheDocument()
+  })
+
+  it('Closed: a closed root that has been read is excluded, same as any other scope', async () => {
+    items = [
+      conv('closed-read', { phase: 'Closed', unread: false }),
+      conv('closed-unread', { phase: 'Closed', unread: true }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByTestId('scope-Archive'))
+    expect(screen.getByTestId('row-closed-unread')).toBeInTheDocument()
+    expect(screen.queryByTestId('row-closed-read')).not.toBeInTheDocument()
   })
 
   it('a tree with no match anywhere is excluded entirely', async () => {

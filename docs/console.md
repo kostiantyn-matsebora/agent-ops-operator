@@ -684,8 +684,9 @@ console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-**Every scope but Closed is an unread count.** A bare "All" that counted
-everyone, read or not, is gone.
+**Every scope is an unread count, no exceptions.** A bare "All" that counted
+everyone, read or not, is gone, and so is Closed ever counting a READ closed
+conversation.
 
 The Inbox used to carry both All and a separate Unread. Once every other
 scope turned unread-scoped too, that pair just counted the same backlog
@@ -698,23 +699,22 @@ no action of its own — the tree under its root is the only way to reach it.
 | Scope | Counts |
 |---|---|
 | Unread (`kind: 'all'`) | every unread root, no further filter |
-| Working, Mine, Errored, each Pipeline or Coordinator | unread roots its own filter admits |
-| Closed | every closed root, read or not — the one exception |
+| Working, Mine, Errored, Closed, each Pipeline or Coordinator | unread roots its own filter admits |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
 
-**Closed is unconditional on purpose.** An archive a person could only browse
-while everything in it stayed unread would empty out the moment they had
-read it, defeating what an archive is for.
-
-**"Show closed" moves every count but Closed's.** Switching scopes never
-moves a count that belongs to a different one, computed before that filter
-applies.
+**"Show closed" moves every count except Closed's own.** Switching scopes
+never moves a count that belongs to a different one, computed before that
+filter applies.
 
 The closed-row toggle is a different thing, not a scope. Every list but
 Closed's own hides a closed row while it is off, so a badge for one of those
-lists excludes that row too — or it promises something the list cannot show.
+lists excludes that row too.
+
+Closed's own list is exempt from that one filter — it IS the closed view —
+so its count ignores the toggle too. It still requires unread, like every
+other scope here.
 
 Opening a conversation reports it read, at `max(the newest counted message's
 time, status.lastActivity)` — the second term keeps the report monotone

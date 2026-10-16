@@ -210,22 +210,25 @@ func isMember(s ConversationSummary) bool {
 // Every one of these is an UNREAD count, ANDed with its own predicate —
 // phase, ownership, error state or wiring — matching ChatView.tsx's
 // TREE_PREDICATE exactly (each entry there also ANDs its own condition with
-// `c.unread`). A read conversation never inflates a badge whose whole point
-// is "something here still needs you."
+// `c.unread`, Closed included). A read conversation never inflates a badge,
+// Archive's no longer excepted: browsing it is one more click away
+// (showClosed) on every other scope already, and a badge that counted a row
+// its own scope's list no longer shows was exactly the bug this exists to
+// not repeat.
 //
-// closedVisible mirrors the ONE further filter every one of those lists
-// applies: ChatView.tsx hides a closed row everywhere except the dedicated
-// Closed scope, unless showClosed is on. Closed's OWN badge is the one
-// exception to BOTH rules — unconditional on read state AND on showClosed:
-// an archive a person can only browse while every item in it stays unread
-// would empty out the moment they had read it, defeating what an archive is
-// for.
+// closedVisible mirrors the ONE further filter every scope's list but
+// Closed's applies: ChatView.tsx hides a closed row there unless showClosed
+// is on. Closed's OWN list is exempt from THAT filter — it is the closed
+// view — so its count is too, regardless of showClosed; it still requires
+// Unread like every other bucket here.
 func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedVisible bool) {
-	if strings.EqualFold(s.Phase, "Closed") && !isMember(s) {
+	if isMember(s) || !s.Unread {
+		return
+	}
+	if strings.EqualFold(s.Phase, "Closed") {
 		scopes["closed"]++
 	}
-	unreadVisible := s.Unread && closedVisible
-	if !unreadVisible {
+	if !closedVisible {
 		return
 	}
 	if strings.EqualFold(s.Phase, "Working") {
@@ -236,9 +239,6 @@ func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedV
 	}
 	if s.Errored {
 		scopes["errored"]++
-	}
-	if isMember(s) {
-		return
 	}
 	if s.Coordinator != "" {
 		scopes[s.Coordinator]++
