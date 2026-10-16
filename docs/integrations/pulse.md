@@ -205,7 +205,7 @@ alerts on.
 
 The two lanes need different things from you:
 
-| Lane | Direction | Works unmodified? |
+| Path | Direction | Works unmodified? |
 |---|---|---|
 | MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl` and `mcpServer.backend` already take any reachable URL — in-cluster or not |
 | Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The adapter registers its own in-cluster Service DNS name, which an external Pulse cannot resolve |
