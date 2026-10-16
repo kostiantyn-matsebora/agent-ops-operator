@@ -116,7 +116,7 @@ spec:
   {{- end }}
   {{- $cfg := dict }}
   {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
-  {{- with $src.webhookURL }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
+  {{- with $src.webhookUrl }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
   {{- with $cfg }}
   config:
 {{ toYaml . | indent 4 }}

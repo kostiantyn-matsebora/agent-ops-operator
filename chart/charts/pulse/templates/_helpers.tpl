@@ -198,11 +198,13 @@ patterns; fails the render on the first one containing "*". */ -}}
 {{- end -}}
 {{- end -}}
 
-{{- /* The server's own Pulse backend — mcp-pulse's PULSE_URL. Defaults onto
-the ingest lane's own base URL, since the common case is one Pulse instance
-serving both lanes; never derived further than that. */ -}}
+{{- /* The server's own Pulse backend — mcp-pulse's PULSE_URL. REQUIRED, never
+derived: the render fails when the server is enabled and this is empty. */ -}}
 {{- define "pulse.mcpServerBackend" -}}
-{{- or .Values.mcpServer.backend .Values.signal.defaultSource.baseUrl | default "" -}}
+{{- if and .Values.mcpServer.enabled (not .Values.mcpServer.backend) -}}
+{{- fail "pulse: mcpServer.backend is required when mcpServer.enabled=true — mcp-pulse has no in-cluster endpoint of its own to forward calls to" -}}
+{{- end -}}
+{{- .Values.mcpServer.backend | default "" -}}
 {{- end -}}
 
 {{- /* The runtime identity for one of this bundle's routes, named after it. */ -}}
@@ -238,12 +240,12 @@ HTTP/MCP, so nothing renders unless an install adds a grant. */ -}}
 {{- end -}}
 
 {{- define "pulse.routeAccountRendered" -}}
+{{- /* Rendered only where routeAccount resolved a name AND it is the one this
+bundle names itself — an explicit account is the install's own to create. */ -}}
 {{- $cfg := .cfg -}}
 {{- $p := .p -}}
-{{- if not ($cfg.serviceAccountName | default ($p.serviceAccountName | default "")) -}}
-{{- $rbac := $cfg.rbac | default dict -}}
-{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
-{{- end -}}
+{{- $explicit := $cfg.serviceAccountName | default ($p.serviceAccountName | default "") -}}
+{{- if and (not $explicit) (include "pulse.routeAccount" .) -}}true{{- end -}}
 {{- end -}}
 
 {{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): see

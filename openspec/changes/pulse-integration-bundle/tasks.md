@@ -94,14 +94,14 @@
       build matrix entries the script's output says are missing. Verify
       `.github/components.sh images` and `.github/components.sh modules`
       list both new components.
-- [x] 3.9 Render `signal.defaultSource.webhookURL` onto
+- [x] 3.9 Render `signal.defaultSource.webhookUrl` onto
       `SignalSource.spec.config.webhookUrl`, omitted entirely when unset.
       Verify render tests for both the override riding the config and the
       key's absence by default.
 - [x] 3.10 Render `signal.ingress`: an Ingress targeting the SignalAdapter
       reconciler's own ClusterIP Service (`agentops-signal-<name>:8080`),
       never a second Service of this chart's own, shaped like the parent
-      chart's `console.ingress`. `webhookURL` alone names a URL with
+      chart's `console.ingress`. `webhookUrl` alone names a URL with
       nothing behind it — Pulse outside the cluster needs the path made
       reachable too. Verify render tests for opt-in, the reconciler's
       Service as backend, the default `/webhook` path, extraHosts, the

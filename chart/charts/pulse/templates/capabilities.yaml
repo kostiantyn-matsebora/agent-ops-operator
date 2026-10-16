@@ -7,8 +7,8 @@ Community-edition-framed roles carry over unchanged.
 An AgentCapability carries no subscription: the chart-rendered Coordinator
 (`chart/templates/coordinator.yaml`) is the one object that claims the alert
 source and lists these capabilities in its own `agents[]`, read through
-`pulse.coordinatorContribution` — the SAME helper this file reuses below, so
-the two cannot drift apart on which route renders.
+`pulse.coordinatorContribution` — gated on the SAME per-route helpers this
+file uses, so the two cannot drift apart on which route renders.
 
 Each keeps the name of the route it replaces (`pulse-observer`,
 `pulse-operator`), gated on the SAME per-route helpers `pipelines.yaml`

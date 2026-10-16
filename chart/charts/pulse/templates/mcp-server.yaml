@@ -20,9 +20,6 @@ home-assistant's admin MCP server workload already takes.
 {{- $s := .Values.mcpServer }}
 {{- $name := include "pulse.mcpServerName" . }}
 {{- $backend := include "pulse.mcpServerBackend" . }}
-{{- if not $backend }}
-{{- fail "pulse: mcpServer.backend is required when mcpServer.enabled=true (or set signal.defaultSource.baseUrl, which it defaults onto) — mcp-pulse has no in-cluster endpoint of its own to forward calls to" }}
-{{- end }}
 {{- /* NAMING ONE IS STILL REFUSED IF IT IS THE RUNTIME'S. The guard survives
 the account not being rendered: an install that points this workload at an
 account of its own must still not point it at the one agents run as. */ -}}

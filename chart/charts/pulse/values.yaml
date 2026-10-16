@@ -58,9 +58,9 @@ signal:
   #
   # Points at the SignalAdapter reconciler's OWN ClusterIP Service
   # (agentops-signal-<signal.name>:8080) — the same Service `defaultSource
-  # .webhookURL` would otherwise derive, never a second Service this chart
+  # .webhookUrl` would otherwise derive, never a second Service this chart
   # renders. Off by default: a cluster-internal Pulse needs neither this
-  # nor `webhookURL`.
+  # nor `webhookUrl`.
   #
   # Shaped exactly like the parent chart's `console.ingress` — same field
   # names, same TLS forms — since that is this repository's one other
@@ -124,7 +124,7 @@ signal:
     # (a LoadBalancer Service, a NodePort, a tunnel) is still on you; this
     # field only says what to tell Pulse once the exposure exists, by
     # whichever path you chose.
-    webhookURL: ""
+    webhookUrl: ""
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     grouping: {}
   # The adapter's registration credential: a Pulse API token (to call
@@ -304,9 +304,8 @@ mcpServer:
     repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-pulse
     tag: "0.1.0"
   # REQUIRED when enabled: the Pulse base URL mcp-pulse forwards every tool
-  # call to. Empty = signal.defaultSource.baseUrl, the common case of one
-  # Pulse instance serving both lanes. Never defaulted further — mcp-pulse
-  # has no in-cluster endpoint of its own to fall back onto.
+  # call to. Empty FAILS the render — never defaulted, mcp-pulse has no
+  # in-cluster endpoint of its own to fall back onto.
   backend: ""
   port: 8080
   # EMPTY, AND NO ACCOUNT IS RENDERED — this server reads an HTTP API over

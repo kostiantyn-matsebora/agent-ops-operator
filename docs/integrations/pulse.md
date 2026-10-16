@@ -134,13 +134,13 @@ Everything below is under `pulse:`.
 | `enabled` | `false` | `true` to render the bundle |
 | `signal.defaultSource.enabled` | `false` | `true`, or the route claims nothing |
 | `signal.defaultSource.baseUrl` | **empty** | your Pulse instance's base URL |
-| `signal.defaultSource.webhookURL` | empty, derives the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
+| `signal.defaultSource.webhookUrl` | empty, derives the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
 | `signal.ingress.enabled` | `false` | `true` to expose the webhook path through your ingress controller |
 | `signal.ingress.host` | **empty, required when enabled** | the hostname Pulse will call |
 | `mcp.observer.enabled` | `true` | `false` to drop the read-only MCP pair |
 | `mcp.operator.enabled` | `true` | `false` to drop the write-capable MCP pair |
 | `mcpServer.enabled` | `false` | `true` to deploy `mcp-pulse` |
-| `mcpServer.backend` | empty, defaults to `signal.defaultSource.baseUrl` | a different Pulse endpoint for the MCP path alone |
+| `mcpServer.backend` | **empty, required when `mcpServer.enabled`** | the Pulse endpoint the MCP server forwards to |
 | `profiles.observer.enabled` | `true` | `false` to drop the investigating agent |
 | `profiles.operator.enabled` | `true` | `false` to drop the annotating agent |
 | `pipelines.enabled` | `false` | `true` for working routes |
@@ -207,7 +207,7 @@ The two lanes need different things from you:
 
 | Lane | Direction | Works unmodified? |
 |---|---|---|
-| MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl`/`mcpServer.backend` already take any reachable URL — in-cluster or not |
+| MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl` and `mcpServer.backend` already take any reachable URL — in-cluster or not |
 | Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The adapter registers its own in-cluster Service DNS name, which an external Pulse cannot resolve |
 
 Fix the webhook lane with `signal.ingress` — it points an Ingress at the
@@ -220,7 +220,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set pulse.signal.ingress.enabled=true \
   --set pulse.signal.ingress.host=pulse-adapter.example.org \
   --set pulse.signal.ingress.tls.clusterIssuer=letsencrypt-prod \
-  --set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
+  --set pulse.signal.defaultSource.webhookUrl=https://pulse-adapter.example.org/webhook/pulse-alerts
 ```
 
 ```powershell
@@ -229,23 +229,23 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set pulse.signal.ingress.enabled=true `
   --set pulse.signal.ingress.host=pulse-adapter.example.org `
   --set pulse.signal.ingress.tls.clusterIssuer=letsencrypt-prod `
-  --set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
+  --set pulse.signal.defaultSource.webhookUrl=https://pulse-adapter.example.org/webhook/pulse-alerts
 ```
 
-**Both lines matter.** The Ingress makes the path *reachable*. `webhookURL`
+**Both lines matter.** The Ingress makes the path *reachable*. `webhookUrl`
 is the separate step of telling Pulse to actually use it — without it the
 adapter still registers its own unreachable in-cluster URL, Ingress or not.
 
 No ingress controller? Expose the adapter's own `agentops-signal-pulse`
 Service (port 8080) another way instead — a `LoadBalancer` Service, a
-`NodePort`, or a tunnel you already run — and point `webhookURL` at
+`NodePort`, or a tunnel you already run — and point `webhookUrl` at
 whatever that gives you.
 
 This chart does not render those forms. An Ingress has one shape this
 chart can target uniformly. A `LoadBalancer`'s annotations and a tunnel's
 whole setup are specific to your cloud or your tooling.
 
-Left unset, both `signal.ingress.enabled` and `webhookURL` keep today's
+Left unset, both `signal.ingress.enabled` and `webhookUrl` keep today's
 behavior — no change for a Pulse instance that already runs inside the
 cluster.
 

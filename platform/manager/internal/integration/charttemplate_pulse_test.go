@@ -130,7 +130,7 @@ func TestPulseWebhookURLOverrideRidesSourceConfig(t *testing.T) {
 		"--set", "pulse.enabled=true",
 		"--set", "pulse.signal.defaultSource.enabled=true",
 		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
-		"--set", "pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts")
+		"--set", "pulse.signal.defaultSource.webhookUrl=https://pulse-adapter.example.org/webhook/pulse-alerts")
 	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
 	if !strings.Contains(doc, "webhookUrl: https://pulse-adapter.example.org/webhook/pulse-alerts") {
 		t.Errorf("expected the override to ride spec.config.webhookUrl, got:\n%s", doc)
@@ -554,7 +554,7 @@ func pulseIngress(t *testing.T, out string) string {
 }
 
 // No Ingress unless asked for — Pulse in-cluster needs neither it nor
-// webhookURL, and the default install must stay silent about the whole
+// webhookUrl, and the default install must stay silent about the whole
 // question.
 func TestPulseIngressIsOptIn(t *testing.T) {
 	out := helmTemplate(t, "--set", "pulse.enabled=true",
