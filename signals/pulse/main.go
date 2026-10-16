@@ -164,7 +164,7 @@ func (a *adapter) report(ctx context.Context, source, reason, message string) {
 		return
 	}
 	if err := a.mgr.ReportStatus(ctx, source, true, reason, message); err != nil {
-		log.Printf("report status %s: %v", source, err)
+		log.Printf("report status %q: %v", source, err)
 		return
 	}
 	a.mu.Lock()
