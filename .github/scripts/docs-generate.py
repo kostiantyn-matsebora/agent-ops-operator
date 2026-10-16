@@ -76,7 +76,7 @@ NAMESPACE = "agent-ops"
 #                from the chart check by KEY, never by value.
 DOCUMENTED_PLACEHOLDERS = {
     "https://ha.example.org",           # home-assistant/values.yaml, homeAssistant.endpoint
-    "https://pulse.example.org",        # pulse/values.yaml, signal.defaultSource.baseUrl
+    "https://pulse.example.org",        # pulse/values.yaml, mcpServer.backend
     "http://metrics.example:8428",      # RFC 2606 reserved domain
     "-1001234567890",                   # telegram/values.yaml, surface.chatId
     # prometheus/values.yaml, mcpServers.backend — the chart's OWN example, and
@@ -287,7 +287,10 @@ BUNDLES = {
     },
     "pulse": {
         "components": {
-            "Ingest lane": {"flag": "signal.defaultSource.enabled"},
+            "Ingest lane": {
+                "flag": "signal.defaultSource.enabled",
+                "sets": {"signal.credentials.token": "placeholder-token"},
+            },
             "Profiles": {"flags": ["profiles.observer.enabled", "profiles.operator.enabled"]},
             "MCP tooling": {
                 "flags": ["mcp.observer.enabled", "mcp.operator.enabled"],

@@ -20,7 +20,7 @@ for the source and the reference material beside this file.
   privilege: `pulse-observer` only investigates, `pulse-operator` can
   additionally record a Community-tier operator-state annotation
   (maintenance window, criticality tag). See
-  [the integration page](../docs/integrations/pulse.md).
+  [the integration page](integrations/pulse.md).
   - The real wall between the two profiles is which pre-scoped Pulse API
     token each route's `MCPConfig` carries, not the toolset — `mcp-pulse`
     forwards whichever token the caller presented and decides no reach of

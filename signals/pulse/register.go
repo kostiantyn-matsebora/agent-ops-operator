@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -82,7 +83,30 @@ func parseRegisterConfig(raw json.RawMessage) (*registerConfig, error) {
 	}
 	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
 	cfg.WebhookURL = strings.TrimSuffix(cfg.WebhookURL, "/")
+	if cfg.BaseURL != "" {
+		// the token is sent to this URL, so only a plain http(s) origin is accepted
+		if err := validHTTPURL(cfg.BaseURL); err != nil {
+			return nil, fmt.Errorf("invalid spec.config: baseUrl %v", err)
+		}
+	}
+	if cfg.WebhookURL != "" {
+		// registered WITH Pulse verbatim, so the same shape check applies
+		if err := validHTTPURL(cfg.WebhookURL); err != nil {
+			return nil, fmt.Errorf("invalid spec.config: webhookUrl %v", err)
+		}
+	}
 	return &cfg, nil
+}
+
+// validHTTPURL rejects anything that is not a plain http(s) origin with a
+// host — no embedded userinfo, no scheme-less or opaque value a sender
+// could misinterpret.
+func validHTTPURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return fmt.Errorf("must be an http(s) URL with a host")
+	}
+	return nil
 }
 
 // pulseCredential resolves this source's projected credential: the Pulse
@@ -266,7 +290,7 @@ func (c *pulseClient) ensureWebhook(ctx context.Context, desired pulseWebhookCon
 			return nil
 		}
 		desired.ID = cur.ID
-		code, body, err = c.do(ctx, "PUT", "/api/notifications/webhooks/"+cur.ID, desired)
+		code, body, err = c.do(ctx, "PUT", "/api/notifications/webhooks/"+url.PathEscape(cur.ID), desired)
 		if err != nil {
 			return fmt.Errorf("update webhook %s: %v", cur.ID, err)
 		}

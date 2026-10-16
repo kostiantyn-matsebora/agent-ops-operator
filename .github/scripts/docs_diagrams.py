@@ -263,17 +263,18 @@ INTEGRATION_DIAGRAMS: dict[str, dict] = {
     # reads cleanly).
     "pulse": {
         "dir": "integrations",
-        "alt": "A firing Pulse alert reaches two routes through their own "
-               "MCP pairs: one that only investigates, one that may also "
-               "record a maintenance window or a criticality tag.",
+        "alt": "A firing Pulse alert is claimed by two routes, each binding "
+               "its own MCP pair: one that only investigates, one that may "
+               "also record a maintenance window or a criticality tag.",
+        "named": True,
         "cols": [
             [("a firing alert", "from Pulse", "plain")],
-            [("observer-mcp", "reads & investigates", "yours"),
-             ("operator-mcp", "+ maintenance, tags", "yours")],
             [("pulse-observer", "investigates only", "subject"),
              ("pulse-operator", "may also annotate", "subject")],
+            [("observer-mcp", "reads & investigates", "yours"),
+             ("operator-mcp", "+ maintenance, tags", "yours")],
         ],
-        "arrows": ["read by", "answered by"],
+        "arrows": ["claimed by", "bind"],
     },
     "telegram": {
         "dir": "integrations",

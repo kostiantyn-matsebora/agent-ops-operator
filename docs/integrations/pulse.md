@@ -313,6 +313,7 @@ each with its own agent and tools.
 SignalAdapter/pulse
 
 # Ingest lane  (signal.defaultSource.enabled)
+Secret/agentops-pulse-ingest
 SignalSource/pulse-alerts
 
 # Profiles  (profiles.observer.enabled / profiles.operator.enabled)
