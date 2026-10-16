@@ -39,6 +39,7 @@ func pulseEnabledArgs(extra ...string) []string {
 		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
 		"--set", "pulse.signal.credentials.token=ingest-tok",
 		"--set", "pulse.mcpServer.enabled=true",
+		"--set", "pulse.mcpServer.backend=https://pulse.example.org",
 		"--set", "pulse.mcp.observer.credentials.token=observer-tok",
 		"--set", "pulse.mcp.operator.credentials.token=operator-tok",
 	}, extra...)
@@ -330,17 +331,18 @@ func TestPulseMcpServerGuards(t *testing.T) {
 	}
 }
 
-// mcp-pulse's backend defaults onto the ingest lane's own base URL — the
-// common case of one Pulse instance serving both lanes — and the deployed
-// server mounts no ServiceAccount token when none is named.
-func TestPulseMcpServerBackendDefaultsOntoIngestBaseUrl(t *testing.T) {
+// mcp-pulse's backend is its own required value, never derived from the ingest
+// lane's base URL, and the deployed server mounts no ServiceAccount token when
+// none is named.
+func TestPulseMcpServerBackendIsExplicit(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "pulse.enabled=true",
-		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://ingest.example.org",
+		"--set", "pulse.mcpServer.backend=https://pulse.example.org",
 		"--set", "pulse.mcpServer.enabled=true")
 	dep := findDocByKindAndName(t, out, "Deployment", "agentops-mcp-pulse")
 	if !strings.Contains(dep, `value: "https://pulse.example.org"`) {
-		t.Errorf("PULSE_URL must default onto the ingest lane's base URL:\n%s", dep)
+		t.Errorf("PULSE_URL must be the explicit backend:\n%s", dep)
 	}
 	if strings.Contains(dep, "serviceAccountName:") {
 		t.Errorf("a pod that mounts no token gains nothing from naming an account:\n%s", dep)
@@ -490,18 +492,15 @@ func TestPulseMcpServerEqualToRuntimeServiceAccountFailsRender(t *testing.T) {
 	}
 }
 
-// Neither route needs Kubernetes RBAC by default — Pulse is reached entirely
-// over HTTP/MCP — so no route ServiceAccount renders unless a grant is
-// declared.
-func TestPulseRoutesRenderNoIdentityByDefault(t *testing.T) {
+// Each active route gets its own ServiceAccount, bound no Kubernetes RBAC by
+// default — Pulse is reached entirely over HTTP/MCP.
+func TestPulseRoutesRenderOwnIdentityByDefault(t *testing.T) {
 	out := helmTemplate(t, pulseEnabledArgs("--set", "pulse.pipelines.enabled=true")...)
-	for _, doc := range splitDocs(out) {
-		if strings.Contains(doc, "\nkind: ServiceAccount\n") &&
-			strings.Contains(doc, "agentops-pulse") &&
-			(strings.Contains(doc, "agentops-pulse-observer") || strings.Contains(doc, "agentops-pulse-operator")) &&
-			!strings.Contains(doc, "kind: Secret") {
-			t.Fatalf("neither route needs Kubernetes RBAC, no ServiceAccount should render:\n%s", doc)
-		}
+	for _, name := range []string{"agentops-pulse-observer", "agentops-pulse-operator"} {
+		findDocByKindAndName(t, out, "ServiceAccount", name)
+	}
+	if strings.Contains(out, "name: agentops-pulse-observer-") {
+		t.Errorf("no RBAC should bind to a route account by default")
 	}
 }
 

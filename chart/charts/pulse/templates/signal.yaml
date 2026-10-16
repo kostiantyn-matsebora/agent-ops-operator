@@ -76,7 +76,7 @@ spec:
   # this.
   credentialKeys:
     - key: token
-      required: true
+      required: false
       description: >-
         Pulse API token, scoped for POST /api/notifications/webhooks. Without
         one the source still serves webhooks, but registration fails and the

@@ -93,8 +93,7 @@ spec:
   # UNDER WHOSE IDENTITY, overriding the runtime's own.
   #
   # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
-  # yours to grant. This bundle renders no ServiceAccount unless a grant is
-  # declared.
+  # yours to grant. Left unset, this bundle renders its own route account.
   serviceAccountName: {{ . }}
   {{- end }}
   {{- with .sources }}

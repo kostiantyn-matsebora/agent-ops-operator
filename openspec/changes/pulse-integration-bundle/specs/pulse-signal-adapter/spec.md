@@ -77,8 +77,7 @@ here.
 
 #### Scenario: No override still derives the in-cluster URL
 - **WHEN** the served source carries no `spec.config.webhookUrl`
-- **THEN** the adapter registers its own derived in-cluster Service URL,
-  exactly as before this requirement existed
+- **THEN** the adapter registers its own derived in-cluster Service URL
 
 ### Requirement: The adapter registers its webhook with Pulse at pod start, and keeps healing it
 At pod start the adapter SHALL call Pulse's `POST /api/notifications/webhooks`

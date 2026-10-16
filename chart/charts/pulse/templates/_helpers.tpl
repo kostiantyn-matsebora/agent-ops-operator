@@ -222,30 +222,19 @@ object. Disagreeing means a Pipeline naming an account nothing created, which
 fails at POD ADMISSION: no pod, a conversation with no phase, and nothing in
 the render to look at.
 
-AN ACCOUNT IS RENDERED ONLY WHERE THE ROUTE IS GRANTED SOMETHING — neither
-route needs Kubernetes RBAC by default, since Pulse is reached entirely over
-HTTP/MCP, so nothing renders unless an install adds a grant. */ -}}
+EVERY ACTIVE ROUTE GETS ITS OWN ACCOUNT unless the install names one. It is
+bound no Kubernetes RBAC by default, since Pulse is reached entirely over
+HTTP/MCP — a grant is added with `rbac.clusterRoles`/`.bindClusterRoles`. */ -}}
 {{- define "pulse.routeAccount" -}}
 {{- $cfg := .cfg -}}
 {{- $p := .p -}}
-{{- $explicit := $cfg.serviceAccountName | default ($p.serviceAccountName | default "") -}}
-{{- if $explicit -}}
-{{ $explicit }}
-{{- else -}}
-{{- $rbac := $cfg.rbac | default dict -}}
-{{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}
-{{ include "pulse.routeServiceAccount" (dict "ctx" .ctx "route" $cfg.name) }}
-{{- end -}}
-{{- end -}}
+{{- $cfg.serviceAccountName | default ($p.serviceAccountName | default (include "pulse.routeServiceAccount" (dict "ctx" .ctx "route" $cfg.name))) -}}
 {{- end -}}
 
+{{- /* Rendered only where routeAccount resolved to the name this bundle gives
+itself — an explicit account is the install's own to create. */ -}}
 {{- define "pulse.routeAccountRendered" -}}
-{{- /* Rendered only where routeAccount resolved a name AND it is the one this
-bundle names itself — an explicit account is the install's own to create. */ -}}
-{{- $cfg := .cfg -}}
-{{- $p := .p -}}
-{{- $explicit := $cfg.serviceAccountName | default ($p.serviceAccountName | default "") -}}
-{{- if and (not $explicit) (include "pulse.routeAccount" .) -}}true{{- end -}}
+{{- if eq (include "pulse.routeAccount" .) (include "pulse.routeServiceAccount" (dict "ctx" .ctx "route" .cfg.name)) -}}true{{- end -}}
 {{- end -}}
 
 {{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): see
