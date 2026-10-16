@@ -130,7 +130,7 @@ func (a *adapter) registryLoop(ctx context.Context) {
 func (a *adapter) refreshSources(ctx context.Context) {
 	infos, err := a.mgr.Sources(ctx, a.sourceType)
 	if err != nil {
-		log.Printf("list sources: %v", err)
+		log.Printf("list sources: %q", err.Error())
 		return
 	}
 	next := map[string]string{}
@@ -176,7 +176,7 @@ func (a *adapter) report(ctx context.Context, source, reason, message string) {
 		return
 	}
 	if err := a.mgr.ReportStatus(ctx, source, true, reason, message); err != nil {
-		log.Printf("report status %q: %v", source, err)
+		log.Printf("report status %q: %q", source, err.Error())
 		return
 	}
 	a.mu.Lock()
@@ -238,7 +238,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
 		// the registry's own spelling, never the caller's path segment, so it cannot forge log lines.
-		log.Printf("inbound %q: %v", a.servedName(name), err)
+		log.Printf("inbound %q: %q", a.servedName(name), err.Error())
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}
