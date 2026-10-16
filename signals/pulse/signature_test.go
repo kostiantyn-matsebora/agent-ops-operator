@@ -91,7 +91,7 @@ func TestVerifySignatureStaleTimestampIsRejected(t *testing.T) {
 func TestHandleWebhookSignatureEndToEnd(t *testing.T) {
 	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}}
 	a := testAdapter(t, f)
-	a.reg.SigningSecret = "s3cret"
+	a.sources["pulse-default"] = "s3cret"
 	h := a.handler()
 	body := firingBody("sig-1")
 
@@ -133,7 +133,7 @@ func TestHandleWebhookSignatureEndToEnd(t *testing.T) {
 	}
 
 	// unsigned mode: no secret configured at all → any body accepted
-	a.reg.SigningSecret = ""
+	a.sources["pulse-default"] = ""
 	rec = post(t, h, "/webhook/pulse-default", firingBody("sig-2"))
 	if rec.Code != 200 {
 		t.Fatalf("unsigned mode should accept a bare post: %d %s", rec.Code, rec.Body.String())

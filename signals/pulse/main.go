@@ -8,28 +8,30 @@
 //	sources:  GET /signal/sources?adapter=<ADAPTER_NAME> (15s poll)
 //	push:     POST /signal/inbound     (normalized; alert lane)
 //
-// Registration is pod-environment-driven, not SignalSource-driven
-// (design.md Decision 1 — this bundle ships exactly one default source, so
-// the generalized, per-source, CR-carried registration path
-// signals/alertmanager uses would add indirection this adapter has no use
-// for). At pod start, and on a bounded retry loop thereafter (register.go),
-// the adapter calls Pulse's own POST /api/notifications/webhooks to create
-// or repair a Generic webhook receiver pointing at its own
-// /webhook/<source> endpoint. The webhook is served regardless of
-// registration outcome — an unregistered sender means no alerts arrive, not
-// that the endpoint refuses them.
+// Registration reads the served source's OWN spec.config.baseUrl and
+// credentialsSecretRef (register.go) on every registryLoop poll tick — this
+// bundle ships exactly one default source, so there is no generalized,
+// hand-authored-source registration path to build, but the SignalAdapter
+// CRD has no pod-env passthrough, so the source's own config/credential is
+// the only delivery mechanism that actually reaches this pod (see
+// register.go's doc comment). The adapter calls Pulse's own
+// POST /api/notifications/webhooks to create or repair a Generic webhook
+// receiver pointing at its own /webhook/<source> endpoint. The webhook is
+// served regardless of registration outcome — an unregistered sender means
+// no alerts arrive, not that the endpoint refuses them.
 //
 // payload.go owns both the registered Go-template payload body and the
 // parser that decodes it on receipt, so the two halves cannot drift apart.
 // signature.go verifies HMAC-SHA256 over timestamp + "." + body
-// (X-Pulse-Timestamp / X-Pulse-Signature) when PULSE_SIGNING_SECRET is
-// configured; unsigned mode accepts anything, parity with
+// (X-Pulse-Timestamp / X-Pulse-Signature) when a source's credential
+// carries a signing secret; unsigned mode accepts anything, parity with
 // signals/alertmanager's opt-in-per-source credential posture.
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default "pulse" —
 // in-cluster the reconciler injects the SignalAdapter CR name), LISTEN_ADDR
-// (default ":8080"), POD_NAMESPACE, PULSE_URL, PULSE_API_TOKEN,
-// PULSE_SOURCE_NAME, PULSE_SIGNING_SECRET.
+// (default ":8080"), POD_NAMESPACE — all reconciler-injected, contract
+// parity with every other signal adapter. No Pulse-specific env: that
+// config rides the served SignalSource itself (register.go).
 package main
 
 import (
@@ -51,10 +53,13 @@ type adapter struct {
 	sourceType string // ADAPTER_NAME
 	podNS      string // downward-API namespace, "" when unset
 	listen     string
-	reg        pulseRegistration
 
-	mu       sync.Mutex
-	sources  map[string]bool // served source names, learned from the manager
+	mu sync.Mutex
+	// sources maps each served source name to its resolved signing secret
+	// ("" = unsigned mode) — resolved fresh every registryLoop poll tick
+	// from that source's own spec.config/credentialsSecretRef, never cached
+	// longer than one refresh cycle.
+	sources  map[string]string
 	reported map[string]string
 }
 
@@ -87,8 +92,7 @@ func main() {
 		sourceType: sourceType,
 		podNS:      os.Getenv("POD_NAMESPACE"),
 		listen:     listen,
-		reg:        loadRegistration(),
-		sources:    map[string]bool{},
+		sources:    map[string]string{},
 		reported:   map[string]string{},
 	}
 	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
@@ -96,7 +100,6 @@ func main() {
 	log.Printf("signal-pulse adapter starting (adapter=%s, listen=%s)", sourceType, listen)
 
 	go a.registryLoop(ctx)
-	go a.registerLoop(ctx)
 
 	srv := &http.Server{Addr: listen, Handler: a.handler()}
 	go func() {
@@ -110,10 +113,11 @@ func main() {
 	}
 }
 
-// registryLoop keeps the served-source map fresh (cron-adapter pattern), so
-// a source unclaimed or deleted stops being accepted within one poll
-// interval, and a newly wired one starts being accepted within the same
-// window.
+// registryLoop keeps the served-source map fresh (cron-adapter pattern) and
+// reconciles each source's Pulse registration on the same tick, so a source
+// unclaimed or deleted stops being accepted within one poll interval, a
+// newly wired one starts being accepted within the same window, and a
+// rotated token or a Pulse outage heals without a pod restart.
 func (a *adapter) registryLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		a.refreshSources(ctx)
@@ -130,20 +134,23 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %v", err)
 		return
 	}
-	next := map[string]bool{}
+	next := map[string]string{}
 	for _, info := range infos {
-		next[info.Name] = true
+		next[info.Name] = a.reconcileRegistration(ctx, info)
 	}
 	a.mu.Lock()
 	a.sources = next
 	a.mu.Unlock()
 }
 
-// served reports whether a source name is currently listed by the manager.
-func (a *adapter) served(name string) bool {
+// served reports whether a source name is currently listed by the manager,
+// and the signing secret to verify its inbound webhooks against ("" =
+// unsigned mode).
+func (a *adapter) served(name string) (string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.sources[name]
+	secret, ok := a.sources[name]
+	return secret, ok
 }
 
 // report publishes a source's Ready state, skipping unchanged repeats so the
@@ -182,7 +189,8 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 
 func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("source")
-	if !a.served(name) {
+	signingSecret, served := a.served(name)
+	if !served {
 		// a retried Pulse delivery covers the source-poll lag
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown or unserved source %q", name)})
 		return
@@ -197,8 +205,8 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// signature verification is gated on a configured signing secret —
 	// unsigned mode (no secret) accepts anything, matching
 	// signals/alertmanager's opt-in-per-source credential posture.
-	if secret := a.reg.SigningSecret; secret != "" {
-		if !verifySignature(secret, r.Header.Get("X-Pulse-Timestamp"), r.Header.Get("X-Pulse-Signature"), body, time.Now()) {
+	if signingSecret != "" {
+		if !verifySignature(signingSecret, r.Header.Get("X-Pulse-Timestamp"), r.Header.Get("X-Pulse-Signature"), body, time.Now()) {
 			writeJSON(w, 401, map[string]string{"error": "invalid or missing signature"})
 			return
 		}

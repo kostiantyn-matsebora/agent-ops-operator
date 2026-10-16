@@ -7,16 +7,29 @@ package main
 // Pulse sends outgoing webhooks only (design.md Decision 1) — there is no
 // receiver-registration concept on THIS adapter's side. "Registering" means
 // calling PULSE'S OWN API (POST /api/notifications/webhooks, the Generic
-// service) to tell Pulse where to post. Unlike signals/alertmanager, this
-// adapter's registration config is read straight from the pod's own
-// environment (PULSE_URL, PULSE_API_TOKEN, PULSE_SOURCE_NAME,
-// PULSE_SIGNING_SECRET), rendered there by the bundle chart — never from a
-// SignalSource (design.md Decision 1, pulse-signal-adapter spec).
+// service) to tell Pulse where to post.
 //
-// Registration runs once at startup and keeps re-running on a fixed
-// interval afterward (registerLoop), never crash-looping on failure. A
-// failed attempt degrades the source's Ready reason; a later successful
-// retry heals it with no pod restart.
+// Registration config comes from the SERVED SOURCE itself, not a pod-wide
+// env var: the SignalAdapter CRD has no generic env/envFrom passthrough
+// (platform/manager/api/v1alpha1/signaladapter_types.go — image, servedBy,
+// port, serviceAccountName, singleton, resources, configSchema,
+// credentialKeys, externals, and nothing else), so a literal PULSE_URL/
+// PULSE_API_TOKEN the bundle chart "renders onto the pod" has no delivery
+// path. The one mechanism that DOES reach this pod is the one every other
+// signal adapter already uses: SignalSource.spec.config (schema-less JSON,
+// polled via GET /signal/sources?adapter=) for the non-sensitive base URL,
+// and SignalSource.spec.credentialsSecretRef (kubelet-resolved envFrom,
+// never read by the manager) for the API token and the optional signing
+// secret — exactly signals/ha's `credentialToken` pattern. This bundle
+// still ships exactly one default SignalSource (design.md Decision 1's
+// actual goal — no generalized, hand-authored-source registration path),
+// it just reads that one source's own config/credential rather than a pod
+// env var nothing could set.
+//
+// Registration runs on every source-list poll tick (main.go's
+// registryLoop), never crash-looping on failure. A failed attempt degrades
+// the source's Ready reason; a later successful retry heals it with no pod
+// restart.
 
 import (
 	"bytes"
@@ -30,74 +43,85 @@ import (
 	"time"
 )
 
-// registerInterval is the fixed interval between registration attempts —
-// not exponential backoff. Pulse coming back up, or a rotated API token
-// taking effect, is the common case this loop exists for, and a modest
-// fixed interval heals that well under a minute without hammering Pulse
-// during a longer outage.
-const registerInterval = 30 * time.Second
-
-// pulseRegistration is this adapter's own registration inputs, read once
-// from the pod's environment at startup.
-type pulseRegistration struct {
-	BaseURL       string // PULSE_URL
-	APIToken      string // PULSE_API_TOKEN
-	SourceName    string // PULSE_SOURCE_NAME — also the source this adapter's single registration reports status against
-	SigningSecret string // PULSE_SIGNING_SECRET, optional — "" means unsigned mode
+// registerConfig is the served SignalSource's spec.config, interpreted by
+// this adapter alone (schema-less on the CRD; signals/alertmanager's
+// registerSpec is the precedent for a signal type owning its own config
+// shape).
+type registerConfig struct {
+	// BaseURL is Pulse's own base URL, e.g. https://pulse.example.org.
+	BaseURL string `json:"baseUrl"`
 }
 
-// loadRegistration reads the registration config from the pod's own
-// environment. An empty BaseURL or SourceName means "nothing configured to
-// register" — the webhook endpoint still serves either way.
-func loadRegistration() pulseRegistration {
-	return pulseRegistration{
-		BaseURL:       strings.TrimSuffix(os.Getenv("PULSE_URL"), "/"),
-		APIToken:      os.Getenv("PULSE_API_TOKEN"),
-		SourceName:    os.Getenv("PULSE_SOURCE_NAME"),
-		SigningSecret: os.Getenv("PULSE_SIGNING_SECRET"),
+// parseRegisterConfig extracts this adapter's config block. No config at
+// all (nil/empty) is a valid, common state — the bundle's default source
+// ships inert until the install sets baseUrl — and is reported as "not
+// configured" rather than an error.
+func parseRegisterConfig(raw json.RawMessage) (*registerConfig, error) {
+	if len(raw) == 0 {
+		return nil, nil
 	}
+	var cfg registerConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid spec.config: %v", err)
+	}
+	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
+	return &cfg, nil
 }
 
-// registerLoop keeps this adapter's Pulse-side webhook registered, forever.
-// Every tick re-attempts and re-reports, so a fixed interval is all the
-// retry policy needed — no crash-loop, no one-shot startup attempt that
-// could leave a pod permanently unregistered (pulse-signal-adapter spec,
-// "Pulse unreachable at startup still serves the webhook").
-func (a *adapter) registerLoop(ctx context.Context) {
-	for ctx.Err() == nil {
-		a.reconcileRegistration(ctx)
-		select {
-		case <-ctx.Done():
-		case <-time.After(registerInterval):
+// pulseCredential resolves this source's projected credential: the Pulse
+// API token (required to register) and the optional HMAC signing secret,
+// both keys of the one Secret credentialsSecretRef names. Both casings are
+// accepted, mirroring signals/ha's credentialToken — Secrets written by
+// hand commonly use either.
+func pulseCredential(info SourceInfo) (token, signingSecret string) {
+	if info.CredentialEnvPrefix == "" {
+		return "", ""
+	}
+	for _, key := range []string{"token", "TOKEN"} {
+		if v := os.Getenv(info.CredentialEnvPrefix + key); v != "" {
+			token = v
+			break
 		}
 	}
+	for _, key := range []string{"signingSecret", "SIGNING_SECRET"} {
+		if v := os.Getenv(info.CredentialEnvPrefix + key); v != "" {
+			signingSecret = v
+			break
+		}
+	}
+	return token, signingSecret
 }
 
-// reconcileRegistration attempts one registration cycle and reports the
-// resulting Ready state. Exposed to tests directly (bypassing the loop's
-// ticker) to drive a deterministic failure-then-success sequence.
-func (a *adapter) reconcileRegistration(ctx context.Context) {
-	if a.reg.SourceName == "" {
-		// nothing to register, and no source identity to report status
-		// against — a pod with no registration env configured at all.
-		return
+// reconcileRegistration attempts one registration cycle for a served source
+// and reports the resulting Ready state. Returns the resolved signing
+// secret (possibly "") so the caller can cache it for inbound signature
+// verification — this adapter never stores it longer than one refresh
+// cycle. Exposed to tests directly to drive a deterministic
+// failure-then-success sequence without waiting on registryLoop's ticker.
+func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) string {
+	cfg, err := parseRegisterConfig(info.Config)
+	if err != nil {
+		a.report(ctx, info.Name, "InvalidConfig", err.Error())
+		return ""
 	}
-	if a.reg.BaseURL == "" {
-		a.report(ctx, a.reg.SourceName, "RegistrationNotConfigured",
-			"served, but PULSE_URL is not set — configure the bundle chart's registration env to register with Pulse")
-		return
+	if cfg == nil || cfg.BaseURL == "" {
+		a.report(ctx, info.Name, "RegistrationNotConfigured",
+			fmt.Sprintf("served by signal-pulse — POST %s; set spec.config.baseUrl (and a credentialsSecretRef "+
+				"holding a Pulse API token) to register this webhook with Pulse automatically", a.endpoint(info.Name)))
+		return ""
 	}
-
-	url := a.endpoint(a.reg.SourceName)
-	client := newPulseClient(a.reg.BaseURL, a.reg.APIToken)
-	desired := desiredWebhook(a.reg.SourceName, url, a.reg.SigningSecret)
+	token, signingSecret := pulseCredential(info)
+	url := a.endpoint(info.Name)
+	client := newPulseClient(cfg.BaseURL, token)
+	desired := desiredWebhook(info.Name, url, signingSecret)
 	if err := client.ensureWebhook(ctx, desired); err != nil {
-		a.report(ctx, a.reg.SourceName, "PulseRegistrationFailed",
+		a.report(ctx, info.Name, "PulseRegistrationFailed",
 			fmt.Sprintf("served, but could not register the webhook with Pulse: %v", err))
-		return
+		return signingSecret
 	}
-	a.report(ctx, a.reg.SourceName, "PulseRegistered",
+	a.report(ctx, info.Name, "PulseRegistered",
 		fmt.Sprintf("served by signal-pulse — Pulse posts alerts to %s", url))
+	return signingSecret
 }
 
 // endpoint is this adapter's webhook URL for a source (in-cluster form when

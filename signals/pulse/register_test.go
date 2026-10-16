@@ -153,8 +153,8 @@ func TestEnsureWebhookSigningSecretNeverCompared(t *testing.T) {
 // verification: an initial failure (Pulse down) degrades the Ready reason
 // without crashing, and a later successful retry heals it — both through
 // the adapter's own reconcileRegistration, called directly twice rather
-// than through the loop's ticker, exactly as registerLoop would call it on
-// consecutive ticks.
+// than through registryLoop's ticker, exactly as it would on consecutive
+// polls of the served source.
 func TestReconcileRegistrationInitialFailureThenSuccessHeals(t *testing.T) {
 	mgr := &fakeManager{}
 	mgrSrv := mgr.server(t)
@@ -166,18 +166,19 @@ func TestReconcileRegistrationInitialFailureThenSuccessHeals(t *testing.T) {
 		sourceType: "pulse",
 		podNS:      "agent-ops",
 		listen:     ":8080",
-		reg: pulseRegistration{
-			BaseURL:    pulseSrv.URL,
-			APIToken:   "tok",
-			SourceName: "pulse-default",
-		},
-		sources:  map[string]bool{},
-		reported: map[string]string{},
+		sources:    map[string]string{},
+		reported:   map[string]string{},
 	}
+	info := SourceInfo{
+		Name:                "pulse-default",
+		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `"}`),
+		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+	}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
 
 	// Pulse unreachable: registration fails, but must not crash or panic —
 	// the loop simply reports degraded and lets the next tick retry.
-	a.reconcileRegistration(context.Background())
+	a.reconcileRegistration(context.Background(), info)
 	mgr.mu.Lock()
 	if len(mgr.statuses) != 1 || mgr.statuses[0]["reason"] != "PulseRegistrationFailed" {
 		t.Fatalf("expected one degraded status report, got: %+v", mgr.statuses)
@@ -192,7 +193,7 @@ func TestReconcileRegistrationInitialFailureThenSuccessHeals(t *testing.T) {
 	pulse.mu.Lock()
 	pulse.fail = false
 	pulse.mu.Unlock()
-	a.reconcileRegistration(context.Background())
+	a.reconcileRegistration(context.Background(), info)
 
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -207,18 +208,17 @@ func TestReconcileRegistrationInitialFailureThenSuccessHeals(t *testing.T) {
 }
 
 // TestReconcileRegistrationNotConfiguredReportsOnce closes the branch where
-// PULSE_SOURCE_NAME is set but PULSE_URL is not — served, but nothing to
-// register against.
+// the source is served but carries no spec.config.baseUrl — served, but
+// nothing to register against.
 func TestReconcileRegistrationNotConfiguredReportsOnce(t *testing.T) {
 	mgr := &fakeManager{}
 	mgrSrv := mgr.server(t)
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),
-		reg:      pulseRegistration{SourceName: "pulse-default"},
-		sources:  map[string]bool{},
+		sources:  map[string]string{},
 		reported: map[string]string{},
 	}
-	a.reconcileRegistration(context.Background())
+	a.reconcileRegistration(context.Background(), SourceInfo{Name: "pulse-default"})
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	if len(mgr.statuses) != 1 || mgr.statuses[0]["reason"] != "RegistrationNotConfigured" {
@@ -226,23 +226,21 @@ func TestReconcileRegistrationNotConfiguredReportsOnce(t *testing.T) {
 	}
 }
 
-// TestReconcileRegistrationNoSourceNameIsNoop closes the branch where no
-// registration env is set at all — nothing to register, and no source
-// identity to report status against, so reconcileRegistration must not call
-// the manager at all.
-func TestReconcileRegistrationNoSourceNameIsNoop(t *testing.T) {
+// TestReconcileRegistrationInvalidConfigReportsOnce closes
+// parseRegisterConfig's error branch via the handler: a served source whose
+// spec.config is not valid JSON must degrade rather than crash.
+func TestReconcileRegistrationInvalidConfigReportsOnce(t *testing.T) {
 	mgr := &fakeManager{}
 	mgrSrv := mgr.server(t)
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),
-		reg:      pulseRegistration{},
-		sources:  map[string]bool{},
+		sources:  map[string]string{},
 		reported: map[string]string{},
 	}
-	a.reconcileRegistration(context.Background())
+	a.reconcileRegistration(context.Background(), SourceInfo{Name: "pulse-default", Config: json.RawMessage(`{not-json`)})
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	if len(mgr.statuses) != 0 {
-		t.Fatalf("with no source name configured, nothing should be reported: %+v", mgr.statuses)
+	if len(mgr.statuses) != 1 || mgr.statuses[0]["reason"] != "InvalidConfig" {
+		t.Fatalf("expected one InvalidConfig report, got: %+v", mgr.statuses)
 	}
 }

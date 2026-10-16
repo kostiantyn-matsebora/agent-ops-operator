@@ -102,7 +102,7 @@ func testAdapter(t *testing.T, f *fakeManager) *adapter {
 	a := &adapter{
 		mgr:        NewManager(mgrSrv.URL, "tok"),
 		sourceType: "pulse",
-		sources:    map[string]bool{},
+		sources:    map[string]string{},
 		reported:   map[string]string{},
 	}
 	a.refreshSources(context.Background())
@@ -220,7 +220,7 @@ func TestSourceListRefresh(t *testing.T) {
 // TestHealthzOK closes the /healthz route, never exercised by any other test
 // here (every other test posts to /webhook/*).
 func TestHealthzOK(t *testing.T) {
-	a := &adapter{sources: map[string]bool{}, reported: map[string]string{}}
+	a := &adapter{sources: map[string]string{}, reported: map[string]string{}}
 	rec := httptest.NewRecorder()
 	a.handler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"ok":true`) {
@@ -309,7 +309,7 @@ func TestRefreshSourcesKeepsPreviousOnListError(t *testing.T) {
 	f.mu.Unlock()
 	a.refreshSources(context.Background())
 
-	if !a.served("pulse-default") {
+	if _, ok := a.served("pulse-default"); !ok {
 		t.Fatal("a failed source listing must not drop previously known sources")
 	}
 }
@@ -346,17 +346,18 @@ func TestMustEnvMissingExits(t *testing.T) {
 
 // TestMainRunsUntilSignaled closes main() itself: it starts the real process
 // loop (env defaulting, adapter construction, the real HTTP server,
-// registryLoop, registerLoop) against a real HTTP double for the manager,
-// then cancels baseContext directly — main()'s own signal.NotifyContext
-// derives from it, so this stops main() exactly as a real SIGTERM would.
+// registryLoop) against a real HTTP double for the manager serving one
+// source with no spec.config — which exercises the RegistrationNotConfigured
+// report as the sync point — then cancels baseContext directly — main()'s
+// own signal.NotifyContext derives from it, so this stops main() exactly as
+// a real SIGTERM would.
 func TestMainRunsUntilSignaled(t *testing.T) {
 	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}, statusHit: make(chan string, 4)}
 	mgrSrv := f.server(t)
 
 	env := map[string]string{
-		"MANAGER_URL":       mgrSrv.URL,
-		"ADAPTER_TOKEN":     "t",
-		"PULSE_SOURCE_NAME": "pulse-default", // unset PULSE_URL exercises the RegistrationNotConfigured report, our sync point
+		"MANAGER_URL":   mgrSrv.URL,
+		"ADAPTER_TOKEN": "t",
 	}
 	prev := map[string]string{}
 	had := map[string]bool{}
@@ -366,7 +367,6 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 	}
 	os.Unsetenv("ADAPTER_NAME") // exercise the default-name fill-in branch
 	os.Unsetenv("LISTEN_ADDR")  // exercise the default-listen fill-in branch
-	os.Unsetenv("PULSE_URL")
 	defer func() {
 		for k := range env {
 			if had[k] {
