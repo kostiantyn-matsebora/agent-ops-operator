@@ -50,6 +50,22 @@ import (
 type registerConfig struct {
 	// BaseURL is Pulse's own base URL, e.g. https://pulse.example.org.
 	BaseURL string `json:"baseUrl"`
+	// WebhookURL overrides the URL registered WITH Pulse as the delivery
+	// target. Empty derives the in-cluster Service DNS name
+	// (http://agentops-signal-<adapter>.<ns>.svc:<port>/webhook/<source>),
+	// which only resolves for a Pulse instance reachable from inside this
+	// cluster's network.
+	//
+	// Pulse is commonly NOT in-cluster — it watches Proxmox/Docker hosts
+	// that may sit entirely outside Kubernetes — so a Pulse that cannot
+	// resolve cluster-internal DNS needs an externally reachable URL
+	// instead: a LoadBalancer Service, a NodePort, an Ingress, or a tunnel
+	// the operator already runs, pointed at this adapter's own
+	// /webhook/<source> path. Exposing that is OUTSIDE this chart's
+	// scope, same posture as every other operator-supplied endpoint here
+	// (prometheus's query backend is never derived either) — this field
+	// only says what to tell Pulse once the exposure exists.
+	WebhookURL string `json:"webhookUrl,omitempty"`
 }
 
 // parseRegisterConfig extracts this adapter's config block. No config at
@@ -65,6 +81,7 @@ func parseRegisterConfig(raw json.RawMessage) (*registerConfig, error) {
 		return nil, fmt.Errorf("invalid spec.config: %v", err)
 	}
 	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
+	cfg.WebhookURL = strings.TrimSuffix(cfg.WebhookURL, "/")
 	return &cfg, nil
 }
 
@@ -111,7 +128,15 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) st
 		return ""
 	}
 	token, signingSecret := pulseCredential(info)
-	url := a.endpoint(info.Name)
+	url := cfg.WebhookURL
+	if url == "" {
+		// No override: derive the in-cluster Service URL, which only
+		// resolves for a Pulse reachable from inside this cluster's
+		// network. An external Pulse needs spec.config.webhookUrl set to
+		// whatever the operator exposed this adapter's /webhook/<source>
+		// path as — see registerConfig's doc comment.
+		url = a.endpoint(info.Name)
+	}
 	client := newPulseClient(cfg.BaseURL, token)
 	desired := desiredWebhook(info.Name, url, signingSecret)
 	if err := client.ensureWebhook(ctx, desired); err != nil {

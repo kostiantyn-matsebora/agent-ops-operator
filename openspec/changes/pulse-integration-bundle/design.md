@@ -95,6 +95,38 @@ pod restart.
 This is deliberately NOT a one-shot registration at startup only — see
 Risks below for why a true one-shot was rejected.
 
+### Decision 1b: the registered delivery URL is overridable, for a Pulse outside the cluster
+
+Pulse watches Proxmox/Docker/Kubernetes/TrueNAS hosts, which commonly sit
+outside the Kubernetes cluster this chart installs into. Alertmanager is
+different — this repository's other bundles can assume it runs alongside
+the cluster it alerts on.
+
+Deriving the webhook URL from the adapter's own in-cluster Service
+identity, as `signals/alertmanager` does unconditionally, would register a
+URL Pulse can never reach once it lives outside the cluster.
+
+`spec.config` gains a second flat field, `webhookUrl`, read by the same
+mechanism as `baseUrl`. Set, it is registered verbatim. Empty, the adapter
+derives the in-cluster URL exactly as before.
+
+**Alternative considered**: render an Ingress for the webhook path.
+Rejected — this chart cannot safely guess an ingress class, a TLS cert
+issuer or a hostname, the same reason `prometheus`'s query backend is
+never derived either.
+
+Exposing the adapter is the operator's own network decision. This field
+only says what to tell Pulse once that exposure exists.
+
+**Trade-off accepted**: an operator with an external Pulse must expose the
+adapter's Service themselves (LoadBalancer, NodePort, Ingress, or a
+tunnel) before `webhookUrl` has anything correct to name.
+
+Undocumented, this reads as "registration silently points nowhere" —
+`docs/integrations/pulse.md` states the two-lane split explicitly. MCP
+already works outbound-only for an external Pulse. The webhook direction
+needs this field.
+
 ### Decision 2: `mcp-pulse` is a first-party wrapper, not a vendored stdio binary
 
 Pulse's own `pulse-mcp` is a stdio binary, meant to be launched locally by

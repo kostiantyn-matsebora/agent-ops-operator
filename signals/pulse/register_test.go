@@ -244,3 +244,42 @@ func TestReconcileRegistrationInvalidConfigReportsOnce(t *testing.T) {
 		t.Fatalf("expected one InvalidConfig report, got: %+v", mgr.statuses)
 	}
 }
+
+// TestReconcileRegistrationWebhookURLOverride is Pulse-outside-the-cluster's
+// verification: spec.config.webhookUrl, when set, is what gets registered
+// with Pulse instead of the derived in-cluster Service URL — the adapter
+// never has to resolve its own cluster-internal DNS name for this to work.
+func TestReconcileRegistrationWebhookURLOverride(t *testing.T) {
+	mgr := &fakeManager{}
+	mgrSrv := mgr.server(t)
+	pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+	pulseSrv := pulse.server(t)
+
+	a := &adapter{
+		mgr:        NewManager(mgrSrv.URL, "tok"),
+		sourceType: "pulse",
+		podNS:      "agent-ops", // would otherwise derive a cluster-internal URL
+		listen:     ":8080",
+		sources:    map[string]string{},
+		reported:   map[string]string{},
+	}
+	info := SourceInfo{
+		Name:                "pulse-default",
+		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `","webhookUrl":"https://pulse-adapter.example.org/webhook/pulse-default"}`),
+		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+	}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
+
+	a.reconcileRegistration(context.Background(), info)
+
+	pulse.mu.Lock()
+	defer pulse.mu.Unlock()
+	wh, ok := pulse.webhooks["agentops-pulse-default"]
+	if !ok {
+		t.Fatal("expected the webhook to be registered")
+	}
+	if wh.URL != "https://pulse-adapter.example.org/webhook/pulse-default" {
+		t.Fatalf("expected the override URL to be registered, got %q (would otherwise have been the cluster-internal %q)",
+			wh.URL, a.endpoint(info.Name))
+	}
+}

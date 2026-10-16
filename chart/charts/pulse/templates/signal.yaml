@@ -62,6 +62,15 @@ spec:
           Pulse's own base URL, e.g. https://pulse.example.org. Required for
           the adapter to self-register its webhook; without it the source
           still serves, reporting RegistrationNotConfigured.
+      webhookUrl:
+        type: string
+        description: >-
+          Overrides the URL registered WITH Pulse as the delivery target.
+          Empty derives the in-cluster Service DNS name, which only resolves
+          for a Pulse reachable from inside this cluster's network. Set this
+          when Pulse is NOT in-cluster: an externally reachable URL for a
+          LoadBalancer, NodePort, Ingress or tunnel you expose this
+          adapter's own /webhook/<source> path through.
     additionalProperties: false
   # Documentation only — the manager reads no Secrets and can never verify
   # this.
@@ -107,6 +116,7 @@ spec:
   {{- end }}
   {{- $cfg := dict }}
   {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
+  {{- with $src.webhookURL }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
   {{- with $cfg }}
   config:
 {{ toYaml . | indent 4 }}

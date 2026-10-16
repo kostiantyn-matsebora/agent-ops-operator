@@ -54,6 +54,31 @@ exist.
 - **THEN** registration proceeds, driven entirely by that source's own
   config and credential
 
+### Requirement: The registered delivery URL is overridable for a Pulse outside the cluster
+The adapter SHALL derive the webhook URL it registers with Pulse from its
+own in-cluster Service identity by default
+(`http://agentops-signal-<adapter>.<namespace>.svc:<port>/webhook/<source>`).
+
+`spec.config.webhookUrl`, when set, SHALL be registered verbatim instead.
+Pulse commonly runs outside the cluster — it watches Proxmox/Docker hosts
+that may sit entirely outside Kubernetes — so the derived, cluster-internal
+URL is unreachable from such a Pulse.
+
+The adapter makes no attempt to expose itself externally. An operator who
+already exposes this adapter's `/webhook/<source>` path (a LoadBalancer
+Service, a NodePort, an Ingress, or a tunnel) states the resulting URL
+here.
+
+#### Scenario: Pulse outside the cluster registers an external URL
+- **WHEN** the served source carries `spec.config.webhookUrl`
+- **THEN** that exact URL is registered with Pulse, never the derived
+  in-cluster Service URL
+
+#### Scenario: No override still derives the in-cluster URL
+- **WHEN** the served source carries no `spec.config.webhookUrl`
+- **THEN** the adapter registers its own derived in-cluster Service URL,
+  exactly as before this requirement existed
+
 ### Requirement: The adapter registers its webhook with Pulse at pod start, and keeps healing it
 At pod start the adapter SHALL call Pulse's `POST /api/notifications/webhooks`
 (the Generic service) to create or update a webhook receiver pointing at its

@@ -134,6 +134,7 @@ Everything below is under `pulse:`.
 | `enabled` | `false` | `true` to render the bundle |
 | `signal.defaultSource.enabled` | `false` | `true`, or the route claims nothing |
 | `signal.defaultSource.baseUrl` | **empty** | your Pulse instance's base URL |
+| `signal.defaultSource.webhookURL` | empty, derives the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
 | `mcp.observer.enabled` | `true` | `false` to drop the read-only MCP pair |
 | `mcp.operator.enabled` | `true` | `false` to drop the write-capable MCP pair |
 | `mcpServer.enabled` | `false` | `true` to deploy `mcp-pulse` |
@@ -191,6 +192,55 @@ Point `mcp.url` at it and skip the deployed workload:
 ```powershell
 --set pulse.mcp.url=http://mcp-pulse.agent-ops.svc:8080/mcp `
 --set pulse.mcpServer.enabled=false
+```
+
+### Pulse installed outside the cluster
+
+**Pulse commonly is NOT in-cluster.** It watches Proxmox, Docker or TrueNAS
+hosts that may sit entirely outside Kubernetes, unlike Alertmanager, which
+this repository's other bundles can assume runs alongside the cluster it
+alerts on.
+
+The two lanes need different things from you:
+
+| Lane | Direction | Works unmodified? |
+|---|---|---|
+| MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl`/`mcpServer.backend` already take any reachable URL — in-cluster or not |
+| Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The adapter registers its own in-cluster Service DNS name, which an external Pulse cannot resolve |
+
+Fix the webhook lane by exposing `signals/pulse`'s `/webhook/pulse-alerts`
+path yourself — a `LoadBalancer` Service, a `NodePort`, an Ingress, or a
+tunnel you already run — then tell the adapter what you called it:
+
+```sh
+--set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
+```
+
+```powershell
+--set pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts
+```
+
+> **This chart renders no Ingress of its own.** It cannot safely guess your
+> ingress class, your TLS cert issuer or your hostname — the same reason
+> `mcpServer.backend` is never derived either. Exposing the adapter is your
+> network decision. `webhookURL` only says what to register with Pulse once
+> that exposure exists.
+{: .ao-callout}
+
+Left unset, `webhookURL` registers the derived in-cluster URL exactly as
+before — no change for a Pulse instance that already runs inside the
+cluster.
+
+If `global.agentops.networkPolicy` is on, also add the external Pulse's
+address to `signal.webhookFrom` (raw `NetworkPolicyPeer` entries — an
+`ipBlock` works here, not only a `namespaceSelector`):
+
+```yaml
+pulse:
+  signal:
+    webhookFrom:
+      - ipBlock:
+          cidr: 203.0.113.4/32
 ```
 
 ## What neither agent can do

@@ -67,6 +67,21 @@ signal:
     # self-register; without it the source still serves webhooks, reporting
     # RegistrationNotConfigured instead of failing.
     baseUrl: ""
+    # Overrides the URL registered WITH Pulse as the delivery target. Empty
+    # derives the in-cluster Service DNS name
+    # (http://agentops-signal-pulse.<ns>.svc:8080/webhook/pulse-alerts),
+    # which only resolves for a Pulse reachable from inside THIS cluster's
+    # network.
+    #
+    # PULSE IS COMMONLY NOT IN-CLUSTER — it watches Proxmox/Docker hosts
+    # that may sit entirely outside Kubernetes. Set this to whatever you
+    # exposed this adapter's own /webhook/pulse-alerts path as: a
+    # LoadBalancer Service, a NodePort, an Ingress, or a tunnel you already
+    # run. Exposing it is on you — this chart renders no Ingress, since it
+    # cannot safely guess your ingress class, TLS cert issuer or hostname,
+    # the same posture every other operator-supplied endpoint in this
+    # repository takes.
+    webhookURL: ""
     # SignalSource grouping policy (manager-side; defaults apply when empty).
     grouping: {}
   # The adapter's registration credential: a Pulse API token (to call

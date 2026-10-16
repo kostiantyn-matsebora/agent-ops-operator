@@ -107,7 +107,8 @@ CREDENTIAL_KEY = re.compile(r"(?i)credential|token|secret|password")
 # infrastructure until proven otherwise.
 ALLOWED_HOSTS = {
     "example", "example.com", "example.net", "example.org",
-    "ha.example.org", "pulse.example.org", "metrics.example",
+    "ha.example.org", "pulse.example.org", "pulse-adapter.example.org",
+    "metrics.example",
     "github.com", "kubernetes.io", "keepachangelog.com",
     "localhost", "127.0.0.1",
     # The SVG namespace, which every generated drawing must declare. The audit

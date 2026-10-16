@@ -120,6 +120,37 @@ func TestPulseIngestLaneRendersWithoutAClaim(t *testing.T) {
 	}
 }
 
+// Pulse commonly runs outside the cluster, so the webhook delivery URL
+// registered WITH Pulse must be overridable rather than always the derived
+// in-cluster Service DNS name — the adapter reads spec.config.webhookUrl
+// (signals/pulse/register.go), and the chart's job is only to carry the
+// value through, never to render an Ingress of its own.
+func TestPulseWebhookURLOverrideRidesSourceConfig(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pulse.enabled=true",
+		"--set", "pulse.signal.defaultSource.enabled=true",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
+		"--set", "pulse.signal.defaultSource.webhookURL=https://pulse-adapter.example.org/webhook/pulse-alerts")
+	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
+	if !strings.Contains(doc, "webhookUrl: https://pulse-adapter.example.org/webhook/pulse-alerts") {
+		t.Errorf("expected the override to ride spec.config.webhookUrl, got:\n%s", doc)
+	}
+}
+
+// Without the override, spec.config carries no webhookUrl key at all — the
+// adapter then derives the in-cluster Service URL itself, and a present but
+// empty key would be a different, wrong signal to send it.
+func TestPulseWebhookURLOverrideOmittedByDefault(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pulse.enabled=true",
+		"--set", "pulse.signal.defaultSource.enabled=true",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org")
+	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
+	if strings.Contains(doc, "webhookUrl") {
+		t.Errorf("expected no webhookUrl key with no override set, got:\n%s", doc)
+	}
+}
+
 // Two sources for one credential is ambiguous, so it fails the render rather
 // than picking one — checked for all three independent credentials.
 func TestPulseBothCredentialFormsIsRefused(t *testing.T) {
