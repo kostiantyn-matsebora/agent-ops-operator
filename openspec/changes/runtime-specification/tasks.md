@@ -86,19 +86,36 @@
 
 ## 7. System tests — testing-specialist
 
-- [ ] 7.1 Nothing here is decided by a cluster — the change is documentation,
+- [x] 7.1 Nothing here is decided by a cluster — the change is documentation,
       context rules and a docs generator. No manager, runtime, chart or RBAC
       behavior changes.
 
 ## 8. Documentation
 
-- [ ] 8.1 Reference docs: `python3 .github/scripts/docs-generate.py --check`
+- [x] 8.1 Reference docs: `python3 .github/scripts/docs-generate.py --check`
       clean over the whole tree, and the slimmed `docs/contracts.md` still
       states where each moved contract lives.
-- [ ] 8.2 Adopter site: build the site from this working copy's tree and look
+- [x] 8.2 Adopter site: build the site from this working copy's tree and look
       at the changed pages per `docs/CLAUDE.md` pre-flight — the guide's
       stations render, command fences pair, no table crushes, no horizontal
-      overflow in either theme.
-- [ ] 8.3 Adopter site: verify `index.md`, the nav and `getting-started.md`
+      overflow in either theme. No `docker` in this remote session, so built
+      with the Ruby/Jekyll toolchain already on the machine instead
+      (`jekyll build`, served at the `agent-ops-operator/` baseurl) and
+      checked with the pre-installed Chromium via `playwright-core`, both
+      `colorScheme`s, at 1280×1000: `guides/agent-runtime/`,
+      `runtimes/ollama/`, `runtimes/copilot/` and `/` all return `200` with
+      `scrollWidth` never exceeding `clientWidth`. Screenshots read by hand —
+      the guide's numbered stations, code fences and tables render cleanly,
+      and each runtime page's new "conforms to the runtime specification"
+      line sits correctly under its opening sentence.
+- [x] 8.3 Adopter site: verify `index.md`, the nav and `getting-started.md`
       still reach the contracts and the rewritten guide, and the prose lint in
-      `docs/CLAUDE.md` is silent over the changed pages.
+      `docs/CLAUDE.md` is silent over the changed pages. `docs/index.md`'s
+      reference bullet was stale (still pointed at one `contracts.md` for
+      "the work and adapter contracts") and is fixed to name the split pages.
+      `_data/nav.yml`'s `/guides/agent-runtime/` link is untouched and still
+      resolves (the guide kept its permalink). `getting-started.md` names no
+      contract page and needed no change. The lint (`rules_compliance.py`
+      and the raw awk from `docs/CLAUDE.md`) is silent over every page this
+      change wrote or edited. The handful of hits elsewhere all pre-date
+      this change, confirmed by `git blame` to commit `dacd810`.
