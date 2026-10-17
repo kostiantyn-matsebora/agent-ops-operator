@@ -25,7 +25,7 @@ them.
 **What executes it.** The engine hosting the LLM agent — image, entrypoint,
 idle TTL, storage volumes, service account (the agent's RBAC).
 
-- **Any image speaking the [work contract](contracts.md#the-work-contract)
+- **Any image speaking the [runtime contract](contracts/runtime.md)
   plugs in.** A claude-code runtime ships with the chart.
 - **Resolution order**: the conversation's snapshot → `profile.runtimeRef`
   (deprecated) → CR named `default` → manager env. A `Pipeline` chooses it, and
@@ -314,7 +314,7 @@ whether a signal is emitted at all — see
 
 **A signal implementation, nothing more.** The inbound-only sibling of
 `ChannelAdapter`: an image implementing the
-[signal contract](contracts.md#the-signal-adapter-contract), plugged in as a CR
+[signal contract](contracts/signal-adapter.md#the-signal-adapter-contract), plugged in as a CR
 whose **name is the type key** SignalSources select via `spec.adapter`.
 
 Same posture as `ChannelAdapter` — owned workload, zero-RBAC SA, singleton,
@@ -389,7 +389,7 @@ them is configuration, and none grants anything.
 
 | Field | Declares | Read by |
 |---|---|---|
-| `spec.configSchema` | a JSON Schema for the `config` of the Channels or SignalSources it serves | the reconciler, which reports `SchemaValid` and, on each served CR, an advisory `ConfigValid` — see [contracts](contracts.md#discovering-what-config-needs) |
+| `spec.configSchema` | a JSON Schema for the `config` of the Channels or SignalSources it serves | the reconciler, which reports `SchemaValid` and, on each served CR, an advisory `ConfigValid` — see [contracts](contracts/channel-adapter.md#discovering-what-config-needs) |
 | `spec.credentialKeys[]` | the Secret keys it expects in a served CR's `credentialsSecretRef` | people. The manager reads no Secrets, so it can never verify them |
 | `spec.externals[]` | each system outside the install the implementation faces, as a `name` and a `kind` | the console's topology, which draws each one beside the adapter, verbatim |
 
@@ -910,7 +910,8 @@ looking for, and the reader would see the tags.
 printed answer is the deliverable is a fact about the system rather than a
 preference, and is injected whatever this says.
 
-See [contracts.md](contracts.md) for the grammar itself.
+See [contracts/channel-adapter.md](contracts/channel-adapter.md#the-body-grammar)
+for the grammar itself.
 
 What an agent may *do* comes from the `Pipeline` routing its conversation, which
 is the only place capabilities live:
@@ -2130,7 +2131,7 @@ Reading it on one channel says nothing about any other.
 thread there is no watermark and no claim to make.
 
 **The watermark is written only by the manager**, on an adapter's report to
-[`POST /channel/read`](contracts.md#post-channelread). No adapter and no console
+[`POST /channel/read`](contracts/channel-adapter.md#post-channelread). No adapter and no console
 writes it to the Kubernetes API.
 
 Two rules make it safe to report from a browser:
@@ -2165,7 +2166,7 @@ rather than replacing it.
 A reader may also RECLAIM a message as unread. `POST /channel/read` accepts
 `rewind` beside `readAt`, moving that reader's own watermark backward
 instead of forward, still named and still clamped — see
-[the rewind rule](contracts.md#post-channelread).
+[the rewind rule](contracts/channel-adapter.md#post-channelread).
 
 ### Telemetry says where it lost the thread
 

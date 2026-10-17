@@ -27,7 +27,8 @@ Write to the file that OWNS that content:
 | What changed | Where it goes |
 |---|---|
 | CRD fields, capability resolution | `docs/concepts.md` |
-| Work/adapter contracts, HTTP endpoints | `docs/contracts.md` |
+| Runtime/channel/signal contract | `docs/contracts/<contract>.md` |
+| Manager-owned surfaces, HTTP endpoints | `docs/contracts.md` |
 | An integration's adopter content | `docs/integrations/<system>.md`, dense prose, no exhaustive values, no renders table |
 | What a bundle renders, for a reference page (`cr-reference.md`, `guides/`, `runtimes/<vendor>.md`) | the `renders` marker + `docs-generate.py` |
 | Install/upgrade/uninstall, storage access mode | `docs/installation.md` |

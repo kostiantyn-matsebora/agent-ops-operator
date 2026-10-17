@@ -308,6 +308,8 @@ identity, mediated egress and at-least-once delivery are already in it.
   in your cluster: what a default install grants, and what is still open.
 - **The reference** — every CRD in full in
   [Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md),
-  and the work and adapter contracts in
-  [Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md).
-  Both are read on GitHub today.
+  the manager's own surfaces in
+  [Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md),
+  and the runtime, channel and signal adapter contracts under
+  [docs/contracts/](https://github.com/kostiantyn-matsebora/agent-ops-operator/tree/master/docs/contracts).
+  All are read on GitHub today.

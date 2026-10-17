@@ -184,7 +184,10 @@ in learning order. The reference pages are read here:
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, capacity and queueing, and how a route's tools resolve |
 | [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
-| [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
+| [docs/contracts.md](docs/contracts.md) | The manager's own surfaces: the aops MCP server, activity, introspection, metrics, and the HTTP API |
+| [docs/contracts/runtime.md](docs/contracts/runtime.md) | The runtime contract: the work unit, the report, and the lifecycle |
+| [docs/contracts/channel-adapter.md](docs/contracts/channel-adapter.md) | The channel adapter contract: long-poll, push, and the body grammar |
+| [docs/contracts/signal-adapter.md](docs/contracts/signal-adapter.md) | The signal adapter contract: normalize, push, and the lane rules |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
 | [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](docs/claude.md) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the three runtimes |
 | [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |

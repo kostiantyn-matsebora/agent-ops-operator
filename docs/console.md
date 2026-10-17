@@ -792,7 +792,8 @@ again.
 - **It never touches the channel-wide mark.** Rewinding your own watermark
   cannot un-read a thread for anyone else.
 - **It is the one exception to monotonic.** Every other report only ever
-  advances a watermark — see [the rewind rule](contracts.md#post-channelread).
+  advances a watermark — see [the rewind
+  rule](contracts/channel-adapter.md#post-channelread).
 - **Bounded at 50 and attributed exactly like mark read.**
 
 Threads bound before this existed are treated as **read** — see the backfill
