@@ -713,6 +713,17 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 			if conv.Status.ThreadArchived(t.Channel) {
 				continue
 			}
+			if t.ThreadID == "" {
+				// No topic was ever created on this channel — ensure-topic
+				// never succeeded. There is nothing to close yet, and an op
+				// carrying an empty thread id can only ever be rejected
+				// (every adapter's close-topic handler validates it), so
+				// enqueueing it would retry forever and log an error every
+				// pass. Leave it unarchived: the next pass re-evaluates, and
+				// a later successful ensure-topic enqueues close-topic
+				// normally once a real thread id exists.
+				continue
+			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
 				continue // channel gone: nothing left to archive on it

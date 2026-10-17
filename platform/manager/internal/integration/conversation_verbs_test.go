@@ -312,3 +312,82 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 		t.Fatalf("deletion must send exactly one operation per thread, also got %q", again.Kind)
 	}
 }
+
+// A thread whose topic was never created (ensure-topic never succeeded,
+// ThreadID stays "") must not get a close-topic op — there is nothing to
+// close, and every adapter rejects an empty thread id. Enqueueing it anyway
+// retries forever and logs an error on every reconcile pass.
+func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
+	ops := testOps()
+	r := &controller.ConversationReconciler{
+		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
+	}
+	mkChannel(t, "no-topic-ch", "tg")
+	conv := mkVerbConv(t, "no-topic-conv", []string{"no-topic-ch"}, agentopsv1alpha1.ConversationClosed)
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "no-topic-ch", ThreadID: ""}}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "no-topic-conv"}}
+
+	// Two passes: a single pass proves nothing was enqueued once, a second
+	// proves it is not a one-shot skip that still archives silently.
+	for i := 0; i < 2; i++ {
+		if _, err := r.Reconcile(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if op := ops.Claim("tg"); op != nil {
+		t.Fatalf("a thread with no topic yet must get no close-topic op, got %q", op.Kind)
+	}
+	if got := getConv(t, "no-topic-conv"); got.Status.ThreadArchived("no-topic-ch") {
+		t.Fatal("a thread with no topic yet must not be recorded as archived")
+	}
+}
+
+// Once ensure-topic finally succeeds and the thread gets a real thread id,
+// the next reconcile pass must enqueue close-topic for it normally — the
+// skip above is a re-evaluated condition, not a permanent exclusion.
+func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
+	ops := testOps()
+	r := &controller.ConversationReconciler{
+		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
+	}
+	mkChannel(t, "late-topic-ch", "tg")
+	conv := mkVerbConv(t, "late-topic-conv", []string{"late-topic-ch"}, agentopsv1alpha1.ConversationClosed)
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "late-topic-ch", ThreadID: ""}}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "late-topic-conv"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if op := ops.Claim("tg"); op != nil {
+		t.Fatalf("still no topic: no op expected yet, got %q", op.Kind)
+	}
+
+	// ensure-topic succeeds later: the thread id arrives.
+	conv = getConv(t, "late-topic-conv")
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "late-topic-ch", ThreadID: "99"}}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+
+	op := ops.Claim("tg")
+	if op == nil {
+		t.Fatal("a thread that just got a real topic must have close-topic enqueued")
+	}
+	if op.Kind != chat.OpCloseTopic {
+		t.Fatalf("expected close-topic, got %q", op.Kind)
+	}
+	if op.ThreadID == nil || *op.ThreadID != "99" {
+		t.Fatalf("it must carry the thread id: %+v", op.ThreadID)
+	}
+}
