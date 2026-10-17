@@ -1,4 +1,19 @@
-# The runtime contract
+---
+title: AgentRuntime specification
+permalink: /contracts/runtime/
+description: >-
+  The versioned, normative specification of what an AgentRuntime image owes
+  the manager, and what the manager owes it — for building a runtime
+  agent-ops does not ship.
+
+next:
+  eyebrow: Reference
+  title: Every field of every kind
+  body: >-
+    The generated custom resource reference, and the contracts the adapter and
+    runtime kinds serve.
+  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
+---
 
 **Version 1.0.0.** The versioned specification of what an `AgentRuntime`
 image owes the manager, and what the manager owes it. Build against this

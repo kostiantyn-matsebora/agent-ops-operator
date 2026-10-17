@@ -56,7 +56,7 @@ It is **not** what you want when:
 > A runtime that ignores it voids every toolset binding in the install,
 > silently. Read the allowlist station below before you write any of it.
 
-Review [the runtime contract](../contracts/runtime.md) and
+Review [the runtime contract]({{ '/contracts/runtime/' | relative_url }}) and
 [AgentRuntime](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#agentruntime)
 first. This page builds the smallest thing that satisfies them, station by
 station, and every station names the exact section of the contract it builds
@@ -97,10 +97,10 @@ A bundle may ship a runtime of its own the same way.
 The manager creates one pod per conversation from part 2, and that pod is your
 image. It gives the pod `CONTROL_URL`, `CONVO_ID`, `POD_NAME`,
 `RUNTIME_IDLE_TTL_M`, `REPO_URL`, `REPO_REF` and the profile's git
-credentials — the full list is [Environment](../contracts/runtime.md#environment).
+credentials — the full list is [Environment]({{ '/contracts/runtime/' | relative_url }}#environment).
 
 **Checking the repository out is your runtime's own job, never the
-manager's.** See [Runtime's obligations](../contracts/runtime.md#runtimes-obligations).
+manager's.** See [Runtime's obligations]({{ '/contracts/runtime/' | relative_url }}#runtimes-obligations).
 The stations below build that sequence in order, starting with the poll.
 
 **The pod dials the manager, never the reverse.** Your runtime needs no inbound
@@ -109,7 +109,7 @@ port and no Service.
 ## 1. Poll for work
 
 Long-poll. The call blocks until there is a unit or the wait expires — the
-first thing [Runtime's obligations](../contracts/runtime.md#runtimes-obligations)
+first thing [Runtime's obligations]({{ '/contracts/runtime/' | relative_url }}#runtimes-obligations)
 asks of you.
 
 ```sh
@@ -121,7 +121,7 @@ curl "$env:CONTROL_URL/work?convo=$env:CONVO_ID&pod=$env:POD_NAME&wait=25"
 ```
 
 A `204` means nothing is queued. Poll again. A unit looks like this — every
-field is named in [The work unit](../contracts/runtime.md#the-work-unit):
+field is named in [The work unit]({{ '/contracts/runtime/' | relative_url }}#the-work-unit):
 
 ```json
 {
@@ -148,12 +148,12 @@ something to do.
 ## 2. Clone the repository
 
 **Repository checkout is your runtime's obligation, never the manager's** —
-see [Runtime's obligations](../contracts/runtime.md#runtimes-obligations). The
+see [Runtime's obligations]({{ '/contracts/runtime/' | relative_url }}#runtimes-obligations). The
 manager hands you `REPO_URL`, `REPO_REF` and the git credentials the profile
 declares, and stops there.
 
 `REPO_URL` and `REPO_REF` are always set and may both be empty — see
-[Environment](../contracts/runtime.md#environment). An empty `REPO_URL` means
+[Environment]({{ '/contracts/runtime/' | relative_url }}#environment). An empty `REPO_URL` means
 this conversation has no repository, so clone nothing rather than treating
 the empty string as an error.
 
@@ -171,11 +171,11 @@ if ($env:REPO_URL) {
 
 Authenticate from whichever pair the environment carries: `GIT_AUTH_TYPE`
 with `GIT_SSH_KEY`, or `GIT_AUTH_TYPE` with `GIT_TOKEN` — same
-[Environment](../contracts/runtime.md#environment) table.
+[Environment]({{ '/contracts/runtime/' | relative_url }}#environment) table.
 
 **Verify:** `/data/workspace` holds the checkout at `REPO_REF` once
 `REPO_URL` is non-empty, and stays empty when `REPO_URL` is empty. That path
-never moves — see [Filesystem](../contracts/runtime.md#filesystem).
+never moves — see [Filesystem]({{ '/contracts/runtime/' | relative_url }}#filesystem).
 
 ## 3. Compose the tool allowlist
 
@@ -184,7 +184,7 @@ frontmatter of `.claude/agents/<agent>.md` in the checkout, which only your
 runtime can read, because only your runtime holds the repository.
 
 The rule for combining them is [Composing the
-allowlist](../contracts/runtime.md#composing-the-allowlist) — this station
+allowlist]({{ '/contracts/runtime/' | relative_url }}#composing-the-allowlist) — this station
 demonstrates it and states nothing beyond it.
 
 `toolsMode` directs how the two combine:
@@ -241,9 +241,9 @@ curl -X POST "$env:CONTROL_URL/work/done" -d '{
 ```
 
 Every field of this report is named in [The completion
-report](../contracts/runtime.md#the-completion-report). `status` is
+report]({{ '/contracts/runtime/' | relative_url }}#the-completion-report). `status` is
 `succeeded` or `failed` — the manager reads any other value as a failed run,
-see [Enums](../contracts/runtime.md#enums).
+see [Enums]({{ '/contracts/runtime/' | relative_url }}#enums).
 
 **`result` is the deliverable.** The operator hands it to every bound channel
 through their adapters, so your runtime never posts to a transport and holds
@@ -263,7 +263,7 @@ continue.
 | `unavailable` | you could not reach it — the manager fails the run rather than answering fresh under its name |
 
 If you report `turns[]` or `toolCalls[]`, trim each to the
-[bounds](../contracts/runtime.md#bounds) — 200 entries, 200 bytes per string
+[bounds]({{ '/contracts/runtime/' | relative_url }}#bounds) — 200 entries, 200 bytes per string
 field — before posting. The manager refuses the WHOLE report with `400` over
 any bound, never trims it for you.
 
@@ -274,7 +274,7 @@ bound instead — 201 entries in `turns[]`, say — and confirm it comes back
 ## 5. Exit when idle
 
 Exit `0` after `RUNTIME_IDLE_TTL_M` minutes with no work — the one condition
-[Lifecycle](../contracts/runtime.md#lifecycle) names for exiting on your own.
+[Lifecycle]({{ '/contracts/runtime/' | relative_url }}#lifecycle) names for exiting on your own.
 The pod outliving the answer is deliberate, so a follow-up skips the cold
 start. The manager creates a fresh pod on the next input.
 
@@ -301,7 +301,7 @@ spec:
 `contextStorage` is what the manager reads **before** promising a reader
 that a follow-up keeps its context.
 
-See [Manager's provisions](../contracts/runtime.md#managers-provisions) for
+See [Manager's provisions]({{ '/contracts/runtime/' | relative_url }}#managers-provisions) for
 the restoration and checkpoint-ordering guarantee that declaration unlocks.
 It is the one storage question only your runtime can answer — whether its
 backend writes context to a disk at all:
@@ -345,7 +345,7 @@ condition is what confirms it actually resolves.
 ## 7. Point a Pipeline at it, and verify
 
 This station builds toward [Manager's
-provisions](../contracts/runtime.md#managers-provisions), where the manager
+provisions]({{ '/contracts/runtime/' | relative_url }}#managers-provisions), where the manager
 creates one pod per conversation from the runtime the Pipeline resolves.
 
 Declaring it through the chart is the ordinary path — the `AgentRuntime` above
@@ -380,7 +380,7 @@ arriving, then the allowlist you composed, then the answer.
 ## What comes next
 
 1. **Read the specification in full** — [the runtime
-   contract](../contracts/runtime.md) covers every field, every enum, the
+   contract]({{ '/contracts/runtime/' | relative_url }}) covers every field, every enum, the
    bounds and their refusal, and the conformance checklist a claim of
    conformance is walked against.
 2. **Compare against the reference** —

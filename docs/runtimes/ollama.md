@@ -17,7 +17,7 @@ next:
 **This is a runtime, not an integration.** It starts no work and answers on no
 surface. It is what EXECUTES an agent — and the second one this chart ships.
 
-It conforms to the [runtime specification](../contracts/runtime.md), version
+It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
 1.0.0.
 
 **With this bundle, agent-ops runs a route on a model your own Ollama serves.**

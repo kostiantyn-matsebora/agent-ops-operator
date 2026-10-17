@@ -119,3 +119,26 @@
       and the raw awk from `docs/CLAUDE.md`) is silent over every page this
       change wrote or edited. The handful of hits elsewhere all pre-date
       this change, confirmed by `git blame` to commit `dacd810`.
+- [x] 8.4 Publish `docs/contracts/runtime.md` as a site page instead of a
+      GitHub-only reference: front matter, permalink `/contracts/runtime/`,
+      a `next:` card back to the generated CR reference, and a new
+      "Specifications" nav group in `_data/nav.yml` (`AgentRuntime` →
+      `/contracts/runtime/`) — the same promotion the Integrations group
+      already got once. Every site-page link to it (`guides/agent-runtime.md`,
+      `runtimes/ollama.md`, `runtimes/copilot.md`) retargeted to
+      `{{ '/contracts/runtime/' | relative_url }}`, anchors preserved.
+      Reference-only pages (`docs/claude.md`, `docs/contracts.md`,
+      `docs/concepts.md`, `docs/CHANGELOG.md`) keep their plain relative
+      links since they're read on GitHub, not through the site. Recorded the
+      convention in `docs/CLAUDE.md` and `docs/.claude/site.md` so
+      `contracts/channel-adapter.md`/`contracts/signal-adapter.md` get the
+      same treatment only in the change that rewrites each to this same
+      versioned-spec standard. Verified: `anchor-check.py` reports the same
+      13 pre-existing breaks and none in a touched file,
+      `publication-guard.py` and `retired-vocabulary-guard.py` clean,
+      `docs-generate.py --check` clean, and the site rebuilt and screenshotted
+      (light/dark, 1400×1200) — `/contracts/runtime/` renders with the H1 from
+      front matter, its on-this-page rail lists every section, the sidebar
+      highlights "AgentRuntime" under "Specifications", and
+      `scrollWidth`/`clientWidth` never diverge on `/contracts/runtime/` or
+      `/guides/agent-runtime/`.
