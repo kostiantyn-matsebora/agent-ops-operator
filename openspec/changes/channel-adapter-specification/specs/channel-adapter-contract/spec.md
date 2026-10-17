@@ -64,15 +64,18 @@ The adapter's obligations SHALL include at least:
 - **THEN** the specification states it is never re-ingested as inbound, as a
   named obligation of the adapter
 
-### Requirement: Schema tables are generated from the Go structs
+### Requirement: Schema tables are hand-written, traced to the Go structs
 
-Every operation and payload field table whose shape a named Go struct carries
-SHALL be rendered by the docs generator's `struct-table` marker from that
-struct's json tags, never typed by hand.
+Every operation and payload field table whose shape a named Go struct
+carries SHALL be hand-written, in the `| Field | Type | Required |
+Description |` shape `docs/contracts/runtime.md` settled on, traced to that
+struct's json tags.
 
-The marker does not exist yet. It is the capability `runtime-specification`
-adds to `docs-generate.py`, an unmet prerequisite of this change until that
-change is archived.
+No generator renders these tables. `runtime-specification` tried a
+`struct-table` docs-generator marker for this exact purpose and reversed it
+before archiving (its own task 3.3): the generated cells copied Go
+doc-comment paragraphs verbatim, producing unreadable rows. This
+specification follows the hand-written shape it settled on instead.
 
 The struct-backed sources are:
 
@@ -90,22 +93,18 @@ The struct-backed sources are:
 
 The one shape no named struct backs — the channel-listing entry, a
 function-local type in `internal/httpapi/server.go` — SHALL carry a
-hand-written table, marked as hand-written, until a named struct backs it.
+hand-written table like every other, noted as backed by no named struct
+rather than by a different authoring method.
 
-CI SHALL regenerate the generated tables and fail on a difference, so a field
-added in code without a specification row fails the build.
+A change that edits a struct-backed source's json tags MUST edit the
+matching table in the same change. Review is what catches a missed row —
+no generator exists to catch it for a reviewer.
 
-#### Scenario: A field is added in code only
+#### Scenario: A struct's json tags change
 
-- **WHEN** a json-tagged field is added to a struct-backed source and the
-  specification is not regenerated
-- **THEN** CI fails on the stale generated block
-
-#### Scenario: A generated table is hand-edited
-
-- **WHEN** someone edits a generated field table by hand
-- **THEN** the next generator run reverts the edit and CI fails on the
-  difference
+- **WHEN** a field is added, removed or renamed on a struct-backed source
+- **THEN** the change also edits that source's table, and a reviewer checks
+  the table against the struct before approving
 
 ### Requirement: Compatibility rules make additive change safe
 

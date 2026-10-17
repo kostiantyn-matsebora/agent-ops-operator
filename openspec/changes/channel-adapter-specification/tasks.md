@@ -1,16 +1,22 @@
 ## 1. Rework the contract page into the specification — api-architect
 
-- [ ] 1.1 Confirm the precondition: `runtime-specification` is archived, so
-      `docs/contracts/channel-adapter.md` exists and `docs-generate.py` has
-      the `struct-table` marker. Verify both in the tree.
+- [x] 1.1 Confirm the precondition: `runtime-specification` is archived, so
+      `docs/contracts/channel-adapter.md` exists. `docs-generate.py` has NO
+      `struct-table` marker — `runtime-specification` tried one and reversed
+      it (its own task 3.3) before archiving. Verified both in the tree.
+      Updated the proposal, design and delta spec to hand-write the
+      struct-backed tables instead, matching `docs/contracts/runtime.md`.
 - [ ] 1.2 Rework `docs/contracts/channel-adapter.md` into the versioned
       (1.0.0) specification per the delta spec: both parties' obligations,
       the ops lifecycle, auth, backpressure, pacing, the no-relay-loop rule,
       compatibility rules and the changelog at the foot. Verify every
       normative sentence traces to source or a test.
-- [ ] 1.3 Place `struct-table` markers for the struct-backed op and payload
-      tables, keep the body grammar hand-written and named as such, run the
-      generator. Verify `docs-generate.py --check` is clean.
+- [ ] 1.3 Hand-write the struct-backed op and payload field tables, in the
+      same `| Field | Type | Required | Description |` shape
+      `docs/contracts/runtime.md` uses, traced to each struct's json tags.
+      Keep the body grammar hand-written and named as such. Verify
+      `docs-generate.py --check` is clean (no generator touches these
+      tables) and every field in the named structs has a row.
 - [ ] 1.4 Write the numbered conformance checklist, each item citing the
       `channels/telegram` and `platform/console` test that exercises it where
       one exists. Verify both shipped adapters pass every item by reading
