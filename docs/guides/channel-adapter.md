@@ -148,9 +148,10 @@ reader as literal characters.
 **An `answer` or `notice` body may also carry the BLOCK GRAMMAR.** Its
 recognition rules and the fold belong to the `structured-agent-output`
 capability, shared verbatim with `channels/telegram/blocks.go` and the
-console's `blocks.ts` — see
-[The body grammar]({{ '/contracts/channel-adapter/' | relative_url }}#the-body-grammar).
-This guide states no rule of its own for it.
+console's `blocks.ts`.
+
+See [The body grammar]({{ '/contracts/channel-adapter/' | relative_url }}#the-body-grammar)
+for the rules themselves. This guide states none of its own.
 
 **Not implementing it is fine.** `AgentProfile.spec.outputFormat` is
 required, and a profile declaring `none` emits no tags at all.

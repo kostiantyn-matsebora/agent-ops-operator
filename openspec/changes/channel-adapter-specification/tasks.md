@@ -81,12 +81,13 @@
 
 ## 4. Unit tests — testing-specialist
 
-- [ ] 4.1 A link-and-anchor check over every file the change touched: every
-      relative link resolves to a file and every anchor to a heading. Verify
-      it passes on this working copy's tree.
-- [ ] 4.2 `rules_compliance.py`, `retired-vocabulary-guard.py` and
-      `publication-guard.py` clean over every file the change touched. Verify
-      by running all three.
+- [x] 4.1 Ran `anchor-check.py` over the 11 touched markdown files (the
+      12th, `docs/_data/nav.yml`, is YAML). Result: 11 files, every
+      relative link and anchor resolves. Zero failures, nothing to fix.
+- [x] 4.2 Ran all three guards. `rules_compliance.py` over the same 11
+      markdown files: clean (no output, exit 0). `retired-vocabulary-guard.py`
+      tree-wide: clean, 128 files, nothing attributable to this change.
+      `publication-guard.py` tree-wide: clean. Nothing to fix.
 
 ## 5. System tests — testing-specialist
 
@@ -95,12 +96,48 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 Reference docs: `python3 .github/scripts/docs-generate.py --check`
-      clean over the whole tree, and `docs/contracts.md`'s pointer to the
-      channel page still resolves.
-- [ ] 6.2 Adopter site: build the site from this working copy's tree and look
-      at the changed pages per `docs/CLAUDE.md` pre-flight — stations render,
-      command fences pair, no table crushes, no horizontal overflow in either
-      theme.
-- [ ] 6.3 Adopter site: the prose lint in `docs/CLAUDE.md` is silent over the
-      changed pages, and the nav still reaches the rewritten guide.
+- [x] 6.1 `python3 .github/scripts/docs-generate.py --check` → "52 generated
+      file(s) up to date." `docs/contracts.md`'s "## The channel adapter
+      contract" pointer still resolves to the (now-promoted) page.
+
+      **Pre-existing defect found, not introduced by this change, left
+      unfixed as out of scope**: a plain reference page's RELATIVE `.md`
+      link to a page that carries front matter (a permalink) 404s on the
+      built site, because Jekyll serves the promoted page at its permalink
+      instead of its original path. Verified this already held for
+      `docs/claude.md`'s and `docs/contracts.md`'s existing links to
+      `contracts/runtime.md` before this change touched anything — the
+      same pattern `runtime-specification` shipped unreconciled. This
+      change's `docs/console.md` and the unchanged `docs/contracts.md` now
+      link to `contracts/channel-adapter.md` the identical way, so the
+      defect now covers two pages instead of one. Flagging for the PR
+      description rather than inventing a new link convention unilaterally
+      — `docs/claude.md` is not this change's to edit, and a real fix
+      needs a decision about every such link at once, not a one-off here.
+- [x] 6.2 Docker's daemon is not reachable in this remote session (client
+      present, socket absent), so built the site with a native Jekyll
+      install (`gem install jekyll jekyll-default-layout jekyll-seo-tag
+      jekyll-sitemap`) instead of the containerized command — same Jekyll
+      version class, same `_config.yml`. Served over
+      `python3 -m http.server` with the `agent-ops-operator/` baseurl
+      symlink. Checked `/contracts/channel-adapter/`, `/guides/channel-adapter/`,
+      `/console/`, `/integrations/telegram/` with Playwright
+      (`chromium-1194`), light and dark, 1280×900: all `200`, zero
+      `scrollWidth` overflow in every case. Full-page and anchor-targeted
+      screenshots of both rewritten pages: tables keep their code columns
+      on one line, the Description column isn't crushed, the sh/powershell
+      command pairs render as tabs, the "Specifications" nav group shows
+      "Channel adapter" and highlights it as current.
+- [x] 6.3 Ran the exact `docs/CLAUDE.md` prose-lint `awk` one-liner over
+      `docs/*.md docs/guides/*.md` (its own stated scope — `contracts/`
+      and `integrations/` pages aren't in that glob, but stay covered by
+      the stricter `rules_compliance.py`, run clean throughout). Found and
+      fixed one hit on this change's own file,
+      `docs/guides/channel-adapter.md:148` (a 49-word paragraph split in
+      two). Every other hit the lint reports is in a file this change
+      never touched (`CHANGELOG.md`, `concepts.md`, `configuration.md`,
+      `security.md`, three other guides, root `docs/CLAUDE.md` itself) —
+      pre-existing debt, left alone. Re-ran after the fix: zero hits on
+      any file this change touched. The built site's sidebar
+      reaches `/guides/channel-adapter/` under Guides exactly as before —
+      unchanged entry, confirmed in the screenshots above.
