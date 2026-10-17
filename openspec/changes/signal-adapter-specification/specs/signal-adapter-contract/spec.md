@@ -167,14 +167,18 @@ version that adapter conforms to.
 
 ### Requirement: A specification change carries conformance
 
-A change that edits `docs/contracts/signal-adapter.md` MUST, in the same
-change, bring every shipped signal adapter — `signals/cron`,
-`signals/alertmanager`, `signals/k8s-events`, `signals/ha`,
-`signals/telegram` — into conformance with the new version.
+A change that moves the MAJOR or MINOR version of
+`docs/contracts/signal-adapter.md` MUST, in the same change, bring every
+shipped signal adapter — `signals/cron`, `signals/alertmanager`,
+`signals/k8s-events`, `signals/ha`, `signals/telegram` — into conformance with
+the new version.
 
 The same change MUST move the version every shipped adapter page claims. The
 change is not finished while any shipped adapter conforms only to the previous
 version, so the specification never runs ahead of what ships.
+
+A PATCH-only change alters no obligation, so it is exempt from the adapter walk
+and the claimed versions stay as they are.
 
 The first version, `1.0.0`, documents shipped behavior. It needs no adapter
 change, but the change MUST walk the checklist for all five adapters and fix
@@ -182,9 +186,14 @@ any gap it finds before the version is claimed.
 
 #### Scenario: The specification version moves
 
-- **WHEN** a change bumps the specification version
+- **WHEN** a change bumps the specification's MAJOR or MINOR version
 - **THEN** the same change updates every shipped signal adapter and every
   claimed version, or the change is not archivable
+
+#### Scenario: A PATCH clarification
+
+- **WHEN** a change moves only the PATCH version
+- **THEN** no adapter or claimed version needs to change
 
 ### Requirement: The specification governs the agent's own changes
 
