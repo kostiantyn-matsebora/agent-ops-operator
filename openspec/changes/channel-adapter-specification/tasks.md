@@ -40,12 +40,17 @@
 
 ## 2. Rewrite the adopter guide as the station procedure
 
-- [ ] 2.1 Rewrite `docs/guides/channel-adapter.md` as ordered stations — each
-      citing a spec section by anchor, each ending in a verification. Verify
-      the guide states no requirement of its own and every cited anchor
-      exists.
-- [ ] 2.2 Re-run `docs-generate.py` for the guide's generated blocks and
-      verify `--check` is clean.
+- [x] 2.1 Rewrote `docs/guides/channel-adapter.md` as 7 numbered stations
+      (take operations, complete each op, render the message, push replies
+      back, declare the ChannelAdapter, declare a Channel, verify end to
+      end), each citing the specification by anchor and ending in its own
+      **Verify:** step. Kept the "Before you start" and "What comes next"
+      framing from the previous narrative guide. Verified the guide states
+      no requirement of its own (every normative claim is a citation) and
+      every cited anchor exists with `anchor-check.py`.
+- [x] 2.2 Re-ran `docs-generate.py` for the guide's generated
+      `ChannelAdapter`/`Channel` template and example blocks (unchanged
+      content, carried over verbatim). `--check` is clean.
 
 ## 3. Governance rule and version claims
 
