@@ -302,7 +302,7 @@ spec:
 that a follow-up keeps its context.
 
 That declaration unlocks restoration
-([`GET /work`]({{ '/contracts/runtime/' | relative_url }}#get-work), API-4) and
+([`GET /work`]({{ '/contracts/runtime/' | relative_url }}#get-work), API-3) and
 checkpoint ordering
 ([Manager's provisions]({{ '/contracts/runtime/' | relative_url }}#managers-provisions), MGR-2).
 

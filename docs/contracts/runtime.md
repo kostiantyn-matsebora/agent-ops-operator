@@ -15,27 +15,49 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.0.0.** Two HTTP operations carry the whole contract:
-[`GET /work`](#get-work) and [`POST /work/done`](#post-workdone). Build
-against this page alone — no shipped runtime's source is required. The
-[Conformance checklist](#conformance-checklist) verifies a claim, item by
-item.
+**Version 1.0.0**
+
+This specification gives everything necessary to build and maintain an
+`AgentRuntime` — a harness agent-ops does not ship.
 
 ## Conventions
 
-| | |
+MUST / MUST NOT / SHOULD / MAY follow RFC 2119. Every requirement carries
+a stable ID, prefixed by the section it belongs to:
+
+| Prefix | Section |
 |---|---|
-| MUST / MUST NOT / SHOULD / MAY | RFC 2119 |
-| Requirement ID | `API-n`, `LC-n` (lifecycle), `RT-n` (runtime), `MGR-n` (manager), `SEC-n` (security), `COMPAT-n` (compatibility) |
+| `API-n` | `GET /work` / `POST /work/done` |
+| `LC-n` | [Lifecycle](#lifecycle) |
+| `RT-n` | [Runtime's obligations](#runtimes-obligations) |
+| `MGR-n` | [Manager's provisions](#managers-provisions) |
+| `SEC-n` | [Security posture](#security-posture) |
+| `COMPAT-n` | [Compatibility](#compatibility) |
 
 ## GET /work
 
+Long-polls for this conversation's next work unit.
+
 `GET $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25`
+
+| Param | Required | Meaning |
+|---|---|---|
+| `convo` | yes | The `Conversation` to poll for. |
+| `pod` | no | This pod's own name, logged by the manager. |
+| `wait` | no | Seconds to block. Clamped to 30 server-side — a runtime asking for more still gets at most 30. |
 
 | Status | Body |
 |---|---|
+| `400` | `{"error": "missing convo"}` — `convo` was empty. |
 | `204` | No work yet. Not an error. |
 | `200` | A work unit, below. |
+
+**Example — `200`:**
+
+```json
+{"runId": "r-7f2a", "convo": "convo-abc12", "agent": "release-notes",
+ "allowedTools": "Bash,Read", "toolsMode": "merge", "maxTurns": 40}
+```
 
 ### Work unit
 
@@ -55,23 +77,32 @@ item.
 | `toolsMode` | string | no | `merge` or `overwrite` — see [Composing the allowlist](#composing-the-allowlist). |
 | `maxTurns` | integer | no | The profile's turn budget for this run. |
 
-Source: `platform/manager/internal/dispatch/dispatch.go`, type `WorkUnit`.
-
 | ID | Requirement |
 |---|---|
 | API-1 | A runtime MUST long-poll this endpoint while able to accept work. `204` is not an error. |
 | API-2 | Exactly one of `promptFile`/`promptText` is set. |
-| API-3 | The manager MUST hold at most one inflight unit per conversation — see [Lifecycle](#lifecycle). |
-| API-4 | Where continuity is possible for the deployment, context named by `runtimeContextId` MUST already be restored before this call answers. |
+| API-3 | Where continuity is possible for the deployment, context named by `runtimeContextId` MUST already be restored before this call answers. |
 
 ## POST /work/done
+
+Reports a run's outcome and closes out the inflight unit.
 
 `POST $CONTROL_URL/work/done`
 
 | Status | Body |
 |---|---|
-| `200` | Accepted. |
-| `400` | A [bound](#bounds) exceeded. Whole report refused, naming the field and the bound broken. |
+| `200` | `{"ok": true}` |
+| `400` | `{"error": "<message>"}` — malformed JSON, or a [bound](#bounds) exceeded (message names the field and the bound broken). Whole report refused, never trimmed. |
+| `404` | `{"error": "<message>"}` — `convo` names no `Conversation`. |
+| `500` | `{"error": "<message>"}` — transient, not a runtime fault. Retrying the same report is not refused. |
+
+**Example — request:**
+
+```json
+{"convo": "convo-abc12", "runId": "r-7f2a", "status": "succeeded",
+ "runtimeContextId": "ctx-91c3", "continuity": "continued",
+ "result": "Opened PR #482.", "brief": "Drafted the v2 release notes."}
+```
 
 ### Completion report
 
@@ -89,8 +120,6 @@ Source: `platform/manager/internal/dispatch/dispatch.go`, type `WorkUnit`.
 | `brief` | string | no | A one- or two-sentence summary of the conversation. |
 | `turns[]` | array of Turn | no | One entry per model call — see [Turns](#turns). |
 | `toolCalls[]` | array of ToolCall | no | One entry per tool call — see [Tool calls](#tool-calls). |
-
-Source: `platform/manager/internal/httpapi/server.go`, type `workDone`.
 
 #### Turns
 
@@ -114,12 +143,12 @@ Source: `platform/manager/internal/httpapi/server.go`, type `workDone`.
 
 | ID | Requirement |
 |---|---|
-| API-5 | `turns[]`/`toolCalls[]` MUST be trimmed to the [bounds](#bounds) before posting. |
-| API-6 | `runtimeContextId`/`brief` are LATEST-WINS. Absent leaves the stored value untouched. |
-| API-7 | `turns[]`/`toolCalls[]` become one activity hop each (`model.call`/`tool.call`), never written to the `Conversation` — see [the activity contract](../contracts.md#the-activity-contract). |
-| API-8 | A fact the runtime cannot determine MUST be omitted, never reported as zero. |
-| API-9 | A tool's input or output MUST NOT be reported. |
-| API-10 | Neither array is reported when the run made neither a model call nor a tool call. |
+| API-4 | `turns[]`/`toolCalls[]` MUST be trimmed to the [bounds](#bounds) before posting. |
+| API-5 | `runtimeContextId`/`brief` are LATEST-WINS. Absent leaves the stored value untouched. |
+| API-6 | `turns[]`/`toolCalls[]` become one activity hop each (`model.call`/`tool.call`), never written to the `Conversation` — see [the activity contract](../contracts.md#the-activity-contract). |
+| API-7 | A fact the runtime cannot determine MUST be omitted, never reported as zero. |
+| API-8 | A tool's input or output MUST NOT be reported. |
+| API-9 | Neither array is reported when the run made neither a model call nor a tool call. |
 
 ## Lifecycle
 
@@ -144,9 +173,6 @@ Source: `platform/manager/internal/httpapi/server.go`, type `workDone`.
 | RT-1 | Clone `REPO_URL`/`REPO_REF` with the environment's git credentials, when `REPO_URL` is not empty. |
 | RT-2 | Execute the returned unit, streaming progress to **stdout**, never a transport of its own. |
 | RT-3 | Compose the tool allowlist as `toolsMode` directs — see [Composing the allowlist](#composing-the-allowlist). |
-
-Source for RT-1: the repository is never checked out by the manager —
-`/data/workspace`, see [Filesystem](#filesystem).
 
 ### Composing the allowlist
 
@@ -189,11 +215,6 @@ A runtime implementing none of these stays fully conformant — see
 | MGR-2 | Context MUST be checkpointed before `POST /work/done` reaches the manager — a handle MUST NOT be recorded before its context is persisted. |
 | MGR-3 | A pod that never reaches `Running` MUST be reaped at a deadline, freeing its admission slot. |
 | MGR-4 | The manager MUST supply every variable in [Environment](#environment), and the profile's git credentials. |
-
-Source for MGR-2/API-4: `platform/context-sync/main.go`
-(`BeforeFirstWork`/`BeforeWorkDone`) when `contextSync` is declared,
-otherwise the manager itself. Source for MGR-3:
-`platform/manager/internal/controller/runtimestart.go`.
 
 ## Environment
 
@@ -243,10 +264,6 @@ otherwise the manager itself. Source for MGR-3:
 | `result` | truncated to 2000 bytes, never refused |
 | `brief` | truncated to 512 bytes, never refused |
 
-Source: `platform/manager/internal/httpapi/workreport.go`, constants
-`MaxReportedTurns`, `MaxReportedToolCalls`, `MaxReportedField`, function
-`validateReport`.
-
 ## Compatibility
 
 | ID | Requirement |
@@ -265,27 +282,19 @@ Source: `platform/manager/internal/httpapi/workreport.go`, constants
 implemented — an absent parameter means "the version this document
 describes," and adding it would be MINOR, not MAJOR.
 
-## Conformance checklist
+## Conformance
 
-| # | Verifies | Tests |
-|---|---|---|
-| CF-1 | API-1 | claude `runtime.mainloop.test.js` · copilot `runtime.test.js` (`pollNextUnit`) · ollama `work_test.go` (`TestPollDecodesAWorkUnit`, `TestPollNoContentMeansNoWork`) |
-| CF-2 | RT-1 (clone iff non-empty) | claude/copilot `runtime.gitclone.test.js` · ollama `repo_sync_test.go` (`TestSyncWithNoURLIsANoOp`, `TestSyncClonesThenFetchesAndResetsAgainstARealRepo`) |
-| CF-3 | RT-1 (auth) | claude/copilot `runtime.sshenv.test.js`, `runtime.httpsenv.test.js` · ollama `repo_sync_test.go` (`TestCloneURLEmbedsTheTokenOnlyForHTTPSAuth`, `TestEnvSetsGitSSHCommandOnlyForSSHAuth`) |
-| CF-4 | RT-3.1 | claude/copilot `tools.test.js` · ollama `tools_test.go` (`TestFrontmatterForms`, `TestCompose`) |
-| CF-5 | RT-3.2 | claude/copilot `tools.test.js` ("empty means empty") · ollama `tools_test.go` (`TestCompose`, "empty means empty") |
-| CF-6 | Work unit: `runtimeContextId`/`resumeSessionId` | claude `runtime.mainloop.test.js` · ollama `work_test.go` (`TestReportPostsTheDoneBodyAndSucceeds`) · copilot `runtime.test.js` (`contextIdOf` fallback) |
-| CF-7 | `status` enum | claude `runtime.spawnerror.test.js` · ollama `agent_test.go` (`TestTurnLimit`, `TestModelWithoutToolsOnAToolRoute`, `TestEmptyPromptAndInferenceFailure`, `TestMissingContextFails`) · copilot — **gap**, no test asserts the literal `status: 'failed'` string |
-| CF-8 | `continuity` enum | ollama `agent_test.go` (`TestTextOnly`, `TestMissingContextFails`) · copilot `continuity.test.js` (`confirmContextMissing`) — **gap**, no test asserts the literal `continuity` string posted |
-| CF-9 | API-5 | claude/copilot `report.test.js` ("trimmed to the manager bounds") · ollama `report_test.go` (`TestReportIsTrimmedToTheManagersBounds`) |
-| CF-10 | API-8 | claude `report.test.js` ("an unknown fact is omitted, never zero") · ollama `report_test.go` (`TestChatWithoutCountsLeavesThemUnset`) |
-| CF-11 | API-9 | claude/copilot `report.test.js` ("no tool input or output reaches the report") · ollama `report_test.go` (`TestRunReportsItsTurnsAndToolCalls`) |
-| CF-12 | LC-2 | claude `runtime.mainloop.test.js` · copilot `runtime.mainentry.test.js` — **gap**, no dedicated test for ollama's idle-TTL loop (inline in `main()`) |
-| CF-13 | RT-2 | claude `runtime.test.js` (`formatEvent`) · ollama `ollama_test.go` (`TestChatAlwaysSetsNumCtxAndStreams`) |
-| CF-14 | API-10 | claude `report.test.js` ("a synthetic message is not a model call...") · ollama `report_test.go` (`TestSilentRunReportsNothing`) |
+| Contract | Satisfies |
+|---|---|
+| Minimal — MUST, to interoperate at all | API-1–API-9, LC-1–LC-3, RT-1–RT-3, RT-3.1–RT-3.4, MGR-1–MGR-5, SEC-1–SEC-3, COMPAT-1–COMPAT-3 |
+| Optional — MAY, additive | [Optional capabilities](#optional-capabilities) |
+
+A runtime implementing the minimal contract alone is fully conformant —
+every optional capability may be skipped with no loss of conformance, see
+[Compatibility](#compatibility).
 
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
-| 1.0.0 | 2026-10-17 | First versioned edition. The manager/runtime contract as two HTTP operations (`GET /work`, `POST /work/done`), each with its own request/response schema and requirement IDs, a shared Lifecycle state machine, and a Conformance checklist that cites tests by requirement ID. Replaces the narrative "work contract" section of `docs/contracts.md`. No behavior change — documents what already ships. |
+| 1.0.0 | 2026-10-17 | Initial release. |

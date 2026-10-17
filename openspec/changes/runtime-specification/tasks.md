@@ -179,3 +179,55 @@
       page done") is silent over both files, `anchor-check.py` reports the
       same pre-existing 13 breaks and none in a touched file, and the site
       rebuilt and screenshotted shows the new structure rendering cleanly.
+- [x] 8.6 8.5 was still missing what a real API reference states: the actual
+      status codes and response bodies (read from `handleWork`/
+      `handleWorkDone` in `platform/manager/internal/httpapi/server.go`,
+      not assumed) and one worked example per operation. Added to both `GET
+      /work` (the `convo`/`pod`/`wait` query params, the server-side 30s
+      clamp on `wait`, the `400 {"error": "missing convo"}` case) and `POST
+      /work/done` (`200 {"ok": true}`, `400`/`404`/`500` bodies, one example
+      request). Verify: the two response bodies and the `wait` clamp match
+      `server.go` line by line, the prose lint and `docs-generate.py
+      --check` stay clean, and the rebuilt site shows both JSON examples
+      rendering as code blocks with no overflow.
+- [x] 8.7 8.6's Conformance checklist still cited this repo's own test file
+      names (`runtime.mainloop.test.js`, `work_test.go`) against each
+      requirement — information only agent-ops' own CI needs, not a third
+      party building their own runtime. Replaced with a two-row minimal/
+      optional split: the full MUST id range states the minimal conformant
+      contract, [Optional capabilities](../contracts/runtime.md#optional-capabilities)
+      states what adds nothing to it. Also cut, as the same class of
+      problem: the intro's restatement of what `GET /work`/`POST
+      /work/done` do (already the next two headings), five `Source:
+      platform/...` lines citing internal Go file paths with no normative
+      content, and API-3 (one inflight unit per conversation), which
+      duplicated LC-1 under Lifecycle word for word — API-4 through API-10
+      renumbered down to API-3 through API-9, the one external cross-reference
+      in `docs/guides/agent-runtime.md` updated to match. Verify: every
+      requirement ID row is contiguous with no gap or collision
+      (`grep -n` the four tables), the prose lint and `anchor-check.py`
+      stay clean, and the full script suite still passes.
+- [x] 8.8 Two readability fixes on the same page: the version tag and the
+      purpose sentence were one run-on line (`**Version 1.0.0.** This
+      specification...`) — split onto their own lines, version as its own
+      paragraph. The Conventions table's "Requirement ID" row packed all
+      six prefixes into one comma-separated cell (`API-n`, `LC-n`
+      (lifecycle), ...) — replaced with a two-column `Prefix | Section`
+      table, one prefix per row, each linking to the section it marks.
+      Verify: the prose lint stays clean, `anchor-check.py` resolves all
+      six new section links, and the rebuilt site shows the intro and
+      Conventions table rendering as distinct, scannable blocks.
+- [x] 8.9 Two closing fixes, GitHub REST API docs as the model. `GET
+      /work`/`POST /work/done` jumped straight from the heading to the
+      request line with no description — the one-sentence summary that
+      belongs there (not in the intro, see 8.6/8.7) had been dropped
+      entirely rather than moved. Added one line under each heading:
+      "Long-polls for this conversation's next work unit." /
+      "Reports a run's outcome and closes out the inflight unit." The
+      Changelog's `1.0.0` row described what the document now contains, as
+      prose — meaningless for a first entry with no prior version to
+      change from. Trimmed to "Initial release.", relying on
+      `docs/contracts.md`'s own existing pointer to this page for
+      provenance instead of restating it. Verify: the prose lint and
+      `anchor-check.py` stay clean, and the rebuilt site shows a
+      description under both endpoint headings.
