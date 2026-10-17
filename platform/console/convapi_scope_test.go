@@ -93,44 +93,14 @@ func convWithPhase(name, phase, readAt, runStatus string) *Object {
 		"1", `{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`, status)
 }
 
-// The Working, Mine and Errored badges undercounted relative to their own
-// scope's list: they only folded in UNREAD rows, while opening any of the
-// three scopes filters on phase/mine/error state alone (ChatView.tsx's
-// TREE_PREDICATE), read or unread. A scope's badge must equal its own list.
-func TestScopeCountsIncludeReadConversations(t *testing.T) {
-	keyer := NewAdapter(nil, nil, nil, "console")
-	withSalt(keyer, "pepper")
-	aliceKey := keyer.ReaderKey("alice@example.com")
-
-	workingRead := convWithPhase("working-read", "Working", tLate, "succeeded")
-	workingUnread := convWithPhase("working-unread", "Working", "", "succeeded")
-	erroredRead := convWithPhase("errored-read", "Idle", tLate, "failed")
-	mineRead := withOriginReader(convWithPhase("mine-read", "Idle", tLate, "succeeded"), "console", aliceKey)
-
-	api, _, _, _ := apiWithOptions(t, "tok", true, workingRead, workingUnread, erroredRead, mineRead)
-	withSalt(api.adapter, "pepper")
-	h := api.Handler(http.NotFoundHandler())
-
-	var scoped struct {
-		Scopes map[string]int `json:"scopes"`
-	}
-	rec := identified(t, h, "GET", "/api/conversations?count=1", "", "alice@example.com")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("count-only: %d", rec.Code)
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &scoped); err != nil {
-		t.Fatal(err)
-	}
-	if scoped.Scopes["working"] != 2 {
-		t.Fatalf("working scope must count the read row too: %+v", scoped.Scopes)
-	}
-	if scoped.Scopes["errored"] != 1 {
-		t.Fatalf("errored scope must count the read row: %+v", scoped.Scopes)
-	}
-	if scoped.Scopes["mine"] != 1 {
-		t.Fatalf("mine scope must count the read row: %+v", scoped.Scopes)
-	}
-}
+// REVERSED BY A LATER DECISION. This used to require Working/Mine/Errored to
+// count a READ row too, matching their own list's phase/mine/error predicate
+// with no unread restriction. The product decision behind that is gone: every
+// scope but Closed is now an UNREAD count (ChatView.tsx's TREE_PREDICATE ANDs
+// `c.unread` into each one), which is what made a separate Unread scope feel
+// redundant and is why it no longer exists. See
+// TestEveryScopeButClosedIsAnUnreadCount (convapi_rootscope_test.go) for the
+// current behavior this test used to contradict.
 
 // getListAs is getList, but as a named identity rather than the shared token.
 func getListAs(t *testing.T, h http.Handler, path, who string) listResponse {

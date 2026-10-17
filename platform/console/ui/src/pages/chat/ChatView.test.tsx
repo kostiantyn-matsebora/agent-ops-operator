@@ -6,9 +6,13 @@ import { api } from '../../api/client'
 import { ChatView } from './ChatView'
 import type { ConversationSummary, VocabularyEntry } from '../../api/types'
 
+// unread defaults true: the default scope (`{kind: 'all'}`) is now an UNREAD
+// filter (ChatView.tsx's TREE_PREDICATE), so a fixture most tests here treat
+// as an ordinary, not-yet-dealt-with row needs to still be one. A test about
+// read/unread specifically overrides it per row.
 function conv(name: string, over: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
-    name, title: name, runCount: 0, queued: 0, joined: true, errored: false, unread: false,
+    name, title: name, runCount: 0, queued: 0, joined: true, errored: false, unread: true,
     ageSeconds: 10, deleting: false, phase: 'Idle', ...over,
   }
 }
@@ -76,6 +80,29 @@ describe('both routes render the one view', () => {
   })
 })
 
+// A brand new conversation has nothing unread yet — nobody has replied, so
+// there is no counted message past the (nonexistent) watermark — and a read
+// one has nothing unread any more either. All must show both regardless: it
+// is every conversation a person can open, not every unread one. Twice
+// mistaken for an unread filter while this fix was built, each time breaking
+// the exact case a reader actually hits — a conversation disappearing from
+// the default view the moment it stops needing attention, or before it ever
+// does.
+describe('All shows every conversation, not only unread ones', () => {
+  it('still shows a conversation nobody has replied to yet', () => {
+    items = [conv('fresh', { unread: false, unreadCount: 0 })]
+    renderAt('/conversations')
+    expect(screen.getByTestId('scope-All')).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByTestId('row-fresh')).toBeInTheDocument()
+  })
+
+  it('still shows a conversation that has already been read', () => {
+    items = [conv('already-read', { unread: false })]
+    renderAt('/conversations')
+    expect(screen.getByTestId('row-already-read')).toBeInTheDocument()
+  })
+})
+
 describe('narrow windows show one column', () => {
   it('hides the list once a conversation is open', () => {
     window.innerWidth = 600
@@ -127,7 +154,7 @@ describe('a phone width turns the Inbox into a drawer, never a squeezed column',
     expect(screen.getByTestId('inbox')).toBeInTheDocument()
     // The list is replaced, not merely covered — nothing of it renders either.
     expect(screen.queryByRole('button', { name: 'conversation filters' })).toBeNull()
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    await userEvent.click(screen.getByTestId('scope-All'))
     expect(screen.queryByTestId('inbox')).toBeNull()
     expect(screen.getByRole('button', { name: 'conversation filters' })).toBeInTheDocument()
     window.innerWidth = 1440
@@ -177,15 +204,20 @@ describe('arrivals (console-thread-live-cues)', () => {
   // the narrow scope's small set and tagged everything the narrow scope
   // never had as "new" — even though nothing had actually arrived.
   it('does not tag every row as new just from switching to a wider scope', async () => {
-    items = [conv('a', { unread: true }), conv('b'), conv('c'), conv('d'), conv('e')]
+    items = [
+      conv('a', { phase: 'Working', unread: true }),
+      conv('b', { unread: true }), conv('c', { unread: true }),
+      conv('d', { unread: true }), conv('e', { unread: true }),
+    ]
     renderAt('/conversations')
-    // Narrow the view first (Unread: only 'a' qualifies), establishing a
+    // Narrow the view first (Working: only 'a' qualifies), establishing a
     // small "seen" set for that scope.
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    await userEvent.click(screen.getByTestId('scope-Working'))
     expect(screen.getByTestId('row-a')).toBeInTheDocument()
     expect(screen.queryByTestId('row-b')).not.toBeInTheDocument()
-    // Now open the wide scope. None of b/c/d/e actually just arrived — they
-    // existed the whole time, just outside the narrow scope's own set.
+    // Now open All (still unread-scoped, no further predicate) — every row
+    // here is unread, 'a' included. None of b/c/d/e actually just arrived —
+    // they existed the whole time, just outside the narrow scope's own set.
     await userEvent.click(screen.getByTestId('scope-All'))
     expect(screen.getByTestId('row-b')).toBeInTheDocument()
     // The real claim: nothing is tagged "new" just from the scope widening.
@@ -193,7 +225,7 @@ describe('arrivals (console-thread-live-cues)', () => {
   })
 })
 
-describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored)', () => {
+describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored, Closed)', () => {
   // Each of these used to be an independent per-row filter: a member is
   // never literally "mine" (it was invoked, never originated), never
   // literally "errored" just because its root is, and so on — so opening
@@ -221,7 +253,7 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
       conv('member-2', { causedBy: { parent: 'root-2', entry: 'diagnose' }, unread: true, unreadCount: 1 }),
     ]
     renderAt('/conversations')
-    await userEvent.click(screen.getByTestId('scope-Unread'))
+    await userEvent.click(screen.getByTestId('scope-All'))
     // Same fold default as above — not what this test is checking.
     await userEvent.click(screen.getByText('Expand all'))
     expect(screen.getByTestId('row-root-2')).toBeInTheDocument()
@@ -230,6 +262,17 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     // the same claim as every row in it being unread.
     expect(screen.queryByTestId('unread-root-2')).not.toBeInTheDocument()
     expect(screen.getByTestId('unread-member-2')).toBeInTheDocument()
+  })
+
+  it('Closed: a closed root that has been read is excluded, same as any other scope', async () => {
+    items = [
+      conv('closed-read', { phase: 'Closed', unread: false }),
+      conv('closed-unread', { phase: 'Closed', unread: true }),
+    ]
+    renderAt('/conversations')
+    await userEvent.click(screen.getByTestId('scope-Archive'))
+    expect(screen.getByTestId('row-closed-unread')).toBeInTheDocument()
+    expect(screen.queryByTestId('row-closed-read')).not.toBeInTheDocument()
   })
 
   it('a tree with no match anywhere is excluded entirely', async () => {

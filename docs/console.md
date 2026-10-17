@@ -560,7 +560,7 @@ thread pane in place — there is no navigation away from the list.
 | Column | Shows |
 |---|---|
 | Icon rail | the app's own sidebar, collapsed to icons on this view |
-| Inbox | scopes, in this order: All, Unread, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
+| Inbox | scopes, in this order: All, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
 | List | the rows in the active scope, as a coordination tree by default |
 | Thread pane | the open conversation |
 
@@ -674,26 +674,58 @@ the counted messages — `signal`, `agent`, `relay` — newer than the reader's
 watermark. Acks, notices, listings, refusals and run events never count, and
 a phase change is not a message at all.
 
+Neither does a coordinator's reply to a causedBy member's report alone —
+real content, delivered like any other answer, but internal to the
+coordination loop, never new for a person.
+
 The source is `status.runs[]` — a run's inputs and its result — merged with
 the live buffer for a message not yet recorded. A member conversation has no
 console thread and so no count of its own.
 
 Its result arrives on its root as an input, and is counted there instead.
 
-Every scope in the inbox carries a count matching what opening it lists.
+**All is a total, not an unread count.** It is every conversation a person
+can open, read or not — unchanged from what it always meant.
+
+Every OTHER fixed scope (Working, Mine, Errored), each Pipeline or
+Coordinator, and Closed are unread counts instead.
+
+That is what made the dedicated Unread scope redundant: every category
+already carried its own unread count one level down. It was removed. All
+was not, and is not an unread count either.
+
+An invoked member never counts, on any scope. It binds no console thread and
+no action of its own — the tree under its root is the only way to reach it.
 
 | Scope | Counts |
 |---|---|
-| Working, Mine, Errored, Closed, each Pipeline or Coordinator | every conversation its own filter admits — phase, ownership, error state or wiring — read or unread |
-| Unread | unread rows only, since unread IS that scope |
+| All (`kind: 'all'`) | every root, read or not, excluding a closed root while "Show closed" is off |
+| Working, Mine, Errored, Closed, each Pipeline or Coordinator | unread roots its own filter admits |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
 
-The **Unread** scope narrows the list to conversations with a count.
+**"Show closed" moves every count except Closed's own.** Switching scopes
+never moves a count that belongs to a different one, computed before that
+filter applies.
 
-Every sum is computed before any filter, so narrowing the view never moves
-it.
+All is not exempt from this — it still excludes a closed root while the
+toggle is off, same as every unread-scoped one.
+
+The closed-row toggle is a different thing, not a scope. Every list but
+Closed's own hides a closed row while it is off, so a badge for one of those
+lists excludes that row too.
+
+Closed's own list is exempt from that one filter — it IS the closed view —
+so its count ignores the toggle too. It still requires unread, like every
+scope here except All.
+
+**The navigation rail's own badge, outside the Inbox, is a plain unread
+count** — `unreadTotal`, every unread root, no further filter, the same
+number the removed Unread scope used to show.
+
+It answers "is there anything to read", a different question from what All
+answers now.
 
 Opening a conversation reports it read, at `max(the newest counted message's
 time, status.lastActivity)` — the second term keeps the report monotone

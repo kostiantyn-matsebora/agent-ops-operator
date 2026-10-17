@@ -71,6 +71,17 @@ type Message struct {
 	// Pending marks a locally-typed message the manager has not confirmed yet.
 	Pending bool `json:"pending,omitempty"`
 
+	// InternalRound marks a run's OWN result as coordination-internal: every input
+	// that run consumed was a causedBy member reaching back up
+	// (RecordedInput.Origin == originMember), so nothing about this round
+	// originated from a human or an external signal. Set only in
+	// mergeTranscript, where the run's Inputs are still in hand. Still
+	// rendered — it is real content, delivered to every other bound channel
+	// the same as any other answer — but excluded from countUnread: a
+	// human-facing conversation with one real exchange and a dozen internal
+	// member round-trips must not read as a dozen unread messages.
+	InternalRound bool `json:"internal,omitempty"`
+
 	// Choices are the actions this message OFFERS. Kept STRUCTURED all the way
 	// to the browser: the console is the surface that can render them as
 	// controls, and flattening them into the text here would throw that away.
@@ -486,7 +497,7 @@ var countedKinds = map[string]bool{
 func countUnread(messages []Message, watermark string) (count int, newest Message, hasNewest bool) {
 	wm, hasWM := parseAt(watermark)
 	for _, m := range messages {
-		if !countedKinds[m.Kind] {
+		if !countedKinds[m.Kind] || m.InternalRound {
 			continue
 		}
 		at, ok := parseAt(m.At)

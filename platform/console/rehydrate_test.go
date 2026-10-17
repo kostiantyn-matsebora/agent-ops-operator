@@ -293,6 +293,63 @@ func TestMemberResultInputIsNotRenderedAsASignalCard(t *testing.T) {
 	if got[0].Text != "deciding what to do next" {
 		t.Fatalf("the surviving message must be the coordinator's own run result: %+v", got[0])
 	}
+	// Still rendered, but not a human-facing count: nothing about this round
+	// originated outside the coordination loop.
+	if !got[0].InternalRound {
+		t.Fatalf("a run triggered solely by a member's report must be InternalRound: %+v", got[0])
+	}
+}
+
+// A run with a MIX of origins — one member report, one genuine external
+// trigger — is not internal: SOMETHING about it reached the coordinator from
+// outside the loop, so its result is a real answer to count.
+func TestRunWithAnyNonMemberInputIsNotInternal(t *testing.T) {
+	runs := []Run{{
+		RunID: "r1", Result: "here is what I found", FinishedAt: "2026-08-21T06:00:05Z",
+		Inputs: []RecordedInput{
+			{ID: "member:member-xw4h5:r0", Text: "the ha report", Origin: originMember, ReceivedAt: "2026-08-21T06:00:00Z"},
+			{ID: "in-1", Text: "also check the disk", Origin: "channel", ReceivedAt: "2026-08-21T06:00:01Z"},
+		},
+	}}
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
+	for _, m := range got {
+		if m.Kind == MsgAgent && m.InternalRound {
+			t.Fatalf("a run with a genuine external input must not be InternalRound: %+v", m)
+		}
+	}
+}
+
+// A run from before Inputs was recorded (len(Inputs) == 0) is never flagged
+// InternalRound — the console cannot tell what triggered it, and the established
+// rule everywhere else in this file is to render it exactly as it always
+// has rather than guess.
+func TestRunWithNoRecordedInputsIsNotInternal(t *testing.T) {
+	runs := []Run{{RunID: "r1", Result: "an old answer", FinishedAt: "2026-08-21T06:00:05Z"}}
+	got := mergeTranscript("c1", "console", nil, runs, ConversationSummary{})
+	if len(got) != 1 || got[0].InternalRound {
+		t.Fatalf("a run with no recorded inputs must not be flagged InternalRound: %+v", got)
+	}
+}
+
+// A result still sitting in the LIVE buffer (not yet reconstructed from
+// status.runs[]) must be flagged exactly like one rebuilt here — matched by
+// runID — or an active coordinator conversation would read as unread for as
+// long as the buffer holds that entry, which can outlast the round itself by
+// a long way (maxThreadMessages, maxThreads).
+func TestInternalRoundIsFlaggedEvenWhileStillInTheLiveBuffer(t *testing.T) {
+	live := []Message{{ID: "send:c1:console:r1", Thread: "c1", Kind: MsgAgent,
+		Text: "deciding what to do next", At: "2026-08-21T06:00:05Z", runID: "r1"}}
+	runs := []Run{{
+		RunID: "r1", Result: "deciding what to do next", FinishedAt: "2026-08-21T06:00:05Z",
+		Inputs: []RecordedInput{{
+			ID: "member:member-xw4h5:r0", Text: "the ha report", Origin: originMember,
+			ReceivedAt: "2026-08-21T06:00:00Z",
+		}},
+	}}
+	got := mergeTranscript("c1", "console", live, runs, ConversationSummary{})
+	if len(got) != 1 || !got[0].InternalRound {
+		t.Fatalf("the live-buffered copy of an internal round must be flagged too: %+v", got)
+	}
 }
 
 // An input predating the Origin field (no "origin" key in the stored record)
