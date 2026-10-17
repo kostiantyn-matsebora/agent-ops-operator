@@ -144,7 +144,7 @@ counting.
 
 **This breaker is `runtime-claude`'s own mitigation**, not a manager
 obligation or a requirement on every runtime — see
-[`docs/contracts/runtime.md`](contracts/runtime.md) for what the contract
+the [runtime specification](contracts/runtime.md) for what the contract
 itself requires.
 
 ## What it does NOT ship

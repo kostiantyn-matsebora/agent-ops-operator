@@ -222,7 +222,8 @@ def check_file(path: pathlib.Path) -> list[str]:
             continue
         link_path, _, anchor = raw_target.partition("#")
         if link_path:
-            target_path = (path.parent / link_path).resolve()
+            base = REPO if link_path.startswith("/") else path.parent
+            target_path = (base / link_path.lstrip("/")).resolve()
             if not target_path.exists():
                 problems.append(
                     f"{display(path)}:{lineno}: "

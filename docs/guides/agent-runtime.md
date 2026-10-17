@@ -344,6 +344,10 @@ condition is what confirms it actually resolves.
 
 ## 7. Point a Pipeline at it, and verify
 
+This station builds toward [Manager's
+provisions](../contracts/runtime.md#managers-provisions), where the manager
+creates one pod per conversation from the runtime the Pipeline resolves.
+
 Declaring it through the chart is the ordinary path — the `AgentRuntime` above
 is what that renders, and applying one by hand is the same object.
 

@@ -12,6 +12,7 @@ adapter.
    | `ensure-topic` | create a thread for a conversation |
    | `send` | post a message |
    | `close-topic` | archive the thread in `op.threadId` — its conversation has ended |
+   | `delete-conversation` | tell the thread in `op.threadId` its conversation is gone for good |
 
    **Delivery is at-least-once.** Dedup by `op.id`.
 
@@ -53,8 +54,7 @@ adapter.
    | op | Body |
    |---|---|
    | `ensure-topic` | `{"threadId":"…"}` — an opaque string in your id space |
-   | `close-topic` | **empty** |
-   | any, on failure | `{"error":"…"}` — surfaced as a Conversation condition and regenerated |
+   | `close-topic` | **empty** |   | any, on failure | `{"error":"…"}` — surfaced as a Conversation condition and regenerated |
 
    **`close-topic` is the exception to that last clause, in both halves.** Its
    conversation is being deleted, so a failure is *logged* rather than written
