@@ -109,8 +109,9 @@ signal:
     # (http://agentops-signal-pulse.<ns>.svc:8080/webhook/<name>).
     name: pulse-alerts
     # Pulse's own base URL, e.g. https://pulse.example.org. Rides
-    # spec.config.baseUrl — the ONE flat config field this source carries
-    # (design.md Decision 1), read by the adapter's own registration call
+    # spec.config.baseUrl — one of the three flat config fields this source
+    # carries, with webhookUrl and webhookHeaders below (design.md Decision 1),
+    # read by the adapter's own registration call
     # (POST /api/notifications/webhooks). Required for the adapter to
     # self-register; without it the source still serves webhooks, reporting
     # RegistrationNotConfigured instead of failing.

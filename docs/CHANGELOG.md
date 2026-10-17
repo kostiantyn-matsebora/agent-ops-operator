@@ -34,8 +34,8 @@ for the source and the reference material beside this file.
 ### Changed
 
 **BREAKING: every bundle's wiring switch is now `<bundle>.wiringEnabled`,**
-not `<bundle>.pipelines.enabled`. `kubernetes`, `prometheus`, `home-assistant`
-and `pulse` all move.
+not `<bundle>.pipelines.enabled`. `kubernetes`, `prometheus` and
+`home-assistant` all move. `pulse` is new this release and ships the new name.
 
 The old spelling named one of the two shapes a bundle's route can take — a
 `Pipeline`, under `global.agentops.wiringMode: pipelines` — even though the
