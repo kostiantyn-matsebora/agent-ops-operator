@@ -1115,7 +1115,7 @@ func TestDemoModeAlsoShowcasesAPlainPipelineUnderCoordinator(t *testing.T) {
 	for _, needle := range []string{
 		"name: k8s-engineer",   // the SAME observing route's profile
 		"name: cluster-events", // claims the bundle's source
-		"- name: console",     // and the console's
+		"- name: console",      // and the console's
 		"name: k8s-observability",
 	} {
 		if !strings.Contains(doc, needle) {
@@ -2464,6 +2464,14 @@ func coordinatorAgentDescriptions(t *testing.T, rendered string) map[string]stri
 // k8s-operate sat in agents[]. This pins the sentences that make it delegate
 // instead, and the ordering the operator's prefix and the self-heal paragraph
 // have always had around them.
+//
+// A second live regression shaped the rest: a conversation that had delegated
+// correctly drifted, within the SAME conversation, into inventorying its own
+// toolbox and answering "this can't be answered live" from it. The prompt
+// also claimed "you hold no domain tool yourself" while the runtime visibly
+// handed it a shell — a prompt contradicting the observed toolbox gets
+// discounted wholesale. Hence the pins on the mandatory first call, the
+// re-scoped generic tools, the verdict rule and the loop-never-expires line.
 func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
 	role := coordinatorRole(t)
 	for _, phrase := range []string{
@@ -2486,16 +2494,28 @@ func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
 		"An observing agent running out of evidence is not a dead end",
 		"same task to that domain's acting counterpart",
 		"needs no approval",
+		"AND THE FIRST TOOL CALL OF EVERY CONVERSATION",
+		"that roster's fact",
+		"is not among your tools",
+		"your coordination path is broken",
+		"housekeeping around delegation",
+		"IS the signal to invoke the agent",
+		"This loop never expires",
+		"never your own recent attempts",
+		"Your own lack of access is never evidence",
+		"the answer is premature",
 	} {
 		if !strings.Contains(role, phrase) {
 			t.Errorf("the coordinating agent's role lacks %q:\n%s", phrase, role)
 		}
 	}
-	// The dispatcher's sentences are gone, not merely outnumbered.
+	// The dispatcher's sentences are gone, not merely outnumbered — and so is
+	// the toolbox claim the agent could see was false.
 	for _, retired := range []string{
 		"only job is reading what started the conversation and routing it",
 		"Pick the one whose description matches",
 		"description of when to use it",
+		"You hold no domain tool yourself",
 	} {
 		if strings.Contains(role, retired) {
 			t.Errorf("the role still carries the dispatcher sentence %q:\n%s", retired, role)
@@ -2555,11 +2575,11 @@ func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
 	// toolset, and what it CANNOT — one of each, so a rewrite that drops either
 	// half fails here.
 	must := map[string][]string{
-		"k8s-observe":  {"read-only", "logs", "Cannot change anything", "Hand it"},
-		"k8s-operate":  {"act on the cluster", "restart a workload by deleting its pod", "scale", "patch", "pod execution", "Cannot touch kube-system", "Hand it an instruction"},
+		"k8s-observe":        {"read-only", "logs", "Cannot change anything", "Hand it"},
+		"k8s-operate":        {"act on the cluster", "restart a workload by deleting its pod", "scale", "patch", "pod execution", "Cannot touch kube-system", "Hand it an instruction"},
 		"alert-investigator": {"PromQL", "Cannot change anything", "Hand it a firing alert"},
-		"ha-control":   {"Assist intents", "operate the house", "Cannot reach configuration", "Hand it"},
-		"ha-ops":       {"REST API", "diagnose", "reaches configuration", "Describes and stops", "Hand it"},
+		"ha-control":         {"Assist intents", "operate the house", "Cannot reach configuration", "Hand it"},
+		"ha-ops":             {"REST API", "diagnose", "reaches configuration", "Describes and stops", "Hand it"},
 	}
 	// The CRD caps a description (coordinator_types.go, MaxLength) and helm
 	// template validates no schema, so the first live install of the
