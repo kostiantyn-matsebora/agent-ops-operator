@@ -136,7 +136,7 @@ Everything below is under `pulse:`.
 | `enabled` | `false` | `true` to render the bundle |
 | `signal.defaultSource.enabled` | `false` | `true`, or the route claims nothing |
 | `signal.defaultSource.baseUrl` | **empty** | your Pulse instance's base URL |
-| `signal.defaultSource.webhookUrl` | empty, derives the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
+| `signal.defaultSource.webhookUrl` | empty, chart renders the in-cluster Service URL | an externally reachable URL, when Pulse is outside the cluster |
 | `signal.ingress.enabled` | `false` | `true` to expose the webhook path through your ingress controller |
 | `signal.ingress.host` | **empty, required when enabled** | the hostname Pulse will call |
 | `signal.credentials.token` | empty | the Pulse API token that registers the webhook, or `existingSecret` for a Secret you manage |
@@ -215,7 +215,7 @@ The two paths need different things from you:
 | Path | Direction | Works unmodified? |
 |---|---|---|
 | MCP (agents reach Pulse) | out of the cluster | **Yes.** `signal.defaultSource.baseUrl` and `mcpServer.backend` already take any reachable URL — in-cluster or not |
-| Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The adapter registers its own in-cluster Service DNS name, which an external Pulse cannot resolve |
+| Webhook (Pulse reaches the adapter) | into the cluster | **No, by default.** The chart renders the adapter's own in-cluster Service DNS name, which an external Pulse cannot resolve |
 
 Fix the webhook path with `signal.ingress` — it points an Ingress at the
 SignalAdapter reconciler's own Service, so the chart does the exposing for
@@ -241,7 +241,8 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
 
 **Both lines matter.** The Ingress makes the path *reachable*. `webhookUrl`
 is the separate step of telling Pulse to actually use it — without it the
-adapter still registers its own unreachable in-cluster URL, Ingress or not.
+chart's own unreachable in-cluster URL still gets registered, Ingress or
+not.
 
 No ingress controller? Expose the adapter's own `agentops-signal-pulse`
 Service (port 8080) another way instead — a `LoadBalancer` Service, a

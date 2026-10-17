@@ -187,14 +187,13 @@ func TestReconcileRegistrationInitialFailureThenSuccessHeals(t *testing.T) {
 	a := &adapter{
 		mgr:        NewManager(mgrSrv.URL, "tok"),
 		sourceType: "pulse",
-		podNS:      "agent-ops",
 		listen:     ":8080",
 		sources:    map[string]string{},
 		reported:   map[string]string{},
 	}
 	info := SourceInfo{
 		Name:                "pulse-default",
-		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `"}`),
+		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `","webhookUrl":"http://agentops-signal-pulse.agent-ops.svc:8080/webhook/pulse-default"}`),
 		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
 	}
 	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
@@ -268,41 +267,84 @@ func TestReconcileRegistrationInvalidConfigReportsOnce(t *testing.T) {
 	}
 }
 
-// TestReconcileRegistrationWebhookURLOverride is Pulse-outside-the-cluster's
-// verification: spec.config.webhookUrl, when set, is what gets registered
-// with Pulse instead of the derived in-cluster Service URL — the adapter
-// never has to resolve its own cluster-internal DNS name for this to work.
-func TestReconcileRegistrationWebhookURLOverride(t *testing.T) {
+// TestReconcileRegistrationUsesConfiguredWebhookURL is the adapter's
+// dumb-transport verification: it registers exactly the spec.config.
+// webhookUrl the source carries, verbatim — never deriving one of its own
+// (same posture as channels/telegram and signals/ha). Covers both the
+// chart-computed in-cluster form and an operator-set external one; the
+// adapter cannot tell them apart and must not try to.
+func TestReconcileRegistrationUsesConfiguredWebhookURL(t *testing.T) {
+	for _, webhookURL := range []string{
+		"http://agentops-signal-pulse.agent-ops.svc:8080/webhook/pulse-default",
+		"https://pulse-adapter.example.org/webhook/pulse-default",
+	} {
+		t.Run(webhookURL, func(t *testing.T) {
+			mgr := &fakeManager{}
+			mgrSrv := mgr.server(t)
+			pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+			pulseSrv := pulse.server(t)
+
+			a := &adapter{
+				mgr:        NewManager(mgrSrv.URL, "tok"),
+				sourceType: "pulse",
+				listen:     ":8080",
+				sources:    map[string]string{},
+				reported:   map[string]string{},
+			}
+			info := SourceInfo{
+				Name:                "pulse-default",
+				Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `","webhookUrl":"` + webhookURL + `"}`),
+				CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+			}
+			t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
+
+			a.reconcileRegistration(context.Background(), info)
+
+			pulse.mu.Lock()
+			defer pulse.mu.Unlock()
+			wh, ok := pulse.webhooks["agentops-pulse-default"]
+			if !ok {
+				t.Fatal("expected the webhook to be registered")
+			}
+			if wh.URL != webhookURL {
+				t.Fatalf("expected %q to be registered verbatim, got %q", webhookURL, wh.URL)
+			}
+		})
+	}
+}
+
+// TestReconcileRegistrationNotConfiguredWithoutWebhookURL closes the branch
+// where a source carries baseUrl but no webhookUrl — the adapter must
+// refuse to guess one, reporting the same not-configured state it already
+// does for a missing baseUrl.
+func TestReconcileRegistrationNotConfiguredWithoutWebhookURL(t *testing.T) {
 	mgr := &fakeManager{}
 	mgrSrv := mgr.server(t)
 	pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
 	pulseSrv := pulse.server(t)
 
 	a := &adapter{
-		mgr:        NewManager(mgrSrv.URL, "tok"),
-		sourceType: "pulse",
-		podNS:      "agent-ops", // would otherwise derive a cluster-internal URL
-		listen:     ":8080",
-		sources:    map[string]string{},
-		reported:   map[string]string{},
+		mgr:      NewManager(mgrSrv.URL, "tok"),
+		sources:  map[string]string{},
+		reported: map[string]string{},
 	}
 	info := SourceInfo{
 		Name:                "pulse-default",
-		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `","webhookUrl":"https://pulse-adapter.example.org/webhook/pulse-default"}`),
+		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `"}`),
 		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
 	}
 	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
 
 	a.reconcileRegistration(context.Background(), info)
 
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if len(mgr.statuses) != 1 || mgr.statuses[0]["reason"] != "RegistrationNotConfigured" {
+		t.Fatalf("expected one RegistrationNotConfigured report, got: %+v", mgr.statuses)
+	}
 	pulse.mu.Lock()
 	defer pulse.mu.Unlock()
-	wh, ok := pulse.webhooks["agentops-pulse-default"]
-	if !ok {
-		t.Fatal("expected the webhook to be registered")
-	}
-	if wh.URL != "https://pulse-adapter.example.org/webhook/pulse-default" {
-		t.Fatalf("expected the override URL to be registered, got %q (would otherwise have been the cluster-internal %q)",
-			wh.URL, a.endpoint(info.Name))
+	if pulse.creates != 0 {
+		t.Fatalf("must not register anything without a configured webhookUrl: creates=%d", pulse.creates)
 	}
 }

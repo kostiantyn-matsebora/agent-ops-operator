@@ -34,11 +34,14 @@
       crash-loop on failure, a degraded Ready reason reported via
       `/signal/sources/{name}/status`, healing on a later successful retry.
       Verify with a unit test simulating an initial failure then a success.
-- [x] 1.8 Make the registered delivery URL overridable via
-      `spec.config.webhookUrl`, for a Pulse instance outside the cluster
-      that cannot resolve the adapter's own in-cluster Service DNS name
-      (see design.md Decision 1b). Verify with a unit test asserting the
-      override is registered verbatim instead of the derived URL.
+- [x] 1.8 Require the registered delivery URL from `spec.config.webhookUrl`,
+      the same way `baseUrl` is required — the adapter is a dumb transport
+      and never derives one itself (see design.md Decision 1b). The chart
+      renders it for the shipped source: the in-cluster Service DNS form by
+      default, an operator override for a Pulse instance outside the
+      cluster. Verify with a unit test asserting the configured URL is
+      registered verbatim, and another asserting a missing `webhookUrl`
+      reports not-configured like a missing `baseUrl` does.
 - [x] 1.9 Register `spec.config.webhookHeaders` as Pulse's own
       `WebhookConfig.Headers` field (confirmed real against Pulse's
       `internal/notifications/notifications.go`) — static headers Pulse
@@ -104,10 +107,13 @@
       build matrix entries the script's output says are missing. Verify
       `.github/components.sh images` and `.github/components.sh modules`
       list both new components.
-- [x] 3.9 Render `signal.defaultSource.webhookUrl` onto
-      `SignalSource.spec.config.webhookUrl`, omitted entirely when unset.
-      Verify render tests for both the override riding the config and the
-      key's absence by default.
+- [x] 3.9 Render `SignalSource.spec.config.webhookUrl` always: an
+      operator-set `signal.defaultSource.webhookUrl` when given, otherwise
+      the chart's own computed in-cluster Service DNS form (namespace and
+      port are already known at template time) — never omitted, since the
+      adapter requires it the same way it requires `baseUrl`. Verify render
+      tests for both the override riding the config and the computed
+      default's exact value.
 - [x] 3.10 Render `signal.ingress`: an Ingress targeting the SignalAdapter
       reconciler's own ClusterIP Service (`agentops-signal-<name>:8080`),
       never a second Service of this chart's own, shaped like the parent

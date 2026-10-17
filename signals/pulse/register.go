@@ -51,11 +51,18 @@ import (
 type registerConfig struct {
 	// BaseURL is Pulse's own base URL, e.g. https://pulse.example.org.
 	BaseURL string `json:"baseUrl"`
-	// WebhookURL overrides the URL registered WITH Pulse as the delivery
-	// target. Empty derives the in-cluster Service DNS name
-	// (http://agentops-signal-<adapter>.<ns>.svc:<port>/webhook/<source>),
-	// which only resolves for a Pulse instance reachable from inside this
-	// cluster's network.
+	// WebhookURL is the URL registered WITH Pulse as the delivery target.
+	// This adapter is a dumb transport — it never derives a URL of its own
+	// (same posture as channels/telegram and signals/ha: no connectivity
+	// information lives on the adapter, only on the source), so this is
+	// required for registration exactly like BaseURL is: a source carrying
+	// one but not the other still serves, reporting
+	// RegistrationNotConfigured.
+	//
+	// The bundle chart computes this for the one source it ships (the
+	// in-cluster Service DNS name, http://agentops-signal-<adapter>.<ns>
+	// .svc:<port>/webhook/<source>) — see chart/charts/pulse/templates
+	// /signal.yaml. A hand-authored source must set it explicitly.
 	//
 	// Pulse is commonly NOT in-cluster — it watches Proxmox/Docker hosts
 	// that may sit entirely outside Kubernetes — so a Pulse that cannot
@@ -156,46 +163,23 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) st
 		a.report(ctx, info.Name, "InvalidConfig", err.Error())
 		return ""
 	}
-	if cfg == nil || cfg.BaseURL == "" {
+	if cfg == nil || cfg.BaseURL == "" || cfg.WebhookURL == "" {
 		a.report(ctx, info.Name, "RegistrationNotConfigured",
-			fmt.Sprintf("served by signal-pulse — POST %s; set spec.config.baseUrl (and a credentialsSecretRef "+
-				"holding a Pulse API token) to register this webhook with Pulse automatically", a.endpoint(info.Name)))
+			"served by signal-pulse — set spec.config.baseUrl and spec.config.webhookUrl (and a credentialsSecretRef "+
+				"holding a Pulse API token) to register this webhook with Pulse automatically")
 		return ""
 	}
 	token, signingSecret := pulseCredential(info)
-	url := cfg.WebhookURL
-	if url == "" {
-		// No override: derive the in-cluster Service URL, which only
-		// resolves for a Pulse reachable from inside this cluster's
-		// network. An external Pulse needs spec.config.webhookUrl set to
-		// whatever the operator exposed this adapter's /webhook/<source>
-		// path as — see registerConfig's doc comment.
-		url = a.endpoint(info.Name)
-	}
 	client := newPulseClient(cfg.BaseURL, token)
-	desired := desiredWebhook(info.Name, url, signingSecret, cfg.WebhookHeaders)
+	desired := desiredWebhook(info.Name, cfg.WebhookURL, signingSecret, cfg.WebhookHeaders)
 	if err := client.ensureWebhook(ctx, desired); err != nil {
 		a.report(ctx, info.Name, "PulseRegistrationFailed",
 			fmt.Sprintf("served, but could not register the webhook with Pulse: %v", err))
 		return signingSecret
 	}
 	a.report(ctx, info.Name, "PulseRegistered",
-		fmt.Sprintf("served by signal-pulse — Pulse posts alerts to %s", url))
+		fmt.Sprintf("served by signal-pulse — Pulse posts alerts to %s", cfg.WebhookURL))
 	return signingSecret
-}
-
-// endpoint is this adapter's webhook URL for a source (in-cluster form when
-// the reconciler injected the pod namespace; path-only otherwise) — mirrors
-// signals/alertmanager's own.
-func (a *adapter) endpoint(source string) string {
-	if a.podNS == "" {
-		return "<service>/webhook/" + source
-	}
-	port := strings.TrimPrefix(a.listen, ":")
-	if port == "" {
-		port = "8080"
-	}
-	return fmt.Sprintf("http://agentops-signal-%s.%s.svc:%s/webhook/%s", a.sourceType, a.podNS, port, source)
 }
 
 // pulseClient is a minimal Pulse REST client, stdlib only (this module stays

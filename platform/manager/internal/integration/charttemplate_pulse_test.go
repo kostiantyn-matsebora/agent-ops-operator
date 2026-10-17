@@ -138,17 +138,19 @@ func TestPulseWebhookURLOverrideRidesSourceConfig(t *testing.T) {
 	}
 }
 
-// Without the override, spec.config carries no webhookUrl key at all — the
-// adapter then derives the in-cluster Service URL itself, and a present but
-// empty key would be a different, wrong signal to send it.
-func TestPulseWebhookURLOverrideOmittedByDefault(t *testing.T) {
+// Without the override, the chart computes the in-cluster Service DNS form
+// itself — the adapter is a dumb transport (same posture as
+// channels/telegram and signals/ha) and never derives one of its own
+// (signals/pulse/register.go), so spec.config.webhookUrl must always carry
+// something.
+func TestPulseWebhookURLDefaultsToInClusterServiceDNS(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "pulse.enabled=true",
 		"--set", "pulse.signal.defaultSource.enabled=true",
 		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org")
 	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
-	if strings.Contains(doc, "webhookUrl") {
-		t.Errorf("expected no webhookUrl key with no override set, got:\n%s", doc)
+	if !strings.Contains(doc, "webhookUrl: http://agentops-signal-pulse.default.svc:8080/webhook/pulse-alerts") {
+		t.Errorf("expected the chart-computed in-cluster webhookUrl, got:\n%s", doc)
 	}
 }
 

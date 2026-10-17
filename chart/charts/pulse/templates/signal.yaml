@@ -12,10 +12,15 @@ Pulse sends outgoing webhooks only: there is no receiver-registration concept
 to call into, so "registering" means THIS adapter calling Pulse's own API
 (POST /api/notifications/webhooks) to tell it where to post. The
 SignalAdapter CRD carries no generic pod-env passthrough, so the registration
-config (Pulse's base URL, its API token, the optional HMAC signing secret)
-rides the served SignalSource's own spec.config/credentialsSecretRef instead
-— the same two mechanisms signals/alertmanager and signals/ha already use.
-See design.md Decision 1.
+config (Pulse's base URL, its delivery URL, its API token, the optional HMAC
+signing secret) rides the served SignalSource's own
+spec.config/credentialsSecretRef instead — the same two mechanisms
+signals/alertmanager and signals/ha already use. The adapter is a dumb
+transport: it holds no connectivity information of its own (same posture as
+channels/telegram and signals/ha), only ever following what the source
+configures — including the delivery URL it registers with Pulse, which this
+chart computes for the one source it ships and a hand-authored source must
+set itself. See design.md Decision 1.
 */ -}}
 {{- if and (include "pulse.active" .) .Values.signal.enabled }}
 {{- $sig := .Values.signal }}
@@ -65,12 +70,14 @@ spec:
       webhookUrl:
         type: string
         description: >-
-          Overrides the URL registered WITH Pulse as the delivery target.
-          Empty derives the in-cluster Service DNS name, which only resolves
-          for a Pulse reachable from inside this cluster's network. Set this
-          when Pulse is NOT in-cluster: an externally reachable URL for a
-          LoadBalancer, NodePort, Ingress or tunnel you expose this
-          adapter's own /webhook/<source> path through.
+          The URL registered WITH Pulse as the delivery target. The adapter
+          is a dumb transport — it never derives this itself, only ever
+          reads it off this source. A chart-rendered default source carries
+          the in-cluster Service DNS name computed by the chart; a
+          hand-authored source must set it explicitly. Set this to an
+          externally reachable URL (a LoadBalancer, NodePort, Ingress or
+          tunnel you expose this adapter's own /webhook/<source> path
+          through) when Pulse is NOT in-cluster.
       webhookHeaders:
         type: object
         additionalProperties:
@@ -128,7 +135,19 @@ spec:
   {{- end }}
   {{- $cfg := dict }}
   {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
-  {{- with $src.webhookUrl }}{{ $_ := set $cfg "webhookUrl" . }}{{ end }}
+  {{- /*
+  webhookUrl is REQUIRED by the adapter (register.go treats it the same way
+  as baseUrl — served but RegistrationNotConfigured without it), never
+  derived there. The chart carries it instead: this source's own in-cluster
+  Service DNS form by default, overridable for a Pulse that is not
+  in-cluster. Always set, never omitted — the adapter makes no guess of
+  its own about where it is reachable.
+  */ -}}
+  {{- $webhookUrl := $src.webhookUrl }}
+  {{- if not $webhookUrl }}
+  {{- $webhookUrl = printf "http://agentops-signal-%s.%s.svc:8080/webhook/%s" $sig.name .Release.Namespace $src.name }}
+  {{- end }}
+  {{- $_ := set $cfg "webhookUrl" $webhookUrl }}
   {{- with $src.webhookHeaders }}{{ $_ := set $cfg "webhookHeaders" . }}{{ end }}
   {{- with $cfg }}
   config:

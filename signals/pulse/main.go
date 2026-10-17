@@ -29,9 +29,12 @@
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default "pulse" —
 // in-cluster the reconciler injects the SignalAdapter CR name), LISTEN_ADDR
-// (default ":8080"), POD_NAMESPACE — all reconciler-injected, contract
-// parity with every other signal adapter. No Pulse-specific env: that
-// config rides the served SignalSource itself (register.go).
+// (default ":8080") — all reconciler-injected, contract parity with every
+// other signal adapter. No Pulse-specific env, and no connectivity
+// information of the adapter's own either (same posture as
+// channels/telegram and signals/ha) — the delivery URL registered with
+// Pulse rides the served SignalSource itself (register.go), the same as
+// its base URL.
 package main
 
 import (
@@ -58,7 +61,6 @@ func sanitizeLogText(s string) string {
 type adapter struct {
 	mgr        *Manager
 	sourceType string // ADAPTER_NAME
-	podNS      string // downward-API namespace, "" when unset
 	listen     string
 
 	mu sync.Mutex
@@ -97,7 +99,6 @@ func main() {
 	a := &adapter{
 		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		sourceType: sourceType,
-		podNS:      os.Getenv("POD_NAMESPACE"),
 		listen:     listen,
 		sources:    map[string]string{},
 		reported:   map[string]string{},

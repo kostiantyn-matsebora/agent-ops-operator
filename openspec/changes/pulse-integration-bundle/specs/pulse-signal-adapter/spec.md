@@ -40,7 +40,8 @@ Pulse API token plus the optional HMAC signing secret from
 
 This bundle still ships exactly one default source. The config shape is
 three flat fields — `{"baseUrl": "...", "webhookUrl": "...", "webhookHeaders": {...}}`,
-the last two optional (see the delivery-URL and header requirements below) — never
+`webhookHeaders` optional, `webhookUrl` required for registration exactly
+like `baseUrl` is (see the delivery-URL requirement below) — never
 `signals/alertmanager`'s `register` sub-block.
 
 Registration follows whichever source the adapter serves, not a
@@ -55,29 +56,39 @@ exist.
 - **THEN** registration proceeds, driven entirely by that source's own
   config and credential
 
-### Requirement: The registered delivery URL is overridable for a Pulse outside the cluster
-The adapter SHALL derive the webhook URL it registers with Pulse from its
-own in-cluster Service identity by default
-(`http://agentops-signal-<adapter>.<namespace>.svc:<port>/webhook/<source>`).
+### Requirement: The registered delivery URL comes from the source, never the adapter
+The adapter is a dumb transport — the same posture as `channels/telegram`
+and `signals/ha`. It SHALL hold no connectivity information of its own.
+It SHALL register exactly the URL `spec.config.webhookUrl` carries,
+verbatim, never deriving one itself.
 
-`spec.config.webhookUrl`, when set, SHALL be registered verbatim instead.
-Pulse commonly runs outside the cluster — it watches Proxmox/Docker hosts
-that may sit entirely outside Kubernetes — so the derived, cluster-internal
-URL is unreachable from such a Pulse.
+A served source carrying `spec.config.baseUrl` but no `webhookUrl` SHALL be
+treated as not configured for registration. That is the same treatment a
+missing `baseUrl` gets.
 
-The adapter makes no attempt to expose itself externally. An operator who
-already exposes this adapter's `/webhook/<source>` path (a LoadBalancer
-Service, a NodePort, an Ingress, or a tunnel) states the resulting URL
-here.
+The bundle chart renders `webhookUrl` for the one source it ships:
+
+- Default: the in-cluster Service DNS form
+  (`http://agentops-signal-<adapter>.<namespace>.svc:<port>/webhook/<source>`),
+  computed at the template level, where the namespace and port are already
+  known.
+- Override: an operator-set external URL, for a Pulse outside the cluster.
+  Pulse commonly runs this way — it watches Proxmox/Docker hosts that may
+  sit entirely outside Kubernetes, unreachable from the in-cluster form.
+
+A hand-authored second source carries its own `webhookUrl` the same way.
+The adapter makes no attempt to expose itself externally either way.
 
 #### Scenario: Pulse outside the cluster registers an external URL
-- **WHEN** the served source carries `spec.config.webhookUrl`
-- **THEN** that exact URL is registered with Pulse, never the derived
-  in-cluster Service URL
+- **WHEN** the served source carries a `spec.config.webhookUrl` naming an
+  externally reachable address
+- **THEN** that exact URL is registered with Pulse
 
-#### Scenario: No override still derives the in-cluster URL
-- **WHEN** the served source carries no `spec.config.webhookUrl`
-- **THEN** the adapter registers its own derived in-cluster Service URL
+#### Scenario: A missing webhookUrl is not configured, not derived
+- **WHEN** the served source carries `spec.config.baseUrl` but no
+  `spec.config.webhookUrl`
+- **THEN** the adapter registers nothing and reports the same
+  not-configured state a missing `baseUrl` produces
 
 ### Requirement: The adapter registers its webhook with Pulse at pod start, and keeps healing it
 At pod start the adapter SHALL call Pulse's `POST /api/notifications/webhooks`

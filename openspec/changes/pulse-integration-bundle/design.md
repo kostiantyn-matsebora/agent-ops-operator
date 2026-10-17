@@ -113,16 +113,31 @@ outside the Kubernetes cluster this chart installs into. Alertmanager is
 different — this repository's other bundles can assume it runs alongside
 the cluster it alerts on.
 
-Deriving the webhook URL from the adapter's own in-cluster Service
-identity, as `signals/alertmanager` does unconditionally, would register a
-URL Pulse can never reach once it lives outside the cluster.
+`signals/alertmanager` derives its webhook URL in the adapter's own Go
+code, from the adapter's own in-cluster Service identity.
+
+Copying that unconditionally would register a URL Pulse can never reach
+once it lives outside the cluster. The adapter has no way to tell whether
+it does.
 
 `spec.config` gains a second flat field, `webhookUrl`, read by the same
-mechanism as `baseUrl`. Set, it is registered verbatim. Empty, the adapter
-derives the in-cluster URL exactly as before.
+mechanism as `baseUrl`. Required for registration, never derived by the
+adapter.
+
+The adapter is a dumb transport, the same posture as `channels/telegram`
+and `signals/ha`. It holds no connectivity information of its own, only
+ever what the served source configures.
+
+The chart renders `webhookUrl` for the one source it ships:
+
+- Default: the in-cluster Service DNS form. The chart already has the
+  namespace and the port at template time.
+- Override: an operator-set external URL.
+
+A hand-authored second source sets it the same way the operator would.
 
 `webhookUrl` only says what to register. Saying it is not the same as
-making it true — a config field with nothing behind it would read as
+making it true — a config value with nothing behind it would read as
 working and silently deliver nothing, which is worse than the gap it
 claims to close.
 

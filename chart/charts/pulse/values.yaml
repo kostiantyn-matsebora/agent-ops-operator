@@ -115,9 +115,10 @@ signal:
     # self-register; without it the source still serves webhooks, reporting
     # RegistrationNotConfigured instead of failing.
     baseUrl: ""
-    # Overrides the URL registered WITH Pulse as the delivery target. Empty
-    # derives the in-cluster Service DNS name
-    # (http://agentops-signal-pulse.<ns>.svc:8080/webhook/pulse-alerts),
+    # The URL registered WITH Pulse as the delivery target. The adapter is a
+    # dumb transport — it never derives this itself, only reads it off this
+    # source. Empty renders the chart's own computed in-cluster Service DNS
+    # name (http://agentops-signal-pulse.<ns>.svc:8080/webhook/pulse-alerts),
     # which only resolves for a Pulse reachable from inside THIS cluster's
     # network.
     #
