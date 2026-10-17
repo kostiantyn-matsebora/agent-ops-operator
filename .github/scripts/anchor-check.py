@@ -225,10 +225,11 @@ def check_file(path: pathlib.Path) -> list[str]:
             base = REPO if link_path.startswith("/") else path.parent
             target_path = (base / link_path.lstrip("/")).resolve()
             if not target_path.exists():
+                where = display(base) if base == REPO else display(path.parent)
                 problems.append(
                     f"{display(path)}:{lineno}: "
                     f"broken link {raw_target!r} -- no such file or directory "
-                    f"{link_path!r} relative to {display(path.parent)}/"
+                    f"{link_path!r} relative to {where}/"
                 )
                 continue
         else:

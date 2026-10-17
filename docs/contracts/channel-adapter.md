@@ -54,7 +54,9 @@ adapter.
    | op | Body |
    |---|---|
    | `ensure-topic` | `{"threadId":"…"}` — an opaque string in your id space |
-   | `close-topic` | **empty** |   | any, on failure | `{"error":"…"}` — surfaced as a Conversation condition and regenerated |
+   | `close-topic` | **empty** |
+   | `delete-conversation` | **empty** |
+   | any, on failure | `{"error":"…"}` — surfaced as a Conversation condition and regenerated |
 
    **`close-topic` is the exception to that last clause, in both halves.** Its
    conversation is being deleted, so a failure is *logged* rather than written
