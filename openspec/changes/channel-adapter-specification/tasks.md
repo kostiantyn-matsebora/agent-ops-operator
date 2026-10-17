@@ -15,6 +15,9 @@
       `channels/telegram` and `platform/console` test that exercises it where
       one exists. Verify both shipped adapters pass every item by reading
       their tests, recording any gap as a gap.
+- [ ] 1.5 Strip any channel contract statement left in `docs/contracts.md`, so
+      the specification page is the only statement. Verify it keeps only a
+      pointer to the page.
 
 ## 2. Rewrite the adopter guide as the station procedure
 
@@ -45,7 +48,7 @@
 
 ## 5. System tests — testing-specialist
 
-- [ ] 5.1 Nothing here is decided by a cluster — the change is documentation
+- [x] 5.1 Nothing here is decided by a cluster — the change is documentation
       and context rules. No manager, adapter, chart or RBAC behavior changes.
 
 ## 6. Documentation
