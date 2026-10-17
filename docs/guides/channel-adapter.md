@@ -2,9 +2,9 @@
 title: "Talk to agents from your own chat"
 permalink: /guides/channel-adapter/
 description: >-
-  What a channel adapter is, why an operation carries meaning rather than
-  markup, and how to implement one so people can talk to agents from a surface
-  agent-ops does not serve.
+  What a channel adapter is, and how to implement one so people can talk to
+  agents from a surface agent-ops does not serve, station by station against
+  the channel adapter specification.
 
 next:
   eyebrow: Next
@@ -42,14 +42,16 @@ It is **not** what you want when:
   the adapter that already exists.
 
 {: .ao-callout}
-> **Never re-ingest your own outbound posts as inbound.** An implementation that
-> does loops rather than merely duplicating — one adapter may serve several
-> surfaces of one conversation, so a message can be delivered *toward* the
-> transport it entered through.
+> **Never re-ingest your own outbound posts as inbound.** One adapter may serve
+> several surfaces of one conversation, so a message can be delivered *toward*
+> the transport it entered through — that is not the loop this rule forbids.
 
-Review
-[the channel adapter contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts/channel-adapter.md#the-channel-adapter-contract)
-first.
+Review [the channel adapter specification]({{ '/contracts/channel-adapter/' | relative_url }})
+first. This page builds the smallest thing that satisfies it, station by
+station, and every station names the exact section it builds toward.
+
+The specification wins on any disagreement — this page states no
+requirement of its own.
 
 ## The overall shape
 
@@ -62,15 +64,18 @@ Four pieces:
 3. **A `Channel` naming it**, with that surface's credentials.
 4. **A `Pipeline` listing that channel**, so conversations are bound to it.
 
-**The manager composes meaning. You compose presentation.** An operation carries
-a typed message or a topic descriptor, and there is no `op.text` and no
-`op.title`. Escaping, length limits, splitting and topic naming belong to the
+**The manager composes meaning. You compose presentation.** An operation
+carries a typed message or a topic descriptor, and there is no `op.text`
+and no `op.title` — see [The typed message]({{ '/contracts/channel-adapter/' | relative_url }}#the-typed-message).
+
+Escaping, length limits, splitting and topic naming belong to the
 component that knows them, which is yours.
 
-## Take operations from the queue
+## 1. Take operations from the queue
 
-Long-poll. `contract=2` is required, and an absent or outdated version is
-refused at the door with a `400` naming the current one.
+Long-poll — see [GET /channel/ops]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelops).
+`contract=2` is required, and an absent or outdated version is refused at the
+door with a `400` naming the current one.
 
 ```sh
 curl -H "Authorization: Bearer $ADAPTER_TOKEN" \
@@ -82,72 +87,96 @@ curl -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
   "$env:MANAGER_URL/channel/ops?adapter=$env:ADAPTER_NAME&contract=2&wait=25"
 ```
 
-| Operation | You do | You report to `POST /channel/ops/{id}/done` |
+A `204` means nothing queued — poll again. A delivered op is
+[the operation envelope]({{ '/contracts/channel-adapter/' | relative_url }}#the-operation-envelope),
+one of
+[four typed kinds]({{ '/contracts/channel-adapter/' | relative_url }}#typed-operations),
+carrying
+[a claim window]({{ '/contracts/channel-adapter/' | relative_url }}#the-claim-window):
+
+```json
+{"id":"op-91c3","channel":"my-surface","kind":"send",
+ "message":{"kind":"answer","body":"…"},"reclaimAfterSeconds":120}
+```
+
+**A `503` means this replica is not the manager's current leader.** Retry at
+once, on a fresh connection, exactly as you already retry an empty `204` —
+never log either as a failure (`OPS-1`, `OPS-2`).
+
+**Verify:** the `curl` above returns `204` against an idle channel, and
+returns an envelope shaped like the one above once a conversation queues
+you work.
+
+## 2. Complete each op
+
+Report the outcome to
+[POST /channel/ops/{id}/done]({{ '/contracts/channel-adapter/' | relative_url }}#post-channelopsiddone)
+with
+[the completion result]({{ '/contracts/channel-adapter/' | relative_url }}#the-completion-result):
+
+| Operation | You do | You report |
 |---|---|---|
-| `ensure-topic` | create a thread from `op.topic` | `{"threadId":"…"}`, opaque and in your own id space |
-| `send` | post `op.message` | empty body |
-| `close-topic` | archive the thread | empty body |
-| `delete-conversation` | the conversation is **gone for good** — tombstone, archive, rename, your call | empty body |
+| `ensure-topic` | create a thread from `op.topic` | `{"threadId":"…"}`, opaque, your own id space |
+| `send` | post `op.message` | an empty body |
+| `close-topic` | archive the thread | an empty body, or a logged (never conditioned) failure |
+| `delete-conversation` | gone for good — tombstone, archive, rename, your call | an empty body |
 
 **Delivery is at-least-once.** Dedup by `op.id`, and treat an already-closed
-thread as success. Redelivery is normal.
+thread as success — redelivery is normal.
 
-Report a failure as `{"error":"…"}` and the manager surfaces it as a Conversation
-condition and regenerates the operation.
+A transport backpressure signal — `429`, a `retry_after`, a token-bucket
+rejection — is not an operation failure. Absorb it inside your claim window
+and pace your own sending before you claim, never before you send — see
+[Backpressure]({{ '/contracts/channel-adapter/' | relative_url }}#backpressure-is-the-adapters-to-absorb).
 
-**A `503` means this replica is not the manager's current leader.** Only the
-leader claims an op, and the manager may run more than one pod. Retry at
-once, the same way you already retry an empty `204`. Never log it as a
-failure.
+**Verify:** complete an `ensure-topic` with no `threadId` and no `error`, and
+confirm the manager treats it as a failed op (`OPS-6`) — then complete one
+correctly and confirm the Conversation records your thread id.
 
-## Render the message
+## 3. Render the message
 
-`send` carries `op.message`, one of four kinds:
+`send` carries
+[the typed message]({{ '/contracts/channel-adapter/' | relative_url }}#the-typed-message),
+one of four kinds — `signal`, `answer`, `relay`, `notice` — never rendered
+text.
 
-| Kind | Is |
-|---|---|
-| `signal` | the event that opened or advanced the conversation, as it arrived |
-| `answer` | agent output |
-| `relay` | a user message, from a surface that is not this one |
-| `notice` | the manager on its own behalf — acks, listings, refusals |
+Prose fields arrive in
+[a named markdown subset]({{ '/contracts/channel-adapter/' | relative_url }}#prose-fields-are-markdown).
+Escape it for your transport — passing it through raw is how tags reach a
+reader as literal characters.
 
-Prose arrives in a **named markdown subset**, which the agent is instructed to
-write. Escape it for your transport. An adapter that passes it through raw is
-how tags reach a reader as literal characters.
+**An `answer` or `notice` body may also carry the BLOCK GRAMMAR.** Its
+recognition rules and the fold belong to the `structured-agent-output`
+capability, shared verbatim with `channels/telegram/blocks.go` and the
+console's `blocks.ts`.
 
-**A body may also carry the BLOCK GRAMMAR**, and you parse it:
+See [The body grammar]({{ '/contracts/channel-adapter/' | relative_url }}#the-body-grammar)
+for the rules themselves. This guide states none of its own.
 
-| Tag | Is |
-|---|---|
-| `<title>` | at most one, rendered first, a single line |
-| `<details>` | **the fold** — present it collapsed |
-| anything else | a section the AGENT named, above the fold, in written order |
+**Not implementing it is fine.** `AgentProfile.spec.outputFormat` is
+required, and a profile declaring `none` emits no tags at all.
 
-- **Recognized only** when a tag stands alone on its own line, forms a
-  well-formed pair, and sits outside fenced code. Everything else is literal —
-  agent output is full of `<`.
-- **`answer` and `notice` only.** A relay is somebody's typed words, and a
-  `signal` is a card built from its structured fields.
-- **No tags is one block**, which renders as prose does today.
-- **The section vocabulary is OPEN.** Render a label generically — never carry a
-  list of section names.
+`ensure-topic` carries
+[a topic descriptor]({{ '/contracts/channel-adapter/' | relative_url }}#the-topic-descriptor)
+rather than a baked title, because the manager cannot know your limits — a
+Telegram forum topic caps at 128 characters, a web chat does not.
 
-The manager parses none of this, exactly as it parses none of the markdown. Full
-rules in [the channel adapter
-contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts/channel-adapter.md#the-body-grammar).
+Any message may also carry
+[`choices`]({{ '/contracts/channel-adapter/' | relative_url }}#a-message-choice)
+and `inReplyTo`. Render controls if your transport has them. **Never drop
+`choices`** (`ADA-8`) — the body already names each one, so a transport
+without controls renders them as a list.
 
-**Not implementing it is fine.** `AgentProfile.spec.outputFormat` is required,
-and a profile declaring `none` emits no tags at all.
+**Verify:** send yourself an `answer` carrying `<title>`/`<details>` tags and
+confirm your renderer folds `<details>` and shows the rest in written order.
+Send one with no tags and confirm it renders as plain prose — the
+backward-compatibility case (`ADA-12`).
 
-`ensure-topic` carries a **descriptor** rather than a baked title, because the
-manager cannot know your limits. A Telegram forum topic caps at 128 characters
-and a web chat does not.
+## 4. Push replies back
 
-Any message may also carry `choices` and `inReplyTo`. Render controls if your
-transport has them. **Never drop `choices`** — the body already names each one,
-so a transport without controls renders them as a list.
-
-## Push replies back
+[POST /channel/inbound]({{ '/contracts/channel-adapter/' | relative_url }}#post-channelinbound)
+with
+[the inbound request]({{ '/contracts/channel-adapter/' | relative_url }}#the-inbound-request):
 
 ```sh
 curl -X POST -H "Authorization: Bearer $ADAPTER_TOKEN" \
@@ -162,16 +191,19 @@ curl -X POST -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
 ```
 
 {: .ao-callout}
-> **`threadId` is REQUIRED, and this endpoint never starts a conversation.** A
-> message in a thread the manager does not know is dropped, not adopted. **A
-> channel carries conversations. It never starts one.**
+> **`threadId` is REQUIRED, and this endpoint never starts a conversation**
+> (`IN-1`). A message in a thread the manager does not know is dropped, not
+> adopted (`IN-2`).
 
-Delivery to the other bound surfaces and busy-acks happen manager-side.
+Delivery to the other bound surfaces, and busy-acks, happen manager-side. A
+reply you push comes back to you **only** if you declare
+`echoesOwnMessages: false` (`ADA-5`).
 
-A reply you push comes back to you **only** if your adapter declares
-`echoesOwnMessages: false`.
+**Verify:** push a reply naming a thread the manager does not know, and
+confirm nothing is adopted. Push one on a real thread and confirm it reaches
+every other bound surface, never the one it entered on.
 
-## Declare the ChannelAdapter
+## 5. Declare the ChannelAdapter
 
 <!-- generated: template kind=ChannelAdapter name=my-adapter fields=image,port,echoesOwnMessages,singleton,configSchema,credentialKeys,externals comments=off -->
 ```yaml
@@ -282,7 +314,11 @@ spec:
 - It sends through `gateway-telegram`'s outbound relay.
 - What it needs projected is the gateway binding, `gatewayUrl` and `gatewayToken`, never the bot token.
 
-## Declare a Channel
+**Verify:** `kubectl apply -f my-adapter.yaml` succeeds, and
+`kubectl get channeladapter my-adapter` shows the interface metadata back —
+the next station's `Channel` is what actually serves a surface through it.
+
+## 6. Declare a Channel
 
 <!-- generated: template kind=Channel name=my-surface fields=credentialsSecretRef,config comments=off -->
 ```yaml
@@ -298,11 +334,14 @@ spec:
 ```
 <!-- /generated -->
 
-Credentials are **per surface**, not per implementation. The manager projects
-the Secret into your pod as `AGENTOPS_CRED_<CHANNEL>_*` and never reads it.
+Credentials are **per surface**, not per implementation — see
+[Credentials]({{ '/contracts/channel-adapter/' | relative_url }}#credentials).
+The manager projects the Secret into your pod as `AGENTOPS_CRED_<CHANNEL>_*`
+and never reads it (`MGR-10`).
 
 Everything type-specific lives in `config`, which only your implementation
-interprets:
+interprets — see
+[The channel-listing entry]({{ '/contracts/channel-adapter/' | relative_url }}#the-channel-listing-entry):
 
 <!-- generated: example preset=tier3 kind=Channel name=k8s-ops -->
 ```yaml
@@ -342,7 +381,7 @@ spec:
 > this site. Substitute your own — an example that works when pasted unchanged
 > would be naming somebody else's surface.
 
-## Verify
+## 7. Verify end to end
 
 ```sh
 kubectl -n agent-ops get channel my-surface
@@ -357,20 +396,31 @@ kubectl -n agent-ops logs deploy/agentops-adapter-my-adapter -f
 List that channel on a Pipeline's `channelRefs`, then start a conversation on
 that Pipeline. You should see an `ensure-topic` arrive, then a `send`.
 
+**Verify:** the pod log shows the `ensure-topic` envelope arriving, your
+completion carrying the thread id back, then the `send` rendering the
+agent's answer — stations 1 through 3, in order, on a real conversation.
+
 ## What comes next
 
-1. **Copy the reference** —
+1. **Read the specification in full** —
+   [the channel adapter specification]({{ '/contracts/channel-adapter/' | relative_url }})
+   covers every field, every enum, the compatibility rules, and the
+   23-item conformance checklist a claim of conformance is walked against.
+2. **Copy the reference** —
    [`channels/telegram`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/channels/telegram/),
    and read it beside
    [`gateways/telegram`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/gateways/telegram/)
    and
    [`signals/telegram`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/telegram/).
    One poll loop per credential is structural, and the split is why.
-2. **Read a browser implementation** —
+3. **Read a browser implementation** —
    [`platform/console`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/platform/console/),
    if your surface is a page rather than a chat service.
-3. **Add the optional halves** — `POST /channel/read` for a read watermark and
-   `GET /channel/vocabulary` for a command menu. An adapter that implements
-   neither stays fully conformant.
-4. **[Run agents on your own backend]({{ '/guides/agent-runtime/' | relative_url }})** —
+4. **Add the optional halves** —
+   [`POST /channel/read`]({{ '/contracts/channel-adapter/' | relative_url }}#post-channelread)
+   for a read watermark and
+   [`GET /channel/vocabulary`]({{ '/contracts/channel-adapter/' | relative_url }}#get-channelvocabulary)
+   for a command menu. An adapter implementing neither stays fully
+   conformant.
+5. **[Run agents on your own backend]({{ '/guides/agent-runtime/' | relative_url }})** —
    the execution side, and what it is trusted to enforce.

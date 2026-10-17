@@ -5,7 +5,13 @@ builds on:
 
 - The channel adapter contract already lives at
   `docs/contracts/channel-adapter.md`, moved verbatim.
-- `docs-generate.py` already has the `struct-table` marker.
+- `docs-generate.py` has no `struct-table` marker. `runtime-specification`
+  tried one and reversed it (its own task 3.3) before archiving: the
+  generated cells copied Go doc-comment paragraphs verbatim, producing
+  unreadable rows. `docs/contracts/runtime.md`'s field tables are
+  hand-written instead, in the same concise shape `cr-reference.md`'s own
+  generator uses, and this change follows that settled shape rather than
+  the generator this proposal originally planned to reuse.
 - The governance pattern (scoped rule, verify-against-spec, approval-gated
   edits, conformance carried by a spec change) is established.
 
@@ -36,10 +42,14 @@ This design states only what differs for channel adapters.
 
 ### Struct-backed and grammar-backed parts are named apart
 
-The typed operations and their payloads are Go structs and get generated
-tables. The body grammar is a grammar, not a struct — it stays hand-written,
-shared with `structured-agent-output`, and the spec names which sections are
-which.
+The typed operations and their payloads are Go structs. Their field tables
+are hand-written, in the same `| Field | Type | Required | Description |`
+shape `docs/contracts/runtime.md` settled on, traced to each struct's json
+tags by review rather than a generator.
+
+The body grammar is a grammar, not a struct. It stays hand-written too,
+shared with `structured-agent-output`, and the spec names which sections
+are which.
 
 ### The console is a shipped channel adapter
 

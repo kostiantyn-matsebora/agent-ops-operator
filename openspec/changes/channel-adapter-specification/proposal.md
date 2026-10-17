@@ -18,9 +18,12 @@ and a guide that is the exact path to it.
   adapter must do (consume `/channel/*`, parse the body grammar, absorb
   retryable backpressure, own outbound pacing, never relay its own outbound
   as inbound).
-- **Generate the struct-backed schema tables** with the `struct-table` marker
-  `runtime-specification` adds to `docs-generate.py`, so op and payload
-  fields cannot drift from the Go structs.
+- **Hand-write the struct-backed schema tables**, in the
+  `| Field | Type | Required | Description |` shape `docs/contracts/runtime.md`
+  settled on. The `struct-table` marker this proposal originally planned to
+  reuse was tried in `runtime-specification` and reversed there before this
+  change started — generated cells copied Go doc-comment paragraphs verbatim,
+  producing unreadable rows. No generator exists for these tables.
 - **Add the numbered conformance checklist**, each item verifiable, cited
   against the shipped adapters' tests.
 - **Rewrite `docs/guides/channel-adapter.md` as the station procedure** —
@@ -37,8 +40,8 @@ and a guide that is the exact path to it.
   the same change, bring every shipped channel adapter into conformance and
   move every claimed version.
 - **Depends on `runtime-specification`** — the page location and the
-  generator capability land there. Out of scope: any behavior change to the
-  manager, the adapters or the chart.
+  hand-written table shape land there. Out of scope: any behavior change to
+  the manager, the adapters or the chart.
 
 ## Capabilities
 
