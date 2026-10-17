@@ -38,8 +38,8 @@
       field from tags and doc comments, failing loudly on a struct it cannot
       parse. Verify with the script suite.
 - [ ] 3.2 Place markers in `docs/contracts/runtime.md` for the work unit
-      struct (`internal/dispatch/dispatch.go`) and the report struct
-      (`internal/httpapi/`), run the generator, and verify
+      struct (`platform/manager/internal/dispatch/dispatch.go`) and the report struct
+      (`platform/manager/internal/httpapi/`), run the generator, and verify
       `docs-generate.py --check` is clean and the tables match the structs.
 
 ## 4. Rewrite the adopter guide as the station procedure — api-architect
@@ -78,6 +78,11 @@
 - [ ] 6.3 `rules_compliance.py`, `retired-vocabulary-guard.py` and
       `publication-guard.py` clean over every file the change touched. Verify
       by running all three.
+- [ ] 6.4 A scope test for `.claude/rules/runtime-spec.md`: every `paths:` glob
+      in its frontmatter matches at least one tracked file, and a file under
+      each named path (`runtimes/**`, the manager's dispatch, runtimepod and
+      httpapi packages, `docs/contracts/runtime.md`) is matched by the rule.
+      Verify it passes and fails when a glob is broken.
 
 ## 7. System tests — testing-specialist
 

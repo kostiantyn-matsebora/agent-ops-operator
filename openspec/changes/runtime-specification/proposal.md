@@ -41,7 +41,8 @@ page no single adopter needs the whole of.
   approval.
 - **A specification change carries conformance.** An approved edit to the
   spec must, in the same change, bring every shipped runtime into conformance
-  and move the version each vendor page claims.
+  and move the version each vendor page claims (`docs/runtimes/ollama.md`,
+  `docs/runtimes/copilot.md` and `docs/claude.md`).
 - **Out of scope, named follow-ups:** spec-ifying the channel and signal
   adapter contracts to the same standard (one change each), and a runnable
   conformance harness.
