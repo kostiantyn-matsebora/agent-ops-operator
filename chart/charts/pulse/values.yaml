@@ -155,7 +155,7 @@ signal:
   # verifying inbound deliveries (X-Pulse-Timestamp/X-Pulse-Signature).
   # Delivered through SignalSource.spec.credentialsSecretRef — kubelet-
   # resolved envFrom, the manager reads no Secrets. Keys `token` and
-  # `signingSecret`; the adapter accepts either casing.
+  # `signingSecret`, exactly.
   #
   # EITHER an existing Secret's name OR the token/secret themselves, never
   # both — two sources for one value is ambiguous. The token form makes the
