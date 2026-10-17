@@ -139,6 +139,11 @@ signal:
     # reach, such as a WAF or gateway in front of `signal.ingress`
     # requiring its own shared-secret header.
     #
+    # PLAIN spec.config, NOT a Secret — a value here is as visible as any
+    # other SignalSource field (kubectl get signalsource -o yaml), unlike
+    # `token`/`signingSecret` below. Fine for a gateway check that is
+    # defense-in-depth, not this adapter's real security boundary.
+    #
     #   webhookHeaders:
     #     X-Gateway-Key: <shared secret your gateway checks>
     webhookHeaders: {}

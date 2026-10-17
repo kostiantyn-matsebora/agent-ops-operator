@@ -325,6 +325,16 @@ pulse:
 This is a static value, not a signature — closer to the bearer-token risk
 above than to HMAC signing. Pair it with TLS, same as the other two.
 
+**It also sits in plain `spec.config`, not a Secret** — unlike `token` and
+`signingSecret`, which `credentialsSecretRef` keeps out of the CR
+entirely. Anyone who can read this SignalSource (`kubectl get
+signalsource -o yaml`) can read whatever value you put here.
+
+That is the right trade for what this field is for: a gateway's own
+defense-in-depth check, never this adapter's real security boundary.
+Treat `X-Gateway-Key` as something you could rotate without much
+concern, not as a credential on the level of your Pulse API token.
+
 ## What neither agent can do
 
 Pulse's plan/approve/execute governed-action flow is **Pro-gated** and out of

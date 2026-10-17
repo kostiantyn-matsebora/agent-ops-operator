@@ -104,7 +104,24 @@ own `WebhookConfig.Headers`.
 - Serves infra in front of the adapter (a WAF, a gateway) needing its own
   shared-secret header.
 - Registered whether or not a signing secret is configured.
-- Read by the same mechanism as `baseUrl`.
+- Read by the same mechanism as `baseUrl` — `spec.config`, not
+  `credentialsSecretRef`.
+
+**Trade-off accepted**: a shared-secret-shaped header value here sits in
+plain `spec.config`, not a Secret. Weaker than `token`/`signingSecret`,
+which `credentialsSecretRef` keeps out of the CR entirely.
+
+Routing it through a Secret instead would need a value-templating
+mechanism inside a schema-less JSON field — a second config language on
+top of the one `spec.config` already is, for one optional field.
+
+The header this exists for is a defense-in-depth gateway check, never
+this adapter's real security boundary. `signingSecret`/`token` are that
+boundary, and both already go through `credentialsSecretRef`.
+
+`docs/integrations/pulse.md` states the trade-off where the field is
+documented, rather than leaving it to be discovered against a real
+cluster's RBAC.
 
 ### Decision 1b: the registered delivery URL is overridable, for a Pulse outside the cluster
 
