@@ -9,7 +9,7 @@ The repository SHALL provide these reference pages:
 | `docs/concepts.md` | CRD reference and capability resolution |
 | `docs/contracts/<contract>.md` | one extension-point contract each: `runtime.md`, `channel-adapter.md`, `signal-adapter.md` |
 | `docs/contracts.md` | the manager-owned surfaces: the aops MCP server contract, the activity contract, introspection, metrics, the HTTP API |
-| `docs/<bundle>.md` | ONE PAGE PER BUNDLE SUBCHART |
+| `docs/integrations/<system>.md` | ONE PAGE PER INTEGRATION, named for the system it documents |
 
 Each page SHALL be reachable from the README's Documentation index in one
 hop.
@@ -55,7 +55,7 @@ one.
 #### Scenario: A new bundle subchart ships
 
 - **WHEN** a chart gains another optional bundle
-- **THEN** its documentation is a new `docs/<bundle>.md` with one line in the
+- **THEN** its documentation is a new `docs/integrations/<system>.md` with one line in the
   README's Documentation index, and no existing page grows
 
 #### Scenario: Reader needs CRD detail beyond the README table

@@ -42,7 +42,7 @@
       (`internal/httpapi/`), run the generator, and verify
       `docs-generate.py --check` is clean and the tables match the structs.
 
-## 4. Rewrite the adopter guide as the station procedure
+## 4. Rewrite the adopter guide as the station procedure — api-architect
 
 - [ ] 4.1 Rewrite `docs/guides/agent-runtime.md` as ordered stations — each
       citing a spec section by anchor, each ending in a verification — fixing
@@ -51,13 +51,14 @@
 - [ ] 4.2 Re-run `docs-generate.py` for the guide's generated resource blocks
       and verify `--check` is clean.
 
-## 5. Governance rule, version claims, routing
+## 5. Governance rule, version claims, routing — api-architect
 
 - [ ] 5.1 Add `.claude/rules/runtime-spec.md`, scoped by `paths:` to
-      `runtimes/**`, the manager's dispatch and httpapi packages, and
+      `runtimes/**`, the manager's dispatch, runtimepod and httpapi packages, and
       `docs/contracts/runtime.md`, stating the three obligations
       (verify-against-spec, no unapproved spec edit, a spec change carries
-      conformance). Verify with `rules_compliance.py` and the authoring rules.
+      conformance). Verify with `rules_compliance.py` and the authoring rules,
+      and that the rule loads when a file under each named path is read.
 - [ ] 5.2 Add the claimed specification version (1.0.0) to
       `docs/runtimes/ollama.md`, `docs/runtimes/copilot.md` and
       `docs/claude.md`. Verify each page states it.

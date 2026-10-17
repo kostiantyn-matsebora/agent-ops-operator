@@ -80,12 +80,14 @@ every path the contract carries. A field present in the wire types and absent
 from the specification is a specification defect.
 
 Every work-unit field SHALL be stated: `runId`, `convo`, `threadId`,
-`runtimeContextId`, `resumeSessionId` (deprecated), `promptText`,
+`runtimeContextId`, `resumeSessionId` (deprecated, replaced by
+`runtimeContextId`), `promptText`,
 `promptFile`, `promptVars`, `agent`, `systemPrompt`, `allowedTools`,
 `toolsMode`, `maxTurns`.
 
 Every report field SHALL be stated: `convo`, `runId`, `status`, `exitCode`,
-`runtimeContextId`, `sessionId` (deprecated), `continuity`,
+`runtimeContextId`, `sessionId` (deprecated, replaced by
+`runtimeContextId`), `continuity`,
 `continuityReason`, `result`, `brief`, `turns[]` and `toolCalls[]`.
 
 Every entry field of the telemetry lists SHALL be stated: `model`,

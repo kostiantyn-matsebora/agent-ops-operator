@@ -106,7 +106,7 @@ would return with the next field.
 ### Governance is a scoped rule, enforced socially plus one hook surface
 
 A new `.claude/rules/runtime-spec.md` with `paths:` scoping to `runtimes/**`,
-the manager's dispatch and httpapi packages, and `docs/contracts/runtime.md`.
+the manager's dispatch, runtimepod and httpapi packages, and `docs/contracts/runtime.md`.
 It states three obligations:
 
 1. A change on the governed surface is verified against the specification
