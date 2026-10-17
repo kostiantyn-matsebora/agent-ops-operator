@@ -40,7 +40,7 @@ func TestWebhookTemplateMatchesParser(t *testing.T) {
 		t.Fatalf("pulseWebhookTemplate does not parse: %v", err)
 	}
 	ctx := pulseTemplateContext{
-		Type: "alert", ID: "abc123", ResourceName: "vm-101", ResourceType: "vm",
+		Event: "alert", ID: "abc123", ResourceName: "vm-101", ResourceType: "vm",
 		Node: "pve1", Level: "critical", Message: "CPU high", Value: "97",
 		Timestamp: "2026-01-01T00:00:00Z",
 	}

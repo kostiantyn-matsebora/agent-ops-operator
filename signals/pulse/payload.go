@@ -14,10 +14,16 @@ package main
 // payload template). This is a deliberate, documented choice consistent
 // with the "firing"/"resolved" semantics the adapter contract already uses:
 // an "event" field carrying exactly "alert" (firing) or "resolved", plus the
-// resource/alert identity fields a fingerprint needs. Confirm the assumed
-// template variable names below against a real Pulse instance before
-// depending on this in production — design.md's own Risks section notes the
-// same open question for a future Pulse version.
+// resource/alert identity fields a fingerprint needs.
+//
+// CONFIRMED against a real Pulse instance (v6.5.0) on 2026-10-17, via its own
+// `GET /api/notifications/webhook-templates` response for the "generic"
+// service: the lifecycle field is `.Event`, not `.Type` — `.Type` is the
+// resource's metric type (cpu, diskRead, ...), a separate real field from
+// `.ResourceType` (the virtualization object kind). The first version of
+// this template used `.Type` for "event", which silently dropped every real
+// alert (normalize() never saw "alert") — design.md's own Risks section had
+// flagged this exact confirmation as still open.
 
 import (
 	"crypto/sha256"
@@ -33,7 +39,7 @@ import (
 // json tag on pulseEvent below — TestWebhookTemplateMatchesParser pins that
 // agreement.
 const pulseWebhookTemplate = `{
-  "event": "{{ .Type }}",
+  "event": "{{ .Event }}",
   "id": "{{ .ID }}",
   "resource": "{{ .ResourceName }}",
   "resourceType": "{{ .ResourceType }}",
@@ -46,11 +52,11 @@ const pulseWebhookTemplate = `{
 
 // pulseTemplateContext documents the fields pulseWebhookTemplate assumes
 // Pulse's own notification context exposes when rendering a Generic webhook
-// body (Type carrying "alert"/"resolved", the rest naming the resource and
+// body (Event carrying "alert"/"resolved", the rest naming the resource and
 // alert identity). Used only by this module's own pinned fixture test —
 // Pulse renders the real thing with its own template engine.
 type pulseTemplateContext struct {
-	Type         string
+	Event        string
 	ID           string
 	ResourceName string
 	ResourceType string

@@ -267,10 +267,12 @@ func normalize(e pulseEvent) []Signal {
 	if e.Event != "alert" {
 		return nil
 	}
+	// Severity stays OUT of the title on purpose — the console's signal card
+	// drops a label row whose value already appears as a bare word in the
+	// title (platform/console/manager.go's labelRows, TestSignalCardIsStructured),
+	// so a "🔍 <resource> — <severity>" title would silently swallow the
+	// severity label row out of the table it belongs in.
 	title := "🔍 " + e.Resource
-	if e.Severity != "" {
-		title += " — " + e.Severity
-	}
 	payloadJSON, _ := json.MarshalIndent(e, "", "  ")
 	return []Signal{{
 		Fingerprint: e.fingerprint(),
