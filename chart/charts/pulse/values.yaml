@@ -83,9 +83,13 @@ signal:
     path: /webhook
     pathType: Prefix
     # TLS. Nothing here is required, and leaving it empty renders no `tls`
-    # section — legitimate when TLS terminates upstream at a load balancer.
-    # `tls` also accepts a raw list of Ingress tls entries, rendered
-    # verbatim.
+    # section — legitimate when TLS terminates upstream at a load balancer or
+    # in a service mesh. The install notes will point out that the alert
+    # payload otherwise crosses the network in clear text.
+    #
+    # `tls` also accepts the same raw LIST form `console.ingress` does (raw
+    # Ingress tls entries). A list is rendered verbatim so a values file
+    # written for one of this chart's Ingresses works for the other.
     tls:
       # Existing certificate Secret. The tls[] hosts are DERIVED from
       # `host` + `extraHosts`, so hostnames are never restated.
@@ -93,6 +97,9 @@ signal:
       # cert-manager issuer: adds the issuer annotation and derives
       # secretName when it is unset.
       clusterIssuer: ""
+      # Full raw override — a list of Ingress tls entries, used verbatim and
+      # taking precedence over the derived form.
+      existing: []
   # The alert source. INERT until a Pipeline/AgentCapability claims it — the
   # `pipelines:` component below, or a route under the parent chart's own
   # `pipelines:`.
