@@ -44,9 +44,9 @@ operator who meant to leave it off.
 - **THEN** the same bundle components render — demo mode is an enablement path, not a distinct feature set — and NO Pipeline renders unless the wiring flag is set
 
 ### Requirement: Each component is individually toggleable
-Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, `mcp.enabled`, and `pipelines.enabled` SHALL independently control their component's objects. The first three SHALL default `true`, and the `mcpServers` sub-component that deploys the MCP server workload SHALL default `true` alongside `mcp`: the two flip together so the config's URL always has an endpoint to default onto, which is the only reason the MCP component was previously off. The endpoint guard SHALL remain and SHALL still fail loudly for `mcp.enabled` with no server workload and no `url`.
+Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, `mcp.enabled`, and `wiringEnabled` SHALL independently control their component's objects. The first three SHALL default `true`, and the `mcpServers` sub-component that deploys the MCP server workload SHALL default `true` alongside `mcp`: the two flip together so the config's URL always has an endpoint to default onto, which is the only reason the MCP component was previously off. The endpoint guard SHALL remain and SHALL still fail loudly for `mcp.enabled` with no server workload and no `url`.
 
-`pipelines.enabled` SHALL default `false` — the exception among the four, because a route is the one component of this bundle that spends money and touches the cluster on its own. Demo mode SHALL force it on; nothing else SHALL.
+`wiringEnabled` SHALL default `false` — the exception among the four, because a route is the one component of this bundle that spends money and touches the cluster on its own. Demo mode SHALL force it on; nothing else SHALL.
 
 The bundle SHALL expose no runtime-defaults or floor-account component; those are the parent's `global.agentops.runtimeDefaults` and `runtimes:`. It SHALL expose ONE stated setting for whether agents on its lane may CHANGE the cluster, which moves the server's read-only flag, that server's RBAC, the mutating toolset and which route ships — each still individually overridable, and none derived from a release-wide value.
 
