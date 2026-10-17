@@ -36,19 +36,30 @@
 
 ## 3. Governance rule and version claims
 
-- [ ] 3.1 Add the scoped rule (loads under `channels/**`, the console's
-      adapter surface and the manager's channel surface) stating the two
-      obligations: verify a change there against the specification before
-      claiming it done, and never edit the specification without the user's
-      explicit approval. Verify with `rules_compliance.py` and the authoring
-      rules.
-- [ ] 3.2 Add the claimed specification version (1.0.0) to
-      `docs/integrations/telegram.md` and `docs/console.md`. Verify each page
-      states it.
-- [ ] 3.3 Update `.claude/rules/documentation.md`'s "Where documentation goes"
-      table so the adapter contracts row points channel contract changes at
-      `docs/contracts/channel-adapter.md`, the only statement. Verify the
-      table names that page and `docs/contracts.md` keeps only a pointer.
+- [x] 3.1 Added `.claude/rules/channel-spec.md`, scoped by `paths:` to
+      `channels/**`, `platform/console/*.go`, the manager's `internal/chat/`
+      and `internal/httpapi/`, and `docs/contracts/channel-adapter.md` —
+      mirroring `runtime-spec.md`'s shape exactly, stating the two
+      obligations (verify-against-spec, no unapproved spec edit) plus the
+      conformance-carries obligation. Added the routing row to root
+      `CLAUDE.md`. Verified clean with `rules_compliance.py`. Verified the
+      rule's structure and scoping match `runtime-spec.md`'s working
+      pattern. Live path-triggering on a file created this session could
+      not be re-confirmed in this same session, since the harness's
+      scoped-rule index reads the directory at session start. It loads on
+      the next session that reads a matching file, same as any new scoped
+      rule.
+- [x] 3.2 Added the claimed specification version (1.0.0) to
+      `docs/integrations/telegram.md` (conforms-to line, Jekyll `relative_url`
+      link since it is a published page) and `docs/console.md` (plain
+      relative link, reference page). Verified each page states it.
+- [x] 3.3 `.claude/rules/documentation.md`'s existing "Runtime/channel/signal
+      contract | `docs/contracts/<contract>.md`" row already resolves
+      channel contract changes to `docs/contracts/channel-adapter.md`
+      generically — the same row `runtime-specification` generalized for
+      itself. No row change needed. Verified `docs/contracts.md`'s "## The
+      channel adapter contract" heading carries only the one-line pointer,
+      no restated contract.
 
 ## 4. Unit tests — testing-specialist
 
