@@ -39,10 +39,10 @@ spec:
   tools:
 {{ toYaml $mcp.toolset.tools | indent 4 }}
 {{- end }}
----
 {{- if and (include "pulse.active" .) (include "pulse.operatorMcpEnabled" .) }}
 {{- $mcp := .Values.mcp.operator }}
 {{- include "pulse.refuseWildcardTools" $mcp.toolset.tools }}
+---
 apiVersion: agentops.dev/v1alpha1
 kind: MCPConfig
 metadata:

@@ -143,8 +143,8 @@ claims to close.
 
 So the chart ALSO renders `signal.ingress`, an Ingress in front of the
 SignalAdapter reconciler's own ClusterIP Service
-(`agentops-signal-<name>:8080`) — never a second Service of this chart's
-own.
+(`agentops-signal-<name>:8080`, the same naming and port the bundle spec
+requires) — never a second Service of this chart's own.
 
 Shaped exactly like the parent chart's existing `console.ingress`, same
 field names and TLS forms. An Ingress is the one exposure shape this

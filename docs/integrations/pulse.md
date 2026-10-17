@@ -432,8 +432,10 @@ ServiceAccount/agentops-pulse-operator
 - **The `SignalSource` appears only under `signal.defaultSource.enabled`.**
   The chart renders the adapter CR — the reconciler owns the workload, the
   webhook Service and its listen address.
-- **No account is rendered for `mcp-pulse`** unless you name one. It reads
+- **No account is rendered for `mcp-pulse`**, and it mounts no token. It reads
   Pulse's HTTP API, not the Kubernetes API, so it needs no RBAC.
+  - **Name its own account** with `mcpServer.serviceAccountName` if you want
+    one. The render fails when that is the runtime's account.
 - **Neither profile carries `allowedTools` or `mcp`.** What each agent may
   reach comes exclusively from the route binding it.
 
