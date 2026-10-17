@@ -108,7 +108,7 @@ just stops being a second door to the API.
 exists so the runtime is swappable. Derive one:
 
 ```dockerfile
-FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.9.0
+FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.10.0
 USER root
 RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
  && chmod 0755 /usr/local/bin/kubectl
@@ -615,7 +615,7 @@ checks.
 global:
   agentops:
     runtimeDefaults:
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.9.0
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.10.0
       contextStorage: volume      # does this backend use a disk at all
       idleTtlMinutes: 1
       nodeSelector: {}
