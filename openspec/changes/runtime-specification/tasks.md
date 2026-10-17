@@ -69,16 +69,16 @@
 
 ## 6. Unit tests — testing-specialist
 
-- [ ] 6.1 Script-suite tests for the `struct-table` marker: a rendered table,
+- [x] 6.1 Script-suite tests for the `struct-table` marker: a rendered table,
       a drift failure, and a loud failure on an unparsable struct. Verify
       `.github/tests/run.sh` passes.
-- [ ] 6.2 A link-and-anchor check over `README.md`, `CLAUDE.md` and
+- [x] 6.2 A link-and-anchor check over `README.md`, `CLAUDE.md` and
       `docs/**`: every relative link resolves to a file and every anchor to a
       heading. Verify it passes on this working copy's tree.
-- [ ] 6.3 `rules_compliance.py`, `retired-vocabulary-guard.py` and
+- [x] 6.3 `rules_compliance.py`, `retired-vocabulary-guard.py` and
       `publication-guard.py` clean over every file the change touched. Verify
       by running all three.
-- [ ] 6.4 A scope test for `.claude/rules/runtime-spec.md`: every `paths:` glob
+- [x] 6.4 A scope test for `.claude/rules/runtime-spec.md`: every `paths:` glob
       in its frontmatter matches at least one tracked file, and a file under
       each named path (`runtimes/**`, the manager's dispatch, runtimepod and
       httpapi packages, `docs/contracts/runtime.md`) is matched by the rule.
