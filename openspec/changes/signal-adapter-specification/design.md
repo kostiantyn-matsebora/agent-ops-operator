@@ -59,7 +59,7 @@ birth.
   cites the test that exercises it per adapter, and a gap is fixed in this
   change before the version is claimed.
 - [The self-exclusion invariant is restated wrongly] → the spec cites
-  `selfexclude.go` and the invariant, never paraphrases the rule's mechanics.
+  `signals/ha/selfexclude.go`, `signals/k8s-events/selfexclude.go` and the invariant, never paraphrases the rule's mechanics.
 - [Governance rule is prose, not enforcement] → accepted, same trade as the
   sibling changes.
 
