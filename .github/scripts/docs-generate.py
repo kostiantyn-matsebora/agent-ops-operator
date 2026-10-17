@@ -1011,7 +1011,15 @@ def build_struct_table(file_rel: str, struct: str) -> str:
     out = ["| Field | Type | Meaning |", "|---|---|---|"]
     for f in fields:
         type_cell = f["type"] if f["required"] else f"{f['type']}, optional"
-        out.append(f"| `{f['json']}` | {type_cell} | {f['meaning']} |")
+        # An array field reads `turns[]` everywhere else on the page this
+        # table lands in -- carry that spelling here too, rather than
+        # leaving the bracket-free JSON key to read as an inconsistency a
+        # hand edit would have to keep re-applying.
+        name = f["json"] + ("[]" if f["type"].startswith("array of ") else "")
+        # A `|` in a doc comment would otherwise read as a new column --
+        # the same escape `one_line()` already applies to a CRD description.
+        meaning = f["meaning"].replace("|", "\\|")
+        out.append(f"| `{name}` | {type_cell} | {meaning} |")
     return "\n".join(out) + "\n"
 
 

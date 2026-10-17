@@ -104,6 +104,45 @@ class ARenderedTable(StructTableBase):
         self.assertNotIn("Internal", table)
         self.assertIn("| `name` | string | Name is the only visible field. |", table)
 
+    def test_a_pipe_in_the_doc_comment_is_escaped_not_a_new_column(self):
+        # A doc comment written as prose enum -- `"a" | "b"` -- is a natural
+        # way to describe a field, and an unescaped `|` would read as a table
+        # column boundary, corrupting the row with no error anywhere.
+        self.write_go("piped.go", """\
+            package fixture
+
+            type Thing struct {
+            	// Status is "succeeded" | "failed".
+            	Status string `json:"status"`
+            }
+            """)
+        table = self.m.build_struct_table("piped.go", "Thing")
+        self.assertIn(
+            '| `status` | string | Status is "succeeded" \\| "failed". |', table
+        )
+        # Exactly three columns: 4 structural pipes plus the one escaped
+        # `\|` inside the Meaning cell, which still counts as a `|`
+        # character -- an UNESCAPED pipe there would add a fifth structural
+        # one (a fourth column) instead.
+        row = next(l for l in table.splitlines() if l.startswith("| `status`"))
+        self.assertEqual(row.count("|"), 5)
+        self.assertEqual(row.count("\\|"), 1)
+
+    def test_an_array_field_renders_with_brackets_like_the_rest_of_the_page(self):
+        # `turns[]`/`toolCalls[]` are how every OTHER mention of these
+        # fields reads on the page the generated table lands in -- the
+        # Field column should match, not read the bare JSON key.
+        self.write_go("array.go", """\
+            package fixture
+
+            type Thing struct {
+            	// Turns is one entry per model call.
+            	Turns []Turn `json:"turns,omitempty"`
+            }
+            """)
+        table = self.m.build_struct_table("array.go", "Thing")
+        self.assertIn("| `turns[]` | array of Turn, optional |", table)
+
 
 class ADriftFailure(StructTableBase):
     """The exact comparison `main()` uses to decide `stale`: the regenerated

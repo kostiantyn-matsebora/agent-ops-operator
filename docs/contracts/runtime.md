@@ -229,8 +229,8 @@ What a runtime posts to `POST /work/done`.
 | `continuityReason` | string, optional | ContinuityReason is free text from the runtime explaining why a context could not be continued. Recorded VERBATIM — the manager does not know where any given runtime keeps its context, so any explanation it invented would be confident and sometimes wrong. |
 | `result` | string, optional | Result is the run's answer. Truncated to 2000 bytes by the manager, never refused for length. |
 | `brief` | string, optional | Brief is what the runtime extracted as this conversation's one- or two-sentence description (design D-I) — a contract field, never a parsed section of Result. LATEST-WINS, the same rule as RuntimeContextID: absent leaves the stored one untouched. |
-| `turns` | array of Turn, optional | Turns is one entry per model call this run made, bounded in count and field size (workreport.go). It becomes one activity hop and nothing else — telemetry, never written to the Conversation. |
-| `toolCalls` | array of ToolCall, optional | ToolCalls is one entry per tool call this run made, bounded in count and field size (workreport.go). It becomes one activity hop and nothing else — telemetry, never written to the Conversation. |
+| `turns[]` | array of Turn, optional | Turns is one entry per model call this run made, bounded in count and field size (workreport.go). It becomes one activity hop and nothing else — telemetry, never written to the Conversation. |
+| `toolCalls[]` | array of ToolCall, optional | ToolCalls is one entry per tool call this run made, bounded in count and field size (workreport.go). It becomes one activity hop and nothing else — telemetry, never written to the Conversation. |
 <!-- /generated -->
 
 Source: `platform/manager/internal/httpapi/server.go`, type `workDone`.
