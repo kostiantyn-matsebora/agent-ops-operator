@@ -50,6 +50,8 @@ Want the acting route without a server that can act? Set both independently:
 --set kubernetes.allowMutations=true --set kubernetes.mcpServers.readOnly=true
 ```
 
+## Where it answers
+
 **It answers in the console already** — the route binds it and claims the
 composer, so replies work with nothing else set. Add a chat surface beside it
 with `--set kubernetes.pipelines.channels={team-chat}` — it merges rather than

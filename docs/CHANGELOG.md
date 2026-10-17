@@ -10,7 +10,9 @@ for the source and the reference material beside this file.
 
 ## [15.1.0] — 2026-10-16
 
-- `signal-pulse` 0.1.0, `mcp-pulse` 0.1.0.
+- `signal-pulse` 0.1.0, `mcp-pulse` 0.1.0, bundle `pulse` 0.1.0.
+- Bundles `kubernetes` 0.3.2, `prometheus` 0.2.0 and `home-assistant` 0.2.0
+  take the breaking `wiringEnabled` rename (see Changed).
 
 ### Added
 

@@ -117,7 +117,7 @@ split if it's worth keeping:
 pipelines:
   - name: estate
     profile: pulse-observer
-    signalSources: [pulse-alerts, team-chat]
+    signalSources: [pulse-alerts]
     toolsets: [agentops-observe, pulse-observability]
     mcpConfigs: [pulse-observer-mcp]
     channels: [team-chat]

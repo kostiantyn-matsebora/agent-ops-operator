@@ -81,6 +81,11 @@ template can guess among those. Already run a query MCP server? Point
 --set prometheus.mcpServers.enabled=false
 ```
 
+```powershell
+--set prometheus.mcp.url=http://mcp-prometheus.agent-ops.svc:8080/mcp `
+--set prometheus.mcpServers.enabled=false
+```
+
 Point your Alertmanager at the webhook the post-install notes print filled in:
 
 ```yaml
