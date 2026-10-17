@@ -24,7 +24,9 @@ test('the captured stream produces the expected report', () => {
   const report = replay(lines);
   assert.deepStrictEqual(report, {
     turns: [
-      { model: 'claude-sonnet-4-5', tokensIn: 9312, tokensOut: 64, cacheReadTokens: 9000, stopReason: 'tool_use' },
+      // Turn one WRITES 300 tokens of cache; the later turns write none and
+      // carry no cacheCreationTokens at all — omitted, never zero.
+      { model: 'claude-sonnet-4-5', tokensIn: 9312, tokensOut: 64, cacheReadTokens: 9000, cacheCreationTokens: 300, stopReason: 'tool_use' },
       { model: 'claude-sonnet-4-5', tokensIn: 9340, tokensOut: 31, cacheReadTokens: 9300, stopReason: 'tool_use' },
       { model: 'claude-sonnet-4-5', tokensIn: 9455, tokensOut: 14, cacheReadTokens: 9400, stopReason: 'end_turn' },
     ],

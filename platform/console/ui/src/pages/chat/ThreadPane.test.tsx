@@ -61,7 +61,7 @@ const RICH = conv('rich-1', {
     runId: 'run-rich', status: 'succeeded', finishedAt: '2024-01-01T00:03:00Z',
     result: 'rich result text',
     turns: [
-      { model: 'claude-5', tokensIn: 1200, tokensOut: 340, cacheReadTokens: 800, stopReason: 'end_turn' },
+      { model: 'claude-5', tokensIn: 1200, tokensOut: 340, cacheReadTokens: 800, cacheCreationTokens: 150, stopReason: 'end_turn' },
     ],
     toolCalls: [
       { tool: 'Read', server: '', durationMs: 410, resultBytes: 1234 },
@@ -367,7 +367,10 @@ describe('a run\'s turns and tool calls, in the Runs view (item 16)', () => {
     expect(screen.getByText('turns — 1 model call')).toBeInTheDocument()
     expect(screen.getByText('claude-5')).toBeInTheDocument()
     expect(screen.getByText('1200')).toBeInTheDocument()
-    expect(screen.getByText(/800 cached/)).toBeInTheDocument()
+    expect(screen.getByText('800')).toBeInTheDocument()
+    expect(screen.getByText('150')).toBeInTheDocument()
+    // Fresh is DERIVED: 1200 in - 800 read - 150 written.
+    expect(screen.getByText('250')).toBeInTheDocument()
     expect(screen.getByText('340')).toBeInTheDocument()
     expect(screen.getByText('end_turn')).toBeInTheDocument()
 

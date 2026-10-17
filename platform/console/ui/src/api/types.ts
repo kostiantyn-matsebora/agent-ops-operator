@@ -457,6 +457,7 @@ export interface RunTurn {
   tokensIn?: number
   tokensOut?: number
   cacheReadTokens?: number
+  cacheCreationTokens?: number
   stopReason?: string
 }
 

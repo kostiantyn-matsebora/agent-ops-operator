@@ -769,25 +769,40 @@ function withKeys<T>(items: T[], keyOf: (item: T) => string): Array<[string, T]>
   })
 }
 
+/**
+ * freshTokens is the input the call actually paid full price for: total in,
+ * minus what the provider served from its prompt cache, minus what the call
+ * wrote INTO that cache. Derived rather than reported — the work contract
+ * carries the three facts and this is their arithmetic. Undefined while the
+ * total is, so a turn with no usage renders dashes, never zeros.
+ */
+function freshTokens(t: RunTurn): number | undefined {
+  if (t.tokensIn === undefined) return undefined
+  return t.tokensIn - (t.cacheReadTokens ?? 0) - (t.cacheCreationTokens ?? 0)
+}
+
 function TurnsTable({ turns }: Readonly<{ turns: RunTurn[] }>) {
   return (
     <div>
       <SubTableLabel>{`turns — ${turns.length} model call${turns.length === 1 ? '' : 's'}`}</SubTableLabel>
       <Table variant="compact" aria-label="turns">
         <Thead>
-          <Tr><Th>Model</Th><Th>Tokens in</Th><Th>Tokens out</Th><Th>Stop reason</Th></Tr>
+          {/* Short on purpose: seven columns truncate long headers, and two
+              adjacent "Cache …" stubs were indistinguishable at 1400px. */}
+          <Tr>
+            <Th>Model</Th><Th>In</Th><Th>Cached</Th><Th>Written</Th>
+            <Th>Fresh</Th><Th>Out</Th><Th>Stop reason</Th>
+          </Tr>
         </Thead>
         <Tbody>
-          {withKeys(turns, (t) => `${t.model}:${t.tokensIn}:${t.tokensOut}:${t.stopReason}`).map(([key, t]) => (
+          {withKeys(turns, (t) => `${t.model}:${t.tokensIn}:${t.tokensOut}:${t.cacheReadTokens}:${t.cacheCreationTokens}:${t.stopReason}`).map(([key, t]) => (
             <Tr key={key}>
               <Td dataLabel="Model"><PlainText>{t.model || '—'}</PlainText></Td>
-              <Td dataLabel="Tokens in">
-                {t.tokensIn ?? '—'}
-                {t.cacheReadTokens !== undefined && (
-                  <span style={{ color: 'var(--ao-text-subtle)' }}> ({t.cacheReadTokens} cached)</span>
-                )}
-              </Td>
-              <Td dataLabel="Tokens out">{t.tokensOut ?? '—'}</Td>
+              <Td dataLabel="In">{t.tokensIn ?? '—'}</Td>
+              <Td dataLabel="Cached">{t.cacheReadTokens ?? '—'}</Td>
+              <Td dataLabel="Written">{t.cacheCreationTokens ?? '—'}</Td>
+              <Td dataLabel="Fresh">{freshTokens(t) ?? '—'}</Td>
+              <Td dataLabel="Out">{t.tokensOut ?? '—'}</Td>
               <Td dataLabel="Stop reason"><PlainText>{t.stopReason || '—'}</PlainText></Td>
             </Tr>
           ))}
