@@ -275,9 +275,9 @@ are meant together — a rule stated twice is a rule that drifts.
 not by the subchart that packages it.** It previously named them by their
 bundle, so that renaming a subchart renamed its page and the rule together.
 
-That was the wrong half to bind: the rename it was written for —
-`docs/vm-bundle.md` to `docs/prometheus-bundle.md` — happened because the
-page was named after one sender rather than after the thing.
+That was the wrong half to bind: `docs/vm-bundle.md` was renamed to
+`docs/prometheus-bundle.md` because the page was named after one sender
+rather than after the thing.
 
 A page named for the system would have survived it untouched, taking every
 reader's bookmark with it.
