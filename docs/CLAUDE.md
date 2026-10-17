@@ -33,7 +33,7 @@ path. Plugins are limited to the set Pages enables by default.
     calls, and are gone rather than reworded.** CRD ownership named a decision
     that does not exist — Helm never deletes CRDs from a chart's `crds/`
     directory, and the keep annotation is on the PVC, not a CRD. The model
-    credential has no default to get wrong; there is nothing to undo, only a
+    credential has no default to get wrong. There is nothing to undo, only a
     different Secret to create.
   - **`allowPodExecution` READS like an install decision and is not one.** It
     defaults to `false`, so an install cannot come up over-privileged, and
@@ -60,6 +60,14 @@ path. Plugins are limited to the set Pages enables by default.
     what it costs to turn on.
   - **"Where it answers" is OMITTED where the system carries no answers**, never
     left present and empty. Telegram is the only one that has it.
+  - **NO EXHAUSTIVE VALUES TABLE, AND NO RENDERS TABLE.** An integration page
+    is a page an adopter meets first, not a reference page — it names the
+    handful of values with no sane default, states the one real decision in
+    prose, and points everything else at the chart's own `values.yaml`.
+    `kubernetes`/`prometheus`/`home-assistant`/`pulse` all carried both once
+    and were cut to the same shape `installation.md` was (775 lines to 204).
+    The `renders` marker stays for `cr-reference.md`, `guides/` and
+    `runtimes/<vendor>.md` — pages that ARE reference pages.
   - **A RUNTIME IS NOT AN INTEGRATION.** A runtime is what EXECUTES an agent,
     not a seam a Pipeline wires, and three of the four questions would be
     blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
@@ -364,10 +372,14 @@ with its Chromium in `~/.cache/ms-playwright`. Drive it from a script and assert
   server, rebuild, start it again.
 
 ## Authoring rules (binding)
-Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
-Structure over prose:
-Steps → numbered list.
-Choices / mappings → table.
-"X means Y" → **X.** Y on its own line.
-Multi-rule bullet → parent + sub-bullets, one rule per line.
-Prose paragraph stating > 2 rules → restructure.
+
+The shape rules, stated once and quoted, never paraphrased — see
+`.claude/rules/writing.md`:
+
+    Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
+    Structure over prose:
+    Steps → numbered list.
+    Choices / mappings → table.
+    "X means Y" → **X.** Y on its own line.
+    Multi-rule bullet → parent + sub-bullets, one rule per line.
+    Prose paragraph stating > 2 rules → restructure.
