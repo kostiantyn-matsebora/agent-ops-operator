@@ -32,9 +32,10 @@ func NewManager(baseURL, token string) *Manager {
 // SourceInfo is one signal source served by this adapter. CredentialEnvPrefix
 // (set when the source declares credentialsSecretRef) locates projected
 // credentials in this process's environment: Secret key K is env <prefix>K.
-// Unused by this adapter today — Pulse's registration credential comes from
-// PULSE_API_TOKEN (register.go), not a per-source projection — kept for
-// contract parity with every other signal adapter's SourceInfo.
+// register.go's pulseCredential reads the Pulse API token and the optional
+// HMAC signing secret through it — the only per-source projection this
+// adapter has, since the SignalAdapter CRD carries no generic pod-env
+// passthrough.
 type SourceInfo struct {
 	Name                string          `json:"name"`
 	Config              json.RawMessage `json:"config,omitempty"`

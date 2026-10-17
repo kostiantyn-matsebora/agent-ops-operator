@@ -59,7 +59,7 @@ func main() {
 	defer stop()
 	log.Printf("mcp-pulse starting (listen=%s, pulse=%s)", listen, srv.client.baseURL)
 
-	httpSrv := &http.Server{Addr: listen, Handler: srv.handler()}
+	httpSrv := &http.Server{Addr: listen, Handler: srv.handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

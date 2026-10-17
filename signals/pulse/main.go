@@ -87,15 +87,19 @@ func mustEnv(key string) string {
 // this process.
 var baseContext = context.Background
 
+// envOr reads an env var, falling back to def when unset — split out from
+// main() so the defaulting itself is a plain unit test, never exercised
+// only by binding a real port.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
-	sourceType := os.Getenv("ADAPTER_NAME")
-	if sourceType == "" {
-		sourceType = "pulse"
-	}
-	listen := os.Getenv("LISTEN_ADDR")
-	if listen == "" {
-		listen = ":8080"
-	}
+	sourceType := envOr("ADAPTER_NAME", "pulse")
+	listen := envOr("LISTEN_ADDR", ":8080")
 	a := &adapter{
 		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		sourceType: sourceType,

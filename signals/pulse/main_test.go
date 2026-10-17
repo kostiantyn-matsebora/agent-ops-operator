@@ -344,13 +344,31 @@ func TestMustEnvMissingExits(t *testing.T) {
 	}
 }
 
+// TestEnvOrDefaults is the default-fill-in branch's own unit test — the
+// thing TestMainRunsUntilSignaled used to exercise by unsetting LISTEN_ADDR
+// and letting main() bind the real default :8080, which collided with
+// anything else already listening there on the host or CI runner and took
+// the whole test binary down with it (main.go's log.Fatalf on a bind
+// failure calls os.Exit inside the test process). Covering the branch here
+// instead means the integration test below never needs to bind a fixed
+// port at all.
+func TestEnvOrDefaults(t *testing.T) {
+	os.Unsetenv("ENVOR_TEST_KEY")
+	if got := envOr("ENVOR_TEST_KEY", "fallback"); got != "fallback" {
+		t.Fatalf("expected the fallback when unset, got %q", got)
+	}
+	t.Setenv("ENVOR_TEST_KEY", "set")
+	if got := envOr("ENVOR_TEST_KEY", "fallback"); got != "set" {
+		t.Fatalf("expected the set value to win, got %q", got)
+	}
+}
+
 // TestMainRunsUntilSignaled closes main() itself: it starts the real process
-// loop (env defaulting, adapter construction, the real HTTP server,
-// registryLoop) against a real HTTP double for the manager serving one
-// source with no spec.config — which exercises the RegistrationNotConfigured
-// report as the sync point — then cancels baseContext directly — main()'s
-// own signal.NotifyContext derives from it, so this stops main() exactly as
-// a real SIGTERM would.
+// loop (adapter construction, the real HTTP server, registryLoop) against a
+// real HTTP double for the manager serving one source with no spec.config —
+// which exercises the RegistrationNotConfigured report as the sync point —
+// then cancels baseContext directly — main()'s own signal.NotifyContext
+// derives from it, so this stops main() exactly as a real SIGTERM would.
 func TestMainRunsUntilSignaled(t *testing.T) {
 	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}, statusHit: make(chan string, 4)}
 	mgrSrv := f.server(t)
@@ -358,6 +376,7 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 	env := map[string]string{
 		"MANAGER_URL":   mgrSrv.URL,
 		"ADAPTER_TOKEN": "t",
+		"LISTEN_ADDR":   "127.0.0.1:0", // OS-assigned port — never a fixed one a real process could already hold
 	}
 	prev := map[string]string{}
 	had := map[string]bool{}
@@ -366,7 +385,6 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 		os.Setenv(k, v)
 	}
 	os.Unsetenv("ADAPTER_NAME") // exercise the default-name fill-in branch
-	os.Unsetenv("LISTEN_ADDR")  // exercise the default-listen fill-in branch
 	defer func() {
 		for k := range env {
 			if had[k] {
