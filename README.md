@@ -42,9 +42,10 @@ This page is the short version of it.
 <img src="docs/assets/img/logos/prometheus.svg" width="18" alt=""> Prometheus &nbsp;·&nbsp;
 cron schedules &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/home-assistant.svg" width="18" alt=""> Home Assistant &nbsp;·&nbsp;
-Pulse &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/pulse.svg" width="18" alt=""> Pulse &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/telegram.svg" width="18" alt=""> Telegram &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/agent-ops.svg" width="18" alt=""> the console &nbsp;·&nbsp;
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/ollama-dark.svg"><img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""></picture> Ollama &nbsp;·&nbsp;
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/github-dark.svg"><img src="docs/assets/img/logos/github-light.svg" width="18" alt=""></picture> GitHub Copilot &nbsp;·&nbsp;
 any MCP server &nbsp;·&nbsp; your own
