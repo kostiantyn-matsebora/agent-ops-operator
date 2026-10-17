@@ -48,7 +48,7 @@ It is **not** what you want when:
 > transport it entered through.
 
 Review
-[the channel adapter contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-channel-adapter-contract)
+[the channel adapter contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts/channel-adapter.md#the-channel-adapter-contract)
 first.
 
 ## The overall shape
@@ -134,7 +134,7 @@ how tags reach a reader as literal characters.
 
 The manager parses none of this, exactly as it parses none of the markdown. Full
 rules in [the channel adapter
-contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-body-grammar).
+contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts/channel-adapter.md#the-body-grammar).
 
 **Not implementing it is fine.** `AgentProfile.spec.outputFormat` is required,
 and a profile declaring `none` emits no tags at all.

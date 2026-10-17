@@ -52,7 +52,7 @@ Even a liveness re-check passes, because the pod really is broken. The caps
 bound pods and backlog, so it fills etcd more slowly and never stops.
 
 Review
-[the signal adapter contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-signal-adapter-contract)
+[the signal adapter contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts/signal-adapter.md#the-signal-adapter-contract)
 first.
 
 ## The overall shape
@@ -114,7 +114,7 @@ environment.
 Event, because Kubernetes recreates Events per recurrence.
 
 **`kind` says what sort of work this is.** It picks the prompt wrapper the agent
-receives — `contracts.md` calls these **lanes** — and it decides how a later
+receives — `contracts/signal-adapter.md` calls these **lanes** — and it decides how a later
 signal is keyed when the source declares no `signatureLabels`:
 
 | `kind` | Subject | Keyed on |

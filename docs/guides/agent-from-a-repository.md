@@ -148,7 +148,7 @@ That wrapper says the agent is running headless in a pod, tells it to adopt the
 role from `.claude/agents/<agent>.md`, sets the rules for that kind of work, and
 says how to finish.
 
-There is one wrapper per kind of work. `contracts.md` calls these **lanes**:
+There is one wrapper per kind of work. `contracts/signal-adapter.md` calls these **lanes**:
 
 | Kind of work | The wrapper says |
 |---|---|

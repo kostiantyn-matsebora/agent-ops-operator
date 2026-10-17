@@ -1,16 +1,16 @@
 ## 1. Split docs/contracts.md by extension point — api-architect
 
-- [ ] 1.1 Move the channel adapter contract verbatim to
+- [x] 1.1 Move the channel adapter contract verbatim to
       `docs/contracts/channel-adapter.md`, leaving a one-line pointer at the
       old heading. Verify the diff is a pure move plus the pointer.
-- [ ] 1.2 Move the signal adapter contract verbatim to
+- [x] 1.2 Move the signal adapter contract verbatim to
       `docs/contracts/signal-adapter.md`, same pointer rule, same
       verification.
-- [ ] 1.3 Retarget every link to a moved `contracts.md` anchor across
+- [x] 1.3 Retarget every link to a moved `contracts.md` anchor across
       `README.md`, `CLAUDE.md`, `docs/**` and `.claude/rules/**`. Verify by
       resolving every relative link and anchor in the touched files to an
       existing heading.
-- [ ] 1.4 Add the three contract pages to the README Documentation index.
+- [x] 1.4 Add the three contract pages to the README Documentation index.
       Verify each is reachable from the README in one hop.
 
 ## 2. Write the runtime specification — api-architect
