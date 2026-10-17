@@ -249,7 +249,7 @@ disabled route or profile withholds the same agent here. */ -}}
 {{- if include "pulse.wiringActive" . -}}
 {{- $p := .Values.pipelines -}}
 {{- $sig := .Values.signal -}}
-{{- if $sig.defaultSource.enabled -}}{{- $sources = append $sources $sig.defaultSource.name -}}{{- end -}}
+{{- if and $sig.enabled $sig.defaultSource.enabled -}}{{- $sources = append $sources $sig.defaultSource.name -}}{{- end -}}
 {{- if include "pulse.observerRouteEnabled" . -}}
 {{- $agents = append $agents (dict "name" $p.observer.name "capability" $p.observer.name "description" $p.observer.description) -}}
 {{- end -}}
