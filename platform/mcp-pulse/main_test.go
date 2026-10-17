@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -14,10 +15,22 @@ import (
 // real SIGTERM would, without sending any OS signal that could also reach
 // other tests sharing this process.
 func TestMainRunsUntilSignaled(t *testing.T) {
+	// A free port picked up front, rather than ":0" left for main() to
+	// resolve blind, so this test has an address it can actually dial to
+	// know the server is up — a real synchronization point instead of a
+	// fixed sleep (signals/pulse/main_test.go's TestMainRunsUntilSignaled
+	// uses the equivalent real signal on its own loop, a status report).
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a free port: %v", err)
+	}
+	addr := probe.Addr().String()
+	probe.Close()
+
 	prevURL, hadURL := os.LookupEnv("PULSE_URL")
 	prevListen, hadListen := os.LookupEnv("LISTEN_ADDR")
 	os.Setenv("PULSE_URL", "http://127.0.0.1:1") // never dialed by this test
-	os.Setenv("LISTEN_ADDR", "127.0.0.1:0")
+	os.Setenv("LISTEN_ADDR", addr)
 	defer func() {
 		restore := func(had bool, key, prev string) {
 			if had {
@@ -41,8 +54,17 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 		close(done)
 	}()
 
-	// give the listener a moment to bind before tearing it down again.
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if conn, err := net.Dial("tcp", addr); err == nil {
+			conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("main() never started listening")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	cancel()
 
 	select {

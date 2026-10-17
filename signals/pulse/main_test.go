@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -418,5 +419,50 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("main() did not return after its context was cancelled")
+	}
+}
+
+// TestConcurrentRefreshAndWebhookDelivery actually races registryLoop's
+// kind of source-map refresh against inbound webhook delivery on the same
+// adapter, the scenario every other test in this package drives
+// sequentially from one goroutine — `go test -race` has nothing to catch
+// without a test that does this. One goroutine repeatedly calls
+// refreshSources (what registryLoop's ticker does on every tick), another
+// concurrently posts to the webhook endpoint (what a real Pulse delivery
+// does), both touching a.sources/a.reported through the same mutex-guarded
+// paths main.go reads and writes in production.
+func TestConcurrentRefreshAndWebhookDelivery(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}}
+	mgrSrv := f.server(t)
+	a := &adapter{
+		mgr:        NewManager(mgrSrv.URL, "tok"),
+		sourceType: "pulse",
+		sources:    map[string]string{},
+		reported:   map[string]string{},
+	}
+	h := a.handler()
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			a.refreshSources(context.Background())
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			post(t, h, "/webhook/pulse-default", firingBody("race-"+strconv.Itoa(i)))
+		}
+	}()
+
+	wg.Wait()
+
+	if _, ok := a.served("pulse-default"); !ok {
+		t.Fatal("the source must still be served once both goroutines finish")
 	}
 }

@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakePulse stands in for Pulse's own notifications-webhooks API: a simple
@@ -71,6 +73,58 @@ func (f *fakePulse) server(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// TestValidHTTPURLRejectsShapes pins validHTTPURL's rejection branches —
+// unparseable, a non-http(s) scheme, no host, and embedded userinfo all
+// must fail, so a regression that made it a no-op would be caught here
+// rather than only by a production misconfiguration.
+func TestValidHTTPURLRejectsShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		want bool // true = accepted
+	}{
+		{"valid http", "http://pulse.example.org", true},
+		{"valid https", "https://pulse.example.org:8443", true},
+		{"unparseable", "http://[::1", false},
+		{"non-http scheme", "ftp://pulse.example.org", false},
+		{"scheme-less", "pulse.example.org", false},
+		{"no host", "http://", false},
+		{"embedded userinfo", "http://user:pass@pulse.example.org", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validHTTPURL(tc.url)
+			if tc.want && err != nil {
+				t.Fatalf("expected %q to be accepted, got: %v", tc.url, err)
+			}
+			if !tc.want && err == nil {
+				t.Fatalf("expected %q to be rejected, got no error", tc.url)
+			}
+		})
+	}
+}
+
+// TestParseRegisterConfigRejectsInvalidURLs closes parseRegisterConfig's two
+// per-field error branches: syntactically valid JSON carrying a
+// syntactically invalid baseUrl or webhookUrl must fail, not just
+// non-JSON input (TestReconcileRegistrationInvalidConfigReportsOnce covers
+// that case already).
+func TestParseRegisterConfigRejectsInvalidURLs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		json string
+	}{
+		{"bad baseUrl", `{"baseUrl":"not-a-url"}`},
+		{"bad webhookUrl", `{"baseUrl":"https://pulse.example.org","webhookUrl":"not-a-url"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := parseRegisterConfig(json.RawMessage(tc.json))
+			if err == nil {
+				t.Fatalf("expected an error, got config: %+v", cfg)
+			}
+		})
+	}
 }
 
 // TestEnsureWebhookCreateThenUpdateIdempotent is task 1.6's verification:
@@ -346,5 +400,68 @@ func TestReconcileRegistrationNotConfiguredWithoutWebhookURL(t *testing.T) {
 	defer pulse.mu.Unlock()
 	if pulse.creates != 0 {
 		t.Fatalf("must not register anything without a configured webhookUrl: creates=%d", pulse.creates)
+	}
+}
+
+// TestSigningSecretFlowsFromCredentialToVerification closes the gap every
+// other registration test leaves open: they only ever set the `token` env
+// var, and signature_test.go's own end-to-end test injects a secret
+// directly into a.sources, bypassing pulseCredential/reconcileRegistration
+// entirely. This drives the real path start to finish — the chart's
+// `signingSecret` Secret key (chart/charts/pulse/templates/credentials.yaml)
+// projected as AGENTOPS_CRED_<prefix>signingSecret, resolved by
+// pulseCredential, returned by reconcileRegistration, and written into
+// a.sources by refreshSources — then proves it by actually verifying a
+// signed webhook through the real handler. A key-name drift anywhere in
+// that chain would show up here as a wrongly-accepted or wrongly-rejected
+// request, not just a missing map entry.
+func TestSigningSecretFlowsFromCredentialToVerification(t *testing.T) {
+	mgr := &fakeManager{sources: []SourceInfo{{
+		Name:                "pulse-default",
+		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+	}}}
+	mgrSrv := mgr.server(t)
+	pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+	pulseSrv := pulse.server(t)
+	mgr.sources[0].Config = json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `","webhookUrl":"https://pulse-adapter.example.org/webhook/pulse-default"}`)
+
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "s3cret")
+
+	a := &adapter{
+		mgr:      NewManager(mgrSrv.URL, "tok"),
+		sources:  map[string]string{},
+		reported: map[string]string{},
+	}
+	a.refreshSources(context.Background())
+
+	if got, ok := a.served("pulse-default"); !ok || got != "s3cret" {
+		t.Fatalf("expected the resolved signingSecret to reach a.sources via refreshSources, got %q (served=%v)", got, ok)
+	}
+
+	h := a.handler()
+	body := firingBody("sig-flow")
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+
+	// a correctly signed request, using the same secret the real chart Secret
+	// key and pulseCredential's lookup actually agree on, must be accepted.
+	req := httptest.NewRequest("POST", "/webhook/pulse-default", strings.NewReader(body))
+	req.Header.Set("X-Pulse-Timestamp", ts)
+	req.Header.Set("X-Pulse-Signature", sign(t, "s3cret", ts, []byte(body)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("correctly signed request: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// a request signed with a DIFFERENT secret (what a key-name drift between
+	// the chart and this adapter would actually produce) must be rejected.
+	req = httptest.NewRequest("POST", "/webhook/pulse-default", strings.NewReader(body))
+	req.Header.Set("X-Pulse-Timestamp", ts)
+	req.Header.Set("X-Pulse-Signature", sign(t, "wrong-secret", ts, []byte(body)))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("wrongly signed request must be rejected: %d %s", rec.Code, rec.Body.String())
 	}
 }
