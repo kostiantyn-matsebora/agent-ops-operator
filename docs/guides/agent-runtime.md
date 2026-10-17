@@ -54,13 +54,13 @@ It is **not** what you want when:
 {: .ao-callout}
 > **Your runtime applies the tool allowlist, and nothing checks that it did.**
 > A runtime that ignores it voids every toolset binding in the install,
-> silently. Read the allowlist section below before you write any of it.
+> silently. Read the allowlist station below before you write any of it.
 
-Review
-[the work contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-work-contract)
-and
+Review [the runtime contract](../contracts/runtime.md) and
 [AgentRuntime](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#agentruntime)
-first. This page builds the smallest thing that satisfies them.
+first. This page builds the smallest thing that satisfies them, station by
+station, and every station names the exact section of the contract it builds
+toward.
 
 ## The overall shape
 
@@ -95,16 +95,22 @@ one. That is the honest alternative to conversations queueing forever.
 A bundle may ship a runtime of its own the same way.
 
 The manager creates one pod per conversation from part 2, and that pod is your
-image. It gives the pod `CONTROL_URL`, `CONVO_ID`, `POD_NAME` and
-`RUNTIME_IDLE_TTL_M`, and checks the profile's repository out at
-`/data/workspace` before your process starts.
+image. It gives the pod `CONTROL_URL`, `CONVO_ID`, `POD_NAME`,
+`RUNTIME_IDLE_TTL_M`, `REPO_URL`, `REPO_REF` and the profile's git
+credentials — the full list is [Environment](../contracts/runtime.md#environment).
+
+**Checking the repository out is your runtime's own job, never the
+manager's.** See [Runtime's obligations](../contracts/runtime.md#runtimes-obligations).
+The stations below build that sequence in order, starting with the poll.
 
 **The pod dials the manager, never the reverse.** Your runtime needs no inbound
 port and no Service.
 
-## Poll for work
+## 1. Poll for work
 
-Long-poll. The call blocks until there is a unit or the wait expires.
+Long-poll. The call blocks until there is a unit or the wait expires — the
+first thing [Runtime's obligations](../contracts/runtime.md#runtimes-obligations)
+asks of you.
 
 ```sh
 curl "$CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25"
@@ -114,7 +120,8 @@ curl "$CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25"
 curl "$env:CONTROL_URL/work?convo=$env:CONVO_ID&pod=$env:POD_NAME&wait=25"
 ```
 
-A `204` means nothing is queued. Poll again. A unit looks like this:
+A `204` means nothing is queued. Poll again. A unit looks like this — every
+field is named in [The work unit](../contracts/runtime.md#the-work-unit):
 
 ```json
 {
@@ -130,35 +137,89 @@ A `204` means nothing is queued. Poll again. A unit looks like this:
 ```
 
 `promptText` arrives fully rendered — the manager has already wrapped the
-payload in a prompt. A profile that replaces that wrapper sends `promptFile` and
-`promptVars` instead, both relative to the checkout, and your runtime renders
-them.
+payload in a prompt. A profile that replaces that wrapper sends `promptFile`
+and `promptVars` instead, both relative to the checkout, and your runtime
+renders them.
 
-## Compose the tool allowlist
+**Verify:** the `curl` above returns `204` against an idle conversation, and
+returns a unit shaped like the one above once you give that conversation
+something to do.
+
+## 2. Clone the repository
+
+**Repository checkout is your runtime's obligation, never the manager's** —
+see [Runtime's obligations](../contracts/runtime.md#runtimes-obligations). The
+manager hands you `REPO_URL`, `REPO_REF` and the git credentials the profile
+declares, and stops there.
+
+`REPO_URL` and `REPO_REF` are always set and may both be empty — see
+[Environment](../contracts/runtime.md#environment). An empty `REPO_URL` means
+this conversation has no repository, so clone nothing rather than treating
+the empty string as an error.
+
+```sh
+if [ -n "$REPO_URL" ]; then
+  git clone --branch "$REPO_REF" "$REPO_URL" /data/workspace
+fi
+```
+
+```powershell
+if ($env:REPO_URL) {
+  git clone --branch $env:REPO_REF $env:REPO_URL /data/workspace
+}
+```
+
+Authenticate from whichever pair the environment carries: `GIT_AUTH_TYPE`
+with `GIT_SSH_KEY`, or `GIT_AUTH_TYPE` with `GIT_TOKEN` — same
+[Environment](../contracts/runtime.md#environment) table.
+
+**Verify:** `/data/workspace` holds the checkout at `REPO_REF` once
+`REPO_URL` is non-empty, and stays empty when `REPO_URL` is empty. That path
+never moves — see [Filesystem](../contracts/runtime.md#filesystem).
+
+## 3. Compose the tool allowlist
 
 **`allowedTools` is half of the allowlist.** The other half is the `tools:`
 frontmatter of `.claude/agents/<agent>.md` in the checkout, which only your
 runtime can read, because only your runtime holds the repository.
 
-`toolsMode` says how the two combine:
+The rule for combining them is [Composing the
+allowlist](../contracts/runtime.md#composing-the-allowlist) — this station
+demonstrates it and states nothing beyond it.
+
+`toolsMode` directs how the two combine:
 
 | `toolsMode` | Pass to the model |
 |---|---|
 | `merge` | the union, the definition's own entries keeping their position |
 | `overwrite` | `allowedTools` alone |
 
-Three rules, and each of them was paid for:
+**An empty allowlist means empty.** The contract is explicit: substituting a
+default is a grant nobody wrote down. No repository means no definition to
+read, so `merge` degrades to `allowedTools` alone — that is correct, not a
+fallback.
 
-| Rule | Because |
-|---|---|
-| An **empty allowlist means empty** | substituting a default is a grant nobody wrote down |
-| **Never re-apply the definition** on top of the composed list | applying it twice as an intersection silently defeats `overwrite` |
-| **Never prompt** for a permission | nobody is in a pod to answer, so the run hangs until its idle TTL |
+In practice, compose the list once and pass exactly that to the model.
 
-No repository means no definition to read, so `merge` degrades to
-`allowedTools`. That is correct, not a fallback.
+Re-applying the definition afterward as an intersection would quietly turn
+`overwrite` back into `merge`. Falling back to an interactive prompt for a
+missing tool has nobody in the pod to answer it, so the run would simply
+hang until `RUNTIME_IDLE_TTL_M`.
 
-## Run the unit and report the outcome
+**Verify:** log the composed list before it reaches the model.
+
+```sh
+echo "allowlist: $COMPOSED_TOOLS"
+```
+
+```powershell
+Write-Output "allowlist: $env:COMPOSED_TOOLS"
+```
+
+Confirm it matches the table above for both a `merge` and an `overwrite`
+unit.
+
+## 4. Run the unit and report the outcome
 
 Stream progress to **stdout**. That is the live transcript an operator reads
 with `kubectl logs`, and the only window into a run while it happens.
@@ -179,13 +240,19 @@ curl -X POST "$env:CONTROL_URL/work/done" -d '{
 }'
 ```
 
+Every field of this report is named in [The completion
+report](../contracts/runtime.md#the-completion-report). `status` is
+`succeeded` or `failed` — the manager reads any other value as a failed run,
+see [Enums](../contracts/runtime.md#enums).
+
 **`result` is the deliverable.** The operator hands it to every bound channel
-through their adapters, so your runtime never posts to a transport and holds no
-channel credentials.
+through their adapters, so your runtime never posts to a transport and holds
+no channel credentials.
 
 **`runtimeContextId` is your own handle, and the manager interprets nothing.**
-It stores the string and hands it back on the next unit. Report the context you
-actually finished on, which is not always the one you were asked to continue.
+It stores the string and hands it back on the next unit. Report the context
+you actually finished on, which is not always the one you were asked to
+continue.
 
 `continuity` says what happened to the context you were handed:
 
@@ -195,13 +262,27 @@ actually finished on, which is not always the one you were asked to continue.
 | `new` | you started fresh, and nothing had been promised |
 | `unavailable` | you could not reach it — the manager fails the run rather than answering fresh under its name |
 
-## Exit when idle
+If you report `turns[]` or `toolCalls[]`, trim each to the
+[bounds](../contracts/runtime.md#bounds) — 200 entries, 200 bytes per string
+field — before posting. The manager refuses the WHOLE report with `400` over
+any bound, never trims it for you.
 
-Exit `0` after `RUNTIME_IDLE_TTL_M` minutes with no work. The pod outliving the
-answer is deliberate, so a follow-up skips the cold start. The manager creates a
-fresh pod on the next input.
+**Verify:** the `POST /work/done` above returns `200`. Post a report over a
+bound instead — 201 entries in `turns[]`, say — and confirm it comes back
+`400` naming the field and the bound rather than being trimmed and accepted.
 
-## Declare the AgentRuntime
+## 5. Exit when idle
+
+Exit `0` after `RUNTIME_IDLE_TTL_M` minutes with no work — the one condition
+[Lifecycle](../contracts/runtime.md#lifecycle) names for exiting on your own.
+The pod outliving the answer is deliberate, so a follow-up skips the cold
+start. The manager creates a fresh pod on the next input.
+
+**Verify:** set `RUNTIME_IDLE_TTL_M` low on a test deployment and watch the
+pod exit `0` on its own once that many minutes pass with no `GET /work`
+returning a unit.
+
+## 6. Declare the AgentRuntime
 
 <!-- generated: template kind=AgentRuntime name=my-runtime fields=image,contextStorage,serviceAccountName,idleTtlMinutes comments=off -->
 ```yaml
@@ -217,9 +298,13 @@ spec:
 ```
 <!-- /generated -->
 
-`contextStorage` is what the manager reads **before** promising a reader that a
-follow-up keeps its context. It is the one storage question only your runtime
-can answer — whether its backend writes context to a disk at all:
+`contextStorage` is what the manager reads **before** promising a reader
+that a follow-up keeps its context.
+
+See [Manager's provisions](../contracts/runtime.md#managers-provisions) for
+the restoration and checkpoint-ordering guarantee that declaration unlocks.
+It is the one storage question only your runtime can answer — whether its
+backend writes context to a disk at all:
 
 | Value | Your runtime keeps context |
 |---|---|
@@ -253,9 +338,13 @@ operator's own namespace.
 namespace, whatever its RBAC says.** The kubelet does the reading. See
 [installation](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/installation.md).
 
-## Point a Pipeline at it, and verify
+**Verify:** `kubectl apply -f my-runtime.yaml` succeeds. The object carries
+no condition of its own to watch — the next station's Pipeline `Ready`
+condition is what confirms it actually resolves.
 
-Declaring it through the chart is the ordinary path — the `AgentRuntime` below
+## 7. Point a Pipeline at it, and verify
+
+Declaring it through the chart is the ordinary path — the `AgentRuntime` above
 is what that renders, and applying one by hand is the same object.
 
 ```sh
@@ -280,16 +369,16 @@ ask something new.
 Naming an `AgentRuntime` that does not exist turns the Pipeline's `Ready`
 condition `False`, naming the missing runtime.
 
-Apply the missing `AgentRuntime` and `Ready` converges with no further edit.
-
-Ask your agent something. The pod log should show the unit arriving, then the
-allowlist you composed, then the answer.
+**Verify:** apply the missing `AgentRuntime` and `Ready` converges with no
+further edit. Ask your agent something — the pod log shows the unit
+arriving, then the allowlist you composed, then the answer.
 
 ## What comes next
 
-1. **Read the contract in full** —
-   [the work contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md#the-work-contract)
-   covers every field, and the breaker for a tool call the model cannot form.
+1. **Read the specification in full** — [the runtime
+   contract](../contracts/runtime.md) covers every field, every enum, the
+   bounds and their refusal, and the conformance checklist a claim of
+   conformance is walked against.
 2. **Compare against the reference** —
    [`runtimes/claude`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/runtimes/claude/),
    about 200 lines of contract handling.

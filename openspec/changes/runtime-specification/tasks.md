@@ -44,11 +44,11 @@
 
 ## 4. Rewrite the adopter guide as the station procedure — api-architect
 
-- [ ] 4.1 Rewrite `docs/guides/agent-runtime.md` as ordered stations — each
+- [x] 4.1 Rewrite `docs/guides/agent-runtime.md` as ordered stations — each
       citing a spec section by anchor, each ending in a verification — fixing
       the repository-checkout claim. Verify the guide states no requirement of
       its own and every cited anchor exists in the spec.
-- [ ] 4.2 Re-run `docs-generate.py` for the guide's generated resource blocks
+- [x] 4.2 Re-run `docs-generate.py` for the guide's generated resource blocks
       and verify `--check` is clean.
 
 ## 5. Governance rule, version claims, routing — api-architect
