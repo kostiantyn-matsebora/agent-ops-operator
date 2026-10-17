@@ -30,9 +30,10 @@ and a guide that is the exact path to it.
   `signals/telegram` — each one's documentation page states the specification
   version it conforms to, and an adapter whose page is the guide itself is
   claimed there.
-- **The specification governs the agent too.** A scoped context rule binds
-  changes under `signals/**` and the manager's ingest surface: verify against
-  the specification, never edit it without the user's explicit approval.
+- **The specification governs the agent too.** The existing scoped rule
+  `signal-rules.md` is extended to bind changes under `signals/**` and the
+  manager's ingest surface: verify against the specification, never edit it
+  without the user's explicit approval.
 - **A specification change carries conformance.** An approved edit must, in
   the same change, bring every shipped signal adapter into conformance and
   move every claimed version.
@@ -72,8 +73,14 @@ None.
 
 **Context touched:**
 
-- A new scoped rule (loads under `signals/**` and the manager's ingest
-  surface) — verify against the specification, never edit it unapproved, a
-  spec change carries conformance.
+- `.claude/rules/signal-rules.md`, extended rather than a new file. It
+  already scopes `signals/**` and `internal/ingest/`, and gains the signal
+  endpoints in `internal/httpapi/` plus the three obligations: verify against
+  the specification, never edit it unapproved, a spec change carries
+  conformance.
+- `.claude/rules/documentation.md` routing table — a row sending signal
+  adapter contract changes to `docs/contracts/signal-adapter.md`.
+- `docs/contracts.md` — points to the signal page.
 
-**Code:** none.
+**Code:** none expected. 1.0.0 documents shipped behavior, and a conformance
+gap the checklist finds is fixed in this change.

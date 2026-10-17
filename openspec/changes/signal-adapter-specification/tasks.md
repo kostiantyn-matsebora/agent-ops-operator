@@ -15,7 +15,8 @@
       shipped adapter test that exercises it where one exists, across
       `signals/cron`, `signals/alertmanager`, `signals/k8s-events`,
       `signals/ha` and `signals/telegram`. Verify all five pass every item by
-      reading their tests, recording any gap as a gap.
+      reading their tests. Fix any gap in this change before the version is
+      claimed.
 
 ## 2. Rewrite the adopter guide as the station procedure
 
@@ -28,8 +29,8 @@
 
 ## 3. Governance rule and version claims
 
-- [ ] 3.1 Add the scoped rule (loads under `signals/**` and the manager's
-      ingest surface) stating the three obligations. Verify with
+- [ ] 3.1 Extend `.claude/rules/signal-rules.md` (add the signal endpoints in
+      `internal/httpapi/` to its `paths:`) with the three obligations. Verify with
       `rules_compliance.py` and the authoring rules.
 - [ ] 3.2 Add the claimed specification version (1.0.0) to
       `docs/integrations/home-assistant.md`, `docs/integrations/prometheus.md`,
@@ -54,8 +55,9 @@
 ## 6. Documentation
 
 - [ ] 6.1 Reference docs: `python3 .github/scripts/docs-generate.py --check`
-      clean over the whole tree, and `docs/contracts.md`'s pointer to the
-      signal page still resolves.
+      clean over the whole tree. Update `docs/contracts.md` to point at the
+      signal page and add its row to `.claude/rules/documentation.md`'s
+      routing table. Verify the pointer resolves.
 - [ ] 6.2 Adopter site: build the site from this working copy's tree and look
       at the changed pages per `docs/CLAUDE.md` pre-flight — stations render,
       command fences pair, no table crushes, no horizontal overflow in either

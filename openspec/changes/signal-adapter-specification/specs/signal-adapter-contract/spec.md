@@ -5,6 +5,9 @@
 The signal adapter specification SHALL live at `docs/contracts/signal-adapter.md`
 as a reference page with no front matter.
 
+The same change SHALL add a row to `.claude/rules/documentation.md`'s routing
+table for this page and point `docs/contracts.md` at it.
+
 It SHALL carry a semver version, starting at `1.0.0`, and its own changelog
 recording every version with what changed in it.
 
@@ -173,6 +176,10 @@ The same change MUST move the version every shipped adapter page claims. The
 change is not finished while any shipped adapter conforms only to the previous
 version, so the specification never runs ahead of what ships.
 
+The first version, `1.0.0`, documents shipped behavior. It needs no adapter
+change, but the change MUST walk the checklist for all five adapters and fix
+any gap it finds before the version is claimed.
+
 #### Scenario: The specification version moves
 
 - **WHEN** a change bumps the specification version
@@ -181,8 +188,10 @@ version, so the specification never runs ahead of what ships.
 
 ### Requirement: The specification governs the agent's own changes
 
-A scoped context rule SHALL load for `signals/**` and the manager's ingest
-surface: `internal/ingest/` and the signal endpoints in `internal/httpapi/`.
+The existing scoped rule `.claude/rules/signal-rules.md` SHALL be extended, not
+duplicated in a new file. It already loads for `signals/**` and
+`internal/ingest/`, and SHALL also load for the signal endpoints in
+`internal/httpapi/`.
 
 The rule SHALL state that a change there is verified against the specification
 before it is claimed done. It SHALL state that the specification itself is

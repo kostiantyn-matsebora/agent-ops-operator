@@ -1,7 +1,8 @@
 ## Context
 
-See proposal.md — Why. `runtime-specification` lands the structure this change
-builds on:
+See proposal.md — Why. This change builds on a sibling change,
+`runtime-specification`, which is not yet in the tree (no change directory or
+archive entry exists). Once it lands it provides:
 
 - The signal adapter contract already lives at
   `docs/contracts/signal-adapter.md`, moved verbatim.
@@ -53,8 +54,8 @@ birth.
 ## Risks / Trade-offs
 
 - [Five shipped adapters drift from one checklist] → each checklist item
-  cites the test that exercises it per adapter, and a gap is recorded as a
-  gap rather than papered over.
+  cites the test that exercises it per adapter, and a gap is fixed in this
+  change before the version is claimed.
 - [The self-exclusion invariant is restated wrongly] → the spec cites
   `selfexclude.go` and the invariant, never paraphrases the rule's mechanics.
 - [Governance rule is prose, not enforcement] → accepted, same trade as the
