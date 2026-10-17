@@ -36,13 +36,13 @@
       claiming it done, and never edit the specification without the user's
       explicit approval. Verify with `rules_compliance.py` and the authoring
       rules.
+- [ ] 3.2 Add the claimed specification version (1.0.0) to
+      `docs/integrations/telegram.md` and `docs/console.md`. Verify each page
+      states it.
 - [ ] 3.3 Update `.claude/rules/documentation.md`'s "Where documentation goes"
       table so the adapter contracts row points channel contract changes at
       `docs/contracts/channel-adapter.md`, the only statement. Verify the
       table names that page and `docs/contracts.md` keeps only a pointer.
-- [ ] 3.2 Add the claimed specification version (1.0.0) to
-      `docs/integrations/telegram.md` and `docs/console.md`. Verify each page
-      states it.
 
 ## 4. Unit tests — testing-specialist
 
