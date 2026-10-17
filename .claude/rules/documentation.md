@@ -29,8 +29,8 @@ Write to the file that OWNS that content:
 | CRD fields, capability resolution | `docs/concepts.md` |
 | Runtime/channel/signal contract | `docs/contracts/<contract>.md` |
 | Manager-owned surfaces, HTTP endpoints | `docs/contracts.md` |
-| An integration's adopter content | `docs/integrations/<system>.md` |
-| What a bundle renders | the `renders` marker + `docs-generate.py` |
+| An integration's adopter content | `docs/integrations/<system>.md`, dense prose, no exhaustive values, no renders table |
+| What a bundle renders, for a reference page (`cr-reference.md`, `guides/`, `runtimes/<vendor>.md`) | the `renders` marker + `docs-generate.py` |
 | Install/upgrade/uninstall, storage access mode | `docs/installation.md` |
 | Other parent chart values (reversible) | `docs/configuration.md` |
 | A release's chart/image version | `installation.md` + `concepts.md` |

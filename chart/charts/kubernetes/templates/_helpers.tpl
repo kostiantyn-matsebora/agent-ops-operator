@@ -102,13 +102,13 @@ because "one flag, a working install" is the whole promise, and an install that
 answers nothing until you hand-write a CR does not keep it.
 
 `null` means that rule; an explicit boolean is absolute in both directions, so
-`pipelines.enabled: false` is the opt-out even under demo mode. That is why this
+`wiringEnabled: false` is the opt-out even under demo mode. That is why this
 value is nullable and `enabled` on the other components is not — theirs never
 have to disagree with demo mode. */ -}}
 {{- define "kubernetes.wiringActive" -}}
 {{- if include "kubernetes.active" . -}}
-{{- if kindIs "bool" .Values.pipelines.enabled -}}
-{{- if .Values.pipelines.enabled }}true{{ end -}}
+{{- if kindIs "bool" .Values.wiringEnabled -}}
+{{- if .Values.wiringEnabled }}true{{ end -}}
 {{- else if dig "demo" "enabled" false (.Values.global | default dict) -}}
 true
 {{- end -}}

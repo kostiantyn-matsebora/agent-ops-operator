@@ -8,6 +8,62 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [15.1.0] — 2026-10-16
+
+- `signal-pulse` 0.1.0, `mcp-pulse` 0.1.0, bundle `pulse` 0.1.0.
+- Bundles `kubernetes` 0.3.2, `prometheus` 0.2.0 and `home-assistant` 0.2.0
+  take the breaking `wiringEnabled` rename (see Changed).
+
+### Added
+
+- **The `pulse` bundle.** A webhook-receiving `SignalAdapter` for Pulse
+  (rcourtman/pulse — Proxmox VE/PBS/PMG, Docker/Podman, Kubernetes, TrueNAS),
+  a first-party `mcp-pulse` MCP server, and two AgentProfiles split by
+  privilege: `pulse-observer` only investigates, `pulse-operator` can
+  additionally record a Community-tier operator-state annotation
+  (maintenance window, criticality tag). See
+  [the integration page](integrations/pulse.md).
+  - The real wall between the two profiles is which pre-scoped Pulse API
+    token each route's `MCPConfig` carries, not the toolset — `mcp-pulse`
+    forwards whichever token the caller presented and decides no reach of
+    its own.
+  - The adapter self-registers its webhook against Pulse's own
+    `POST /api/notifications/webhooks`, reading the base URL and token from
+    the served `SignalSource`'s own `spec.config`/`spec.credentialsSecretRef`
+    — the `SignalAdapter` CRD carries no generic pod-env passthrough, so
+    that is the only delivery path that reaches the adapter's pod.
+
+### Changed
+
+**BREAKING: every bundle's wiring switch is now `<bundle>.wiringEnabled`,**
+not `<bundle>.pipelines.enabled`. `kubernetes`, `prometheus` and
+`home-assistant` all move. `pulse` is new this release and ships the new name.
+
+The old spelling named one of the two shapes a bundle's route can take — a
+`Pipeline`, under `global.agentops.wiringMode: pipelines` — even though the
+same flag also gates the `AgentCapability` objects `wiringMode: coordinator`
+renders instead. `wiringEnabled` says only WHETHER the bundle's own route(s)
+render. `wiringMode` still says AS WHAT.
+
+Per-route sub-flags are unaffected: `pulse.pipelines.observer.enabled` and
+`pulse.pipelines.operator.enabled` keep their names and their place under
+`pipelines:`.
+
+### Upgrade
+
+Action needed if you set any `<bundle>.pipelines.enabled` value. **The
+render FAILS until you move it**, deliberately — Helm never reports an
+unread values key, so an unguarded rename would present as a successful
+upgrade that silently turned wiring off.
+
+Rename `<bundle>.pipelines.enabled` to `<bundle>.wiringEnabled` for each
+bundle you set it on:
+
+```yaml
+kubernetes:
+  wiringEnabled: true   # was: pipelines.enabled
+```
+
 ## [15.0.0] — 2026-10-12
 
 - `manager` 0.58.0, `channel-telegram` 0.26.0, `gateway-telegram` 0.7.0.
@@ -292,7 +348,7 @@ CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
   instead of attempted and reported as an RBAC refusal. Rendered from the same
   value the RBAC reads, and absent when the gate is on. An install overriding
   `kubernetes.profile.systemPrompt` gains the paragraph on upgrade, appended
-  after its own text; `kubernetes.profile.podExecutionWithheldPrompt: ""`
+  after its own text. `kubernetes.profile.podExecutionWithheldPrompt: ""`
   declines it. Bundle `kubernetes` 0.3.2.
 - The home-assistant bundle's `ha-admin` toolset now ships ten registry-removal
   tools by default — entities, devices, areas/floors, zones, helpers and
@@ -428,7 +484,7 @@ below, each image carries what landed on it since its last tag:
 
 
 - **The `kubernetes` bundle's events `ClusterRole` gains `nodes`
-  `list`/`watch`** (cluster-wide RBAC only; a namespaced install has no
+  `list`/`watch`** (cluster-wide RBAC only. A namespaced install has no
   equivalent, since nodes are cluster-scoped — drain awareness is simply off
   there, and every source's Ready condition notes it once).
 - **The shipped tier-3 node-condition rule now matches `kind="Node"`.**
@@ -447,7 +503,7 @@ below, each image carries what landed on it since its last tag:
   and keeps firing on every pod-level `NodeNotReady` exactly as before.
 - **The SonarCloud quality gate is a required check.** The scan step in CI
   waits on the gate and fails the component's job on `ERROR`, reported
-  through `ci-green`. Contributor-facing only; nothing in the chart or the
+  through `ci-green`. Contributor-facing only. Nothing in the chart or the
   operator changes. See `CONTRIBUTING.md`, *Code analysis* and *Pull
   requests* (the `autofix` label).
 
@@ -470,10 +526,13 @@ below, each image carries what landed on it since its last tag:
 ## [13.3.0] — 2026-08-28
 
 **A third runtime: `agentops-runtime-copilot` 0.1.0, shipped as the `copilot`
-bundle.** GitHub Copilot driven through its SDK, in process. The first vendor
-to own its own tool vocabulary, its own agent-definition format and its own
-session store — and every one of those is translated inside the runtime, so a
-Pipeline binds the same toolsets it binds for claude. No manager, CRD or
+bundle.** GitHub Copilot driven through its SDK, in process.
+
+The first vendor to own its own tool vocabulary, its own agent-definition
+format and its own session store. Every one of those is translated inside
+the runtime.
+
+A Pipeline binds the same toolsets it binds for claude. No manager, CRD or
 toolset change was needed.
 
 ### Added
@@ -510,12 +569,17 @@ rendered manifest is identical.
 ## [13.2.0] — 2026-08-27
 
 **A burst that healed before its dwell closed no longer opens a
-conversation.** Both dwell adapters re-check a matched event at the end of its
-`for` window. For a kind with no health predicate — every kind but Pod in the
+conversation.** Both dwell adapters re-check a matched event at the end of
+its `for` window.
+
+For a kind with no health predicate — every kind but Pod in the
 cluster-events lane, every integration without a config-entry state in the
-Home Assistant lane — the re-check asked *did it recur*, and a controller that
-retried every few seconds for half a minute and then healed answered yes. On
-the reference install that was most of the backlog: twelve conversations
+Home Assistant lane — the re-check asked *did it recur*.
+
+A controller that retried every few seconds for half a minute and then
+healed answered yes.
+
+On the reference install that was most of the backlog: twelve conversations
 about Longhorn snapshot purges that had healed two minutes before the
 catch-all fired, each concluding "self-resolved, no action needed".
 
@@ -526,21 +590,24 @@ catch-all fired, each concluding "self-resolved, no action needed".
   asks whether the event was **still recurring as the window closed** — its
   last third, floored at thirty seconds, derived from the window actually
   waited so escalation keeps the proportion. A burst that went quiet before
-  that is dropped as churn; one still arriving is reported once, and its
+  that is dropped as churn. One still arriving is reported once, and its
   evidence names how long before the close the last event arrived.
 - The Home Assistant re-check applies the same rule to the log's own count: a
   count that rose early in the window and stopped rising is a blip that
   healed, not an integration still failing.
 
 **Trade-off, named.** A controller backing off to a retry period longer than
-the closing window — ninety seconds under a three-minute rule — is dropped at
-that deadline, and its next retry opens a fresh window. The report is delayed
-by one window, not lost. Anyone preferring the previous behaviour restates the
-rule with a shorter `for`; there is no switch.
+the closing window — ninety seconds under a three-minute rule — is dropped
+at that deadline, and its next retry opens a fresh window.
 
-No configuration, CRD or RBAC change. `NodeNotReady` and the other `for: "0"`
-reasons are unaffected — they are never re-checked; a scheduled reboot is the
-time axis's job (`route.muteTimeIntervals`, see the Kubernetes page).
+The report is delayed by one window, not lost. Anyone preferring the
+previous behaviour restates the rule with a shorter `for`. There is no
+switch.
+
+No configuration, CRD or RBAC change. `NodeNotReady` and the other
+`for: "0"` reasons are unaffected. They are never re-checked — a scheduled
+reboot is the time axis's job (`route.muteTimeIntervals`, see the
+Kubernetes page).
 
 ## [13.1.1] — 2026-08-27
 
@@ -568,11 +635,14 @@ and scanned clean, so it is unchanged.
 ## [13.1.0] — 2026-08-26
 
 **A second runtime: `agentops-runtime-ollama` 0.1.0, shipped as the `ollama`
-bundle.** A local-model runtime over an Ollama endpoint you already run, in
-which the RUNTIME is the harness — the agent loop, tool dispatch, the
-transcript and the context handle are its own, and Ollama is called only for
-the next message. Building it needed no manager, CRD or work-contract change,
-which is the finding: the contract is vendor-neutral.
+bundle.** A local-model runtime over an Ollama endpoint you already run.
+
+The RUNTIME is the harness here — the agent loop, tool dispatch, the
+transcript and the context handle are its own. Ollama is called only for
+the next message.
+
+Building it needed no manager, CRD or work-contract change, which is the
+finding: the contract is vendor-neutral.
 
 ### Added
 
@@ -616,71 +686,21 @@ Ten components moved to versions the release workflow built and pushed:
 `signal-telegram` 0.6.2.
 
 **No behaviour changes.** The images are built from the same source as the
-versions they replace; what is new is HOW they got there. The previous ones were
-pushed by hand before this repository was public, so nothing in the tree
-recorded which commit produced them and the registry's immutability rule meant
-a tag could never be added after the fact — only a new version could carry one.
+versions they replace. What is new is HOW they got there.
+
+The previous ones were pushed by hand before this repository was public, so
+nothing in the tree recorded which commit produced them. The registry's
+immutability rule meant a tag could never be added after the fact — only a
+new version could carry one.
 
 Component tags exist for that provenance and deliberately create no GitHub
 Release: the chart version is the one an adopter types.
-
-## [13.0.0] — 2026-08-24
-
-**The one-flag demo works on a laptop cluster, with its memory intact.**
-
-### Changed
-
-
-**`persistence.context.accessModes` and `.workspace.accessModes` ship EMPTY, and
-the chart answers them.** `ReadWriteMany` for an ordinary install, exactly as
-before; `ReadWriteOnce` under `global.demo.enabled`.
-
-The demo failed on every cluster a reader is likely to try it on. `local-path`
-is the only storage class rancher-desktop, k3d, kind and minikube ship, and it
-REFUSES an RWX claim:
-
-```
-failed to provision volume with StorageClass "local-path":
-NodePath only supports ReadWriteOnce and ReadWriteOncePod (1.22+) access modes
-```
-
-The claim sat `Pending`, no runtime pod was ever created, and the conversation
-waited forever. Getting started documented the workaround —
-`persistence.context.enabled=false` — which buys a working demo by taking away
-the thing the demo is showing.
-
-- **It is not about node COUNT.** Any cluster whose only provisioner is RWO-only
-  hits it; a single-node cluster with an RWX provisioner never does.
-- **RWO is CORRECT under demo, not merely tolerable.** Many pods share an RWO
-  volume on one node and the volume's affinity is what puts them there, so the
-  default cap of five concurrent conversations still holds.
-- **An explicit value wins in both modes.** The default is empty rather than a
-  mode because an empty list is the one thing a chart can tell apart from a
-  choice somebody typed.
-
-### Upgrading
-
-**A DEMO install whose context claim already BOUND cannot be upgraded in place.**
-A PVC's `accessModes` is immutable, so Helm's patch is refused by the API server
-and the upgrade fails naming the field.
-
-Two ways out, and the first is the one a demo deserves:
-
-```sh
-# the demo is disposable — reinstall it
-helm uninstall agent-ops -n agent-ops && kubectl delete ns agent-ops
-
-# or keep the claim exactly as it is
-helm upgrade ... --set 'persistence.context.accessModes={ReadWriteMany}'
-```
-
-**No ordinary install is affected.** Outside demo mode the rendered claim is
-`ReadWriteMany` before and after, so there is no patch to refuse.
 
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-13.0.md](changelog/CHANGELOG-13.0.md) | chart 13.0.0 |
 | [CHANGELOG-11.0-12.0.md](changelog/CHANGELOG-11.0-12.0.md) | chart 11.0.0 through 12.0.0 |
 | [CHANGELOG-channel-telegram-0.24.2.md](changelog/CHANGELOG-channel-telegram-0.24.2.md) | channel-telegram 0.24.2 |
 | [CHANGELOG-9.0-10.0.md](changelog/CHANGELOG-9.0-10.0.md) | chart 9.0.0 through 10.0.0 |

@@ -572,8 +572,15 @@ mcpServers:
 # render is a channel — and that is values-supplied and omitted when unset. A
 # bundle whose route spanned other components could not, and telegram
 # still ships none.
+#
+# Paired with the parent's `global.agentops.wiringMode`: this says WHETHER the
+# bundle's own route(s) render at all, wiringMode says AS WHAT — a `Pipeline`
+# under `pipelines` mode, an `AgentCapability` on the chart-rendered
+# `Coordinator` under `coordinator` mode. Kept out of the `pipelines:` block
+# below so the name does not tie it to one of those two shapes.
+wiringEnabled: null
+
 pipelines:
-  enabled: null
   # TWO routes, differing in exactly one binding — the mutating toolset. At most
   # one renders by default.
   #

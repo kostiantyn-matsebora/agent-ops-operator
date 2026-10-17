@@ -257,7 +257,7 @@ profile.
 ### Requirement: The wiring component ships one claiming Pipeline, off by default
 The bundle SHALL offer a wiring component rendering a `Pipeline` that claims the
 bundle's own alert source and names the bundle's own profile, binding the
-bundle's metrics toolset and `MCPConfig`. `pipelines.enabled` SHALL default to
+bundle's metrics toolset and `MCPConfig`. `wiringEnabled` SHALL default to
 `false`, and — unlike the Kubernetes bundle — NO values path SHALL force it on,
 because no turnkey mode enables this bundle at all. The component SHALL render
 only when the profile component renders, since a Pipeline with no profile has no
@@ -315,11 +315,11 @@ under two profiles, with two agents acting.
 
 ### Requirement: Each component is individually toggleable
 Within an active bundle, `alertmanager.enabled`, `mcp.enabled`,
-`mcpServers.enabled`, `profile.enabled` and `pipelines.enabled` SHALL
+`mcpServers.enabled`, `profile.enabled` and `wiringEnabled` SHALL
 independently control their component's objects, so partial enablement works and
 cross-component references stay values-resolvable.
 
-`pipelines.enabled` SHALL default `false` — the exception, because a route is the
+`wiringEnabled` SHALL default `false` — the exception, because a route is the
 one component that spends money and acts on its own. `mcp` and `mcpServers` SHALL
 default off together, because both require an operator-supplied endpoint.
 

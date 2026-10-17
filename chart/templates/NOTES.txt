@@ -291,7 +291,7 @@ Prometheus bundle — this release WIRED it, so it answers on its own:
 Every admitted alert now opens a conversation and spends LLM credits.
 {{- end }}
 Decline it without giving up the rest of the bundle:
-  --set prometheus.pipelines.enabled=false
+  --set prometheus.wiringEnabled=false
 {{- if not $pb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
@@ -305,14 +305,14 @@ That is allowed — signal sources are shareable — and it means each admitted
 alert opens a conversation PER claiming Pipeline, under each one's own profile
 and capabilities. Two conversations, two bills.
 If you meant only your own route:
-  --set prometheus.pipelines.enabled=false
+  --set prometheus.wiringEnabled=false
 {{- end }}
 {{- else if and $pwired (not $pAlsoClaim) }}
 
 ONE STEP LEFT — nothing answers alerts yet. SignalSource {{ $psrc }} drops every
 alert (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set prometheus.pipelines.enabled=true
+  --set prometheus.wiringEnabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
@@ -412,7 +412,7 @@ Kubernetes bundle — this release WIRED it, so it answers on its own:
 Every admitted Warning event now opens a conversation and spends LLM credits.
 {{- end }}
 Decline it without giving up the rest of the bundle:
-  --set kubernetes.pipelines.enabled=false
+  --set kubernetes.wiringEnabled=false
 {{- if not $kb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
@@ -426,14 +426,14 @@ That is allowed — signal sources are shareable — and it means each admitted
 event opens a conversation PER claiming Pipeline, under each one's own profile
 and capabilities. Two conversations, two bills, and both agents act.
 If you meant only your own route:
-  --set kubernetes.pipelines.enabled=false
+  --set kubernetes.wiringEnabled=false
 {{- end }}
 {{- else if and $wired (not $alsoClaim) }}
 
 ONE STEP LEFT — nothing answers cluster events yet. SignalSource {{ $src }} drops
 every event (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set kubernetes.pipelines.enabled=true
+  --set kubernetes.wiringEnabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
@@ -478,7 +478,7 @@ the one you want:
   /{{ $hb.pipelines.ops.name }} <what is broken>          — fix it
 {{- end }}
 Decline the routes without giving up the rest of the bundle:
-  --set home-assistant.pipelines.enabled=false
+  --set home-assistant.wiringEnabled=false
 {{- if not $hb.pipelines.chatSources }}
 No chat source is claimed, so neither agent is offered on a surface — they are
 still reachable by name. Claim one with
@@ -495,14 +495,48 @@ Bind one with home-assistant.pipelines.channels={<channel>}.
 ONE STEP LEFT — nothing answers the house yet. SignalSource {{ $hsrc }} drops every
 record (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set home-assistant.pipelines.enabled=true
+  --set home-assistant.wiringEnabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
+{{- $pub := index .Values "pulse" }}
+{{- if and $pub $pub.enabled }}
+{{- $pubIng := $pub.signal.ingress }}
+{{- $pubTls := $pubIng.tls }}
+{{- $pubHasTLS := false }}
+{{- if kindIs "slice" $pubTls }}{{ if $pubTls }}{{ $pubHasTLS = true }}{{ end }}
+{{- else if $pubTls }}{{ if or $pubTls.secretName $pubTls.clusterIssuer $pubTls.existing }}{{ $pubHasTLS = true }}{{ end }}{{ end }}
+{{- if and $pub.signal.enabled $pubIng.enabled (not $pubHasTLS) }}
+
+ACTION NEEDED — the pulse webhook endpoint is exposed over plain HTTP. The
+alert payload, and any header named in signal.defaultSource.webhookHeaders,
+cross the network in CLEAR TEXT. Terminate TLS:
+  --set pulse.signal.ingress.tls.secretName=<secret>
+or let cert-manager issue one:
+  --set pulse.signal.ingress.tls.clusterIssuer=<issuer>
+(Ignore this if TLS already terminates upstream at a load balancer or a
+service mesh — the chart cannot see what sits in front of it.)
+{{- end }}
+{{- if and $pub.signal.defaultSource.enabled $pub.signal.defaultSource.baseUrl (hasPrefix "http://" $pub.signal.defaultSource.baseUrl) }}
+
+ACTION NEEDED — signal.defaultSource.baseUrl is plain HTTP. Every
+registration call sends your Pulse API token as a bearer header on this
+connection, in CLEAR TEXT — unlike the HMAC-signed inbound webhook, a
+stolen bearer token can simply be replayed by whoever captured it. Use an
+https:// URL unless this traffic never leaves a trusted network.
+{{- end }}
+{{- if and $pub.mcpServer.enabled (hasPrefix "http://" $pub.mcpServer.backend) }}
+
+ACTION NEEDED — mcp-pulse's backend is plain HTTP. Every tool call forwards
+the CALLING agent's own Pulse API token to it, in CLEAR TEXT on this
+connection. Use an https:// URL unless this traffic never leaves a trusted
+network.
+{{- end }}
+{{- end }}
 
 {{- $np := (.Values.global.agentops).networkPolicy | default dict }}
-{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) }}
+{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) (and (index .Values "pulse") (index .Values "pulse" "enabled") (index .Values "pulse" "mcpServer" "enabled")) }}
 {{- if $np.enabled }}
 
 ────────────────────────────────────────────────────────────────────────────

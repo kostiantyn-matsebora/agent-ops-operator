@@ -598,7 +598,7 @@ global:
     #
     # `null` — DEFAULT, and this is the load-bearing reason it is nullable
     # rather than the plain string "pipelines", same reason
-    # `kubernetes.pipelines.enabled` is: left unset, the render FOLLOWS
+    # `kubernetes.wiringEnabled` is: left unset, the render FOLLOWS
     # `global.demo.enabled` — off, the DEFAULT BEHAVIOUR is "pipelines"
     # (today's posture, rendered byte-identical); true selects "coordinator",
     # so a turnkey install exercises the Coordinator model out of the box. An
@@ -1157,8 +1157,8 @@ resources:
 #     backend: http://<prometheus-or-vmsingle>:9090
 #   # The bundle's own route — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     channels: [<your-channel>]        # optional; omitted when unset
 # MIGRATION: the retired `vm-bundle:` key — every value must be restated under
 # the new one, and the render FAILS while the old key is present. See docs/CHANGELOG.md.
@@ -1179,14 +1179,47 @@ resources:
 #                                      # an ask-only house
 #   # The bundle's own routes — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     chatSources: [<your-chat-source>] # claimed by ha-control only
 #     channels: [<your-channel>]        # optional; omitted when unset
 # The Secrets are referenced by name and never created here:
 #   kubectl -n <ns> create secret generic ha-admin \
 #     --from-literal=token="$TOKEN" --from-literal=authorization="Bearer $TOKEN"
 home-assistant:
+  enabled: false
+
+# Pulse bundle (embedded subchart, OFF by default; never enabled by demo
+# mode — it needs your own Pulse (rcourtman/pulse) instance and API tokens).
+# Ships a Community-edition-framed privilege split: pulse-observer
+# investigates alerts read-only, pulse-operator additionally records
+# operator-state annotations (maintenance windows, criticality tags) — Pulse's
+# governed plan/approve/execute flow stays Pro-gated and out of reach for
+# both. See chart/charts/pulse/values.yaml for the full surface and
+# docs/integrations/pulse.md. Typical enablement:
+# pulse:
+#   enabled: true
+#   signal:
+#     defaultSource:
+#       enabled: true                     # SignalSource (INERT until claimed)
+#       baseUrl: https://pulse.example.org
+#     credentials:
+#       token: <pulse-api-token>           # or existingSecret
+#   mcpServer:
+#     enabled: true                        # deploys mcp-pulse in-cluster
+#   mcp:
+#     observer:
+#       credentials:
+#         token: <read-scoped-pulse-token>
+#     operator:
+#       credentials:
+#         token: <write-scoped-pulse-token>
+#   # The bundle's own routes — OFF by default, the one component that spends
+#   # money and acts on its own:
+#   wiringEnabled: true
+#   pipelines:
+#     channels: [<your-channel>]           # optional; omitted when unset
+pulse:
   enabled: false
 
 # CRD management (cert-manager pattern): templated, so upgrades work.

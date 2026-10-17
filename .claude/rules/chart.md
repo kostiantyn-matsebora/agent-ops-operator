@@ -22,7 +22,7 @@ owns its whole lane: at most ONE Pipeline claiming its own source with its own
 profile and toolsets, channels values-supplied and omitted when unset.
 
 - **OFF inside an active bundle and forced on by `global.demo.enabled` ALONE**,
-  which is why `pipelines.enabled` is nullable — an explicit `false` must
+  which is why `wiringEnabled` is nullable — an explicit `false` must
   decline the route under demo too.
 - **WHICH route is one of FOUR things `kubernetes.allowMutations` moves.** True
   renders the acting `k8s-operate` (binds `k8s-admin`), false the observing
@@ -40,7 +40,7 @@ profile and toolsets, channels values-supplied and omitted when unset.
   `coordinator` mode alone** — the demo-only `k8s-observe-pipeline`
   `Pipeline`, reusing the observing route's profile, toolset and privilege
   level rather than a new one. Gated on `kubernetes.demoShowcaseActive`
-  (`global.demo.wiringShowcase`, nullable like `pipelines.enabled`) AND the
+  (`global.demo.wiringShowcase`, nullable like `wiringEnabled`) AND the
   resolved `wiringMode` being `coordinator` AND `kubernetes.wiringActive`.
   Claims the same sources `pipelines.yaml` would — `cluster-events` plus the
   console's — alongside the chart-rendered `Coordinator`'s own claim on them,

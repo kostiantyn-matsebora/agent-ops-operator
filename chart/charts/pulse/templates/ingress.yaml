@@ -1,0 +1,81 @@
+{{- /*
+Exposes the webhook endpoint outside the cluster, for a Pulse instance that
+is not in-cluster (the common case this bundle is built for). Points at the
+SignalAdapter reconciler's OWN ClusterIP Service
+(agentops-signal-<signal.name>:8080) — this template renders no Service of
+its own, only an Ingress in front of the one that already exists.
+
+Shaped exactly like the parent chart's `console.ingress` — same field
+names, same TLS forms, same --reuse-values tolerance — since that is this
+repository's one other operator-supplied external endpoint.
+*/ -}}
+{{- if and (include "pulse.active" .) .Values.signal.enabled .Values.signal.ingress.enabled }}
+{{- $ing := .Values.signal.ingress }}
+{{- /* One list feeding both the rules and the certificate, so a rule host
+       and a certificate host cannot disagree. */ -}}
+{{- $hosts := prepend ($ing.extraHosts | default list) (required "pulse.signal.ingress.host is required when signal.ingress.enabled" $ing.host) }}
+{{- /*
+TLS accepts BOTH shapes, mirroring console.ingress: a LIST is rendered
+verbatim (pre-existing values files, --reuse-values), a MAP derives its
+hosts from the list above.
+*/ -}}
+{{- $tls := $ing.tls }}
+{{- $tlsEntries := list }}
+{{- $issuer := "" }}
+{{- if kindIs "slice" $tls }}
+{{- $tlsEntries = $tls }}
+{{- else if $tls }}
+{{- $issuer = $tls.clusterIssuer | default "" }}
+{{- if $tls.existing }}
+{{- $tlsEntries = $tls.existing }}
+{{- else }}
+{{- $secret := $tls.secretName | default "" }}
+{{- if and (not $secret) $issuer }}
+{{- $secret = printf "agentops-signal-%s-tls" .Values.signal.name }}
+{{- end }}
+{{- if $secret }}
+{{- $tlsEntries = list (dict "hosts" $hosts "secretName" $secret) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $ann := merge (dict) ($ing.annotations | default dict) }}
+{{- if $issuer }}
+{{- $_ := set $ann "cert-manager.io/cluster-issuer" $issuer }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "pulse.adapterServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    {{- with $ing.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+  {{- with $ann }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  {{- with $ing.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with $tlsEntries }}
+  tls:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  rules:
+    {{- range $hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: {{ $ing.path | default "/webhook" }}
+            pathType: {{ $ing.pathType | default "Prefix" }}
+            backend:
+              service:
+                # owned by the SignalAdapter reconciler, not by this chart
+                name: {{ include "pulse.adapterServiceName" $ }}
+                port:
+                  number: 8080
+    {{- end }}
+{{- end }}

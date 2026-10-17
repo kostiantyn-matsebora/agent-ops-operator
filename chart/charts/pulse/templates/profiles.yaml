@@ -1,0 +1,67 @@
+{{- /*
+The two AgentProfiles: behaviour only, inline role each (neither carries a
+repository, so there is no .claude/agents/<name>.md to read).
+
+NOTE what is NOT here, and must never be added: no allowedTools, no mcp. An
+AgentProfile carries no capabilities — what each agent may DO comes
+exclusively from the Pipeline/AgentCapability routing it. Unlike
+home-assistant's profiles, neither carries connectivity env either: the MCP
+credential lives on the MCPConfig (mcp.yaml), not here.
+*/ -}}
+{{- if include "pulse.active" . }}
+{{- if include "pulse.observerProfileEnabled" . }}
+{{- $p := .Values.profiles.observer }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  maxTurns: {{ $p.maxTurns }}
+  {{- /* coordinator-deployment-mode task 3: see kubernetes/templates/profile.yaml
+  for why this is appended unconditionally. */ -}}
+  {{- $role := include "agentops.withSelfClose" (dict "text" $p.systemPrompt) | trim }}
+  {{- with $role }}
+  # Inline role: this profile has no repository, so there is no
+  # .claude/agents/<name>.md to read.
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
+  # REQUIRED, and with no default on purpose: `none` leaves output
+  # unformatted unless this profile's prompt says otherwise, and `blocks`
+  # shapes it by something the author never asked for. The author declares
+  # it.
+  outputFormat: {{ $p.outputFormat }}
+  {{- with $p.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+{{- end }}
+---
+{{- if include "pulse.operatorProfileEnabled" . }}
+{{- $p := .Values.profiles.operator }}
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  maxTurns: {{ $p.maxTurns }}
+  {{- $role := include "agentops.withSelfClose" (dict "text" $p.systemPrompt) | trim }}
+  {{- with $role }}
+  systemPrompt: |
+{{ . | trim | indent 4 }}
+  {{- end }}
+  outputFormat: {{ $p.outputFormat }}
+  {{- with $p.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end }}

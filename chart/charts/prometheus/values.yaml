@@ -149,8 +149,14 @@ profile:
 # The bundle's OWN route — the one component that spends money and acts alone.
 # OFF by default and forced on by nothing: no turnkey mode enables this bundle,
 # so unlike kubernetes's there is no demo path to override.
+#
+# Paired with the parent's `global.agentops.wiringMode`: this says WHETHER the
+# route renders, wiringMode says AS WHAT — a `Pipeline` under `pipelines`
+# mode, an `AgentCapability` on the chart-rendered `Coordinator` under
+# `coordinator` mode.
+wiringEnabled: false
+
 pipelines:
-  enabled: false
   # Named for the job, not the channel it answers on.
   name: alert-triage
   # Display only — see kubernetes's `pipelines.observe.icon`.
