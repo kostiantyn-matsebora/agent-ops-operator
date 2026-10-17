@@ -79,9 +79,9 @@ Long-polls for this conversation's next work unit.
 
 | ID | Requirement |
 |---|---|
-| API-1 | A runtime MUST long-poll this endpoint while able to accept work. `204` is not an error. |
-| API-2 | Exactly one of `promptFile`/`promptText` is set. |
-| API-3 | Where continuity is possible for the deployment, context named by `runtimeContextId` MUST already be restored before this call answers. |
+| `API-1` | A runtime MUST long-poll this endpoint while able to accept work. `204` is not an error. |
+| `API-2` | Exactly one of `promptFile`/`promptText` is set. |
+| `API-3` | Where continuity is possible for the deployment, context named by `runtimeContextId` MUST already be restored before this call answers. |
 
 ## POST /work/done
 
@@ -143,18 +143,18 @@ Reports a run's outcome and closes out the inflight unit.
 
 | ID | Requirement |
 |---|---|
-| API-4 | `turns[]`/`toolCalls[]` MUST be trimmed to the [bounds](#bounds) before posting. |
-| API-5 | `runtimeContextId`/`brief` are LATEST-WINS. Absent leaves the stored value untouched. |
-| API-6 | `turns[]`/`toolCalls[]` become one activity hop each (`model.call`/`tool.call`), never written to the `Conversation` — see [the activity contract](../contracts.md#the-activity-contract). |
-| API-7 | A fact the runtime cannot determine MUST be omitted, never reported as zero. |
-| API-8 | A tool's input or output MUST NOT be reported. |
-| API-9 | Neither array is reported when the run made neither a model call nor a tool call. |
+| `API-4` | `turns[]`/`toolCalls[]` MUST be trimmed to the [bounds](#bounds) before posting. |
+| `API-5` | `runtimeContextId`/`brief` are LATEST-WINS. Absent leaves the stored value untouched. |
+| `API-6` | `turns[]`/`toolCalls[]` become one activity hop each (`model.call`/`tool.call`), never written to the `Conversation` — see [the activity contract](../contracts.md#the-activity-contract). |
+| `API-7` | A fact the runtime cannot determine MUST be omitted, never reported as zero. |
+| `API-8` | A tool's input or output MUST NOT be reported. |
+| `API-9` | Neither array is reported when the run made neither a model call nor a tool call. |
 
 ## Lifecycle
 
 | State | Entered | Left by |
 |---|---|---|
-| Starting | the manager creates the pod | reaching `Running`, or the start deadline (MGR-3) |
+| Starting | the manager creates the pod | reaching `Running`, or the start deadline (`MGR-3`) |
 | Polling | `Running`, no inflight run | `GET /work` returns `200`, or the idle TTL elapses |
 | Working | `GET /work` returned a unit | `POST /work/done` is accepted |
 | Idle | `POST /work/done` is accepted, nothing queued | the next `GET /work` returns a unit, or `RUNTIME_IDLE_TTL_M` elapses |
@@ -162,17 +162,17 @@ Reports a run's outcome and closes out the inflight unit.
 
 | ID | Requirement |
 |---|---|
-| LC-1 | One inflight unit per conversation. A runtime polling while Working MUST get nothing back. |
-| LC-2 | A runtime MUST exit on exactly one condition: no work for `RUNTIME_IDLE_TTL_M` minutes. |
-| LC-3 | `/exit` deletes the pod. Refused while a run is in progress. |
+| `LC-1` | One inflight unit per conversation. A runtime polling while Working MUST get nothing back. |
+| `LC-2` | A runtime MUST exit on exactly one condition: no work for `RUNTIME_IDLE_TTL_M` minutes. |
+| `LC-3` | `/exit` deletes the pod. Refused while a run is in progress. |
 
 ## Runtime's obligations
 
 | ID | Requirement |
 |---|---|
-| RT-1 | Clone `REPO_URL`/`REPO_REF` with the environment's git credentials, when `REPO_URL` is not empty. |
-| RT-2 | Execute the returned unit, streaming progress to **stdout**, never a transport of its own. |
-| RT-3 | Compose the tool allowlist as `toolsMode` directs — see [Composing the allowlist](#composing-the-allowlist). |
+| `RT-1` | Clone `REPO_URL`/`REPO_REF` with the environment's git credentials, when `REPO_URL` is not empty. |
+| `RT-2` | Execute the returned unit, streaming progress to **stdout**, never a transport of its own. |
+| `RT-3` | Compose the tool allowlist as `toolsMode` directs — see [Composing the allowlist](#composing-the-allowlist). |
 
 ### Composing the allowlist
 
@@ -183,10 +183,10 @@ Reports a run's outcome and closes out the inflight unit.
 
 | ID | Requirement |
 |---|---|
-| RT-3.1 | A runtime that cannot see a repository MUST use `allowedTools` as-is — what `merge` degrades to. |
-| RT-3.2 | An empty allowlist MUST stay empty. No tool substitutes for one nobody declared. |
-| RT-3.3 | An absent or unreadable agent definition MUST contribute nothing, whatever a vendor default would be. |
-| RT-3.4 | Definition path is runtime-specific: `runtimes/claude`/`runtimes/ollama` read `.claude/agents/<agent>.md`, `runtimes/copilot` reads `.github/agents/<agent>.agent.md`. |
+| `RT-3.1` | A runtime that cannot see a repository MUST use `allowedTools` as-is — what `merge` degrades to. |
+| `RT-3.2` | An empty allowlist MUST stay empty. No tool substitutes for one nobody declared. |
+| `RT-3.3` | An absent or unreadable agent definition MUST contribute nothing, whatever a vendor default would be. |
+| `RT-3.4` | Definition path is runtime-specific: `runtimes/claude`/`runtimes/ollama` read `.claude/agents/<agent>.md`, `runtimes/copilot` reads `.github/agents/<agent>.agent.md`. |
 
 ### Optional capabilities
 
@@ -203,18 +203,18 @@ A runtime implementing none of these stays fully conformant — see
 
 | ID | Requirement |
 |---|---|
-| SEC-1 | The manager MUST NOT read a secret. Every credential compiles to `valueFrom`/`envFrom`. |
-| SEC-2 | `AOPS_MCP_TOKEN` MUST be derived, never stored. |
-| SEC-3 | The operator MUST grant the runtime no Kubernetes permissions of its own. `spec.serviceAccountName` is a reference only. |
+| `SEC-1` | The manager MUST NOT read a secret. Every credential compiles to `valueFrom`/`envFrom`. |
+| `SEC-2` | `AOPS_MCP_TOKEN` MUST be derived, never stored. |
+| `SEC-3` | The operator MUST grant the runtime no Kubernetes permissions of its own. `spec.serviceAccountName` is a reference only. |
 
 ## Manager's provisions
 
 | ID | Requirement |
 |---|---|
-| MGR-1 | One pod per conversation. The manager creates it and owns its lifecycle. |
-| MGR-2 | Context MUST be checkpointed before `POST /work/done` reaches the manager — a handle MUST NOT be recorded before its context is persisted. |
-| MGR-3 | A pod that never reaches `Running` MUST be reaped at a deadline, freeing its admission slot. |
-| MGR-4 | The manager MUST supply every variable in [Environment](#environment), and the profile's git credentials. |
+| `MGR-1` | One pod per conversation. The manager creates it and owns its lifecycle. |
+| `MGR-2` | Context MUST be checkpointed before `POST /work/done` reaches the manager — a handle MUST NOT be recorded before its context is persisted. |
+| `MGR-3` | A pod that never reaches `Running` MUST be reaped at a deadline, freeing its admission slot. |
+| `MGR-4` | The manager MUST supply every variable in [Environment](#environment), and the profile's git credentials. |
 
 ## Environment
 
@@ -235,7 +235,7 @@ A runtime implementing none of these stays fully conformant — see
 
 | ID | Requirement |
 |---|---|
-| MGR-5 | An empty `REPO_URL` MUST NOT be read as an error or as "clone the default" — a runtime skips cloning. |
+| `MGR-5` | An empty `REPO_URL` MUST NOT be read as an error or as "clone the default" — a runtime skips cloning. |
 
 ## Filesystem
 
@@ -268,9 +268,9 @@ A runtime implementing none of these stays fully conformant — see
 
 | ID | Requirement |
 |---|---|
-| COMPAT-1 | A runtime MUST ignore work-unit fields it does not know. |
-| COMPAT-2 | The manager MUST ignore report fields it does not know. |
-| COMPAT-3 | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
+| `COMPAT-1` | A runtime MUST ignore work-unit fields it does not know. |
+| `COMPAT-2` | The manager MUST ignore report fields it does not know. |
+| `COMPAT-3` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
 
 | Version part | Moves when |
 |---|---|
@@ -284,14 +284,9 @@ describes," and adding it would be MINOR, not MAJOR.
 
 ## Conformance
 
-| Contract | Satisfies |
-|---|---|
-| Minimal — MUST, to interoperate at all | API-1–API-9, LC-1–LC-3, RT-1–RT-3, RT-3.1–RT-3.4, MGR-1–MGR-5, SEC-1–SEC-3, COMPAT-1–COMPAT-3 |
-| Optional — MAY, additive | [Optional capabilities](#optional-capabilities) |
-
-A runtime implementing the minimal contract alone is fully conformant —
-every optional capability may be skipped with no loss of conformance, see
-[Compatibility](#compatibility).
+A runtime implementing every requirement on this page except
+[Optional capabilities](#optional-capabilities) is fully conformant — no
+optional capability is required, see [Compatibility](#compatibility).
 
 ## Changelog
 

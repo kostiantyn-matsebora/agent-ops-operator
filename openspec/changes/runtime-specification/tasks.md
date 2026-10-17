@@ -231,3 +231,14 @@
       provenance instead of restating it. Verify: the prose lint and
       `anchor-check.py` stay clean, and the rebuilt site shows a
       description under both endpoint headings.
+- [x] 8.10 A screenshot showed `RT-3.1`–`RT-3.4` wrapping mid-token (`RT-`
+      / `3.1`) in a narrow ID column — the 30 requirement IDs across every
+      table were plain text, unlike every other short token on the page
+      (`merge`, `toolsMode`) which renders as a non-wrapping code badge.
+      Wrapped all 30 in backticks. The Conformance table's "Satisfies"
+      cell had the same problem one level up — a comma-separated
+      restatement of every ID range already visible in its own section —
+      replaced with one sentence: every requirement on the page is the
+      minimal contract except Optional capabilities. Verify: the rebuilt
+      site shows every ID as a single-line badge, no row splitting an ID
+      across two lines, and the prose lint/anchor-check stay clean.
