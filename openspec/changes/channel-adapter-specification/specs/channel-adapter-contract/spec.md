@@ -1,9 +1,16 @@
 ## ADDED Requirements
 
-### Requirement: The specification is a versioned reference page
+### Requirement: The specification is a versioned, published page
 
 The channel adapter specification SHALL live at
-`docs/contracts/channel-adapter.md` as a reference page with no front matter.
+`docs/contracts/channel-adapter.md`, promoted to a published site page —
+front matter, permalink `/contracts/channel-adapter/`, a "Specifications"
+nav entry. This is the same promotion `runtime-specification` gave
+`docs/contracts/runtime.md`.
+
+It SHALL NOT stay a plain reference page. The site's own
+`docs/_data/nav.yml` already names this change as the one that promotes
+it.
 
 It SHALL carry a semver version, starting at `1.0.0`, and its own changelog
 at its foot recording every version with what changed in it.

@@ -1,133 +1,223 @@
-# The channel adapter contract
+---
+title: Channel adapter specification
+permalink: /contracts/channel-adapter/
+description: >-
+  The versioned, normative specification of what a channel adapter owes the
+  manager, and what the manager owes it — for building a channel adapter
+  agent-ops does not ship.
 
-**A channel adapter dials the manager, never the reverse** — the same pattern as
-runtimes. NetworkPolicies stay simple and transport credentials never leave the
-adapter.
+next:
+  eyebrow: Reference
+  title: Every field of every kind
+  body: >-
+    The generated custom resource reference, and the contracts the adapter and
+    runtime kinds serve.
+  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
+---
 
-1. **Long-poll for outbound operations.**
-   `GET /channel/ops?adapter=<your-adapter>&contract=2&wait=25`
+**Version 1.0.0**
 
-   | op | Does |
-   |---|---|
-   | `ensure-topic` | create a thread for a conversation |
-   | `send` | post a message |
-   | `close-topic` | archive the thread in `op.threadId` — its conversation has ended |
-   | `delete-conversation` | tell the thread in `op.threadId` its conversation is gone for good |
+This specification gives everything necessary to build and maintain a
+channel adapter — a component agent-ops does not ship, that carries a
+conversation onto a chat surface (Telegram, a web console, Slack, anything
+with a reply box).
 
-   **Delivery is at-least-once.** Dedup by `op.id`.
+A channel adapter dials the manager, never the reverse — the same pattern
+runtimes use. NetworkPolicies stay simple, and no transport credential ever
+leaves the adapter.
 
-   **`contract` is required.** An absent or outdated version is refused with 400
-   naming the current one. Version 1 carried rendered `text`, and an adapter
-   still reading that field would post empty messages and look healthy doing it,
-   so the handshake fails at the door rather than downstream.
+**No second statement of this contract survives beside it.**
+[`docs/contracts.md`](../contracts.md#the-channel-adapter-contract) points
+here and states nothing of its own.
 
-   **The block grammar did NOT move it.** No field was added and none changed
-   meaning — a body that was markdown is now markdown plus a grammar, read by
-   the component that already read the markdown. See [The body
-   grammar](#the-body-grammar).
+## Conventions
 
-   **A claimed op also carries `reclaimAfterSeconds`** — how long the manager
-   leaves the claim with you before returning the op to the queue. It is
-   additive and optional: ignore it and nothing changes. Honour it if you absorb
-   transport backpressure in-process (below), because finishing after it expires
-   means a second claimant posts the same message again.
+MUST / MUST NOT / SHOULD / MAY follow RFC 2119. Every requirement carries a
+stable ID, prefixed by the section it belongs to:
 
-   **A `503` means this replica cannot safely answer the poll.** It is not the
-   manager's current leader, and only the leader claims an op (multiple manager
-   pods share one `/channel/ops`).
+| Prefix | Section |
+|---|---|
+| `OPS-n` | [GET /channel/ops](#get-channelops) / [POST /channel/ops/{id}/done](#post-channelopsiddone) |
+| `IN-n` | [POST /channel/inbound](#post-channelinbound) |
+| `READ-n` | [POST /channel/read](#post-channelread) |
+| `MGR-n` | [Manager's provisions](#managers-provisions) |
+| `ADA-n` | [Adapter's obligations](#adapters-obligations) |
+| `SEC-n` | [Auth](#auth) |
+| `COMPAT-n` | [Compatibility](#compatibility) |
 
-   **The claim is recorded on the Conversation** as `status.threads[].claim`
-   (`holder`, `claimedAt`), written only by the leader. A claim older than
-   `claimStalenessSeconds` is cleared and the op dispatched again. A claim held
-   by a former leader is cleared at once.
+## GET /channel/ops
 
-   **Retry at once**, exactly as you already do on an empty `204`, and never
-   surface it as an error. The claim may well exist, this replica simply cannot
-   see it.
+Long-polls for this adapter's next outbound operation.
 
-   **Every response carries `X-Agentops-Vocabulary-Revision`** — the delivered
-   op, the empty `204` and the `503` alike. See [What may be
-   typed](#what-may-be-typed) below.
+`GET $MANAGER_URL/channel/ops?adapter=<name>&contract=2&wait=25`
 
-2. **Complete each op** with `POST /channel/ops/{id}/done`.
+| Param | Required | Meaning |
+|---|---|---|
+| `adapter` | yes | This `ChannelAdapter` CR's own name — the routing key. |
+| `contract` | yes | The outbound message contract version this adapter speaks. |
+| `wait` | no | Seconds to block. Clamped to 30 server-side. |
 
-   | op | Body |
-   |---|---|
-   | `ensure-topic` | `{"threadId":"…"}` — an opaque string in your id space |
-   | `close-topic` | **empty** |
-   | `delete-conversation` | **empty** |
-   | any, on failure | `{"error":"…"}` — surfaced as a Conversation condition and regenerated |
+| Status | Body |
+|---|---|
+| `200` | A [claimed op](#the-claim-window), below. |
+| `204` | No work yet. Not an error. |
+| `400` | `adapter` or `contract` missing or outdated — the message names the version to build against. |
+| `401` | no or wrong bearer token. |
+| `403` | the token's scope names a different adapter. |
+| `503` | this replica is not the current leader, and the leader could not be reached. |
 
-   **`close-topic` is the exception to that last clause, in both halves.** Its
-   conversation is being deleted, so a failure is *logged* rather than written
-   as a condition — there will be no object left to carry one — and the op is
-   never regenerated.
+**Every response carries `X-Agentops-Vocabulary-Revision`** — the `200`
+that delivers an op, the `204` and the `503` alike. See
+[GET /channel/vocabulary](#get-channelvocabulary).
 
-   An adapter that does not implement the kind may complete it with an error or
-   ignore it entirely. The visible consequence is one open thread for a
-   conversation that no longer exists, closable by hand.
+### The operation envelope
 
-   **Deletion itself never waits longer than a 2-minute grace**, so a down
-   adapter cannot wedge it. Treat an already-closed thread as success —
-   redelivery is normal.
+Struct-backed: `Op`, `platform/manager/internal/chat/ops.go`.
 
-   While a `close-topic` op is outstanding the deleting Conversation is held by
-   the `agentops.dev/close-topics` finalizer, which is what keeps every op
-   derivable from CR state across a manager restart.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Dedup key. Delivery is at-least-once — tolerate a repeated id. |
+| `channel` | string | yes | The `Channel` CR this op targets. |
+| `conversation` | string | no | The `Conversation` this op belongs to. Empty for a manager notice bound to no conversation. |
+| `kind` | string | yes | One of [the typed operations](#typed-operations). |
+| `threadId` | string | no | The send target. Absent means the channel's general surface. |
+| `topic` | object | no | A [topic descriptor](#the-topic-descriptor). Set only on `ensure-topic`. |
+| `message` | object | no | The [typed message](#the-typed-message) to post. Set only on `send`. |
 
-3. **Push user REPLIES** with `POST /channel/inbound`, body
-   `{"channel","threadId","text"}`.
+### Typed operations
 
-   - **`threadId` is REQUIRED.** This endpoint continues an existing
-     conversation and never starts one. A message in a thread the manager does
-     not know is dropped, not adopted.
-   - **Delivery to the other bound surfaces and busy-acks happen
-     manager-side.** A reply you push is delivered back to you only if your
-     adapter declares `echoesOwnMessages: false`.
-   - **Refused when the origin surface names the thread's own target
-     conversation.** A message that would feed a conversation its own output
-     back as input is the shape a self-feeding loop takes, and the manager
-     refuses it with a reason rather than dispatching it.
+| Kind | Does | Completed with |
+|---|---|---|
+| `ensure-topic` | create a thread for a conversation | `{"threadId":"…"}` |
+| `send` | post `op.message` | an empty body |
+| `close-topic` | archive the thread named in `op.threadId` — its conversation ended | an empty body, or a logged failure (never a condition, see `OPS-8`) |
+| `delete-conversation` | tell the thread in `op.threadId` its conversation is gone for good | an empty body |
 
-   **To ORIGINATE**, your transport's general surface belongs to a chat
-   `SignalSource`. Post to `/signal/inbound` (see `signals/telegram/`):
+| ID | Requirement |
+|---|---|
+| `OPS-1` | An adapter MUST long-poll this endpoint while able to accept ops. `204` is not an error. |
+| `OPS-2` | A `503` MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. A kept-alive connection pinned to a non-leader would ask the same non-leader forever. |
+| `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. The visible cost is one open thread for a conversation that no longer exists, closable by hand. |
 
-   ```json
-   {"kind":"chat","fingerprint":"…","payload":"…",
-    "labels":{"agentops.dev/channel":"…","agentops.dev/sender":"…",
-              "agentops.dev/message":"…"}}
-   ```
+### The claim window
 
-   The Pipeline claiming that source decides who answers, and command parsing
-   (`/pipelines`, `/<pipeline> <task>`) happens there.
+Struct-backed: `claimedOp`, `platform/manager/internal/httpapi/server.go`.
+It embeds every field of [the operation envelope](#the-operation-envelope),
+plus:
 
-   `agentops.dev/message` is optional. It is your transport's own handle for the
-   message that arrived. The manager stores it and hands it back on any reply,
-   so a reply can say which message it answers.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reclaimAfterSeconds` | integer | yes | How long the manager leaves this claim with the adapter before returning the op to the queue. |
 
-4. **Read what may be typed** from `GET /channel/vocabulary`, if you offer a
-   command menu or a typeahead.
+| ID | Requirement |
+|---|---|
+| `OPS-4` | An adapter absorbing transport backpressure in-process MUST budget its total wait strictly below `reclaimAfterSeconds`, or a second claimant may post the same op again. |
+| `OPS-5` | `reclaimAfterSeconds` is ADDITIVE and optional to act on. An adapter that ignores it is fully conformant, falling back to its own conservative default. |
 
-5. **Read your channels** and their opaque `spec.config` from
-   `GET /channel/channels?adapter=`.
-   - Persist cursors — poll offsets and the like — via
-     `GET/PUT /channel/state/{channel}/{key}`.
-   - Report config problems via `POST /channel/channels/{name}/status`.
+**The claim itself is recorded on the Conversation**, as
+`status.threads[].claim` (`holder`, `claimedAt`), written only by the
+manager's current leader.
 
-6. **Optionally act on a conversation your channel is bound to**, all with
-   `{"channel":"…"}`:
-   - `POST /channel/conversations/{name}/reopen`
-   - `POST /channel/conversations/{name}/delete`
-   - `POST /channel/conversations/{name}/reset-context`
+A claim older than `claimStalenessSeconds` is cleared and the op
+dispatched again. A claim held by a former leader is cleared at once.
+Neither is the adapter's concern.
 
-7. **Optionally report how far your threads have been read** —
-   `POST /channel/read` ([below](#post-channelread)).
+## POST /channel/ops/{id}/done
 
-### POST /channel/read
+Completes a claimed op.
 
-**Optional.** An adapter that never calls it stays fully conformant. Its threads
-simply carry no watermark, which is inert for every surface that does not render
-unreadness.
+`POST $MANAGER_URL/channel/ops/{id}/done`
+
+| Status | Body |
+|---|---|
+| `200` | `{"ok": true}`. Duplicate completions are legal (at-least-once) and always `200`. |
+| `400` | malformed JSON. |
+
+### The completion result
+
+Struct-backed: `OpResult`, `platform/manager/internal/chat/ops.go`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `threadId` | string | no | Required for `ensure-topic` — the opaque thread id the adapter minted, in its own id space. |
+| `error` | string | no | Set on failure. Surfaced as a Conversation condition and regenerated, except `close-topic` (below). |
+
+| ID | Requirement |
+|---|---|
+| `OPS-6` | An `ensure-topic` completed with no `error` and no `threadId` MUST be treated by the manager as a failure. |
+| `OPS-7` | `close-topic`'s failure MUST be logged rather than written as a condition — its conversation is being deleted, so no object will survive to carry one — and the op MUST NOT be regenerated. |
+| `OPS-8` | `delete-conversation`'s failure is TERMINAL: logged, never a condition, never regenerated. Deletion MUST NOT wait longer than a 2-minute grace, so a down adapter cannot wedge it. An already-closed thread is treated as success. |
+
+### Backpressure is the adapter's to absorb
+
+A transport that says "slow down" — HTTP 429, a `retry_after`, a
+token-bucket rejection — is not an operation failure.
+
+| ID | Requirement |
+|---|---|
+| `ADA-3` | An adapter MUST absorb a retryable backpressure signal inside its claim window, waiting the interval the transport stated rather than a backoff it computed instead. |
+| `ADA-3.1` | An adapter MUST report an op failed only when the condition is terminal, or when riding it out would overrun the claim. |
+| `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it CLAIMS an op, never before it sends. Work it cannot yet deliver stays queued in the manager, derivable from CR state and surviving the adapter's own restart. |
+
+The manager's recovery path is for operations that genuinely could not be
+performed. Reporting a retryable condition as a failure makes that path
+load-bearing for something the adapter could have waited out.
+
+## POST /channel/inbound
+
+Pushes a user reply into an existing conversation thread.
+
+`POST $MANAGER_URL/channel/inbound`
+
+### The inbound request
+
+Struct-backed: `inboundReq`, `platform/manager/internal/httpapi/server.go`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `channel` | string | yes | The `Channel` CR the message arrived on. |
+| `threadId` | string | yes | The thread this message continues. |
+| `text` | string | yes | The message, as the person typed it. |
+| `sender` | string | no | The transport-side identity, when the adapter can supply one. |
+
+| ID | Requirement |
+|---|---|
+| `IN-1` | The manager MUST refuse a request with no `threadId` — this endpoint continues an existing conversation and never starts one. A general-surface message is an ORIGINATION, posted instead as a chat signal to `POST /signal/inbound` from a chat `SignalSource` a Ready Pipeline claims. |
+| `IN-2` | A message naming a thread the manager does not know MUST be dropped, not adopted. |
+| `IN-3` | The manager MUST refuse a message whose origin surface names the thread's own target conversation — the shape a self-feeding loop takes. |
+| `ADA-5` | An adapter MUST NOT re-ingest its own outbound post as inbound. Delivery to the other bound surfaces, and busy-acks, happen manager-side — a reply the adapter pushes is delivered back to it only when it declares `echoesOwnMessages: false`. |
+
+## GET /channel/channels
+
+Lists the Channels this adapter serves, with their opaque config.
+
+`GET $MANAGER_URL/channel/channels?adapter=<name>`
+
+### The channel-listing entry
+
+No named Go struct backs this shape — it is function-local to the
+`GET /channel/channels` handler in `platform/manager/internal/httpapi/server.go`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The `Channel` CR's own name. |
+| `config` | object | no | The Channel's `spec.config`, opaque to the manager — never parsed manager-side. |
+| `credentialEnvPrefix` | string | no | Where this channel's projected credentials live in the adapter's own environment. Secret key `K` appears as env `<prefix>K`. |
+
+Persist adapter-side cursor state (poll offsets and the like) through
+`GET`/`PUT /channel/state/{channel}/{key}`, and report a config problem
+through `POST /channel/channels/{name}/status` with
+`{"ready","reason"?,"message"?}`.
+
+**A `Channel` nothing serves** — no in-process provider, no Ready
+`ChannelAdapter`, no adapter-reported readiness — carries a `Served=False`
+condition. Typos fail visibly instead of queueing ops forever.
+
+## POST /channel/read
+
+**Optional.** An adapter that never calls it stays fully conformant — its
+threads simply carry no watermark, inert for every surface that does not
+render unreadness.
 
 ```jsonc
 POST /channel/read
@@ -140,566 +230,430 @@ POST /channel/read
  "marked":1,"skipped":0,"failed":0}
 ```
 
-The manager resolves each `threadId` to its conversation and writes the
-watermark to `status.threads[].readAt`.
+### A read-report entry
 
-**The manager owns the write.** The adapter reports and issues no Kubernetes
-write of its own, exactly as with `POST /channel/channels/{name}/status`.
+Struct-backed: `readEntry`, `platform/manager/internal/httpapi/channelread.go`.
 
-**`threadId` rather than a conversation name, on purpose.** An adapter knows
-thread ids, `/channel/inbound` already addresses a thread, and the mapping from
-one to the other is the manager's to own.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `threadId` | string | yes | Which thread was read. The manager resolves it to a conversation. |
+| `readAt` | string | yes | An RFC3339(-Nano) timestamp, opaque to the manager. |
+| `reader` | string | no | OPAQUE key for whoever read the thread. Absent means the CHANNEL-WIDE mark. |
+| `rewind` | boolean | no | "Mark unread" — sets the named reader's own watermark to `readAt` even where that is earlier than stored. Refused with no `reader`. |
 
-Naming conversations here would hand adapters a Kubernetes identifier they have
-no other reason to hold.
+### A read-report outcome
 
-**`reader` is OPTIONAL and OPAQUE** — the adapter's own key for whoever read the
-thread. The manager records that reader's watermark rather than the channel-wide
-one.
+Struct-backed: `readOutcome`, `platform/manager/internal/httpapi/channelread.go`.
 
-Omit it and the behaviour is exactly what it was before the field existed. That
-is what every adapter but the console does, since a Telegram topic is read or it
-is not and there is nobody to attribute it to.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `threadId` | string | yes | Echoes the entry's own `threadId`. |
+| `reader` | string | no | Echoes the entry's own `reader`. |
+| `outcome` | string | yes | `marked`, `skipped`, or `failed` — see [Enums](#enums). |
+| `reason` | string | no | Set for anything not `marked`. |
 
-**Never send an identity in it.** The manager stores the value verbatim and
-cannot tell a hash from an address, so a conversation would end up recording who
-read it.
-
-Compute a SALTED hash — an unsalted digest of a known address is confirmable by
-anyone holding the CR. A key containing `@` is refused with 400.
-
-| Rule | Behaviour |
+| ID | Requirement |
 |---|---|
-| Auth and scope | The same adapter token and channel scope as every other `/channel/*` route — 401 unauthenticated, 403 for a channel served by another adapter |
-| Bound | At most **50** entries, enforced by the manager. More is 400 and nothing is written. An empty list is 400 |
-| Monotonic | A watermark at or before the stored one is `skipped` — no write, no error. Per READER when one is named, so one reader is never skipped because another is ahead |
-| Bounded readers | At most 50 readers per binding, oldest watermark evicted first. An evicted reader falls back to the channel-wide mark |
-| Clamped | A watermark ahead of the manager's clock is written as its `now` |
-| Per entry | One `marked` / `skipped` / `failed` outcome per requested thread, with a reason for anything not marked, plus totals |
-| Mixed batch | Still 200, and one bad entry never stops the rest — an unknown thread is `failed` and its neighbours are still marked |
-| Rewind | `"rewind":true` sets the NAMED reader's own watermark to `readAt` even where that is earlier than what is stored — "mark unread". Still clamped to the manager's clock. Refused with no `reader`: there is no per-reader entry to rewind, and the channel-wide mark is never rewound, which would un-read the thread for every other reader too |
+| `READ-1` | A batch MUST hold at least one entry and at most 50. An empty or oversized batch is refused whole, with nothing written. |
+| `READ-2` | A watermark at or before the one already stored for its reader (or the channel-wide mark, when no reader is named) MUST be `skipped`, not written and not an error. |
+| `READ-3` | A watermark ahead of the manager's own clock MUST be clamped to that clock. |
+| `READ-4` | A mixed batch MUST still answer `200`, with one `marked`/`skipped`/`failed` outcome per entry — one bad entry MUST NOT stop the rest. |
+| `READ-5` | `reader` MUST be an OPAQUE token, never an identity. A key containing `@` MUST be refused with `400`. |
+| `READ-6` | At most 50 readers per thread binding are kept, oldest watermark evicted first — never the entry that triggered the eviction. An evicted reader falls back to the channel-wide mark. |
 
-Entries resolving to the same conversation are grouped into ONE status patch,
-and a report that would not advance the watermark writes nothing at all. So
-re-opening a quiet conversation costs no API write.
-
-A rewind is the one exception: it always writes, since moving the watermark
-backward is its whole purpose.
-
-See [Read state](../concepts.md#read-state-per-thread) for the field and the
+**The manager owns the write.** The adapter reports and issues no
+Kubernetes write of its own, exactly as with
+`POST /channel/channels/{name}/status`. See
+[Read state](../concepts.md#read-state-per-thread) for the field and the
 backfill rule.
 
-### Reach for `reopen`, `delete` and `reset-context`
+## Acting on a bound conversation
 
-**Reach for those verbs is the BINDING**, read from the conversation's
-`spec.channelRefs` and never taken from the request. A surface may act on a
-conversation whose bindings name its channel, and no other.
+All three take `{"channel":"…"}` in the body:
 
-That is narrower than it sounds, and it is the amendment the archived-thread
-case forces on "no remote close verb exists".
+| Verb | Does |
+|---|---|
+| `POST /channel/conversations/{name}/reopen` | returns a `Closed` conversation to `Idle` |
+| `POST /channel/conversations/{name}/delete` | removes an already-`Closed` conversation for good |
+| `POST /channel/conversations/{name}/reset-context` | clears the conversation's `runtimeContextId` |
 
-That rule protected a property rather than a syntax — *you may only end a
-conversation you are part of*.
+| ID | Requirement |
+|---|---|
+| `MGR-7` | Reach for all three MUST be the BINDING, read from the conversation's `spec.channelRefs` and never taken from the request — a surface may act only on a conversation whose bindings name its channel. |
+| `MGR-8` | `delete` MUST additionally refuse anything not already `Closed`, naming the missing step, and MUST NOT close the conversation itself first. |
 
-Holding a live thread was how membership was PROVEN, because posting `/close` on
-a thread is only possible for a surface that has one.
+## GET /channel/vocabulary
 
-A closed conversation has no thread, so that proof is unavailable and the
-binding that put the thread there is the next-strongest.
-
-**`delete` additionally refuses anything not already `Closed`**, with a reason
-naming the missing step.
-
-**It never closes first.** One call doing the irreversible thing to a
-conversation that was still working, behind a confirmation that named only the
-delete, is exactly what the refusal prevents.
-
-Closing itself is still `/close` on a thread. There is no close endpoint.
-
-### Backpressure is yours to absorb
-
-**A transport that says "slow down" — HTTP 429, a `retry_after`, a token-bucket
-rejection — is not an operation failure.**
-
-- **Absorb it inside your claim window.** Wait the interval the transport
-  stated, never a backoff you computed instead of one it gave you, and retry the
-  same call.
-- **Report the op failed only when the condition is terminal**, or when riding
-  it out would overrun the claim.
-
-The manager's recovery path is for operations that genuinely could not be
-performed. Reporting a retryable condition as a failure makes that path
-load-bearing for something you could have waited out, and every re-derivation
-arrives into the same backpressure.
-
-**Budget your total in-process wait strictly below `reclaimAfterSeconds`**, and
-pace your own sending so bursts are spread rather than rejected.
-
-**Pace before you CLAIM, not before you send.** Work you cannot yet deliver
-should stay queued in the manager, where it is still derivable from CR state and
-survives your restart.
-
-### What may be typed
-
-`GET /channel/vocabulary` returns everything a person may type on a chat
-surface, and the revision identifying it.
+Returns everything a person may type on a chat surface, and the revision
+identifying it.
 
 ```json
 {"revision":"3f2a91c…",
  "entries":[
    {"kind":"builtin","name":"pipelines","description":"…","position":"general"},
-   {"kind":"builtin","name":"exit","description":"…","position":"thread"},
    {"kind":"pipeline","name":"k8s-observe","description":"k8s-engineer",
     "position":"general","profile":"k8s-engineer"}]}
 ```
 
-It exists because **an adapter holds no Kubernetes access**. You cannot read a
-Pipeline, so the manager is the only thing that can tell you what is
-addressable.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `revision` | string | yes | Changes whenever the entries change. Compare against the long-poll's header to know when to refetch. |
+| `entries[].kind` | string | yes | `builtin` for a manager command, `pipeline` or `coordinator` for an addressable route. |
+| `entries[].name` | string | yes | What to type. |
+| `entries[].description` | string | yes | Menu text. |
+| `entries[].position` | string | yes | `general` starts a conversation, `thread` acts on one. The two positions take disjoint sets. |
+| `entries[].icon` | string | no | How this entry is recognised in a list. Published as declared. |
+| `entries[].profile` | string | no | The profile answering for a `pipeline`/`coordinator` entry. Empty on a `builtin`. |
 
-| field | what it is |
+| ID | Requirement |
 |---|---|
-| `kind` | `builtin` for a manager command, `pipeline` for an addressable Pipeline |
-| `position` | `general` starts a conversation, `thread` acts on one |
-| `description` | menu text — for a Pipeline, the profile answering for it |
+| `MGR-9` | The response MUST be UNFILTERED — which entries a transport can express is the adapter's own knowledge, never the manager's. |
+| `ADA-6` | An adapter offering a command menu MUST decide for itself what it can express, and MUST learn of a change from the long-poll's `X-Agentops-Vocabulary-Revision` header, never a timer — the manager cannot dial an otherwise-idle adapter any other way. |
+| `ADA-6.1` | An adapter whose transport rejects a name's own characters (a hyphen, say) MAY translate it on the way out and back, as long as nothing else in the system learns the substitute name. |
 
-**The two positions take disjoint sets.** Addressing a Pipeline works only on a
-general surface. `/exit` and `/close` work only inside a thread.
+**Commands the manager answers itself** (`/pipelines`, `/help`, `/start`,
+`/<pipeline> <task>`, `/close`, `/exit`) are handled before any Pipeline
+lookup. An adapter forwards them as ordinary text and implements none of
+them — see [concepts](../concepts.md#releasing-a-runtime-by-hand--exit).
 
-Offer only what applies where the person is typing, **if your transport can
-express the difference**. If it cannot, offer the union — the manager answers a
-command used in the wrong position with usage, and that is the correction.
+## The typed message
 
-**The list is UNFILTERED, and deciding what you can express is your job.**
+**An op carries STRUCTURE, never rendered text.** There is no `op.text` and
+no `op.title` — the manager composes meaning, the adapter composes
+presentation.
 
-Telegram command names admit no hyphen, so `channel-telegram` registers
-`k8s_observe` and translates it back before anything leaves the adapter.
+### Message fields
 
-That rule lives in that adapter. Nothing here knows it, and no Pipeline was
-renamed for it.
+Struct-backed: `Message`, `platform/manager/internal/chat/message.go`.
 
-**Learn about changes from the long-poll, not a timer.** Every
-`GET /channel/ops` response carries `X-Agentops-Vocabulary-Revision`, on the
-`200` and the `204` both. A revision different from your last fetch means
-refetch.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | yes | `signal`, `answer`, `relay`, or `notice` — see [Enums](#enums). |
+| `body` | string | no | Prose, in [the markdown subset](#prose-fields-are-markdown). Present on every kind. |
+| `pipeline` | string | no | *(signal)* The route that originated the conversation. Empty when inference is ambiguous — render as absent, never guess a name. |
+| `source` | string | no | *(signal)* The `SignalSource` the input came from. |
+| `title` | string | no | *(signal)* The conversation title. |
+| `labels` | map of string to string | no | *(signal)* The signal's grouping labels. |
+| `inputRef` | string | no | *(signal)* The `ConversationInput` holding the full payload. |
+| `originKind` | string | no | *(signal)* `signal`, `channel`, or `member` — purely additive, for an adapter that distinguishes a coordination member's result from an ordinary signal. |
+| `choices` | array of [Choice](#a-message-choice) | no | *(any kind)* Offered actions. Never dropped — they are the reader's only account of what is on offer. |
+| `expectsReply` | boolean | no | *(any kind)* This message ASKS the reader for something, because a transport's own command menu sends on tap with nowhere to type the task. |
+| `inReplyTo` | string | no | *(any kind)* The transport's OWN handle for the message this one answers, as supplied in the original inbound push. OPAQUE — stored and returned unaltered. |
+| `origin` | string | no | *(relay)* The channel the message was typed on. |
+| `sender` | string | no | *(relay)* The transport-side identity, when supplied. |
+| `status` | string | no | *(answer)* The run outcome — see [Enums](#enums). |
+| `level` | string | no | *(notice)* `info` or `warn` — see [Enums](#enums). |
 
-The manager cannot dial you — your port is optional and this contract is
-pull-only — so the news rides the connection you are already blocked in.
+### A message choice
 
-**All of it is additive.** Ignore the endpoint and the header and you behave
-exactly as an adapter built before either existed. The contract version stays
-`2`.
+Struct-backed: `Choice`, `platform/manager/internal/chat/message.go`.
 
-### Commands the manager answers itself
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | yes | Names the action in the reader's own terms. |
+| `command` | string | yes | The addressed text the choice stands for, so a transport with no controls can print something the reader can type. |
 
-These are handled before any Pipeline lookup. An adapter forwards them as
-ordinary text and does not implement them.
+### The topic descriptor
 
-| Command | Where | What it does |
-|---|---|---|
-| `/pipelines`, `/help`, `/start` | general surface | lists Ready pipelines and their profiles |
-| `/<pipeline> <task>` | general surface | originates a conversation ([above](#the-channel-adapter-contract)) |
-| `/close` | a conversation's thread | ends the conversation, archives the thread |
-| `/exit` | a conversation's thread | releases the runtime pod, keeps the conversation |
+Struct-backed: `TopicDescriptor`, `platform/manager/internal/chat/message.go`.
 
-- **`/agents` still works** and is never printed, offered or registered. It was
-  the old name for `/pipelines`.
-- **The addressed form is one segment.** Text after the Pipeline name is the
-  task, colons included.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `conversation` | string | yes | The conversation this thread belongs to. |
+| `pipeline` | string | no | Inferred, may be empty — see `Message.pipeline` above. |
+| `source` | string | no | The `SignalSource` the input came from. |
+| `title` | string | no | A suggested name. The adapter enforces its own limits (Telegram forum topics cap at 128 characters, take no markup). |
+| `labels` | map of string to string | no | The signal's grouping labels. |
+| `kind` | string | no | The originating signal kind (`alert`, `job`, `task`, `chat`), so an adapter can prefix or icon a topic by lane. |
+| `previousThreadId` | string | no | Set only on a REOPEN: the thread this conversation used before its topics were archived. |
 
-- **Both thread commands are intercepted on the REPLY path**, before the text
-  could become an input.
-- **Both answer with usage** when typed on a general surface where there is no
-  conversation to act on.
-- **`/exit` refuses while a run is inflight or input is queued** — see
-  [concepts](../concepts.md#releasing-a-runtime-by-hand--exit).
-- **A Pipeline whose name collides with any of these is not reachable by that
-  command.**
-
-### The manager composes meaning, the adapter composes presentation
-
-**An op carries STRUCTURE, never rendered text.** There is no `op.text` and no
-`op.title`.
-
-`send` carries `op.message`, one of four kinds:
-
-| kind | fields | what it is |
-|---|---|---|
-| `signal` | `pipeline?`, `source`, `title`, `labels{}`, `body`, `inputRef` | the event that opened or advanced the conversation, as it arrived |
-| `answer` | `body`, `status` | agent output, reported through `/work/done` |
-| `relay` | `origin`, `sender?`, `body` | a user message, from any surface but this one — including THIS surface's own users when the adapter declares `echoesOwnMessages: false` |
-| `notice` | `level` (`info`/`warn`), `body` | the manager on its own behalf: acks, listings, refusals |
-
-**Any kind MAY also carry `choices` and `inReplyTo`.** Both are optional and
-both are structured, not prose.
-
-| field | what it is | what you do |
-|---|---|---|
-| `choices[]` | offered actions: `label`, `command` | render controls if your transport has them. Otherwise the body already names each one, so nothing is lost |
-| `inReplyTo` | your OWN handle for the message this answers, as you supplied it in `agentops.dev/message` | reply to that message, or ignore it |
-| `expectsReply` | this message ASKS the reader for something | open a reply box if you can, or do nothing — the prose says what to send |
-
-`inReplyTo` is **opaque** to the manager. It stores and returns the string
-unaltered and never parses it, exactly as it treats a thread id.
-
-**`expectsReply` exists because a command menu SENDS on tap.** Somebody picking
-`/k8s-ops` from a transport's own list posts it bare, with nowhere to type the
-task — so the manager asks for one instead of answering with usage.
-
-The answer finds its way back through the reply chain, and nothing is stored:
-
-```
-  the reply          →  the manager's question  →  the bare command
-                            (inReplyTo)              (the Pipeline)
-```
-
-An adapter that cannot open a reply box is still conformant. The prose names the
-Pipeline and says what to send.
-
-Together they are what lets a control offered on somebody's own words carry
-those words forward. Post the offer as a reply to their message and your
-transport still holds the text, so a selection needs no state on either side.
-
-**Never drop `choices`.** They are the reader's only account of what is on
-offer. A transport without controls renders them as a list.
-
-### The body grammar
-
-**A free-text body is markdown in the named subset, PLUS a block grammar.** You
-read both. That is how this contract has always worked for prose: it names a
-language, and each surface renders what it can.
-
-**The manager does not parse either one.** It hands you what the agent printed,
-character for character.
-
-#### The grammar
-
-A tag is recognized only when **all three** hold:
-
-1. it stands alone on its own line, at the start of that line
-2. it forms a well-formed open/close pair
-3. it is not inside a fenced code block
-
-```
-<title>
-Pod is looping
-</title>
-
-<root-cause>
-OOM at 512Mi.
-</root-cause>
-
-<details>
-Everything a reader only wants if they ask.
-</details>
-```
-
-| Tag | Is |
+| ID | Requirement |
 |---|---|
-| `<title>` | at most one, rendered FIRST wherever it appeared, a single line |
-| `<details>` | **THE FOLD** — present it collapsed, expandable by the reader |
-| anything else | a section the AGENT named, above the fold, in written order |
+| `ADA-7` | An adapter whose transport can un-archive a thread MUST honour `previousThreadId` and return that same id, so the conversation continues where it left off. One whose transport cannot MUST open a fresh thread and return the new id — ignoring the hint entirely is a valid implementation. |
+| `ADA-8` | An adapter MUST render `choices` as controls where its transport has them, and as a plain list where it does not — but MUST NOT drop them. |
+| `ADA-9` | An adapter that opens a reply box MUST do so on `expectsReply`, and one that cannot is still conformant — the body prose names what to send. |
 
-#### Rules your parser must follow
+### Prose fields are markdown
 
-- **Anything failing the three conditions is LITERAL TEXT.** Agent output is
-  full of `<` — `if x < y`, `Deployment<T>`, shell redirects. None of it is a
-  tag.
-- **Parsing is TOTAL.** No recognized tag yields one block holding the whole
-  text, which renders exactly as prose does today. That is the entire
-  backward-compatibility story.
-- **An unpaired opening tag closes at end of output.** Never discard the region
-  — losing an agent's words to a grammar slip is the worst failure available.
-- **A tag inside an open region is literal.** The model is flat.
-- **The section vocabulary is OPEN.** Every agent names its own sections for its
-  own job — `root-cause`, `changed`, `what-i-checked`. Render a label
-  generically. **An adapter carrying a list of section names is wrong**, and
-  will be wrong again the next time somebody writes a profile.
-- **Only the fold is closed**, which is all you need to know where to collapse.
-- **Never reorder named sections** and never shorten anything. Which part is the
-  summary is the agent's judgement, already made by what it put in `<details>`.
-
-#### Which bodies carry it
-
-| kind | Parse it? |
-|---|---|
-| `answer` | **yes** — agent output by definition |
-| `notice` | **yes** — a failed run that explained itself leaves as one, and that explanation is the longest thing an agent produces. Manager-composed prose parses to one block, same result |
-| `relay` | **no** — somebody's typed words. Parsing them consumes characters a person deliberately wrote |
-| `signal` | **no** — not prose at all, see below |
-
-**A `signal` is a CARD, not a body.** Its structured fields *are* the message:
-title, source, pipeline, labels, payload.
-
-Its payload is a machine document or somebody's typed text, never this grammar.
-
-**That is the one place you need a second renderer.** Keeping the two apart is
-what lets a card show a source and a label table while an answer shows a title
-and a fold.
-
-#### If you do not implement it
-
-You render the tags literally, which is ugly.
-
-That is prevented upstream. `AgentProfile.spec.outputFormat` is **required**,
-and a profile declaring `none` emits no tags at all — so an install serves the
-grammar only to surfaces that understand it.
-
-**The compatibility boundary is the profile, not the wire.**
-
-**`ensure-topic` carries `op.topic`, a descriptor** — `conversation`,
-`pipeline?`, `source?`, `title`, `labels{}`, `kind` — and YOU name the thread
-from it.
-
-The manager sends no baked title because it cannot know your limits. Telegram
-forum topics cap at 128 characters and take no markup. A web chat has neither
-constraint.
-
-The descriptor and the first card in the thread carry the same facts, so an
-adapter can choose not to repeat itself.
-
-**`pipeline` may be EMPTY on both.** It is inferred from the conversation's
-materialized bindings and left blank when several Ready Pipelines could claim
-it. Blank means "not determinable", so render it as absent rather than inventing
-a name.
-
-**`delete-conversation` carries the target thread id and a `notice`**, and
-reports that the conversation is **gone for good** — not that a thread should be
-closed.
-
-What ending means for your transport is YOUR decision: post the tombstone,
-archive the thread, rename it, delete it.
-
-It is named for the conversation because that is what ended. `ensure-topic` and
-`close-topic` instruct you about a thread, this one informs you about a
-lifecycle event.
-
-**It REPLACES `close-topic` on the deletion path** — a conversation being
-deleted gets one or the other, never both — so you never have to work out
-whether a pair means one ending or two.
-
-- **Do not silently ignore it.** An adapter that cannot act should complete it
-  with an error.
-- **Not implementing the kind at all is still correct.** The operation is
-  reported failed and the deletion proceeds.
-
-`channel-telegram` un-archives the topic, posts the notice and closes it again,
-because a closed forum topic refuses `sendMessage` and an open one would invite
-replies into a conversation that no longer exists.
-
-It does not delete the topic: the history above the tombstone is what a person
-scrolls back to.
-
-**`previousThreadId` is an optional hint**, present only when a closed
-conversation is being reopened: the thread this conversation used before its
-topics were archived. **Ignoring it is a valid implementation.**
-
-| Your transport | Do |
-|---|---|
-| can un-archive | honour the hint and return that same id — the conversation continues where it left off, with its history above the new messages |
-| cannot | open a fresh thread and return the new id. The manager records whatever comes back |
-
-**That asymmetry is why this is a hint on an existing operation rather than a
-`reopen-topic` kind.** Most transports have no un-archive, so most
-implementations of a new kind would be a second name for `ensure-topic`.
-
-Whether un-archiving is possible is transport knowledge, and the manager holds
-none.
-
-**Prose fields are markdown**, in one deliberately small subset:
+Prose fields are markdown, in one deliberately small subset:
 
 ```
 **bold**   *italic*   `inline code`   ```fenced code```   [text](url)
 ```
 
-Anything outside that subset is UNDEFINED. You may render it, escape it or strip
-it, and no caller may depend on which. The subset is small because the
-alternative to naming it is every adapter inventing its own.
+Anything outside that subset is UNDEFINED — an adapter may render it, escape
+it, or strip it, and no caller may depend on which.
 
-**Rendering, escaping, splitting and truncation are yours, entirely.** The
-manager guarantees nothing about how a message looks or how long it may be.
+| ID | Requirement |
+|---|---|
+| `ADA-10` | Rendering, escaping, splitting and truncation are the adapter's ENTIRELY. The manager guarantees nothing about how a message looks or how long it may be. `channels/telegram/render.go` is the reference: HTML composition, entity escaping, 4096-character splitting, 128-character topic names. |
 
-`channels/telegram/render.go` is the reference: HTML composition, entity
-escaping, 4096-character splitting, 128-character topic names. An adapter that
-cannot be bothered may concatenate the fields and send them plain — the contract
-asks only that presentation be the adapter's call.
+## The body grammar
 
-### Credentials
+**A free-text body is markdown in the subset above, PLUS a block grammar.**
+The adapter reads both — that is how this contract has always treated
+markdown: it names a language, and each surface renders what it can.
 
-**Declared per Channel** (`spec.credentialsSecretRef`, a Secret name) and
-projected into the adapter pod by the ChannelAdapter reconciler as env vars.
+**The grammar itself, its recognition rules and the fold are owned by the
+`structured-agent-output` capability**
+(`openspec/specs/structured-agent-output/spec.md`), shared verbatim with the
+console's own parser (`blocks.ts`) and `channels/telegram/blocks.go`. This
+page states only WHERE the grammar applies, never restates the rules.
 
-- Every key `K` of the Secret appears as `<credentialEnvPrefix>K`.
-- The prefix is advertised per channel in the `GET /channel/channels` listing.
-  Key `botToken` becomes `AGENTOPS_CRED_HOME_OPS_botToken`.
-- **The kubelet resolves the values.** Neither the manager nor any reconciler
-  ever reads a Secret through the API.
+| ID | Requirement |
+|---|---|
+| `ADA-11` | An adapter MUST parse the grammar on an `answer` or `notice` body, and MUST NOT parse one on a `relay` (somebody's typed words) or a `signal` (a CARD, never prose — see below). |
+| `ADA-12` | Parsing MUST be TOTAL. A body with no recognized tag yields one block holding the whole text — the entire backward-compatibility story, and how output predating the grammar keeps rendering. |
+| `ADA-13` | The manager MUST NOT parse, rewrite, or shorten the body it hands the adapter. The section vocabulary is OPEN — an adapter carrying a fixed list of section names is wrong, and will be wrong again the next time a profile is written. |
 
-Several Channels with different Secrets means several bots or workspaces through
-one adapter process.
+**A `signal` is a CARD, not prose.** Its structured fields (`title`,
+`source`, `pipeline`, `labels`, the payload) ARE the message, and an adapter
+renders them with a second, dedicated renderer — never this grammar.
 
-### Auth
+**The contract version did NOT move for this grammar.** A body that was
+markdown is now markdown plus a block grammar, read by the same component
+that already read the markdown — nothing was added to the wire.
 
-**All `/channel/*` calls carry `Authorization: Bearer <token>`.**
+**If an adapter does not implement it**, the tags render literally, which is
+ugly but not wrong — prevented upstream, since `AgentProfile.spec.outputFormat`
+is required and a profile declaring `none` emits no tags at all. The
+compatibility boundary is the PROFILE, not the wire.
+
+## Credentials
+
+Declared per `Channel` (`spec.credentialsSecretRef`, a Secret name) and
+projected into the adapter pod by the `ChannelAdapter` reconciler as env
+vars: Secret key `K` appears as `<credentialEnvPrefix>K`, advertised per
+channel in [the channel listing](#get-channelchannels).
+
+| ID | Requirement |
+|---|---|
+| `MGR-10` | The manager and every reconciler MUST NOT read a Secret through the Kubernetes API. The kubelet resolves the values. |
+
+Several `Channel`s with different Secrets through one adapter process means
+several bots or workspaces served by one binary.
+
+## Auth
+
+All `/channel/*` calls carry `Authorization: Bearer <token>`.
 
 | Token | Scope |
 |---|---|
-| Per-adapter, derived from the master key (`HMAC(ADAPTER_TOKEN, adapter name)`, validated statelessly by re-derivation) | **its own name** — the type key Channels select. Cross-key calls get 403 |
-| The bare master token, chart-provisioned into the manager as env | full, so hand-deployed adapters work unchanged |
+| Per-adapter, `HMAC(ADAPTER_TOKEN, "adapter:"+name)`, base64url, validated by RE-DERIVATION against the `ChannelAdapter` list | the adapter's own CR name — the type key `Channel`s select. A cross-scope call gets `403` |
+| The bare master token (`ADAPTER_TOKEN`, chart-provisioned into the manager) | full scope, so a hand-deployed adapter works unchanged |
 
-**No Kubernetes API access is needed.** The reference adapter
-[`channels/telegram/`](../../channels/telegram/) is dependency-free Go.
+| ID | Requirement |
+|---|---|
+| `SEC-1` | A per-adapter token MUST be derived, never minted or stored — the manager validates a presented token by re-deriving it against every `ChannelAdapter`, stateless across restarts. |
+| `SEC-2` | The manager MUST reject an unauthenticated or wrongly-scoped call with `401`/`403` naming which. |
+| `SEC-3` | No reconciler MUST grant a channel adapter any Kubernetes permission of its own. `spec.serviceAccountName` is a reference the operator never creates, validates or binds. |
 
 ### Discovering what `config` needs
 
-An adapter CR may optionally declare:
+An adapter CR may optionally declare `spec.configSchema` (a JSON Schema for
+the `config` of the `Channel`s/`SignalSource`s it serves) and
+`spec.credentialKeys` (the Secret keys it expects).
 
-- **`spec.configSchema`** — a JSON Schema for the `config` of the Channels and
-  SignalSources it serves.
-- **`spec.credentialKeys`** — the Secret keys it expects.
+Both are interface METADATA, advisory only. They are readable the moment
+the CR is applied, and neither ever blocks serving, projection, or
+ingestion.
 
-**The declaration lives on the CR spec**, so
-`kubectl get channeladapter telegram -o yaml` answers "what do I write?" before
-the adapter pod has ever started. No registration step, and adapter binaries
-play no part.
+## Manager's provisions
 
-The reconciler compile-checks a declared schema and reports `SchemaValid` on the
-adapter CR. Served Channels and SignalSources then carry `ConfigValid`, with
-`SchemaValidated` or `SchemaViolation` naming the offending fields.
-
-**Both are advisory.** A violation never blocks serving, projection, or
-ingestion — the adapter's own Ready report stays authoritative, because a
-CR-declared schema can drift from the running image.
-
-Declaring nothing keeps behavior exactly as before, and no `ConfigValid`
-appears.
-
-**Authoring rule:** bump the schema in the same diff as `image`.
-
-**A `Channel` whose adapter nothing serves** — no in-process provider, no Ready
-`ChannelAdapter`, no adapter-reported readiness — carries a `Served=False`
-condition. Typos fail visibly instead of queueing ops forever.
-
-### A thread opens with the event that caused it
-
-**Delivery is decided per DESTINATION.** When an input is appended and a thread
-binding exists, the manager delivers it to every bound channel EXCEPT the
-surface it entered on, because that surface displayed it as it was typed.
-
-An event nobody typed entered on no surface, so every channel receives it.
-
-**What arrives depends on who said it:**
-
-| Said by | Arrives as |
+| ID | Provision |
 |---|---|
-| an event | a `signal` message — so an alert thread reads as the event, then the work, then the answer |
-| a person | a `relay`, with `origin` and `sender` |
+| `MGR-1` | **The ops long-poll** — `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`, at-least-once delivery, duplicates tolerated by `id`. |
+| `MGR-2` | **The claim window** — a claimed op carries `reclaimAfterSeconds`, and an op not completed within it returns to the queue for another claimant. |
+| `MGR-3` | **Typed operations** — `send`, `ensure-topic`, `close-topic`, `delete-conversation`, each a structured payload, never rendered display text. |
+| `MGR-4` | **The vocabulary revision** — every long-poll response carries the current revision, and `GET /channel/vocabulary` serves the entries to the same authentication. |
+| `MGR-5` | **Derived-token auth** — the master token plus per-adapter tokens derived as `HMAC(masterKey, "adapter:"+name)`, validated by re-derivation, scoped to the adapter's own name. |
+| `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
 
-**Whether the origin surface displayed it is a fact about YOUR transport, so you
-declare it:** `ChannelAdapter.spec.echoesOwnMessages`, default true. A viewer
-that renders only what it is sent sets it false and receives its own users'
-messages like any other destination.
+**Delivery is decided per DESTINATION.** An input is delivered to every
+bound channel EXCEPT the surface it entered on, because that surface
+already displayed it.
 
-Three more rules:
+Whether a surface displays its own message is a fact about that
+transport, declared as `ChannelAdapter.spec.echoesOwnMessages` (default
+`true`). A viewer rendering only what it is sent sets it `false`.
 
-- **An input predating provenance is delivered nowhere.**
-- **Op ids are stable per conversation × input × channel**, so reconcile-driven
-  re-enqueues dedup.
-- **Delivery runs parallel to dispatch.** It neither gates nor is gated by the
-  run.
+**A reply op's id is stable per conversation × channel × run**
+(`send:<conversation>:<channel>:<runId>`), so a manager restart between
+`/work/done` and an adapter claiming the op re-derives the answer rather
+than losing it, and completing it appends the channel to
+`status.runs[].delivered[]`.
 
-### The operator delivers, always
+## Adapter's obligations
 
-**An agent's printed answer is its whole deliverable.** The runtime reports it
-via `/work/done` and the manager posts it to every bound thread through the
-serving adapters.
-
-**Agents never send chat messages themselves**, so no prompt carries transport
-instructions and no runtime holds a channel's credentials. The surface is the
-adapter's business alone.
-
-- **A conversation dispatches once at least one of its topics exists**, so one
-  broken channel never deadlocks it.
-- **Channel implementations must never re-ingest their own outbound posts as
-  inbound.** Relayed messages would loop otherwise.
-
-That last rule is load-bearing in one more place now: one adapter may serve
-several surfaces of one conversation, so a message can be delivered toward the
-transport it entered through.
-
-### Conversation context travels as an OPAQUE HANDLE
-
-A work unit carries `runtimeContextId` — the runtime's own identifier for
-everything this conversation has accumulated.
-
-The obligation is one sentence: **continue the context this handle names, or
-report that you could not.**
-
-**Where that context lives is entirely yours**: session files on a mounted
-volume, a thread id at a vendor API, rows in a database. The manager stores the
-handle, hands it back, and interprets nothing.
-
-`--resume` is one runtime's implementation of this and `session` is that
-runtime's word for it. Neither appears in the contract.
-
-`POST /work/done` reports back:
-
-| field | meaning |
+| ID | Obligation |
 |---|---|
-| `runtimeContextId` | the handle for the context this run leaves behind. **Latest-wins** — it replaces the stored one, including on a FAILED run, because a crash after a context was established should not strand it |
-| `continuity` | `continued`, `new`, or `unavailable` |
-| `continuityReason` | free text, recorded verbatim, when a context could not be reached |
+| `ADA-1` | **Consume the `/channel/*` endpoints it needs** — poll, complete, inbound replies, channel listing, cursor state, channel status. |
+| `ADA-2` | **Parse the body grammar** — the markdown subset plus the block grammar, under the shared `structured-agent-output` recognition rules. |
+| `ADA-3`/`ADA-3.1`/`ADA-4` | **Absorb retryable backpressure inside the claim window**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
+| `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
+| `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
 
-**`continuity` exists because the manager cannot infer it.** It sends a handle
-and receives a handle, and when they differ it has no way to tell an agent that
-branched deliberately from one that was forced to start over.
+## Enums
 
-- **Absent means no claim.** A runtime that omits it keeps today's behaviour,
-  because an addition to the contract must not make an existing runtime look
-  broken.
-- **A runtime that cannot continue anything conforms by always reporting
-  `new`.**
+| Enum | Values | Reading |
+|---|---|---|
+| `kind` (op) | `ensure-topic`, `send`, `close-topic`, `delete-conversation` | — |
+| `kind` (message) | `signal`, `answer`, `relay`, `notice` | An adapter that does not recognise one SHOULD render the body rather than drop the message. |
+| `level` | `info`, `warn` | Two-valued on purpose — an error needing durable recording surfaces as a Conversation condition, not as chat. |
+| `status` | `succeeded`, any other string | Reported on an `answer`, from the run's own outcome. |
+| `outcome` (read report) | `marked`, `skipped`, `failed` | — |
+| `originKind` | `signal`, `channel`, `member` | — |
 
-**Reporting `unavailable` means the context was LOST.**
+## Compatibility
 
-**Do not answer without it.** A conversation without its context is a new one
-wearing the same name and thread, and an agent asked to undo something it has no
-memory of will guess.
+| ID | Requirement |
+|---|---|
+| `COMPAT-1` | An adapter MUST ignore an operation field it does not know. |
+| `COMPAT-2` | The manager MUST ignore a field it does not know in a completion, an inbound request, or a read report. |
+| `COMPAT-3` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
 
-Fail the run and say why — never with an empty result, which is what made
-answering-anyway look like the kinder option.
+| Version part | Moves when |
+|---|---|
+| MAJOR | an adapter conformant with the previous version stops conforming |
+| MINOR | a new optional capability or field is added |
+| PATCH | a clarification that changes no obligation |
 
-**Before declaring it, distinguish a store that says GONE from one that did not
-ANSWER.** A shared filesystem can stall for seconds, and ending a conversation
-over that would be a correctness bug.
+**The document version is NOT the wire contract version.** The
+`contract=<version>` parameter an adapter declares on the long-poll keeps
+its own integer series, unrelated to this document's semver:
 
-`resumeSessionId` and `sessionId` are the retired spellings of the handle, sent
-and accepted for one release so a runtime image can be upgraded independently of
-the manager. Read `runtimeContextId`.
+| Document version | Wire `contract` value |
+|---|---|
+| 1.0.0 | `2` |
 
-### Delivery is a recorded fact, not a queue entry
+A document MINOR bump — an additive field, a new optional endpoint — MUST
+NOT move the wire `contract` value. Only a change that an adapter speaking
+the current wire version could no longer parse safely moves it, and that
+change is itself document-MAJOR.
 
-**`/work/done` writes the run into `Conversation.status.runs[]` and enqueues the
-reply**, exactly as before. It is no longer the only path that can produce it.
+## Conformance
 
-The reply op id is **stable per conversation × channel × run**:
+A channel adapter implementing every item below is fully conformant with
+this specification. Each item is independently verifiable against a
+running adapter or its source.
 
-```
-send:<conversation>:<channel>:<runId>
-```
+Where `channels/telegram` or `platform/console`'s own test suite already
+exercises an item, the test is named. Running it is the verification.
 
-- **Completing it appends the channel to `status.runs[].delivered[]`.**
-- **Reconciliation enqueues a reply** for any completed run whose bound thread
-  is missing from that list.
+An item with no named test is a GAP. The obligation still holds, but no
+shipped adapter's suite currently proves it.
 
-So a manager restart between `/work/done` and an adapter claiming the op
-re-derives the answer rather than losing it. A fan-out interrupted after one of
-three threads completes the other two without repeating the first.
+1. **Long-polls `GET /channel/ops`, treating `204` as no-op, not an
+   error.** `channels/telegram`:
+   `TestNextOpTreats503AsNoOpRatherThanAnError` (`errorpaths_test.go`).
+2. **Retries a `503` at once, on a fresh connection, never as a failure.**
+   `channels/telegram`: `TestNextOpClosesTheConnectionOnANonLeaderAnswer`,
+   `TestPollOnceDoesNotSleepOnANonLeaderRejection` (`errorpaths_test.go`).
+3. **Tolerates a redelivered op id.** `channels/telegram`:
+   `TestPollOnceLogsAndSwallowsAFailedCompleteOnARedeliveredOp`
+   (`errorpaths_test.go`). `platform/console`:
+   `TestRedeliveredSendRendersOnce` (`adapter_test.go`).
+4. **Completes `ensure-topic` with a thread id, and reopens from
+   `previousThreadId` when its transport can.** `channels/telegram`:
+   `TestExecuteReopensTopicFromPreviousThreadID`,
+   `TestExecuteEnsureTopicWithoutADescriptorIsReported`
+   (`coverage_test.go`). `platform/console`:
+   `TestEnsureTopicIsDeterministicFromConversationUID` (`adapter_test.go`).
+5. **Completes `close-topic` and treats an already-closed thread as
+   success.** `channels/telegram`: `TestExecuteClosesATopic`,
+   `TestAlreadyClosedTopicIsNotAFailure` (`coverage_test.go`, `main_test.go`).
+6. **Completes `delete-conversation` and never leaves it unanswered.**
+   `channels/telegram`: `TestDeleteConversationReopensPostsAndClosesAgain`,
+   `TestDeleteConversationWithoutAThreadIsReported`,
+   `TestDeleteTopicFailureIsReportedNotSoftened` (`main_test.go`).
+7. **Absorbs a transport's retryable backpressure inside the claim
+   window.** `channels/telegram`: `TestRetryAfterIsHonouredThenSucceeds`,
+   `TestSustainedRateLimitFailsInsideTheBudget`,
+   `TestRetryBudgetIsHalfTheAdvertisedClaim` (`retry_test.go`).
+8. **Paces sends, gating before the claim rather than before the send.**
+   `channels/telegram`: `TestPacerGatesTheClaimNotTheSend`,
+   `TestPacerIsPerChat` (`limiter_test.go`).
+9. **Pushes a reply with a required `threadId`.** `channels/telegram`:
+   `TestTopicMessageCarriesItsThreadID` (`main_test.go`).
+10. **Never re-ingests its own outbound post as inbound.**
+    `platform/console`: `TestNoRelayLoop` (`adapter_test.go`). GAP:
+    `channels/telegram` carries no dedicated test — the rule is enforced
+    manager-side (`chat.ErrSelfInput`) and Telegram's `getUpdates` never
+    surfaces the bot's own `sendMessage` as an update, so the case does not
+    arise for it today.
+11. **Refetches the vocabulary on a changed revision, never a timer.**
+    `channels/telegram`: `TestStaleAsksAndSyncedRecords`,
+    `TestInconsequentialChangeLeavesTheAdaptedListIdentical`
+    (`vocabulary_test.go`). `platform/console`:
+    `TestVocabularyIsProjectedFromTheManagerWhenReachable`,
+    `TestVocabularyFallsBackWhenTheManagerIsUnreachable`
+    (`vocabulary_test.go`).
+12. **Renders `choices` as controls, and never drops them.**
+    `channels/telegram`: `TestChoicesRenderAsInlineControls`,
+    `TestNoChoicesMeansNoKeyboard`, `TestOversizedChoiceFallsBackToProse`
+    (`vocabulary_test.go`).
+13. **Carries `inReplyTo` through its own reply handle when present.**
+    `channels/telegram`: `TestSendUsesTheReplyHandleWhenPresent`,
+    `TestSendOmitsTheLinkageWhenAbsent` (`vocabulary_test.go`).
+14. **Parses the body grammar on an `answer`/`notice`, total and
+    fold-aware, and never on a `relay`.** `channels/telegram`:
+    `TestRenderBlocks`, `TestNoticeWithBlocksIsFolded`,
+    `TestARelayIsNotParsed`, `TestTheAdapterParsesTheBodyItself`
+    (`render_test.go`). `platform/console`: `TestFenceNests`,
+    `TestOneLineProseIsNotFenced` (`manager_test.go`).
+15. **Renders a `signal` as a card, never through the body grammar.**
+    `channels/telegram`: `TestSignalCardOmitsWhatItDoesNotKnow`,
+    `TestSignalPayloadFoldsWhenTall` (`render_test.go`).
+    `platform/console`: `TestRecordedSignalIsACard`,
+    `TestRecordedSignalDegrades` (`rehydrate_test.go`).
+16. **Renders the markdown subset and owns its own splitting/escaping.**
+    `channels/telegram`: `TestMarkdownSubsetRenders`,
+    `TestLongBodyIsSplitAndEveryPartFits`,
+    `TestPayloadWithMarkupCharactersSurvives` (`render_test.go`).
+17. **Declares `echoesOwnMessages` and the manager honours it per
+    destination.** `platform/console`:
+    `TestOwnMessageDeliveredBackConfirmsInsteadOfDuplicating`,
+    `TestDeliveredMessageFromAnotherSurfaceStaysARelay` (`adapter_test.go`).
+18. **Reads and writes cursor state via `GET`/`PUT /channel/state`.**
+    `channels/telegram`: `TestOffsetRoundTripsThroughTheStateAPI`
+    (`main_test.go`).
+19. **Projects per-channel credentials into its own environment via the
+    advertised prefix.** `platform/console`:
+    `TestProjectedCredentialsAreReadFromTheEnvironment`,
+    `TestProjectedCredentialsIgnoreUnrelatedEnvironment`,
+    `TestUITokenComesFromProjectedChannelCredentials` (`adapter_test.go`).
+    GAP: `channels/telegram` holds no credential of its own (every Bot API
+    call relays through `gateways/telegram/`), so this item does not apply
+    to it as shipped.
+20. **Authenticates every `/channel/*` call and respects scope.**
+    `channels/telegram`: `TestEveryCallGoesThroughTheGateway`
+    (`gatewaycall_test.go`, call-side). GAP: no `channels/telegram` or
+    `platform/console` test exercises a WRONG-scope token being refused —
+    that path is proven manager-side only (`internal/httpapi` auth tests).
+21. **Reports `GET`/`PUT /channel/read` watermarks honouring the batch
+    bound, monotonic rule, and reader opacity.** `platform/console`:
+    `TestMarkReadMarksTheSelection`,
+    `TestMarkReadRefusesEmptyAndOversizedBatches`,
+    `TestReaderKeyCarriesNoIdentity`, `TestMarkUnreadBringsOneMessageBack`,
+    `TestMarkUnreadRefusedWithNoReader` (`unread_test.go`,
+    `markunread_test.go`). GAP: `channels/telegram` implements no read
+    reporting at all, which is a conformant choice — see
+    [POST /channel/read](#post-channelread).
+22. **Honours `reopen`/`delete` reach as the conversation's own binding.**
+    `platform/console`: `TestReopenOnlyAppliesToAClosedConversation`,
+    `TestReopenPassesTheManagersReasonThrough`,
+    `TestBulkDeleteRefusesAConversationThatIsNotClosed`,
+    `TestDeleteConversationLeavesAReadableArchivedTranscript`
+    (`bulkdelete_test.go`). GAP: no shipped adapter test exercises
+    `reset-context` — neither `channels/telegram` nor `platform/console`
+    calls that verb today.
+23. **Reports a config problem via `POST /channel/channels/{name}/status`.**
+    GAP: neither shipped adapter carries a dedicated test asserting what
+    it sends on that call, though `platform/console/adapter.go` does call
+    it on an invalid config.
 
-**Adapters need change nothing.** The id is a better dedup key than the counter
-it replaces, and delivery stays at-least-once.
+## Changelog
 
-**Ack and notice sends keep counter-based ids** (`send:<counter>`) and stay
-fire-and-forget. Saying the same thing twice is correct when a user asked twice,
-and neither derives from CR state.
-
+| Version | Date | Changed |
+|---|---|---|
+| 1.0.0 | 2026-10-17 | Initial release — the narrative contract page rewritten into a versioned, normative specification: exhaustive field tables traced to their Go structs, a stable ID per requirement, the manager's provisions and the adapter's obligations stated as two exhaustive sections, compatibility rules separating the document's semver from the wire `contract` value, and the conformance checklist above. |
