@@ -12,7 +12,6 @@ versions.
 
 ### Changed
 
-
 **`persistence.context.accessModes` and `.workspace.accessModes` ship EMPTY, and
 the chart answers them.** `ReadWriteMany` for an ordinary install, exactly as
 before. `ReadWriteOnce` under `global.demo.enabled`.
@@ -40,7 +39,7 @@ the thing the demo is showing.
   mode because an empty list is the one thing a chart can tell apart from a
   choice somebody typed.
 
-### Upgrading
+### Upgrade
 
 **A DEMO install whose context claim already BOUND cannot be upgraded in place.**
 A PVC's `accessModes` is immutable, so Helm's patch is refused by the API server
