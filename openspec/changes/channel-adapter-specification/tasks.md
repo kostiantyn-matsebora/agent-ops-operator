@@ -67,6 +67,16 @@
       scoped-rule index reads the directory at session start. It loads on
       the next session that reads a matching file, same as any new scoped
       rule.
+
+      **`.github/tests/run.sh` caught the other consumer of a scoped rule**:
+      `review-rules.py`'s own routing table, separate from root `CLAUDE.md`'s,
+      had no row for `channel-spec` — `--check` failed, "no path routes to
+      .claude/rules/channel-spec.md". Added rows mirroring the rule's
+      `paths:` exactly (`channels/**`, `platform/console/*.go`, the
+      manager's `internal/chat/`/`internal/httpapi/`,
+      `docs/contracts/channel-adapter.md`), same pattern `runtime-spec`
+      uses. `review-rules.test.sh`: 18 passed, `claude-review.test.sh`: 44
+      passed.
 - [x] 3.2 Added the claimed specification version (1.0.0) to
       `docs/integrations/telegram.md` (conforms-to line, Jekyll `relative_url`
       link since it is a published page) and `docs/console.md` (plain
