@@ -5,7 +5,9 @@ See proposal.md — Why. This change builds on a sibling change,
 archive entry exists). Once it lands it provides:
 
 - The signal adapter contract already lives at
-  `docs/contracts/signal-adapter.md`, moved verbatim.
+  `docs/contracts/signal-adapter.md`, moved verbatim. That sibling creates the
+  page. This change only adds its version, changelog, routing row and
+  governance.
 - `docs-generate.py` already has the `struct-table` marker.
 - The governance pattern (scoped rule, verify-against-spec, approval-gated
   edits, conformance carried by a spec change) is established.

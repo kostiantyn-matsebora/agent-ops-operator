@@ -30,7 +30,8 @@
 ## 3. Governance rule and version claims
 
 - [ ] 3.1 Extend `.claude/rules/signal-rules.md` (add the signal endpoints in
-      `internal/httpapi/` to its `paths:`) with the three obligations. Verify with
+      `internal/httpapi/` to its `paths:`) with the two obligations (verify before claiming done, never edit the
+      specification without the user's approval). Verify with
       `rules_compliance.py` and the authoring rules.
 - [ ] 3.2 Add the claimed specification version (1.0.0) to
       `docs/integrations/home-assistant.md`, `docs/integrations/prometheus.md`,

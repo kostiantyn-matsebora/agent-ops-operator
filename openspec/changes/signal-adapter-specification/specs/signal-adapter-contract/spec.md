@@ -3,7 +3,8 @@
 ### Requirement: The specification is a versioned reference page
 
 The signal adapter specification SHALL live at `docs/contracts/signal-adapter.md`
-as a reference page with no front matter.
+as a reference page with no front matter. The page is moved there by
+`runtime-specification`, and this change makes it a versioned specification.
 
 The same change SHALL add a row to `.claude/rules/documentation.md`'s routing
 table for this page and point `docs/contracts.md` at it.
