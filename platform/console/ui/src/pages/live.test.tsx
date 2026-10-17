@@ -53,10 +53,13 @@ vi.mock('../api/client', () => ({
 
 vi.stubGlobal('EventSource', FakeEventSource)
 
+// unread defaults true: the default scope (`{kind: 'all'}`) is now an UNREAD
+// filter (ChatView.tsx's TREE_PREDICATE), and nothing here is testing
+// read/unread specifically.
 const summary = (over: Record<string, unknown> = {}) => ({
   name: 'conv-1', title: 'disk pressure on node-3', phase: 'Running', profile: 'k8s-engineer',
   pipeline: 'k8s-ops', runCount: 1, queued: 0, joined: true, consoleThread: 'th-1',
-  errored: false, unread: false, ageSeconds: 12, deleting: false, threads: [],
+  errored: false, unread: true, ageSeconds: 12, deleting: false, threads: [],
   runs: [], ...over,
 })
 

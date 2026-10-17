@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Badge, Tooltip } from '@patternfly/react-core'
 import {
-  ArchiveIcon, BellIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, UserIcon,
+  ArchiveIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, UserIcon,
 } from '@patternfly/react-icons'
 import { useInboxCounts, useVocabulary } from '../../api/hooks'
 import { Icon } from '../../components/Icon'
@@ -11,13 +11,17 @@ import { INBOX_COLLAPSED_WIDTH } from './layout'
 // Ported from `prototype/C-rail.html` (expanded) and `C-collapsed.html`
 // (the icon strip) — scope order and wording read from there.
 //
-// `console-chat-layout` spec: "the inbox column SHALL list, in this order:
-// the filters All, Unread, Working, Mine and Errored, then every Ready
-// Pipeline and Coordinator, then Closed."
+// `console-chat-layout` spec named this scope "All", counting every
+// conversation regardless of read state, with a separate "Unread" scope
+// beside it. A later decision made every OTHER fixed scope (Working, Mine,
+// Errored), each Pipeline/Coordinator, and Closed an unread count
+// (ChatView.tsx's TREE_PREDICATE) — which made the dedicated "Unread" scope
+// redundant (every category already had its own unread count one level
+// down) and it was removed. All itself did NOT change: it is still every
+// conversation a person can open, read or not, same as it always was.
 
 export type Scope =
   | { kind: 'all' }
-  | { kind: 'unread' }
   | { kind: 'working' }
   | { kind: 'mine' }
   | { kind: 'errored' }
@@ -37,6 +41,11 @@ interface InboxProps {
   onSelectScope: (s: Scope) => void
   collapsed: boolean
   onToggleCollapsed: () => void
+  /** The list's own "Show closed" preference (ChatView.tsx's layout.ts) —
+   * threaded through so the All/per-Pipeline/Coordinator badges can match
+   * what the list below actually shows instead of promising a closed-but-
+   * unread row a reader cannot reach without checking that box first. */
+  showClosed: boolean
 }
 
 function Section({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
@@ -56,7 +65,7 @@ function Section({ title, children }: Readonly<{ title: string; children: ReactN
 }
 
 function Row({
-  icon, label, count, active, onClick, mono, countTooltip,
+  icon, label, count, active, onClick, mono,
 }: Readonly<{
   icon: ReactNode
   label: string
@@ -64,11 +73,6 @@ function Row({
   active: boolean
   onClick: () => void
   mono?: boolean
-  /** Explains a count the row BELOW it will not visibly match (item 24) — the
-   * server computes `total`/`scopes` over every conversation before any
-   * filter, so a badge can read higher than the rows a reader sees without
-   * scrolling or un-hiding closed ones. */
-  countTooltip?: string
 }>) {
   const badge = typeof count === 'number' && count > 0 && (
     <span style={{ marginLeft: 'auto' }}>
@@ -92,29 +96,29 @@ function Row({
     >
       <span aria-hidden style={{ display: 'flex', flex: 'none' }}>{icon}</span>
       <PlainText>{label}</PlainText>
-      {badge && (countTooltip ? <Tooltip content={countTooltip}>{badge}</Tooltip> : badge)}
+      {badge}
     </button>
   )
 }
 
-export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed }: Readonly<InboxProps>) {
-  const counts = useInboxCounts()
+export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed, showClosed }: Readonly<InboxProps>) {
+  const counts = useInboxCounts(showClosed)
   const vocabulary = useVocabulary()
   const scopes = counts.data?.scopes ?? {}
   const entries = vocabulary.data?.entries ?? []
   const pipelines = entries.filter((e) => e.kind === 'pipeline' || e.kind === 'coordinator')
 
-  // Item 24: "All"'s count is the server's total BEFORE any filter — every
-  // conversation, closed ones and invoked members included — while the list
-  // beneath it hides closed conversations by default (the "Show closed"
-  // checkbox) and may have roots collapsed. The gap is real, not a bug in
-  // the count, so it is named rather than silently narrowed: narrowing it to
-  // "visible rows" would drift the moment paging, search or another scope
-  // changes what is on screen.
-  const ALL_COUNT_TOOLTIP = 'Every conversation, including closed ones and invoked members — not all are visible in the list below by default.'
-  const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number; countTooltip?: string }[] = [
-    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.total, countTooltip: ALL_COUNT_TOOLTIP },
-    { scope: { kind: 'unread' }, icon: <BellIcon />, label: 'Unread', count: counts.data?.unreadTotal },
+  // All reads `rootTotal` — every conversation a person can open, read or
+  // not, respecting showClosed like every scope but its own list already
+  // does. Every OTHER count below is UNREAD, ANDed with its own scope's
+  // predicate: the dedicated Unread scope is GONE, because once Working,
+  // Mine, Errored, each Pipeline/Coordinator and Closed all carried their own
+  // unread count, a blanket one added nothing a category-scoped click
+  // couldn't already answer. Every one of these still matches its own list
+  // exactly (ChatView.tsx's TREE_PREDICATE), so none needs a tooltip
+  // explaining a gap — there isn't one.
+  const fixed: { scope: Scope; icon: ReactNode; label: string; count?: number }[] = [
+    { scope: { kind: 'all' }, icon: <ListIcon />, label: 'All', count: counts.data?.rootTotal },
     { scope: { kind: 'working' }, icon: <InProgressIcon />, label: 'Working', count: scopes.working },
     { scope: { kind: 'mine' }, icon: <UserIcon />, label: 'Mine', count: scopes.mine },
     { scope: { kind: 'errored' }, icon: <ExclamationCircleIcon />, label: 'Errored', count: scopes.errored },
@@ -133,7 +137,7 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         {fixed.map((f) => (
           <Tooltip
             key={scopeKey(f.scope)}
-            content={f.countTooltip ?? (f.count ? `${f.label} · ${f.count}` : f.label)}
+            content={f.count ? `${f.label} · ${f.count}` : f.label}
           >
             <IconButton active={sameScope(activeScope, f.scope)} onClick={() => onSelectScope(f.scope)} badge={f.count}>
               {f.icon}
@@ -190,7 +194,6 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
             icon={f.icon}
             label={f.label}
             count={f.count}
-            countTooltip={f.countTooltip}
             active={sameScope(activeScope, f.scope)}
             onClick={() => onSelectScope(f.scope)}
           />

@@ -52,7 +52,7 @@ export function parseOpId(opId?: string): { kind: string; channel?: string; runI
 }
 
 const DATA_LABELS: Record<string, string> = {
-  model: 'Model', tokensIn: 'Tokens in', tokensOut: 'Tokens out', cacheReadTokens: 'Cache reads',
+  model: 'Model', tokensIn: 'Tokens in', tokensOut: 'Tokens out', cacheReadTokens: 'Cache reads', cacheCreationTokens: 'Cache writes',
   stopReason: 'Stop reason', tool: 'Tool', server: 'Target', resultBytes: 'Result bytes',
 }
 
@@ -140,7 +140,7 @@ export function hopContent(ev: ActivityEvent, detail?: ConversationDetail): Carr
       break
     }
     case 'model.call':
-      for (const k of ['model', 'tokensIn', 'tokensOut', 'cacheReadTokens', 'stopReason']) datum(k)
+      for (const k of ['model', 'tokensIn', 'tokensOut', 'cacheReadTokens', 'cacheCreationTokens', 'stopReason']) datum(k)
       break
     case 'tool.call':
       for (const k of ['tool', 'server', 'resultBytes']) datum(k)

@@ -80,11 +80,12 @@ type Run struct {
 // Field names match the work contract's own `turns[]` exactly
 // (docs/contracts.md).
 type RunTurn struct {
-	Model           string `json:"model,omitempty"`
-	TokensIn        *int64 `json:"tokensIn,omitempty"`
-	TokensOut       *int64 `json:"tokensOut,omitempty"`
-	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
-	StopReason      string `json:"stopReason,omitempty"`
+	Model               string `json:"model,omitempty"`
+	TokensIn            *int64 `json:"tokensIn,omitempty"`
+	TokensOut           *int64 `json:"tokensOut,omitempty"`
+	CacheReadTokens     *int64 `json:"cacheReadTokens,omitempty"`
+	CacheCreationTokens *int64 `json:"cacheCreationTokens,omitempty"`
+	StopReason          string `json:"stopReason,omitempty"`
 }
 
 // RunToolCall is one tool call a run made, read off a `tool.call` activity
@@ -122,7 +123,8 @@ func attachRunCalls(runs []Run, events []ActivityEvent) []Run {
 			turns[e.RunID] = append(turns[e.RunID], RunTurn{
 				Model: e.Data["model"], StopReason: e.Data["stopReason"],
 				TokensIn: reportedCount(e.Data, "tokensIn"), TokensOut: reportedCount(e.Data, "tokensOut"),
-				CacheReadTokens: reportedCount(e.Data, "cacheReadTokens"),
+				CacheReadTokens:     reportedCount(e.Data, "cacheReadTokens"),
+				CacheCreationTokens: reportedCount(e.Data, "cacheCreationTokens"),
 			})
 		case "tool.call":
 			toolCalls[e.RunID] = append(toolCalls[e.RunID], RunToolCall{
@@ -274,9 +276,9 @@ type convView struct {
 		// rule would otherwise get wrong (api/v1alpha1's own comment on the
 		// field).
 		OriginReader *originReaderRef `json:"originReader,omitempty"`
-		Toolsets   *refBinding `json:"toolsets,omitempty"`
-		MCPConfigs *refBinding `json:"mcpConfigs,omitempty"`
-		Inputs     []struct {
+		Toolsets     *refBinding      `json:"toolsets,omitempty"`
+		MCPConfigs   *refBinding      `json:"mcpConfigs,omitempty"`
+		Inputs       []struct {
 			ID   string `json:"id"`
 			Type string `json:"type"`
 		} `json:"inputs,omitempty"`

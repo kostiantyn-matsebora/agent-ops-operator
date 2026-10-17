@@ -96,11 +96,48 @@ func mergeTranscript(thread, ownChannel string, live []Message, runs []Run, conv
 			Kind:   MsgAgent,
 			Text:   r.Result,
 			At:     at,
+			runID:  r.RunID,
 		})
 	}
 
+	markInternalRounds(out, runs)
 	sortByTime(out)
 	return out
+}
+
+// markInternalRounds flags, on every message in out, the run whose entire
+// durable Inputs are a causedBy member reaching back up (coordination-loop)
+// — nothing a human or an external signal triggered. Matched by runID so a
+// message still sitting in the live buffer is flagged exactly like one
+// reconstructed here, instead of reading as unread until the buffer evicts
+// it: a coordinator conversation with one real exchange and a dozen
+// internal member round-trips must not count as a dozen unread messages
+// (countUnread skips InternalRound the same way it already skips an ack).
+func markInternalRounds(out []Message, runs []Run) {
+	internalRound := map[string]bool{}
+	for _, r := range runs {
+		if len(r.Inputs) == 0 {
+			continue // predates recorded Inputs — never flagged, never hidden
+		}
+		allMember := true
+		for _, in := range r.Inputs {
+			if in.Origin != originMember {
+				allMember = false
+				break
+			}
+		}
+		if allMember {
+			internalRound[r.RunID] = true
+		}
+	}
+	if len(internalRound) == 0 {
+		return
+	}
+	for i := range out {
+		if out[i].runID != "" && internalRound[out[i].runID] {
+			out[i].InternalRound = true
+		}
+	}
 }
 
 // recordedMessage renders one recorded input as a transcript line.

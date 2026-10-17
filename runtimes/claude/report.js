@@ -78,11 +78,12 @@ function newCallRecorder(now = Date.now) {
     const u = msg.usage;
     if (u) {
       const input = count(u.input_tokens);
-      const created = count(u.cache_creation_input_tokens) ?? 0;
+      const created = count(u.cache_creation_input_tokens);
       const read = count(u.cache_read_input_tokens);
-      if (input !== undefined) turn.tokensIn = input + created + (read ?? 0);
+      if (input !== undefined) turn.tokensIn = input + (created ?? 0) + (read ?? 0);
       if (count(u.output_tokens) !== undefined) turn.tokensOut = u.output_tokens;
       if (read !== undefined) turn.cacheReadTokens = read;
+      if (created !== undefined) turn.cacheCreationTokens = created;
     }
     if (msg.stop_reason) turn.stopReason = field(msg.stop_reason);
     for (const b of msg.content || []) {

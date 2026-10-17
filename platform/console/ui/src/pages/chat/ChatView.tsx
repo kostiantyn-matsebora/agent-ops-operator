@@ -33,14 +33,20 @@ const PAGE_SIZE = 100
 function scopeParams(scope: Scope, search: string): URLSearchParams {
   const p = new URLSearchParams()
   if (scope.kind === 'closed') p.set('phase', 'Closed')
-  else if (scope.kind === 'pipeline') p.set('pipeline', scope.name)
+  else if (scope.kind === 'pipeline') {
+    p.set('pipeline', scope.name)
+    // A Pipeline conversation never causes a member (only a Coordinator
+    // invokes — terminology.md), so there is no tree for `?unread=true` to
+    // break here the way it would for the scopes below.
+    p.set('unread', 'true')
+  }
   // A Coordinator scope has no server-side filter param (the backend tracks
   // it only as a `scopes` count, console.go/convapi.go — not mine to add):
   // narrowed CLIENT-SIDE below instead of widening the request shape here.
   //
-  // Unread, Working, Errored and Mine are the SAME shape of problem: each is
-  // an independent per-row predicate server-side (convapi.go's `matches`),
-  // with no tree awareness at all. `?mine=true` kept a root but dropped every
+  // All, Working, Errored and Mine are the SAME shape of problem: each is an
+  // independent per-row predicate server-side (convapi.go's `matches`), with
+  // no tree awareness at all. `?mine=true` kept a root but dropped every
   // member (a member is never Mine — it was invoked, never originated, so it
   // carries no OriginReader). `?unread=true` would just as readily keep an
   // unread MEMBER while dropping its own root, or the reverse — either way
@@ -316,11 +322,19 @@ export function ChatView() {
       const byName = new Map(raw.map((c) => [c.name, c]))
       raw = raw.filter((c) => byName.get(rootNameOf(raw, c))?.coordinator === scope.name)
     }
+    // All is NOT an unread filter — it is every conversation a person can
+    // open, full stop, narrowed only by the generic "hide closed" rule below
+    // (so it still respects showClosed). Every OTHER scope here is unread,
+    // ANDed with its own predicate: Working/Mine/Errored/Coordinator check
+    // what they are named for plus unread, and Closed does too — it is the
+    // archive, not a dumping ground, so a READ closed conversation stays out
+    // of it the same way a read one stays out of Working or Mine.
     const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
-      unread: (c) => Boolean(c.unread),
-      working: (c) => c.phase === 'Working',
-      errored: (c) => Boolean(c.errored),
-      mine: (c) => Boolean(c.mine),
+      working: (c) => c.phase === 'Working' && Boolean(c.unread),
+      errored: (c) => Boolean(c.errored) && Boolean(c.unread),
+      mine: (c) => Boolean(c.mine) && Boolean(c.unread),
+      coordinator: (c) => Boolean(c.unread),
+      closed: (c) => Boolean(c.unread),
     }
     const predicate = TREE_PREDICATE[scope.kind]
     if (predicate) {
@@ -464,6 +478,7 @@ export function ChatView() {
             }}
             collapsed={false}
             onToggleCollapsed={() => undefined}
+            showClosed={showClosed}
           />
         </div>
       )}
@@ -477,6 +492,7 @@ export function ChatView() {
                   onSelectScope={setScope}
                   collapsed={layout.inboxCollapsed}
                   onToggleCollapsed={() => updateLayout({ inboxCollapsed: !layout.inboxCollapsed })}
+                  showClosed={showClosed}
                 />
               </div>
               {!narrow && (

@@ -287,6 +287,10 @@ The text is `kubernetes.profile.podExecutionWithheldPrompt`. Set it to `""`
 to leave it out. One profile, not two — a profile picked by hand to match
 the value would drift the first time it was flipped.
 
+With the gate on, `podExecutionAllowedPrompt` replaces it instead — the
+other side of the same paragraph, naming pod-exec as the way into a
+workload with no dedicated tool of its own. `""` leaves it out either way.
+
 **Turning it on also gives the `kubernetes` bundle's acting route a local
 shell** (`agentops-shell`), beside its `k8s-admin` and `agentops-websearch`
 toolsets — narrower than the `pods/exec` grant this flag already carries.
@@ -360,7 +364,7 @@ global:
   agentops:
     runtimeDefaults:
       # the agent backend — swap it to change vendor
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.9.0
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.10.0
       credentialsSecret:
         # read by the kubelet, never by the operator
         name: agentops-claude

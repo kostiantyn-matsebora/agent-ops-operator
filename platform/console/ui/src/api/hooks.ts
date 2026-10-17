@@ -136,28 +136,39 @@ export function useMarkUnread() {
 }
 
 /**
- * The inbox's per-scope unread counts — the SAME count-only request the
- * navigation badge already fetches (`useUnreadCount`, below), which also
- * carries `scopes` (console-unread: "the count per scope SHALL be available
- * for the inbox"). One query, one cache entry, one `apply.ts` invalidation
- * rule for both readers.
+ * The inbox's per-scope counts — the SAME count-only request the navigation
+ * badge already fetches (`useUnreadCount`, below), which also carries
+ * `rootTotal` and `scopes` (console-unread: "the count per scope SHALL be
+ * available for the inbox"). One query, one cache entry, one `apply.ts`
+ * invalidation rule for both readers.
+ *
+ * `showClosed` rides in the query key: the server excludes a closed
+ * conversation from `rootTotal` and every unread-gated scope when it is
+ * false, so toggling the list's own "Show closed" checkbox must refetch
+ * rather than reuse a cached answer computed the other way.
  */
-export function useInboxCounts() {
-  return useUnreadCount()
+export function useInboxCounts(showClosed: boolean) {
+  return useUnreadCount(showClosed)
 }
 
 /**
  * The unread count for the navigation, without the rows.
  *
  * count=1 asks for the totals only — the badge wants a number, and a page of
- * conversations it would throw away is the wrong thing to fetch on every route.
- * The count is computed server-side BEFORE any filter, so it is the same number
- * whatever the list page is currently showing.
+ * conversations it would throw away is the wrong thing to fetch on every
+ * route. `unreadTotal` is what the navigation rail itself reads, a plain
+ * notification count. The Inbox's "All" row reads `rootTotal` instead — every
+ * conversation, NOT gated on read state, the one count here that isn't.
+ * Every other scope (`working`, `mine`, `errored`, `closed`, each
+ * per-Pipeline/Coordinator entry in `scopes`) is unread, ANDed with its own
+ * predicate. `showClosed=false` excludes a closed conversation from all of
+ * these, Closed's own included, so a badge never promises a row the list is
+ * hiding.
  */
-export function useUnreadCount() {
+export function useUnreadCount(showClosed: boolean) {
   return useQuery({
-    queryKey: ['conversationCount'],
-    queryFn: () => api.conversations(new URLSearchParams({ count: '1' })),
+    queryKey: ['conversationCount', showClosed],
+    queryFn: () => api.conversations(new URLSearchParams({ count: '1', showClosed: String(showClosed) })),
   })
 }
 

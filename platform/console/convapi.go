@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,16 +103,39 @@ func parseFilter(r *http.Request) ConversationFilter {
 // conversationPageSize bounds one page.
 const conversationPageSize = 50
 
-func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
-	filter := parseFilter(r)
-	limit := conversationPageSize
-	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+// parsePaging reads the page window: limit (1..500, default one page) and a
+// non-negative offset.
+func parsePaging(q url.Values) (limit, offset int) {
+	limit = conversationPageSize
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
 		limit = n
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	offset, _ = strconv.Atoi(q.Get("offset"))
 	if offset < 0 {
 		offset = 0
 	}
+	return limit, offset
+}
+
+// parseShowClosed mirrors the list's own display preference (ChatView.tsx's
+// layout.ts, default false) for the SAME reason the list itself hides a
+// closed row by default: a count the reader cannot reach without first
+// flipping that switch is not a count of anything they can act on.
+// Absent entirely — an older client — behaves as true, the behaviour
+// before this parameter existed.
+func parseShowClosed(q url.Values) bool {
+	v := q.Get("showClosed")
+	if v == "" {
+		return true
+	}
+	b, _ := strconv.ParseBool(v)
+	return b
+}
+
+func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
+	filter := parseFilter(r)
+	limit, offset := parsePaging(r.URL.Query())
+	showClosed := parseShowClosed(r.URL.Query())
 
 	pipelines := a.cache.List("pipelines")
 	coordinators := a.cache.List("coordinators")
@@ -122,6 +146,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	reader := a.adapter.ReaderKey(Identity(r))
 	var all []ConversationSummary
 	unreadTotal := 0
+	rootTotal := 0
 	scopes := map[string]int{}
 	for _, o := range a.cache.List("conversations") {
 		s := summarize(o, pipelines, coordinators, consoleChannel, reader, a.transcripts)
@@ -129,12 +154,26 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		// Run history is DROPPED from list rows: a result is a whole agent
 		// message, and thousands of them do not belong in a listing.
 		s.Runs = nil
+		// closedVisible mirrors ChatView.tsx's own generic rule — every scope's
+		// list except the dedicated Closed one hides a closed row unless
+		// showClosed is on — so a badge for one of those scopes counts the
+		// same rows its list actually shows.
+		closedVisible := showClosed || !strings.EqualFold(s.Phase, "Closed")
 		// Counted BEFORE the filter, always: a count that moved because the
 		// view narrowed would let a filter hide a backlog without saying so.
-		accumulateScopeCounts(scopes, s)
-		if s.Unread {
+		accumulateScopeCounts(scopes, s, closedVisible)
+		// rootTotal is the Inbox's "All" badge — every conversation a person
+		// can open on its own, respecting showClosed like every scope but
+		// Closed, but NOT gated on read state: "All" means all of them, not
+		// "all unread". A member never counts, same reason as everywhere else.
+		if !isMember(s) && closedVisible {
+			rootTotal++
+		}
+		// A member is never Joined — it binds no console thread of its own
+		// (invariants.md) — so s.Unread is already always false for one; the
+		// explicit guard here is belt-and-braces, not load-bearing.
+		if s.Unread && !isMember(s) && closedVisible {
 			unreadTotal++
-			accumulateUnreadScopeCounts(scopes, s)
 		}
 		if filter.matches(s, 0) {
 			all = append(all, s)
@@ -146,11 +185,13 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	total := len(all)
 	// count-only: the navigation badge wants the number, not a page of rows it
 	// would immediately throw away. The inbox's per-scope badges ride along —
-	// same reasoning as unreadTotal: computed over every conversation, never
-	// narrowed by the filter this same request may also carry.
+	// same reasoning as rootTotal/unreadTotal: computed over every
+	// conversation, never narrowed by the filter this same request may also
+	// carry.
 	if ok, _ := strconv.ParseBool(r.URL.Query().Get("count")); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items": []ConversationSummary{}, "total": total, "unreadTotal": unreadTotal,
+			"items": []ConversationSummary{}, "total": total, "rootTotal": rootTotal,
+			"unreadTotal": unreadTotal,
 			"offset": 0, "limit": 0, "scopes": scopes,
 		})
 		return
@@ -167,7 +208,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		page = []ConversationSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": page, "total": total, "offset": offset, "limit": limit,
+		"items": page, "total": total, "rootTotal": rootTotal, "offset": offset, "limit": limit,
 		"unreadTotal": unreadTotal,
 		// facets let the UI build filter dropdowns from what EXISTS rather than
 		// from a hardcoded list that drifts from the cluster
@@ -175,11 +216,44 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// accumulateScopeCounts folds EVERY row into the inbox's Working, Mine and
-// Errored badges. Each is counted over its own filter predicate alone —
-// phase, ownership or error state — exactly as ChatView.tsx's TREE_PREDICATE
-// defines that scope's list, never additionally restricted to unread rows.
-func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
+// isMember reports whether s was itself invoked as a causedBy member — it
+// binds no console thread and no conversation-level action of its own
+// (docs/console.md), and the only way to reach it is through its root's
+// tree, never a sidebar count on its own. `total`/`items` still carry every
+// member (ChatView.tsx's withTreeContext rebuilds the tree client-side from
+// the full flat page), so this only ever excludes a member from a COUNT,
+// never from the list a count is meant to describe.
+func isMember(s ConversationSummary) bool {
+	return s.CausedBy != nil && s.CausedBy.Parent != ""
+}
+
+// accumulateScopeCounts folds every row into the inbox's Working, Mine,
+// Errored, Closed and per-Pipeline/Coordinator badges.
+//
+// Every one of these is an UNREAD count, ANDed with its own predicate —
+// phase, ownership, error state or wiring — matching ChatView.tsx's
+// TREE_PREDICATE exactly (each entry there also ANDs its own condition with
+// `c.unread`, Closed included). A read conversation never inflates a badge,
+// Archive's no longer excepted: browsing it is one more click away
+// (showClosed) on every other scope already, and a badge that counted a row
+// its own scope's list no longer shows was exactly the bug this exists to
+// not repeat.
+//
+// closedVisible mirrors the ONE further filter every scope's list but
+// Closed's applies: ChatView.tsx hides a closed row there unless showClosed
+// is on. Closed's OWN list is exempt from THAT filter — it is the closed
+// view — so its count is too, regardless of showClosed; it still requires
+// Unread like every other bucket here.
+func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedVisible bool) {
+	if isMember(s) || !s.Unread {
+		return
+	}
+	if strings.EqualFold(s.Phase, "Closed") {
+		scopes["closed"]++
+	}
+	if !closedVisible {
+		return
+	}
 	if strings.EqualFold(s.Phase, "Working") {
 		scopes["working"]++
 	}
@@ -188,16 +262,6 @@ func accumulateScopeCounts(scopes map[string]int, s ConversationSummary) {
 	}
 	if s.Errored {
 		scopes["errored"]++
-	}
-}
-
-// accumulateUnreadScopeCounts folds one UNREAD row into the inbox's Closed
-// badge, plus one entry keyed by name for every pipeline and coordinator a
-// row attributes to — read the same way the sidebar presents them: an
-// unread count, never a total.
-func accumulateUnreadScopeCounts(scopes map[string]int, s ConversationSummary) {
-	if strings.EqualFold(s.Phase, "Closed") {
-		scopes["closed"]++
 	}
 	if s.Coordinator != "" {
 		scopes[s.Coordinator]++

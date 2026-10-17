@@ -329,9 +329,10 @@ profile:
     You are a Kubernetes site reliability engineer operating a live cluster.
 
     The mcp__kubernetes__* tools are how you reach the cluster. The runtime
-    image ships no Kubernetes CLI, so there is no shell fallback: if a tool for
-    something is not in your allowlist, you cannot do it — say so plainly
-    instead of trying to improvise one.
+    image ships no Kubernetes CLI of its own — if a tool for something is
+    not in your allowlist, say so plainly instead of trying to improvise
+    one. Whether `pods_exec`/`pods_run` are in that allowlist depends on
+    this install, stated below.
 
     Those tools return kubectl-shaped tables and cannot filter server-side, so
     ask for the narrowest scope you can (a namespace rather than the cluster)
@@ -358,11 +359,13 @@ profile:
   # learn the posture by hitting it, and reported an RBAC fault where the
   # install had made a decision.
   #
-  # This paragraph is the third wall, on the same value. It is appended after
-  # `systemPrompt` — the shipped one or yours — while the gate is OFF, and is
-  # absent while it is ON. ONE profile, never a second one per posture: a
-  # profile picked by hand to match a value drifts the first time the value is
-  # flipped. Set it to "" to decline the paragraph.
+  # This paragraph is the third wall, on the same value — ONE SIDE OR THE
+  # OTHER, never both and never neither. It is appended after `systemPrompt`
+  # — the shipped one or yours — whichever of this and
+  # `podExecutionAllowedPrompt` below matches the gate's current state. ONE
+  # profile, never a second one per posture: a profile picked by hand to
+  # match a value drifts the first time the value is flipped. Set it to ""
+  # to decline the paragraph (the agent is then told nothing either way).
   podExecutionWithheldPrompt: |
     This install withholds pod execution. You cannot create a pod, exec into
     one, or change the pod template of a Deployment, StatefulSet, DaemonSet,
@@ -375,6 +378,20 @@ profile:
     NetworkPolicies, PodDisruptionBudgets, HorizontalPodAutoscalers and
     PersistentVolumeClaims — and suggest the operator makes the edit. The
     value that decides this is global.agentops.runtimeDefaults.allowPodExecution.
+  # THE OTHER SIDE OF THE SAME WALL. Appended instead of the paragraph above
+  # once the gate is ON, so the agent is told what it gained, not just left
+  # to infer it from a tool appearing in its allowlist.
+  podExecutionAllowedPrompt: |
+    This install allows pod execution: `pods_exec` and `pods_run` are real,
+    not advertised-but-refused. When a workload has no dedicated API or MCP
+    tool of its own — its own database, a config only its local CLI can
+    read, a cache only reachable from inside the pod — exec into its pod and
+    run that workload's own tooling (psql, sqlite3, a local curl) rather
+    than reporting that nothing can be done. This is not improvising a tool
+    you lack; it is the tool this install granted you for exactly this case.
+    The same caution rules still apply: investigate before you act, and
+    describe a risky or irreversible change instead of making it. The value
+    that decides this is global.agentops.runtimeDefaults.allowPodExecution.
   maxTurns: 40
   # Names an AgentRuntime other than the parent's `default` — a higher-trust or
   # different-vendor runtime you applied yourself. Empty emits no runtimeRef and

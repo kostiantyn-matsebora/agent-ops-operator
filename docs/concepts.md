@@ -108,7 +108,7 @@ just stops being a second door to the API.
 exists so the runtime is swappable. Derive one:
 
 ```dockerfile
-FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.9.0
+FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.10.0
 USER root
 RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
  && chmod 0755 /usr/local/bin/kubectl
@@ -615,7 +615,7 @@ checks.
 global:
   agentops:
     runtimeDefaults:
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.9.0
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.10.0
       contextStorage: volume      # does this backend use a disk at all
       idleTtlMinutes: 1
       nodeSelector: {}
@@ -798,11 +798,16 @@ declare AND the `kubernetes` bundle's MCP server role, through one shared
 helper — because an agent reaches the cluster THROUGH that server, so fixing one
 wall leaves the hole one indirection along.
 
-**And the agent is told.** Neither wall shows in its tool list, so the
-`kubernetes` bundle's `k8s-engineer` role ends with a posture paragraph while
-the gate is off — rendered from the same value — and a pod-template edit is
-declined with the reason rather than attempted and reported as an RBAC
-refusal. The wording is `kubernetes.profile.podExecutionWithheldPrompt`.
+**And the agent is told, either way.** Neither wall shows in its tool list,
+so the `kubernetes` bundle's `k8s-engineer` role always ends with a posture
+paragraph naming which side of the gate it's on.
+
+Off, a pod-template edit is declined with the reason rather than attempted
+and reported as an RBAC refusal. On, it names `pods_exec` as the way into a
+workload with no tool of its own.
+
+Wording: `kubernetes.profile.podExecutionWithheldPrompt` /
+`podExecutionAllowedPrompt`.
 
 | | Off | On |
 |---|---|---|

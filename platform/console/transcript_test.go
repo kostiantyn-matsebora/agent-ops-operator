@@ -83,6 +83,19 @@ func TestCountUnreadExcludesLocalMessages(t *testing.T) {
 	}
 }
 
+// An internal round never counts, whatever KIND it carries — a coordinator's
+// own reply to a causedBy member reaching back up is still MsgAgent (it is a
+// real answer, delivered to every other bound channel the same as any
+// other), but countUnread must skip it the same way it skips MsgAck, or a
+// dozen internal round-trips read as a dozen unread messages.
+func TestCountUnreadExcludesInternalMessages(t *testing.T) {
+	msgs := []Message{{Kind: MsgAgent, At: "2026-08-13T11:00:00Z", InternalRound: true}}
+	count, _, ok := countUnread(msgs, "2026-08-13T10:00:00Z")
+	if count != 0 || ok {
+		t.Fatalf("an internal message must never count or become the newest counted message: count=%d ok=%v", count, ok)
+	}
+}
+
 // inputIDOf must recover the WHOLE input id even when that id is itself
 // colon-delimited — internal/chat/coordinate.go's member-result dedup ids
 // ("member:<conversation>:<runId>", "escalate:<conversation>:<nanotime>") are

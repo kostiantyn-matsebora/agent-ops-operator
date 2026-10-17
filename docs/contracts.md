@@ -929,6 +929,7 @@ and its runs draw exactly the hops they drew before.
 | `tokensIn` | integer | every input token the call consumed, cache reads included |
 | `tokensOut` | integer | the output tokens it produced |
 | `cacheReadTokens` | integer | the part of `tokensIn` served from the provider's prompt cache |
+| `cacheCreationTokens` | integer | the part of `tokensIn` written into the provider's prompt cache by this call |
 | `stopReason` | string | why the model stopped: end of turn, tool use, max tokens |
 
 `toolCalls[]`, one per tool call:
@@ -1374,7 +1375,7 @@ op's message have durable homes and are joined from there.
 
 | Hop | `data` keys, each present only when known |
 |---|---|
-| `model.call` | `model`, `tokensIn`, `tokensOut`, `cacheReadTokens`, `stopReason` |
+| `model.call` | `model`, `tokensIn`, `tokensOut`, `cacheReadTokens`, `cacheCreationTokens`, `stopReason` |
 | `tool.call` | `tool`, `server`, `resultBytes` |
 | `context.checkpoint`, `context.skipped`, `context.restored` | `bytes`, `files`, `quiesced` |
 

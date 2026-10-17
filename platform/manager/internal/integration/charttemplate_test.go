@@ -1115,7 +1115,7 @@ func TestDemoModeAlsoShowcasesAPlainPipelineUnderCoordinator(t *testing.T) {
 	for _, needle := range []string{
 		"name: k8s-engineer",   // the SAME observing route's profile
 		"name: cluster-events", // claims the bundle's source
-		"- name: console",     // and the console's
+		"- name: console",      // and the console's
 		"name: k8s-observability",
 	} {
 		if !strings.Contains(doc, needle) {
@@ -2464,6 +2464,14 @@ func coordinatorAgentDescriptions(t *testing.T, rendered string) map[string]stri
 // k8s-operate sat in agents[]. This pins the sentences that make it delegate
 // instead, and the ordering the operator's prefix and the self-heal paragraph
 // have always had around them.
+//
+// A second live regression shaped the rest: a conversation that had delegated
+// correctly drifted, within the SAME conversation, into inventorying its own
+// toolbox and answering "this can't be answered live" from it. The prompt
+// also claimed "you hold no domain tool yourself" while the runtime visibly
+// handed it a shell — a prompt contradicting the observed toolbox gets
+// discounted wholesale. Hence the pins on the mandatory first call, the
+// re-scoped generic tools, the verdict rule and the loop-never-expires line.
 func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
 	role := coordinatorRole(t)
 	for _, phrase := range []string{
@@ -2483,16 +2491,31 @@ func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
 		"Do not ask the person to confirm",
 		"A change YOU conclude is worth making",
 		"is proposed, not made",
+		"An observing agent running out of evidence is not a dead end",
+		"same task to that domain's acting counterpart",
+		"needs no approval",
+		"AND THE FIRST TOOL CALL OF EVERY CONVERSATION",
+		"that roster's fact",
+		"is not among your tools",
+		"your coordination path is broken",
+		"housekeeping around delegation",
+		"IS the signal to invoke the agent",
+		"This loop never expires",
+		"never your own recent attempts",
+		"Your own lack of access is never evidence",
+		"the answer is premature",
 	} {
 		if !strings.Contains(role, phrase) {
 			t.Errorf("the coordinating agent's role lacks %q:\n%s", phrase, role)
 		}
 	}
-	// The dispatcher's sentences are gone, not merely outnumbered.
+	// The dispatcher's sentences are gone, not merely outnumbered — and so is
+	// the toolbox claim the agent could see was false.
 	for _, retired := range []string{
 		"only job is reading what started the conversation and routing it",
 		"Pick the one whose description matches",
 		"description of when to use it",
+		"You hold no domain tool yourself",
 	} {
 		if strings.Contains(role, retired) {
 			t.Errorf("the role still carries the dispatcher sentence %q:\n%s", retired, role)
@@ -2552,11 +2575,11 @@ func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
 	// toolset, and what it CANNOT — one of each, so a rewrite that drops either
 	// half fails here.
 	must := map[string][]string{
-		"k8s-observe":  {"read-only", "logs", "Cannot change anything", "Hand it"},
-		"k8s-operate":  {"act on the cluster", "restart a workload by deleting its pod", "scale", "patch", "pod execution", "Cannot touch kube-system", "Hand it an instruction"},
+		"k8s-observe":        {"read-only", "logs", "Cannot change anything", "Hand it"},
+		"k8s-operate":        {"act on the cluster", "restart a workload by deleting its pod", "scale", "patch", "pod execution", "Cannot touch kube-system", "Hand it an instruction"},
 		"alert-investigator": {"PromQL", "Cannot change anything", "Hand it a firing alert"},
-		"ha-control":   {"Assist intents", "operate the house", "Cannot reach configuration", "Hand it"},
-		"ha-ops":       {"REST API", "diagnose", "reaches configuration", "Describes and stops", "Hand it"},
+		"ha-control":         {"Assist intents", "operate the house", "Cannot reach configuration", "Hand it"},
+		"ha-ops":             {"REST API", "diagnose", "reaches configuration", "Describes and stops", "Hand it"},
 	}
 	// The CRD caps a description (coordinator_types.go, MaxLength) and helm
 	// template validates no schema, so the first live install of the
@@ -2625,6 +2648,7 @@ func k8sEngineerRole(t *testing.T, args ...string) string {
 }
 
 const postureMarker = "This install withholds pod execution"
+const allowedPostureMarker = "This install allows pod execution"
 
 // selfCloseMarker is coordinator-deployment-mode's self-close instruction
 // (chart/templates/_helpers.tpl's `agentops.selfCloseInstruction`), appended
@@ -2676,6 +2700,9 @@ func TestK8sProfilePostureFollowsTheGate(t *testing.T) {
 	if strings.Contains(role, postureMarker) {
 		t.Fatalf("with the gate on the RBAC grants the writes, so the role must not say they are withheld:\n%s", role)
 	}
+	if !strings.Contains(role, allowedPostureMarker) {
+		t.Fatalf("with the gate on the role must say pod execution is available, not fall silent on it:\n%s", role)
+	}
 	if !strings.Contains(role, "You are a Kubernetes site reliability engineer") {
 		t.Errorf("turning the gate on must leave the shipped role in place:\n%s", role)
 	}
@@ -2701,6 +2728,55 @@ func TestK8sProfilePostureCanBeDeclined(t *testing.T) {
 	// The self-close instruction (coordinator-deployment-mode) always follows
 	// the shipped role now — declining the posture paragraph leaves the role
 	// itself untouched, right up to that addition.
+	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
+	if !ok {
+		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)
+	}
+	if !strings.HasSuffix(before, "Lead with the finding, then the evidence.") {
+		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", before)
+	}
+}
+
+// THE OTHER SIDE OF THE SAME WALL: an agent must be told what it gained, not
+// just left to infer it from a tool appearing in its allowlist.
+func TestK8sProfileStatesTheAllowedPosture(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	at := strings.Index(role, allowedPostureMarker)
+	if at < 0 {
+		t.Fatalf("with allowPodExecution on the role must state the posture:\n%s", role)
+	}
+	if job := strings.Index(role, "You are a Kubernetes site reliability engineer"); job < 0 || job > at {
+		t.Errorf("the posture paragraph must follow the shipped role, not replace or precede it:\n%s", role)
+	}
+	selfCloseAt := strings.Index(role, selfCloseMarker)
+	if selfCloseAt < 0 {
+		t.Fatalf("the self-close instruction must follow the posture paragraph:\n%s", role)
+	}
+	paragraph := role[at:selfCloseAt]
+	if strings.Contains(strings.TrimRight(paragraph, "\n"), "\n\n") {
+		t.Errorf("the posture paragraph must be the last thing before the self-close instruction:\n%s", paragraph)
+	}
+	for _, phrase := range []string{
+		"pods_exec",
+		"has no dedicated API or MCP",
+		"granted you for exactly this case",
+		"global.agentops.runtimeDefaults.allowPodExecution",
+	} {
+		if !strings.Contains(paragraph, phrase) {
+			t.Errorf("the posture paragraph lacks %q:\n%s", phrase, paragraph)
+		}
+	}
+}
+
+// Emptying the value is how an install declines the paragraph on the allowed
+// side too, and the role then renders exactly as it did before the value
+// existed.
+func TestK8sProfileAllowedPostureCanBeDeclined(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true",
+		"--set", "kubernetes.profile.podExecutionAllowedPrompt=")
+	if strings.Contains(role, allowedPostureMarker) {
+		t.Fatalf("an emptied value must render no posture paragraph:\n%s", role)
+	}
 	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
 	if !ok {
 		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)

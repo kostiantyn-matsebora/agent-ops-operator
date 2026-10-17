@@ -1062,12 +1062,32 @@ jobs:
           cache: true
       - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
 
+  # A PINNED RUNTIME IMAGE MUST CARRY THE WORK-REPORT CONTRACT. The manager
+  # draws a run's model/tool statistics only from what the runtime reports, so
+  # a chart pin older than the report module ships installs whose Runs show no
+  # statistics — with every code test green, since each half passes alone.
+  # Measured: runtime-claude 0.9.0 stayed pinned for three weeks after the
+  # contract landed. The guard reads the repository's own tags, hence the full
+  # fetch, and enforces the order: push the release tag FIRST, bump the pin
+  # after.
+  pinned-runtimes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - run: python3 .github/scripts/pinned-runtime-guard.py
+
   ci-green:
     name: ci-green
     # Never reports on a draft: a green required check on a pull request that
     # ran nothing would be a claim.
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance, review-clean]
+    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance, review-clean, pinned-runtimes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed
