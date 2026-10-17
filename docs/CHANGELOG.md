@@ -193,7 +193,7 @@ CVE-2026-97031 (`crypto/tls`), fixed upstream in 1.26.9 and 1.27.2.
   `agentops_model_calls_total`, `agentops_model_call_tokens`,
   `agentops_tool_calls_total` and `agentops_tool_call_duration_seconds`. A
   report over its bounds is refused with `400`. See
-  [contracts.md](contracts.md#what-the-run-did-turns-and-toolcalls). Manager
+  [contracts/runtime.md](contracts/runtime.md#completion-report). Manager
   0.58.0, runtime-claude 0.10.0, runtime-ollama 0.2.0, runtime-copilot 0.2.0.
 - **`SignalAdapter` and `ChannelAdapter` gain `spec.externals[]`**, a `name`
   and a `kind` (`sender`, `api` or `kubernetes`) for each system the

@@ -17,6 +17,9 @@ next:
 **This is a runtime, not an integration.** It starts no work and answers on no
 surface. It is what EXECUTES an agent — and the third one this chart ships.
 
+It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
+1.0.0.
+
 **With this bundle, agent-ops runs a route on GitHub Copilot.** Each
 conversation gets a `runtime-copilot` pod, and the manager hands it work.
 
@@ -103,6 +106,7 @@ this is the only runtime — so it is the default without the flag.
 
 **`maxTurns` is not a Copilot control.** A Pipeline's profile bounds a claude
 run and an ollama loop by turns. Copilot's nearest control is a credit budget.
+
 The runtime logs the turns it was asked for and enforces `maxAiCredits`
 instead. Without it, a run is bounded by its timeout (`COPILOT_RUN_TIMEOUT_S`,
 default an hour) and the pod's idle TTL.
@@ -149,8 +153,9 @@ runtimes, and it is why the toolsets ship risk-split — see
 ## Where its context lives
 
 One Copilot context per conversation, under an id the runtime minted, in the
-SDK's own session store beneath the runtime's context directory. The bundle
-declares it to [context sync]({{ '/installation/#storage' | relative_url }}),
+SDK's own session store beneath the runtime's context directory.
+
+The bundle declares it to [context sync]({{ '/installation/#storage' | relative_url }}),
 so a run works on pod-local storage and the durable volume holds a snapshot.
 
 | The context | The run |
@@ -200,9 +205,10 @@ AgentRuntime/copilot
 One `AgentRuntime`, named `copilot`, through the parent chart's shared
 renderer. It inherits every release-wide default and carries only what names
 this vendor: the image, the credential as environment, the model and the
-credit ceiling as environment, and its own context-sync paths. No
-ServiceAccount, no volume. The credential Secret renders only when a token was
-supplied.
+credit ceiling as environment, and its own context-sync paths.
+
+No ServiceAccount, no volume. The credential Secret renders only when a token
+was supplied.
 
 ## Going deeper
 
