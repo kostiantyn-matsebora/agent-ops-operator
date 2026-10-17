@@ -190,12 +190,10 @@ func TestPulseBothCredentialFormsIsRefused(t *testing.T) {
 func TestPulseTokenFormCreatesTheSecret(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "pulse.enabled=true",
-		// The MCP component is off here: this test is about secret creation
-		// alone, and with no mcp.url/mcpServer the MCPConfig would otherwise
-		// fail the render for an unrelated reason (covered by
-		// TestPulseMcpServerGuards).
-		"--set", "pulse.mcp.observer.enabled=false",
-		"--set", "pulse.mcp.operator.enabled=false",
+		// Each MCP pair's Secret renders only while its pair is enabled, so
+		// both are on, with the server they need to render.
+		"--set", "pulse.mcpServer.enabled=true",
+		"--set", "pulse.mcpServer.backend=https://pulse.example.org",
 		"--set", "pulse.signal.credentials.token=ITOK",
 		"--set", "pulse.mcp.observer.credentials.token=OTOK",
 		"--set", "pulse.mcp.operator.credentials.token=PTOK")
