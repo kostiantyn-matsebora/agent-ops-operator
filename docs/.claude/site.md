@@ -5,8 +5,10 @@ command tabs, the components it may name, the table rules and the pre-flight
 lint. What is here is the directory around those pages.
 
 **Reference pages** — `concepts.md` (CRDs plus capability resolution),
-`contracts.md` (work and adapter contracts plus HTTP API), and one page per
-bundle subchart.
+`contracts.md` (the manager-owned surfaces: aops MCP server, activity,
+introspection, metrics, HTTP API), `contracts/<contract>.md` (one page per
+extension point — `runtime.md`, `channel-adapter.md`, `signal-adapter.md`),
+and one page per bundle subchart.
 
 **The published site's Jekyll source** — `_config.yml`, `_layouts/`,
 `_includes/`, `_data/nav.yml`, `assets/` (css, js, vendored Red Hat fonts, the

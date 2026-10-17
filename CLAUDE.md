@@ -12,6 +12,7 @@ files it names.
 | `chart.md` | `chart/**` |
 | `palette-and-mark.md` | the console theme, the site's css/js, the mark's three files |
 | `signal-rules.md` | `signals/**`, the manager's `internal/ingest/`, their chart values |
+| `runtime-spec.md` | `runtimes/**`, the manager's `internal/dispatch/`/`internal/runtimepod/`/`internal/httpapi/`, `docs/contracts/runtime.md` |
 | `authoring.md` | `.claude/rules/**`, `docs/.claude/**` |
 | `writing.md` | any `*.md` file |
 | `change-tests.md` | an openspec change's `tasks.md` or `proposal.md` |

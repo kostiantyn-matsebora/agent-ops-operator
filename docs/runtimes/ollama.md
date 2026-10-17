@@ -17,6 +17,9 @@ next:
 **This is a runtime, not an integration.** It starts no work and answers on no
 surface. It is what EXECUTES an agent — and the second one this chart ships.
 
+It conforms to the [runtime specification](../contracts/runtime.md), version
+1.0.0.
+
 **With this bundle, agent-ops runs a route on a model your own Ollama serves.**
 Each conversation gets a `runtime-ollama` pod, and the manager hands it work.
 

@@ -3,6 +3,9 @@
 The reference agent runtime, shipped as a bundle: `claude-code` implementing the
 operator's work contract.
 
+It conforms to the [runtime specification](contracts/runtime.md), version
+1.0.0.
+
 `chart/charts/claude/` renders exactly two objects — one `AgentRuntime` named
 `claude` and, when you supply a token, its credential `Secret`. The PARENT
 renders the `AgentRuntime` named `default` as a copy of it, unless another
