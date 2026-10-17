@@ -108,9 +108,8 @@ port and no Service.
 
 ## 1. Poll for work
 
-Long-poll. The call blocks until there is a unit or the wait expires — the
-first thing [Runtime's obligations]({{ '/contracts/runtime/' | relative_url }}#runtimes-obligations)
-asks of you.
+Long-poll. The call blocks until there is a unit or the wait expires — see
+[`GET /work`]({{ '/contracts/runtime/' | relative_url }}#get-work).
 
 ```sh
 curl "$CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25"
@@ -121,7 +120,7 @@ curl "$env:CONTROL_URL/work?convo=$env:CONVO_ID&pod=$env:POD_NAME&wait=25"
 ```
 
 A `204` means nothing is queued. Poll again. A unit looks like this — every
-field is named in [The work unit]({{ '/contracts/runtime/' | relative_url }}#the-work-unit):
+field is named in [Work unit]({{ '/contracts/runtime/' | relative_url }}#work-unit):
 
 ```json
 {
@@ -240,8 +239,8 @@ curl -X POST "$env:CONTROL_URL/work/done" -d '{
 }'
 ```
 
-Every field of this report is named in [The completion
-report]({{ '/contracts/runtime/' | relative_url }}#the-completion-report). `status` is
+Every field of this report is named in [Completion
+report]({{ '/contracts/runtime/' | relative_url }}#completion-report). `status` is
 `succeeded` or `failed` — the manager reads any other value as a failed run,
 see [Enums]({{ '/contracts/runtime/' | relative_url }}#enums).
 
@@ -275,6 +274,7 @@ bound instead — 201 entries in `turns[]`, say — and confirm it comes back
 
 Exit `0` after `RUNTIME_IDLE_TTL_M` minutes with no work — the one condition
 [Lifecycle]({{ '/contracts/runtime/' | relative_url }}#lifecycle) names for exiting on your own.
+
 The pod outliving the answer is deliberate, so a follow-up skips the cold
 start. The manager creates a fresh pod on the next input.
 
@@ -301,8 +301,11 @@ spec:
 `contextStorage` is what the manager reads **before** promising a reader
 that a follow-up keeps its context.
 
-See [Manager's provisions]({{ '/contracts/runtime/' | relative_url }}#managers-provisions) for
-the restoration and checkpoint-ordering guarantee that declaration unlocks.
+That declaration unlocks restoration
+([`GET /work`]({{ '/contracts/runtime/' | relative_url }}#get-work), API-4) and
+checkpoint ordering
+([Manager's provisions]({{ '/contracts/runtime/' | relative_url }}#managers-provisions), MGR-2).
+
 It is the one storage question only your runtime can answer — whether its
 backend writes context to a disk at all:
 

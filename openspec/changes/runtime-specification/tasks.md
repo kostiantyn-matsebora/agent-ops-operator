@@ -31,7 +31,7 @@
       leaving the pointer at the old anchor. Verify no work-contract
       requirement is stated in two places.
 
-## 3. Generated schema tables — deployment-engineer
+## 3. Generated schema tables — deployment-engineer — REVERSED, see 3.3
 
 - [x] 3.1 Add a `struct-table` marker to `.github/scripts/docs-generate.py`:
       given a Go file and struct name, render a table row per json-tagged
@@ -41,6 +41,21 @@
       struct (`platform/manager/internal/dispatch/dispatch.go`) and the report struct
       (`platform/manager/internal/httpapi/`), run the generator, and verify
       `docs-generate.py --check` is clean and the tables match the structs.
+- [x] 3.3 Reversed. The Go doc comments written to feed 3.1 carried full
+      rationale paragraphs (why a field exists, what it replaced, when to
+      trust it), because that is normal Go doc-comment style — and the
+      generator copied them verbatim into the "Meaning" column, producing
+      unreadable, unmaintainable table cells no reader asked for, plus 300+
+      lines of parser and its own test suite to keep working. Removed
+      `build_struct_table`/`_parse_go_struct_fields`/`_humanize_go_type` and
+      the `struct-table` marker from `docs-generate.py`, and deleted
+      `.github/tests/struct-table.test.py`/`.test.sh`. The two field tables
+      in `docs/contracts/runtime.md` are now hand-written, in the same
+      concise `| Field | Type | Required | Description |` shape
+      `cr-reference.md`'s own generator already uses. Verify:
+      `docs-generate.py --check` clean with no `struct-table` marker left
+      anywhere, and `.github/tests/run.sh` green with the two test files
+      gone.
 
 ## 4. Rewrite the adopter guide as the station procedure — api-architect
 
@@ -69,9 +84,9 @@
 
 ## 6. Unit tests — testing-specialist
 
-- [x] 6.1 Script-suite tests for the `struct-table` marker: a rendered table,
-      a drift failure, and a loud failure on an unparsable struct. Verify
-      `.github/tests/run.sh` passes.
+- [x] 6.1 Superseded by 3.3 — the `struct-table` marker these tests covered
+      no longer exists. Verify `.github/tests/run.sh` passes with the test
+      files gone and no `struct-table` reference left in the script suite.
 - [x] 6.2 A link-and-anchor check over `README.md`, `CLAUDE.md` and
       `docs/**`: every relative link resolves to a file and every anchor to a
       heading. Verify it passes on this working copy's tree.
@@ -142,3 +157,25 @@
       highlights "AgentRuntime" under "Specifications", and
       `scrollWidth`/`clientWidth` never diverge on `/contracts/runtime/` or
       `/guides/agent-runtime/`.
+- [x] 8.5 Rewrite `docs/contracts/runtime.md` to an actual API specification
+      shape instead of narrative reference prose: a `## Conventions` section
+      (RFC 2119 keywords, the requirement-ID scheme), the two HTTP
+      operations as top-level sections (`GET /work`, `POST /work/done`)
+      ahead of everything else, each with its request/response table and a
+      short `| ID | Requirement |` table — no prose paragraph states more
+      than one rule. `Lifecycle`, `Runtime's obligations`, `Manager's
+      provisions`, `Security posture` and `Compatibility` get the same
+      `| ID | Requirement |` treatment. The Conformance checklist is now a
+      `| # | Verifies | Tests |` traceability table citing the requirement
+      IDs, not 14 paragraphs mixing a claim with its test citations. See 3.3
+      for the generated-table reversal this depended on. Two headings
+      renamed for the new structure (`Work unit` → `GET /work`, `Completion
+      report` → `POST /work/done`). Every other anchor is unchanged, so
+      `docs/guides/agent-runtime.md`'s ~15 links were retargeted only where
+      they pointed at a renamed anchor or a claim that moved sections (the
+      long-poll and context-restoration claims, which moved from `Runtime's
+      obligations`/`Manager's provisions` into the new `GET /work` section).
+      Verify: the repo's own prose lint (`docs/CLAUDE.md`, "Before calling a
+      page done") is silent over both files, `anchor-check.py` reports the
+      same pre-existing 13 breaks and none in a touched file, and the site
+      rebuilt and screenshotted shows the new structure rendering cleanly.
