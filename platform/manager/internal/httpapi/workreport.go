@@ -47,6 +47,10 @@ type Turn struct {
 	// CacheReadTokens is the part of TokensIn served from the provider's
 	// prompt cache. Omitted by a vendor that reports none.
 	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
+	// CacheCreationTokens is the part of TokensIn written INTO the provider's
+	// prompt cache by this call — where a cache a later turn reads was made.
+	// Omitted by a vendor that reports none.
+	CacheCreationTokens *int64 `json:"cacheCreationTokens,omitempty"`
 	// StopReason is why the model stopped: end of turn, tool use, max tokens.
 	StopReason string `json:"stopReason,omitempty"`
 }
@@ -81,7 +85,8 @@ func validateReport(d *workDone) error {
 			return err
 		}
 		if err := nonNegative(fmt.Sprintf("turns[%d]", i), map[string]*int64{
-			"tokensIn": t.TokensIn, "tokensOut": t.TokensOut, "cacheReadTokens": t.CacheReadTokens}); err != nil {
+			"tokensIn": t.TokensIn, "tokensOut": t.TokensOut,
+			"cacheReadTokens": t.CacheReadTokens, "cacheCreationTokens": t.CacheCreationTokens}); err != nil {
 			return err
 		}
 	}
@@ -143,7 +148,8 @@ func (s *Server) emitRunCalls(ctx context.Context, conv *agentopsv1alpha1.Conver
 			Pipeline: pipeline, Conversation: conv.Name, RunID: runID,
 			Detail: t.Model,
 			Data: withCounts(map[string]string{"model": t.Model, "stopReason": t.StopReason},
-				map[string]*int64{"tokensIn": t.TokensIn, "tokensOut": t.TokensOut, "cacheReadTokens": t.CacheReadTokens}),
+				map[string]*int64{"tokensIn": t.TokensIn, "tokensOut": t.TokensOut,
+					"cacheReadTokens": t.CacheReadTokens, "cacheCreationTokens": t.CacheCreationTokens}),
 		}
 		if t.Model != "" {
 			e.To = activity.Node(activity.NodeModel, t.Model)

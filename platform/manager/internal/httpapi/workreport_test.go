@@ -56,7 +56,7 @@ func TestWorkResultTurnsAndToolCallsBecomeHops(t *testing.T) {
 	rec := postWorkDone(t, s, map[string]any{
 		"convo": "conv-a", "runId": "r1", "status": "succeeded", "result": "done",
 		"turns": []map[string]any{
-			{"model": "model-a", "tokensIn": 1200, "tokensOut": 80, "cacheReadTokens": 900, "stopReason": "tool_use"},
+			{"model": "model-a", "tokensIn": 1200, "tokensOut": 80, "cacheReadTokens": 900, "cacheCreationTokens": 250, "stopReason": "tool_use"},
 			{"model": "model-a", "tokensIn": 1400, "tokensOut": 40, "stopReason": "end_turn"},
 		},
 		"toolCalls": []map[string]any{
@@ -83,11 +83,15 @@ func TestWorkResultTurnsAndToolCallsBecomeHops(t *testing.T) {
 		t.Fatalf("a model call carries the run: %+v", m)
 	}
 	if m.Data["tokensIn"] != "1200" || m.Data["tokensOut"] != "80" ||
-		m.Data["cacheReadTokens"] != "900" || m.Data["stopReason"] != "tool_use" {
+		m.Data["cacheReadTokens"] != "900" || m.Data["cacheCreationTokens"] != "250" ||
+		m.Data["stopReason"] != "tool_use" {
 		t.Fatalf("the turn's facts ride in data: %+v", m.Data)
 	}
 	if _, ok := models[1].Data["cacheReadTokens"]; ok {
 		t.Fatalf("an unreported fact is omitted, never zero: %+v", models[1].Data)
+	}
+	if _, ok := models[1].Data["cacheCreationTokens"]; ok {
+		t.Fatalf("an unreported cache write is omitted, never zero: %+v", models[1].Data)
 	}
 
 	tools := eventsOfKind(log, activity.KindToolCall)
