@@ -25,6 +25,10 @@ the house, one that can repair it.
 
 ![A Home Assistant record — a log error here, the same path for a failed integration, a repair or a faulting sensor — is re-checked by the rules, and opens a conversation on one of two routes: one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
 
+`signals/ha` conforms to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+1.0.0.
+
 ## What you get
 
 | You get | Which means |

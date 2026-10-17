@@ -1,105 +1,287 @@
-# The signal adapter contract
+---
+title: Signal adapter specification
+permalink: /contracts/signal-adapter/
+description: >-
+  The versioned, normative specification of what a SignalAdapter container
+  owes the manager, and what the manager owes it — for building an adapter
+  agent-ops does not ship.
 
-**Signals are one-directional**, so this is the channel contract minus the ops
-queue. An adapter normalizes its transport into signals and the manager does the
-rest: **adapters normalize, the manager groups.**
+next:
+  eyebrow: Reference
+  title: Every field of every kind
+  body: >-
+    The generated custom resource reference, and the contracts the adapter and
+    runtime kinds serve.
+  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
+---
 
-1. **Read your sources** and their opaque `spec.config` from
-   `GET /signal/sources?adapter=`. Entries carry `credentialEnvPrefix` exactly
-   like the channel listing.
-2. **Push normalized signals** to `POST /signal/inbound`:
+**Version 1.0.0**
 
-   ```json
-   {"source":"…","signals":[{"fingerprint":"…","labels":{},"title":"…",
-    "payload":"…","kind":"alert"}]}
-   ```
+This specification gives everything necessary to build and maintain a
+`SignalAdapter` — a container agent-ops does not ship, normalizing one
+transport into signals the manager groups into conversations.
 
-   `kind` is one of `alert`, `job`, `task`, `chat`. `title` is optional.
+**Signals are one-directional.** This is the [channel adapter
+contract](channel-adapter.md) minus the ops queue — an adapter pushes, and
+has no inbound surface of its own.
 
-   **A signal payload is never parsed as prose.** It reaches every adapter
-   exactly as you sent it, and the adapter renders a CARD from your structured
-   fields. The block grammar applies to AGENT output only — see [The body
-   grammar](channel-adapter.md#the-body-grammar).
+## Conventions
 
-   The manager applies the source's `grouping` policy: fingerprint cooldown
-   (at-least-once delivery is safe, re-sends collapse), signature from `labels`
-   × `signatureLabels`, window reuse, and recurrence-on-session.
-3. **Persist cursors** via `GET/PUT /signal/state/{source}/{key}`, and report
-   config problems via `POST /signal/sources/{name}/status`.
+MUST / MUST NOT / SHOULD / MAY follow RFC 2119. Every requirement carries a
+stable ID, prefixed by the section it belongs to:
 
-**This endpoint is the only way work originates from outside a chat surface.**
+| Prefix | Section |
+|---|---|
+| `API-n` | the four signal endpoints |
+| `LANE-n` | [Lanes](#lanes) |
+| `ADP-n` | [Adapter's obligations](#adapters-obligations) |
+| `MGR-n` | [Manager's provisions](#managers-provisions) |
+| `SEC-n` | [Security posture](#security-posture) |
+| `COMPAT-n` | [Compatibility](#compatibility) |
 
-There is no route that names a `Pipeline`. A caller posts to a `SignalSource`,
-and the Ready Pipeline claiming that source decides which agent answers, on
-which channels, with which capabilities.
+## GET /signal/sources
 
-**The `kind` selects the lane**, and the lane decides two things — which prompt
-renders, and how a later signal is keyed when the source declares no
-`signatureLabels`:
+Lists this adapter's own `SignalSource`s.
 
-| `kind` | Lane | Subject | Keying with no `signatureLabels` |
+`GET $MANAGER_URL/signal/sources?adapter=$ADAPTER_NAME`
+
+| Status | Body |
+|---|---|
+| `401` | unauthorized — see [Security posture](#security-posture) |
+| `403` | the token's scope does not match `adapter` |
+| `200` | an array of sources, below |
+
+**Example — `200`:**
+
+```json
+[{"name": "my-source", "config": {"schedule": "*/5 * * * *"},
+  "credentialEnvPrefix": "AGENTOPS_CRED_MY_SOURCE_"}]
+```
+
+### Source entry
+
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `alert` (default) | read-only investigation | a problem that recurs | default labels `alertgroup`/`alertname`/`namespace` — group and resume |
-| `job` | task-lane prompt, `jobName` = source | a job that recurs | same default labels — successive ticks fold into one conversation |
-| `task` | task-lane prompt, no `jobName` | a caller asking once | the signal's own fingerprint — each post is its own conversation |
-| `chat` | task-lane prompt, no `jobName` | a person asking once | the signal's own fingerprint — each message is its own conversation |
+| `name` | string | yes | The `SignalSource`'s own name. |
+| `config` | object | no | Opaque to the manager — whatever shape the adapter defines. |
+| `credentialEnvPrefix` | string | no | Set only when the source has credentials. Env var `<prefix><key>` holds each key, keyed by the source's name. |
 
-- **`alert` and `job` are recurring-subject lanes.** The second signal is more
-  news about the same thing, so it folds into the open conversation and resumes
-  the session.
-- **`task` and `chat` are one-shot lanes.** The second signal is a second
-  request, and the default labels are alert vocabulary neither carries, so
-  keying on them would hash every request to one empty signature.
+| ID | Requirement |
+|---|---|
+| `API-1` | An adapter MUST read its sources from this endpoint, never from a CR watch — `config` and credentials are the manager's to serve and validate. |
 
-**A `chat` signal MUST carry the label `agentops.dev/channel`** naming the
-surface it arrived on, or it is refused — its reply has nowhere to go.
+## POST /signal/inbound
 
-**A `task` signal must not.** Replies go to the claiming Pipeline's
-`channelRefs`.
+Pushes normalized signals. The only way work originates from outside a chat
+surface.
 
-**A posted task inherits the target source's `grouping`.** The lane rule above
-is a FALLBACK, not an override.
+`POST $MANAGER_URL/signal/inbound`
 
-A source that declares `signatureLabels` groups by them in every lane, `task`
-included, so two tasks sharing those label values land in one conversation. Two
-tasks carrying none of them share the empty signature.
+```json
+{"source": "my-source",
+ "signals": [{"fingerprint": "…", "labels": {}, "title": "…",
+              "payload": "…", "kind": "alert"}]}
+```
 
-Post to a source whose grouping is what you want. Operators who need an isolated
-ask lane create their own source against an adapter they run.
+| Status | Body |
+|---|---|
+| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `fingerprint`, or a `chat` signal missing its channel label (`LANE-3`) |
+| `401` / `403` | see [Security posture](#security-posture) |
+| `200` | `{"queued": <n>, "conversations": <n>, "reason": "<optional>"}` |
 
-**Auth mirrors channels**: master token, or a per-`SignalAdapter` derived token
-scoped to the adapter's name. The derivation context is distinct, so channel and
-signal adapters sharing a name never share a token.
+### Normalized signal
 
-A `SignalSource` whose adapter nothing serves carries `Served=False`.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fingerprint` | string | yes | Dedup identity of the recurring THING, never of one occurrence — see `ADP-2`. |
+| `labels` | map of string to string | no | Feeds the source's `grouping.signatureLabels`. Bounded to 32 keys, sorted before truncation. |
+| `title` | string | no | Overrides the conversation title when this signal opens one. Bounded to 500 runes. |
+| `payload` | string | no | The raw content handed to the agent, stored out of band. Never parsed as prose by the manager. |
+| `kind` | string | no | Selects the [lane](#lanes). Absent reads as `alert`. |
+| `reader` | string | no | `chat` lane only. An opaque, salted hash of the sender — never an identity — used only to stamp their own read watermark so their own message is not shown back to them as unread. |
 
-**Reference implementation:** [`signals/cron/`](../../signals/cron/), which replaced
-the old roadmap `cron` sub-struct.
+| ID | Requirement |
+|---|---|
+| `API-2` | `queued`/`conversations` count the signals accepted and the conversations they touched, which may be fewer than `len(signals)` under cooldown. |
+| `API-3` | At-least-once delivery MUST be safe. A re-sent fingerprint within the source's cooldown window collapses rather than opening a second conversation. |
 
-`config: {schedule, input, title?}` fires job-lane signals with
-`<source>@<tick>` fingerprints, restart-safe via the state API. The grouping
-window turns a recurring job into one conversation whose later runs resume the
-agent session.
+## Lanes
 
-**How an adapter proves it:** the contract conformance suite,
-`platform/manager/test/conformance/`, runs every adapter's BUILT BINARY against
-a fake manager and asserts the obligations above.
+`kind` picks the prompt wrapper and decides how a later signal is keyed when
+the source declares no `signatureLabels`.
 
-For a channel adapter:
+| `kind` | Subject | Keyed on (no `signatureLabels`) |
+|---|---|---|
+| `alert` (default) | a problem that recurs | default labels `alertgroup`/`alertname`/`namespace` |
+| `job` | a job that recurs | the same default labels |
+| `task` | a caller asking once | the signal's own fingerprint |
+| `chat` | a person asking once | the signal's own fingerprint |
 
-- the long-poll and the `contract=` declaration
-- typed-message rendering
-- ack-once under a redelivered op id
-- inbound push with a `threadId`
-- listing and status
-- no relay loop
+| ID | Requirement |
+|---|---|
+| `LANE-1` | `alert` and `job` are recurring-subject lanes — a second signal is more news about the same thing, so it folds into the open conversation and resumes the session. |
+| `LANE-2` | `task` and `chat` are one-shot lanes — a second signal is a second request, never folded by the alert-vocabulary default labels. |
+| `LANE-3` | A `chat` signal MUST carry the label `agentops.dev/channel`, naming the surface it arrived on, or the post is refused with `400` — its reply has nowhere to go otherwise. |
+| `LANE-4` | A `task` signal MUST NOT carry `agentops.dev/channel`. Its reply goes to the claiming Pipeline's `channelRefs`. |
+| `LANE-5` | A source declaring `signatureLabels` groups by them in every lane, `task` included — the lane table is a FALLBACK, never an override. |
 
-For a signal adapter:
+## GET /signal/state/{source}/{key}
 
-- normalized emission, the bearer, and source scoping
-- a rejected post that is retried or surfaced rather than dropped
-- for a chat-originating adapter, the channel label on every signal
+Reads one persisted cursor.
 
-A new adapter joins by being listed there. Nothing in its own source changes.
-See [Testing](../testing.md).
+`GET $MANAGER_URL/signal/state/<source>/<key>`
 
+| Status | Body |
+|---|---|
+| `404` | `source` names no `SignalSource` this token may read |
+| `200` | `{"value": "<string, empty if never set>"}` |
+
+## PUT /signal/state/{source}/{key}
+
+Persists one cursor, replacing any value already stored.
+
+`PUT $MANAGER_URL/signal/state/<source>/<key>`
+
+```json
+{"value": "…"}
+```
+
+| Status | Body |
+|---|---|
+| `400` | invalid JSON |
+| `404` | `source` names no `SignalSource` this token may read |
+| `200` | `{"ok": true}` |
+
+| ID | Requirement |
+|---|---|
+| `API-4` | The value is opaque to the manager — a byte string, not a schema. |
+| `API-5` | An adapter MUST persist cursors and offsets here rather than on local disk. Its pod is replaceable. |
+
+## POST /signal/sources/{name}/status
+
+Reports a configuration problem (or clears one) on the source's `Ready`
+condition.
+
+`POST $MANAGER_URL/signal/sources/<name>/status`
+
+```json
+{"ready": false, "reason": "BadSchedule", "message": "…"}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ready` | boolean | yes | Sets `Ready` to `True`/`False`. |
+| `reason` | string | no | Defaults to `AdapterReady`/`AdapterError`. |
+| `message` | string | no | Free text surfaced on the condition. |
+
+| Status | Body |
+|---|---|
+| `400` | invalid JSON |
+| `404` | `name` names no `SignalSource` this token may read |
+| `200` | `{"ok": true}` |
+
+## Adapter's obligations
+
+| ID | Requirement |
+|---|---|
+| `ADP-1` | Read sources from [`GET /signal/sources`](#get-signalsources) — never assume connectivity or credentials, both are the manager's to serve. |
+| `ADP-2` | Fingerprint honestly: the same recurring thing MUST reuse the same fingerprint across occurrences, so at-least-once re-sends collapse rather than opening a new conversation each time. |
+| `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, window reuse or recurrence itself — those are the manager's, per `MGR-1`. |
+| `ADP-4` | An observing adapter MUST NOT emit a signal about agent-ops' own machinery — see [Self-exclusion](#self-exclusion). |
+
+### Self-exclusion
+
+An adapter watching cluster-shaped state can observe agent-ops' own failures
+and feed them back in. A runtime pod that fails to start emits a Warning
+event.
+
+The event becomes a signal, the signal opens a Conversation, and that
+Conversation's pod is the next thing to fail. Nothing downstream catches the
+loop — the fingerprint is fresh because the pod name is new.
+
+The invariant and its breakers are never paraphrased here — they are cited at
+their own source, where the test that pins them lives:
+[`signals/ha/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/ha/)
+and
+[`signals/k8s-events/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/k8s-events/),
+plus the invariant itself in `invariants.md`'s "No signal loops".
+
+### Security posture
+
+| ID | Requirement |
+|---|---|
+| `SEC-1` | Every call MUST carry `Authorization: Bearer $ADAPTER_TOKEN`. The master token has full scope. A per-`SignalAdapter` derived token is scoped to that adapter's own name, in a derivation context distinct from channel adapters — the two never share a token even sharing a name. |
+| `SEC-2` | `ADAPTER_TOKEN` MUST be derived, never minted or stored. The manager re-derives and compares in constant time, reading no Secret. |
+| `SEC-3` | The operator MUST grant an adapter no Kubernetes permissions of its own. `spec.serviceAccountName` is a reference only. |
+
+## Manager's provisions
+
+| ID | Requirement |
+|---|---|
+| `MGR-1` | The manager owns grouping: fingerprint cooldown, signature from `labels` × `signatureLabels`, window reuse, and recurrence-on-session. An adapter implements none of it. |
+| `MGR-2` | A source's grouping policy MUST be evaluated once, above every Pipeline claiming it — never once per claiming Pipeline, or the first one starves the rest. |
+| `MGR-3` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is dropped. |
+| `MGR-4` | The manager MUST supply every variable in [Environment](#environment). |
+| `MGR-5` | This endpoint set is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
+
+## Environment
+
+| Kind | Variable | Meaning |
+|---|---|---|
+| always | `MANAGER_URL` | Where to read sources and push signals. |
+| always | `ADAPTER_NAME` | This adapter's own name — the `adapter=` scope on every call. |
+| always | `ADAPTER_TOKEN` | Bearer credential — see `SEC-1`. |
+| conditional | `LISTEN_ADDR` | Set only when `SignalAdapter.spec.port` is set — this adapter is pushed to rather than polling, and the reconciler owns the matching Service. |
+| per-source | `AGENTOPS_CRED_<SOURCE>_<KEY>` | A source's own credentials, keyed by its sanitized name — see `credentialEnvPrefix` on the [source entry](#source-entry). |
+
+## Enums
+
+| Enum | Values | Reading |
+|---|---|---|
+| `kind` | `alert`, `job`, `task`, `chat` | Absent or unrecognized reads as `alert`. |
+
+## Bounds
+
+| Bound | Value |
+|---|---|
+| `labels` keys per signal | ≤ 32, sorted, extra keys dropped |
+| `title` | truncated to 500 runes |
+| request body, `POST /signal/inbound` | ≤ 1 MiB |
+| request body, `PUT /signal/state/{source}/{key}` | ≤ 1 KiB |
+
+## Optional capabilities
+
+| Capability | An adapter may | Trigger |
+|---|---|---|
+| Cursor persistence | use [`GET`/`PUT /signal/state`](#get-signalstatesourcekey) instead of local disk | the transport is polled rather than pushed, so a restart needs an offset |
+| Push mode | bind `LISTEN_ADDR` and serve inbound webhooks | `SignalAdapter.spec.port` is set |
+| Status reporting | report config problems via [`POST /signal/sources/{name}/status`](#post-signalsourcesnamestatus) | the adapter's own `config` can be invalid at runtime |
+
+An adapter implementing none of these stays fully conformant — see
+[Compatibility](#compatibility).
+
+## Compatibility
+
+| ID | Requirement |
+|---|---|
+| `COMPAT-1` | The manager MUST ignore inbound payload fields it does not know. |
+| `COMPAT-2` | An adapter MUST ignore source-listing fields it does not know. |
+| `COMPAT-3` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
+
+| Version part | Moves when |
+|---|---|
+| MAJOR | an adapter conformant with the previous version stops conforming |
+| MINOR | a new optional capability or field is added |
+| PATCH | a clarification that changes no obligation |
+
+## Conformance
+
+An adapter implementing every requirement on this page except [Optional
+capabilities](#optional-capabilities) is fully conformant — no optional
+capability is required, see [Compatibility](#compatibility).
+
+## Changelog
+
+| Version | Date | Changed |
+|---|---|---|
+| 1.0.0 | 2026-10-17 | Initial release. |

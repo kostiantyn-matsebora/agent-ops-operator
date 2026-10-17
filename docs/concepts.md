@@ -314,8 +314,8 @@ whether a signal is emitted at all — see
 
 **A signal implementation, nothing more.** The inbound-only sibling of
 `ChannelAdapter`: an image implementing the
-[signal contract](contracts/signal-adapter.md#the-signal-adapter-contract), plugged in as a CR
-whose **name is the type key** SignalSources select via `spec.adapter`.
+[signal adapter specification](contracts/signal-adapter.md), plugged in as a
+CR whose **name is the type key** SignalSources select via `spec.adapter`.
 
 Same posture as `ChannelAdapter` — owned workload, zero-RBAC SA, singleton,
 derived name-scoped token, credential projection.

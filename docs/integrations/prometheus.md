@@ -24,6 +24,10 @@ reaches you has the investigation already done.
 Prometheus Alertmanager can post to it, and VictoriaMetrics answers the same
 query API — MetricsQL is a PromQL superset, so one server serves both.
 
+`signals/alertmanager` conforms to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+1.0.0.
+
 ## What you get
 
 | You get | Which means |
