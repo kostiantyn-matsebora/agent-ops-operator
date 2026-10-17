@@ -190,21 +190,23 @@ What a runtime receives from `GET /work`.
 
 ### The work unit
 
+<!-- generated: struct-table file=platform/manager/internal/dispatch/dispatch.go struct=WorkUnit -->
 | Field | Type | Meaning |
 |---|---|---|
-| `runId` | string | Unique id for this unit. Echoed back in the completion report. |
-| `convo` | string | The `Conversation` this unit belongs to. |
-| `threadId` | string, optional | The bound channel's thread id, present only for a conversation bound to exactly one channel. The runtime never posts to it — the manager delivers to every bound channel after the report. |
-| `runtimeContextId` | string, optional | The runtime's own handle for this conversation's accumulated context, echoed from the last run. Empty means start fresh — also what a deployment unable to carry context sends every time, deliberately. |
-| `resumeSessionId` | string, optional | **Deprecated**, replaced by `runtimeContextId`. Sent alongside it for one release so a runtime image upgrades independently of the manager. A conformant runtime reads `runtimeContextId`. |
-| `promptFile` | string, optional | A repo-relative path to render, when the profile supplies its own prompt file. The runtime renders `promptVars` into it. |
-| `promptText` | string, optional | The fully rendered prompt, when the manager rendered it from a built-in template. Exactly one of `promptFile`/`promptText` is set. |
-| `promptVars` | map of string to string, optional | Template variables for `promptFile`. |
-| `agent` | string, optional | The agent definition's name, for the runtime to resolve from the checked-out repository — see [Composing the allowlist](#composing-the-allowlist). |
-| `systemPrompt` | string, optional | Inline role text the runtime appends to the agent's own system prompt. Identity only — never affects the allowlist. |
-| `allowedTools` | string, optional | The wiring's half of the tool allowlist, comma-separated. |
-| `toolsMode` | string, optional | `merge` or `overwrite` — see [Enums](#enums). |
-| `maxTurns` | integer, optional | The profile's turn budget for this run, when set. |
+| `runId` | string | RunID is a unique id for this unit, echoed back in the completion report. |
+| `convo` | string | Convo is the Conversation this unit belongs to. |
+| `threadId` | string, optional | ThreadID is the bound channel's thread id, present only for a conversation bound to exactly one channel. The runtime never posts to it -- the manager delivers to every bound channel after the report. |
+| `runtimeContextId` | string, optional | RuntimeContextID is the runtime's OWN handle for this conversation's accumulated context, echoed back from the last run. Continue that context, or report that you could not — where it is stored is the runtime's business and the manager assumes nothing about it. Empty means "start fresh, nothing is being continued", which is also what a deployment that cannot carry context sends every time, deliberately. |
+| `resumeSessionId` | string, optional | ResumeSessionID is the former name of RuntimeContextID, sent alongside it for ONE release so a runtime image can be upgraded independently of the manager. Runtimes must read RuntimeContextID. DEPRECATED. |
+| `promptFile` | string, optional | PromptFile is a repo-relative path to render, when the profile supplies its own prompt file. The runtime renders PromptVars into it. |
+| `promptText` | string, optional | PromptText is the fully rendered prompt, when the manager rendered it from a built-in template. Exactly one of PromptFile/PromptText is set. |
+| `promptVars` | map of string to string, optional | PromptVars carries template variables for PromptFile. |
+| `agent` | string, optional | Agent is the agent definition's name, for the runtime to resolve from the checked-out repository. |
+| `systemPrompt` | string, optional | SystemPrompt is inline role text the runtime APPENDS to the agent's system prompt. Identity only — it never affects the allowlist. |
+| `allowedTools` | string, optional | AllowedTools is the wiring's half of the tool allowlist, comma-separated. |
+| `toolsMode` | string, optional | ToolsMode is "merge" or "overwrite", directing how AllowedTools composes with the agent definition's own declared tools. |
+| `maxTurns` | integer, optional | MaxTurns is the profile's turn budget for this run, when set. |
+<!-- /generated -->
 
 Source: `platform/manager/internal/dispatch/dispatch.go`, type `WorkUnit`.
 
@@ -214,20 +216,22 @@ What a runtime posts to `POST /work/done`.
 
 ### The completion report
 
+<!-- generated: struct-table file=platform/manager/internal/httpapi/server.go struct=workDone -->
 | Field | Type | Meaning |
 |---|---|---|
-| `convo` | string | The `Conversation` this report is for. |
-| `runId` | string | The unit's own `runId`, round-tripped. |
-| `status` | string | `succeeded` or `failed` — see [Enums](#enums). |
-| `exitCode` | integer, optional | The process exit code, when the runtime has one to report. |
-| `runtimeContextId` | string, optional | The handle for the context this run leaves behind — the one to continue next time. May be reported even on a **failed** run, so a crash after the context was established does not strand it. |
-| `sessionId` | string, optional | **Deprecated**, replaced by `runtimeContextId`. Accepted for one release so an older runtime image keeps working. |
-| `continuity` | string, optional | `continued`, `new` or `unavailable` — see [Enums](#enums). Absent means no claim. |
-| `continuityReason` | string, optional | Free text explaining why a context could not be continued. Recorded verbatim — the manager does not know where any given runtime keeps its context. |
-| `result` | string, optional | The run's answer. Truncated to 2000 bytes by the manager, never refused for length. |
-| `brief` | string, optional | One or two sentences of what the conversation is about, replacing whatever was stored (LATEST-WINS). Absent leaves the stored brief unchanged. Truncated to 512 bytes, never refused. |
-| `turns[]` | array of [Turn](#turns), optional | One entry per model call this run made. |
-| `toolCalls[]` | array of [tool call](#tool-calls), optional | One entry per tool call this run made. |
+| `convo` | string | Convo is the Conversation this report is for. |
+| `runId` | string | RunID is the unit's own RunID, round-tripped. |
+| `status` | string | Status is "succeeded" or "failed". The manager treats any other value as a failed run. |
+| `exitCode` | integer, optional | ExitCode is the process exit code, when the runtime has one to report. |
+| `runtimeContextId` | string, optional | RuntimeContextID is the handle for the context this run leaves behind — the one to continue next time. Runtimes may report it on a FAILED run too: a crash after the context was established should not strand it. |
+| `sessionId` | string, optional | SessionID is the retired spelling, accepted for one release so an older runtime image keeps working. DEPRECATED. |
+| `continuity` | string, optional | Continuity says what happened to the context this run was asked to continue: "continued", "new", or "unavailable" (a new one was needed because the named context could not be reached). The manager cannot infer this. It sends a handle and receives a handle, and when they differ it has no way to tell an agent that branched deliberately from one that was forced to start over. The runtime knows, because it is the component that tried. ABSENT MEANS NO CLAIM: a runtime that does not implement it keeps today's behaviour, because an addition to the contract must not make an existing runtime look broken. |
+| `continuityReason` | string, optional | ContinuityReason is free text from the runtime explaining why a context could not be continued. Recorded VERBATIM — the manager does not know where any given runtime keeps its context, so any explanation it invented would be confident and sometimes wrong. |
+| `result` | string, optional | Result is the run's answer. Truncated to 2000 bytes by the manager, never refused for length. |
+| `brief` | string, optional | Brief is what the runtime extracted as this conversation's one- or two-sentence description (design D-I) — a contract field, never a parsed section of Result. LATEST-WINS, the same rule as RuntimeContextID: absent leaves the stored one untouched. |
+| `turns` | array of Turn, optional | Turns is one entry per model call this run made, bounded in count and field size (workreport.go). It becomes one activity hop and nothing else — telemetry, never written to the Conversation. |
+| `toolCalls` | array of ToolCall, optional | ToolCalls is one entry per tool call this run made, bounded in count and field size (workreport.go). It becomes one activity hop and nothing else — telemetry, never written to the Conversation. |
+<!-- /generated -->
 
 Source: `platform/manager/internal/httpapi/server.go`, type `workDone`.
 

@@ -33,11 +33,11 @@
 
 ## 3. Generated schema tables — deployment-engineer
 
-- [ ] 3.1 Add a `struct-table` marker to `.github/scripts/docs-generate.py`:
+- [x] 3.1 Add a `struct-table` marker to `.github/scripts/docs-generate.py`:
       given a Go file and struct name, render a table row per json-tagged
       field from tags and doc comments, failing loudly on a struct it cannot
       parse. Verify with the script suite.
-- [ ] 3.2 Place markers in `docs/contracts/runtime.md` for the work unit
+- [x] 3.2 Place markers in `docs/contracts/runtime.md` for the work unit
       struct (`platform/manager/internal/dispatch/dispatch.go`) and the report struct
       (`platform/manager/internal/httpapi/`), run the generator, and verify
       `docs-generate.py --check` is clean and the tables match the structs.

@@ -523,9 +523,15 @@ func (s *Server) defaultRuntimeName(ctx context.Context) string {
 }
 
 type workDone struct {
-	Convo    string `json:"convo"`
-	RunID    string `json:"runId"`
-	Status   string `json:"status"`
+	// Convo is the Conversation this report is for.
+	Convo string `json:"convo"`
+	// RunID is the unit's own RunID, round-tripped.
+	RunID string `json:"runId"`
+	// Status is "succeeded" or "failed". The manager treats any other
+	// value as a failed run.
+	Status string `json:"status"`
+	// ExitCode is the process exit code, when the runtime has one to
+	// report.
 	ExitCode *int32 `json:"exitCode,omitempty"`
 	// RuntimeContextID is the handle for the context this run leaves behind —
 	// the one to continue next time. Runtimes may report it on a FAILED run too:
@@ -538,10 +544,10 @@ type workDone struct {
 	// continue: "continued", "new", or "unavailable" (a new one was needed
 	// because the named context could not be reached).
 	//
-	// The manager cannot infer this. It sends a handle and receives a handle;
-	// when they differ it has no way to tell an agent that branched deliberately
-	// from one that was forced to start over. The runtime knows, because it is
-	// the component that tried.
+	// The manager cannot infer this. It sends a handle and receives a
+	// handle, and when they differ it has no way to tell an agent that
+	// branched deliberately from one that was forced to start over. The
+	// runtime knows, because it is the component that tried.
 	//
 	// ABSENT MEANS NO CLAIM: a runtime that does not implement it keeps today's
 	// behaviour, because an addition to the contract must not make an existing
@@ -552,16 +558,21 @@ type workDone struct {
 	// where any given runtime keeps its context, so any explanation it invented
 	// would be confident and sometimes wrong.
 	ContinuityReason string `json:"continuityReason,omitempty"`
-	Result           string `json:"result,omitempty"`
+	// Result is the run's answer. Truncated to 2000 bytes by the manager,
+	// never refused for length.
+	Result string `json:"result,omitempty"`
 	// Brief is what the runtime extracted as this conversation's one- or
 	// two-sentence description (design D-I) — a contract field, never a
 	// parsed section of Result. LATEST-WINS, the same rule as
 	// RuntimeContextID: absent leaves the stored one untouched.
 	Brief string `json:"brief,omitempty"`
-	// Turns and ToolCalls are what the runtime saw the run do, bounded in
-	// count and field size (workreport.go). Each becomes one activity hop and
-	// nothing else — they are telemetry, never written to the Conversation.
-	Turns     []Turn     `json:"turns,omitempty"`
+	// Turns is one entry per model call this run made, bounded in count and
+	// field size (workreport.go). It becomes one activity hop and nothing
+	// else — telemetry, never written to the Conversation.
+	Turns []Turn `json:"turns,omitempty"`
+	// ToolCalls is one entry per tool call this run made, bounded in count
+	// and field size (workreport.go). It becomes one activity hop and
+	// nothing else — telemetry, never written to the Conversation.
 	ToolCalls []ToolCall `json:"toolCalls,omitempty"`
 }
 

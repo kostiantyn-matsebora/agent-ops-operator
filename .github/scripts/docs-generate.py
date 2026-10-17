@@ -897,6 +897,125 @@ def field_table(rows: list[dict]) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Struct tables -- the work-unit and report fields, from the Go source
+# --------------------------------------------------------------------------
+
+# A flat struct field: NAME TYPE `json:"tag"` with no embedded spaces in TYPE
+# (every type this reads -- string, *string, int32, *int32,
+# map[string]string, []Turn, []ToolCall -- satisfies that), and an optional
+# `// trailing comment` on the same line.
+_GO_FIELD_RE = re.compile(
+    r'^\s*(?P<name>[A-Z]\w*)\s+(?P<type>\S+)\s+`json:"(?P<tag>[^"]*)"`'
+    r'(?:\s*//\s*(?P<trailing>.*))?\s*$'
+)
+
+_GO_TYPE_NAMES = {
+    "string": "string",
+    "int32": "integer",
+    "int64": "integer",
+}
+
+
+def _humanize_go_type(path: pathlib.Path, struct: str, field: str, gotype: str) -> str:
+    """The vocabulary `docs/contracts/runtime.md` already uses: `string`,
+    `integer`, `map of string to string`, `array of <Type>`. Pointer-ness is
+    read by the caller for required/optional and never reaches this -- a
+    `*string` and a `string` are the same type cell."""
+    bare = gotype.lstrip("*")
+    if bare in _GO_TYPE_NAMES:
+        return _GO_TYPE_NAMES[bare]
+    if bare == "map[string]string":
+        return "map of string to string"
+    if bare.startswith("[]") and bare[2:]:
+        return f"array of {bare[2:]}"
+    raise SystemExit(
+        f"{path.relative_to(REPO)}: struct {struct}: field {field}: "
+        f"unrecognized Go type {gotype!r} -- teach _humanize_go_type its shape "
+        "rather than guessing"
+    )
+
+
+def _parse_go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
+    """json-tagged fields of a FLAT struct, in source order, read by line.
+
+    Scoped deliberately to what the work-unit and report structs actually
+    are: no nested anonymous structs, no multi-line type expressions. A
+    struct this cannot parse fails loudly rather than rendering a partial
+    table -- see design.md, "the struct-table generator misparses Go
+    source".
+    """
+    text = path.read_text()
+    block = re.search(
+        rf"type\s+{re.escape(struct)}\s+struct\s*{{(?P<body>.*?)\n}}",
+        text,
+        re.DOTALL,
+    )
+    if not block:
+        raise SystemExit(
+            f"{path.relative_to(REPO)}: no flat `type {struct} struct {{ ... }}` found"
+        )
+
+    fields: list[dict] = []
+    doc_lines: list[str] = []
+    for raw in block.group("body").split("\n"):
+        line = raw.strip()
+        if not line:
+            # A blank line breaks the doc-comment's adjacency to the field
+            # below it -- standard Go doc-comment style.
+            doc_lines = []
+            continue
+        if line.startswith("//"):
+            doc_lines.append(line[2:].strip())
+            continue
+        m = _GO_FIELD_RE.match(raw)
+        if not m:
+            raise SystemExit(
+                f"{path.relative_to(REPO)}: struct {struct}: cannot parse field "
+                f"line: {raw!r}"
+            )
+        tag = m.group("tag")
+        json_name = tag.split(",")[0]
+        if not json_name or json_name == "-":
+            doc_lines = []
+            continue
+        omitempty = ",omitempty" in tag
+        gotype = m.group("type")
+        # A blank `//` line is a paragraph break within the comment, not a
+        # word -- joined as-is it leaves a double space in the rendered cell.
+        kept = [d for d in doc_lines if d]
+        meaning = " ".join(kept) if kept else (m.group("trailing") or "").strip()
+        if not meaning:
+            raise SystemExit(
+                f"{path.relative_to(REPO)}: struct {struct}: field {m.group('name')} "
+                "has no doc comment and no trailing comment to render as its meaning"
+            )
+        fields.append({
+            "json": json_name,
+            "required": not omitempty and not gotype.startswith("*"),
+            "type": _humanize_go_type(path, struct, m.group("name"), gotype),
+            "meaning": meaning,
+        })
+        doc_lines = []
+    return fields
+
+
+def build_struct_table(file_rel: str, struct: str) -> str:
+    """`| Field | Type | Meaning |`, one row per json-tagged field, read
+    from the Go struct's own tags and doc comments -- the single source of
+    truth, so the table and the wire type cannot drift (design.md, "Schema
+    tables generated from the Go structs")."""
+    path = REPO / file_rel
+    if not path.is_file():
+        raise SystemExit(f"struct-table: no such file {file_rel!r}")
+    fields = _parse_go_struct_fields(path, struct)
+    out = ["| Field | Type | Meaning |", "|---|---|---|"]
+    for f in fields:
+        type_cell = f["type"] if f["required"] else f"{f['type']}, optional"
+        out.append(f"| `{f['json']}` | {type_cell} | {f['meaning']} |")
+    return "\n".join(out) + "\n"
+
+
+# --------------------------------------------------------------------------
 # Injection
 # --------------------------------------------------------------------------
 
@@ -935,6 +1054,10 @@ def generate_block(attrs: dict[str, str], schemas: dict[str, dict]) -> str:
         # emits a resource; this emits a table, which is why the dispatcher
         # returns the whole block rather than the text to wrap in one.
         return build_renders(attrs["bundle"])
+    elif "struct-table" in attrs:
+        # Same shape as `renders`: a markdown table, not a resource, so it
+        # also returns the whole block rather than the yaml-fenced text.
+        return build_struct_table(attrs["file"], attrs["struct"])
     else:
         raise SystemExit(
             f"marker declares none of template, example or renders: {attrs}"
