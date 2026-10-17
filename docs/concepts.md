@@ -25,7 +25,7 @@ them.
 **What executes it.** The engine hosting the LLM agent — image, entrypoint,
 idle TTL, storage volumes, service account (the agent's RBAC).
 
-- **Any image speaking the [work contract](contracts.md#the-work-contract)
+- **Any image speaking the [runtime contract](contracts/runtime.md)
   plugs in.** A claude-code runtime ships with the chart.
 - **Resolution order**: the conversation's snapshot → `profile.runtimeRef`
   (deprecated) → CR named `default` → manager env. A `Pipeline` chooses it, and

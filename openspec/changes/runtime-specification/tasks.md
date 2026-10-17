@@ -15,7 +15,7 @@
 
 ## 2. Write the runtime specification — api-architect
 
-- [ ] 2.1 Write `docs/contracts/runtime.md` at version 1.0.0 per the
+- [x] 2.1 Write `docs/contracts/runtime.md` at version 1.0.0 per the
       `runtime-contract` delta spec: both parties' obligations, the lifecycle
       state machine, the environment table (always vs conditional, the
       empty-`REPO_URL` meaning), the filesystem contract, every enum with the
@@ -23,11 +23,11 @@
       whole-report refusal, compatibility rules with the reserved wire-version
       sentence, and the changelog at the foot. Verify every normative sentence
       traces to source or a test.
-- [ ] 2.2 Write the numbered conformance checklist, each item individually
+- [x] 2.2 Write the numbered conformance checklist, each item individually
       verifiable and citing the runtime test file that exercises it where one
       exists. Verify the three shipped runtimes pass every item by reading
       their tests.
-- [ ] 2.3 Remove the work-contract narrative from `docs/contracts.md`,
+- [x] 2.3 Remove the work-contract narrative from `docs/contracts.md`,
       leaving the pointer at the old anchor. Verify no work-contract
       requirement is stated in two places.
 
