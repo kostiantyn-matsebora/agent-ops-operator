@@ -46,7 +46,7 @@ def git_ok(root: Path, *args: str) -> bool:
 def check(root: Path, component: str, values: str, contract: tuple) -> list[str]:
     try:
         data = yaml.safe_load((root / values).read_text())
-    except OSError as e:
+    except (OSError, yaml.YAMLError) as e:
         return [f"{values}: unreadable ({e})"]
     image = str((data or {}).get("image", ""))
     if f"agentops-{component}:" not in image:
