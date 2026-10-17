@@ -29,8 +29,8 @@ agentops-mcp-prometheus
 kept only so the rule reads identically in every bundle that ships wiring. */ -}}
 {{- define "prometheus.wiringActive" -}}
 {{- if include "prometheus.active" . -}}
-{{- if kindIs "bool" .Values.pipelines.enabled -}}
-{{- if .Values.pipelines.enabled }}true{{ end -}}
+{{- if kindIs "bool" .Values.wiringEnabled -}}
+{{- if .Values.wiringEnabled }}true{{ end -}}
 {{- else if dig "demo" "enabled" false (.Values.global | default dict) -}}
 true
 {{- end -}}

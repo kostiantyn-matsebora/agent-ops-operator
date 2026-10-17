@@ -37,19 +37,19 @@ One flag gives you a working lane, end to end.
 helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
   -n agent-ops --create-namespace \
   --set kubernetes.enabled=true \
-  --set kubernetes.pipelines.enabled=true
+  --set kubernetes.wiringEnabled=true
 ```
 
 ```powershell
 helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
   -n agent-ops --create-namespace `
   --set kubernetes.enabled=true `
-  --set kubernetes.pipelines.enabled=true
+  --set kubernetes.wiringEnabled=true
 ```
 
 **No credential.** It authenticates to the cluster it runs in.
 
-`enabled` renders the parts. `pipelines.enabled` wires them into a working
+`enabled` renders the parts. `wiringEnabled` wires them into a working
 route — leave it off and nothing answers, which is what you want if you are
 [bringing your own](#adopt-it).
 
@@ -63,7 +63,7 @@ rest have working defaults, and `helm show values` is the full list.
 | Value | Default | Set it to |
 |---|---|---|
 | `enabled` | `false` | `true` to render the bundle at all |
-| `pipelines.enabled` | unset — **on under demo** | `true` for a working route, `false` to wire it yourself |
+| `wiringEnabled` | unset — **on under demo** | `true` for a working route, `false` to wire it yourself |
 | `allowMutations` | `false` | `true` to let the agent change the cluster |
 | `eventsAdapter.enabled` | `true` | `false` if you post cluster events yourself |
 | `eventsAdapter.source.create` | `true` | `false` to declare your own `SignalSource` |
@@ -236,10 +236,13 @@ because that is no longer one flapping pod.
 
 **Only a Pod can be looked at.** For any other kind — a Node, a Job, a storage
 operator's own objects — the adapter asks the events instead: was this still
-arriving as the window closed? "Closed" is the last third of the wait, never
-less than thirty seconds. A controller that retried for forty seconds and then
-healed has recurred, and is dropped; one still retrying at the deadline is
-reported once, with the whole burst attached and the time of its last event.
+arriving as the window closed?
+
+"Closed" is the last third of the wait, never less than thirty seconds.
+
+A controller that retried for forty seconds and then healed has recurred,
+and is dropped. One still retrying at the deadline is reported once, with
+the whole burst attached and the time of its last event.
 
 ### "Tell me immediately about OOM kills"
 
@@ -253,10 +256,12 @@ re-check finds the healthy replacement, so the report is dropped.
 
 **Don't add `NodeNotReady` to this one.** The bundle's own shipped rule
 already reports it at `for: "0"` when it is genuinely a NODE-level event —
-qualified `kind="Node"`, on purpose. A bare `reason=~"...|NodeNotReady"` with
-no kind matcher catches the PER-POD copies the node lifecycle controller
-stamps on every workload scheduled there, so one reboot fires once per
-DaemonSet instead of dwelling to see whether the node came back.
+qualified `kind="Node"`, on purpose.
+
+A bare `reason=~"...|NodeNotReady"` with no kind matcher catches the
+PER-POD copies the node lifecycle controller stamps on every workload
+scheduled there, so one reboot fires once per DaemonSet instead of
+dwelling to see whether the node came back.
 
 ### "Ignore my scratch namespace"
 
@@ -270,10 +275,12 @@ available here.
 
 ### "A reboot manager cordons my nodes one at a time — stay quiet through that"
 
-This is already the default: **nothing to configure.** A node that is cordoned
-or maintenance-tainted (kured is the common case) suppresses every event on
-its objects for as long as it stays that way, whatever reason they carry and
-however many DaemonSets have pods scheduled there.
+This is already the default: **nothing to configure.** A node that is
+cordoned or maintenance-tainted (kured is the common case) suppresses every
+event on its objects for as long as it stays that way.
+
+That holds whatever reason the event carries and however many DaemonSets
+have pods scheduled there.
 
 ```yaml
 eventsAdapter:
@@ -345,11 +352,11 @@ use its wiring to use its work.
 Turn the bundle's own route off and declare your own:
 
 ```sh
---set kubernetes.enabled=true --set kubernetes.pipelines.enabled=false
+--set kubernetes.enabled=true --set kubernetes.wiringEnabled=false
 ```
 
 ```powershell
---set kubernetes.enabled=true --set kubernetes.pipelines.enabled=false
+--set kubernetes.enabled=true --set kubernetes.wiringEnabled=false
 ```
 
 ### Your agent, its tools
@@ -400,7 +407,7 @@ pipelines:
 
 ### Run yours beside the bundle's
 
-**Sources are shareable, and nothing conflicts.** Leave `pipelines.enabled=true`
+**Sources are shareable, and nothing conflicts.** Leave `wiringEnabled=true`
 and declare your own claiming `cluster-events` as well — each admitted event
 then opens **one conversation per claiming pipeline**, with its own agent and
 its own tools.
@@ -435,7 +442,7 @@ Deployment/agentops-mcp-k8s
 Service/agentops-mcp-k8s
 ServiceAccount/agentops-mcp-k8s
 
-# Wiring  (pipelines.enabled)
+# Wiring  (wiringEnabled)
 Pipeline/k8s-observe
 ```
 <!-- /generated -->

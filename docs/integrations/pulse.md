@@ -50,7 +50,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set pulse.mcpServer.enabled=true \
   --set pulse.mcp.observer.credentials.token=<read-scoped-token> \
   --set pulse.mcp.operator.credentials.token=<write-scoped-token> \
-  --set pulse.pipelines.enabled=true
+  --set pulse.wiringEnabled=true
 ```
 
 ```powershell
@@ -63,7 +63,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set pulse.mcpServer.enabled=true `
   --set pulse.mcp.observer.credentials.token=<read-scoped-token> `
   --set pulse.mcp.operator.credentials.token=<write-scoped-token> `
-  --set pulse.pipelines.enabled=true
+  --set pulse.wiringEnabled=true
 ```
 
 > **Registration failure never unserves the webhook.** `signal.defaultSource`
@@ -150,7 +150,7 @@ Everything below is under `pulse:`.
 | `mcpServer.backend` | **empty, required when `mcpServer.enabled`** | the Pulse endpoint the MCP server forwards to |
 | `profiles.observer.enabled` | `true` | `false` to drop the investigating agent |
 | `profiles.operator.enabled` | `true` | `false` to drop the annotating agent |
-| `pipelines.enabled` | `false` | `true` for working routes |
+| `wiringEnabled` | `false` | `true` for working routes |
 | `pipelines.observer.enabled` | `true` | `false` to ship the operator route alone |
 | `pipelines.operator.enabled` | `true` | `false` to ship the observer route alone |
 
@@ -349,11 +349,11 @@ Pulse's own alerting, never a stand-in for an actual fix.
 Turn the bundle's own routes off and declare your own:
 
 ```sh
---set pulse.enabled=true --set pulse.pipelines.enabled=false
+--set pulse.enabled=true --set pulse.wiringEnabled=false
 ```
 
 ```powershell
---set pulse.enabled=true --set pulse.pipelines.enabled=false
+--set pulse.enabled=true --set pulse.wiringEnabled=false
 ```
 
 ### Your agent, Pulse's tools
@@ -391,7 +391,7 @@ pipelines:
 
 ### Run yours beside the bundle's
 
-**Sources are shareable.** Leave `pipelines.enabled=true` and claim
+**Sources are shareable.** Leave `wiringEnabled=true` and claim
 `pulse-alerts` from your own route as well.
 
 Each admitted alert then opens **one conversation per claiming pipeline**,
@@ -427,7 +427,7 @@ Service/agentops-mcp-pulse
 # Webhook exposure  (signal.ingress.enabled)
 Ingress/agentops-signal-pulse
 
-# Wiring  (pipelines.enabled / pipelines.observer.enabled / pipelines.operator.enabled)
+# Wiring  (wiringEnabled / pipelines.observer.enabled / pipelines.operator.enabled)
 Pipeline/pulse-observer
 Pipeline/pulse-operator
 ServiceAccount/agentops-pulse-observer

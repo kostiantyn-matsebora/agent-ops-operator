@@ -598,7 +598,7 @@ global:
     #
     # `null` — DEFAULT, and this is the load-bearing reason it is nullable
     # rather than the plain string "pipelines", same reason
-    # `kubernetes.pipelines.enabled` is: left unset, the render FOLLOWS
+    # `kubernetes.wiringEnabled` is: left unset, the render FOLLOWS
     # `global.demo.enabled` — off, the DEFAULT BEHAVIOUR is "pipelines"
     # (today's posture, rendered byte-identical); true selects "coordinator",
     # so a turnkey install exercises the Coordinator model out of the box. An
@@ -1157,8 +1157,8 @@ resources:
 #     backend: http://<prometheus-or-vmsingle>:9090
 #   # The bundle's own route — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     channels: [<your-channel>]        # optional; omitted when unset
 # MIGRATION: the retired `vm-bundle:` key — every value must be restated under
 # the new one, and the render FAILS while the old key is present. See docs/CHANGELOG.md.
@@ -1179,8 +1179,8 @@ resources:
 #                                      # an ask-only house
 #   # The bundle's own routes — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     chatSources: [<your-chat-source>] # claimed by ha-control only
 #     channels: [<your-channel>]        # optional; omitted when unset
 # The Secrets are referenced by name and never created here:
@@ -1216,8 +1216,8 @@ home-assistant:
 #         token: <write-scoped-pulse-token>
 #   # The bundle's own routes — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     channels: [<your-channel>]           # optional; omitted when unset
 pulse:
   enabled: false

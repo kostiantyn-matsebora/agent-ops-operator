@@ -158,7 +158,7 @@ PRESETS = {
     "tier2": {
         "sets": {
             "home-assistant.enabled": "true",
-            "home-assistant.pipelines.enabled": "true",
+            "home-assistant.wiringEnabled": "true",
             "home-assistant.homeAssistant.endpoint": "https://ha.example.org",
             "home-assistant.homeAssistant.credentials.operatorToken": "placeholder-token",
         },
@@ -183,7 +183,7 @@ PRESETS = {
             "prometheus.mcp.enabled": "true",
             "prometheus.mcpServers.enabled": "true",
             "prometheus.mcpServers.backend": "http://vmsingle-vm.monitoring.svc:8429",
-            "prometheus.pipelines.enabled": "true",
+            "prometheus.wiringEnabled": "true",
         },
     },
 }
@@ -232,7 +232,7 @@ BUNDLES = {
             "MCP tooling": {"flag": "mcp.enabled", "requires": ["MCP server"]},
             "MCP server": {"flag": "mcpServers.enabled"},
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flag": "wiringEnabled",
                 "requires": ["Events lane", "Profile", "MCP tooling"],
             },
         },
@@ -251,7 +251,7 @@ BUNDLES = {
                 "sets": {"mcpServers.backend": "http://vmsingle-vm.monitoring.svc:8429"},
             },
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flag": "wiringEnabled",
                 "requires": ["Ingest lane", "Profile", "MCP tooling"],
             },
         },
@@ -281,7 +281,7 @@ BUNDLES = {
             # states the switch and the page states the escape hatch.
             "Admin MCP": {"flags": ["adminMcp.enabled", "adminMcpServer.enabled"]},
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flag": "wiringEnabled",
                 "requires": ["Ingest lane", "Profiles", "MCP tooling"],
             },
         },
@@ -314,7 +314,7 @@ BUNDLES = {
             },
             "Wiring": {
                 "flags": [
-                    "pipelines.enabled",
+                    "wiringEnabled",
                     "pipelines.observer.enabled",
                     "pipelines.operator.enabled",
                 ],

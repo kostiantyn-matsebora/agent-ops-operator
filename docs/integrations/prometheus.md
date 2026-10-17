@@ -46,7 +46,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set prometheus.mcp.enabled=true \
   --set prometheus.mcpServers.enabled=true \
   --set prometheus.mcpServers.backend=http://vmsingle-vm.monitoring.svc:8429 \
-  --set prometheus.pipelines.enabled=true
+  --set prometheus.wiringEnabled=true
 ```
 
 ```powershell
@@ -57,7 +57,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set prometheus.mcp.enabled=true `
   --set prometheus.mcpServers.enabled=true `
   --set prometheus.mcpServers.backend=http://vmsingle-vm.monitoring.svc:8429 `
-  --set prometheus.pipelines.enabled=true
+  --set prometheus.wiringEnabled=true
 ```
 
 > **`defaultSource.enabled` is not optional if you want the route to answer.**
@@ -125,7 +125,7 @@ Everything below is under `prometheus:`.
 | `mcpServers.enabled` | `false` | `true` to deploy the query server |
 | `mcpServers.backend` | **empty, required** | your Prometheus-API endpoint |
 | `profile.enabled` | `true` | `false` if you bring your own agent |
-| `pipelines.enabled` | `false` | `true` for a working route |
+| `wiringEnabled` | `false` | `true` for a working route |
 
 ### What things are called
 
@@ -220,11 +220,11 @@ receiver sets `send_resolved: false`.
 Turn the bundle's own route off and declare your own:
 
 ```sh
---set prometheus.enabled=true --set prometheus.pipelines.enabled=false
+--set prometheus.enabled=true --set prometheus.wiringEnabled=false
 ```
 
 ```powershell
---set prometheus.enabled=true --set prometheus.pipelines.enabled=false
+--set prometheus.enabled=true --set prometheus.wiringEnabled=false
 ```
 
 ### Your agent, its metrics tools
@@ -270,7 +270,7 @@ pipelines:
 
 ### Run yours beside the bundle's
 
-**Sources are shareable.** Leave `pipelines.enabled=true` and claim `alerts`
+**Sources are shareable.** Leave `wiringEnabled=true` and claim `alerts`
 from your own route as well.
 
 Each admitted alert then opens **one conversation per claiming pipeline**, each
@@ -298,7 +298,7 @@ MCPToolset/prometheus-observability
 Deployment/agentops-mcp-prometheus
 Service/agentops-mcp-prometheus
 
-# Wiring  (pipelines.enabled)
+# Wiring  (wiringEnabled)
 Pipeline/alert-triage
 ```
 <!-- /generated -->

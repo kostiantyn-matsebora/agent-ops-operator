@@ -31,6 +31,37 @@ for the source and the reference material beside this file.
     — the `SignalAdapter` CRD carries no generic pod-env passthrough, so
     that is the only delivery path that reaches the adapter's pod.
 
+### Changed
+
+**BREAKING: every bundle's wiring switch is now `<bundle>.wiringEnabled`,**
+not `<bundle>.pipelines.enabled`. `kubernetes`, `prometheus`, `home-assistant`
+and `pulse` all move.
+
+The old spelling named one of the two shapes a bundle's route can take — a
+`Pipeline`, under `global.agentops.wiringMode: pipelines` — even though the
+same flag also gates the `AgentCapability` objects `wiringMode: coordinator`
+renders instead. `wiringEnabled` says only WHETHER the bundle's own route(s)
+render. `wiringMode` still says AS WHAT.
+
+Per-route sub-flags are unaffected: `pulse.pipelines.observer.enabled` and
+`pulse.pipelines.operator.enabled` keep their names and their place under
+`pipelines:`.
+
+### Upgrade
+
+Action needed if you set any `<bundle>.pipelines.enabled` value. **The
+render FAILS until you move it**, deliberately — Helm never reports an
+unread values key, so an unguarded rename would present as a successful
+upgrade that silently turned wiring off.
+
+Rename `<bundle>.pipelines.enabled` to `<bundle>.wiringEnabled` for each
+bundle you set it on:
+
+```yaml
+kubernetes:
+  wiringEnabled: true   # was: pipelines.enabled
+```
+
 ## [15.0.0] — 2026-10-12
 
 - `manager` 0.58.0, `channel-telegram` 0.26.0, `gateway-telegram` 0.7.0.

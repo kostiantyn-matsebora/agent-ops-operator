@@ -53,7 +53,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set home-assistant.homeAssistant.endpoint=https://ha.example.org \
   --set home-assistant.homeAssistant.credentials.controlToken=<everyday-token> \
   --set home-assistant.homeAssistant.credentials.operatorToken=<admin-token> \
-  --set home-assistant.pipelines.enabled=true
+  --set home-assistant.wiringEnabled=true
 ```
 
 ```powershell
@@ -63,7 +63,7 @@ helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent
   --set home-assistant.homeAssistant.endpoint=https://ha.example.org `
   --set home-assistant.homeAssistant.credentials.controlToken=<everyday-token> `
   --set home-assistant.homeAssistant.credentials.operatorToken=<admin-token> `
-  --set home-assistant.pipelines.enabled=true
+  --set home-assistant.wiringEnabled=true
 ```
 
 **Off by default, and demo mode never enables it.** Every component needs an
@@ -143,7 +143,7 @@ Everything below is under `home-assistant:`.
 | `adminMcp.enabled` | `false` | `true` **with** `adminMcpServer.enabled` — see below |
 | `profiles.user.enabled` | `true` | `false` to drop the everyday agent |
 | `profiles.ops.enabled` | `true` | `false` to drop the repair agent |
-| `pipelines.enabled` | `false` | `true` for working routes |
+| `wiringEnabled` | `false` | `true` for working routes |
 
 ### What things are called
 
@@ -327,11 +327,11 @@ key conversation grouping on the exact wording.
 Turn the bundle's own routes off and declare your own:
 
 ```sh
---set home-assistant.enabled=true --set home-assistant.pipelines.enabled=false
+--set home-assistant.enabled=true --set home-assistant.wiringEnabled=false
 ```
 
 ```powershell
---set home-assistant.enabled=true --set home-assistant.pipelines.enabled=false
+--set home-assistant.enabled=true --set home-assistant.wiringEnabled=false
 ```
 
 ### Your agent, your house
@@ -409,7 +409,7 @@ MCPConfig/ha-admin-api
 MCPToolset/ha-admin
 Service/agentops-mcp-ha
 
-# Wiring  (pipelines.enabled)
+# Wiring  (wiringEnabled)
 Pipeline/ha-control
 Pipeline/ha-ops
 ```

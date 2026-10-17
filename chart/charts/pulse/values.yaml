@@ -352,8 +352,12 @@ mcpServer:
 # AgentCapability objects instead, claimed by the chart-rendered Coordinator
 # (`pulse.coordinatorContribution` — the SAME helper both files read, so the
 # two render paths cannot drift).
+#
+# `wiringEnabled` below says WHETHER these routes render at all, regardless
+# of which of the two shapes above `wiringMode` picks.
+wiringEnabled: false
+
 pipelines:
-  enabled: false
   observer:
     # Independently toggleable: set false to ship the admin route alone.
     enabled: true

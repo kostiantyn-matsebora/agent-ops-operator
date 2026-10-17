@@ -108,7 +108,7 @@ when unset.
 DEFAULTS OFF, and nothing forces it on: unlike kubernetes there is no demo
 path, so a plain boolean says everything a nullable one would. */ -}}
 {{- define "pulse.wiringActive" -}}
-{{- if and (include "pulse.active" .) .Values.pipelines.enabled -}}
+{{- if and (include "pulse.active" .) .Values.wiringEnabled -}}
 true
 {{- end -}}
 {{- end -}}

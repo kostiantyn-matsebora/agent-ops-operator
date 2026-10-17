@@ -400,7 +400,7 @@ func TestPulseEnabledArgsRenderEveryComponent(t *testing.T) {
 // shareable, so both routes render without conflict — and each binds its
 // own MCP pair.
 func TestPulsePipelinesModeClaimsTheSharedSourceTwice(t *testing.T) {
-	out := helmTemplate(t, pulseEnabledArgs("--set", "pulse.pipelines.enabled=true")...)
+	out := helmTemplate(t, pulseEnabledArgs("--set", "pulse.wiringEnabled=true")...)
 	got := pulsePipelineNames(out)
 	sort.Strings(got)
 	if want := []string{"pulse-observer", "pulse-operator"}; !equalStrings(got, want) {
@@ -428,7 +428,7 @@ func TestPulseWiringNamesOnlyWhatWasRendered(t *testing.T) {
 		"--set", "pulse.enabled=true",
 		"--set", "pulse.signal.defaultSource.enabled=true",
 		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
-		"--set", "pulse.pipelines.enabled=true",
+		"--set", "pulse.wiringEnabled=true",
 	}
 	bare := pulsePipelines(helmTemplate(t, base...))["pulse-observer"]
 	for _, needle := range []string{"pulse-observability", "pulse-observer-mcp", "mcpConfigs"} {
@@ -448,7 +448,7 @@ func TestPulseWiringNamesOnlyWhatWasRendered(t *testing.T) {
 // Each route is independently toggleable.
 func TestPulseRoutesAreIndependentlyToggleable(t *testing.T) {
 	out := helmTemplate(t, pulseEnabledArgs(
-		"--set", "pulse.pipelines.enabled=true",
+		"--set", "pulse.wiringEnabled=true",
 		"--set", "pulse.pipelines.operator.enabled=false")...)
 	got := pulsePipelineNames(out)
 	if want := []string{"pulse-observer"}; !equalStrings(got, want) {
@@ -462,7 +462,7 @@ func TestPulseRoutesAreIndependentlyToggleable(t *testing.T) {
 func TestPulseCoordinatorModeContributesBoth(t *testing.T) {
 	out := helmTemplate(t, pulseEnabledArgs(
 		"--set", "global.agentops.wiringMode=coordinator",
-		"--set", "pulse.pipelines.enabled=true")...)
+		"--set", "pulse.wiringEnabled=true")...)
 
 	if got := pulsePipelineNames(out); len(got) != 0 {
 		t.Fatalf("coordinator mode must render no Pipeline, got %v", got)
@@ -497,7 +497,7 @@ func TestPulseMcpServerEqualToRuntimeServiceAccountFailsRender(t *testing.T) {
 // Each active route gets its own ServiceAccount, bound no Kubernetes RBAC by
 // default — Pulse is reached entirely over HTTP/MCP.
 func TestPulseRoutesRenderOwnIdentityByDefault(t *testing.T) {
-	out := helmTemplate(t, pulseEnabledArgs("--set", "pulse.pipelines.enabled=true")...)
+	out := helmTemplate(t, pulseEnabledArgs("--set", "pulse.wiringEnabled=true")...)
 	for _, name := range []string{"agentops-pulse-observer", "agentops-pulse-operator"} {
 		findDocByKindAndName(t, out, "ServiceAccount", name)
 	}
