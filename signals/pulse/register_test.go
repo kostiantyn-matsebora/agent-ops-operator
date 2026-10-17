@@ -91,7 +91,7 @@ func TestValidHTTPURLRejectsShapes(t *testing.T) {
 		{"non-http scheme", "ftp://pulse.example.org", false},
 		{"scheme-less", "pulse.example.org", false},
 		{"no host", "http://", false},
-		{"embedded userinfo", "http://user:pass@pulse.example.org", false},
+		{"embedded userinfo", "http://user:pass@example.org", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validHTTPURL(tc.url)
