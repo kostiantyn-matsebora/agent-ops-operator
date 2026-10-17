@@ -536,7 +536,7 @@ network.
 {{- end }}
 
 {{- $np := (.Values.global.agentops).networkPolicy | default dict }}
-{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) }}
+{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) (and (index .Values "pulse") (index .Values "pulse" "enabled") (index .Values "pulse" "mcpServer" "enabled")) }}
 {{- if $np.enabled }}
 
 ────────────────────────────────────────────────────────────────────────────

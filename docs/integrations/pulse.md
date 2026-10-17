@@ -151,6 +151,8 @@ Everything below is under `pulse:`.
 | `profiles.observer.enabled` | `true` | `false` to drop the investigating agent |
 | `profiles.operator.enabled` | `true` | `false` to drop the annotating agent |
 | `pipelines.enabled` | `false` | `true` for working routes |
+| `pipelines.observer.enabled` | `true` | `false` to ship the operator route alone |
+| `pipelines.operator.enabled` | `true` | `false` to ship the observer route alone |
 
 ### What things are called
 
@@ -415,7 +417,7 @@ Service/agentops-mcp-pulse
 # Webhook exposure  (signal.ingress.enabled)
 Ingress/agentops-signal-pulse
 
-# Wiring  (pipelines.enabled)
+# Wiring  (pipelines.enabled / pipelines.observer.enabled / pipelines.operator.enabled)
 Pipeline/pulse-observer
 Pipeline/pulse-operator
 ServiceAccount/agentops-pulse-observer
@@ -423,6 +425,10 @@ ServiceAccount/agentops-pulse-operator
 ```
 <!-- /generated -->
 
+- **The Wiring row is the `pipelines` wiring mode.** Under
+  `global.agentops.wiringMode: coordinator` it renders
+  `AgentCapability/pulse-observer` and `AgentCapability/pulse-operator`
+  instead of the two Pipelines, claimed by the chart-rendered Coordinator.
 - **The `SignalSource` appears only under `signal.defaultSource.enabled`.**
   The chart renders the adapter CR — the reconciler owns the workload, the
   webhook Service and its listen address.

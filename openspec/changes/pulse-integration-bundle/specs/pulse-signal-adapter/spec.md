@@ -35,8 +35,8 @@ This adapter's registration config SHALL instead be read from the served
 SignalSource itself: the Pulse base URL from `spec.config.baseUrl`
 (schema-less JSON, polled via `GET /signal/sources?adapter=`), and the
 Pulse API token plus the optional HMAC signing secret from
-`spec.credentialsSecretRef` (kubelet-resolved `envFrom`, accepting both
-`token`/`TOKEN` and `signingSecret`/`SIGNING_SECRET` key casings).
+`spec.credentialsSecretRef` (kubelet-resolved `envFrom`, under the single
+documented keys `token` and `signingSecret`).
 
 This bundle still ships exactly one default source. The config shape is
 three flat fields — `{"baseUrl": "...", "webhookUrl": "...", "webhookHeaders": {...}}`,

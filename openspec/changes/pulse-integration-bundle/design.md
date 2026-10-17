@@ -60,16 +60,16 @@ Two mechanisms DO reach the pod, the same ones `signals/alertmanager` and
 | Pulse base URL (non-sensitive) | `SignalSource.spec.config`, polled via `GET /signal/sources?adapter=` |
 | API token, optional signing secret | `SignalSource.spec.credentialsSecretRef`, kubelet-resolved `envFrom` |
 
-The adapter reads both off the served `SourceInfo`, accepting `token`/
-`TOKEN` and `signingSecret`/`SIGNING_SECRET` key casings — `signals/ha`'s
-`credentialToken` pattern.
+The adapter reads both off the served `SourceInfo`, under the single
+documented keys `token` and `signingSecret`.
 
 This bundle still ships exactly one default source. The registration path
 is still NOT generalized to arbitrary hand-authored sources — the adapter
 registers whichever source it is currently serving, always the one the
 chart renders.
 
-`spec.config` here is one flat field (`{"baseUrl": "..."}`), not
+`spec.config` here is three flat fields (`baseUrl`, `webhookUrl`, optional
+`webhookHeaders`, see Decisions 1a and the delivery-URL decision below), not
 `signals/alertmanager`'s `register` sub-block. No per-source registration
 knobs beyond what this one bundle needs.
 

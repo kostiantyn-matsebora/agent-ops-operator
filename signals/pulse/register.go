@@ -129,26 +129,13 @@ func validHTTPURL(raw string) error {
 
 // pulseCredential resolves this source's projected credential: the Pulse
 // API token (required to register) and the optional HMAC signing secret,
-// both keys of the one Secret credentialsSecretRef names. Both casings are
-// accepted, mirroring signals/ha's credentialToken — Secrets written by
-// hand commonly use either.
+// both keys of the one Secret credentialsSecretRef names. One documented
+// shape: `token` and `signingSecret`, exactly as the chart renders them.
 func pulseCredential(info SourceInfo) (token, signingSecret string) {
 	if info.CredentialEnvPrefix == "" {
 		return "", ""
 	}
-	for _, key := range []string{"token", "TOKEN"} {
-		if v := os.Getenv(info.CredentialEnvPrefix + key); v != "" {
-			token = v
-			break
-		}
-	}
-	for _, key := range []string{"signingSecret", "SIGNING_SECRET"} {
-		if v := os.Getenv(info.CredentialEnvPrefix + key); v != "" {
-			signingSecret = v
-			break
-		}
-	}
-	return token, signingSecret
+	return os.Getenv(info.CredentialEnvPrefix + "token"), os.Getenv(info.CredentialEnvPrefix + "signingSecret")
 }
 
 // reconcileRegistration attempts one registration cycle for a served source

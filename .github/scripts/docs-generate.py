@@ -313,7 +313,11 @@ BUNDLES = {
                 "sets": {"signal.ingress.host": "pulse-adapter.example.org"},
             },
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flags": [
+                    "pipelines.enabled",
+                    "pipelines.observer.enabled",
+                    "pipelines.operator.enabled",
+                ],
                 "requires": ["Ingest lane", "Profiles", "MCP tooling"],
             },
         },
