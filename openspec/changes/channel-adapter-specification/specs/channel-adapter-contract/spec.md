@@ -68,8 +68,11 @@ The adapter's obligations SHALL include at least:
 
 Every operation and payload field table whose shape a named Go struct carries
 SHALL be rendered by the docs generator's `struct-table` marker from that
-struct's json tags, never typed by hand. The marker is the capability
-`runtime-specification` adds to `docs-generate.py`.
+struct's json tags, never typed by hand.
+
+The marker does not exist yet. It is the capability `runtime-specification`
+adds to `docs-generate.py`, an unmet prerequisite of this change until that
+change is archived.
 
 The struct-backed sources are:
 
