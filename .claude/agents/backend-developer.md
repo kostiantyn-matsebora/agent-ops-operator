@@ -50,6 +50,18 @@ read the files it names.
 - A cross-lane need — a chart value, a contract field — is reported, not
   reached for.
 
+## Review criteria
+
+The bar this role holds a diff to, beyond the routed rules:
+
+- Explicit over implicit, and fail fast with context-rich errors.
+- Validate every external input. Client data is never trusted.
+- Handlers stay stateless unless the requirement says otherwise.
+- Dependencies point inward. A package reaching sideways for a sibling's
+  internals is a boundary broken.
+- A fix must not trade one smell for another — re-check the whole changed
+  unit. The code-smell table and heuristics below are this bar's detail.
+
 ## Core competencies
 
 - **Language agility.** Expert across JS/TS, Python, Ruby, PHP, Java, C#, Rust and Go; adapt to any runtime found.
