@@ -3,7 +3,7 @@
 See `proposal.md` — Why. Both reconcilers build a `labels` map before calling
 `ensureAdapterWorkload`/`ensureAdapterService` (`adapterworkload.go`):
 
-- `signaladapter_controller.go:104` — `labels := map[string]string{"app.kubernetes.io/name": "agentops-signal-adapter", signalAdapterLabelKey: adapter.Name}`
+- `signaladapter_controller.go:103` — `labels := map[string]string{"app.kubernetes.io/name": "agentops-signal-adapter", signalAdapterLabelKey: adapter.Name}`
 - `channeladapter_controller.go:136` — `buildAdapterLabels`, same shape, `"agentops-adapter"` / `channelAdapterLabelKey`
 
 `signalAdapterLabelKey` (`agentops.dev/signal-adapter`) and

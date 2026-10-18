@@ -1,10 +1,10 @@
 ## 1. Signal adapter instance label — backend-developer
 
-- [x] 1.1 In `platform/manager/internal/controller/signaladapter_controller.go`, add `"app.kubernetes.io/instance": adapter.Name` to the `labels` map built before `ensureAdapterWorkload`/`ensureAdapterService` (around line 104), leaving `app.kubernetes.io/name` and `signalAdapterLabelKey` untouched. Verify by reading the updated reconciler and confirming the map carries both keys.
+- [x] 1.1 In `platform/manager/internal/controller/signaladapter_controller.go`, add `"app.kubernetes.io/instance": adapter.Name` to the `labels` map built before `ensureAdapterWorkload`/`ensureAdapterService` (around line 103), leaving `app.kubernetes.io/name` and `signalAdapterLabelKey` untouched. Verify by reading the updated reconciler and confirming the map carries both keys.
 
 ## 2. Channel adapter instance label — backend-developer
 
-- [x] 2.1 In `platform/manager/internal/controller/channeladapter_controller.go`, add `"app.kubernetes.io/instance": adapter.Name` to the `labels` map built before `ensureAdapterWorkload`/`ensureAdapterService` (around line 105), leaving `app.kubernetes.io/name` and `channelAdapterLabelKey` untouched. Verify by reading the updated reconciler and confirming the map carries both keys.
+- [x] 2.1 In `platform/manager/internal/controller/channeladapter_controller.go`, add `"app.kubernetes.io/instance": adapter.Name` to the map returned by `buildAdapterLabels` (around line 136), leaving `app.kubernetes.io/name` and `channelAdapterLabelKey` untouched. Verify by reading the updated reconciler and confirming the map carries both keys.
 
 ## 3. Unit tests
 
