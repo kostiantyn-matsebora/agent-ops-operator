@@ -27,8 +27,10 @@ job identity — the source name. All ticks of one job correlate to one
 conversation by id equality, never by falling back to an empty default
 grouping key.
 
-An at-least-once re-post of a tick repeats the same id and is absorbed by
-the manager's cooldown, or appended as the recurrence it is.
+An at-least-once re-post of a tick repeats the same id. Inside the source's
+`cooldownHours` window this is a re-send and is absorbed. Outside it, the job
+conversation has closed, and the repeat opens a new one adopting the same
+id, the recurrence it is.
 
 #### Scenario: Restart does not re-fire
 - **WHEN** the adapter fires the 06:00 tick, restarts at 06:02, and re-evaluates schedules

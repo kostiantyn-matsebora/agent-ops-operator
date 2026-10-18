@@ -312,7 +312,7 @@ signals land.
    dependency-free Go with a five-field cron parser and restart-safe cursors.
    It conforms to the [signal adapter
    specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-   1.0.0.
+   2.0.0.
 3. **Compare a different transport** —
    [`signals/alertmanager`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/alertmanager/)
    receives webhooks,

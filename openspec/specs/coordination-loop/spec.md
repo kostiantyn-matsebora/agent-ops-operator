@@ -82,6 +82,11 @@ Invoking an AgentCapability SHALL return the created (or reused) member conversa
 identity at once and SHALL NOT wait for a result. The invoke SHALL report
 whether it created a conversation or attached to an existing one.
 
+The member's `conversationId` SHALL be minted deterministically from the
+invoking `agents[]` entry name, never from the signal that opened the root.
+This is why a second invoke of the same entry attaches rather than
+duplicating: it is the same id-equality rule every signal routes by.
+
 #### Scenario: Attach reported
 - **WHEN** a coordinator invokes an AgentCapability with a correlation id a live member already carries
 - **THEN** the invoke returns that member's name and reports `attached`

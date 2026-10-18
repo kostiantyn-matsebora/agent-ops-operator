@@ -350,12 +350,16 @@ func (a *adapter) normalize(upd tgUpdate) (string, Signal, bool) {
 	}
 
 	return match, Signal{
-		// A fresh mint from the update's own delivery identity: unique per
-		// bot, so identical text twice never collapses on cooldown —
-		// repeating yourself is not dedup — while a crash-retried redelivery
-		// of the SAME update repeats the same id rather than posing as a
-		// second request.
-		InitiationID: "tg-" + strconv.FormatInt(upd.UpdateID, 10),
+		// A fresh mint from the update's own delivery identity, scoped to
+		// the matched SOURCE as well as the update id: update_id is a
+		// per-bot sequence, so two SignalSources (two bot tokens, or the
+		// same bot served twice) claimed by one Pipeline could otherwise
+		// mint the same bare update_id and collide. Identical text twice
+		// never collapses on cooldown — repeating yourself is not dedup —
+		// while a crash-retried redelivery of the SAME update on the SAME
+		// source repeats the same id rather than posing as a second
+		// request.
+		InitiationID: "tg-" + match + "-" + strconv.FormatInt(upd.UpdateID, 10),
 		Labels:       a.chatLabels(cfg, m.From, m.MessageID),
 		Kind:         "chat",
 		Payload:      text,
@@ -401,10 +405,11 @@ func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
 		}
 	}
 	return match, Signal{
-		// A fresh mint from the tap's own delivery identity: unique per tap,
-		// so tapping twice is two requests rather than one collapsed by
-		// cooldown.
-		InitiationID: "tg-cb-" + cb.ID,
+		// A fresh mint from the tap's own delivery identity, scoped to the
+		// matched source for the same reason the message path is: unique
+		// per tap, so tapping twice is two requests rather than one
+		// collapsed by cooldown.
+		InitiationID: "tg-cb-" + match + "-" + cb.ID,
 		Labels:       a.chatLabels(cfg, cb.From, handle),
 		Kind:         "chat",
 		Payload:      payload,

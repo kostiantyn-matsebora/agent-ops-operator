@@ -16,7 +16,7 @@ A recurrence after close takes the next `-N` suffix on the same base name, exact
 #### Scenario: An adopted id does not name the object
 
 - **WHEN** a signal with `initiationId` `{}:{alertname="NodeDown"}` and title text "NodeDown — ns-prod" opens a new conversation
-- **THEN** the conversation's name is `alert-node-down-ns`, and the id is recorded on the spec rather than in the name
+- **THEN** the conversation's name is `alert-node-down-ns`, and the id is recorded on `spec.conversationId` rather than in the name
 
 #### Scenario: Recurrence after close keeps the numbered suffix
 

@@ -242,6 +242,12 @@ reviewer missed by hand still fails there before the change lands.
 
 ### Requirement: Compatibility rules make additive change safe
 
+There is no compatibility shim for a missing `initiationId`: a `1.x`
+adapter, or any signal with no `initiationId`, gets the same `4xx` naming
+the field, never a manager-synthesized id — this is the COMPAT statement
+the previous requirement promises, matching `docs/contracts/signal-adapter.md`'s
+own `COMPAT-1`.
+
 The manager MUST ignore inbound payload fields it does not know. This codifies
 the decoding behavior already shipped, and it makes an additive field a MINOR
 change.

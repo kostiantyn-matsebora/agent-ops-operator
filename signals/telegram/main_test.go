@@ -54,8 +54,8 @@ func TestNormalizeChatSignal(t *testing.T) {
 	if sig.Kind != "chat" {
 		t.Fatalf("kind = %q, want chat", sig.Kind)
 	}
-	if sig.InitiationID != "tg-77" {
-		t.Fatalf("initiationId = %q, want tg-77", sig.InitiationID)
+	if sig.InitiationID != "tg-tg-chat-77" {
+		t.Fatalf("initiationId = %q, want tg-tg-chat-77 (scoped to the source, not just the update id)", sig.InitiationID)
 	}
 	if sig.Payload != "check the disk" {
 		t.Fatalf("payload = %q", sig.Payload)
@@ -257,8 +257,8 @@ func TestSelectionCarriesTheOriginalMessage(t *testing.T) {
 	if sig.Payload != "/k8s-observe who is on call?" {
 		t.Fatalf("payload = %q — the original was not carried forward", sig.Payload)
 	}
-	if sig.InitiationID != "tg-cb-cb-1" {
-		t.Fatalf("initiationId = %q", sig.InitiationID)
+	if sig.InitiationID != "tg-cb-tg-chat-cb-1" {
+		t.Fatalf("initiationId = %q, want tg-cb-tg-chat-cb-1 (scoped to the source)", sig.InitiationID)
 	}
 	if sig.Labels[labelMessage] != "8" {
 		t.Fatalf("selection must link to the ORIGINAL message, got %q", sig.Labels[labelMessage])

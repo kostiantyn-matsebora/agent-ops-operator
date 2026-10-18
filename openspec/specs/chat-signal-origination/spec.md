@@ -155,7 +155,11 @@ A chat surface applies the contract's one id rule — minted or propagated — a
 | a new human request | minting — the request is its own aggregation unit | a FRESH `initiationId`, own conversation by construction |
 | a person writing into a thread the manager already bound | propagation — the thread carries the manager-issued id back | the `conversationId` the manager stamped on that thread binding, passed through verbatim |
 
-A fresh origination id SHALL be minted deterministically from the transport's own delivery identity (the update or message id), so a re-delivered update repeats the same id instead of posing as a second request.
+A fresh origination id SHALL be minted deterministically from the transport's own delivery identity (the update or message id) scoped to the matched SOURCE, never from the delivery identity alone.
+
+A transport's delivery id is typically scoped per sender, so two SignalSources a Pipeline shares (sources are shareable, never exclusive) could otherwise collide on the same bare id.
+
+Scoping the mint to the source keeps a re-delivered update idempotent, while two different sources never collide.
 
 A thread reply routes by the same equality rule as every signal: the propagated id matches the open conversation and is appended as an input.
 

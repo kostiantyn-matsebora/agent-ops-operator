@@ -7,7 +7,7 @@ It is **also a channel**, so you can reply to an agent from the screen you are
 watching it on, and **also a signal source**, so you can start one.
 
 As a channel, it conforms to the [channel adapter specification](contracts/channel-adapter.md),
-version 1.0.0.
+version 1.1.0.
 
 It ships as its own pod, **enabled by default**, and is disabled with one value.
 

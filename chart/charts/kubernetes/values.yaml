@@ -63,6 +63,9 @@ eventsAdapter:
     # / drainingNodeBound) — it REQUIRES the nodes grant below (cluster-wide
     # installs only) to do anything; an earlier image ignores those keys
     # entirely and a namespaced install always ran this way.
+    # 0.5.0 mints initiationId from the owning workload's identity instead of
+    # sending a fingerprint for the manager to group — an earlier image still
+    # posts the retired field and the manager rejects it 4xx.
     tag: 0.5.0
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).

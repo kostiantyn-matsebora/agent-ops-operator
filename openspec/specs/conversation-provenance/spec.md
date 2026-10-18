@@ -9,7 +9,14 @@ API rather than an inference, and one that may nest to any depth.
 
 ### Requirement: A conversation adopts its correlation id at creation
 
-`Conversation.spec.conversationId` SHALL record the `initiationId` of the signal that opened the conversation, written once at creation and never changed. It replaces the derived signature and the `agentops.dev/signature-hash` label as the conversation's correlation identity.
+`Conversation.spec.conversationId` SHALL record the id that opened the conversation, written once at creation and never changed. A root adopts the signal's `initiationId`. A member adopts the id its `invoke` mints instead (`coordination-loop`'s own requirement).
+
+The derived signature and the `agentops.dev/signature-hash` label are removed. `conversationId` is the conversation's correlation identity now.
+
+```yaml
+spec:
+  conversationId: "{}:{alertname=\"NodeDown\"}"   # adopted verbatim, opaque
+```
 
 The id is OPAQUE. The manager SHALL compare it only for equality and SHALL NOT parse, derive or interpret it.
 
