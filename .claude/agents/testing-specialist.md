@@ -73,3 +73,11 @@ The bar this role holds a diff to, beyond the routed rules:
   undeclared dependency.
 - A fixture edit changes what the suite pins, so an incidental one is a
   finding, not a tidy-up.
+
+## Best practices
+
+- One logical assertion per test (where practical).
+- Names read like specifications.
+- Clean up test data in teardown.
+- Deterministic — no flakiness.
+- 100% pass before any merge.
