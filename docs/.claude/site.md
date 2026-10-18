@@ -6,18 +6,14 @@ lint. What is here is the directory around those pages.
 
 **Reference pages** — `concepts.md` (CRDs plus capability resolution),
 `contracts.md` (the manager-owned surfaces: aops MCP server, activity,
-introspection, metrics, HTTP API), `contracts/channel-adapter.md`
-(the one extension-point page still awaiting the versioned-spec rewrite),
-and one page per bundle subchart.
+introspection, metrics, HTTP API), and one page per bundle subchart.
 
-**`contracts/runtime.md` and `contracts/signal-adapter.md` are published,
-not reference pages** — front matter, permalink, a "Specifications" nav
-entry (`_data/nav.yml`). Same promotion as the Integrations group's four
-pages.
-
-`channel-adapter.md` earns the same treatment only in the change that
-rewrites it to the versioned-spec standard. Spec-ifying one contract is not
-spec-ifying the others.
+**`contracts/runtime.md`, `contracts/channel-adapter.md` and
+`contracts/signal-adapter.md` are published, not reference pages** — each
+carries front matter, its own permalink (`/contracts/runtime/`,
+`/contracts/channel-adapter/`, `/contracts/signal-adapter/`), and a
+"Specifications" nav entry (`_data/nav.yml`). Same promotion as the
+Integrations group's four pages.
 
 **The published site's Jekyll source** — `_config.yml`, `_layouts/`,
 `_includes/`, `_data/nav.yml`, `assets/` (css, js, vendored Red Hat fonts, the

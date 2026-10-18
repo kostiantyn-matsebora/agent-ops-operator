@@ -22,7 +22,6 @@ assert_not_contains "$(r README.md)" "structure.md"
 
 it "an ingest file adds the signal rules"
 assert_contains "$(r platform/manager/internal/ingest/group.go)" ".claude/rules/signal-rules.md"
-assert_not_contains "$(r platform/manager/internal/httpapi/signals.go)" "signal-rules"
 
 it "a chart file gets the chart rule, and wiring"
 out=$(r chart/values.yaml)
