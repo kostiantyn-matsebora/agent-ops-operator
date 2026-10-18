@@ -118,7 +118,7 @@ with
 |---|---|---|
 | `ensure-topic` | create a thread from `op.topic` | `{"threadId":"…"}`, opaque, your own id space |
 | `send` | post `op.message` | an empty body |
-| `close-topic` | archive the thread | an empty body, or a logged (never conditioned) failure |
+| `close-topic` | archive the thread | an empty body, or — on failure — just a log line, never a Conversation condition |
 | `delete-conversation` | gone for good — tombstone, archive, rename, your call | an empty body |
 
 **Delivery is at-least-once.** Dedup by `op.id`, and treat an already-closed

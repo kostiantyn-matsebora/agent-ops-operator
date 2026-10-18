@@ -456,6 +456,7 @@ An adapter implementing none of these stays fully conformant — see
 |---|---|---|
 | `kind` (op) | `ensure-topic`, `send`, `close-topic`, `delete-conversation` | — |
 | `kind` (message) | `signal`, `answer`, `relay`, `notice` | An adapter that does not recognise one SHOULD render the body rather than drop the message. |
+| `entries[].kind` | `builtin`, `pipeline`, `coordinator` | `builtin` is a manager command, the other two an addressable route. |
 | `level` | `info`, `warn` | Two-valued on purpose — an error needing durable recording surfaces as a Conversation condition, not as chat. |
 | `status` | `succeeded`, any other string | Reported on an `answer`, from the run's own outcome. |
 | `outcome` (read report) | `marked`, `skipped`, `failed` | — |
