@@ -2,7 +2,8 @@
 paths:
   - "signals/**"
   - "platform/manager/internal/ingest/**"
-  - "platform/manager/internal/httpapi/**"
+  - "platform/manager/internal/httpapi/signals.go"
+  - "platform/manager/internal/httpapi/server.go"
   - "platform/manager/internal/integration/charttemplate_test.go"
   - "chart/charts/kubernetes/**"
   - "chart/charts/home-assistant/**"
