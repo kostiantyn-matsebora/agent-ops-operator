@@ -63,6 +63,14 @@ The source of truth for every field named stays `NormalizedSignal` in
 `platform/manager/internal/httpapi/signals.go` — a reviewer traces each row to
 it by reading the source, not by running a generator.
 
+Dropping generated regeneration leaves no CI check of its own over this
+drift.
+
+The compensating control is the "A spec change carries conformance"
+governance rule. A specification change is not archivable until every
+shipped adapter's own conformance suite passes against it, so a table a
+reviewer missed by hand still fails there before the change lands.
+
 #### Scenario: A field is added in code only
 
 - **WHEN** a json-tagged field is added to the normalized signal struct

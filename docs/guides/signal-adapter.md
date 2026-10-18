@@ -121,9 +121,9 @@ never on the Event, because Kubernetes recreates Events per recurrence.
 signal must carry the label `agentops.dev/channel` (`LANE-3`), or the post is
 refused — its reply would have nowhere to go.
 
-**Verify:** two signals with the same `fingerprint`, posted to a source with
-`cooldownHours` set, collapse into one conversation rather than two (station
-3's at-least-once check).
+**Verify:** every signal in your batch names a `kind` from the table above,
+and any `chat` one carries `agentops.dev/channel` — station 3 is where the
+refusal would otherwise surface.
 
 ## 3. Push them
 
@@ -153,7 +153,9 @@ cooldown, so never build your own dedup to avoid them.
 
 **Verify:** post the same signal twice in a row. The response's
 `conversations` count stays at one, and `queued` reflects both posts
-accepted.
+accepted. On a source with `cooldownHours` set, repeating the same
+`fingerprint` after that window still collapses into the same conversation
+rather than opening a new one.
 
 ## 4. Persist cursors (if you poll)
 
