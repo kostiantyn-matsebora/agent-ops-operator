@@ -25,6 +25,25 @@ and the self-heal paragraph in the coordinating agent's own prompt.
 {{- $contrib := include "agentops.coordinatorContributions" . | fromYaml }}
 {{- $sources := $contrib.sources | default list }}
 {{- $agents := $contrib.agents | default list }}
+{{- /* OVERRIDE POINT (coordinator-agents-override): sits above the reaper
+fold-in, so `coordinator.agents`, when set, REPLACES the contributions-derived
+roster outright — never merged with it — before the reaper's own append runs
+against whichever roster (derived or overridden) is now current. Each entry
+is validated against the CRD's own "exactly one of" rule at render time,
+mirroring `coordinator-model`'s CEL, so a malformed override fails `helm
+template` with the entry's name rather than shipping a manifest the API
+server would then reject. */ -}}
+{{- range $c.agents }}
+{{- if and .capability .coordinator }}
+{{- fail (printf "coordinator.agents[%s]: carries both capability and coordinator — exactly one is required" .name) }}
+{{- end }}
+{{- if not (or .capability .coordinator) }}
+{{- fail (printf "coordinator.agents[%s]: carries neither capability nor coordinator — exactly one is required" .name) }}
+{{- end }}
+{{- end }}
+{{- if $c.agents }}
+{{- $agents = $c.agents }}
+{{- end }}
 {{- /* The reaper is an ORDINARY agents[] entry (coordinator-self-heal) — same
 shape as every bundle's, never a reaper-specific field here. Its description
 is deliberately an INSTRUCTION ("invoke this ONLY in response to...") rather
@@ -279,7 +298,12 @@ spec:
     {{- range $agents }}
     - name: {{ .name }}
       description: {{ .description | quote }}
+      {{- if .coordinator }}
+      coordinatorRef:
+        name: {{ .coordinator }}
+      {{- else }}
       capabilityRef:
         name: {{ .capability }}
+      {{- end }}
     {{- end }}
 {{- end }}

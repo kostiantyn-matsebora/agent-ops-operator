@@ -2629,6 +2629,85 @@ func assertDescriptionsUnderCap(t *testing.T, descs map[string]string, limit int
 	}
 }
 
+// ---- coordinator.agents override (coordinator-agents-override) -----------
+
+// Empty coordinator.agents (today's default) must not change the derived
+// roster at all — a bundle install upgrading the chart gets byte-identical
+// output.
+func TestCoordinatorAgentsOverrideEmptyIsByteIdentical(t *testing.T) {
+	before := findDocByKindAndName(t, everyBundleCoordinator(t), "Coordinator", "agentops-coordinator")
+	after := findDocByKindAndName(t, everyBundleCoordinator(t, "--set", "coordinator.agents=null"), "Coordinator", "agentops-coordinator")
+	if before != after {
+		t.Fatalf("an unset coordinator.agents must not change the rendered Coordinator:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// A set coordinator.agents REPLACES the contributions-derived roster
+// outright (design.md - Decisions, "Replace, never merge") and maps
+// `capability` to capabilityRef, `coordinator` to coordinatorRef.
+func TestCoordinatorAgentsOverrideReplacesRoster(t *testing.T) {
+	out := everyBundleCoordinator(t,
+		"--set", "coordinator.agents[0].name=stated-capability",
+		"--set", "coordinator.agents[0].description=a stated agent",
+		"--set", "coordinator.agents[0].capability=some-capability",
+		"--set", "coordinator.agents[1].name=stated-coordinator",
+		"--set", "coordinator.agents[1].description=a nested coordinator",
+		"--set", "coordinator.agents[1].coordinator=nested-coordinator",
+	)
+	doc := findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if !strings.Contains(doc, "- name: stated-capability") || !strings.Contains(doc, "capabilityRef:\n        name: some-capability") {
+		t.Errorf("the capability entry must map to capabilityRef:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- name: stated-coordinator") || !strings.Contains(doc, "coordinatorRef:\n        name: nested-coordinator") {
+		t.Errorf("the coordinator entry must map to coordinatorRef:\n%s", doc)
+	}
+	// None of the bundle-contributed entries survive — the override replaces,
+	// it never merges.
+	for _, retired := range []string{"k8s-observe", "k8s-operate", "alert-investigator", "ha-control", "ha-ops"} {
+		if strings.Contains(doc, "- name: "+retired) {
+			t.Errorf("coordinator.agents must replace the derived roster, found %q still rendered:\n%s", retired, doc)
+		}
+	}
+}
+
+// The reaper fold-in (coordinator-self-heal) still appends on top of a set
+// override — the override point sits ABOVE the fold-in (design.md).
+func TestCoordinatorAgentsOverrideKeepsReaperFoldIn(t *testing.T) {
+	out := everyBundleCoordinator(t,
+		"--set", "coordinator.agents[0].name=stated",
+		"--set", "coordinator.agents[0].description=a stated agent",
+		"--set", "coordinator.agents[0].capability=some-capability",
+	)
+	doc := findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if !strings.Contains(doc, "- name: stated") {
+		t.Errorf("the overridden entry must still render:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- name: reaper") {
+		t.Errorf("the reaper fold-in must still append on top of a set override:\n%s", doc)
+	}
+	if !strings.Contains(doc, "signalSourceRefs:") || !strings.Contains(doc, "- name: reaper-sweep") {
+		t.Errorf("the reaper's signalSourceRefs claim must still fold in on top of a set override:\n%s", doc)
+	}
+}
+
+// A malformed entry — both refs, or neither — fails the render naming the
+// entry, mirroring coordinator-model's own "exactly one of" CEL rule rather
+// than shipping a manifest the API server would reject.
+func TestCoordinatorAgentsOverrideShapeGuard(t *testing.T) {
+	neither := helmTemplateErr(t, "--set", "global.agentops.wiringMode=coordinator", "--set", "coordinator.agents[0].name=bad")
+	if !strings.Contains(neither, "coordinator.agents[bad]") || !strings.Contains(neither, "neither capability nor coordinator") {
+		t.Errorf("an entry with neither ref must fail naming it:\n%s", neither)
+	}
+	both := helmTemplateErr(t, "--set", "global.agentops.wiringMode=coordinator",
+		"--set", "coordinator.agents[0].name=bad",
+		"--set", "coordinator.agents[0].capability=a",
+		"--set", "coordinator.agents[0].coordinator=b",
+	)
+	if !strings.Contains(both, "coordinator.agents[bad]") || !strings.Contains(both, "both capability and coordinator") {
+		t.Errorf("an entry with both refs must fail naming it:\n%s", both)
+	}
+}
+
 // k8sEngineerRole returns the rendered systemPrompt body of the bundle's
 // profile, de-indented, with the outputFormat line that follows it cut off.
 func k8sEngineerRole(t *testing.T, args ...string) string {
