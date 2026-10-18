@@ -470,6 +470,56 @@ func TestSignalAdapterServiceOwnership(t *testing.T) {
 	}
 }
 
+// EVERY SIGNAL ADAPTER SHARED ONE app.kubernetes.io/name, SO LABEL-GROUPING
+// TOOLING (a Hubble service map, a dashboard, kubectl -l) could not tell
+// instances apart. app.kubernetes.io/instance now carries the CR name, on
+// the Deployment, its Pod template and its Service — additively, alongside
+// the unchanged app.kubernetes.io/name and the selector key.
+func TestSignalAdapterInstanceLabel(t *testing.T) {
+	ctx := context.Background()
+	mkSignalAdapter(t, "inst-sig-a")
+	reconcileSignalAdapter(t, "inst-sig-a")
+
+	b := &agentopsv1alpha1.SignalAdapter{}
+	b.Name, b.Namespace = "inst-sig-b", ns
+	b.Spec.Image = "example/signal-adapter:1"
+	port := int32(8081)
+	b.Spec.Port = &port
+	if err := k8sClient.Create(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSignalAdapter(t, "inst-sig-b")
+
+	var deployA, deployB appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("inst-sig-a")}, &deployA); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("inst-sig-b")}, &deployB); err != nil {
+		t.Fatal(err)
+	}
+	for _, deploy := range []appsv1.Deployment{deployA, deployB} {
+		if deploy.Labels["app.kubernetes.io/name"] != "agentops-signal-adapter" {
+			t.Fatalf("app.kubernetes.io/name changed: %+v", deploy.Labels)
+		}
+	}
+	if deployA.Labels["app.kubernetes.io/instance"] != "inst-sig-a" ||
+		deployA.Spec.Template.Labels["app.kubernetes.io/instance"] != "inst-sig-a" {
+		t.Fatalf("instance label wrong on A: deploy=%+v pod=%+v", deployA.Labels, deployA.Spec.Template.Labels)
+	}
+	if deployB.Labels["app.kubernetes.io/instance"] != "inst-sig-b" ||
+		deployB.Spec.Template.Labels["app.kubernetes.io/instance"] != "inst-sig-b" {
+		t.Fatalf("instance label wrong on B: deploy=%+v pod=%+v", deployB.Labels, deployB.Spec.Template.Labels)
+	}
+
+	var svcB corev1.Service
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.SignalAdapterDeploymentName("inst-sig-b")}, &svcB); err != nil {
+		t.Fatalf("Service not rendered for ported adapter: %v", err)
+	}
+	if svcB.Labels["app.kubernetes.io/instance"] != "inst-sig-b" {
+		t.Fatalf("instance label wrong on Service: %+v", svcB.Labels)
+	}
+}
+
 // THE IDENTITY IS A REFERENCE, AND THE OPERATOR CREATES NOTHING. This
 // reconciler was the only one in the project that created a ServiceAccount, and
 // it created accounts it was forbidden from granting anything to.

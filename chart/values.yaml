@@ -1352,6 +1352,12 @@ coordinator:
   # stanza at all: a zero field there means unset, not zero, so an install that
   # wants one states it (`maxAgents`, `maxTurns`, `deadline`).
   limits: {}
+  # REPLACES the contributions-derived roster outright when set (never
+  # merged with it) — empty (default) renders today's byte-identical
+  # derived roster. Each entry: `name`, `description`, and either
+  # `capability` (-> capabilityRef) or `coordinator` (-> coordinatorRef),
+  # exactly one of the two.
+  agents: []
 
 # THE SELF-HEAL REAPER (coordinator-self-heal) — an ORDINARY AgentProfile /
 # AgentCapability pair, rendered under `coordinator` mode ALONE (no separate

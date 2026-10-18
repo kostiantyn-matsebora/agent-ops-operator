@@ -1098,6 +1098,38 @@
         "signing secret",
         "gone"
       ]
+    },
+    {
+      "id": "channel-type-env",
+      "pattern": "CHANNEL_TYPE\\b",
+      "says": "ADAPTER_NAME is the one env name carrying an adapter's identity, on channel and signal adapters alike",
+      "allow": [
+        "removed",
+        "retired",
+        "replaced",
+        "replacing",
+        "renamed",
+        "no longer",
+        "no `CHANNEL_TYPE`",
+        "formerly",
+        "RETIRED"
+      ]
+    },
+    {
+      "id": "source-type-env",
+      "pattern": "SOURCE_TYPE\\b",
+      "says": "ADAPTER_NAME is the one env name carrying an adapter's identity, on channel and signal adapters alike",
+      "allow": [
+        "removed",
+        "retired",
+        "replaced",
+        "replacing",
+        "renamed",
+        "no longer",
+        "no `SOURCE_TYPE`",
+        "formerly",
+        "RETIRED"
+      ]
     }
   ]
 }
