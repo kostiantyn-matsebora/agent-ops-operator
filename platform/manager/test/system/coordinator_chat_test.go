@@ -102,7 +102,7 @@ func TestCoordinatorAddressedChatBindsChannelsAtCreationAndEscalates(t *testing.
 	// whether the Coordinator itself claims the source (discoverable
 	// addressing: reached, never named by a claim).
 	e.PostSignal(t, SourceTelegram, map[string]any{
-		"fingerprint": "e2e-coord-chat-" + stamp, "kind": "chat",
+		"initiationId": "e2e-coord-chat-" + stamp, "kind": "chat",
 		"payload": "/" + coordName + " " + task,
 		"labels":  map[string]string{"agentops.dev/channel": ChannelTelegram, "agentops.dev/sender": "e2e-operator"},
 	})

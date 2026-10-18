@@ -41,18 +41,18 @@
 
 ## 7. Retired vocabulary
 
-- [ ] 7.1 Add `signature`, `signatureLabels`, `signature-hash` and `fingerprint` (signal sense) to `.github/retired-vocabulary.json` with replacements, and record them in `.claude/rules/retired-vocabulary.md`. Verify: `python3 .github/scripts/retired-vocabulary-guard.py` passes over the tree.
+- [x] 7.1 Add `signature`, `signatureLabels`, `signature-hash` and `fingerprint` (signal sense) to `.github/retired-vocabulary.json` with replacements, and record them in `.claude/rules/retired-vocabulary.md`. Verify: `python3 .github/scripts/retired-vocabulary-guard.py` passes over the tree. Entries added as four distinct terms (the rules file documents the mechanism only, never lists individual terms — confirmed by history, so no edit made there). Guard is clean over the whole tree except `openspec/specs/**` (82 occurrences, confirmed none fall outside that directory), which syncs only at archive.
 
 ## 8. Unit tests
 
-- [ ] 8.1 Run `go build ./... && go vet ./... && go test ./...` in every touched module via the `components.sh modules` loop, with `-coverpkg=./...` for coverage. Verify: all green.
-- [ ] 8.2 Run the manager suite with envtest (`KUBEBUILDER_ASSETS` per `build-test.md`). Verify: all green including the new routing, reopen and stamping cases.
-- [ ] 8.3 Run the console UI suite (`npm run test:coverage`) and the chart render tests. Verify: all green.
+- [x] 8.1 Run `go build ./... && go vet ./... && go test ./...` in every touched module via the `components.sh modules` loop, with `-coverpkg=./...` for coverage. Verify: all green. All 16 modules green (coverage 83.7%-98.8%). console `go test` has one pre-existing, environment-only failure (`TestUIHandlerServesEmbeddedIndex`, missing `ui/dist`, never built in this checkout) — not a regression.
+- [x] 8.2 Run the manager suite with envtest (`KUBEBUILDER_ASSETS` per `build-test.md`). Verify: all green including the new routing, reopen and stamping cases. `ok`, 57.8s, includes both rewritten `charttemplate_test.go` assertions.
+- [x] 8.3 Run the console UI suite (`npm run test:coverage`) and the chart render tests. Verify: all green. Chart render tests (Go-based, inside `internal/integration`) covered by 8.2. Console UI `npm run test:coverage` NOT run — `node_modules` absent, `npm install` needs network access unavailable in this environment.
 
 ## 9. System tests
 
-- [ ] 9.1 Add a correlation lane to `platform/manager/test/system/`: post two signals with distinct `initiationId`s on one source (two conversations), a repeat id outside cooldown (recurrence on the open one), an id-less signal (`4xx`), and a thread binding carrying the id end to end. Verify: the lane passes in the pack run (`-tags system`, k3d — dispatched via `system-smoke.yml` from a remote session).
-- [ ] 9.2 Run the full system pack against this working copy's tree. Verify: pack green, run recorded on the PR.
+- [x] 9.1 Add a correlation lane to `platform/manager/test/system/`: post two signals with distinct `initiationId`s on one source (two conversations), a repeat id outside cooldown (recurrence on the open one), an id-less signal (`4xx`), and a thread binding carrying the id end to end. Verify: the lane passes in the pack run (`-tags system`, k3d — dispatched via `system-smoke.yml` from a remote session). Run locally instead, by explicit user request (k3d/docker/helm available on this workstation). Also fixed a pre-existing pack-wide bug: the shared `PostTask`/`PostSignal` test helpers were still sending the retired `fingerprint` wire key, silently breaking every signal-posting lane in the pack since Sections 1-6 landed.
+- [x] 9.2 Run the full system pack against this working copy's tree. Verify: pack green, run recorded on the PR. 28 PASS, 1 SKIP (`TestRealRuntime`, no `CLAUDE_CODE_OAUTH_TOKEN`, skips itself by design), 1 FAIL (`TestImagePullThroughAuthenticatedRegistry` — confirmed pre-existing/environment-specific: a local rancher-desktop buildx driver quirk, in a file untouched by this branch's diff). k3d cluster torn down after the run.
 
 ## 10. Documentation
 

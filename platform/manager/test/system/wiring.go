@@ -135,10 +135,12 @@ func waitPipelineReady(ctx context.Context, k *Kube, name string, timeout time.D
 
 // PostTask posts a task-lane signal to a source through the manager's own
 // ingest endpoint — an ordinary signal to a source a Ready Pipeline claims;
-// there is no route that names a Pipeline. Returns the response body.
-func (e *Env) PostTask(t *testing.T, source, fingerprint, payload string) map[string]any {
+// there is no route that names a Pipeline. id is this signal's initiationId,
+// adopted verbatim as the opened conversation's conversationId. Returns the
+// response body.
+func (e *Env) PostTask(t *testing.T, source, id, payload string) map[string]any {
 	t.Helper()
-	return e.PostSignal(t, source, map[string]any{"fingerprint": fingerprint, "kind": "task", "payload": payload, "title": fingerprint})
+	return e.PostSignal(t, source, map[string]any{"initiationId": id, "kind": "task", "payload": payload, "title": id})
 }
 
 // PostSignal posts one normalized signal.
@@ -154,18 +156,19 @@ func (e *Env) PostSignal(t *testing.T, source string, signal map[string]any) map
 	return res
 }
 
-// ConversationFor finds the conversation a task with this title opened.
-func (e *Env) ConversationFor(t *testing.T, fingerprint string, timeout time.Duration) *agentopsv1alpha1.Conversation {
+// ConversationFor finds the conversation a task with this title or
+// initiationId opened.
+func (e *Env) ConversationFor(t *testing.T, id string, timeout time.Duration) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	var found *agentopsv1alpha1.Conversation
-	waitFor(t, "a conversation for "+fingerprint, timeout, func() (bool, error) {
+	waitFor(t, "a conversation for "+id, timeout, func() (bool, error) {
 		items, err := e.K.Conversations(context.Background())
 		if err != nil {
 			return false, err
 		}
 		for i := range items {
 			c := &items[i]
-			if c.Spec.Title == fingerprint || c.Spec.ConversationID == fingerprint {
+			if c.Spec.Title == id || c.Spec.ConversationID == id {
 				found = c
 				return true, nil
 			}

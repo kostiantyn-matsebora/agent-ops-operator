@@ -367,7 +367,7 @@ func TestUnclaimedSourceDrops(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = e.K.Delete(context.Background(), chat) })
 	stamp := fmt.Sprint(time.Now().UnixNano())
-	e.PostSignal(t, chat.Name, map[string]any{"fingerprint": "chat-" + stamp, "kind": "chat", "payload": "hello " + stamp,
+	e.PostSignal(t, chat.Name, map[string]any{"initiationId": "chat-" + stamp, "kind": "chat", "payload": "hello " + stamp,
 		"labels": map[string]string{"agentops.dev/channel": ChannelTelegram, "agentops.dev/sender": "operator"}})
 	waitFor(t, "the Wired=False notice on the Telegram surface", 3*time.Minute, func() (bool, error) {
 		for _, c := range e.BotCalls(t, "sendMessage") {
