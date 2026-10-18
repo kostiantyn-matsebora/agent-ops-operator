@@ -228,6 +228,8 @@ paraphrased:
 | `MGR-3` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is dropped. |
 | `MGR-4` | The manager MUST supply every variable in [Environment](#environment). |
 | `MGR-5` | This endpoint set is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
+| `MGR-6` | The manager authenticates every call by `SEC-1`: the master token, or a per-`SignalAdapter` derived token scoped to the adapter's own name. |
+| `MGR-7` | An adapter needs no Kubernetes access: source listing, cursor state and status reporting reach it through this page's own endpoints. |
 
 ## Environment
 

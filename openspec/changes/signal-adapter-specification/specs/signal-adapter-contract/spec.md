@@ -109,9 +109,12 @@ document and moves MAJOR.
 
 The specification SHALL end with a Conformance section stating that an
 adapter implementing every requirement on the page except its Optional
-capabilities (the rows of the page's `Optional capabilities` table, each
-naming its trigger) is fully conformant — matching `docs/contracts/runtime.md`'s own
-shape, not a per-requirement test registry.
+capabilities is fully conformant. This matches `docs/contracts/runtime.md`'s
+own shape, not a per-requirement test registry.
+
+A capability is Optional only by being a row of the page's `Optional
+capabilities` table, each naming its trigger. Every other requirement is
+mandatory.
 
 Judging a shipped adapter conformant SHALL mean reading that adapter's own
 tests against every requirement on the page, including the conformance suite

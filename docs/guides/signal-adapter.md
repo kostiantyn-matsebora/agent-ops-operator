@@ -158,10 +158,13 @@ accepted.
 ## 4. Persist cursors (if you poll)
 
 A polling adapter needs an offset to survive a restart. Your pod is
-replaceable, so keep it on the manager, not on disk — see
-[`GET`/`PUT /signal/state/{source}/{key}`]({{ '/contracts/signal-adapter/' | relative_url }}#get-signalstatesourcekey)
-(`API-5`, an [optional capability]({{ '/contracts/signal-adapter/' | relative_url }}#optional-capabilities)
-a push-based adapter can skip entirely).
+replaceable, so keep it on the manager, not on disk.
+
+- Read it with [`GET`]({{ '/contracts/signal-adapter/' | relative_url }}#get-signalstatesourcekey).
+- Write it with [`PUT /signal/state/{source}/{key}`]({{ '/contracts/signal-adapter/' | relative_url }}#put-signalstatesourcekey) (`API-5`).
+
+This is an [optional capability]({{ '/contracts/signal-adapter/' | relative_url }}#optional-capabilities).
+A push-based adapter can skip it entirely.
 
 ```sh
 curl -X PUT -H "Authorization: Bearer $ADAPTER_TOKEN" \

@@ -39,8 +39,7 @@ precondition is now satisfied.
 
 ### Shared decisions are adopted, not re-made
 
-Versioning table (MAJOR/MINOR/PATCH), the two-party split, requirement-ID
-prefixes, anchors referenced by name, hand-written field tables, publication
+Versioning table (MAJOR/MINOR/PATCH), the two-party split, anchors referenced by name, hand-written field tables, publication
 (front matter + nav entry), governance as a scoped rule — all exactly as
 `runtime.md` ships them today. This design states only what differs for
 signal adapters.
