@@ -14,7 +14,7 @@ alertmanager:
   name: alertmanager
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-alertmanager
-    tag: 0.7.5
+    tag: 0.8.0
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.

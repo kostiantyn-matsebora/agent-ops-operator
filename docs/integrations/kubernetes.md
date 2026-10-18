@@ -32,6 +32,11 @@ second reaches an agent.
 Rules under `kubernetes.eventsAdapter.source.rules` decide which, see
 [Tune what reaches you](#tune-what-reaches-you).
 
+The adapter correlates on `<source>@<namespace>/<workload>` — the owning
+Deployment or similar, resolved through owner references — never the Event
+object or its reason, so a workload's whole run of failures across pods and
+restarts stays one conversation.
+
 ## What it may reach
 
 The agent reads pods, logs, events and nodes, then names the cause. Read-only

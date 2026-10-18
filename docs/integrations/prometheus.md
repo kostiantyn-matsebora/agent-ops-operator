@@ -31,7 +31,8 @@ specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
 ## What starts work
 
 A firing alert, posted to the bundle's webhook. One conversation per alert —
-the fingerprint collapses recurrences, not every repetition.
+the adapter correlates on Alertmanager's own `groupKey`, so recurrences land
+on the same conversation and never open a second one per repetition.
 
 The agent queries the metric that fired through six read-only tools, shows
 its evidence, and recommends rather than claims to have fixed anything.

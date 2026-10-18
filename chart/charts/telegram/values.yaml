@@ -30,11 +30,11 @@ channelAdapter:
     # are both agentops-adapter-<name>.
     # A workload named for the image does not exist.
     repository: ghcr.io/kostiantyn-matsebora/agentops-channel-telegram
-    # 0.26.0 holds no Telegram credential at all (chat-ops-broker-telegram-
+    # Holds no Telegram credential at all (chat-ops-broker-telegram-
     # gateway): every Bot API call is relayed through gateway-telegram's
     # POST /telegram/call/{method} instead, authenticated with the
     # gatewayUrl/gatewayToken binding rather than a bot token.
-    tag: 0.26.0
+    tag: 0.26.1
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -47,7 +47,7 @@ signalAdapter:
   name: telegram
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-telegram
-    tag: 0.6.5
+    tag: 0.6.6
   # Port the router pushes general-surface updates to.
   port: 8080
   resources: {}

@@ -58,16 +58,16 @@
 
 Reference docs:
 
-- [ ] 10.1 `docs/contracts.md`: `/signal/inbound` request shape and the `4xx` rejection. Verify: the page matches the 2.0.0 contract.
-- [ ] 10.2 `docs/concepts.md`: grouping/signature vocabulary replaced by the correlation id and equality routing. Verify: retired-vocabulary guard passes on the page.
-- [ ] 10.3 Re-run `python3 .github/scripts/docs-generate.py` after the CRD change and confirm `--check` passes — `docs/cr-reference.md` and every generated block.
-- [ ] 10.4 `docs/guides/signal-adapter.md`: authoring guidance mints an id, `signatureLabels` gone. Verify: guide's yaml blocks regenerate clean.
-- [ ] 10.5 `docs/integrations/prometheus.md`, `pulse.md`, `home-assistant.md`, `kubernetes.md`: state where each integration's id comes from. Verify: pages read as dense adopter prose, no renders table.
-- [ ] 10.6 `docs/CHANGELOG.md`: breaking change, upgrade steps (CRD apply, 1.x adapter rejection), newest first. Verify: entry present with the chart/image versions it ships in.
+- [x] 10.1 `docs/contracts.md`: `/signal/inbound` request shape and the `4xx` rejection. Verify: the page matches the 2.0.0 contract.
+- [x] 10.2 `docs/concepts.md`: grouping/signature vocabulary replaced by the correlation id and equality routing. Verify: retired-vocabulary guard passes on the page.
+- [x] 10.3 Re-run `python3 .github/scripts/docs-generate.py` after the CRD change and confirm `--check` passes — `docs/cr-reference.md` and every generated block. Also caught and fixed two gaps outside this task's own files: a stale `fingerprint` example in `chart/templates/NOTES.txt`, and a stale `chart/Chart.lock` that left the bumped subchart versions (10.6) unresolved — `docs-generate.py --check` now reports "51 generated file(s) up to date" with no version mismatch.
+- [x] 10.4 `docs/guides/signal-adapter.md`: authoring guidance mints an id, `signatureLabels` gone. Verify: guide's yaml blocks regenerate clean.
+- [x] 10.5 `docs/integrations/prometheus.md`, `pulse.md`, `home-assistant.md`, `kubernetes.md`: state where each integration's id comes from. Verify: pages read as dense adopter prose, no renders table.
+- [x] 10.6 `docs/CHANGELOG.md`: breaking change, upgrade steps (CRD apply, 1.x adapter rejection), newest first. Verify: entry present with the chart/image versions it ships in. Bumped chart 16.0.0→17.0.0 and every touched component's image/subchart version (manager, console, the five changed signal adapters, channel-telegram, and the prometheus/pulse/home-assistant/kubernetes/telegram subcharts), refreshing `chart/Chart.lock` to match. Archived the oldest changelog entry (13.0.1) to `docs/changelog/CHANGELOG-13.0.1.md` to hold the ten-version limit.
 
 Adopter site:
 
-- [ ] 10.7 `docs/index.md` (landing): grouping vocabulary replaced. Verify: retired-vocabulary guard passes.
-- [ ] 10.8 `docs/configuration.md`: bundle grouping values removed, `cooldownHours` documented as the one knob. Verify: matches the shipped values.
-- [ ] 10.9 `docs/installation.md`: the CRD upgrade note. Verify: upgrade section names `kubectl apply -f chart/crds/`.
-- [ ] 10.10 `docs/getting-started.md` and `docs/introduction.md`: check for grouping mentions, fix or record "none found". Verify: the verdict is recorded in this task on tick.
+- [x] 10.7 `docs/index.md` (landing): grouping vocabulary replaced. Verify: retired-vocabulary guard passes.
+- [x] 10.8 `docs/configuration.md`: bundle grouping values removed, `cooldownHours` documented as the one knob. Verify: matches the shipped values. Verdict: "none found" — `grouping` was never a parent-chart value here (bundle values are explicitly not duplicated into this page, per each integration page's own "this page does not repeat it" note), and `cooldownHours`'s per-bundle overrides are documented in `docs/guides/signal-adapter.md` and each integration page instead (10.4/10.5).
+- [x] 10.9 `docs/installation.md`: the CRD upgrade note. Verify: upgrade section names `kubectl apply -f chart/crds/`. Also bumped the install command's `--version` to 17.0.0 and added the 17.0.0 breaking-upgrade callout.
+- [x] 10.10 `docs/getting-started.md` and `docs/introduction.md`: check for grouping mentions, fix or record "none found". Verify: the verdict is recorded in this task on tick. Verdict: "none found" in both files.

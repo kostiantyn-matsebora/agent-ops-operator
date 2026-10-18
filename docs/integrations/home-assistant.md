@@ -36,6 +36,10 @@ one-off retry does not.
 The log listing is polled every 15 seconds. Nothing in Home Assistant needs
 enabling for it.
 
+The adapter correlates on `<source>@<integration>`, so every dwell cycle of
+the same failing integration lands on one conversation, however many log
+lines it sampled in between.
+
 Three more surfaces beside the log are on by default (config-entry state,
 repairs, fault sensors), a fourth — a pending-update digest — is one switch
 away. Filter any of them the same way you'd filter cluster events:

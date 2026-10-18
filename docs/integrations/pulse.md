@@ -24,7 +24,8 @@ way to act: an operator-state annotation.
 ## What starts work
 
 A firing Pulse alert, posted to the bundle's own webhook. One conversation per
-alert — the fingerprint collapses recurrences, not one per repetition.
+alert — the adapter correlates on Pulse's own alert id, so recurrences land
+on the same conversation and never open a second one per repetition.
 
 **Pulse only sends webhooks, it has no inbound registration of its own.** So
 "registering" means this adapter calling *Pulse's* API to tell it where to

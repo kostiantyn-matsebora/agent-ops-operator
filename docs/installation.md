@@ -49,13 +49,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 16.0.0 -n agent-ops
+     --version 17.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 16.0.0 -n agent-ops
+     --version 17.0.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -189,6 +189,23 @@ state somewhere of its own:
 
 ## Upgrade and uninstall
 
+**Apply the CRDs yourself, before every upgrade.** Helm never upgrades a CRD
+that came from a chart's `crds/` directory — an upgraded install keeps the
+OLD shape until you apply the new one, and a field the new CRD removed keeps
+silently pruning on every write:
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+```
+
+```powershell
+kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+```
+
+Working from a checkout? `kubectl apply -f chart/crds/` does the same thing.
+
+Then the release itself:
+
 ```sh
 helm upgrade agent-ops \
   oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
@@ -204,6 +221,10 @@ helm upgrade agent-ops `
 Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/CHANGELOG.md)
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
+
+**17.0.0 is BREAKING**: a signal adapter still posting `fingerprint` instead
+of `initiationId` gets a `4xx`, not a silent drop. See the changelog entry
+before you upgrade a production install.
 
 `helm uninstall` removes the workloads but leaves the CRDs, every Conversation
 and the context claim, so reinstalling finds your data where it was.

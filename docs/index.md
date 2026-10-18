@@ -206,9 +206,10 @@ agent-ops gives you a platform that puts an LLM agent behind the systems you
 already run. One Helm install and your cluster grows a brain and a pair of
 hands.
 
-agent-ops is more than a model and a prompt in a pod: grouping and cooldown, a
-capacity cap with a queue, context that survives a restart, per-route cluster
-identity, mediated egress and at-least-once delivery are already in it.
+agent-ops is more than a model and a prompt in a pod: correlation and
+cooldown, a capacity cap with a queue, context that survives a restart,
+per-route cluster identity, mediated egress and at-least-once delivery are
+already in it.
 
 {: .ao-cards}
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes native

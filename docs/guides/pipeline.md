@@ -320,7 +320,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-kubernetes
-    helm.sh/chart: "kubernetes-0.3.2"
+    helm.sh/chart: "kubernetes-0.4.0"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.

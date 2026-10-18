@@ -37,7 +37,7 @@ signal:
   name: pulse
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-pulse
-    tag: "0.1.0"
+    tag: "0.1.1"
   resources: {}
   # WHO MAY POST WEBHOOKS HERE, when global.agentops.networkPolicy is on.
   # Raw NetworkPolicyPeer entries, exactly like the parent chart's

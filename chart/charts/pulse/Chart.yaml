@@ -10,4 +10,4 @@ description: >-
   enabled by demo mode: every component needs a Pulse instance and a token no
   demo cluster has.
 type: application
-version: 0.1.0
+version: 0.1.1
