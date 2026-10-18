@@ -8,9 +8,10 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [15.1.0] — 2026-10-16
+## [16.0.0] — 2026-10-18
 
 - `signal-pulse` 0.1.0, `mcp-pulse` 0.1.0, bundle `pulse` 0.1.0.
+- `manager` 0.59.1, `console` 0.39.0, `runtime-claude` 0.11.0.
 - Bundles `kubernetes` 0.3.2, `prometheus` 0.2.0 and `home-assistant` 0.2.0
   take the breaking `wiringEnabled` rename (see Changed).
 
@@ -32,6 +33,11 @@ for the source and the reference material beside this file.
     the served `SignalSource`'s own `spec.config`/`spec.credentialsSecretRef`
     — the `SignalAdapter` CRD carries no generic pod-env passthrough, so
     that is the only delivery path that reaches the adapter's pod.
+- **The claude runtime reports cache writes.** `cacheCreationTokens` carries
+  through the work contract (`report.js` → `workreport.go` → the console),
+  and the Runs table splits usage into In / Cached / Written / Fresh / Out
+  instead of folding a cache write into In unexplained. A vendor reporting
+  no cache facts renders dashes, never zeros.
 
 ### Changed
 
@@ -48,6 +54,38 @@ render. `wiringMode` still says AS WHAT.
 Per-route sub-flags are unaffected: `pulse.pipelines.observer.enabled` and
 `pulse.pipelines.operator.enabled` keep their names and their place under
 `pipelines:`.
+
+### Fixed
+
+- **The chart-rendered Coordinator escalates to an acting agent instead of
+  claiming it has no tools.** Its prompt told it to delegate but never to
+  retry through an acting agent once an observing one ran out of evidence
+  for lack of a tool. The `kubernetes` bundle's profile had the matching
+  gap: turning `allowPodExecution` on removed the "no shell fallback"
+  paragraph instead of replacing it, leaving the agent no reason to connect
+  a tool-less workload to the `pods_exec` tool it had just been granted.
+- **The Coordinator anchors on its roster, not its own toolbox.** A
+  conversation that had been delegating correctly could drift into
+  inventorying its own generic tools and answering "this can't be answered
+  live" from them. The prompt now mandates `list_agents` as the first tool
+  call of every conversation, re-scopes the generic tools as housekeeping
+  rather than denying them, and reserves infeasibility verdicts to an
+  invoked agent's own report.
+- **The chart pinned `runtime-claude` and `runtime-copilot` releases that
+  predate the work-report contract**, three weeks after it landed — every
+  install's Runs view showed no model/tool-call statistics, with every code
+  test green since each half of the contract passed alone.
+  `pinned-runtime-guard.py` now fails `ci-green` on a pin whose tagged tree
+  doesn't carry the runtime's report module.
+- **A coordinator's internal round-trips with an invoked member no longer
+  inflate the console's unread counts.** A run triggered solely by a member
+  reaching back up with its report — already shown in full on the invoke
+  card — was counted as a new unread message like any other reply.
+- **`close-topic` no longer retries forever for a thread with no topic
+  yet.** `reconcileClosed` enqueued it unconditionally, even when
+  `ensure-topic` had never succeeded (auth failure, bot removed from a
+  group, rate limit), logging an error every few seconds for as long as
+  the conversation existed.
 
 ### Upgrade
 
