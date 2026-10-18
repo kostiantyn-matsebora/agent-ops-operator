@@ -2,10 +2,23 @@
 
 ## Purpose
 
-The `SignalSource` CRD: `spec.adapter` naming the serving `SignalAdapter`, opaque per-adapter `config`, name-only credential references, and manager-side grouping policy applied uniformly to every source. There are no built-in signal types — the manager hosts no signal transport, so every source needs a serving adapter.
+The `SignalSource` CRD: `spec.adapter` naming the serving `SignalAdapter`, opaque per-adapter `config`, name-only credential references, and manager-side cooldown keyed on the sender-minted `initiationId`, applied uniformly to every source. There are no built-in signal types — the manager hosts no signal transport, so every source needs a serving adapter.
 ## Requirements
 ### Requirement: SignalSource CRD splits shared metadata from type-specific config
-The `SignalSource` CRD SHALL consist of type-agnostic metadata — required immutable `spec.adapter` (the name of the `SignalAdapter` CR serving this source, a REFERENCE whose implementation defines and validates the sibling config; it replaced the open-string `spec.type`), typed `spec.grouping` (signatureLabels, windowDays, cooldownHours), optional `spec.credentialsSecretRef` — plus an optional opaque `spec.config` (`x-kubernetes-preserve-unknown-fields`) whose shape only the serving signal implementation defines and validates authoritatively. The operator SHALL never interpret `spec.config` semantically and SHALL never read the credential Secret's values (name-only projection). **When the serving `SignalAdapter` CR declares a config schema, the manager SHALL mechanically validate `spec.config` against that adapter-declared schema and report the result as an advisory `ConfigValid` condition — admission still accepts arbitrary config, and a violation never blocks serving or ingestion.** **The source SHALL carry no wiring: `channelRef` and `profileRef` are removed (BREAKING) — a `Pipeline` claim is the only way a source reaches a profile and channels.**
+The `SignalSource` CRD SHALL consist of type-agnostic metadata plus an optional opaque `spec.config`:
+
+- required immutable `spec.adapter` — the name of the `SignalAdapter` CR serving this source, a REFERENCE whose implementation defines and validates the sibling config (it replaced the open-string `spec.type`)
+- typed `spec.cooldownHours` — how long a repeat of one `initiationId` is suppressed
+- optional `spec.credentialsSecretRef`
+- optional opaque `spec.config` (`x-kubernetes-preserve-unknown-fields`), whose shape only the serving signal implementation defines and validates authoritatively
+
+The source SHALL carry no grouping policy: `spec.grouping` (`signatureLabels`, `windowDays`, `cooldownHours`) is removed (BREAKING). Which signals are one problem is decided where the `initiationId` is minted, and the manager routes by id equality alone.
+
+The operator SHALL never interpret `spec.config` semantically and SHALL never read the credential Secret's values (name-only projection).
+
+**When the serving `SignalAdapter` CR declares a config schema, the manager SHALL mechanically validate `spec.config` against that adapter-declared schema and report the result as an advisory `ConfigValid` condition — admission still accepts arbitrary config, and a violation never blocks serving or ingestion.**
+
+**The source SHALL carry no wiring: `channelRef` and `profileRef` are removed (BREAKING) — a `Pipeline` claim is the only way a source reaches a profile and channels.**
 
 #### Scenario: Wiring fields no longer accepted
 - **WHEN** a manifest sets `spec.channelRef` or `spec.profileRef` against the new CRD
@@ -56,42 +69,34 @@ The NUMBER of serving Ready Pipelines is what an operator needs to predict behav
 - **WHEN** two Ready Pipelines list one chat source
 - **THEN** the source reports `Wired=True` naming both, which is also what tells an operator that bare messages there will be refused as ambiguous
 
-### Requirement: Grouping policy stays manager-side for every source type
-Signature grouping, fingerprint cooldown, window-based conversation reuse, and recurrence-on-session SHALL be applied by the manager from `spec.grouping` for signals of every source type. Adapters SHALL NOT need to implement any grouping logic.
+### Requirement: Cooldown keys on the correlation id and survives restarts
 
-Cooldown state SHALL be durable rather than process memory: the manager SHALL record fingerprint suppression on the owning `SignalSource` and SHALL load it before applying cooldown to that source after a restart, so a restart does not re-open conversations for signals inside an active window. An in-memory map MAY remain the hot path, but SHALL NOT be the record. Recorded entries SHALL be pruned once past their window so the object stays bounded.
+The manager SHALL suppress a signal whose `initiationId` was admitted on the same source within the source's `spec.cooldownHours`, so at-least-once delivery is safe. A repeat inside the window is a re-send and is dropped. A repeat outside it is a re-notification and routes by id equality.
+
+Dedup granularity therefore matches the sender's own re-notification policy. `cooldownHours` is sized below the sender's re-notification interval, so a genuine re-notification appends as a recurrence rather than being absorbed.
+
+Cooldown state SHALL be durable rather than process memory:
+
+- suppression is recorded on the owning `SignalSource`, keyed by `initiationId`
+- the record is loaded before cooldown is applied to that source after a restart
+- an in-memory map MAY remain the hot path, but SHALL NOT be the record
+- entries past their window SHALL be pruned so the object stays bounded
 
 #### Scenario: Cooldown suppresses adapter-fed duplicates
-- **WHEN** an adapter re-delivers a signal with a fingerprint seen within `cooldownHours`
+- **WHEN** an adapter re-delivers a signal with an `initiationId` seen within `cooldownHours`
 - **THEN** no new input is created (at-least-once delivery is safe)
 
 #### Scenario: Cooldown survives a manager restart
-- **WHEN** the manager restarts and an adapter re-delivers a signal whose fingerprint was suppressed before the restart and is still inside `cooldownHours`
-- **THEN** the signal is still suppressed and no duplicate conversation is opened
+- **WHEN** the manager restarts and an adapter re-delivers a signal whose `initiationId` was suppressed before the restart and is still inside `cooldownHours`
+- **THEN** the signal is still suppressed and no duplicate conversation or input is created
 
-#### Scenario: Adapter-fed signals group manager-side
-- **WHEN** two normalized signals with different fingerprints but identical signature labels arrive via an adapter within the source's window
-- **THEN** they land in the same conversation, the second as a recurrence when a session exists
+#### Scenario: A re-notification outside the window appends
+- **WHEN** a sender re-notifies with the same `initiationId` after `cooldownHours`, while the adopted conversation is still open
+- **THEN** the signal is appended to that conversation as a recurrence
 
-#### Scenario: Same-signature batch collapses to one input
-- **WHEN** one inbound batch carries several fresh signals sharing a signature
+#### Scenario: Same-id batch collapses to one input
+- **WHEN** one inbound batch carries several fresh signals sharing an `initiationId`
 - **THEN** they land as ONE combined input on one conversation
-
-#### Scenario: Alerts keep the default labels when a source declares none
-- **WHEN** two `kind: alert` signals with different fingerprints but the same `alertname` and `namespace` arrive at a source with `grouping: {}`
-- **THEN** they land in the same conversation, exactly as before — the default labels still apply to the alert lane
-
-#### Scenario: Recurring jobs keep folding into one conversation
-- **WHEN** a job source with no `signatureLabels` fires successive ticks carrying distinct fingerprints
-- **THEN** the ticks land in the same conversation and later ones resume the agent session as recurrences
-
-#### Scenario: One-shot lanes key on the fingerprint
-- **WHEN** two `kind: task` signals with different fingerprints arrive at a source with no `signatureLabels`
-- **THEN** each opens its own conversation, rather than sharing the empty default signature
-
-#### Scenario: Explicit labels override the lane default
-- **WHEN** a source declares `signatureLabels` and receives `kind: task` signals sharing those label values
-- **THEN** they group under that signature — an operator who asks for grouping gets it in every lane
 
 #### Scenario: Suppression record stays bounded
 - **WHEN** recorded suppression entries age past their cooldown window

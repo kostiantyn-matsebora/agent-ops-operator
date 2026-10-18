@@ -132,14 +132,15 @@ that thread, cleared when delivery succeeds.
 - **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op
 
 ### Requirement: Suppression windows survive a manager restart
-Fingerprint cooldown state SHALL be durable for the lifetime of its window. The
-manager SHALL record suppression on the owning `SignalSource` and SHALL load it
-before applying cooldown to a source after a restart. Entries older than their
-window SHALL be pruned so the record stays bounded.
+Cooldown state keyed on `initiationId` SHALL be durable for the lifetime of its
+window. The manager SHALL record suppression on the owning `SignalSource` and
+SHALL load it before applying cooldown to a source after a restart.
+
+Entries older than their window SHALL be pruned so the record stays bounded.
 
 #### Scenario: Cooldown holds across a restart
-- **WHEN** the manager restarts and an adapter re-delivers a signal whose fingerprint is inside the source's cooldown window
-- **THEN** the signal is suppressed and no duplicate conversation is opened
+- **WHEN** the manager restarts and an adapter re-delivers a signal whose `initiationId` is inside the source's cooldown window
+- **THEN** the signal is suppressed and no duplicate conversation or input is created
 
 #### Scenario: Expired entries do not accumulate
 - **WHEN** suppression entries age past their window

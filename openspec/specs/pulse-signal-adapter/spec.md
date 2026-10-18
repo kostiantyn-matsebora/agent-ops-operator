@@ -165,19 +165,19 @@ genuinely signed delivery. This is not a cosmetic detail — it is the one
 place this adapter's behavior has to match Pulse's actual source rather
 than a best guess at the Generic webhook contract.
 
-A missing or invalid signature, or a signature missing the `v1=` prefix,
+A missing or invalid webhook signature, or one missing the `v1=` prefix,
 SHALL be rejected with 401 and push nothing. The timestamp SHALL be bound
 to a tolerance window to reject stale replays.
 
 With no signing secret configured, the endpoint accepts unsigned posts —
 parity with `signals/alertmanager`'s opt-in-per-source credential posture.
 
-#### Scenario: Valid signature is accepted
+#### Scenario: Valid webhook signature is accepted
 - **WHEN** a webhook arrives with a `v1=`-prefixed signature computed from
   the configured signing secret, inside the timestamp tolerance
 - **THEN** the adapter parses the body and pushes the normalized signal
 
-#### Scenario: Invalid signature is refused before parsing
+#### Scenario: Invalid webhook signature is refused before parsing
 - **WHEN** a webhook arrives with a signature that does not match, that is
   missing the `v1=` prefix, or outside the timestamp tolerance
 - **THEN** the adapter returns 401 and never parses the body
@@ -210,19 +210,26 @@ Matching `signals/alertmanager`'s firing-only parity, the adapter SHALL
 forward only Pulse's `"alert"` (firing) events as normalized signals.
 
 `"resolved"` events SHALL be accepted, so Pulse sees a 2xx and does not
-retry, but SHALL produce no signal. Grouping, cooldown and recurrence stay
-manager-side.
+retry, but SHALL produce no signal.
 
-The fingerprint SHALL be derived from the resource identity and the alert
-identity carried in the registered template's fields. The same underlying
-Pulse alert occurrence SHALL always yield the same fingerprint, across
-retries and across a firing/resolved pair.
+The `initiationId` SHALL be the Pulse alert id carried in the registered
+template's fields — the resource identity joined with the alert identity.
+That is Pulse's own incident model doing the grouping, so two unrelated
+alerts never share an id.
+
+The same underlying Pulse alert occurrence SHALL always yield the same id,
+across retries and across a firing/resolved pair.
+
+Cooldown and routing stay manager-side, keyed on that id.
 
 #### Scenario: A firing event produces one signal
 - **WHEN** a webhook body carries an `"alert"` event
-- **THEN** exactly one normalized signal is pushed, fingerprinted on the
-  resource and alert identity
+- **THEN** exactly one normalized signal is pushed, its `initiationId` the Pulse alert id from the resource and alert identity
 
 #### Scenario: A resolved event produces no signal
 - **WHEN** a webhook body carries a `"resolved"` event
 - **THEN** the adapter responds 200 and pushes no signal
+
+#### Scenario: Unrelated Pulse alerts never merge
+- **WHEN** a node-memory threshold alert and an unreachable-device incident both fire
+- **THEN** their signals carry distinct `initiationId` values and open distinct conversations
