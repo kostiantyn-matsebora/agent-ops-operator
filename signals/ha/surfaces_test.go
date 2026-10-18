@@ -117,8 +117,8 @@ func TestConfigEntryFailureIsReportedOnceWithItsReason(t *testing.T) {
 	if sig.Labels["surface"] != surfaceConfigEntry || sig.Labels["integration"] != "fully_kiosk" {
 		t.Fatalf("labels: %v", sig.Labels)
 	}
-	if sig.Fingerprint != "ha-logs@config-entry@fully_kiosk/e1" {
-		t.Fatalf("fingerprint = %q", sig.Fingerprint)
+	if sig.InitiationID != "ha-logs@config-entry@fully_kiosk/e1" {
+		t.Fatalf("initiationId = %q", sig.InitiationID)
 	}
 	if !strings.Contains(sig.Payload, "Cannot connect to host") || !strings.Contains(sig.Title, "fully_kiosk") {
 		t.Fatalf("the entry's own reason must be the message: title=%q payload=%s", sig.Title, sig.Payload)
@@ -161,8 +161,8 @@ func TestRepairIsReportedWithWhatItNamesAndWarningsAreNot(t *testing.T) {
 	if sig.Labels["surface"] != surfaceRepair || sig.Labels["integration"] != "automation" || sig.Labels["level"] != "ERROR" {
 		t.Fatalf("labels: %v", sig.Labels)
 	}
-	if sig.Fingerprint != "ha-logs@repair-issue@automation/ring_popup_service_not_found" {
-		t.Fatalf("fingerprint = %q", sig.Fingerprint)
+	if sig.InitiationID != "ha-logs@repair-issue@automation/ring_popup_service_not_found" {
+		t.Fatalf("initiationId = %q", sig.InitiationID)
 	}
 	if !strings.Contains(sig.Payload, "browser_mod.more_info") || !strings.Contains(sig.Title, "service_not_found") {
 		t.Fatalf("the placeholders must reach the reader: title=%q payload=%s", sig.Title, sig.Payload)
@@ -231,8 +231,8 @@ func TestUpdatesAreOneDigestRepostedOnGrowth(t *testing.T) {
 
 	waitFor(t, "the digest", func() bool { return len(fm.Posted()) == 1 })
 	sig := fm.Posted()[0]
-	if sig.Labels["surface"] != surfaceUpdate || sig.Labels["integration"] != "updates" || sig.Fingerprint != "ha-logs@pending-updates@pending" {
-		t.Fatalf("digest identity: %q %v", sig.Fingerprint, sig.Labels)
+	if sig.Labels["surface"] != surfaceUpdate || sig.Labels["integration"] != "updates" || sig.InitiationID != "ha-logs@pending-updates@pending" {
+		t.Fatalf("digest identity: %q %v", sig.InitiationID, sig.Labels)
 	}
 	if !strings.Contains(sig.Payload, "update.mushroom_update") || !strings.Contains(sig.Payload, "update.kiosk_mode_update") ||
 		!strings.Contains(sig.Title, "2 pending") {

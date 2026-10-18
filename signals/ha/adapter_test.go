@@ -530,7 +530,7 @@ func TestPostReportsClippingOnceAndTakesTheZeroAllowedExit(t *testing.T) {
 	a.cap = newEmitCap(1)
 	ctx := context.Background()
 
-	sigs := []Signal{{Fingerprint: "a"}, {Fingerprint: "b"}}
+	sigs := []Signal{{InitiationID: "a"}, {InitiationID: "b"}}
 	if !a.post(ctx, "src", sigs) {
 		t.Fatal("expected the signal within the cap to post")
 	}
@@ -571,7 +571,7 @@ func TestPostReportsFailureOnceThenRecovers(t *testing.T) {
 	a := newTestAdapter(fm)
 	ctx := context.Background()
 
-	if a.post(ctx, "src", []Signal{{Fingerprint: "x"}}) {
+	if a.post(ctx, "src", []Signal{{InitiationID: "x"}}) {
 		t.Fatal("expected the post to fail while the manager is down")
 	}
 	failReports := func() int {
@@ -588,7 +588,7 @@ func TestPostReportsFailureOnceThenRecovers(t *testing.T) {
 	}
 
 	// Still down: reportPostFailure's LoadOrStore guard must keep this quiet.
-	if a.post(ctx, "src", []Signal{{Fingerprint: "x"}}) {
+	if a.post(ctx, "src", []Signal{{InitiationID: "x"}}) {
 		t.Fatal("expected the post to keep failing")
 	}
 	if failReports() != 1 {
@@ -596,7 +596,7 @@ func TestPostReportsFailureOnceThenRecovers(t *testing.T) {
 	}
 
 	fm.SetFailInbound(false)
-	if !a.post(ctx, "src", []Signal{{Fingerprint: "x"}}) {
+	if !a.post(ctx, "src", []Signal{{InitiationID: "x"}}) {
 		t.Fatal("expected the post to succeed once the manager recovers")
 	}
 	recovered := false

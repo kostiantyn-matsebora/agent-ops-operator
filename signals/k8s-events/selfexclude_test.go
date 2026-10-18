@@ -147,8 +147,8 @@ func TestDeliverEmitsNothingForRuntimePodEvents(t *testing.T) {
 }
 
 // The failing-pod loop, exercised as the sequence that produces it: successive
-// pod names, each of which would otherwise be a fresh fingerprint AND a fresh
-// signature, so nothing downstream could collapse them.
+// pod names, each of which would otherwise be a fresh initiationId, so
+// nothing downstream could collapse them.
 func TestSuccessiveRuntimePodNamesAllExcluded(t *testing.T) {
 	mgr := newFakeManager()
 	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))

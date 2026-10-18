@@ -54,7 +54,9 @@ type pendingEntry struct {
 	// recurred, and is the transient the dwell exists to drop.
 	lastSeen time.Time
 	// sample is the most recent signal, used as the emitted signal's base so
-	// labels, fingerprint and title stay exactly as normalize built them.
+	// labels and title stay exactly as normalize built them. Its
+	// InitiationID is overridden at decide() time with the entry's own
+	// stable id — see initiationID().
 	sample Signal
 }
 
@@ -162,8 +164,7 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule, count i
 
 	// Refractory: this integration was reported recently, so there is nothing
 	// to add by reporting it again. The manager already collapses repeats
-	// (fingerprint cooldown, signature window reuse) — re-posting only spends
-	// round trips.
+	// (initiationId cooldown) — re-posting only spends round trips.
 	if last, ok := q.emitted[key]; ok {
 		quiet := rule.dwell
 		if quiet < minRefractory {
@@ -320,7 +321,23 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	if len(e.members) > 1 {
 		sig.Title = fmt.Sprintf("%s (%d places)", sig.Title, len(e.members))
 	}
+	// The entry's own key — source + integration — IS the condition identity
+	// this queue already decides "same problem" by (it is what the
+	// refractory window and the due-entry grouping key on). A member's own
+	// per-record id (normalize's source@logger@location) only identifies
+	// which record happened to be the latest sample, which would drift
+	// across dwell cycles whenever breadth makes a different member last —
+	// splitting one recurring integration's history across conversations,
+	// the exact failure this correlation id exists to prevent.
+	sig.InitiationID = e.initiationID()
 	return sig, true
+}
+
+// initiationID is this entry's stable correlation id across every dwell
+// cycle it recurs through: source-scoped, so two SignalSources watching two
+// Home Assistant instances never collide on a common integration name.
+func (e *pendingEntry) initiationID() string {
+	return e.source + "@" + e.integration
 }
 
 // evidence renders the accumulated burst. This is why dwell is a feature rather

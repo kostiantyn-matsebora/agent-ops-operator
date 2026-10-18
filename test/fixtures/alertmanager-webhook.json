@@ -1,6 +1,7 @@
 {
   "receiver": "agentops",
   "status": "firing",
+  "groupKey": "{}/{alertname=\"A\"}",
   "alerts": [
     {
       "status": "firing",

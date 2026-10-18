@@ -8,15 +8,18 @@
 //
 //	config:   {"schedule": "0 6 * * *", "input": "...", "title": "..."}   (opaque spec.config)
 //	cursor:   state key "last-fire" via /signal/state (restart-safe)
-//	firing:   POST /signal/inbound, kind=job, fingerprint "<source>@<tick>"
+//	firing:   POST /signal/inbound, kind=job, initiationId "<source>" (the job's own identity)
 //
-// The deterministic fingerprint makes at-least-once delivery idempotent (the
-// manager's cooldown absorbs a re-fired tick), and the stable labels give
-// every source its own signature under the default signatureLabels — so
-// consecutive runs land in ONE conversation, later ticks resuming the agent
-// session (a recurring job that remembers). Missed ticks during downtime fire
-// at most once (the latest missed tick) on recovery; ticks from before a
-// source was first seen never fire.
+// initiationId is the SOURCE NAME, not the tick — every tick of one job is
+// the same recurring job, so all of them correlate to one conversation,
+// later ticks resuming the agent session. A crash between firing and
+// persisting the cursor re-fires the same tick under the same id, which the
+// manager's cooldown absorbs as a re-send (a cron source sizes its own
+// cooldownHours below its schedule interval so consecutive, DISTINCT ticks
+// still reach the open conversation as recurrences rather than being
+// dropped). Missed ticks during downtime fire at most once (the latest
+// missed tick) on recovery; ticks from before a source was first seen never
+// fire.
 //
 // Run single-instance (the SignalAdapter reconciler's singleton default) —
 // two schedulers would double-fire ticks.
@@ -152,8 +155,8 @@ func (a *adapter) refreshSources(ctx context.Context) {
 }
 
 // evaluate fires the latest elapsed tick of one source, if any. Fire-then-
-// persist: a crash between the two re-fires the same fingerprint, which the
-// manager's cooldown absorbs.
+// persist: a crash between the two re-fires the same tick under the same
+// initiationId, which the manager's cooldown absorbs.
 func (a *adapter) evaluate(ctx context.Context, name string, now time.Time) error {
 	a.mu.Lock()
 	src, ok := a.sources[name]
@@ -186,14 +189,13 @@ func (a *adapter) evaluate(ctx context.Context, name string, now time.Time) erro
 
 	tick := latest.UTC().Format(time.RFC3339)
 	err = a.mgr.Inbound(ctx, name, []Signal{{
-		Fingerprint: name + "@" + tick,
-		// distinct default-signature labels per source, so different cron
-		// sources never group into one conversation; "source" supports custom
-		// grouping.signatureLabels
-		Labels:  map[string]string{"alertgroup": "cron", "alertname": name, "source": name},
-		Title:   src.cfg.Title,
-		Payload: src.cfg.Input,
-		Kind:    "job",
+		// The source's own job identity — every tick of this job shares it,
+		// so all of them correlate to the one recurring conversation.
+		InitiationID: name,
+		Labels:       map[string]string{"alertgroup": "cron", "alertname": name, "source": name},
+		Title:        src.cfg.Title,
+		Payload:      src.cfg.Input,
+		Kind:         "job",
 	}})
 	if err != nil {
 		return err

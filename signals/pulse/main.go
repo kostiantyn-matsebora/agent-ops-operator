@@ -275,7 +275,7 @@ func normalize(e pulseEvent) []Signal {
 	title := "🔍 " + e.Resource
 	payloadJSON, _ := json.MarshalIndent(e, "", "  ")
 	return []Signal{{
-		Fingerprint: e.fingerprint(),
+		InitiationID: e.initiationID(),
 		Labels: map[string]string{
 			"resource": e.Resource, "resourceType": e.ResourceType,
 			"severity": e.Severity, "node": e.Node,

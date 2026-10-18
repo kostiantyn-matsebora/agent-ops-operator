@@ -44,7 +44,7 @@ func allDayMutedFilter(t *testing.T, matchers ...string) *filter {
 }
 
 func sigWith(reason string) Signal {
-	return Signal{Fingerprint: "fp-" + reason, Labels: map[string]string{"reason": reason}}
+	return Signal{InitiationID: "id-" + reason, Labels: map[string]string{"reason": reason}}
 }
 
 func TestTransientNoiseInsideTheWindowIsDropped(t *testing.T) {
@@ -156,5 +156,3 @@ func TestAnActiveMuteIsReportedAndItsCostSummarised(t *testing.T) {
 		return false
 	})
 }
-
-

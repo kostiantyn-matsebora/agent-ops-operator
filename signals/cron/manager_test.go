@@ -79,7 +79,7 @@ func TestManagerInboundPostsBody(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body.Source != "src1" || len(body.Signals) != 1 || body.Signals[0].Fingerprint != "src1@t1" {
+		if body.Source != "src1" || len(body.Signals) != 1 || body.Signals[0].InitiationID != "src1" {
 			t.Fatalf("unexpected body: %+v", body)
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -87,7 +87,7 @@ func TestManagerInboundPostsBody(t *testing.T) {
 	defer srv.Close()
 
 	m := NewManager(srv.URL, "t")
-	err := m.Inbound(context.Background(), "src1", []Signal{{Fingerprint: "src1@t1", Kind: "job"}})
+	err := m.Inbound(context.Background(), "src1", []Signal{{InitiationID: "src1", Kind: "job"}})
 	if err != nil {
 		t.Fatalf("Inbound: %v", err)
 	}

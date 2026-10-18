@@ -154,8 +154,16 @@ func TestWebhookRoutingAndFiringFilter(t *testing.T) {
 		t.Fatalf("firing filter: %d signals", len(signals))
 	}
 	first := signals[0].(map[string]any)
-	if first["fingerprint"] != "fp-a" || first["title"] != "🔍 A — ns1" {
+	second := signals[1].(map[string]any)
+	wantID := `{}/{alertname="A"}`
+	if first["initiationId"] != wantID || first["title"] != "🔍 A — ns1" {
 		t.Fatalf("normalization: %+v", first)
+	}
+	// One Alertmanager group is one conversation: both firing alerts of this
+	// webhook body share the group's groupKey as their initiationId, even
+	// though they carry different alertnames.
+	if second["initiationId"] != wantID {
+		t.Fatalf("both firing alerts must share the group's initiationId: %+v vs %+v", first, second)
 	}
 	if !strings.Contains(first["payload"].(string), `"generatorURL": "http://alertmanager.example.com/a"`) {
 		t.Fatalf("payload shape: %s", first["payload"])
@@ -173,19 +181,35 @@ func TestWebhookRoutingAndFiringFilter(t *testing.T) {
 	}
 }
 
-func TestFingerprintFallbackIsStable(t *testing.T) {
-	a1 := labelFingerprint(map[string]string{"b": "2", "a": "1"})
-	a2 := labelFingerprint(map[string]string{"a": "1", "b": "2"})
+func TestGroupLabelsFallbackIsStable(t *testing.T) {
+	a1 := groupLabelsFallbackID(map[string]string{"b": "2", "a": "1"})
+	a2 := groupLabelsFallbackID(map[string]string{"a": "1", "b": "2"})
 	if a1 != a2 || a1 == "" {
 		t.Fatalf("fallback not stable across map order: %q vs %q", a1, a2)
 	}
-	if labelFingerprint(map[string]string{"a": "1"}) == a1 {
-		t.Fatal("different labels must derive different fingerprints")
+	if groupLabelsFallbackID(map[string]string{"a": "1"}) == a1 {
+		t.Fatal("different groupLabels must derive different ids")
 	}
-	// normalize applies the fallback when the sender omits the fingerprint
-	signals := normalize([]amAlert{{Status: "firing", Labels: map[string]string{"a": "1", "b": "2"}}})
-	if len(signals) != 1 || signals[0].Fingerprint != a1 {
+	// normalize applies the fallback when the sender omits groupKey
+	signals := normalize(amPayload{
+		GroupLabels: map[string]string{"a": "1", "b": "2"},
+		Alerts:      []amAlert{{Status: "firing", Labels: map[string]string{"a": "1", "b": "2"}}},
+	})
+	if len(signals) != 1 || signals[0].InitiationID != a1 {
 		t.Fatalf("normalize fallback: %+v", signals)
+	}
+}
+
+// TestGroupKeyWinsOverFallback pins that a present groupKey is used verbatim
+// and the groupLabels fallback never runs beside it.
+func TestGroupKeyWinsOverFallback(t *testing.T) {
+	signals := normalize(amPayload{
+		GroupKey:    "{}/{alertname=\"X\"}",
+		GroupLabels: map[string]string{"alertname": "X"},
+		Alerts:      []amAlert{{Status: "firing", Labels: map[string]string{"alertname": "X"}}},
+	})
+	if len(signals) != 1 || signals[0].InitiationID != `{}/{alertname="X"}` {
+		t.Fatalf("groupKey must win verbatim: %+v", signals)
 	}
 }
 

@@ -16,10 +16,14 @@
 // each against the same contract and drift shows up as messages silently
 // ignored, so both sides get the same test.
 //
-// NO adapter-side grouping: cooldown, signature grouping, window reuse and
-// recurrence stay manager-side from SignalSource.spec.grouping, and routing
-// requires the source's Pipeline claim (an unclaimed chat source drops with
-// Wired=False and the reason travels back to the user's surface).
+// A general-surface message is always its own aggregation unit — a FRESH
+// initiationId, minted here from the update's own delivery identity, never
+// propagated from anything remembered. (A reply inside a thread the manager
+// already bound is channel-telegram's continuation side, not this one.) NO
+// adapter-side cooldown or recurrence: those stay manager-side, keyed on
+// that id, and routing requires the source's Pipeline claim (an unclaimed
+// chat source drops with Wired=False and the reason travels back to the
+// user's surface).
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default
 // "telegram"), LISTEN_ADDR (default ":8080" — in-cluster the reconciler
@@ -346,13 +350,16 @@ func (a *adapter) normalize(upd tgUpdate) (string, Signal, bool) {
 	}
 
 	return match, Signal{
-		// update_id is unique per bot, so identical text twice never
-		// collapses on cooldown — repeating yourself is not dedup.
-		Fingerprint: "tg-" + strconv.FormatInt(upd.UpdateID, 10),
-		Labels:      a.chatLabels(cfg, m.From, m.MessageID),
-		Kind:        "chat",
-		Payload:     text,
-		Title:       title(text),
+		// A fresh mint from the update's own delivery identity: unique per
+		// bot, so identical text twice never collapses on cooldown —
+		// repeating yourself is not dedup — while a crash-retried redelivery
+		// of the SAME update repeats the same id rather than posing as a
+		// second request.
+		InitiationID: "tg-" + strconv.FormatInt(upd.UpdateID, 10),
+		Labels:       a.chatLabels(cfg, m.From, m.MessageID),
+		Kind:         "chat",
+		Payload:      text,
+		Title:        title(text),
 	}, true
 }
 
@@ -394,13 +401,14 @@ func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
 		}
 	}
 	return match, Signal{
-		// The callback id is unique per tap, so tapping twice is two requests
-		// rather than one collapsed by cooldown.
-		Fingerprint: "tg-cb-" + cb.ID,
-		Labels:      a.chatLabels(cfg, cb.From, handle),
-		Kind:        "chat",
-		Payload:     payload,
-		Title:       title(payload),
+		// A fresh mint from the tap's own delivery identity: unique per tap,
+		// so tapping twice is two requests rather than one collapsed by
+		// cooldown.
+		InitiationID: "tg-cb-" + cb.ID,
+		Labels:       a.chatLabels(cfg, cb.From, handle),
+		Kind:         "chat",
+		Payload:      payload,
+		Title:        title(payload),
 	}, true
 }
 

@@ -44,11 +44,11 @@ type SourceInfo struct {
 
 // Signal is the contract's normalized signal shape.
 type Signal struct {
-	Fingerprint string            `json:"fingerprint"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	Payload     string            `json:"payload,omitempty"`
-	Kind        string            `json:"kind,omitempty"` // "alert" | "job"
+	InitiationID string            `json:"initiationId"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	Payload      string            `json:"payload,omitempty"`
+	Kind         string            `json:"kind,omitempty"` // "alert" | "job"
 }
 
 func (m *Manager) do(ctx context.Context, method, path string, in, out any) error {

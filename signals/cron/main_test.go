@@ -372,7 +372,7 @@ func TestEvaluateNoTickDueIsNoop(t *testing.T) {
 
 // TestEvaluateFiresElapsedTickThenPersistsCursor closes the main firing path:
 // a due tick posts exactly one Inbound signal with the documented
-// fingerprint/labels/kind shape, then persists the fired tick (not "now").
+// initiationId/labels/kind shape, then persists the fired tick (not "now").
 func TestEvaluateFiresElapsedTickThenPersistsCursor(t *testing.T) {
 	es := &evalServer{getStateVal: "2026-08-05T06:00:00Z"}
 	srv := newEvalServer(t, es)
@@ -390,7 +390,7 @@ func TestEvaluateFiresElapsedTickThenPersistsCursor(t *testing.T) {
 		t.Fatalf("expected exactly one fired signal, got %+v", es.inbound)
 	}
 	sig := es.inbound[0]
-	if sig.Fingerprint != "s@2026-08-06T06:00:00Z" || sig.Kind != "job" ||
+	if sig.InitiationID != "s" || sig.Kind != "job" ||
 		sig.Payload != "payload" || sig.Title != "title" {
 		t.Fatalf("unexpected signal: %+v", sig)
 	}
@@ -399,6 +399,39 @@ func TestEvaluateFiresElapsedTickThenPersistsCursor(t *testing.T) {
 	}
 	if len(es.puts) != 1 || es.puts[0] != "2026-08-06T06:00:00Z" {
 		t.Fatalf("expected cursor persisted to the fired tick, got %+v", es.puts)
+	}
+}
+
+// TestEvaluateAllTicksShareOneInitiationID pins the "all ticks, one
+// conversation" requirement: two separate, elapsed ticks of the SAME job
+// fire two signals that carry the identical initiationId — the source's own
+// job identity, not a per-tick value — so the manager's equality routing
+// resumes the one recurring conversation rather than relying on an
+// empty-signature collapse that no longer exists.
+func TestEvaluateAllTicksShareOneInitiationID(t *testing.T) {
+	es := &evalServer{getStateVal: "2026-08-04T06:00:00Z"}
+	srv := newEvalServer(t, es)
+	defer srv.Close()
+
+	a := &adapter{mgr: NewManager(srv.URL, "t"), sources: map[string]servedSource{"s": dailySource(t)}}
+
+	if err := a.evaluate(context.Background(), "s", at("2026-08-05T12:00:00Z")); err != nil {
+		t.Fatalf("first evaluate: %v", err)
+	}
+	es.mu.Lock()
+	es.getStateVal = es.puts[len(es.puts)-1] // simulate the cursor the manager now holds
+	es.mu.Unlock()
+	if err := a.evaluate(context.Background(), "s", at("2026-08-06T12:00:00Z")); err != nil {
+		t.Fatalf("second evaluate: %v", err)
+	}
+
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	if len(es.inbound) != 2 {
+		t.Fatalf("expected two distinct ticks fired, got %+v", es.inbound)
+	}
+	if es.inbound[0].InitiationID != "s" || es.inbound[1].InitiationID != "s" {
+		t.Fatalf("every tick of one job must share the job's initiationId: %+v", es.inbound)
 	}
 }
 

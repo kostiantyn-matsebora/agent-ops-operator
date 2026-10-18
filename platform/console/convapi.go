@@ -43,9 +43,9 @@ type ConversationFilter struct {
 	Unread bool
 	// Mine narrows to conversations the requesting reader themselves started
 	// (ConversationSummary.Mine).
-	Mine bool
+	Mine   bool
 	MaxAge float64 // seconds; 0 = no bound
-	Search    string
+	Search string
 }
 
 func (f ConversationFilter) matches(s ConversationSummary, now float64) bool {
@@ -192,7 +192,7 @@ func (a *API) handleConversations(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"items": []ConversationSummary{}, "total": total, "rootTotal": rootTotal,
 			"unreadTotal": unreadTotal,
-			"offset": 0, "limit": 0, "scopes": scopes,
+			"offset":      0, "limit": 0, "scopes": scopes,
 		})
 		return
 	}
@@ -676,8 +676,12 @@ func (a *API) handleStart(w http.ResponseWriter, r *http.Request) {
 	// ordinary delivery carrying its own sender, and a reload reads it from the
 	// conversation's record — which is what the hint map, the text matching and
 	// the as-typed recovery were all standing in for.
+	// A fresh task from the start form is its own aggregation unit — a new
+	// conversation by construction, never a continuation of one the console
+	// already displays (that case propagates the bound conversationId
+	// instead; see Originator.Start).
 	reason, err := a.originator.Start(r.Context(), a.adapter.PrimaryChannel(), Identity(r),
-		a.adapter.ReaderKey(Identity(r)), in.Task)
+		a.adapter.ReaderKey(Identity(r)), in.Task, FreshInitiationID())
 	if err != nil {
 		log.Printf("origination failed: %s", sanitizeLog(err))
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
