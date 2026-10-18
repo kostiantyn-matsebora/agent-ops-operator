@@ -31,6 +31,11 @@ Telegram is where the work gets asked for, and where the answer arrives.
 **Agents never post to Telegram.** The operator delivers, so nothing an agent
 runs holds a bot token.
 
+`signals/telegram`, the chat-origination adapter behind this bundle, conforms
+to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+1.0.0.
+
 ## Turn it on
 
 **You need a bot and a forum supergroup before the chart helps.** Create the bot

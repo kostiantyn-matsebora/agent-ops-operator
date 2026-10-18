@@ -19,6 +19,10 @@ the events, decides which are real, and gives an agent the tools to look.
 
 ![Two lanes meet on the route: cluster events filtered by your suppression rules, and the MCP server's tools filtered by the toolsets you bind.]({{ '/assets/img/integrations/kubernetes-light.svg' | relative_url }}){: .ao-diagram}
 
+`signals/k8s-events` conforms to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+1.0.0.
+
 ## What starts work
 
 A cluster event, once triage drops the churn. A probe failing twenty seconds

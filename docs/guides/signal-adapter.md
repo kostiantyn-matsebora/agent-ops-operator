@@ -42,18 +42,16 @@ at all.
 > machinery.** A runtime pod that fails to start emits a Warning event, that
 > event becomes a signal, the signal opens a Conversation, and that creates
 > another runtime pod under a new name. Design for this before you write
-> anything.
+> anything — see
+> [Self-exclusion]({{ '/contracts/signal-adapter/' | relative_url }}#self-exclusion).
 
-**Nothing downstream catches that loop.** The fingerprint is fresh because the
-pod name is new, and the workload is fresh because its owner is a new
-Conversation.
+Review [the signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}) first.
 
-Even a liveness re-check passes, because the pod really is broken. The caps
-bound pods and backlog, so it fills etcd more slowly and never stops.
-
-Review
-[the signal adapter contract](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts/signal-adapter.md#the-signal-adapter-contract)
-first.
+This page builds the smallest thing that satisfies it, station by station,
+and every station names the exact section it builds toward. It states no
+requirement of its own. Where it and the specification disagree, the
+specification wins and the guide is the defect.
 
 ## The overall shape
 
@@ -66,10 +64,10 @@ Four pieces, and the last one is somebody else's:
 3. **A `SignalSource` naming it.** The CR name is the routing key, and your
    implementation defines what its opaque `config` may hold.
 4. **A `Pipeline` claiming that source**, or its signals drop with
-   `Wired=False`.
+   `Wired=False` (`MGR-3`).
 
-**You normalise. The manager groups.** Do not implement dedup, cooldown or
-recurrence yourself:
+**You normalise. The manager groups** (`MGR-1`). Do not implement dedup,
+cooldown or recurrence yourself:
 
 | You | The manager |
 |---|---|
@@ -80,12 +78,15 @@ recurrence yourself:
 | Report config problems | Surfaces them on the source's `Ready` condition |
 
 A source's policy must be evaluated **once, above** every Pipeline that claims
-it, or the first Pipeline spends the cooldown window and starves the rest.
+it (`MGR-2`), or the first Pipeline spends the cooldown window and starves the
+rest.
 
-## Read your sources
+The manager gives your pod `MANAGER_URL`, `ADAPTER_NAME` and `ADAPTER_TOKEN` —
+the full list is
+[Environment]({{ '/contracts/signal-adapter/' | relative_url }}#environment).
+Every call below is bearer-authenticated with that token (`SEC-1`).
 
-Your pod is given `MANAGER_URL`, `ADAPTER_NAME` and `ADAPTER_TOKEN`. Every call
-is bearer-authenticated with that token.
+## 1. List your sources
 
 ```sh
 curl -H "Authorization: Bearer $ADAPTER_TOKEN" \
@@ -97,37 +98,42 @@ curl -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
   "$env:MANAGER_URL/signal/sources?adapter=$env:ADAPTER_NAME"
 ```
 
-Each entry carries the source's `config` — whatever shape you defined — and a
-`credentialEnvPrefix` naming where that source's credentials landed in your
-environment.
+Every entry carries the source's `config` and a `credentialEnvPrefix` naming
+where its credentials landed in your environment — see [Source
+entry]({{ '/contracts/signal-adapter/' | relative_url }}#source-entry) (`ADP-1`:
+read sources from here, never assume connectivity or credentials yourself).
 
-## Normalise into signals
+**Verify:** the call returns `200` with an array, empty before you declare a
+`SignalSource` and one entry per source afterward (station 7).
+
+## 2. Normalise into signals
+
+```json
+{"fingerprint": "…", "labels": {}, "title": "…", "payload": "…", "kind": "alert"}
+```
+
+**The fingerprint is the dedup identity of the THING, not of the occurrence**
+(`ADP-2`). `signals/k8s-events` keys on the involved object plus the reason,
+never on the Event, because Kubernetes recreates Events per recurrence.
+
+`kind` picks the lane — see
+[Lanes]({{ '/contracts/signal-adapter/' | relative_url }}#lanes). A `chat`
+signal must carry the label `agentops.dev/channel` (`LANE-3`), or the post is
+refused — its reply would have nowhere to go.
+
+**Verify:** every signal in your batch names a `kind` from the table above,
+and any `chat` one carries `agentops.dev/channel` — station 3 is where the
+refusal would otherwise surface.
+
+## 3. Push them
+
+Wrap the signals in the envelope naming your source:
 
 ```json
 {"source": "my-source",
  "signals": [{"fingerprint": "…", "labels": {}, "title": "…",
               "payload": "…", "kind": "alert"}]}
 ```
-
-**The fingerprint is the dedup identity of the THING, not of the occurrence.**
-`signals/k8s-events` keys on the involved object plus the reason, never on the
-Event, because Kubernetes recreates Events per recurrence.
-
-**`kind` says what sort of work this is.** It picks the prompt wrapper the agent
-receives — `contracts/signal-adapter.md` calls these **lanes** — and it decides how a later
-signal is keyed when the source declares no `signatureLabels`:
-
-| `kind` | Subject | Keyed on |
-|---|---|---|
-| `alert` | a problem that recurs | default alert labels — group and resume |
-| `job` | a job that recurs | the same, so successive ticks fold into one conversation |
-| `task` | a caller asking once | the signal's own fingerprint |
-| `chat` | a person asking once | the signal's own fingerprint |
-
-A `chat` signal **must** carry the label `agentops.dev/channel`, or it is
-refused. Its reply would have nowhere to go.
-
-## Push them
 
 ```sh
 curl -X POST -H "Authorization: Bearer $ADAPTER_TOKEN" \
@@ -139,16 +145,46 @@ curl -X POST -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
   "$env:MANAGER_URL/signal/inbound" -d '@signals.json'
 ```
 
-**At-least-once is safe.** Re-sends collapse under the source's cooldown, so
-never build your own dedup to avoid them.
+See [`POST /signal/inbound`]({{ '/contracts/signal-adapter/' | relative_url }}#post-signalinbound)
+for the full request and response shape.
 
-Persist poll offsets and cursors through `GET`/`PUT
-/signal/state/{source}/{key}` rather than on disk. Your pod is replaceable.
+**At-least-once is safe** (`API-3`). Re-sends collapse under the source's
+cooldown, so never build your own dedup to avoid them.
 
-## Break the loop
+**Verify:** post the same signal twice in a row. The response's
+`conversations` count stays at one, and `queued` reflects both posts
+accepted. On a source with `cooldownHours` set, repeating the same
+`fingerprint` after that window still collapses into the same conversation
+rather than opening a new one.
+
+## 4. Persist cursors (if you poll)
+
+A polling adapter needs an offset to survive a restart. Your pod is
+replaceable, so keep it on the manager, not on disk.
+
+- Read it with [`GET`]({{ '/contracts/signal-adapter/' | relative_url }}#get-signalstatesourcekey).
+- Write it with [`PUT /signal/state/{source}/{key}`]({{ '/contracts/signal-adapter/' | relative_url }}#put-signalstatesourcekey) (`API-5`).
+
+This is an [optional capability]({{ '/contracts/signal-adapter/' | relative_url }}#optional-capabilities).
+A push-based adapter can skip it entirely.
+
+```sh
+curl -X PUT -H "Authorization: Bearer $ADAPTER_TOKEN" \
+  "$MANAGER_URL/signal/state/my-source/cursor" -d '{"value": "…"}'
+```
+
+```powershell
+curl -X PUT -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
+  "$env:MANAGER_URL/signal/state/my-source/cursor" -d '{"value": "…"}'
+```
+
+**Verify:** `GET` the same key back and it round-trips the value you `PUT`,
+surviving a restart of your pod.
+
+## 5. Break the loop
 
 If your adapter observes anything agent-ops itself produces, implement the
-breakers before the feature.
+breakers before the feature (`ADP-4`).
 [`signals/k8s-events/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/k8s-events/)
 uses three, independently:
 
@@ -163,9 +199,13 @@ loop breaker is not one.
 
 **agent-ops' own health is status, not signal.** The reconciler already holds
 the failure. Routing it back through ingest to open a conversation is an
-architectural error, not merely a noisy one.
+architectural error, not merely a noisy one — see
+[Self-exclusion]({{ '/contracts/signal-adapter/' | relative_url }}#self-exclusion).
 
-## Declare the SignalAdapter
+**Verify:** trigger the condition your adapter watches on an agent-ops-owned
+object (a runtime pod, say) and confirm no signal is emitted.
+
+## 6. Declare the SignalAdapter
 
 <!-- generated: template kind=SignalAdapter name=my-signals fields=image,port,serviceAccountName,configSchema,credentialKeys,externals comments=off -->
 ```yaml
@@ -186,8 +226,9 @@ spec:
 ```
 <!-- /generated -->
 
-Set `port` only if your implementation is **pushed to** rather than polling. The
-reconciler then owns the Service `agentops-signal-<name>` and injects
+Set `port` only if your implementation is pushed to rather than polling — the
+[push-mode optional capability]({{ '/contracts/signal-adapter/' | relative_url }}#optional-capabilities).
+The reconciler then owns the Service `agentops-signal-<name>` and injects
 `LISTEN_ADDR`.
 
 `configSchema` and `credentialKeys` are interface metadata, and they are worth
@@ -201,16 +242,19 @@ The console's topology draws each one beside your adapter. **It grants
 nothing**: no RBAC, no network policy and no credential follows from it.
 
 {: .ao-callout}
-> **`serviceAccountName` is a reference, and naming one mounts its token.** No
-> reconciler creates a ServiceAccount and none creates RBAC, ever — a
-> `SignalAdapter` is an ordinary namespaced object, so an operator that could
-> grant one would make CR-edit rights a privilege escalation.
+> **`serviceAccountName` is a reference, and naming one mounts its token**
+> (`SEC-3`). No reconciler creates a ServiceAccount and none creates RBAC,
+> ever — a `SignalAdapter` is an ordinary namespaced object, so an operator
+> that could grant one would make CR-edit rights a privilege escalation.
 >
 > The chart that grants your adapter renders the account beside the grant, so
 > both are read from one file. **Name nothing and it runs as the release floor**
 > — an account bound to nothing, denied every verb.
 
-## Declare a SignalSource, and claim it
+**Verify:** `kubectl apply` the object above and confirm your pod starts with
+`MANAGER_URL`, `ADAPTER_NAME` and `ADAPTER_TOKEN` set.
+
+## 7. Declare a SignalSource, and claim it
 
 <!-- generated: template kind=SignalSource name=my-source fields=config,grouping comments=off -->
 ```yaml
@@ -230,9 +274,7 @@ spec:
 <!-- /generated -->
 
 Then list that source on a Ready Pipeline's `signalSourceRefs`. Until you do,
-`Wired=False` and every signal you push is dropped.
-
-## Verify
+`Wired=False` (`MGR-3`) and every signal you push is dropped.
 
 ```sh
 kubectl -n agent-ops get signalsource my-source
@@ -244,21 +286,29 @@ kubectl -n agent-ops get signalsource my-source
 kubectl -n agent-ops logs -l agentops.dev/signal-adapter=my-signals -f
 ```
 
-`SERVED` goes `True` when your adapter's Deployment is up, `WIRED` when a
-Pipeline claims the source, and `RECEIVED` counts up as signals land.
+**Verify:** `SERVED` goes `True` when your adapter's Deployment is up,
+`WIRED` once a Pipeline claims the source, and `RECEIVED` counts up as
+signals land.
 
 ## What comes next
 
-1. **Copy the reference** —
+1. **Read the specification in full** — [the signal adapter
+   specification]({{ '/contracts/signal-adapter/' | relative_url }}) covers
+   every field, every enum, the bounds and their refusal, and the
+   Conformance section a claim of conformance is checked against.
+2. **Copy the reference** —
    [`signals/cron`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/cron/),
    dependency-free Go with a five-field cron parser and restart-safe cursors.
-2. **Compare a different transport** —
+   It conforms to the [signal adapter
+   specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+   1.0.0.
+3. **Compare a different transport** —
    [`signals/alertmanager`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/alertmanager/)
    receives webhooks,
    [`signals/k8s-events`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/k8s-events/)
    watches the API,
    [`signals/ha`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/ha/)
    reads a WebSocket.
-3. **[Talk to agents from your own chat]({{ '/guides/channel-adapter/' | relative_url }})**
+4. **[Talk to agents from your own chat]({{ '/guides/channel-adapter/' | relative_url }})**
    — the other half, for carrying the conversation.
-4. **[Every field of both kinds](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#signaladapter)**.
+5. **[Every field of both kinds](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#signaladapter)**.

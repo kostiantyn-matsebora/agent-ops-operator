@@ -10,9 +10,9 @@
 # exist is a defect, not a placeholder.
 #
 # Specifications is the same promotion applied to the per-extension-point
-# contracts: AgentRuntime now, Channel adapter and Signal adapter joining it
-# once each is rewritten to the same versioned-spec standard (contracts/
-# runtime.md's own change) instead of staying narrative reference material.
+# contracts: AgentRuntime and Signal adapter now, Channel adapter joining it
+# once it is rewritten to the same versioned-spec standard instead of
+# staying narrative reference material.
 #
 # THERE IS NO INDEX PAGE, and the group is the index. A page listing four
 # entries the sidebar already lists is a second navigation written by hand,
@@ -72,3 +72,5 @@ groups:
     entries:
       - title: AgentRuntime
         url: /contracts/runtime/
+      - title: SignalAdapter
+        url: /contracts/signal-adapter/

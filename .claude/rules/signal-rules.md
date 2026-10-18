@@ -2,12 +2,37 @@
 paths:
   - "signals/**"
   - "platform/manager/internal/ingest/**"
+  - "platform/manager/internal/httpapi/signals.go"
+  - "platform/manager/internal/httpapi/server.go"
   - "platform/manager/internal/integration/charttemplate_test.go"
   - "chart/charts/kubernetes/**"
   - "chart/charts/home-assistant/**"
+  - "docs/contracts/signal-adapter.md"
 ---
 
-## The rule vocabulary the event and log adapters share
+## Signal adapter rules
+
+### The signal adapter specification governs this surface
+
+**`docs/contracts/signal-adapter.md` is the one law for this surface** — every
+`signals/*` adapter plus the manager's ingest and `/signal/*` httpapi
+surfaces.
+
+It states what the manager owes an adapter and what an adapter owes the
+manager. Build and review against it, never against a shipped adapter's
+source.
+
+| Obligation | Rule |
+|---|---|
+| Verify before done | A change on this surface is verified against `docs/contracts/signal-adapter.md` before it is claimed done |
+| No unapproved spec edit | `docs/contracts/signal-adapter.md` is NEVER edited without the user's explicit approval |
+| A spec change carries conformance | An approved specification change brings every shipped signal adapter — `signals/cron`, `signals/alertmanager`, `signals/k8s-events`, `signals/ha`, `signals/telegram` — into conformance in the SAME change, and moves every page's claimed version. The change is not archivable before that |
+
+**Reaching for the specification itself without approval is a STOP, not an
+edit.** Approval is a conversation fact, not something a hook can read — stop,
+ask, and report the conflict instead of writing it.
+
+### The rule vocabulary the event and log adapters share
 
 **`rules` and `route` are BORROWED NAMES**, and what they may mean is fixed by
 where they were borrowed from. Both `signal-k8s-events` and `signal-ha` use

@@ -106,11 +106,10 @@ path. Plugins are limited to the set Pages enables by default.
 - **Every other `docs/*.md` is a reference page, not a site page.** They carry
   no front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
-  - **`contracts/runtime.md` already took that change.** It is the first
-    per-extension-point contract rewritten to a versioned spec, so it carries
-    front matter and a "Specifications" nav entry. `contracts/channel-adapter.md`
-    and `contracts/signal-adapter.md` stay reference pages until their own
-    rewrite does the same — see `.claude/site.md`.
+  - **`contracts/runtime.md` and `contracts/signal-adapter.md` already took
+    that change.** Each carries front matter and a "Specifications" nav
+    entry. `contracts/channel-adapter.md` stays a reference page until its
+    own rewrite does the same — see `.claude/site.md`.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
   field of every kind, written by `.github/scripts/docs-generate.py` from
   `chart/crds/`. Never edit it, and never give it a nav entry.

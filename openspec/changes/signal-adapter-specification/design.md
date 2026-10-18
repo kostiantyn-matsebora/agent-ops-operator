@@ -1,18 +1,28 @@
 ## Context
 
 See proposal.md — Why. This change builds on a sibling change,
-`runtime-specification`, which is not yet in the tree (no change directory or
-archive entry exists). Once it lands it provides:
+`runtime-specification`, now archived (#373). It provides:
 
 - The signal adapter contract already lives at
-  `docs/contracts/signal-adapter.md`, moved verbatim. That sibling creates the
-  page. This change only adds its version, changelog, routing row and
+  `docs/contracts/signal-adapter.md`, moved verbatim. That sibling created the
+  page. This change adds its version, changelog, routing row, publication and
   governance.
-- `docs-generate.py` already has the `struct-table` marker.
 - The governance pattern (scoped rule, verify-against-spec, approval-gated
   edits, conformance carried by a spec change) is established.
+- **Not provided: a generator.** `runtime-specification` added a
+  `struct-table` marker to `docs-generate.py`, then removed it in the same
+  change — its own commit message: "Remove the struct-table generator this
+  depended on."
+  - The Go doc comments it copied verbatim carried rationale normal for Go
+    source but wrong for a spec table.
+  - `runtime.md`'s field tables are hand-written instead, requirement-ID
+    style, the same shape `cr-reference.md`'s generator already uses for
+    CRD fields.
+  - This change follows that actual, final shape — not the generator the
+    original proposal assumed would still exist.
 
-This change MUST NOT start before `runtime-specification` is archived.
+This change was blocked on `runtime-specification` being archived. That
+precondition is now satisfied.
 
 ## Goals / Non-Goals
 
@@ -31,10 +41,10 @@ This change MUST NOT start before `runtime-specification` is archived.
 
 ### Shared decisions are adopted, not re-made
 
-Versioning table (MAJOR/MINOR/PATCH), two-genre split with one-directional
-references, anchors referenced by name, generated tables, governance as a
-scoped rule — all exactly as `runtime-specification`'s design.md decides them.
-This design states only what differs for signal adapters.
+Versioning table (MAJOR/MINOR/PATCH), the two-party split, anchors referenced by name, hand-written field tables, publication
+(front matter + permalink + nav entry), governance as a scoped rule — all
+exactly as `runtime.md` ships them today. This design states only what differs for
+signal adapters.
 
 ### This is the smallest of the three specifications
 
@@ -55,9 +65,11 @@ birth.
 
 ## Risks / Trade-offs
 
-- [Five shipped adapters drift from one checklist] → each checklist item
-  cites the test that exercises it per adapter, and a gap is fixed in this
-  change before the version is claimed.
+- [Five shipped adapters drift from the spec] → verify each adapter's own
+  tests against the spec by hand before claiming its version, and fix any
+  gap in this change. The page itself states a minimal/optional split, not a
+  per-adapter test registry — matching `runtime.md`'s own Conformance
+  section, which dropped the test-citing form as unreadable.
 - [The self-exclusion invariant is restated wrongly] → the spec cites
   `signals/ha/selfexclude.go`, `signals/k8s-events/selfexclude.go` and the invariant, never paraphrases the rule's mechanics.
 - [Governance rule is prose, not enforcement] → accepted, same trade as the

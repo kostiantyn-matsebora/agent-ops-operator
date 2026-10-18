@@ -24,6 +24,10 @@ reaches you has the investigation already done.
 Alertmanager can post to it, and VictoriaMetrics answers the same query API —
 MetricsQL is a PromQL superset, so one server serves both.
 
+`signals/alertmanager` conforms to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+1.0.0.
+
 ## What starts work
 
 A firing alert, posted to the bundle's webhook. One conversation per alert —

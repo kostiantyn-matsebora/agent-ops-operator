@@ -23,6 +23,10 @@ the house, one that can repair it.
 
 ![A Home Assistant record is re-checked by the rules, then opens a conversation on one of two routes — one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
 
+`signals/ha` conforms to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+1.0.0.
+
 ## What starts work
 
 A log error that recurs, an integration still failing, a repair Home
