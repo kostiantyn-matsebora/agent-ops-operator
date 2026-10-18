@@ -301,7 +301,11 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
-		log.Printf("inbound %s: %v", name, err)
+		// %q escapes control characters in the manager's rejection message,
+		// which can echo back webhook-sourced content (initiationId, labels)
+		// — unescaped, a crafted value could forge log lines (CWE log
+		// injection, gosecurity:S5145).
+		log.Printf("inbound %q: %q", name, err.Error())
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}
