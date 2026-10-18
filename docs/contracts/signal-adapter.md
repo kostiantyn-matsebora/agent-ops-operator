@@ -202,14 +202,14 @@ event, and nothing downstream breaks the loop that follows:
 4. The fingerprint is fresh — the pod name is new — so nothing collapses
    the repeat.
 
-The invariant and its breakers are cited at their own source, never
-paraphrased:
+An observing adapter MUST exclude an object before emitting a signal about
+it, matching any of:
 
-- The test that pins them:
-  [`signals/ha/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/ha/)
-  and
-  [`signals/k8s-events/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/k8s-events/).
-- The invariant itself: `invariants.md`'s "No signal loops".
+- **Name prefix** — the object's name starts with an agent-ops-reserved
+  prefix.
+- **Owner or label** — the object is owned by, or labeled as, an agent-ops
+  kind.
+- **Own namespace** — the object lives in agent-ops' own namespace.
 
 ### Security posture
 
