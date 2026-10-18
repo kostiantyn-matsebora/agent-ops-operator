@@ -76,9 +76,9 @@
 - [x] 6.1 Reference docs: `python3 .github/scripts/docs-generate.py --check`
       is clean over the whole tree. `docs/contracts.md` already points at
       the signal page (unchanged, same form as the runtime row), and
-      `.claude/rules/documentation.md`'s routing table already carries a
-      generic "Runtime/channel/signal contract" row covering it — no edit
-      needed there.
+      `.claude/rules/documentation.md`'s routing table already carries the
+      "Runtime/channel/signal contract" row (`docs/contracts/<contract>.md`),
+      which names this page by its path pattern — verified, no edit needed.
 - [ ] 6.2 Adopter site: build the site from this working copy's tree and look
       at the changed pages per `docs/CLAUDE.md` pre-flight — stations render,
       command fences pair, no table crushes, no horizontal overflow in either

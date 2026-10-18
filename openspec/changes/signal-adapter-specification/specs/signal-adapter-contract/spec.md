@@ -3,11 +3,14 @@
 ### Requirement: The specification is a versioned reference page
 
 The signal adapter specification SHALL live at `docs/contracts/signal-adapter.md`
-as a reference page with no front matter. The page is moved there by
+as a published reference page (front matter, permalink, a Specifications
+nav entry). The page is moved there by
 `runtime-specification`, and this change makes it a versioned specification.
 
-The same change SHALL add a row to `.claude/rules/documentation.md`'s routing
-table for this page and point `docs/contracts.md` at it.
+The same change SHALL verify that `.claude/rules/documentation.md`'s routing
+table has a row naming this page (the existing "Runtime/channel/signal
+contract" row, `docs/contracts/<contract>.md`, does) and point
+`docs/contracts.md` at it.
 
 It SHALL carry a semver version, starting at `1.0.0`, and its own changelog
 recording every version with what changed in it.
@@ -106,7 +109,8 @@ document and moves MAJOR.
 
 The specification SHALL end with a Conformance section stating that an
 adapter implementing every requirement on the page except its Optional
-capabilities is fully conformant — matching `docs/contracts/runtime.md`'s own
+capabilities (the rows of the page's `Optional capabilities` table, each
+naming its trigger) is fully conformant — matching `docs/contracts/runtime.md`'s own
 shape, not a per-requirement test registry.
 
 Judging a shipped adapter conformant SHALL mean reading that adapter's own

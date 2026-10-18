@@ -127,6 +127,14 @@ refused — its reply would have nowhere to go.
 
 ## 3. Push them
 
+Wrap the signals in the envelope naming your source:
+
+```json
+{"source": "my-source",
+ "signals": [{"fingerprint": "…", "labels": {}, "title": "…",
+              "payload": "…", "kind": "alert"}]}
+```
+
 ```sh
 curl -X POST -H "Authorization: Bearer $ADAPTER_TOKEN" \
   "$MANAGER_URL/signal/inbound" -d @signals.json
