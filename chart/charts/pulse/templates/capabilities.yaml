@@ -1,0 +1,99 @@
+{{- /*
+Coordinator-mode wiring component (coordinator-deployment-mode): the SAME
+two routes `pipelines.yaml` would have rendered as inline Pipelines, as two
+standalone AgentCapability objects instead — NEVER merged, the two
+Community-edition-framed roles carry over unchanged.
+
+An AgentCapability carries no subscription: the chart-rendered Coordinator
+(`chart/templates/coordinator.yaml`) is the one object that claims the alert
+source and lists these capabilities in its own `agents[]`. It reads
+`pulse.coordinatorContribution` (not called from this file), gated on the SAME
+per-route helpers this file uses, so the two cannot drift apart on which route
+renders.
+
+Each keeps the name of the route it replaces (`pulse-observer`,
+`pulse-operator`), gated on the SAME per-route helpers `pipelines.yaml`
+uses, so a disabled route or profile withholds the same agent here.
+*/ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "pulse.wiringActive" .) }}
+{{- $p := .Values.pipelines }}
+{{- $mcp := .Values.mcp }}
+{{- $observerTools := list }}
+{{- $observerConfigs := list }}
+{{- if include "pulse.observerMcpEnabled" . }}
+{{- $observerTools = append $observerTools $mcp.observer.toolset.name }}
+{{- $observerConfigs = append $observerConfigs $mcp.observer.name }}
+{{- end }}
+{{- $operatorTools := list }}
+{{- $operatorConfigs := list }}
+{{- if include "pulse.operatorMcpEnabled" . }}
+{{- $operatorTools = append $operatorTools $mcp.operator.toolset.name }}
+{{- $operatorConfigs = append $operatorConfigs $mcp.operator.name }}
+{{- end }}
+
+{{- $caps := list }}
+{{- if include "pulse.observerRouteEnabled" . }}
+{{- $caps = append $caps (dict
+      "name" $p.observer.name
+      "runtimeRef" ($p.observer.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "pulse.routeAccount" (dict "ctx" $ "cfg" $p.observer "p" $p))
+      "profile" .Values.profiles.observer.name
+      "tools" $observerTools
+      "configs" $observerConfigs) }}
+{{- end }}
+{{- if include "pulse.operatorRouteEnabled" . }}
+{{- $caps = append $caps (dict
+      "name" $p.operator.name
+      "runtimeRef" ($p.operator.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "pulse.routeAccount" (dict "ctx" $ "cfg" $p.operator "p" $p))
+      "profile" .Values.profiles.operator.name
+      "tools" $operatorTools
+      "configs" $operatorConfigs) }}
+{{- end }}
+{{- range $caps }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentCapability
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  profileRef:
+    name: {{ .profile }}
+  {{- with .runtimeRef }}
+  # WHAT EXECUTES this capability's conversations. Unset resolves the
+  # AgentRuntime named `default`, which the PARENT renders — no bundle
+  # renders a runtime, an identity or a credential, and naming one here
+  # creates nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with .serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own — the same identity a
+  # Pipeline at this route would have named.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. Left unset, this bundle renders its own route account.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with .tools }}
+  # Declared, not inherited: profiles carry no capabilities and nothing
+  # supplies a default, so this stanza IS the agent's allowlist.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with .configs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

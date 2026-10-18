@@ -40,38 +40,158 @@ criticality tags, `scope_only` policy) are not gated.
 
 ## Decisions
 
-### Decision 1: Registration is pod-start, env-driven — not SignalSource-driven
+### Decision 1: Registration config rides the bundle's one default SignalSource
 
-`signals/alertmanager` reads its sender-registration config from
-`SignalSource.spec.config.register`, polled every 15s via
-`GET /signal/sources?adapter=`, so any number of hand-authored sources can
-each carry their own registration.
+`SignalAdapterSpec` has no generic env/envFrom passthrough. Its whole field
+set is `image`, `servedBy`, `port`, `serviceAccountName`, `singleton`,
+`resources`, `configSchema`, `credentialKeys`, `externals`.
 
-This bundle ships exactly one default source. Carrying that same
-indirection would add a CR-mediation layer with nothing to mediate.
+A literal `PULSE_URL`/`PULSE_API_TOKEN` "rendered onto the pod by the
+bundle chart" has no delivery path. The reconciler alone owns the adapter
+Deployment's env — `MANAGER_URL`, `ADAPTER_TOKEN`, `ADAPTER_NAME`,
+`LISTEN_ADDR`, `POD_NAMESPACE`, plus per-source `credentialsSecretRef`
+projection — and no chart can add to that list.
 
-Registration config instead comes straight from the pod's own
-environment, rendered there by the bundle chart: Pulse base URL, API
-token, source name, optional HMAC signing secret.
+Two mechanisms DO reach the pod, the same ones `signals/alertmanager` and
+`signals/ha` already use:
 
-**Alternative considered**: keep the SignalSource-driven path, just made
-eager at startup instead of waiting for the first poll tick. Rejected —
-it would still require threading registration config through
-`SignalSource.spec.config` for a bundle that only ever renders one source,
-buying generality nothing in this bundle uses.
+| Need | Delivered via |
+|---|---|
+| Pulse base URL (non-sensitive) | `SignalSource.spec.config`, polled via `GET /signal/sources?adapter=` |
+| API token, optional signing secret | `SignalSource.spec.credentialsSecretRef`, kubelet-resolved `envFrom` |
+
+The adapter reads both off the served `SourceInfo`, under the single
+documented keys `token` and `signingSecret`.
+
+This bundle still ships exactly one default source. The registration path
+is still NOT generalized to arbitrary hand-authored sources — the adapter
+registers whichever source it is currently serving, always the one the
+chart renders.
+
+`spec.config` here is three flat fields (`baseUrl`, `webhookUrl`, optional
+`webhookHeaders`, see Decisions 1a and the delivery-URL decision below), not
+`signals/alertmanager`'s `register` sub-block. No per-source registration
+knobs beyond what this one bundle needs.
+
+**Alternative considered**: a new `env`/`envFrom` field on
+`SignalAdapterSpec`, a direct pod-env passthrough for every adapter.
+Rejected for this change — a CRD/reconciler change with its own regen,
+RBAC and migration surface, for a need `spec.config`/`credentialsSecretRef`
+already meets.
 
 **Trade-off accepted**: a second, hand-authored Pulse SignalSource outside
-the bundle's own would never get registered, since nothing reads its
-`spec.config`. Acceptable because the bundle contract is one default
-source, same as `prometheus-bundle`.
+the bundle's own would also get registered, since registration follows
+whichever source is served rather than one pinned pod identity. Smaller
+than the trade-off the original decision accepted here, not larger.
 
-The adapter still keeps a background retry loop. Not for CR polling, but
-to retry registration itself on a fixed interval until it succeeds, and to
-keep re-checking afterward so a rotated token or a transient Pulse outage
-heals without a pod restart.
+The adapter still keeps a background retry loop, run on the same poll
+tick that refreshes the served-source list. Not a separate CR-polling
+concern.
+
+It retries registration until it succeeds, and keeps re-checking
+afterward, so a rotated token or a transient Pulse outage heals without a
+pod restart.
 
 This is deliberately NOT a one-shot registration at startup only — see
 Risks below for why a true one-shot was rejected.
+
+### Decision 1a: `webhookHeaders` is a third flat field, independent of signing
+
+`spec.config.webhookHeaders`, when set, is registered verbatim as Pulse's
+own `WebhookConfig.Headers`.
+
+- Static headers PULSE attaches to every delivery.
+- Serves infra in front of the adapter (a WAF, a gateway) needing its own
+  shared-secret header.
+- Registered whether or not a signing secret is configured.
+- Read by the same mechanism as `baseUrl` — `spec.config`, not
+  `credentialsSecretRef`.
+
+**Trade-off accepted**: a shared-secret-shaped header value here sits in
+plain `spec.config`, not a Secret. Weaker than `token`/`signingSecret`,
+which `credentialsSecretRef` keeps out of the CR entirely.
+
+Routing it through a Secret instead would need a value-templating
+mechanism inside a schema-less JSON field — a second config language on
+top of the one `spec.config` already is, for one optional field.
+
+The header this exists for is a defense-in-depth gateway check, never
+this adapter's real security boundary. `signingSecret`/`token` are that
+boundary, and both already go through `credentialsSecretRef`.
+
+`docs/integrations/pulse.md` states the trade-off where the field is
+documented, rather than leaving it to be discovered against a real
+cluster's RBAC.
+
+### Decision 1b: the registered delivery URL is overridable, for a Pulse outside the cluster
+
+Pulse watches Proxmox/Docker/Kubernetes/TrueNAS hosts, which commonly sit
+outside the Kubernetes cluster this chart installs into. Alertmanager is
+different — this repository's other bundles can assume it runs alongside
+the cluster it alerts on.
+
+`signals/alertmanager` derives its webhook URL in the adapter's own Go
+code, from the adapter's own in-cluster Service identity.
+
+Copying that unconditionally would register a URL Pulse can never reach
+once it lives outside the cluster. The adapter has no way to tell whether
+it does.
+
+`spec.config` gains a second flat field, `webhookUrl`, read by the same
+mechanism as `baseUrl`. Required for registration, never derived by the
+adapter.
+
+The adapter is a dumb transport, the same posture as `channels/telegram`
+and `signals/ha`. It holds no connectivity information of its own, only
+ever what the served source configures.
+
+The chart renders `webhookUrl` for the one source it ships:
+
+- Default: the in-cluster Service DNS form. The chart already has the
+  namespace and the port at template time.
+- Override: an operator-set external URL.
+
+A hand-authored second source sets it the same way the operator would.
+
+`webhookUrl` only says what to register. Saying it is not the same as
+making it true — a config value with nothing behind it would read as
+working and silently deliver nothing, which is worse than the gap it
+claims to close.
+
+So the chart ALSO renders `signal.ingress`, an Ingress in front of the
+SignalAdapter reconciler's own ClusterIP Service
+(`agentops-signal-<name>:8080`, the same naming and port the bundle spec
+requires) — never a second Service of this chart's own.
+
+Shaped exactly like the parent chart's existing `console.ingress`, same
+field names and TLS forms. An Ingress is the one exposure shape this
+chart CAN target uniformly: a host, a class, a cert, same fields on every
+provider.
+
+**Alternative considered**: render nothing, leave the whole exposure to
+the operator. Rejected on exactly the trade-off above.
+
+A chart that only describes the gap, in a product whose primary subject
+(Proxmox/Docker hosts) routinely sits outside the cluster, is asking every
+adopter to solve the same problem by hand on day one.
+
+**Alternative considered**: also render a `LoadBalancer`/`NodePort`
+Service option. Deferred, not rejected.
+
+Unlike an Ingress, those forms vary by cloud — annotations, IP allocation
+— in ways this chart cannot express uniformly.
+
+An operator without an ingress controller still has `webhookUrl` to point
+at whatever they expose another way (their own Service, a tunnel) — the
+same escape hatch `prometheus`'s query backend already relies on.
+
+**Trade-off accepted**: `signal.ingress` and `webhookUrl` are two separate
+values an operator must set TOGETHER. The Ingress makes the path
+reachable. `webhookUrl` is the separate act of telling Pulse to use it.
+
+Setting only one leaves either an unreachable registration or a reachable
+path Pulse was never told about. `docs/integrations/pulse.md` states this
+pairing explicitly, in one command block setting both.
 
 ### Decision 2: `mcp-pulse` is a first-party wrapper, not a vendored stdio binary
 

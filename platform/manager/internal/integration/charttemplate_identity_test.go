@@ -175,7 +175,7 @@ func TestAnEntryForTheFloorAccountIsRefused(t *testing.T) {
 func TestNoBundleRendersARuntimeServiceAccount(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set", "kubernetes.pipelines.admin.serviceAccountName=agentops-runtime-actor",
 		"--set", "prometheus.enabled=true")
 
@@ -231,7 +231,7 @@ func assertNoAgentRoleReachesSecrets(t *testing.T, mode string) {
 	t.Helper()
 	args := []string{
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set", "kubernetes.allowMutations=true",
 		"--set", "prometheus.enabled=true",
 		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-actor",
@@ -487,7 +487,7 @@ func assertNoBindingNamesTheFloorAccount(t *testing.T, mode string) {
 	t.Helper()
 	args := []string{
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set", "global.demo.enabled=true",
 		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting",
 	}
@@ -548,7 +548,7 @@ func TestADeclaredAccountRendersItsOwnNamedRole(t *testing.T) {
 func TestABundleRendersAnIdentityOnlyWhereItGrantsOne(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true")
+		"--set", "kubernetes.wiringEnabled=true")
 
 	if strings.Contains(out, "name: agentops-k8s-observe") {
 		t.Fatal("the bundle rendered an account for a route it grants nothing — " +
@@ -563,7 +563,7 @@ func TestABundleRendersAnIdentityOnlyWhereItGrantsOne(t *testing.T) {
 	// this half the rule above passes by rendering nothing, ever.
 	granted := helmTemplate(t,
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set-json", `kubernetes.pipelines.observe.rbac={"clusterRoles":[{"name":"extra",`+
 			`"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get"]}]}]}`)
 	if !strings.Contains(granted, "name: agentops-k8s-observe") {
@@ -611,7 +611,7 @@ func assertNoBindingUsesABuiltInClusterRole(t *testing.T, mode string) {
 	t.Helper()
 	args := []string{"-n", "agent-ops",
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set", "kubernetes.allowMutations=true",
 		"--set", "prometheus.enabled=true",
 		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}
@@ -672,7 +672,7 @@ func assertAgentRolesGrantNoAgentopsCRsOrIdentityListing(t *testing.T, mode stri
 	t.Helper()
 	args := []string{"-n", "agent-ops",
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set", "kubernetes.allowMutations=true",
 		"--set", "prometheus.enabled=true",
 		"--set", "rbac.runtime.serviceAccounts[0].name=agentops-runtime-acting"}

@@ -60,6 +60,14 @@ path. Plugins are limited to the set Pages enables by default.
     what it costs to turn on.
   - **"Where it answers" is OMITTED where the system carries no answers**, never
     left present and empty. Telegram is the only one that has it.
+  - **NO EXHAUSTIVE VALUES TABLE, AND NO RENDERS TABLE.** An integration page
+    is a page an adopter meets first, not a reference page — it names the
+    handful of values with no sane default, states the one real decision in
+    prose, and points everything else at the chart's own `values.yaml`.
+    `kubernetes`/`prometheus`/`home-assistant`/`pulse` all carried both once
+    and were cut to the same shape `installation.md` was (775 lines to 204).
+    The `renders` marker stays for `cr-reference.md`, `guides/` and
+    `runtimes/<vendor>.md` — pages that ARE reference pages.
   - **A RUNTIME IS NOT AN INTEGRATION.** A runtime is what EXECUTES an agent,
     not a seam a Pipeline wires, and three of the four questions would be
     blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
@@ -98,11 +106,11 @@ path. Plugins are limited to the set Pages enables by default.
 - **Every other `docs/*.md` is a reference page, not a site page.** They carry
   no front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
-  - **`contracts/runtime.md` and `contracts/channel-adapter.md` already took
-    that change.** They are the per-extension-point contracts rewritten to a
-    versioned spec, so each carries front matter and a "Specifications" nav
-    entry. `contracts/signal-adapter.md` stays a reference page until its own
-    rewrite does the same — see `.claude/site.md`.
+  - **`contracts/runtime.md`, `contracts/channel-adapter.md` and
+    `contracts/signal-adapter.md` all took that change.** Each is a
+    per-extension-point contract rewritten to a versioned spec, so each
+    carries front matter and a "Specifications" nav entry — see
+    `.claude/site.md`.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
   field of every kind, written by `.github/scripts/docs-generate.py` from
   `chart/crds/`. Never edit it, and never give it a nav entry.
@@ -370,7 +378,8 @@ with its Chromium in `~/.cache/ms-playwright`. Drive it from a script and assert
 
 ## Authoring rules (binding)
 
-Quoted verbatim from `.claude/rules/writing.md`, never paraphrased:
+The shape rules, stated once and quoted, never paraphrased — see
+`.claude/rules/writing.md`:
 
     Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
     Structure over prose:

@@ -301,7 +301,8 @@ which a Helm condition cannot express — so its helpers are always loaded. */ -
 {{- range $b := list
       (dict "key" "kubernetes" "helper" "kubernetes.wiringActive" "gated" false "routes" (dict "observe" "kubernetes.observePipelineEnabled" "admin" "kubernetes.adminPipelineEnabled"))
       (dict "key" "home-assistant" "helper" "home-assistant.wiringActive" "gated" true "routes" (dict "control" "home-assistant.userProfileEnabled" "ops" "home-assistant.opsProfileEnabled"))
-      (dict "key" "prometheus" "helper" "prometheus.wiringActive" "gated" true "routes" dict) -}}
+      (dict "key" "prometheus" "helper" "prometheus.wiringActive" "gated" true "routes" dict)
+      (dict "key" "pulse" "helper" "pulse.wiringActive" "gated" true "routes" (dict "observer" "pulse.observerRouteEnabled" "operator" "pulse.operatorRouteEnabled")) -}}
 {{- $bv := index $root.Values $b.key -}}
 {{- if and $bv (or (not $b.gated) $bv.enabled) -}}
 {{- $ctx := dict "Values" (merge (deepCopy $bv) (dict "global" $root.Values.global)) "Release" $root.Release "Chart" $root.Chart -}}
@@ -1022,7 +1023,8 @@ decoded by `chart/templates/coordinator.yaml`. */ -}}
 {{- range $b := list
       (dict "key" "kubernetes" "helper" "kubernetes.coordinatorContribution" "gated" false)
       (dict "key" "home-assistant" "helper" "home-assistant.coordinatorContribution" "gated" true)
-      (dict "key" "prometheus" "helper" "prometheus.coordinatorContribution" "gated" true) -}}
+      (dict "key" "prometheus" "helper" "prometheus.coordinatorContribution" "gated" true)
+      (dict "key" "pulse" "helper" "pulse.coordinatorContribution" "gated" true) -}}
 {{- $bv := index $root.Values $b.key -}}
 {{- if and $bv (or (not $b.gated) $bv.enabled) -}}
 {{- $ctx := dict "Values" (merge (deepCopy $bv) (dict "global" $root.Values.global)) "Release" $root.Release "Chart" $root.Chart -}}

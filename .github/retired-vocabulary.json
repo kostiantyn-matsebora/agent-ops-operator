@@ -980,6 +980,20 @@
         "holds no",
         "RETIRED"
       ]
+    },
+    {
+      "id": "bundle-pipelines-enabled",
+      "pattern": "pipelines\\.enabled\\b",
+      "says": "wiringEnabled is the bundle-wide switch now, paired with global.agentops.wiringMode for which CRD shape it renders",
+      "allow": [
+        "removed",
+        "retired",
+        "renamed",
+        "no longer",
+        "is now",
+        "formerly",
+        "RETIRED"
+      ]
     }
   ]
 }

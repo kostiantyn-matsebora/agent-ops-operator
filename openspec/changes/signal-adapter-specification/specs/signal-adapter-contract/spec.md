@@ -3,11 +3,14 @@
 ### Requirement: The specification is a versioned reference page
 
 The signal adapter specification SHALL live at `docs/contracts/signal-adapter.md`
-as a reference page with no front matter. The page is moved there by
+as a published reference page (front matter, permalink, a Specifications
+nav entry). The page is moved there by
 `runtime-specification`, and this change makes it a versioned specification.
 
-The same change SHALL add a row to `.claude/rules/documentation.md`'s routing
-table for this page and point `docs/contracts.md` at it.
+The same change SHALL verify that `.claude/rules/documentation.md`'s routing
+table has a row naming this page (the existing "Runtime/channel/signal
+contract" row, `docs/contracts/<contract>.md`, does) and point
+`docs/contracts.md` at it.
 
 It SHALL carry a semver version, starting at `1.0.0`, and its own changelog
 recording every version with what changed in it.
@@ -43,30 +46,43 @@ the self-exclusion invariant.
 - **THEN** the version moves as the compatibility rules direct, and the
   changelog records the change under the new version
 
-### Requirement: Schema tables are generated from the Go structs
+### Requirement: Request and response field tables are hand-written
 
-The inbound signal payload table in the specification SHALL be rendered by the
-docs generator's `struct-table` marker from the Go structs' json tags, never
-typed by hand. The marker capability is introduced by `runtime-specification`.
+The specification's field tables — the inbound signal payload, the envelope
+(`source`, `signals`), the source listing entry and the state/status bodies —
+SHALL be hand-written, requirement-ID style, in the shape
+`docs/contracts/runtime.md` uses.
 
-The source of truth is `NormalizedSignal` in
-`platform/manager/internal/httpapi/signals.go`, with the envelope fields
-(`source`, `signals`) of the inbound request stated beside it.
+`runtime-specification` added a `struct-table` marker to `docs-generate.py`
+and removed it in the same change: the Go doc comments it copied verbatim
+carried rationale normal for Go source but unreadable in a spec table. No
+generator targets this page, so `docs-generate.py --check` SHALL stay clean
+without regenerating any block here.
 
-CI SHALL regenerate the tables and fail on a difference, so a field added in
-code without a specification row fails the build.
+The source of truth for every field named stays `NormalizedSignal` in
+`platform/manager/internal/httpapi/signals.go` — a reviewer traces each row to
+it by reading the source, not by running a generator.
+
+Dropping generated regeneration leaves no CI check of its own over this
+drift.
+
+The compensating control is the "A spec change carries conformance"
+governance rule. A specification change is not archivable until every
+shipped adapter's own conformance suite passes against it, so a table a
+reviewer missed by hand still fails there before the change lands.
 
 #### Scenario: A field is added in code only
 
-- **WHEN** a json-tagged field is added to the normalized signal struct and the
-  specification is not regenerated
-- **THEN** CI fails on the stale generated block
+- **WHEN** a json-tagged field is added to the normalized signal struct
+- **THEN** the specification's table is edited by hand to match, and the
+  change is incomplete until it does
 
-#### Scenario: A generated table is hand-edited
+#### Scenario: Someone looks for a generated block here
 
-- **WHEN** someone edits a generated field table by hand
-- **THEN** the next generator run reverts the edit and CI fails on the
-  difference
+- **WHEN** someone runs `docs-generate.py --check` expecting it to touch this
+  page
+- **THEN** it reports nothing to regenerate, because no marker names this
+  page's tables
 
 ### Requirement: Compatibility rules make additive change safe
 
@@ -97,27 +113,34 @@ document and moves MAJOR.
 - **THEN** the change is MAJOR, because a conformant reader's reference
   stopped resolving
 
-### Requirement: A numbered conformance checklist is the spine
+### Requirement: Conformance is a minimal/optional split
 
-The specification SHALL end with a numbered conformance checklist. Each item
-SHALL be individually verifiable against a running adapter or its source, and
-every normative obligation SHALL be reachable from an item.
+The specification SHALL end with a Conformance section stating that an
+adapter implementing every requirement on the page except its Optional
+capabilities is fully conformant. This matches `docs/contracts/runtime.md`'s
+own shape, not a per-requirement test registry.
 
-Where a shipped adapter test exercises an item, the item SHALL cite it. The
-conformance suite in `platform/manager/test/conformance/` runs every shipped
-signal adapter's built binary against a fake manager.
+A capability is Optional only by being a row of the page's `Optional
+capabilities` table, each naming its trigger. Every other requirement is
+mandatory.
+
+Judging a shipped adapter conformant SHALL mean reading that adapter's own
+tests against every requirement on the page, including the conformance suite
+in `platform/manager/test/conformance/` (which runs every shipped signal
+adapter's built binary against a fake manager), and fixing any gap before its
+claimed version moves.
 
 #### Scenario: An adapter is judged conformant
 
-- **WHEN** someone claims a signal adapter conforms to a specification version
-- **THEN** the claim is the checklist walked item by item, each with its own
-  verdict, never an impression of the whole
+- **WHEN** someone claims a signal adapter conforms to a specification
+  version
+- **THEN** every requirement on the page except Optional capabilities holds
+  for that adapter, verified by reading its own tests
 
-#### Scenario: An item has a shipped test
+#### Scenario: An optional capability is missing
 
-- **WHEN** a checklist item is covered by a shipped adapter's conformance test
-- **THEN** the item names that test, so a reader can run the verification
-  rather than reconstruct it
+- **WHEN** a shipped adapter implements none of the Optional capabilities
+- **THEN** it stays fully conformant, because none is required
 
 ### Requirement: The adopter guide is the station procedure
 

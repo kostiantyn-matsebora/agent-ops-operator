@@ -76,6 +76,8 @@ NAMESPACE = "agent-ops"
 #                from the chart check by KEY, never by value.
 DOCUMENTED_PLACEHOLDERS = {
     "https://ha.example.org",           # home-assistant/values.yaml, homeAssistant.endpoint
+    "https://pulse.example.org",        # pulse/values.yaml, mcpServer.backend
+    "pulse-adapter.example.org",        # pulse/values.yaml, signal.ingress.host
     "http://metrics.example:8428",      # RFC 2606 reserved domain
     "-1001234567890",                   # telegram/values.yaml, surface.chatId
     # prometheus/values.yaml, mcpServers.backend — the chart's OWN example, and
@@ -106,7 +108,8 @@ CREDENTIAL_KEY = re.compile(r"(?i)credential|token|secret|password")
 # infrastructure until proven otherwise.
 ALLOWED_HOSTS = {
     "example", "example.com", "example.net", "example.org",
-    "ha.example.org", "metrics.example",
+    "ha.example.org", "pulse.example.org", "pulse-adapter.example.org",
+    "metrics.example",
     "github.com", "kubernetes.io", "keepachangelog.com",
     "localhost", "127.0.0.1",
     # The SVG namespace, which every generated drawing must declare. The audit
@@ -155,7 +158,7 @@ PRESETS = {
     "tier2": {
         "sets": {
             "home-assistant.enabled": "true",
-            "home-assistant.pipelines.enabled": "true",
+            "home-assistant.wiringEnabled": "true",
             "home-assistant.homeAssistant.endpoint": "https://ha.example.org",
             "home-assistant.homeAssistant.credentials.operatorToken": "placeholder-token",
         },
@@ -180,7 +183,7 @@ PRESETS = {
             "prometheus.mcp.enabled": "true",
             "prometheus.mcpServers.enabled": "true",
             "prometheus.mcpServers.backend": "http://vmsingle-vm.monitoring.svc:8429",
-            "prometheus.pipelines.enabled": "true",
+            "prometheus.wiringEnabled": "true",
         },
     },
 }
@@ -229,7 +232,7 @@ BUNDLES = {
             "MCP tooling": {"flag": "mcp.enabled", "requires": ["MCP server"]},
             "MCP server": {"flag": "mcpServers.enabled"},
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flag": "wiringEnabled",
                 "requires": ["Events lane", "Profile", "MCP tooling"],
             },
         },
@@ -248,7 +251,7 @@ BUNDLES = {
                 "sets": {"mcpServers.backend": "http://vmsingle-vm.monitoring.svc:8429"},
             },
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flag": "wiringEnabled",
                 "requires": ["Ingest lane", "Profile", "MCP tooling"],
             },
         },
@@ -278,7 +281,43 @@ BUNDLES = {
             # states the switch and the page states the escape hatch.
             "Admin MCP": {"flags": ["adminMcp.enabled", "adminMcpServer.enabled"]},
             "Wiring": {
-                "flag": "pipelines.enabled",
+                "flag": "wiringEnabled",
+                "requires": ["Ingest lane", "Profiles", "MCP tooling"],
+            },
+        },
+    },
+    "pulse": {
+        "components": {
+            "Ingest lane": {
+                "flag": "signal.defaultSource.enabled",
+                "sets": {"signal.credentials.token": "placeholder-token"},
+            },
+            "Profiles": {"flags": ["profiles.observer.enabled", "profiles.operator.enabled"]},
+            "MCP tooling": {
+                "flags": ["mcp.observer.enabled", "mcp.operator.enabled"],
+                "sets": {
+                    "mcp.observer.credentials.token": "placeholder-token",
+                    "mcp.operator.credentials.token": "placeholder-token",
+                },
+                "requires": ["MCP server"],
+            },
+            "MCP server": {
+                "flag": "mcpServer.enabled",
+                # REQUIRED when enabled, never derived: mcp-pulse has no
+                # in-cluster endpoint to default onto, since Pulse is always
+                # operator-supplied.
+                "sets": {"mcpServer.backend": "https://pulse.example.org"},
+            },
+            "Webhook exposure": {
+                "flag": "signal.ingress.enabled",
+                "sets": {"signal.ingress.host": "pulse-adapter.example.org"},
+            },
+            "Wiring": {
+                "flags": [
+                    "wiringEnabled",
+                    "pipelines.observer.enabled",
+                    "pipelines.operator.enabled",
+                ],
                 "requires": ["Ingest lane", "Profiles", "MCP tooling"],
             },
         },

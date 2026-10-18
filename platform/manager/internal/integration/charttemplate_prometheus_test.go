@@ -82,7 +82,7 @@ func TestPrometheusBundleShipsNoWiringUnlessAsked(t *testing.T) {
 		// A Pipeline with no profile has no agent to run.
 		{"wiring without a profile", []string{
 			"--set", "prometheus.enabled=true",
-			"--set", "prometheus.pipelines.enabled=true",
+			"--set", "prometheus.wiringEnabled=true",
 			"--set", "prometheus.profile.enabled=false"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,7 +102,7 @@ func TestPrometheusWiringClaimsItsOwnLane(t *testing.T) {
 		"--set", "prometheus.alertmanager.defaultSource.enabled=true",
 		"--set", "prometheus.mcp.enabled=true",
 		"--set", "prometheus.mcp.url=http://mcp.example/mcp",
-		"--set", "prometheus.pipelines.enabled=true")
+		"--set", "prometheus.wiringEnabled=true")
 	got := promPipelineNames(out)
 	if len(got) != 1 || got[0] != "alert-triage" {
 		t.Fatalf("wiring must render exactly alert-triage, got %v", got)
@@ -127,7 +127,7 @@ func TestPrometheusWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	base := []string{
 		"--set", "prometheus.enabled=true",
 		"--set", "prometheus.alertmanager.defaultSource.enabled=true",
-		"--set", "prometheus.pipelines.enabled=true",
+		"--set", "prometheus.wiringEnabled=true",
 	}
 	bare := promPipelines(helmTemplate(t, base...))["alert-triage"]
 	for _, needle := range []string{"prometheus-observability", "prometheus-api", "mcpConfigs"} {
@@ -256,7 +256,7 @@ func TestPrometheusBundleNotes(t *testing.T) {
 		"--set", "pipelines[0].profile=alert-investigator",
 		"--set", "pipelines[0].signalSources={alerts}",
 	}
-	wired := []string{"--set", "prometheus.pipelines.enabled=true"}
+	wired := []string{"--set", "prometheus.wiringEnabled=true"}
 	for _, tc := range []struct {
 		name          string
 		args          []string

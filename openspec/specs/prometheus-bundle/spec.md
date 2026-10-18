@@ -255,30 +255,23 @@ profile.
   alert, which the runtime appends to its system prompt
 
 ### Requirement: The wiring component ships one claiming Pipeline, off by default
-The bundle SHALL offer a wiring component rendering a `Pipeline` that claims the
-bundle's own alert source and names the bundle's own profile, binding the
-bundle's metrics toolset and `MCPConfig`. `pipelines.enabled` SHALL default to
-`false`, and — unlike the Kubernetes bundle — NO values path SHALL force it on,
-because no turnkey mode enables this bundle at all. The component SHALL render
-only when the profile component renders, since a Pipeline with no profile has no
-agent to run.
+The bundle SHALL offer a wiring component rendering a `Pipeline` that claims the bundle's own alert source and names the bundle's own profile, binding the bundle's metrics toolset and `MCPConfig`.
 
-Exactly ONE route SHALL be offered. A metrics query server is read-only, so
-there is no second posture to express.
+`wiringEnabled` SHALL default to `false`, and — unlike the Kubernetes bundle — NO values path SHALL force it on, because no turnkey mode enables this bundle at all.
 
-The component SHALL render the ServiceAccount that route executes under, unless
-the install names one, and SHALL bind it no Kubernetes RBAC by default.
+The component SHALL render only when the profile component renders, since a Pipeline with no profile has no agent to run.
 
-Every reference the Pipeline makes to an object the bundle does not itself render
-SHALL be a values-supplied name, omitted when unset. Channels SHALL be such a
-list and SHALL default to empty; with none bound, the conversation dispatches
-without waiting and its answer is readable from `status.runs[].result`. A ref to
-a bundle component that is turned off SHALL be omitted rather than dangling.
+Exactly ONE route SHALL be offered. A metrics query server is read-only, so there is no second posture to express.
 
-Rendering alongside an install-declared Pipeline claiming the same source SHALL
-be possible and SHALL NOT fail: sources are shareable. It SHALL be reported in
-the post-install notes for what it is — one alert opening two conversations,
-under two profiles, with two agents acting.
+The component SHALL render the ServiceAccount that route executes under, unless the install names one, and SHALL bind it no Kubernetes RBAC by default.
+
+Every reference the Pipeline makes to an object the bundle does not itself render SHALL be a values-supplied name, omitted when unset. Channels SHALL be such a list and SHALL default to empty.
+
+With none bound, the conversation dispatches without waiting and its answer is readable from `status.runs[].result`.
+
+A ref to a bundle component that is turned off SHALL be omitted rather than dangling.
+
+Rendering alongside an install-declared Pipeline claiming the same source SHALL be possible and SHALL NOT fail: sources are shareable. It SHALL be reported in the post-install notes for what it is — one alert opening two conversations, under two profiles, with two agents acting.
 
 #### Scenario: Enabling the bundle adds no route by itself
 - **WHEN** the bundle is enabled with default values
@@ -299,8 +292,8 @@ under two profiles, with two agents acting.
 
 #### Scenario: A channel is named
 - **WHEN** the wiring component's channel list names an existing Channel
-- **THEN** the rendered Pipeline carries that `channelRefs` entry; with the list
-  empty the field is absent, not empty-valued
+- **THEN** the rendered Pipeline carries that `channelRefs` entry. With the list
+  empty, the field is absent, not empty-valued
 
 #### Scenario: A disabled component leaves no dangling reference
 - **WHEN** wiring renders with the metrics component turned off
@@ -314,19 +307,11 @@ under two profiles, with two agents acting.
   opens two conversations
 
 ### Requirement: Each component is individually toggleable
-Within an active bundle, `alertmanager.enabled`, `mcp.enabled`,
-`mcpServers.enabled`, `profile.enabled` and `pipelines.enabled` SHALL
-independently control their component's objects, so partial enablement works and
-cross-component references stay values-resolvable.
+Within an active bundle, `alertmanager.enabled`, `mcp.enabled`, `mcpServers.enabled`, `profile.enabled` and `wiringEnabled` SHALL independently control their component's objects, so partial enablement works and cross-component references stay values-resolvable.
 
-`pipelines.enabled` SHALL default `false` — the exception, because a route is the
-one component that spends money and acts on its own. `mcp` and `mcpServers` SHALL
-default off together, because both require an operator-supplied endpoint.
+`wiringEnabled` SHALL default `false` — the exception, because a route is the one component that spends money and acts on its own. `mcp` and `mcpServers` SHALL default off together, because both require an operator-supplied endpoint.
 
-Wiring the bundle renders SHALL reference only objects the bundle itself renders,
-plus values-supplied names omitted when unset; a route spanning components the
-bundle cannot see SHALL be declared by the install, in the parent chart's
-`pipelines:`.
+Wiring the bundle renders SHALL reference only objects the bundle itself renders, plus values-supplied names omitted when unset. A route spanning components the bundle cannot see SHALL be declared by the install, in the parent chart's `pipelines:`.
 
 #### Scenario: Ingest-only bundle
 - **WHEN** the bundle is enabled with the metrics, profile and wiring components

@@ -10,9 +10,9 @@
 # exist is a defect, not a placeholder.
 #
 # Specifications is the same promotion applied to the per-extension-point
-# contracts: AgentRuntime and Channel adapter now, Signal adapter joining
-# it once it is rewritten to the same versioned-spec standard (contracts/
-# runtime.md's own change) instead of staying narrative reference material.
+# contracts: AgentRuntime, ChannelAdapter and SignalAdapter all now carry
+# the same versioned-spec standard, each rewritten from narrative reference
+# material in its own change.
 #
 # THERE IS NO INDEX PAGE, and the group is the index. A page listing four
 # entries the sidebar already lists is a second navigation written by hand,
@@ -40,6 +40,8 @@ groups:
         url: /integrations/prometheus/
       - title: Home Assistant
         url: /integrations/home-assistant/
+      - title: Pulse
+        url: /integrations/pulse/
       - title: Telegram
         url: /integrations/telegram/
   - title: Runtimes
@@ -72,3 +74,5 @@ groups:
         url: /contracts/runtime/
       - title: ChannelAdapter
         url: /contracts/channel-adapter/
+      - title: SignalAdapter
+        url: /contracts/signal-adapter/

@@ -256,6 +256,26 @@ INTEGRATION_DIAGRAMS: dict[str, dict] = {
     # TELEGRAM IS THE ONE THAT ANSWERS, so its second lane is the reply rather
     # than a toolset -- this bundle grants none. Both lanes run through the
     # single poller, which is the rule the whole integration is shaped by.
+    # ONE SOURCE, TWO MCP PAIRS, TWO ROUTES -- the real wall is the pair, not
+    # the route, so the picture pairs row-to-row between them (kubernetes/
+    # prometheus's "two lanes meet on route" shape, with two route boxes
+    # instead of one -- home-assistant already proves fan-out to two boxes
+    # reads cleanly).
+    "pulse": {
+        "dir": "integrations",
+        "alt": "A firing Pulse alert is claimed by two routes, each binding "
+               "its own MCP pair: one that only investigates, one that may "
+               "also record a maintenance window or a criticality tag.",
+        "named": True,
+        "cols": [
+            [("a firing alert", "from Pulse", "plain")],
+            [("pulse-observer", "investigates only", "subject"),
+             ("pulse-operator", "may also annotate", "subject")],
+            [("observer-mcp", "reads & investigates", "subject"),
+             ("operator-mcp", "+ maintenance, tags", "subject")],
+        ],
+        "arrows": ["claimed by", "bind"],
+    },
     "telegram": {
         "dir": "integrations",
         "alt": "One poller reads every update for a bot token: a message on "

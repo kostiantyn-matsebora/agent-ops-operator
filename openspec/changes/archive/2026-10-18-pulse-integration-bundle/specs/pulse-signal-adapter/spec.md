@@ -26,21 +26,69 @@ contract:
   matches
 - **THEN** the adapter returns 404 naming the source and pushes nothing
 
-### Requirement: Registration config comes from the pod's own environment, not a SignalSource
-This adapter's registration config SHALL be read from the adapter pod's own
-environment, rendered there by the bundle chart: the Pulse base URL, the
-Pulse API token, the source name, and the optional HMAC signing secret.
+### Requirement: Registration config comes from the served SignalSource, never a pod env var
+`SignalAdapterSpec` SHALL carry no generic env/envFrom passthrough a chart
+could use to render `PULSE_URL`/`PULSE_API_TOKEN` directly onto the pod —
+the reconciler alone owns the adapter Deployment's env.
 
-This differs from `signals/alertmanager`'s `SignalSource.spec.config.register`
-block. This bundle ships exactly one default source, so the generalized,
-per-source, CR-carried registration path adds indirection this adapter has
-no use for.
+This adapter's registration config SHALL instead be read from the served
+SignalSource itself: the Pulse base URL from `spec.config.baseUrl`
+(schema-less JSON, polled via `GET /signal/sources?adapter=`), and the
+Pulse API token plus the optional HMAC signing secret from
+`spec.credentialsSecretRef` (kubelet-resolved `envFrom`, under the single
+documented keys `token` and `signingSecret`).
 
-#### Scenario: Registration needs no SignalSource config
-- **WHEN** the adapter starts with its registration env vars set and the
-  bundle's default source carries no `register` block of its own
-- **THEN** registration still proceeds, driven entirely by the pod's
-  environment
+This bundle still ships exactly one default source. The config shape is
+three flat fields — `{"baseUrl": "...", "webhookUrl": "...", "webhookHeaders": {...}}`,
+`webhookHeaders` optional, `webhookUrl` required for registration exactly
+like `baseUrl` is (see the delivery-URL requirement below) — never
+`signals/alertmanager`'s `register` sub-block.
+
+Registration follows whichever source the adapter serves, not a
+hardcoded identity. A second, hand-authored Pulse SignalSource would also
+register — a smaller trade-off than a pod-env mechanism that does not
+exist.
+
+#### Scenario: Registration needs the source's own config
+- **WHEN** the adapter starts and the bundle's default source carries
+  `spec.config.baseUrl` and a `credentialsSecretRef` holding a Pulse API
+  token
+- **THEN** registration proceeds, driven entirely by that source's own
+  config and credential
+
+### Requirement: The registered delivery URL comes from the source, never the adapter
+The adapter is a dumb transport — the same posture as `channels/telegram`
+and `signals/ha`. It SHALL hold no connectivity information of its own.
+It SHALL register exactly the URL `spec.config.webhookUrl` carries,
+verbatim, never deriving one itself.
+
+A served source carrying `spec.config.baseUrl` but no `webhookUrl` SHALL be
+treated as not configured for registration. That is the same treatment a
+missing `baseUrl` gets.
+
+The bundle chart renders `webhookUrl` for the one source it ships:
+
+- Default: the in-cluster Service DNS form
+  (`http://agentops-signal-<adapter>.<namespace>.svc:<port>/webhook/<source>`),
+  computed at the template level, where the namespace and port are already
+  known.
+- Override: an operator-set external URL, for a Pulse outside the cluster.
+  Pulse commonly runs this way — it watches Proxmox/Docker hosts that may
+  sit entirely outside Kubernetes, unreachable from the in-cluster form.
+
+A hand-authored second source carries its own `webhookUrl` the same way.
+The adapter makes no attempt to expose itself externally either way.
+
+#### Scenario: Pulse outside the cluster registers an external URL
+- **WHEN** the served source carries a `spec.config.webhookUrl` naming an
+  externally reachable address
+- **THEN** that exact URL is registered with Pulse
+
+#### Scenario: A missing webhookUrl is not configured, not derived
+- **WHEN** the served source carries `spec.config.baseUrl` but no
+  `spec.config.webhookUrl`
+- **THEN** the adapter registers nothing and reports the same
+  not-configured state a missing `baseUrl` produces
 
 ### Requirement: The adapter registers its webhook with Pulse at pod start, and keeps healing it
 At pod start the adapter SHALL call Pulse's `POST /api/notifications/webhooks`
@@ -105,29 +153,56 @@ registered webhook SHALL set it as Pulse's `signingSecret`.
 
 Every inbound POST SHALL then be verified before the body is parsed:
 HMAC-SHA256 over `timestamp + "." + body`, checked against
-`X-Pulse-Timestamp` and `X-Pulse-Signature`, per Pulse's own webhook
-documentation.
+`X-Pulse-Timestamp` and `X-Pulse-Signature`.
 
-A missing or invalid signature SHALL be rejected with 401 and push
-nothing. The timestamp SHALL be bound to a tolerance window to reject
-stale replays.
+`X-Pulse-Signature` SHALL always carry a `v1=` prefix before the hex
+digest, confirmed against Pulse's own
+`internal/notifications/webhook_signing_test.go`.
+
+A digest compared without accounting for the prefix SHALL reject every
+genuinely signed delivery. This is not a cosmetic detail — it is the one
+place this adapter's behavior has to match Pulse's actual source rather
+than a best guess at the Generic webhook contract.
+
+A missing or invalid signature, or a signature missing the `v1=` prefix,
+SHALL be rejected with 401 and push nothing. The timestamp SHALL be bound
+to a tolerance window to reject stale replays.
 
 With no signing secret configured, the endpoint accepts unsigned posts —
 parity with `signals/alertmanager`'s opt-in-per-source credential posture.
 
 #### Scenario: Valid signature is accepted
-- **WHEN** a webhook arrives with a signature computed from the configured
-  signing secret, inside the timestamp tolerance
+- **WHEN** a webhook arrives with a `v1=`-prefixed signature computed from
+  the configured signing secret, inside the timestamp tolerance
 - **THEN** the adapter parses the body and pushes the normalized signal
 
 #### Scenario: Invalid signature is refused before parsing
-- **WHEN** a webhook arrives with a signature that does not match, or
-  outside the timestamp tolerance
+- **WHEN** a webhook arrives with a signature that does not match, that is
+  missing the `v1=` prefix, or outside the timestamp tolerance
 - **THEN** the adapter returns 401 and never parses the body
 
 #### Scenario: Unsigned mode accepts any body
 - **WHEN** no signing secret is configured
 - **THEN** the adapter accepts an inbound post carrying no signature headers
+
+### Requirement: Pulse-attached headers are registered independently of signing
+`spec.config.webhookHeaders`, when set, SHALL be registered verbatim as
+Pulse's own `WebhookConfig.Headers` field (confirmed real against Pulse's
+`internal/notifications/notifications.go`) — static headers PULSE attaches
+to every delivery to this adapter.
+
+This is the opposite direction from HMAC signing and serves a different
+need: infra in front of this adapter (a WAF, a gateway) that requires its
+own shared-secret header, independent of whether a signing secret is also
+configured.
+
+Pulse's own signing headers win on a name collision, by Pulse's own
+behavior, not this adapter's.
+
+#### Scenario: Custom headers reach the registered webhook
+- **WHEN** the served source carries `spec.config.webhookHeaders`
+- **THEN** the webhook object registered with Pulse carries the same
+  headers verbatim
 
 ### Requirement: Firing alerts normalize into the signal contract, resolved alerts do not
 Matching `signals/alertmanager`'s firing-only parity, the adapter SHALL
