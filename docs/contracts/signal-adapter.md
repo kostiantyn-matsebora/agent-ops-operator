@@ -1,5 +1,5 @@
 ---
-title: Signal adapter specification
+title: SignalAdapter specification
 permalink: /contracts/signal-adapter/
 description: >-
   The versioned, normative specification of what a SignalAdapter container
@@ -193,18 +193,23 @@ condition.
 
 An adapter watching cluster-shaped state can observe agent-ops' own failures
 and feed them back in. A runtime pod that fails to start emits a Warning
-event.
+event, and nothing downstream breaks the loop that follows:
 
-The event becomes a signal, the signal opens a Conversation, and that
-Conversation's pod is the next thing to fail. Nothing downstream catches the
-loop — the fingerprint is fresh because the pod name is new.
+1. The event becomes a signal.
+2. The signal opens a Conversation.
+3. That Conversation's pod is the next thing to fail, emitting its own
+   Warning event.
+4. The fingerprint is fresh — the pod name is new — so nothing collapses
+   the repeat.
 
-The invariant and its breakers are never paraphrased here — they are cited at
-their own source, where the test that pins them lives:
-[`signals/ha/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/ha/)
-and
-[`signals/k8s-events/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/k8s-events/),
-plus the invariant itself in `invariants.md`'s "No signal loops".
+The invariant and its breakers are cited at their own source, never
+paraphrased:
+
+- The test that pins them:
+  [`signals/ha/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/ha/)
+  and
+  [`signals/k8s-events/selfexclude.go`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/k8s-events/).
+- The invariant itself: `invariants.md`'s "No signal loops".
 
 ### Security posture
 

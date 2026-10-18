@@ -72,5 +72,5 @@ groups:
     entries:
       - title: AgentRuntime
         url: /contracts/runtime/
-      - title: Signal adapter
+      - title: SignalAdapter
         url: /contracts/signal-adapter/
