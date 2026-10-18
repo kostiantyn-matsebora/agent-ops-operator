@@ -72,3 +72,18 @@ The bar this role holds a diff to, beyond the routed rules:
   verification.
 - An empty state is a state — a component correct on rich fixtures and
   blank on real sparse data is the measured failure this lane repeats.
+
+## Heuristics & best practices (non-negotiable)
+
+- **Mobile-first, progressive enhancement** — core experience in HTML/CSS, then JS.
+- **Semantic HTML & ARIA** — correct roles, labels, relationships.
+- **Performance budgets.**
+  - Keep per-page JS small.
+  - Inline critical CSS.
+  - Prefetch routes.
+- **State** — prefer local; abstract global state behind composables/hooks/stores.
+- **Styling.**
+  - Grid/Flexbox, logical properties, `prefers-color-scheme`.
+  - Avoid heavy UI libs unless justified.
+  - **Reuse existing primitives** before rolling your own.
+- **Isolation** — encapsulate side-effects (fetch, storage) so components stay pure/testable.
