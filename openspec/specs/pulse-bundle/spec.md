@@ -175,14 +175,14 @@ chart's own `console.ingress` clear-text warning:
 ### Requirement: This bundle's deployed MCP server is first-party, unlike every prior bundle's
 Where `kubernetes` and `prometheus` reference a third party's published MCP
 server image, and `home-assistant` points at a vendor-served endpoint,
-`pulse`'s `mcp-pulse` component SHALL deploy an image this repository
-itself builds and publishes (`agentops-mcp-pulse`).
+`pulse`'s `mcpServer` component (the `mcp-pulse` server) SHALL deploy an
+image this repository itself builds and publishes (`agentops-mcp-pulse`).
 
 The design document SHALL record this as the first such precedent, so a
 later bundle facing the same "no deployable vendor server" gap has it to
 follow.
 
 #### Scenario: The server image is this repository's own
-- **WHEN** the mcp-pulse component renders
+- **WHEN** the `mcpServer` component renders
 - **THEN** its image repository is `agentops-mcp-pulse`, built from
   `platform/mcp-pulse/` by this repository's own release pipeline
