@@ -243,6 +243,18 @@ func backdateSourceCooldown(t *testing.T, ctx context.Context, e *Env, sourceNam
 // sees. The harness's port-forwards already survive a backing pod's
 // replacement (cluster.go's Forward runs a supervisor goroutine for exactly
 // this), so nothing here needs to re-dial.
+//
+// forceManagerRollout only produces a NEW ReplicaSet when the pod template
+// actually changes — true the FIRST time anything clears the affinity
+// field, but a no-op once it is already nil, which replicas_test.go itself
+// documents as permanent for the rest of a run ("once cleared, left
+// cleared"). On SYSTEM_REUSE=1 (this pack's own documented local-dev
+// workflow) or any run ordering where a replicas lane already executed,
+// that leaves nothing for forceManagerRollout to roll: no new pods, no
+// cleared cooldown map, and this test's whole premise unexercised. Bumping
+// a template annotation first forces a genuine diff every time, independent
+// of affinity state, before forceManagerRollout's scheduling-safe mechanics
+// take over.
 func restartManager(t *testing.T, ctx context.Context, e *Env) {
 	t.Helper()
 	var dep appsv1.Deployment
@@ -250,5 +262,15 @@ func restartManager(t *testing.T, ctx context.Context, e *Env) {
 		t.Fatal(err)
 	}
 	n := int(derefOr(dep.Spec.Replicas, 1))
+
+	patch := client.MergeFrom(dep.DeepCopy())
+	if dep.Spec.Template.Annotations == nil {
+		dep.Spec.Template.Annotations = map[string]string{}
+	}
+	dep.Spec.Template.Annotations["agentops.dev/system-test-restarted-at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := e.K.Patch(ctx, &dep, patch); err != nil {
+		t.Fatal(err)
+	}
+
 	forceManagerRollout(t, ctx, e, n)
 }
