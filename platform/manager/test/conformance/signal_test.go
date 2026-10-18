@@ -166,7 +166,7 @@ func TestSignalTelegramConformance(t *testing.T) {
 	assertNormalized(t, post, "tg-chat")
 	s := post.Signals[0]
 	labels, _ := s["labels"].(map[string]any)
-	if s["kind"] != "chat" || s["initiationId"] != "tg-77" || s["payload"] != "check the disk" {
+	if s["kind"] != "chat" || s["initiationId"] != "tg-tg-chat-77" || s["payload"] != "check the disk" {
 		t.Fatalf("chat signal shape: %v", s)
 	}
 	if labels["agentops.dev/channel"] != "telegram-ops" {
