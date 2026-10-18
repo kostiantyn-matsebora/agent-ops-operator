@@ -205,11 +205,11 @@ event, and nothing downstream breaks the loop that follows:
 An observing adapter MUST exclude an object before emitting a signal about
 it, matching any of:
 
-- **Name prefix** — the object's name starts with an agent-ops-reserved
-  prefix.
-- **Owner or label** — the object is owned by, or labeled as, an agent-ops
-  kind.
-- **Own namespace** — the object lives in agent-ops' own namespace.
+| ID | Requirement |
+|---|---|
+| `ADP-5` | Name prefix — the object's name starts with an agent-ops-reserved prefix. |
+| `ADP-6` | Owner or label — the object is owned by, or labeled as, an agent-ops kind. |
+| `ADP-7` | Own namespace — the object lives in agent-ops' own namespace. |
 
 ### Security posture
 
