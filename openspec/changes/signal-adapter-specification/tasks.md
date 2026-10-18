@@ -79,12 +79,16 @@
       `.claude/rules/documentation.md`'s routing table already carries the
       "Runtime/channel/signal contract" row (`docs/contracts/<contract>.md`),
       which names this page by its path pattern — verified, no edit needed.
-- [ ] 6.2 Adopter site: build the site from this working copy's tree and look
-      at the changed pages per `docs/CLAUDE.md` pre-flight — stations render,
-      command fences pair, no table crushes, no horizontal overflow in either
-      theme. **NOT PERFORMED** — this is a remote session with no running
-      Docker daemon (`.claude/rules/remote-session.md`: the visual check is
-      WORKSTATION-ONLY). Recorded as not performed, not done.
+- [x] 6.2 Adopter site: built the site from this working copy's tree
+      (`docker run jekyll/jekyll:4`) on a workstation and looked at every
+      changed page — `contracts/signal-adapter`, `guides/signal-adapter`,
+      `integrations/{home-assistant,kubernetes,prometheus,telegram}` — per
+      `docs/CLAUDE.md` pre-flight. All six return 200 and
+      `scrollWidth <= clientWidth` in both `colorScheme`s (Playwright,
+      `platform/console/ui`'s Chromium). Screenshotted each: stations
+      render, command fences pair (Linux/macOS + Windows tabs), no table
+      crushes. `docs/concepts.md` carries no front matter, so Jekyll copies
+      it verbatim — not a rendered page, nothing to screenshot.
 - [x] 6.3 Adopter site: the prose lint in `docs/CLAUDE.md` (the awk script,
       run directly, not only via the session hook) is silent over
       `docs/contracts/signal-adapter.md` and `docs/guides/signal-adapter.md`.
