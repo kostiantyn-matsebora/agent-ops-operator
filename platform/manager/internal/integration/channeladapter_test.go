@@ -406,6 +406,57 @@ func TestChannelAdapterServiceOwnership(t *testing.T) {
 	}
 }
 
+// EVERY CHANNEL ADAPTER SHARED ONE app.kubernetes.io/name, SO LABEL-GROUPING
+// TOOLING (a Hubble service map, a dashboard, kubectl -l) could not tell
+// instances apart — including the console, which is an ordinary
+// ChannelAdapter CR. app.kubernetes.io/instance now carries the CR name, on
+// the Deployment, its Pod template and its Service — additively, alongside
+// the unchanged app.kubernetes.io/name and the selector key.
+func TestChannelAdapterInstanceLabel(t *testing.T) {
+	ctx := context.Background()
+	mkAdapter(t, "inst-chan-a")
+	reconcileAdapter(t, "inst-chan-a")
+
+	b := &agentopsv1alpha1.ChannelAdapter{}
+	b.Name, b.Namespace = "inst-chan-b", ns
+	b.Spec.Image = "example/adapter:1"
+	port := int32(8082)
+	b.Spec.Port = &port
+	if err := k8sClient.Create(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	reconcileAdapter(t, "inst-chan-b")
+
+	var deployA, deployB appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("inst-chan-a")}, &deployA); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("inst-chan-b")}, &deployB); err != nil {
+		t.Fatal(err)
+	}
+	for _, deploy := range []appsv1.Deployment{deployA, deployB} {
+		if deploy.Labels["app.kubernetes.io/name"] != "agentops-adapter" {
+			t.Fatalf("app.kubernetes.io/name changed: %+v", deploy.Labels)
+		}
+	}
+	if deployA.Labels["app.kubernetes.io/instance"] != "inst-chan-a" ||
+		deployA.Spec.Template.Labels["app.kubernetes.io/instance"] != "inst-chan-a" {
+		t.Fatalf("instance label wrong on A: deploy=%+v pod=%+v", deployA.Labels, deployA.Spec.Template.Labels)
+	}
+	if deployB.Labels["app.kubernetes.io/instance"] != "inst-chan-b" ||
+		deployB.Spec.Template.Labels["app.kubernetes.io/instance"] != "inst-chan-b" {
+		t.Fatalf("instance label wrong on B: deploy=%+v pod=%+v", deployB.Labels, deployB.Spec.Template.Labels)
+	}
+
+	var svcB corev1.Service
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("inst-chan-b")}, &svcB); err != nil {
+		t.Fatalf("Service not rendered for ported adapter: %v", err)
+	}
+	if svcB.Labels["app.kubernetes.io/instance"] != "inst-chan-b" {
+		t.Fatalf("instance label wrong on Service: %+v", svcB.Labels)
+	}
+}
+
 // TestChannelAdapterWithoutPortHasNoService: the polling adapter (the default)
 // declares no port and must stay serviceless.
 func TestChannelAdapterWithoutPortHasNoService(t *testing.T) {

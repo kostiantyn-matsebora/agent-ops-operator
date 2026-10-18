@@ -102,8 +102,9 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	labels := map[string]string{
-		"app.kubernetes.io/name": "agentops-adapter",
-		channelAdapterLabelKey:   adapter.Name,
+		"app.kubernetes.io/name":     "agentops-adapter",
+		"app.kubernetes.io/instance": adapter.Name,
+		channelAdapterLabelKey:       adapter.Name,
 	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
 		Owner:       &adapter,
