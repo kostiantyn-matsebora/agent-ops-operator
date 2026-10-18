@@ -49,13 +49,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 15.1.0 -n agent-ops
+     --version 16.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 15.1.0 -n agent-ops
+     --version 16.0.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public

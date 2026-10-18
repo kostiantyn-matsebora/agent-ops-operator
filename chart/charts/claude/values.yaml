@@ -65,7 +65,10 @@ default: false
 # 0.2.0+ composes the allowlist with the agent definition's own `tools:` and
 # passes it verbatim — no substituted `Read` when nothing is declared. Pinning
 # an older tag keeps that substitution and ignores toolsets.mode.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.10.0
+# 0.11.0 reports cache-write tokens separately from input tokens, so the
+# console's Runs table can show Cached/Written/Fresh instead of folding a
+# cache write into In unexplained.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.11.0
 
 # WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
 # the declaration that turns context synchronisation ON.
