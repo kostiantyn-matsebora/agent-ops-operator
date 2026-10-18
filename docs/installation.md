@@ -190,16 +190,23 @@ state somewhere of its own:
 ## Upgrade and uninstall
 
 **Apply the CRDs yourself, before every upgrade.** Helm never upgrades a CRD
-that came from a chart's `crds/` directory — an upgraded install keeps the
-OLD shape until you apply the new one, and a field the new CRD removed keeps
-silently pruning on every write:
+that came from a chart's `crds/` directory. An upgraded install keeps the OLD
+shape until you apply the new one, and a field the new CRD removed keeps
+silently pruning on every write.
+
+There is no repo to clone just for this. Pull the chart you are upgrading to
+and apply the CRDs it carries:
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+helm pull oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  --version <version> --untar --untardir /tmp/agentops-chart
+kubectl apply -f /tmp/agentops-chart/agent-ops-operator/crds/
 ```
 
 ```powershell
-kubectl apply -f https://raw.githubusercontent.com/kostiantyn-matsebora/agent-ops-operator/master/chart/crds/
+helm pull oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  --version <version> --untar --untardir $env:TEMP\agentops-chart
+kubectl apply -f $env:TEMP\agentops-chart\agent-ops-operator\crds\
 ```
 
 Working from a checkout? `kubectl apply -f chart/crds/` does the same thing.
