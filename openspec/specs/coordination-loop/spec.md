@@ -91,5 +91,5 @@ A second invoke of the same entry attaches rather than duplicating for this
 reason: the same id-equality rule every signal routes by.
 
 #### Scenario: Attach reported
-- **WHEN** a coordinator invokes an AgentCapability with a correlation id a live member already carries
-- **THEN** the invoke returns that member's name and reports `attached`
+- **WHEN** a coordinator invokes the same `agents[]` entry a live member was already invoked as
+- **THEN** the invoke returns that member's name and reports `attached`, because both invokes mint the same id
