@@ -36,8 +36,12 @@ recurrence by comparing it against an open conversation's `conversationId`
   uses the webhook's own `groupKey`, Pulse its alert id, Home Assistant
   `<source>@<integration>`, Kubernetes Events `<source>@<namespace>/<workload>`
   (dropping the event's reason and the pod name from the key), cron the
-  source's own job identity, Telegram and the console a fresh mint per
-  request with verbatim propagation on continuation.
+  source's own job identity, `signal-telegram` a fresh mint per
+  general-surface message (deterministic from the update id, so a replay
+  converges), and the console a fresh mint per new task with verbatim
+  propagation on continuation. A thread reply's continuation travels
+  `channel-telegram`'s own path (`POST /channel/inbound`), correlated by the
+  binding's `conversationId` rather than a propagated `initiationId`.
 - `/channel/ops` and every outbound op now carry `conversationId` alongside
   the thread it binds (additive, `docs/contracts/channel-adapter.md` 1.1.0).
 - A reopen is refused while another OPEN conversation already carries the

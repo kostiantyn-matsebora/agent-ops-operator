@@ -11,10 +11,11 @@ import (
 )
 
 // The signal adapter conformance set. Every adapter: normalized emission
-// (fingerprint, labels, kind, payload; no adapter-side grouping), bearer
-// auth, source scoping, and a rejected post that is retried or surfaced —
-// never dropped behind a healthy-looking process. A chat-originating adapter
-// additionally carries the channel label on every signal.
+// (initiationId, labels, kind, payload; routing/grouping is id-equality,
+// never adapter-side), bearer auth, source scoping, and a rejected post that
+// is retried or surfaced — never dropped behind a healthy-looking process. A
+// chat-originating adapter additionally carries the channel label on every
+// signal.
 
 // accepted returns the accepted posts for a source.
 func accepted(mgr *FakeManager, source string) []SignalPost {
@@ -49,8 +50,8 @@ func assertNormalized(t *testing.T, post SignalPost, source string) {
 		t.Fatalf("an empty post")
 	}
 	for _, s := range post.Signals {
-		if fp, _ := s["fingerprint"].(string); fp == "" {
-			t.Fatalf("every signal needs a fingerprint: %v", s)
+		if id, _ := s["initiationId"].(string); id == "" {
+			t.Fatalf("every signal needs an initiationId: %v", s)
 		}
 		if _, ok := s["payload"]; !ok {
 			t.Fatalf("every signal carries a payload: %v", s)
@@ -80,7 +81,10 @@ func TestSignalCronConformance(t *testing.T) {
 	post := accepted(mgr, "tick")[0]
 	assertNormalized(t, post, "tick")
 	s := post.Signals[0]
-	if s["kind"] != "job" || !strings.HasPrefix(s["fingerprint"].(string), "tick@") || s["payload"] != "echo tick" {
+	// initiationId is the source's own job identity, not a per-tick value —
+	// every tick of this job shares it (design: "cron | the source's job
+	// identity — all ticks, one conversation").
+	if s["kind"] != "job" || s["initiationId"] != "tick" || s["payload"] != "echo tick" {
 		t.Fatalf("cron signal shape: %v", s)
 	}
 	if mgr.State("signal", "tick", "last-fire") == "" {
@@ -116,9 +120,13 @@ func TestSignalAlertmanagerConformance(t *testing.T) {
 	waitFor(t, "the post", 10*time.Second, func() bool { return len(accepted(mgr, "vm-alerts")) >= 1 })
 	post := accepted(mgr, "vm-alerts")[0]
 	assertNormalized(t, post, "vm-alerts")
-	// No adapter-side grouping: one signal per firing alert, each its own fingerprint.
-	if len(post.Signals) != 2 || post.Signals[0]["fingerprint"] != "fp-a" || post.Signals[1]["fingerprint"] != "fp-c" {
-		t.Fatalf("expected the two firing alerts as two signals: %v", post.Signals)
+	// One signal per firing alert, but both correlate to the SAME group: the
+	// webhook's own groupKey, carried verbatim as every signal's
+	// initiationId (design: "alertmanager | webhook groupKey verbatim").
+	const wantGroupKey = `{}/{alertname="A"}`
+	if len(post.Signals) != 2 ||
+		post.Signals[0]["initiationId"] != wantGroupKey || post.Signals[1]["initiationId"] != wantGroupKey {
+		t.Fatalf("expected the two firing alerts as two signals sharing the group's initiationId: %v", post.Signals)
 	}
 	if _, hasKind := post.Signals[0]["kind"]; hasKind {
 		t.Fatalf("alert-lane signals carry no kind: %v", post.Signals[0])
@@ -158,7 +166,7 @@ func TestSignalTelegramConformance(t *testing.T) {
 	assertNormalized(t, post, "tg-chat")
 	s := post.Signals[0]
 	labels, _ := s["labels"].(map[string]any)
-	if s["kind"] != "chat" || s["fingerprint"] != "tg-77" || s["payload"] != "check the disk" {
+	if s["kind"] != "chat" || s["initiationId"] != "tg-77" || s["payload"] != "check the disk" {
 		t.Fatalf("chat signal shape: %v", s)
 	}
 	if labels["agentops.dev/channel"] != "telegram-ops" {

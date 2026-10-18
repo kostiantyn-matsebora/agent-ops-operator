@@ -50,7 +50,10 @@ type SignalProvenance struct {
 	// +optional
 	SourceRef *ObjectRef `json:"sourceRef,omitempty"`
 
-	// Labels are the signal's grouping labels, as the adapter sent them.
+	// Labels are the signal's own context, as the adapter sent them — opaque
+	// attribution only, rendered on signal cards. They feed no routing
+	// decision: the manager routes purely by ConversationID/InitiationID
+	// equality, never by a label.
 	//
 	// BOUNDED at MaxSignalLabels. A Conversation is long-lived where the
 	// ConversationInput that used to hold these was not, and an adapter's label
