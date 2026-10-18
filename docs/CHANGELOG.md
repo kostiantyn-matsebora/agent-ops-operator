@@ -8,6 +8,18 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+### Added
+
+- `SignalAdapter`/`ChannelAdapter` workloads carry `app.kubernetes.io/instance`
+  (the CR name), on top of the unchanged `app.kubernetes.io/name`. Every
+  instance of a given adapter kind used to render the same
+  `app.kubernetes.io/name` with no instance label, so label-grouping tooling
+  — a Cilium Hubble service map, Grafana, `kubectl get pods -l` — could not
+  tell `cron` apart from `alertmanager`, or the console's own adapter from
+  `telegram`.
+
 ## [16.0.0] — 2026-10-18
 
 - `signal-pulse` 0.1.0, `mcp-pulse` 0.1.0, bundle `pulse` 0.1.0.

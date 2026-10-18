@@ -101,8 +101,9 @@ func (r *SignalAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	labels := map[string]string{
-		"app.kubernetes.io/name": "agentops-signal-adapter",
-		signalAdapterLabelKey:    adapter.Name,
+		"app.kubernetes.io/name":     "agentops-signal-adapter",
+		"app.kubernetes.io/instance": adapter.Name,
+		signalAdapterLabelKey:        adapter.Name,
 	}
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
 		Owner:          &adapter,
