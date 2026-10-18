@@ -70,5 +70,5 @@ groups:
     entries:
       - title: AgentRuntime
         url: /contracts/runtime/
-      - title: Channel adapter
+      - title: ChannelAdapter
         url: /contracts/channel-adapter/

@@ -33,7 +33,7 @@ path. Plugins are limited to the set Pages enables by default.
     calls, and are gone rather than reworded.** CRD ownership named a decision
     that does not exist — Helm never deletes CRDs from a chart's `crds/`
     directory, and the keep annotation is on the PVC, not a CRD. The model
-    credential has no default to get wrong; there is nothing to undo, only a
+    credential has no default to get wrong. There is nothing to undo, only a
     different Secret to create.
   - **`allowPodExecution` READS like an install decision and is not one.** It
     defaults to `false`, so an install cannot come up over-privileged, and
@@ -98,10 +98,10 @@ path. Plugins are limited to the set Pages enables by default.
 - **Every other `docs/*.md` is a reference page, not a site page.** They carry
   no front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
-  - **`contracts/runtime.md` already took that change.** It is the first
-    per-extension-point contract rewritten to a versioned spec, so it carries
-    front matter and a "Specifications" nav entry. `contracts/channel-adapter.md`
-    and `contracts/signal-adapter.md` stay reference pages until their own
+  - **`contracts/runtime.md` and `contracts/channel-adapter.md` already took
+    that change.** They are the per-extension-point contracts rewritten to a
+    versioned spec, so each carries front matter and a "Specifications" nav
+    entry. `contracts/signal-adapter.md` stays a reference page until its own
     rewrite does the same — see `.claude/site.md`.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
   field of every kind, written by `.github/scripts/docs-generate.py` from
@@ -369,10 +369,13 @@ with its Chromium in `~/.cache/ms-playwright`. Drive it from a script and assert
   server, rebuild, start it again.
 
 ## Authoring rules (binding)
-Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
-Structure over prose:
-Steps → numbered list.
-Choices / mappings → table.
-"X means Y" → **X.** Y on its own line.
-Multi-rule bullet → parent + sub-bullets, one rule per line.
-Prose paragraph stating > 2 rules → restructure.
+
+Quoted verbatim from `.claude/rules/writing.md`, never paraphrased:
+
+    Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
+    Structure over prose:
+    Steps → numbered list.
+    Choices / mappings → table.
+    "X means Y" → **X.** Y on its own line.
+    Multi-rule bullet → parent + sub-bullets, one rule per line.
+    Prose paragraph stating > 2 rules → restructure.

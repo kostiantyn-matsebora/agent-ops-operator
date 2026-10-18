@@ -1,8 +1,8 @@
 ---
-title: Channel adapter specification
+title: ChannelAdapter specification
 permalink: /contracts/channel-adapter/
 description: >-
-  The versioned, normative specification of what a channel adapter owes the
+  The versioned, normative specification of what a ChannelAdapter owes the
   manager, and what the manager owes it — for building a channel adapter
   agent-ops does not ship.
 
@@ -18,17 +18,9 @@ next:
 **Version 1.0.0**
 
 This specification gives everything necessary to build and maintain a
-channel adapter — a component agent-ops does not ship, that carries a
+`ChannelAdapter` — a component agent-ops does not ship, that carries a
 conversation onto a chat surface (Telegram, a web console, Slack, anything
 with a reply box).
-
-A channel adapter dials the manager, never the reverse — the same pattern
-runtimes use. NetworkPolicies stay simple, and no transport credential ever
-leaves the adapter.
-
-**No second statement of this contract survives beside it.**
-[`docs/contracts.md`](../contracts.md#the-channel-adapter-contract) points
-here and states nothing of its own.
 
 ## Conventions
 
@@ -44,6 +36,11 @@ stable ID, prefixed by the section it belongs to:
 | `ADA-n` | [Adapter's obligations](#adapters-obligations) |
 | `SEC-n` | [Auth](#auth) |
 | `COMPAT-n` | [Compatibility](#compatibility) |
+
+> Every `MUST`/`MUST NOT` on this page is required for conformance.
+> Everything gathered in [Optional capabilities](#optional-capabilities) is
+> not — an adapter implementing none of it is still fully conformant.
+{: .ao-callout}
 
 ## GET /channel/ops
 
@@ -72,8 +69,6 @@ that delivers an op, the `204` and the `503` alike. See
 
 ### The operation envelope
 
-Struct-backed: `Op`, `platform/manager/internal/chat/ops.go`.
-
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `id` | string | yes | Dedup key. Delivery is at-least-once — tolerate a repeated id. |
@@ -96,12 +91,11 @@ Struct-backed: `Op`, `platform/manager/internal/chat/ops.go`.
 | ID | Requirement |
 |---|---|
 | `OPS-1` | An adapter MUST long-poll this endpoint while able to accept ops. `204` is not an error. |
-| `OPS-2` | A `503` MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. A kept-alive connection pinned to a non-leader would ask the same non-leader forever. |
-| `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. The visible cost is one open thread for a conversation that no longer exists, closable by hand. |
+| `OPS-2` | A `503` MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. |
+| `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. |
 
 ### The claim window
 
-Struct-backed: `claimedOp`, `platform/manager/internal/httpapi/server.go`.
 It embeds every field of [the operation envelope](#the-operation-envelope),
 plus:
 
@@ -135,8 +129,6 @@ Completes a claimed op.
 
 ### The completion result
 
-Struct-backed: `OpResult`, `platform/manager/internal/chat/ops.go`.
-
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `threadId` | string | no | Required for `ensure-topic` — the opaque thread id the adapter minted, in its own id space. |
@@ -157,11 +149,7 @@ token-bucket rejection — is not an operation failure.
 |---|---|
 | `ADA-3` | An adapter MUST absorb a retryable backpressure signal inside its claim window, waiting the interval the transport stated rather than a backoff it computed instead. |
 | `ADA-3.1` | An adapter MUST report an op failed only when the condition is terminal, or when riding it out would overrun the claim. |
-| `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it CLAIMS an op, never before it sends. Work it cannot yet deliver stays queued in the manager, derivable from CR state and surviving the adapter's own restart. |
-
-The manager's recovery path is for operations that genuinely could not be
-performed. Reporting a retryable condition as a failure makes that path
-load-bearing for something the adapter could have waited out.
+| `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it CLAIMS an op, never before it sends. |
 
 ## POST /channel/inbound
 
@@ -170,8 +158,6 @@ Pushes a user reply into an existing conversation thread.
 `POST $MANAGER_URL/channel/inbound`
 
 ### The inbound request
-
-Struct-backed: `inboundReq`, `platform/manager/internal/httpapi/server.go`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -195,29 +181,28 @@ Lists the Channels this adapter serves, with their opaque config.
 
 ### The channel-listing entry
 
-No named Go struct backs this shape — it is function-local to the
-`GET /channel/channels` handler in `platform/manager/internal/httpapi/server.go`.
-
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | The `Channel` CR's own name. |
 | `config` | object | no | The Channel's `spec.config`, opaque to the manager — never parsed manager-side. |
 | `credentialEnvPrefix` | string | no | Where this channel's projected credentials live in the adapter's own environment. Secret key `K` appears as env `<prefix>K`. |
 
-Persist adapter-side cursor state (poll offsets and the like) through
-`GET`/`PUT /channel/state/{channel}/{key}`, and report a config problem
-through `POST /channel/channels/{name}/status` with
-`{"ready","reason"?,"message"?}`.
+### Two more utility calls
 
-**A `Channel` nothing serves** — no in-process provider, no Ready
-`ChannelAdapter`, no adapter-reported readiness — carries a `Served=False`
-condition. Typos fail visibly instead of queueing ops forever.
+| Call | Does |
+|---|---|
+| `GET`/`PUT /channel/state/{channel}/{key}` | Persists adapter-side cursor state — poll offsets and the like. |
+| `POST /channel/channels/{name}/status` | Reports a config problem: `{"ready","reason"?,"message"?}`. |
+
+> A `Channel` nothing serves — no in-process provider, no Ready
+> `ChannelAdapter`, no adapter-reported readiness — carries a
+> `Served=False` condition. Typos fail visibly instead of queueing ops
+> forever.
+{: .ao-callout}
 
 ## POST /channel/read
 
-**Optional.** An adapter that never calls it stays fully conformant — its
-threads simply carry no watermark, inert for every surface that does not
-render unreadness.
+**Optional** — see [Optional capabilities](#optional-capabilities).
 
 ```jsonc
 POST /channel/read
@@ -232,8 +217,6 @@ POST /channel/read
 
 ### A read-report entry
 
-Struct-backed: `readEntry`, `platform/manager/internal/httpapi/channelread.go`.
-
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `threadId` | string | yes | Which thread was read. The manager resolves it to a conversation. |
@@ -242,8 +225,6 @@ Struct-backed: `readEntry`, `platform/manager/internal/httpapi/channelread.go`.
 | `rewind` | boolean | no | "Mark unread" — sets the named reader's own watermark to `readAt` even where that is earlier than stored. Refused with no `reader`. |
 
 ### A read-report outcome
-
-Struct-backed: `readOutcome`, `platform/manager/internal/httpapi/channelread.go`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -324,8 +305,6 @@ presentation.
 
 ### Message fields
 
-Struct-backed: `Message`, `platform/manager/internal/chat/message.go`.
-
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | string | yes | `signal`, `answer`, `relay`, or `notice` — see [Enums](#enums). |
@@ -346,16 +325,12 @@ Struct-backed: `Message`, `platform/manager/internal/chat/message.go`.
 
 ### A message choice
 
-Struct-backed: `Choice`, `platform/manager/internal/chat/message.go`.
-
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `label` | string | yes | Names the action in the reader's own terms. |
 | `command` | string | yes | The addressed text the choice stands for, so a transport with no controls can print something the reader can type. |
 
 ### The topic descriptor
-
-Struct-backed: `TopicDescriptor`, `platform/manager/internal/chat/message.go`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -386,38 +361,20 @@ it, or strip it, and no caller may depend on which.
 
 | ID | Requirement |
 |---|---|
-| `ADA-10` | Rendering, escaping, splitting and truncation are the adapter's ENTIRELY. The manager guarantees nothing about how a message looks or how long it may be. `channels/telegram/render.go` is the reference: HTML composition, entity escaping, 4096-character splitting, 128-character topic names. |
+| `ADA-10` | Rendering, escaping, splitting and truncation are the adapter's ENTIRELY. The manager guarantees nothing about how a message looks or how long it may be. |
 
 ## The body grammar
 
-**A free-text body is markdown in the subset above, PLUS a block grammar.**
-The adapter reads both — that is how this contract has always treated
-markdown: it names a language, and each surface renders what it can.
-
-**The grammar itself, its recognition rules and the fold are owned by the
-`structured-agent-output` capability**
-(`openspec/specs/structured-agent-output/spec.md`), shared verbatim with the
-console's own parser (`blocks.ts`) and `channels/telegram/blocks.go`. This
-page states only WHERE the grammar applies, never restates the rules.
+A free-text `answer`/`notice` body is markdown in the subset above, plus a
+block grammar owned by the `structured-agent-output` capability — this page
+states only WHERE it applies, never restates the rules.
 
 | ID | Requirement |
 |---|---|
-| `ADA-11` | An adapter MUST parse the grammar on an `answer` or `notice` body, and MUST NOT parse one on a `relay` (somebody's typed words) or a `signal` (a CARD, never prose — see below). |
-| `ADA-12` | Parsing MUST be TOTAL. A body with no recognized tag yields one block holding the whole text — the entire backward-compatibility story, and how output predating the grammar keeps rendering. |
-| `ADA-13` | The manager MUST NOT parse, rewrite, or shorten the body it hands the adapter. The section vocabulary is OPEN — an adapter carrying a fixed list of section names is wrong, and will be wrong again the next time a profile is written. |
-
-**A `signal` is a CARD, not prose.** Its structured fields (`title`,
-`source`, `pipeline`, `labels`, the payload) ARE the message, and an adapter
-renders them with a second, dedicated renderer — never this grammar.
-
-**The contract version did NOT move for this grammar.** A body that was
-markdown is now markdown plus a block grammar, read by the same component
-that already read the markdown — nothing was added to the wire.
-
-**If an adapter does not implement it**, the tags render literally, which is
-ugly but not wrong — prevented upstream, since `AgentProfile.spec.outputFormat`
-is required and a profile declaring `none` emits no tags at all. The
-compatibility boundary is the PROFILE, not the wire.
+| `ADA-11` | An adapter MUST parse the grammar on an `answer`/`notice` body, and MUST NOT parse one on a `relay` or a `signal` — a signal is a CARD, rendered by a dedicated renderer, never this grammar. |
+| `ADA-11.1` | An adapter not implementing the grammar MAY leave its tags rendering literally — prevented upstream since `AgentProfile.spec.outputFormat` is required, and a profile declaring `none` emits none. |
+| `ADA-12` | Parsing MUST be TOTAL. A body with no recognized tag yields one block holding the whole text. |
+| `ADA-13` | The manager MUST NOT parse, rewrite, or shorten the body. The section vocabulary is OPEN. |
 
 ## Credentials
 
@@ -429,9 +386,6 @@ channel in [the channel listing](#get-channelchannels).
 | ID | Requirement |
 |---|---|
 | `MGR-10` | The manager and every reconciler MUST NOT read a Secret through the Kubernetes API. The kubelet resolves the values. |
-
-Several `Channel`s with different Secrets through one adapter process means
-several bots or workspaces served by one binary.
 
 ## Auth
 
@@ -450,13 +404,14 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 
 ### Discovering what `config` needs
 
-An adapter CR may optionally declare `spec.configSchema` (a JSON Schema for
-the `config` of the `Channel`s/`SignalSource`s it serves) and
-`spec.credentialKeys` (the Secret keys it expects).
+| Field | On `ChannelAdapter` | Is |
+|---|---|---|
+| `spec.configSchema` | optional | A JSON Schema for the `config` of the `Channel`s/`SignalSource`s it serves. |
+| `spec.credentialKeys` | optional | The Secret keys it expects. |
 
-Both are interface METADATA, advisory only. They are readable the moment
-the CR is applied, and neither ever blocks serving, projection, or
-ingestion.
+| ID | Requirement |
+|---|---|
+| `MGR-11` | Both fields are interface METADATA, advisory only — readable the moment the CR is applied, and MUST NOT block serving, projection, or ingestion. |
 
 ## Manager's provisions
 
@@ -468,20 +423,8 @@ ingestion.
 | `MGR-4` | **The vocabulary revision** — every long-poll response carries the current revision, and `GET /channel/vocabulary` serves the entries to the same authentication. |
 | `MGR-5` | **Derived-token auth** — the master token plus per-adapter tokens derived as `HMAC(masterKey, "adapter:"+name)`, validated by re-derivation, scoped to the adapter's own name. |
 | `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
-
-**Delivery is decided per DESTINATION.** An input is delivered to every
-bound channel EXCEPT the surface it entered on, because that surface
-already displayed it.
-
-Whether a surface displays its own message is a fact about that
-transport, declared as `ChannelAdapter.spec.echoesOwnMessages` (default
-`true`). A viewer rendering only what it is sent sets it `false`.
-
-**A reply op's id is stable per conversation × channel × run**
-(`send:<conversation>:<channel>:<runId>`), so a manager restart between
-`/work/done` and an adapter claiming the op re-derives the answer rather
-than losing it, and completing it appends the channel to
-`status.runs[].delivered[]`.
+| `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
+| `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between completion and claim re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
 
 ## Adapter's obligations
 
@@ -492,6 +435,20 @@ than losing it, and completing it appends the channel to
 | `ADA-3`/`ADA-3.1`/`ADA-4` | **Absorb retryable backpressure inside the claim window**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
 | `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
 | `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
+
+## Optional capabilities
+
+| Capability | An adapter may | Trigger |
+|---|---|---|
+| Read reporting | call [`POST /channel/read`](#post-channelread) and track per-reader watermarks | its surface renders unreadness |
+| Config/credential metadata | declare [`spec.configSchema`/`spec.credentialKeys`](#discovering-what-config-needs) | the CR wants its interface machine-checked |
+| Reclaim-aware pacing | budget its own wait inside `reclaimAfterSeconds` (`OPS-5`) | it absorbs backpressure in-process |
+| Thread reopening | honour `previousThreadId` and resume the archived thread (`ADA-7`) | its transport can un-archive a thread |
+| Name translation | translate a vocabulary name on the way out and back (`ADA-6.1`) | its transport rejects the name's own characters |
+| Reset-context | expose [`reset-context`](#acting-on-a-bound-conversation) as a user action | its surface offers that control |
+
+An adapter implementing none of these stays fully conformant — see
+[Conformance](#conformance).
 
 ## Enums
 
@@ -533,127 +490,12 @@ change is itself document-MAJOR.
 
 ## Conformance
 
-A channel adapter implementing every item below is fully conformant with
-this specification. Each item is independently verifiable against a
-running adapter or its source.
-
-Where `channels/telegram` or `platform/console`'s own test suite already
-exercises an item, the test is named. Running it is the verification.
-
-An item with no named test is a GAP. The obligation still holds, but no
-shipped adapter's suite currently proves it.
-
-1. **Long-polls `GET /channel/ops`, treating `204` as no-op, not an
-   error.** `channels/telegram`:
-   `TestNextOpTreats503AsNoOpRatherThanAnError` (`errorpaths_test.go`).
-2. **Retries a `503` at once, on a fresh connection, never as a failure.**
-   `channels/telegram`: `TestNextOpClosesTheConnectionOnANonLeaderAnswer`,
-   `TestPollOnceDoesNotSleepOnANonLeaderRejection` (`errorpaths_test.go`).
-3. **Tolerates a redelivered op id.** `channels/telegram`:
-   `TestPollOnceLogsAndSwallowsAFailedCompleteOnARedeliveredOp`
-   (`errorpaths_test.go`). `platform/console`:
-   `TestRedeliveredSendRendersOnce` (`adapter_test.go`).
-4. **Completes `ensure-topic` with a thread id, and reopens from
-   `previousThreadId` when its transport can.** `channels/telegram`:
-   `TestExecuteReopensTopicFromPreviousThreadID`,
-   `TestExecuteEnsureTopicWithoutADescriptorIsReported`
-   (`coverage_test.go`). `platform/console`:
-   `TestEnsureTopicIsDeterministicFromConversationUID` (`adapter_test.go`).
-5. **Completes `close-topic` and treats an already-closed thread as
-   success.** `channels/telegram`: `TestExecuteClosesATopic`,
-   `TestAlreadyClosedTopicIsNotAFailure` (`coverage_test.go`, `main_test.go`).
-6. **Completes `delete-conversation` and never leaves it unanswered.**
-   `channels/telegram`: `TestDeleteConversationReopensPostsAndClosesAgain`,
-   `TestDeleteConversationWithoutAThreadIsReported`,
-   `TestDeleteTopicFailureIsReportedNotSoftened` (`main_test.go`).
-7. **Absorbs a transport's retryable backpressure inside the claim
-   window.** `channels/telegram`: `TestRetryAfterIsHonouredThenSucceeds`,
-   `TestSustainedRateLimitFailsInsideTheBudget`,
-   `TestRetryBudgetIsHalfTheAdvertisedClaim` (`retry_test.go`).
-8. **Paces sends, gating before the claim rather than before the send.**
-   `channels/telegram`: `TestPacerGatesTheClaimNotTheSend`,
-   `TestPacerIsPerChat` (`limiter_test.go`).
-9. **Pushes a reply with a required `threadId`.** `channels/telegram`:
-   `TestTopicMessageCarriesItsThreadID` (`main_test.go`).
-10. **Never re-ingests its own outbound post as inbound.**
-    `platform/console`: `TestNoRelayLoop` (`adapter_test.go`). GAP:
-    `channels/telegram` carries no dedicated test — the rule is enforced
-    manager-side (`chat.ErrSelfInput`) and Telegram's `getUpdates` never
-    surfaces the bot's own `sendMessage` as an update, so the case does not
-    arise for it today.
-11. **Refetches the vocabulary on a changed revision, never a timer.**
-    `channels/telegram`: `TestStaleAsksAndSyncedRecords`,
-    `TestInconsequentialChangeLeavesTheAdaptedListIdentical`
-    (`vocabulary_test.go`). `platform/console`:
-    `TestVocabularyIsProjectedFromTheManagerWhenReachable`,
-    `TestVocabularyFallsBackWhenTheManagerIsUnreachable`
-    (`vocabulary_test.go`).
-12. **Renders `choices` as controls, and never drops them.**
-    `channels/telegram`: `TestChoicesRenderAsInlineControls`,
-    `TestNoChoicesMeansNoKeyboard`, `TestOversizedChoiceFallsBackToProse`
-    (`vocabulary_test.go`).
-13. **Carries `inReplyTo` through its own reply handle when present.**
-    `channels/telegram`: `TestSendUsesTheReplyHandleWhenPresent`,
-    `TestSendOmitsTheLinkageWhenAbsent` (`vocabulary_test.go`).
-14. **Parses the body grammar on an `answer`/`notice`, total and
-    fold-aware, and never on a `relay`.** `channels/telegram`:
-    `TestRenderBlocks`, `TestNoticeWithBlocksIsFolded`,
-    `TestARelayIsNotParsed`, `TestTheAdapterParsesTheBodyItself`
-    (`render_test.go`). `platform/console`: `TestFenceNests`,
-    `TestOneLineProseIsNotFenced` (`manager_test.go`).
-15. **Renders a `signal` as a card, never through the body grammar.**
-    `channels/telegram`: `TestSignalCardOmitsWhatItDoesNotKnow`,
-    `TestSignalPayloadFoldsWhenTall` (`render_test.go`).
-    `platform/console`: `TestRecordedSignalIsACard`,
-    `TestRecordedSignalDegrades` (`rehydrate_test.go`).
-16. **Renders the markdown subset and owns its own splitting/escaping.**
-    `channels/telegram`: `TestMarkdownSubsetRenders`,
-    `TestLongBodyIsSplitAndEveryPartFits`,
-    `TestPayloadWithMarkupCharactersSurvives` (`render_test.go`).
-17. **Declares `echoesOwnMessages` and the manager honours it per
-    destination.** `platform/console`:
-    `TestOwnMessageDeliveredBackConfirmsInsteadOfDuplicating`,
-    `TestDeliveredMessageFromAnotherSurfaceStaysARelay` (`adapter_test.go`).
-18. **Reads and writes cursor state via `GET`/`PUT /channel/state`.**
-    `channels/telegram`: `TestOffsetRoundTripsThroughTheStateAPI`
-    (`main_test.go`).
-19. **Projects per-channel credentials into its own environment via the
-    advertised prefix.** `platform/console`:
-    `TestProjectedCredentialsAreReadFromTheEnvironment`,
-    `TestProjectedCredentialsIgnoreUnrelatedEnvironment`,
-    `TestUITokenComesFromProjectedChannelCredentials` (`adapter_test.go`).
-    GAP: `channels/telegram` holds no credential of its own (every Bot API
-    call relays through `gateways/telegram/`), so this item does not apply
-    to it as shipped.
-20. **Authenticates every `/channel/*` call and respects scope.**
-    `channels/telegram`: `TestEveryCallGoesThroughTheGateway`
-    (`gatewaycall_test.go`, call-side). GAP: no `channels/telegram` or
-    `platform/console` test exercises a WRONG-scope token being refused —
-    that path is proven manager-side only (`internal/httpapi` auth tests).
-21. **Reports `GET`/`PUT /channel/read` watermarks honouring the batch
-    bound, monotonic rule, and reader opacity.** `platform/console`:
-    `TestMarkReadMarksTheSelection`,
-    `TestMarkReadRefusesEmptyAndOversizedBatches`,
-    `TestReaderKeyCarriesNoIdentity`, `TestMarkUnreadBringsOneMessageBack`,
-    `TestMarkUnreadRefusedWithNoReader` (`unread_test.go`,
-    `markunread_test.go`). GAP: `channels/telegram` implements no read
-    reporting at all, which is a conformant choice — see
-    [POST /channel/read](#post-channelread).
-22. **Honours `reopen`/`delete` reach as the conversation's own binding.**
-    `platform/console`: `TestReopenOnlyAppliesToAClosedConversation`,
-    `TestReopenPassesTheManagersReasonThrough`,
-    `TestBulkDeleteRefusesAConversationThatIsNotClosed`,
-    `TestDeleteConversationLeavesAReadableArchivedTranscript`
-    (`bulkdelete_test.go`). GAP: no shipped adapter test exercises
-    `reset-context` — neither `channels/telegram` nor `platform/console`
-    calls that verb today.
-23. **Reports a config problem via `POST /channel/channels/{name}/status`.**
-    GAP: neither shipped adapter carries a dedicated test asserting what
-    it sends on that call, though `platform/console/adapter.go` does call
-    it on an invalid config.
+An adapter implementing every requirement on this page except
+[Optional capabilities](#optional-capabilities) is fully conformant — no
+optional capability is required.
 
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
-| 1.0.0 | 2026-10-17 | Initial release — the narrative contract page rewritten into a versioned, normative specification: exhaustive field tables traced to their Go structs, a stable ID per requirement, the manager's provisions and the adapter's obligations stated as two exhaustive sections, compatibility rules separating the document's semver from the wire `contract` value, and the conformance checklist above. |
+| 1.0.0 | 2026-10-17 | Initial release. |
