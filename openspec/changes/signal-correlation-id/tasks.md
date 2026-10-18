@@ -22,17 +22,17 @@
 
 ## 4. Shipped signal adapters — backend-developer
 
-- [ ] 4.1 `signals/alertmanager`: `initiationId` = webhook `groupKey` verbatim, hash of sorted `groupLabels` when absent. Verify: adapter unit tests cover both paths.
-- [ ] 4.2 pulse adapter: `initiationId` = the Pulse alert id, stable across retries and firing/resolved. Verify: a unit test pins the motivating case — two unrelated alerts yield two ids and never merge.
-- [ ] 4.3 `signals/ha`: mint in the existing pending/dwell logic, keyed on condition identity. Verify: adapter unit tests pass with the new field.
-- [ ] 4.4 `signals/k8s-events`: `initiationId` = `<source>@<namespace>/<workload>` via the existing owner-reference resolution. Verify: unit tests pin one-conversation-per-workload across pod churn.
-- [ ] 4.5 `signals/cron`: `initiationId` = the source's job identity, keeping the last-fired cursor. Verify: unit tests pin all-ticks-one-conversation without the empty-signature collapse.
-- [ ] 4.6 `signals/telegram` and console origination: fresh mint per new request, verbatim propagation of the stamped binding id on continuation. Verify: unit tests cover both cases on each surface.
+- [x] 4.1 `signals/alertmanager`: `initiationId` = webhook `groupKey` verbatim, hash of sorted `groupLabels` when absent. Verify: adapter unit tests cover both paths.
+- [x] 4.2 pulse adapter: `initiationId` = the Pulse alert id, stable across retries and firing/resolved. Verify: a unit test pins the motivating case — two unrelated alerts yield two ids and never merge.
+- [x] 4.3 `signals/ha`: mint in the existing pending/dwell logic, keyed on condition identity. Verify: adapter unit tests pass with the new field.
+- [x] 4.4 `signals/k8s-events`: `initiationId` = `<source>@<namespace>/<workload>` via the existing owner-reference resolution. Verify: unit tests pin one-conversation-per-workload across pod churn.
+- [x] 4.5 `signals/cron`: `initiationId` = the source's job identity, keeping the last-fired cursor. Verify: unit tests pin all-ticks-one-conversation without the empty-signature collapse.
+- [x] 4.6 `signals/telegram` and console origination: fresh mint per new request, verbatim propagation of the stamped binding id on continuation. Verify: unit tests cover both cases on each surface.
 
 ## 5. Channel surfaces — backend-developer
 
-- [ ] 5.1 `channels/telegram`: thread mapping from the op's `conversationId` only — drop any signature-hash or backref mapping. Verify: the component's test suite passes with the mapping asserted both directions.
-- [ ] 5.2 `platform/console`: read `spec.conversationId` directly, remove signature-hash usages in Go and UI. Verify: console Go tests and `npm run test:coverage` pass.
+- [x] 5.1 `channels/telegram`: thread mapping from the op's `conversationId` only — drop any signature-hash or backref mapping. Verify: the component's test suite passes with the mapping asserted both directions.
+- [x] 5.2 `platform/console`: read `spec.conversationId` directly, remove signature-hash usages in Go and UI. Verify: console Go tests and `npm run test:coverage` pass.
 
 ## 6. Bundles and chart values — deployment-engineer
 
