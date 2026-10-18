@@ -23,7 +23,7 @@ result to the manager.
 every kind of thing that can originate a conversation has an adapter behind
 it.
 
-![Your signal adapter watches your transport and posts normalised signals to the manager, which groups them and opens a conversation.]({{ '/assets/img/guides/signal-adapter-light.svg' | relative_url }}){: .ao-diagram}
+![Your signal adapter watches your transport, mints an initiationId, and posts it to the manager, which matches it by equality and opens or resumes a conversation.]({{ '/assets/img/guides/signal-adapter-light.svg' | relative_url }}){: .ao-diagram}
 
 ## Before you start
 
