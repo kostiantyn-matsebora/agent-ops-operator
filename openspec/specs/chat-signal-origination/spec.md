@@ -186,6 +186,11 @@ No chat-specific routing branch and no second addressing mode SHALL exist manage
 - **WHEN** the transport re-delivers the same update after a crash
 - **THEN** the signal repeats the same `initiationId` and routes to the conversation the first delivery opened, rather than opening a second one
 
+#### Scenario: Two sources never collide on the same bare delivery id
+
+- **WHEN** two SignalSources a Pipeline shares each receive an update carrying the same transport-local delivery id
+- **THEN** each mints a distinct `initiationId`, scoped to its own source, and the two signals open two separate conversations
+
 ### Requirement: A Coordinator is a claimant like a Pipeline
 
 Wherever the claimants of a source are enumerated — fan-out, `Wired`, the
