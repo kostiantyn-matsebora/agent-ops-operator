@@ -175,7 +175,7 @@ curl -X PUT -H "Authorization: Bearer $ADAPTER_TOKEN" \
 
 ```powershell
 curl -X PUT -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
-  "$env:MANAGER_URL/signal/state/my-source/cursor" -d '{\"value\": \"…\"}'
+  "$env:MANAGER_URL/signal/state/my-source/cursor" -d '{"value": "…"}'
 ```
 
 **Verify:** `GET` the same key back and it round-trips the value you `PUT`,

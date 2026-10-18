@@ -10,14 +10,16 @@ See proposal.md — Why. This change builds on a sibling change,
 - The governance pattern (scoped rule, verify-against-spec, approval-gated
   edits, conformance carried by a spec change) is established.
 - **Not provided: a generator.** `runtime-specification` added a
-  `struct-table` marker to `docs-generate.py` and then removed it in the same
-  change (its own commit history: "Remove the struct-table generator this
-  depended on" — the Go doc comments it copied verbatim carried rationale
-  normal for Go source but wrong for a spec table). `runtime.md`'s field
-  tables are hand-written, requirement-ID style, same shape
-  `cr-reference.md`'s generator already uses for CRD fields. This change
-  follows that actual, final shape — not the generator the original proposal
-  assumed would still exist.
+  `struct-table` marker to `docs-generate.py`, then removed it in the same
+  change — its own commit message: "Remove the struct-table generator this
+  depended on."
+  - The Go doc comments it copied verbatim carried rationale normal for Go
+    source but wrong for a spec table.
+  - `runtime.md`'s field tables are hand-written instead, requirement-ID
+    style, the same shape `cr-reference.md`'s generator already uses for
+    CRD fields.
+  - This change follows that actual, final shape — not the generator the
+    original proposal assumed would still exist.
 
 This change was blocked on `runtime-specification` being archived. That
 precondition is now satisfied.
