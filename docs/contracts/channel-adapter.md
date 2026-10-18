@@ -413,19 +413,6 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 |---|---|
 | `MGR-11` | Both fields are interface METADATA, advisory only — readable the moment the CR is applied, and MUST NOT block serving, projection, or ingestion. |
 
-## Manager's provisions
-
-| ID | Provision |
-|---|---|
-| `MGR-1` | **The ops long-poll** — `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`, at-least-once delivery, duplicates tolerated by `id`. |
-| `MGR-2` | **The claim window** — a claimed op carries `reclaimAfterSeconds`, and an op not completed within it returns to the queue for another claimant. |
-| `MGR-3` | **Typed operations** — `send`, `ensure-topic`, `close-topic`, `delete-conversation`, each a structured payload, never rendered display text. |
-| `MGR-4` | **The vocabulary revision** — every long-poll response carries the current revision, and `GET /channel/vocabulary` serves the entries to the same authentication. |
-| `MGR-5` | **Derived-token auth** — the master token plus per-adapter tokens derived as `HMAC(masterKey, "adapter:"+name)`, validated by re-derivation, scoped to the adapter's own name. |
-| `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
-| `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
-| `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between completion and claim re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
-
 ## Adapter's obligations
 
 | ID | Obligation |
@@ -436,7 +423,7 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 | `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
 | `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
 
-## Optional capabilities
+### Optional capabilities
 
 | Capability | An adapter may | Trigger |
 |---|---|---|
@@ -449,6 +436,19 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 
 An adapter implementing none of these stays fully conformant — see
 [Conformance](#conformance).
+
+## Manager's provisions
+
+| ID | Provision |
+|---|---|
+| `MGR-1` | **The ops long-poll** — `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`, at-least-once delivery, duplicates tolerated by `id`. |
+| `MGR-2` | **The claim window** — a claimed op carries `reclaimAfterSeconds`, and an op not completed within it returns to the queue for another claimant. |
+| `MGR-3` | **Typed operations** — `send`, `ensure-topic`, `close-topic`, `delete-conversation`, each a structured payload, never rendered display text. |
+| `MGR-4` | **The vocabulary revision** — every long-poll response carries the current revision, and `GET /channel/vocabulary` serves the entries to the same authentication. |
+| `MGR-5` | **Derived-token auth** — the master token plus per-adapter tokens derived as `HMAC(masterKey, "adapter:"+name)`, validated by re-derivation, scoped to the adapter's own name. |
+| `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
+| `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
+| `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between completion and claim re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
 
 ## Enums
 
