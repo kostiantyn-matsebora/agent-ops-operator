@@ -994,6 +994,22 @@
         "formerly",
         "RETIRED"
       ]
+    },
+    {
+      "id": "channel-type-env",
+      "pattern": "CHANNEL_TYPE\\b",
+      "says": "ADAPTER_NAME is the one env name carrying an adapter's identity, on channel and signal adapters alike",
+      "allow": [
+        "removed",
+        "retired",
+        "replaced",
+        "replacing",
+        "renamed",
+        "no longer",
+        "no `CHANNEL_TYPE`",
+        "formerly",
+        "RETIRED"
+      ]
     }
   ]
 }

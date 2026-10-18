@@ -12,7 +12,7 @@ The Deployment SHALL carry:
 - `MANAGER_URL`
 - **`ADAPTER_NAME`** (the CR's name — the same env name channel adapters receive, replacing `SOURCE_TYPE`)
 - `POD_NAMESPACE`
-- the per-adapter derived token
+- `ADAPTER_TOKEN` (the per-adapter derived token)
 
 It SHALL run `replicas 1` with `Recreate` when singleton, and project each
 served SignalSource's `credentialsSecretRef` as `envFrom` under
