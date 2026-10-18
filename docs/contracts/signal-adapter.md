@@ -219,6 +219,17 @@ it, matching any of:
 | `SEC-2` | `ADAPTER_TOKEN` MUST be derived, never minted or stored. The manager re-derives and compares in constant time, reading no Secret. |
 | `SEC-3` | The operator MUST grant an adapter no Kubernetes permissions of its own. `spec.serviceAccountName` is a reference only. |
 
+### Optional capabilities
+
+| Capability | An adapter may | Trigger |
+|---|---|---|
+| Cursor persistence | use [`GET`/`PUT /signal/state`](#get-signalstatesourcekey) instead of local disk | the transport is polled rather than pushed, so a restart needs an offset |
+| Push mode | bind `LISTEN_ADDR` and serve inbound webhooks | `SignalAdapter.spec.port` is set |
+| Status reporting | report config problems via [`POST /signal/sources/{name}/status`](#post-signalsourcesnamestatus) | the adapter's own `config` can be invalid at runtime |
+
+An adapter implementing none of these stays fully conformant — see
+[Compatibility](#compatibility).
+
 ## Manager's provisions
 
 | ID | Requirement |
@@ -255,17 +266,6 @@ it, matching any of:
 | `title` | truncated to 500 runes |
 | request body, `POST /signal/inbound` | ≤ 1 MiB |
 | request body, `PUT /signal/state/{source}/{key}` | ≤ 1 KiB |
-
-## Optional capabilities
-
-| Capability | An adapter may | Trigger |
-|---|---|---|
-| Cursor persistence | use [`GET`/`PUT /signal/state`](#get-signalstatesourcekey) instead of local disk | the transport is polled rather than pushed, so a restart needs an offset |
-| Push mode | bind `LISTEN_ADDR` and serve inbound webhooks | `SignalAdapter.spec.port` is set |
-| Status reporting | report config problems via [`POST /signal/sources/{name}/status`](#post-signalsourcesnamestatus) | the adapter's own `config` can be invalid at runtime |
-
-An adapter implementing none of these stays fully conformant — see
-[Compatibility](#compatibility).
 
 ## Compatibility
 
