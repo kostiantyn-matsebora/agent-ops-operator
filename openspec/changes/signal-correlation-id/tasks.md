@@ -2,23 +2,23 @@
 
 ## 1. Contract pages — api-architect
 
-- [ ] 1.1 Rewrite `docs/contracts/signal-adapter.md` to 2.0.0: `initiationId` required with the one propagate-or-create rule, `fingerprint` removed, requirement IDs (`API-n`/`ADP-n`/`MGR-n`) renumbered, COMPAT stating reject-never-synthesize, changelog row under 2.0.0. The user approves the wording before it merges (`signal-rules.md`). Verify: the page's claims match the delta specs and `rules_compliance.py` passes on it.
-- [ ] 1.2 Bump `docs/contracts/channel-adapter.md` MINOR: ops carry `conversationId` (additive, opaque), a channel adapter never mints an id. Verify: wire `contract=` value unchanged on the page, changelog row added.
-- [ ] 1.3 Check the open `channel-adapter-specification` change for an overlapping `channel-adapter-contract` delta and rebase whichever lands second. Verify: `openspec validate --strict` passes for both changes after the rebase.
+- [x] 1.1 Rewrite `docs/contracts/signal-adapter.md` to 2.0.0: `initiationId` required with the one propagate-or-create rule, `fingerprint` removed, requirement IDs (`API-n`/`ADP-n`/`MGR-n`) renumbered, COMPAT stating reject-never-synthesize, changelog row under 2.0.0. The user approves the wording before it merges (`signal-rules.md`). Verify: the page's claims match the delta specs and `rules_compliance.py` passes on it.
+- [x] 1.2 Bump `docs/contracts/channel-adapter.md` MINOR: ops carry `conversationId` (additive, opaque), a channel adapter never mints an id. Verify: wire `contract=` value unchanged on the page, changelog row added.
+- [x] 1.3 Check the open `channel-adapter-specification` change for an overlapping `channel-adapter-contract` delta and rebase whichever lands second. Verify: `openspec validate --strict` passes for both changes after the rebase.
 
 ## 2. CRD and API types — backend-developer
 
-- [ ] 2.1 Remove `SignalSource.spec.grouping`, add top-level `spec.cooldownHours` (default 6). Regen deepcopy and CRDs per `build-test.md`. Verify: `go build ./...` and the regenerated `chart/crds/` show the removal and the new field.
-- [ ] 2.2 Replace `Conversation.spec.signature` with `spec.conversationId` (written once, opaque string). Regen. Verify: envtest suite compiles and passes.
+- [x] 2.1 Remove `SignalSource.spec.grouping`, add top-level `spec.cooldownHours` (default 6). Regen deepcopy and CRDs per `build-test.md`. Verify: `go build ./...` and the regenerated `chart/crds/` show the removal and the new field.
+- [x] 2.2 Replace `Conversation.spec.signature` with `spec.conversationId` (written once, opaque string). Regen. Verify: envtest suite compiles and passes.
 
 ## 3. Manager ingest and routing — backend-developer
 
-- [ ] 3.1 Require `initiationId` at `POST /signal/inbound`: `4xx` naming the field, no synthesis. Remove the alert-vs-oneshot fallback in `httpapi/signals.go` and `ingest.Signature`/`SignatureHash`/`DefaultSignatureLabels`. Verify: httpapi unit tests cover the rejection and the removed symbols are gone from the module.
-- [ ] 3.2 Route by equality through an informer field index on `spec.conversationId`, scoped to the claiming pipeline and OPEN conversations only. Remove the `agentops.dev/signature-hash` label and window reuse. Verify: envtest covers open-match recurrence, fresh-id creation, distinct-ids-never-merge and closed-conversation exclusion.
-- [ ] 3.3 Re-key `ingest.Cooldown` to `initiationId`, read `spec.cooldownHours`, keep SignalSource durability and chat's 0. Verify: ingest unit tests pass with the new key.
-- [ ] 3.4 Refuse reopening a closed conversation while another open conversation carries the same `conversationId` for that pipeline, reason naming the successor. Verify: envtest case for the refusal and for a permitted reopen with no successor.
-- [ ] 3.5 Stamp `conversationId` on everything leaving the conversation: every `/channel/ops` operation, member spawns (`invoke`), the runtime context. Verify: chat and dispatch unit tests assert the field on each surface.
-- [ ] 3.6 Update the dispatch/ingest test fixtures to the new semantics — a deliberate change, per `invariants.md`. Verify: the fixture diff only reflects decisions recorded in `design.md`.
+- [x] 3.1 Require `initiationId` at `POST /signal/inbound`: `4xx` naming the field, no synthesis. Remove the alert-vs-oneshot fallback in `httpapi/signals.go` and `ingest.Signature`/`SignatureHash`/`DefaultSignatureLabels`. Verify: httpapi unit tests cover the rejection and the removed symbols are gone from the module.
+- [x] 3.2 Route by equality through an informer field index on `spec.conversationId`, scoped to the claiming pipeline and OPEN conversations only. Remove the `agentops.dev/signature-hash` label and window reuse. Verify: envtest covers open-match recurrence, fresh-id creation, distinct-ids-never-merge and closed-conversation exclusion.
+- [x] 3.3 Re-key `ingest.Cooldown` to `initiationId`, read `spec.cooldownHours`, keep SignalSource durability and chat's 0. Verify: ingest unit tests pass with the new key.
+- [x] 3.4 Refuse reopening a closed conversation while another open conversation carries the same `conversationId` for that pipeline, reason naming the successor. Verify: envtest case for the refusal and for a permitted reopen with no successor.
+- [x] 3.5 Stamp `conversationId` on everything leaving the conversation: every `/channel/ops` operation, member spawns (`invoke`), the runtime context. Verify: chat and dispatch unit tests assert the field on each surface.
+- [x] 3.6 Update the dispatch/ingest test fixtures to the new semantics — a deliberate change, per `invariants.md`. Verify: the fixture diff only reflects decisions recorded in `design.md`.
 
 ## 4. Shipped signal adapters — backend-developer
 
@@ -36,8 +36,8 @@
 
 ## 6. Bundles and chart values — deployment-engineer
 
-- [ ] 6.1 Drop `grouping:` blocks from the prometheus, pulse, ha and k8s bundle values. Set an explicit `cooldownHours` where a source fires more often than the 6h default (cron-shaped sources). Verify: chart render tests pass and no rendered SignalSource carries `grouping`.
-- [ ] 6.2 Ship the regenerated `chart/crds/` and the upgrade note (`kubectl apply -f chart/crds/`, or removed fields silently prune). Verify: render tests pass against the updated CRDs from this working copy's tree, not the released chart.
+- [x] 6.1 Drop `grouping:` blocks from the prometheus, pulse, ha and k8s bundle values. Set an explicit `cooldownHours` where a source fires more often than the 6h default (cron-shaped sources). Verify: chart render tests pass and no rendered SignalSource carries `grouping`.
+- [x] 6.2 Ship the regenerated `chart/crds/` and the upgrade note (`kubectl apply -f chart/crds/`, or removed fields silently prune). Verify: render tests pass against the updated CRDs from this working copy's tree, not the released chart.
 
 ## 7. Retired vocabulary
 

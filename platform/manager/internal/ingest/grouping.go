@@ -1,43 +1,21 @@
-// Package ingest: signal → conversation grouping and fingerprint cooldown.
-// Semantics ported from claude-runner v0.6 (single source of behavioral truth).
+// Package ingest: initiationId cooldown — the one piece of per-source policy
+// the manager still owns. Grouping/signature derivation is gone: equality
+// routing matches a signal's initiationId against a conversation's own
+// spec.conversationId directly, with no manager-side computation at all
+// (signal-correlation-id).
 package ingest
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
 
-// DefaultSignatureLabels compose a signature when a SignalSource doesn't set its own.
-var DefaultSignatureLabels = []string{"alertgroup", "alertname", "namespace"}
-
-// Signature builds the grouping key from labels: values of keys joined by "/",
-// missing values empty (matches v0.6: alertgroup/alertname/namespace).
-func Signature(labels map[string]string, keys []string) string {
-	if len(keys) == 0 {
-		keys = DefaultSignatureLabels
-	}
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, labels[k])
-	}
-	return strings.Join(parts, "/")
-}
-
-// SignatureHash is a label-safe digest of a signature (labels forbid "/").
-func SignatureHash(sig string) string {
-	h := sha256.Sum256([]byte(sig))
-	return hex.EncodeToString(h[:])[:16]
-}
-
-// Cooldown suppresses fingerprints seen within a TTL window.
+// Cooldown suppresses initiationIds seen within a TTL window.
 //
 // The map is the HOT PATH, not the record: it is loaded from the owning
-// SignalSource on first use per source and written back whenever a fingerprint
-// is newly admitted, so a manager restart mid-incident no longer re-opens
+// SignalSource on first use per source and written back whenever an id is
+// newly admitted, so a manager restart mid-incident no longer re-opens
 // conversations for signals still inside their window. Entries() is what the
 // caller persists.
 type Cooldown struct {
@@ -47,17 +25,18 @@ type Cooldown struct {
 	now  func() time.Time
 }
 
-// Entry is one recorded suppression: a fingerprint and when it was admitted.
+// Entry is one recorded suppression: an initiationId and when it was
+// admitted.
 type Entry struct {
-	Fingerprint string
-	At          time.Time
+	InitiationID string
+	At           time.Time
 }
 
 // MaxCooldownEntries bounds what one source records. Exceeding it evicts the
-// OLDEST suppression, which degrades to today's behavior for that fingerprint —
-// one duplicate investigation — rather than to an unbounded object. A source
-// churning through more distinct fingerprints than this is a reason to look at
-// its grouping configuration, not at the bound.
+// OLDEST suppression, which degrades to today's behavior for that id — one
+// duplicate conversation — rather than to an unbounded object. A source
+// churning through more distinct ids than this is a reason to look at its
+// cooldownHours, not at the bound.
 const MaxCooldownEntries = 200
 
 // NewCooldown builds a store with the given suppression window.
@@ -75,7 +54,7 @@ func NewCooldown(ttl time.Duration) *Cooldown {
 func NewCooldownFrom(ttl time.Duration, entries []Entry) *Cooldown {
 	c := NewCooldown(ttl)
 	for _, e := range entries {
-		c.seen[e.Fingerprint] = e.At
+		c.seen[e.InitiationID] = e.At
 	}
 	return c
 }
@@ -93,11 +72,11 @@ func (c *Cooldown) Entries() []Entry {
 	}
 	now := c.now()
 	out := make([]Entry, 0, len(c.seen))
-	for fp, at := range c.seen {
+	for id, at := range c.seen {
 		if now.Sub(at) >= c.ttl {
 			continue
 		}
-		out = append(out, Entry{Fingerprint: fp, At: at})
+		out = append(out, Entry{InitiationID: id, At: at})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
 	if len(out) > MaxCooldownEntries {
@@ -106,29 +85,29 @@ func (c *Cooldown) Entries() []Entry {
 	return out
 }
 
-// Fresh returns the subset of fingerprints not seen within the window and
+// Fresh returns the subset of initiationIds not seen within the window and
 // records them as seen. Old entries are pruned (bounded memory).
-func (c *Cooldown) Fresh(fingerprints []string) []string {
+func (c *Cooldown) Fresh(ids []string) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
 	var out []string
-	for _, fp := range fingerprints {
-		if last, ok := c.seen[fp]; ok && now.Sub(last) < c.ttl {
+	for _, id := range ids {
+		if last, ok := c.seen[id]; ok && now.Sub(last) < c.ttl {
 			continue
 		}
-		c.seen[fp] = now
-		out = append(out, fp)
+		c.seen[id] = now
+		out = append(out, id)
 	}
-	for fp, ts := range c.seen {
+	for id, ts := range c.seen {
 		if now.Sub(ts) > 7*24*time.Hour {
-			delete(c.seen, fp)
+			delete(c.seen, id)
 		}
 	}
 	return out
 }
 
-// Stats reports how many fingerprints are currently SUPPRESSED (inside the
+// Stats reports how many initiationIds are currently SUPPRESSED (inside the
 // window) and the window itself. A cooldown lane looks exactly like an idle one
 // from outside, so this is what lets an operator tell "nothing is happening"
 // from "everything is being swallowed".

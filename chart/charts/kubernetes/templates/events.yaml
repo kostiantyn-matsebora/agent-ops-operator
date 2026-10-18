@@ -320,10 +320,7 @@ spec:
   # a REFERENCE to the SignalAdapter CR above — its implementation defines the
   # schema of the config below
   adapter: {{ $ea.name }}
-  {{- with $src.grouping }}
-  grouping:
-{{ toYaml . | indent 4 }}
-  {{- end }}
+  cooldownHours: {{ $src.cooldownHours }}
   {{- /* Built as a map so an all-empty config omits the key entirely: emitting
   a bare `config:` would set spec.config to null rather than leave it unset. */}}
   {{- $cfg := dict }}

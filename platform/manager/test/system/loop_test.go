@@ -132,7 +132,7 @@ func assertNoSelfSignalConversation(t *testing.T, items []agentopsv1alpha1.Conve
 	t.Helper()
 	for _, c := range items {
 		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
-			if strings.Contains(c.Spec.Title+c.Spec.Signature, "agentops-") || strings.Contains(c.Spec.Title+c.Spec.Signature, Namespace) {
+			if strings.Contains(c.Spec.Title+c.Spec.ConversationID, "agentops-") || strings.Contains(c.Spec.Title+c.Spec.ConversationID, Namespace) {
 				t.Fatalf("a conversation was opened from an event about agent-ops' own machinery: %s %q", c.Name, c.Spec.Title)
 			}
 		}

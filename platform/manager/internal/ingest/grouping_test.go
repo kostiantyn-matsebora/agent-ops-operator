@@ -6,31 +6,6 @@ import (
 	"time"
 )
 
-func TestSignature(t *testing.T) {
-	labels := map[string]string{"alertgroup": "home-assistant", "alertname": "HAErrorBurst", "namespace": "ha"}
-	if got := Signature(labels, nil); got != "home-assistant/HAErrorBurst/ha" {
-		t.Fatalf("default keys: got %q", got)
-	}
-	if got := Signature(labels, []string{"alertname"}); got != "HAErrorBurst" {
-		t.Fatalf("custom keys: got %q", got)
-	}
-	if got := Signature(map[string]string{"alertname": "X"}, nil); got != "/X/" {
-		t.Fatalf("missing labels keep positions: got %q", got)
-	}
-}
-
-func TestSignatureHashLabelSafe(t *testing.T) {
-	h := SignatureHash("a/b/c")
-	if len(h) != 16 {
-		t.Fatalf("hash length: %q", h)
-	}
-	for _, r := range h {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
-			t.Fatalf("non-hex rune %q", r)
-		}
-	}
-}
-
 func TestCooldown(t *testing.T) {
 	c := NewCooldown(6 * time.Hour)
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
@@ -85,7 +60,7 @@ func TestCooldownEntriesArePrunedAndBounded(t *testing.T) {
 	c.now = func() time.Time { return base.Add(7 * time.Hour) }
 	c.Fresh([]string{"recent"})
 	entries := c.Entries()
-	if len(entries) != 1 || entries[0].Fingerprint != "recent" {
+	if len(entries) != 1 || entries[0].InitiationID != "recent" {
 		t.Fatalf("entries past the window must be pruned, got %+v", entries)
 	}
 
@@ -103,8 +78,8 @@ func TestCooldownEntriesArePrunedAndBounded(t *testing.T) {
 		t.Fatalf("bound not enforced: %d entries", len(entries))
 	}
 	newest := "fp-" + strconv.Itoa(MaxCooldownEntries+49)
-	if entries[0].Fingerprint != newest {
-		t.Fatalf("the newest suppression must survive eviction, got %q", entries[0].Fingerprint)
+	if entries[0].InitiationID != newest {
+		t.Fatalf("the newest suppression must survive eviction, got %q", entries[0].InitiationID)
 	}
 }
 

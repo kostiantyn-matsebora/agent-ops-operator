@@ -12,8 +12,7 @@ import (
 // TestDeriveCoordinatorTokenMatchesChatPackage pins runtimepod's DUPLICATED
 // derivation against chat's own — chat imports runtimepod, so runtimepod
 // cannot import chat back, and this package is the one place that can hold
-// both and prove they never drift apart (the same shape
-// labelSignatureHash is pinned by, one package over).
+// both and prove they never drift apart.
 func TestDeriveCoordinatorTokenMatchesChatPackage(t *testing.T) {
 	got := runtimepod.DeriveCoordinatorToken("master-key", "co-a", "root-1")
 	want := chat.DeriveCoordinatorToken("master-key", "co-a", "root-1")

@@ -92,9 +92,9 @@ func TestSignalInboundRouting(t *testing.T) {
 	assertUnwiredSourceDropsSignal(t, h)
 	conv := postJobSignalAndFindConversation(t, ctx, h)
 	assertJobInputShape(t, ctx, conv)
-	assertDuplicateFingerprintAbsorbedByCooldown(t, h)
-	assertRecurrenceIntoSameConversation(t, ctx, h, conv)
-	assertUnknownSourceAndMissingFingerprintRejected(t, h)
+	assertDuplicateInitiationIDAbsorbedByCooldown(t, h)
+	assertRecurrenceIntoSameConversation(t, ctx, conv)
+	assertUnknownSourceAndMissingInitiationIDRejected(t, h)
 	assertSourceBookkeeping(t, ctx, 2)
 }
 
@@ -104,7 +104,7 @@ func assertUnwiredSourceDropsSignal(t *testing.T, h http.Handler) {
 	t.Helper()
 	mkSignalSource(t, "sig-unwired", "sig-t", "")
 	rec0 := postSignal(t, h, testMasterToken, "sig-unwired", []map[string]any{{
-		"fingerprint": "u-1", "labels": map[string]string{"alertname": "x"},
+		"initiationId": "u-1", "labels": map[string]string{"alertname": "x"},
 	}})
 	if rec0.Code != 200 || !strings.Contains(rec0.Body.String(), "not served by any Ready pipeline") {
 		t.Fatalf("unwired drop reason expected: %d %s", rec0.Code, rec0.Body.String())
@@ -116,7 +116,7 @@ func assertUnwiredSourceDropsSignal(t *testing.T, h http.Handler) {
 func postJobSignalAndFindConversation(t *testing.T, ctx context.Context, h http.Handler) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
-		"fingerprint": "tick-1", "labels": map[string]string{"alertname": "nightly"},
+		"initiationId": "tick-1", "labels": map[string]string{"alertname": "nightly"},
 		"title": "🛠 Nightly job", "payload": "run the nightly checks", "kind": "job",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
@@ -161,30 +161,33 @@ func assertJobInputShape(t *testing.T, ctx context.Context, conv *agentopsv1alph
 	}
 }
 
-// assertDuplicateFingerprintAbsorbedByCooldown: at-least-once safe.
-func assertDuplicateFingerprintAbsorbedByCooldown(t *testing.T, h http.Handler) {
+// assertDuplicateInitiationIDAbsorbedByCooldown: at-least-once safe.
+func assertDuplicateInitiationIDAbsorbedByCooldown(t *testing.T, h http.Handler) {
 	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
-		"fingerprint": "tick-1", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
+		"initiationId": "tick-1", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
 	}})
 	if !strings.Contains(rec.Body.String(), `"queued":0`) {
 		t.Fatalf("cooldown not applied: %s", rec.Body.String())
 	}
 }
 
-// assertRecurrenceIntoSameConversation: same signature + session → a second
-// tick becomes a recurrence input on the SAME conversation, not a new one.
-func assertRecurrenceIntoSameConversation(t *testing.T, ctx context.Context, h http.Handler, conv *agentopsv1alpha1.Conversation) {
+// assertRecurrenceIntoSameConversation: the SAME initiationId, with a session
+// present, becomes a recurrence input on the open conversation it already
+// named — never a new one. A fresh server stands in for "outside the
+// source's cooldown" without waiting out its real window.
+func assertRecurrenceIntoSameConversation(t *testing.T, ctx context.Context, conv *agentopsv1alpha1.Conversation) {
 	t.Helper()
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.SessionID = "sess-sig"
 	if err := k8sClient.Status().Patch(ctx, conv, patch); err != nil {
 		t.Fatal(err)
 	}
-	// (signature label is set at creation by the routing core — no reconcile
-	// needed, which also keeps the shared runtime-pod pool untouched)
-	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
-		"fingerprint": "tick-2", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
+	waitForRoutingCacheToObserve(t, conv, conv.ResourceVersion)
+	backdateCooldown(t, "sig-src", "tick-1")
+	h2 := apiServer().Handler()
+	rec := postSignal(t, h2, testMasterToken, "sig-src", []map[string]any{{
+		"initiationId": "tick-1", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
 	}})
 	if !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("second tick: %s", rec.Body.String())
@@ -195,13 +198,13 @@ func assertRecurrenceIntoSameConversation(t *testing.T, ctx context.Context, h h
 	}
 }
 
-func assertUnknownSourceAndMissingFingerprintRejected(t *testing.T, h http.Handler) {
+func assertUnknownSourceAndMissingInitiationIDRejected(t *testing.T, h http.Handler) {
 	t.Helper()
-	if rec := postSignal(t, h, testMasterToken, "no-such-source", []map[string]any{{"fingerprint": "x"}}); rec.Code != 404 {
+	if rec := postSignal(t, h, testMasterToken, "no-such-source", []map[string]any{{"initiationId": "x"}}); rec.Code != 404 {
 		t.Fatalf("unknown source: %d", rec.Code)
 	}
 	if rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{"labels": map[string]string{}}}); rec.Code != 400 {
-		t.Fatalf("missing fingerprint: %d", rec.Code)
+		t.Fatalf("missing initiationId: %d", rec.Code)
 	}
 }
 

@@ -410,7 +410,7 @@ func TestSignalRoutingBindsPipelineFirst(t *testing.T) {
 
 	h := apiServer().Handler()
 	rec := postSignal(t, h, testMasterToken, "sp-src", []map[string]any{{
-		"fingerprint": "sp-1", "labels": map[string]string{"alertname": "PipeAlert"}, "payload": "boom",
+		"initiationId": "sp-1", "labels": map[string]string{"alertname": "PipeAlert"}, "payload": "boom",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

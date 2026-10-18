@@ -329,10 +329,9 @@ metadata:
     app.kubernetes.io/name: agentops-console
 spec:
   adapter: {{ $c.name }}
-  grouping:
-    # Chat: a person asking the same thing twice means it twice, so dedup is off
-    # and each message gets its own conversation.
-    cooldownHours: 0
+  # Chat: a person asking the same thing twice means it twice, so dedup is off
+  # and each message gets its own conversation.
+  cooldownHours: 0
 ---
 # READ-ONLY. agentops.dev for configuration, plus deployments, pods and
 # cronjobs for INSTALL FACTS — image digests, restart counts, pod failure

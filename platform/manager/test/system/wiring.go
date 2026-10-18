@@ -165,7 +165,7 @@ func (e *Env) ConversationFor(t *testing.T, fingerprint string, timeout time.Dur
 		}
 		for i := range items {
 			c := &items[i]
-			if c.Spec.Title == fingerprint || c.Spec.Signature == fingerprint {
+			if c.Spec.Title == fingerprint || c.Spec.ConversationID == fingerprint {
 				found = c
 				return true, nil
 			}

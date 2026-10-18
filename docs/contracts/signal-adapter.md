@@ -15,15 +15,24 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.0.0**
+**Version 2.0.0**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
-transport into signals the manager groups into conversations.
+transport into signals the manager routes into conversations by equality on
+the sender's own correlation id.
 
 **Signals are one-directional.** This is the [channel adapter
 contract](channel-adapter.md) minus the ops queue — an adapter pushes, and
 has no inbound surface of its own.
+
+Every signal carries `initiationId`, the sender's own correlation id.
+
+An adapter either MINTS one where its own aggregation already happens, or
+PROPAGATES one verbatim when a round trip hands back a manager-issued
+`conversationId` — never deriving, defaulting, or re-computing it.
+
+The manager routes by pure equality and owns no grouping policy of its own.
 
 ## Conventions
 
@@ -79,13 +88,13 @@ surface.
 
 ```json
 {"source": "my-source",
- "signals": [{"fingerprint": "…", "labels": {}, "title": "…",
+ "signals": [{"initiationId": "…", "labels": {}, "title": "…",
               "payload": "…", "kind": "alert"}]}
 ```
 
 | Status | Body |
 |---|---|
-| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `fingerprint`, or a `chat` signal missing its channel label (`LANE-3`) |
+| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `initiationId` (naming the field, never synthesized — `MGR-3`), or a `chat` signal missing its channel label (`LANE-2`) |
 | `401` / `403` | see [Security posture](#security-posture) |
 | `200` | `{"queued": <n>, "conversations": <n>, "reason": "<optional>"}` |
 
@@ -93,8 +102,8 @@ surface.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `fingerprint` | string | yes | Dedup identity of the recurring THING, never of one occurrence — see `ADP-2`. |
-| `labels` | map of string to string | no | Feeds the source's `grouping.signatureLabels`. Bounded to 32 keys, sorted before truncation. |
+| `initiationId` | string | yes | The sender's own correlation id — MINTED where its aggregation already happens, or PROPAGATED verbatim from a round trip carrying a manager-issued `conversationId` back. See `ADP-2`. |
+| `labels` | map of string to string | no | Opaque context carried onto the conversation and its topic descriptor. Bounded to 32 keys, sorted before truncation. |
 | `title` | string | no | Overrides the conversation title when this signal opens one. Bounded to 500 runes. |
 | `payload` | string | no | The raw content handed to the agent, stored out of band. Never parsed as prose by the manager. |
 | `kind` | string | no | Selects the [lane](#lanes). Absent reads as `alert`. |
@@ -103,27 +112,26 @@ surface.
 | ID | Requirement |
 |---|---|
 | `API-2` | `queued`/`conversations` count the signals accepted and the conversations they touched, which may be fewer than `len(signals)` under cooldown. |
-| `API-3` | At-least-once delivery MUST be safe. A re-sent fingerprint within the source's cooldown window collapses rather than opening a second conversation. |
+| `API-3` | At-least-once delivery MUST be safe. A re-sent `initiationId` within the source's cooldown window collapses rather than opening a second conversation. |
 
 ## Lanes
 
-`kind` picks the prompt wrapper and decides how a later signal is keyed when
-the source declares no `signatureLabels`.
+`kind` selects only the prompt template an input dispatches with. Routing
+itself is uniform — pure `initiationId`/`conversationId` equality for every
+kind, with no manager-side branch by lane.
 
-| `kind` | Subject | Keyed on (no `signatureLabels`) |
-|---|---|---|
-| `alert` (default) | a problem that recurs | default labels `alertgroup`/`alertname`/`namespace` |
-| `job` | a job that recurs | the same default labels |
-| `task` | a caller asking once | the signal's own fingerprint |
-| `chat` | a person asking once | the signal's own fingerprint |
+| `kind` | Subject | Prompt | Recurs when |
+|---|---|---|---|
+| `alert` (default) | a problem that recurs | the read-only investigation template | the adapter reuses the same `initiationId` for the same recurring problem |
+| `job` | a job that recurs | the task-lane prompt | the adapter reuses the same `initiationId` across ticks, resuming the agent |
+| `task` | a caller asking once | the task-lane prompt | never by default — each task mints its own `initiationId`, per `ADP-2` |
+| `chat` | a person asking once | the task-lane prompt | only when a thread reply propagates the manager-stamped `conversationId` back as `initiationId` |
 
 | ID | Requirement |
 |---|---|
-| `LANE-1` | `alert` and `job` are recurring-subject lanes — a second signal is more news about the same thing, so it folds into the open conversation and resumes the session. |
-| `LANE-2` | `task` and `chat` are one-shot lanes — a second signal is a second request, never folded by the alert-vocabulary default labels. |
-| `LANE-3` | A `chat` signal MUST carry the label `agentops.dev/channel`, naming the surface it arrived on, or the post is refused with `400` — its reply has nowhere to go otherwise. |
-| `LANE-4` | A `task` signal MUST NOT carry `agentops.dev/channel`. Its reply goes to the claiming Pipeline's `channelRefs`. |
-| `LANE-5` | A source declaring `signatureLabels` groups by them in every lane, `task` included — the lane table is a FALLBACK, never an override. |
+| `LANE-1` | `kind` picks only the prompt template. Whether a second signal recurs onto the open conversation is decided by id equality alone (`MGR-2`), never by `kind`. |
+| `LANE-2` | A `chat` signal MUST carry the label `agentops.dev/channel`, naming the surface it arrived on, or the post is refused with `400` — its reply has nowhere to go otherwise. |
+| `LANE-3` | A `task` signal MUST NOT carry `agentops.dev/channel`. Its reply goes to the claiming Pipeline's `channelRefs`. |
 
 ## GET /signal/state/{source}/{key}
 
@@ -185,8 +193,8 @@ condition.
 | ID | Requirement |
 |---|---|
 | `ADP-1` | Read sources from [`GET /signal/sources`](#get-signalsources) — never assume connectivity or credentials, both are the manager's to serve. |
-| `ADP-2` | Fingerprint honestly: the same recurring thing MUST reuse the same fingerprint across occurrences, so at-least-once re-sends collapse rather than opening a new conversation each time. |
-| `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, window reuse or recurrence itself — those are the manager's, per `MGR-1`. |
+| `ADP-2` | Supply `initiationId` one of two ways: MINTED where the adapter's own aggregation already happens — the same recurring problem reusing the same id across occurrences — or PROPAGATED verbatim when a round trip hands back a manager-issued `conversationId`, with no re-derivation. For example, a chat reply in a bound thread propagates the `conversationId` stamped on that binding, and an adapter fronting an external system that accepts input can carry a `conversationId` outward and propagate it back unchanged when that system's response arrives — both are the propagated case, not a special lane. The manager never determines an id and treats it opaquely either way. |
+| `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, or recurrence itself — those are the manager's, per `MGR-2`. |
 | `ADP-4` | An observing adapter MUST NOT emit a signal about agent-ops' own machinery — see [Self-exclusion](#self-exclusion). |
 
 ### Self-exclusion
@@ -199,7 +207,7 @@ event, and nothing downstream breaks the loop that follows:
 2. The signal opens a Conversation.
 3. That Conversation's pod is the next thing to fail, emitting its own
    Warning event.
-4. The fingerprint is fresh — the pod name is new — so nothing collapses
+4. The `initiationId` is fresh — the pod name is new — so nothing collapses
    the repeat.
 
 An observing adapter MUST exclude an object before emitting a signal about
@@ -234,11 +242,11 @@ An adapter implementing none of these stays fully conformant — see
 
 | ID | Requirement |
 |---|---|
-| `MGR-1` | The manager owns grouping: fingerprint cooldown, signature from `labels` × `signatureLabels`, window reuse, and recurrence-on-session. An adapter implements none of it. |
-| `MGR-2` | A source's grouping policy MUST be evaluated once, above every Pipeline claiming it — never once per claiming Pipeline, or the first one starves the rest. |
-| `MGR-3` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is dropped. |
-| `MGR-4` | The manager MUST supply every variable in [Environment](#environment). |
-| `MGR-5` | This endpoint set is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
+| `MGR-1` | The manager owns the one inbound endpoint: `POST /signal/inbound` accepts every normalized signal, and it is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
+| `MGR-2` | Routing and cooldown are pure id equality, evaluated once per source above every claiming Pipeline — never once per Pipeline, or the first one starves the rest. An OPEN conversation whose `conversationId` equals the signal's `initiationId`, for the claiming pipeline, receives the signal as a recurrence. Otherwise a new conversation is created, adopting the `initiationId` as its `conversationId`. Cooldown keys on `initiationId`. |
+| `MGR-3` | The manager MUST NOT mint, derive, or default an `initiationId`. A signal arriving without one is rejected `4xx`, naming the missing field — including from a `1.x` adapter during rollout. There is no compatibility shim: a manager-synthesized id would re-mint grouping policy the manager no longer owns. |
+| `MGR-4` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is dropped. |
+| `MGR-5` | The manager MUST supply every variable in [Environment](#environment). |
 | `MGR-6` | The manager authenticates every call by `SEC-1`: the master token, or a per-`SignalAdapter` derived token scoped to the adapter's own name. |
 | `MGR-7` | An adapter needs no Kubernetes access: source listing, cursor state and status reporting reach it through this page's own endpoints. |
 
@@ -271,9 +279,10 @@ An adapter implementing none of these stays fully conformant — see
 
 | ID | Requirement |
 |---|---|
-| `COMPAT-1` | The manager MUST ignore inbound payload fields it does not know. |
-| `COMPAT-2` | An adapter MUST ignore source-listing fields it does not know. |
-| `COMPAT-3` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
+| `COMPAT-1` | There is no compatibility shim for a missing `initiationId`. A `1.x` adapter, or any signal with no `initiationId`, gets the same `4xx` naming the field — never a manager-synthesized id, per `MGR-3`. |
+| `COMPAT-2` | The manager MUST ignore inbound payload fields it does not know. |
+| `COMPAT-3` | An adapter MUST ignore source-listing fields it does not know. |
+| `COMPAT-4` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
 
 | Version part | Moves when |
 |---|---|
@@ -291,4 +300,5 @@ capability is required, see [Compatibility](#compatibility).
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.0.0 | 2026-10-18 | BREAKING. `fingerprint` is replaced by the sender-minted `initiationId`, required on every signal — minted where the sender's aggregation already happens, or propagated verbatim from a round-tripped `conversationId`. The manager's grouping provision (`labels`×`signatureLabels`, window reuse) is removed — routing is pure `conversationId` equality, and cooldown keys on `initiationId`. A missing `initiationId` is rejected `4xx` naming the field, with no compatibility shim — a `1.x` adapter gets the same rejection. |
 | 1.0.0 | 2026-10-17 | Initial release. |

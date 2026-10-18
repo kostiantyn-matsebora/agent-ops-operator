@@ -144,7 +144,7 @@ func conversationAboutBrokenWorkloadExists(ctx context.Context, e *Env, ns strin
 		return false, err
 	}
 	for _, c := range items {
-		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents && strings.Contains(c.Spec.Title+c.Spec.Signature, ns) {
+		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents && strings.Contains(c.Spec.Title+c.Spec.ConversationID, ns) {
 			return true, nil
 		}
 		if c.Spec.Signal != nil && c.Spec.Signal.SourceRef != nil && c.Spec.Signal.SourceRef.Name == SourceEvents {
@@ -274,7 +274,7 @@ func conversationMentioning(ctx context.Context, e *Env, marker string) (bool, e
 		if c.Spec.Signal == nil || c.Spec.Signal.SourceRef == nil || c.Spec.Signal.SourceRef.Name != SourceEvents {
 			continue
 		}
-		if strings.Contains(c.Spec.Title+c.Spec.Signature, marker) {
+		if strings.Contains(c.Spec.Title+c.Spec.ConversationID, marker) {
 			return true, nil
 		}
 		for _, in := range c.Spec.Inputs {

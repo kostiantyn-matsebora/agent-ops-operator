@@ -16,26 +16,21 @@ import (
 // SignalSource a Ready Pipeline claims. There is no endpoint that names a
 // Pipeline.
 //
-// The fixtures here also pin the SIGNATURE KEYING rule, which is invisible
-// until a lane regresses. When a source declares no `signatureLabels`:
-//
-//	alert / job  — recurring-subject lanes, keyed by the DEFAULT alert labels so
-//	               later signals fold into the open conversation and resume
-//	task / chat  — one-shot lanes, keyed by the signal's own FINGERPRINT so each
-//	               request gets its own conversation
-//
-// A blanket "always key on the fingerprint" rule passes the task fixtures and
-// fails TestAlertsWithNoSignatureLabelsStillGroup and
-// TestJobTicksWithDistinctFingerprintsStillFold. A blanket "always use the
-// default labels" rule does the reverse. Both halves are load-bearing.
+// The alert/job/task grouping-by-label scenarios this file used to pin
+// (TestAlertsWithNoSignatureLabelsStillGroup, TestJobTicksWithDistinctFingerprintsStillFold,
+// TestTaskSignalsGroupWhenTheSourceDeclaresLabels) tested SignalSource.spec.grouping,
+// which is retired: routing is now pure initiationId equality, decided by the
+// sender, never derived from labels. The scenarios signal-correlation-id adds
+// in its place — open-match recurrence, fresh-id creation, distinct-ids-never-merge,
+// closed-conversation exclusion — live in correlation_test.go.
 
 // taskSignal posts one `kind: task` signal as a machine caller would — no
 // channel label, because replies go to the claiming Pipeline's channels.
-func taskSignal(t *testing.T, srv *httpapi.Server, source, fingerprint, text string,
+func taskSignal(t *testing.T, srv *httpapi.Server, source, initiationID, text string,
 	labels map[string]string) *httptest.ResponseRecorder {
 
 	t.Helper()
-	sig := map[string]any{"fingerprint": fingerprint, "kind": "task", "payload": text}
+	sig := map[string]any{"initiationId": initiationID, "kind": "task", "payload": text}
 	if labels != nil {
 		sig["labels"] = labels
 	}
@@ -61,89 +56,7 @@ func convsForProfile(t *testing.T, profile string) []agentopsv1alpha1.Conversati
 	return out
 }
 
-// 3.1 — the prometheus shape: an Alertmanager source ships `grouping: {}` and
-// relies entirely on the default labels. Two distinct fingerprints describing
-// the same alert must share one investigation.
-func TestAlertsWithNoSignatureLabelsStillGroup(t *testing.T) {
-	mkProfile(t, "prof-alertgroup")
-	mkSignalSource(t, "src-alertgroup", "am-group", "")
-	mkPipeline(t, "alertgroup-pipe", []string{"src-alertgroup"}, nil, "prof-alertgroup")
-	reconcilePipeline(t, "alertgroup-pipe")
-	h := apiServer().Handler()
-
-	labels := map[string]string{"alertname": "AlertGroupFixture", "namespace": "prod"}
-	for i, fp := range []string{"ag-1", "ag-2"} {
-		rec := postSignal(t, h, testMasterToken, "src-alertgroup", []map[string]any{
-			{"fingerprint": fp, "labels": labels, "payload": fmt.Sprintf("firing %d", i)},
-		})
-		if rec.Code != 200 {
-			t.Fatalf("alert %s: %d %s", fp, rec.Code, rec.Body.String())
-		}
-	}
-	convs := convsForProfile(t, "prof-alertgroup")
-	if len(convs) != 1 {
-		t.Fatalf("two alerts sharing alertname/namespace must share one conversation, got %d "+
-			"— the alert lane keeps the default signature labels", len(convs))
-	}
-	if len(convs[0].Spec.Inputs) != 2 {
-		t.Fatalf("both alerts must land on it: %+v", convs[0].Spec.Inputs)
-	}
-}
-
-// 3.2 — the signal-cron shape: the adapter fires a DISTINCT fingerprint per
-// tick (`<source>@<tick>`) and depends on the constant signature folding them
-// into one conversation, later ticks resuming the session as recurrences.
-func TestJobTicksWithDistinctFingerprintsStillFold(t *testing.T) {
-	ctx := context.Background()
-	mkProfile(t, "prof-cronfold")
-	mkSignalSource(t, "src-cronfold", "cron-fold", "")
-	mkPipeline(t, "cronfold-pipe", []string{"src-cronfold"}, nil, "prof-cronfold")
-	reconcilePipeline(t, "cronfold-pipe")
-	h := apiServer().Handler()
-
-	// constant labels across ticks — what a cron source carries is the same
-	// every time, which is exactly why the default signature collapses them
-	labels := map[string]string{"namespace": "cron-fold-fixture"}
-	if rec := postSignal(t, h, testMasterToken, "src-cronfold", []map[string]any{
-		{"fingerprint": "src-cronfold@tick1", "kind": "job", "labels": labels, "payload": "nightly"},
-	}); rec.Code != 200 {
-		t.Fatalf("tick1: %d %s", rec.Code, rec.Body.String())
-	}
-	convs := convsForProfile(t, "prof-cronfold")
-	if len(convs) != 1 {
-		t.Fatalf("tick1 must open one conversation, got %d", len(convs))
-	}
-	conv := convs[0]
-	if in := conv.Spec.Inputs[0]; in.Type != agentopsv1alpha1.InputJob ||
-		in.Origin == nil || in.Origin.Name != "src-cronfold" || in.Origin.SignalKind != "job" {
-		t.Fatalf("a job records its source as provenance: %+v", conv.Spec.Inputs[0])
-	}
-
-	// a session exists once the agent has run: the next tick resumes it
-	conv.Status.SessionID = "sess-cronfold"
-	if err := k8sClient.Status().Update(ctx, &conv); err != nil {
-		t.Fatal(err)
-	}
-	if rec := postSignal(t, h, testMasterToken, "src-cronfold", []map[string]any{
-		{"fingerprint": "src-cronfold@tick2", "kind": "job", "labels": labels, "payload": "nightly"},
-	}); rec.Code != 200 {
-		t.Fatalf("tick2: %d %s", rec.Code, rec.Body.String())
-	}
-	convs = convsForProfile(t, "prof-cronfold")
-	if len(convs) != 1 {
-		t.Fatalf("a second tick must NOT open a second conversation, got %d "+
-			"— the job lane keeps the default signature labels", len(convs))
-	}
-	inputs := convs[0].Spec.Inputs
-	if len(inputs) != 2 {
-		t.Fatalf("want two inputs on the folded conversation: %+v", inputs)
-	}
-	if inputs[1].Type != agentopsv1alpha1.InputRecurrence {
-		t.Fatalf("tick2 must resume the session as a recurrence, got %q", inputs[1].Type)
-	}
-}
-
-// 3.3 — the one-shot half of the rule: each posted task is its own request.
+// 3.3 — each posted task is its own request: distinct initiationIds never merge.
 func TestTaskSignalsOpenOneConversationEach(t *testing.T) {
 	mkProfile(t, "prof-taskeach")
 	mkSignalSource(t, "src-taskeach", "task-each", "")
@@ -151,15 +64,15 @@ func TestTaskSignalsOpenOneConversationEach(t *testing.T) {
 	reconcilePipeline(t, "taskeach-pipe")
 	srv := apiServer()
 
-	for i, fp := range []string{"te-1", "te-2"} {
-		if rec := taskSignal(t, srv, "src-taskeach", fp, fmt.Sprintf("ask %d", i), nil); rec.Code != 200 {
-			t.Fatalf("task %s: %d %s", fp, rec.Code, rec.Body.String())
+	for i, id := range []string{"te-1", "te-2"} {
+		if rec := taskSignal(t, srv, "src-taskeach", id, fmt.Sprintf("ask %d", i), nil); rec.Code != 200 {
+			t.Fatalf("task %s: %d %s", id, rec.Code, rec.Body.String())
 		}
 	}
 	convs := convsForProfile(t, "prof-taskeach")
 	if len(convs) != 2 {
 		t.Fatalf("two posted tasks are two requests, want 2 conversations, got %d "+
-			"— a one-shot lane keys on its own fingerprint", len(convs))
+			"— distinct initiationIds never merge", len(convs))
 	}
 	for _, c := range convs {
 		if len(c.Spec.Inputs) != 1 {
@@ -225,38 +138,5 @@ func TestTaskSignalNeedsNoChannelLabel(t *testing.T) {
 		if ci.Spec.Payload != "/etc/hosts is wrong" {
 			t.Fatalf("a task beginning with / is text, not a command: %q", ci.Spec.Payload)
 		}
-	}
-}
-
-// 3.5 — explicit labels win in every lane: an operator who asks for grouping
-// gets it, task included.
-func TestTaskSignalsGroupWhenTheSourceDeclaresLabels(t *testing.T) {
-	ctx := context.Background()
-	mkProfile(t, "prof-taskgroup")
-	mkSignalSource(t, "src-taskgroup", "task-group", "")
-	var src agentopsv1alpha1.SignalSource
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "src-taskgroup"}, &src); err != nil {
-		t.Fatal(err)
-	}
-	src.Spec.Grouping.SignatureLabels = []string{"team"}
-	if err := k8sClient.Update(ctx, &src); err != nil {
-		t.Fatal(err)
-	}
-	mkPipeline(t, "taskgroup-pipe", []string{"src-taskgroup"}, nil, "prof-taskgroup")
-	reconcilePipeline(t, "taskgroup-pipe")
-	srv := apiServer()
-
-	labels := map[string]string{"team": "platform"}
-	for i, fp := range []string{"tg-1", "tg-2"} {
-		if rec := taskSignal(t, srv, "src-taskgroup", fp, fmt.Sprintf("ask %d", i), labels); rec.Code != 200 {
-			t.Fatalf("task %s: %d %s", fp, rec.Code, rec.Body.String())
-		}
-	}
-	convs := convsForProfile(t, "prof-taskgroup")
-	if len(convs) != 1 {
-		t.Fatalf("declared signatureLabels group tasks too, want 1 conversation, got %d", len(convs))
-	}
-	if len(convs[0].Spec.Inputs) != 2 {
-		t.Fatalf("both tasks must land on the grouped conversation: %+v", convs[0].Spec.Inputs)
 	}
 }

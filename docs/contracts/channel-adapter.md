@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 This specification gives everything necessary to build and maintain a
 `ChannelAdapter` — a component agent-ops does not ship, that carries a
@@ -74,6 +74,7 @@ that delivers an op, the `204` and the `503` alike. See
 | `id` | string | yes | Dedup key. Delivery is at-least-once — tolerate a repeated id. |
 | `channel` | string | yes | The `Channel` CR this op targets. |
 | `conversation` | string | no | The `Conversation` this op belongs to. Empty for a manager notice bound to no conversation. |
+| `conversationId` | string | no | The conversation's manager-issued correlation id, carried beside `conversation`. OPAQUE to the adapter — carried, compared, never parsed. Absent on an operation for a conversation created before this field existed. |
 | `kind` | string | yes | One of [the typed operations](#typed-operations). |
 | `threadId` | string | no | The send target. Absent means the channel's general surface. |
 | `topic` | object | no | A [topic descriptor](#the-topic-descriptor). Set only on `ensure-topic`. |
@@ -93,6 +94,7 @@ that delivers an op, the `204` and the `503` alike. See
 | `OPS-1` | An adapter MUST long-poll this endpoint while able to accept ops. `204` is not an error. |
 | `OPS-2` | A `503` MUST be treated exactly like a `204` — retried at once, on a fresh connection, never surfaced as an error. |
 | `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. |
+| `OPS-9` | Every operation additionally carries `conversationId`, beside the channel and conversation names it already carries. The field is ADDITIVE — an adapter that ignores it MUST remain fully conformant, declaring the same `contract` version. |
 
 ### The claim window
 
@@ -171,7 +173,9 @@ Pushes a user reply into an existing conversation thread.
 | `IN-1` | The manager MUST refuse a request with no `threadId` — this endpoint continues an existing conversation and never starts one. A general-surface message is an ORIGINATION, posted instead as a chat signal to `POST /signal/inbound` from a chat `SignalSource` a Ready Pipeline claims. |
 | `IN-2` | A message naming a thread the manager does not know MUST be dropped, not adopted. |
 | `IN-3` | The manager MUST refuse a message whose origin surface names the thread's own target conversation — the shape a self-feeding loop takes. |
+| `IN-4` | A reply on a bound thread is correlated by that binding's `conversationId`, not minted by the adapter — see `ADA-14`. |
 | `ADA-5` | An adapter MUST NOT re-ingest its own outbound post as inbound. Delivery to the other bound surfaces, and busy-acks, happen manager-side — a reply the adapter pushes is delivered back to it only when it declares `echoesOwnMessages: false`. |
+| `ADA-14` | A channel adapter MUST NOT create, derive, or alter any conversation id. The manager-issued `conversationId` reaches it already attached to the binding and its operations. The adapter's only id work is transport translation: `conversationId` on one side, the thread id on the other. Origination stays on the signal lane — no `/channel/*` route accepts a new conversation. |
 
 ## GET /channel/channels
 
@@ -422,6 +426,7 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 | `ADA-3`/`ADA-3.1`/`ADA-4` | **Absorb retryable backpressure inside the claim window**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
 | `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
 | `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
+| `ADA-14` | **Never create, derive, or alter a `conversationId`** — translate it to and from the transport's own thread id, and nothing more. |
 
 ### Optional capabilities
 
@@ -449,6 +454,7 @@ An adapter implementing none of these stays fully conformant — see
 | `MGR-6` | **Delivery recording** — completions land on the Conversation: the thread id in `status.threads[]`, the archive in `status.threadsArchived[]`, read watermarks on the thread bindings. |
 | `MGR-6.1` | **Delivery exclusion** — an input MUST be delivered to every bound channel except the surface it entered on, unless that surface declares `ChannelAdapter.spec.echoesOwnMessages: false`. |
 | `MGR-6.2` | **Idempotent reply ids** — a reply op's id MUST be stable per conversation × channel × run (`send:<conversation>:<channel>:<runId>`), so a manager restart between completion and claim re-derives the answer, appending the channel to `status.runs[].delivered[]`. |
+| `MGR-12` | **`conversationId` on every op** — each operation delivered on `/channel/ops` additionally carries the conversation's correlation id, ADDITIVE and opaque to the adapter, absent only on a conversation created before the field existed. |
 
 ## Enums
 
@@ -482,6 +488,7 @@ its own integer series, unrelated to this document's semver:
 
 | Document version | Wire `contract` value |
 |---|---|
+| 1.1.0 | `2` |
 | 1.0.0 | `2` |
 
 A document MINOR bump — an additive field, a new optional endpoint — MUST
@@ -499,4 +506,5 @@ optional capability is required.
 
 | Version | Date | Changed |
 |---|---|---|
+| 1.1.0 | 2026-10-18 | Every `/channel/ops` operation additionally carries the conversation's `conversationId` (`OPS-9`, `MGR-12`), opaque to the adapter. A channel adapter MUST NOT mint one (`ADA-14`, `IN-4`) — it only translates it to and from the transport's thread id. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.0.0 | 2026-10-17 | Initial release. |

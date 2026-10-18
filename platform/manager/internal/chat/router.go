@@ -403,6 +403,9 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.
 	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		return fmt.Errorf("conversation %s is not closed", conv.Name)
 	}
+	if err := r.refuseReopenBehindOpenSuccessor(ctx, conv); err != nil {
+		return err
+	}
 	if err := r.validateRefs(ctx, conv); err != nil {
 		return err
 	}
@@ -413,6 +416,38 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.
 	now := metav1.Now()
 	conv.Status.LastActivity = &now
 	return r.Client.Status().Patch(ctx, conv, patch)
+}
+
+// refuseReopenBehindOpenSuccessor is the ONE verb that could break equality
+// routing's at-most-one-open invariant (conversation-provenance: "Reopen
+// SHALL be refused while another open conversation carries the same
+// conversationId for that pipeline, with a reason naming the successor") —
+// reopening conv while a `-N` successor with the same conversationId is
+// already open would let two conversations answer for one correlation id.
+//
+// A conversation carrying no conversationId (legacy, or never
+// signal-originated) has nothing to collide on and is never refused.
+func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Spec.ConversationID == "" {
+		return nil
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := r.Client.List(ctx, &list, client.InNamespace(conv.Namespace),
+		client.MatchingFields{agentopsv1alpha1.IndexConversationID: conv.Spec.ConversationID}); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		successor := &list.Items[i]
+		if successor.Name == conv.Name || successor.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
+		if !conv.SameOrigin(successor) {
+			continue
+		}
+		return fmt.Errorf("cannot reopen %s: %s already carries the same conversationId and is open",
+			conv.Name, successor.Name)
+	}
+	return nil
 }
 
 // validateRefs fails a reopen that would produce a conversation which cannot

@@ -148,8 +148,6 @@ signal:
     #   webhookHeaders:
     #     X-Gateway-Key: <shared secret your gateway checks>
     webhookHeaders: {}
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
-    grouping: {}
   # The adapter's registration credential: a Pulse API token (to call
   # POST /api/notifications/webhooks) and an optional HMAC signing secret
   # verifying inbound deliveries (X-Pulse-Timestamp/X-Pulse-Signature).

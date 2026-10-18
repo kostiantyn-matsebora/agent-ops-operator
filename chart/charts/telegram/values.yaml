@@ -152,8 +152,7 @@ surface:
   source:
     # Empty = the surface name itself.
     name: ""
-    # Chat defaults: cooldown OFF and no signature grouping, so each message
-    # opens its own conversation — a person repeating a request means it twice.
-    # Set signatureLabels to opt into grouping.
+    # Chat defaults: cooldown OFF, so each message opens its own conversation
+    # (or, on a bound-thread reply, propagates the stamped conversationId) —
+    # a person repeating a request means it twice.
     cooldownHours: 0
-    signatureLabels: []

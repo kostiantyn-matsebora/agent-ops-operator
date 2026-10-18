@@ -23,16 +23,9 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
-
-// labelSignatureHash MUST equal controller.LabelSignatureHash. Duplicated
-// rather than imported: internal/controller already imports internal/chat for
-// its own reconcilers, so the reverse import would cycle. Both sides are
-// pinned by TestConversationSignatureHashLabelMatchesController.
-const labelSignatureHash = "agentops.dev/signature-hash"
 
 // InvokeResult is what `invoke` reports (aops-mcp-server: "created or
 // attached"), never a result — invocation is asynchronous by design.
@@ -118,8 +111,14 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		return nil, err
 	}
 
-	signature := "invoke:" + entry.Name
-	member, err := r.findReusableMember(ctx, caller.Name, entry.Name, signature)
+	// The member's correlation id, minted by THIS invoke — the sender of the
+	// work, per the one id-ownership rule every lane obeys
+	// (conversation-provenance: "a member's correlation id is minted by the
+	// invoking invoke verb... never computed by the manager"). Scoped to
+	// (parent, entry) by construction, so a different entry or a different
+	// caller never collides on it.
+	initiationID := "invoke:" + entry.Name
+	member, err := r.findReusableMember(ctx, caller.Name, entry.Name, initiationID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +132,7 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		return &InvokeResult{Member: member.Name, Created: false}, nil
 	}
 
-	created, err := r.createMember(ctx, caller, &co, entry, task, signature)
+	created, err := r.createMember(ctx, caller, &co, entry, task, initiationID)
 	if err != nil {
 		return nil, err
 	}
@@ -462,12 +461,14 @@ func isHumanInitiated(c *agentopsv1alpha1.Conversation) bool {
 }
 
 // findReusableMember is conversation-provenance's reuse rule: a live
-// conversation with the same signature AND the same (parent, entry) —
-// depth plays no part.
-func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, signature string) (*agentopsv1alpha1.Conversation, error) {
+// conversation with the same conversationId AND the same (parent, entry) —
+// depth plays no part. Reads the same informer field index equality routing
+// does (agentopsv1alpha1.IndexConversationID), never the removed
+// agentops.dev/signature-hash label.
+func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, initiationID string) (*agentopsv1alpha1.Conversation, error) {
 	var list agentopsv1alpha1.ConversationList
-	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
-		client.MatchingLabels{labelSignatureHash: ingest.SignatureHash(signature)}); err != nil {
+	if err := r.Client.List(ctx, &list, client.InNamespace(r.Namespace),
+		client.MatchingFields{agentopsv1alpha1.IndexConversationID: initiationID}); err != nil {
 		return nil, err
 	}
 	for i := range list.Items {
@@ -489,7 +490,7 @@ func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, 
 // channels bound (coordination-loop: "a caused conversation binds no
 // channel").
 func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, co *agentopsv1alpha1.Coordinator,
-	entry *agentopsv1alpha1.CoordinatorAgentEntry, task, signature string) (*agentopsv1alpha1.Conversation, error) {
+	entry *agentopsv1alpha1.CoordinatorAgentEntry, task, initiationID string) (*agentopsv1alpha1.Conversation, error) {
 
 	var capability agentopsv1alpha1.AgentCapabilitySpec
 	var persistenceName string
@@ -525,7 +526,6 @@ func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	// source is the invoked agents[] entry name, non-empty by
 	// construction (a CoordinatorAgentEntry always names one).
 	member.Labels = map[string]string{
-		labelSignatureHash:             ingest.SignatureHash(signature),
 		agentopsv1alpha1.LabelCausedBy: caller.Name,
 	}
 	member.Spec = agentopsv1alpha1.ConversationSpec{
@@ -538,7 +538,7 @@ func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		WorkspaceClaimName: snap.WorkspaceClaimName,
 		CausedBy:           &agentopsv1alpha1.Provenance{Parent: caller.Name, Entry: entry.Name},
 		Title:              memberTitle(entry.Name, task),
-		Signature:          signature,
+		ConversationID:     initiationID,
 	}
 	if nested != nil {
 		member.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: entry.CoordinatorRef.Name}

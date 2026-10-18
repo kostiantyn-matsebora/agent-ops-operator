@@ -261,14 +261,15 @@ logsAdapter:
     # window that silently never fires.
     route: {}
 
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
-    #
-    # Group by INTEGRATION. The alternative — grouping per record — would open a
-    # conversation for every failing code path of one broken hub, and the
-    # manager's window reuse could never fire.
-    grouping:
-      signatureLabels:
-        - integration
+    # Cooldown: suppress a repeat of the same initiationId within this window.
+    # The pending/dwell queue (pending.go) already re-posts a surviving
+    # failure on its own refractory clock — as short as 1m, never longer than
+    # a rule's own `for:` dwell (5-10m here) — relying on the manager to let
+    # those re-posts through rather than swallow them as duplicates. The CRD
+    # default (6h) would instead silently drop every re-post but the first
+    # one for up to 6 hours, so this source overrides it to 0 (cooldown off,
+    # the adapter's own refractory window is the only pacing this needs).
+    cooldownHours: 0
 
 # Structured Home Assistant access as MCP tools — an MCPConfig (the server) and
 # MCPToolsets (the permission to call it).

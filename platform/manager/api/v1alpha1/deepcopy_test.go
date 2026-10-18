@@ -109,7 +109,7 @@ func TestDeepCopyRoundTripsSubTypesDirectly(t *testing.T) {
 		&SignalAdapterSpec{}, &SignalAdapterStatus{},
 		&SignalSourceSpec{}, &SignalSourceStatus{},
 		&AdapterRef{}, &ContextCheckpoint{}, &ContextSync{}, &CooldownEntry{},
-		&CredentialKeyDoc{}, &EgressMediation{}, &GroupingSpec{}, &InflightRun{},
+		&CredentialKeyDoc{}, &EgressMediation{}, &InflightRun{},
 		&InputItem{}, &InputOrigin{}, &NamedValue{}, &ObjectRef{}, &OriginReader{},
 		&PersistenceBinding{}, &PipelinePersistence{}, &ReaderMark{},
 		&RecordedInput{}, &RepoAuth{}, &RepositorySpec{}, &RunStatus{},

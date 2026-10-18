@@ -132,6 +132,19 @@ const (
 // changed — exactly like the field it mirrors.
 const LabelCausedBy = "agentops.dev/caused-by"
 
+// IndexConversationID names the informer field index on
+// Conversation.spec.conversationId — equality routing, reopen's
+// at-most-one-open check, and coordination's member reuse all read it
+// (signal-correlation-id), in place of the removed
+// agentops.dev/signature-hash label. initiationId values are not
+// label-safe (an Alertmanager groupKey carries "{}", quotes, spaces), so
+// the lookup moved to a cache-backed field index instead of a derived
+// label. Registered by internal/controller.SetupConversationIndexes;
+// defined here, not there, so a package with no reason to import
+// internal/controller (internal/chat, which internal/controller itself
+// imports) can still build the same client.MatchingFields query.
+const IndexConversationID = "spec.conversationId"
+
 // LabelNameBase names a conversation's own word-chain base name —
 // "<kind>-<words>", with no numeric collision suffix — so a later creation
 // for the same base can find every prior conversation sharing it with one
@@ -322,7 +335,7 @@ type ConversationSpec struct {
 	//
 	// It exists because a source is SHAREABLE: two Pipelines listing one source
 	// both open a conversation per signal, and those conversations carry the
-	// same signature. Without the ref, the second Pipeline's next signal would
+	// same conversationId. Without the ref, the second Pipeline's next signal would
 	// be absorbed by the first Pipeline's conversation and run under the wrong
 	// profile with the wrong tools. It also replaces attribution-by-inference,
 	// which went blank exactly when two Pipelines wired identically.
@@ -340,9 +353,9 @@ type ConversationSpec struct {
 	// for display, and nothing is ever resolved through it.
 	//
 	// It is on the CONVERSATION because a conversation has exactly one
-	// originating signal — reuse is scoped to one signature and one pipeline,
-	// so every signal that lands here came from the same source with the same
-	// grouping labels.
+	// originating signal — reuse is scoped to one conversationId and one
+	// pipeline, so every signal that lands here came from the same source
+	// carrying the same correlation id.
 	//
 	// IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on
 	// `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the
@@ -363,10 +376,24 @@ type ConversationSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=500
 	Title string `json:"title,omitempty"`
-	// Signature groups same/similar problems into one conversation
-	// (e.g. alertgroup/alertname/namespace, job:<name>).
+	// ConversationID is the adopted initiationId of the signal that opened
+	// this conversation — the sender-minted correlation identity equality
+	// routing matches on. It replaces the derived Signature and the
+	// agentops.dev/signature-hash label: the manager routes by pure id
+	// equality now, nothing is computed from labels any more.
+	//
+	// OPAQUE. The manager compares it only for equality and never parses,
+	// derives or interprets it.
+	//
+	// WRITTEN ONCE AT CREATION, like PipelineRef and Signal above — reopening,
+	// re-wiring or reconciling this conversation never changes it.
+	//
+	// Absent on a conversation created before this field existed. NEVER
+	// backfilled — equality routing simply never matches a legacy
+	// conversation, so a recurrence opens a new one beside it rather than
+	// risking a wrong merge.
 	// +optional
-	Signature string `json:"signature,omitempty"`
+	ConversationID string `json:"conversationId,omitempty"`
 	// OriginReader records WHO started this conversation, so their own read
 	// watermark can be stamped the moment their thread is created — the person
 	// who typed the request has by definition seen it, and presenting it back
@@ -1162,6 +1189,24 @@ func (c *Conversation) BoundTo(channel string) bool {
 		}
 	}
 	return false
+}
+
+// SameOrigin reports whether c and other were originated by the SAME
+// Pipeline or the SAME Coordinator — the scoping equality routing and
+// reopen's at-most-one-open check both apply on top of a conversationId
+// match (pipeline-model: "a signal MAY only be appended to an open
+// conversation originated by the SAME Pipeline"). The two refs are mutually
+// exclusive, and a conversation naming NEITHER predates both fields — never
+// a match, since nothing backfills them.
+func (c *Conversation) SameOrigin(other *Conversation) bool {
+	switch {
+	case c.Spec.PipelineRef != nil:
+		return other.Spec.PipelineRef != nil && other.Spec.PipelineRef.Name == c.Spec.PipelineRef.Name
+	case c.Spec.CoordinatorRef != nil:
+		return other.Spec.CoordinatorRef != nil && other.Spec.CoordinatorRef.Name == c.Spec.CoordinatorRef.Name
+	default:
+		return false
+	}
 }
 
 // +kubebuilder:object:root=true

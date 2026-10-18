@@ -129,10 +129,6 @@ spec:
   credentialsSecretRef:
     name: {{ . }}
   {{- end }}
-  {{- with $src.grouping }}
-  grouping:
-{{ toYaml . | indent 4 }}
-  {{- end }}
   {{- $cfg := dict }}
   {{- with $src.baseUrl }}{{ $_ := set $cfg "baseUrl" . }}{{ end }}
   {{- /*

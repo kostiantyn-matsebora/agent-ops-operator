@@ -282,18 +282,20 @@ eventsAdapter:
     # the default) — a namespaced install has no equivalent, since nodes are
     # cluster-scoped, so this axis is off there and every source says so once.
     route: {}
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
-    #
-    # Group by WORKLOAD, not by object. `name` here used to be a POD name —
-    # unique per replica and regenerated on every rollout — so conversation
-    # count scaled with pods × rollouts and the manager's 7-day window reuse
-    # could never fire, because the signature never repeated. `workload` is the
-    # owning controller (Deployment/api), resolved through owner references, so
-    # every replica shares one conversation and it survives rollouts.
-    grouping:
-      signatureLabels:
-        - namespace
-        - workload
+    # Cooldown: suppress a repeat of the same initiationId within this window.
+    # The adapter's own `initiationId` is workload-keyed (namespace/workload,
+    # resolved through owner references, FIXED — see the k8s-bundle spec), not
+    # per-pod, so every replica shares one conversation and it survives
+    # rollouts. The pending/dwell queue (pending.go) re-posts a surviving
+    # workload failure on its own refractory clock — as short as 1m, never
+    # longer than a rule's own `for:` dwell (3-10m here) — relying on the
+    # manager to let those re-posts through rather than swallow them as
+    # duplicates. The CRD default (6h) would instead silently drop every
+    # re-post but the first one for up to 6 hours, erasing the occurrence
+    # count the bundle's own spec promises, so this source overrides it to 0
+    # (cooldown off, the adapter's own refractory window is the only pacing
+    # this needs).
+    cooldownHours: 0
 
 # The agent that answers. IDENTITY ONLY — one AgentProfile and nothing else.
 # What executes it is the parent chart's `runtimes:` list and its

@@ -151,10 +151,6 @@ spec:
   credentialsSecretRef:
     name: {{ . }}
   {{- end }}
-  {{- with $src.grouping }}
-  grouping:
-{{ toYaml . | indent 4 }}
-  {{- end }}
   {{- if $reg.enabled }}
   # opaque to the operator; the adapter reads `register` and writes the
   # VMAlertmanagerConfig that makes Alertmanager push here

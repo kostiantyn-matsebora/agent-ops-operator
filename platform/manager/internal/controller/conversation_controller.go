@@ -32,14 +32,10 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
-
-// LabelSignatureHash indexes conversations by grouping signature.
-const LabelSignatureHash = "agentops.dev/signature-hash"
 
 // ConditionContextContinuity reports whether this conversation still carries the
 // context it accumulated. False means a run could not reach it and the thread
@@ -209,9 +205,8 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// CLOSED IS INERT. Everything below this line provisions something — a
 	// topic, a ConfigMap, a pod, a work unit — and a closed conversation gets
-	// none of it. Placed before the signature label and the input pruning on
-	// purpose: a closed conversation is not a place work can land, so there is
-	// nothing to keep groupable or to prune toward.
+	// none of it. A closed conversation is not a place work can land, so
+	// there is nothing to prune toward either.
 	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		return r.reconcileClosed(ctx, &conv)
 	}
@@ -233,21 +228,6 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, r.Router.CloseBudgetExceeded(ctx, &conv, digest)
 		}
 		deadlineRequeue = time.Until(budget.Deadline.Time)
-	}
-
-	// signature label for grouping lookups
-	if conv.Spec.Signature != "" {
-		want := ingest.SignatureHash(conv.Spec.Signature)
-		if conv.Labels[LabelSignatureHash] != want {
-			patch := client.MergeFrom(conv.DeepCopy())
-			if conv.Labels == nil {
-				conv.Labels = map[string]string{}
-			}
-			conv.Labels[LabelSignatureHash] = want
-			if err := r.Patch(ctx, &conv, patch); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
 	}
 
 	// input pruning: drop processed inputs from spec, GC consumed payload objects

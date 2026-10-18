@@ -1,7 +1,9 @@
 // Normalized-signal routing: the single core every signal source feeds —
 // the built-in Alertmanager webhook and external signal adapters alike.
-// Adapters normalize; the manager applies the source's grouping policy
-// (fingerprint cooldown, signature grouping, window reuse, recurrence).
+// Adapters normalize and mint the correlation id; the manager applies
+// nothing but equality — initiationId cooldown, then id-equality routing
+// against an open conversation's own conversationId. "Are these signals one
+// problem?" was decided sender-side, wherever its own aggregation lives.
 package httpapi
 
 import (
@@ -36,10 +38,17 @@ import (
 
 // NormalizedSignal is one signal in the contract's normalized shape.
 type NormalizedSignal struct {
-	// Fingerprint identifies this event for cooldown dedup (at-least-once
-	// delivery collapses on it).
-	Fingerprint string `json:"fingerprint"`
-	// Labels feed the source's grouping.signatureLabels.
+	// InitiationID is the sender-minted correlation id, REQUIRED on every
+	// signal — the manager rejects one that omits it rather than synthesize
+	// or default it. Cooldown keys on it, and equality routing matches it
+	// against an open conversation's own spec.conversationId: the SAME id,
+	// minted where the sender's own aggregation already happens, or
+	// propagated verbatim when a round trip hands back a manager-issued
+	// conversationId. Replaces the retired Fingerprint.
+	InitiationID string `json:"initiationId"`
+	// Labels are attribution only now — stored as SignalProvenance and
+	// rendered on signal cards. They feed no grouping decision: the manager
+	// groups purely by InitiationID.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 	// Title overrides the conversation title when this signal opens one.
@@ -57,7 +66,7 @@ type NormalizedSignal struct {
 	// their own read watermark when their thread is created, so a conversation
 	// somebody just started is not shown back to them as unread.
 	//
-	// NOT a label, deliberately: labels feed signature grouping and are
+	// NOT a label, deliberately: labels are attribution only now and are
 	// rendered on signal cards, and a per-person value has no business in
 	// either.
 	// +optional
@@ -85,14 +94,17 @@ const KindTask = "task"
 // source, and recurrence-on-session so later ticks resume the agent.
 const KindJob = "job"
 
-// KindAlert is the default lane: read-only investigation prompt, grouped by the
-// source's signature labels.
+// KindAlert is the default lane: read-only investigation prompt, grouped by
+// the sender's own initiationId.
 const KindAlert = "alert"
 
 // oneShot reports whether a kind is a one-shot lane — a later signal is a
 // SEPARATE request rather than more news about a standing subject. Chat and
 // task are one-shot; alert and job are recurring-subject lanes that group and
-// resume. This is the distinction the signature fallback keys on.
+// resume. Used only to pick a title's icon now — routing itself no longer
+// branches on it: a one-shot sender mints a fresh initiationId per request,
+// and a recurring-subject sender reuses its own, so equality routing alone
+// already produces this split.
 func oneShot(kind string) bool { return kind == KindChat || kind == KindTask }
 
 // Reserved labels a chat signal carries. LabelChatChannel is what lets the
@@ -151,8 +163,8 @@ func isChat(signals []NormalizedSignal) bool {
 	return false
 }
 
-// combineFunc renders one input payload for a signature group of fresh
-// signals (callers control multi-signal payload shape).
+// combineFunc renders one input payload for a group of fresh signals sharing
+// one initiationId (callers control multi-signal payload shape).
 type combineFunc func(group []NormalizedSignal) string
 
 // combineJoined is the generic combiner: single payload verbatim, several
@@ -168,20 +180,20 @@ func combineJoined(group []NormalizedSignal) string {
 	return strings.Join(parts, "\n---\n")
 }
 
-// routeSignals applies the source's grouping policy to a batch of normalized
-// signals: cooldown by fingerprint, signature grouping, window-based
-// conversation reuse with recurrence-on-session, out-of-line payloads, and
-// source status bookkeeping (the single place lastReceived/receivedTotal are
-// updated). Wiring is pipeline-only: a source no Ready pipeline lists drops the
-// batch with a reason BEFORE cooldown (so re-sent fingerprints route once one
-// does). Returns fresh signals, conversations touched, and the drop reason ("" when routed).
+// routeSignals applies pure id-equality routing to a batch of normalized
+// signals: cooldown by initiationId, grouping signals that share one id,
+// out-of-line payloads, and source status bookkeeping (the single place
+// lastReceived/receivedTotal are updated). Wiring is pipeline-only: a source
+// no Ready pipeline lists drops the batch with a reason BEFORE cooldown (so
+// re-sent ids route once one does). Returns fresh signals, conversations
+// touched, and the drop reason ("" when routed).
 //
 // A source is SHAREABLE, so this FANS OUT: every Ready pipeline listing the
-// source gets its own conversation for each group, with its own profile and
-// capabilities. Per-source policy — cooldown and signature grouping — is
-// deliberately evaluated ONCE, above the fan-out: a fingerprint is admitted
-// once and then delivered to each server. Moving either inside the loop would
-// let the first pipeline spend the cooldown and starve the rest.
+// source gets its own conversation per id, with its own profile and
+// capabilities. Per-source cooldown is deliberately evaluated ONCE, above the
+// fan-out: an id is admitted once and then delivered to each server. Moving
+// it inside the loop would let the first pipeline spend the cooldown and
+// starve the rest.
 func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, combine combineFunc) (int, int, string, error) {
 	servers := chat.PipelinesForSource(ctx, s.Client, s.Namespace, source.Name)
 	if len(servers) == 0 {
@@ -210,60 +222,39 @@ func (s *Server) routeSignals(ctx context.Context, source *agentopsv1alpha1.Sign
 		})
 	}
 	cd := s.cooldown(source, signals)
-	var fps []string
-	byFP := map[string]NormalizedSignal{}
+	// Grouped BEFORE cooldown, by the raw id: several signals in one batch
+	// that share one initiationId are one sender-side notification (a Pulse
+	// batch of readings under one incident, say) and combine into one input,
+	// exactly as several occurrences of one id across separate calls land on
+	// the same open conversation. Checking cooldown against the DISTINCT id
+	// set — once per id, not once per signal — is what keeps a same-batch
+	// repeat from suppressing itself against its own first occurrence.
+	groups := map[string][]NormalizedSignal{}
 	for _, sig := range signals {
-		fps = append(fps, sig.Fingerprint)
-		byFP[sig.Fingerprint] = sig
+		groups[sig.InitiationID] = append(groups[sig.InitiationID], sig)
 	}
-	fresh := cd.Fresh(fps)
+	ids := make([]string, 0, len(groups))
+	for id := range groups {
+		ids = append(ids, id)
+	}
+	fresh := cd.Fresh(ids)
 	if len(fresh) == 0 {
 		// The high-volume case — a flapping alert re-delivered inside its
-		// window — writes NOTHING. Only admitting a fingerprint moves the record.
+		// window — writes NOTHING. Only admitting an id moves the record.
 		return 0, 0, "", nil
 	}
 	s.recordCooldown(ctx, source, cd)
 
-	groups := map[string][]NormalizedSignal{}
-	for _, fp := range fresh {
-		sig := byFP[fp]
-		key := ingest.Signature(sig.Labels, source.Spec.Grouping.SignatureLabels)
-		if oneShot(sig.Kind) && len(source.Spec.Grouping.SignatureLabels) == 0 {
-			// The fallback splits on what the LANE is about, not on whether
-			// labels happen to be present:
-			//
-			//   alert / job  — recurring-subject lanes. The second signal is
-			//                  more news about the same thing, so the default
-			//                  alert labels (alertgroup/alertname/namespace)
-			//                  fold it into the open conversation and resume the
-			//                  session. the prometheus bundle ships `grouping: {}` and
-			//                  depends on this; signal-cron fires a DISTINCT
-			//                  fingerprint per tick and depends on the empty
-			//                  signature collapsing them into one conversation.
-			//   chat / task  — one-shot lanes. The second signal is a second
-			//                  request, and the default labels are alert
-			//                  vocabulary neither one carries, so every request
-			//                  would hash to the same empty signature and pile
-			//                  into a single conversation.
-			//
-			// Do NOT "simplify" this to a blanket per-fingerprint rule: that
-			// regresses alert grouping and gives every cron tick its own
-			// conversation. A source that DOES declare signatureLabels is
-			// unaffected in every lane — asking for grouping gets it.
-			key = sig.Fingerprint
-		}
-		groups[key] = append(groups[key], sig)
-	}
-
 	touched, landed, reason := 0, 0, ""
-	for key, group := range groups {
+	for _, id := range fresh {
+		group := groups[id]
 		// One conversation per serving pipeline. `landed` counts SIGNALS, so it
 		// moves once however many pipelines took the group; `touched` counts
 		// CONVERSATIONS, so it moves per pipeline. Conflating them would report
 		// a doubled intake on a shared source.
 		landedHere := false
 		for i := range servers {
-			_, routed, err := s.routeSignalGroup(ctx, source, servers[i], key, group, combine, len(servers))
+			_, routed, err := s.routeSignalGroup(ctx, source, servers[i], id, group, combine)
 			if err != nil {
 				return 0, 0, "", err
 			}
@@ -301,11 +292,11 @@ func (s *Server) cooldown(source *agentopsv1alpha1.SignalSource, signals []Norma
 	if cd := s.cooldowns[source.Name]; cd != nil {
 		return cd
 	}
-	hours := source.Spec.Grouping.CooldownHours
+	hours := source.Spec.CooldownHours
 	if hours <= 0 {
 		hours = 6
 		if isChat(signals) {
-			// Chat defaults cooldown OFF. Fingerprint dedup exists so a flapping
+			// Chat defaults cooldown OFF. Id dedup exists so a flapping
 			// alert opens one investigation; a person asking the same thing twice
 			// means it twice, and swallowing the second ask would be a bug wearing
 			// dedup's clothes.
@@ -314,7 +305,7 @@ func (s *Server) cooldown(source *agentopsv1alpha1.SignalSource, signals []Norma
 	}
 	recorded := make([]ingest.Entry, 0, len(source.Status.Cooldown))
 	for _, e := range source.Status.Cooldown {
-		recorded = append(recorded, ingest.Entry{Fingerprint: e.Fingerprint, At: e.At.Time})
+		recorded = append(recorded, ingest.Entry{InitiationID: e.InitiationID, At: e.At.Time})
 	}
 	cd := ingest.NewCooldownFrom(time.Duration(hours)*time.Hour, recorded)
 	s.cooldowns[source.Name] = cd
@@ -322,7 +313,7 @@ func (s *Server) cooldown(source *agentopsv1alpha1.SignalSource, signals []Norma
 }
 
 // recordCooldown writes the suppression window back to the source. Called only
-// when a fingerprint was newly admitted — which already costs a conversation
+// when an id was newly admitted — which already costs a conversation
 // create or patch, so this adds no write to any path that was previously free.
 // Entries past the window are pruned and the list is bounded by the write.
 func (s *Server) recordCooldown(ctx context.Context, source *agentopsv1alpha1.SignalSource, cd *ingest.Cooldown) {
@@ -333,7 +324,7 @@ func (s *Server) recordCooldown(ctx context.Context, source *agentopsv1alpha1.Si
 	out := make([]agentopsv1alpha1.CooldownEntry, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, agentopsv1alpha1.CooldownEntry{
-			Fingerprint: e.Fingerprint, At: metav1.NewTime(e.At),
+			InitiationID: e.InitiationID, At: metav1.NewTime(e.At),
 		})
 	}
 	patch := client.MergeFrom(source.DeepCopy())
@@ -537,18 +528,16 @@ func (s *Server) backlogFull(ctx context.Context) (bool, error) {
 	return n >= s.maxQueued(), nil
 }
 
-// routeSignalGroup lands one signature group as an input on the matching
-// conversation (window reuse; created on demand with the serving pipeline's
-// profile and channel set — the only wiring there is). Reports routed=false
-// when the pending backlog is full and the group would have needed a NEW
-// conversation — the bound gates creation only, so window reuse keeps appending
-// to a pending conversation however full the backlog is. Returns the
-// conversation the group landed on, so the caller can attribute the claim.
-//
-// serverCount is how many Ready pipelines serve the source; it exists only for
-// the legacy-conversation rule in reusableBy.
-func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, signature string, group []NormalizedSignal, combine combineFunc, serverCount int) (string, bool, error) {
-	conv, err := s.findReusableConversation(ctx, source, claimant, signature, serverCount)
+// routeSignalGroup lands one initiationId's group as an input on the
+// matching conversation (pure id equality; created on demand with the
+// serving pipeline's profile and channel set — the only wiring there is).
+// Reports routed=false when the pending backlog is full and the group would
+// have needed a NEW conversation — the bound gates creation only, so
+// equality routing keeps appending to an already-admitted conversation
+// however full the backlog is. Returns the conversation the group landed on,
+// so the caller can attribute the claim.
+func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, initiationID string, group []NormalizedSignal, combine combineFunc) (string, bool, error) {
+	conv, err := s.findReusableConversation(ctx, claimant, initiationID)
 	if err != nil {
 		return "", false, err
 	}
@@ -558,7 +547,7 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	inputType := inputTypeForKind(kind)
 
 	if conv == nil {
-		conv, err = s.createConversationForGroup(ctx, source, claimant, signature, group, kind)
+		conv, err = s.createConversationForGroup(ctx, source, claimant, initiationID, group, kind)
 		if err != nil {
 			return "", false, err
 		}
@@ -572,41 +561,30 @@ func (s *Server) routeSignalGroup(ctx context.Context, source *agentopsv1alpha1.
 	return s.appendInputToConversation(ctx, source, claimant, conv, group, combine, inputType)
 }
 
-// findReusableConversation returns the open conversation this claimant may
-// append a matching-signature group to under window reuse, or nil when a new
-// one must be opened.
-func (s *Server) findReusableConversation(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, signature string, serverCount int) (*agentopsv1alpha1.Conversation, error) {
-	windowDays := source.Spec.Grouping.WindowDays
-	if windowDays <= 0 {
-		windowDays = 7
-	}
+// findReusableConversation returns the OPEN conversation, originated by this
+// claimant, whose conversationId equals initiationID — pure equality, read
+// off the informer field index on spec.conversationId
+// (agentopsv1alpha1.IndexConversationID) rather than any derived label.
+// "Open" is the only window now (design: "window reuse" is rejected) — a
+// CLOSED conversation is excluded, which is the rule that makes closing mean
+// anything: without it a matching id would wake the conversation somebody
+// just tidied away. A match there opens a NEW conversation instead.
+func (s *Server) findReusableConversation(ctx context.Context, claimant chat.Claimant, initiationID string) (*agentopsv1alpha1.Conversation, error) {
 	var list agentopsv1alpha1.ConversationList
-	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
-		client.MatchingLabels{controller.LabelSignatureHash: ingest.SignatureHash(signature)}); err != nil {
+	if err := s.Client.List(ctx, &list, client.InNamespace(s.Namespace),
+		client.MatchingFields{agentopsv1alpha1.IndexConversationID: initiationID}); err != nil {
 		return nil, err
 	}
-	cutoff := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
 	for i := range list.Items {
 		c := &list.Items[i]
-		// A CLOSED conversation is not reusable, and this is the rule that
-		// makes closing mean anything: without it a matching signature would
-		// wake the conversation somebody just tidied away, re-materialising a
-		// thread they archived. A match opens a NEW conversation instead.
 		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
 			continue
 		}
-		// The signature hash alone is NOT enough once a source is shared: two
-		// claimants fanning out produce two conversations with the SAME
-		// signature, and absorbing the other one's would run this group under
-		// the wrong profile with the wrong tools.
-		if !reusableBy(c, claimant, serverCount) {
-			continue
-		}
-		last := c.CreationTimestamp.Time
-		if c.Status.LastActivity != nil {
-			last = c.Status.LastActivity.Time
-		}
-		if last.After(cutoff) {
+		// The id alone is NOT enough once a source is shared: two claimants
+		// fanning out from one source both adopt the SAME initiationId as
+		// their own conversationId, and absorbing the other one's would run
+		// this group under the wrong profile with the wrong tools.
+		if reusableBy(c, claimant) {
 			return c, nil
 		}
 	}
@@ -673,12 +651,12 @@ func wordsForGroup(source *agentopsv1alpha1.SignalSource, title string) string {
 	return namewords.Words(source.Name)
 }
 
-// createConversationForGroup opens a new conversation for this signature,
-// resolving the claimant's capability and execution wiring ONCE — whether
-// this claimant inlines it or names it through capabilityRef makes no
-// difference from here on. Returns nil, nil when the backlog is full: no
-// conversation, and nothing wrong.
-func (s *Server) createConversationForGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, signature string, group []NormalizedSignal, kind string) (*agentopsv1alpha1.Conversation, error) {
+// createConversationForGroup opens a new conversation adopting initiationID
+// as its conversationId, resolving the claimant's capability and execution
+// wiring ONCE — whether this claimant inlines it or names it through
+// capabilityRef makes no difference from here on. Returns nil, nil when the
+// backlog is full: no conversation, and nothing wrong.
+func (s *Server) createConversationForGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, claimant chat.Claimant, initiationID string, group []NormalizedSignal, kind string) (*agentopsv1alpha1.Conversation, error) {
 	full, err := s.backlogFull(ctx)
 	if err != nil {
 		return nil, err
@@ -705,7 +683,6 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 		nameKind = "task"
 	}
 	title := titleForGroup(source, group, kind)
-	conv.Labels = map[string]string{controller.LabelSignatureHash: ingest.SignatureHash(signature)}
 	capability, err := dispatch.ResolveCapability(ctx, s.Reader, claimant)
 	if err != nil {
 		return nil, fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
@@ -734,12 +711,12 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 		// with the queue entry.
 		Signal: &agentopsv1alpha1.SignalProvenance{
 			SourceRef: &agentopsv1alpha1.ObjectRef{Name: source.Name},
-			// The first signal's labels represent the group: they share a
-			// signature, so they agree on everything grouping keyed off.
+			// The first signal's labels represent the group: they all share one
+			// initiationId, so they agree on everything the group was formed over.
 			Labels: boundedLabels(group[0].Labels),
 		},
-		Title:     title,
-		Signature: signature,
+		Title:          title,
+		ConversationID: initiationID,
 	}
 	// Provenance names EXACTLY one originating wiring object (design D-B):
 	// a Pipeline names PipelineRef, a Coordinator names CoordinatorRef and
@@ -799,8 +776,8 @@ func (s *Server) appendInputToConversation(ctx context.Context, source *agentops
 		ConversationRef: agentopsv1alpha1.ObjectRef{Name: conv.Name},
 		Type:            inputType,
 		Payload:         combine(group),
-		// The first signal's labels represent the group: they all share a
-		// signature, so they agree on everything grouping keyed off.
+		// The first signal's labels represent the group: they all share one
+		// initiationId, so they agree on everything the group was formed over.
 		Labels: group[0].Labels,
 	}
 	if err := s.Client.Create(ctx, ci); err != nil {
@@ -847,31 +824,24 @@ func (s *Server) appendInputToConversation(ctx context.Context, source *agentops
 }
 
 // reusableBy reports whether an existing conversation may absorb a group from
-// this claimant — the provenance half of window reuse, on top of the signature
-// match the caller already made.
+// this claimant — the provenance half of equality routing, on top of the id
+// match the caller already made (pipeline-model: "a signal MAY only be
+// appended to an open conversation originated by the SAME Pipeline").
 //
 // A conversation carrying a pipelineRef is reusable by that Pipeline alone;
 // one carrying a coordinatorRef by that Coordinator alone — the two refs are
 // mutually exclusive, so a Pipeline claimant never absorbs a Coordinator's
-// conversation or the reverse.
-//
-// One with NEITHER ref predates both fields, and no timestamp can tell which
-// claimant made it. Reusing it whenever the signature matched would hand it to
-// whichever claimant happened to reconcile first once a source is shared — the
-// invisible pick this change exists to delete. Refusing it outright would
-// instead re-open every open investigation on upgrade. So it stays reusable
-// exactly while ONE claimant serves the source, which IS the state every such
-// conversation was created in; the moment a second joins, it is left alone and
-// each claimant opens its own. Nothing backfills either ref — inference is
-// what it replaces.
-func reusableBy(c *agentopsv1alpha1.Conversation, claimant chat.Claimant, serverCount int) bool {
+// conversation or the reverse. One with NEITHER ref predates both fields —
+// exactly the conversations conversation-provenance says equality routing
+// must never match — so it is simply never reusable; nothing backfills it.
+func reusableBy(c *agentopsv1alpha1.Conversation, claimant chat.Claimant) bool {
 	if c.Spec.PipelineRef != nil {
 		return claimant.ClaimantKind() == chat.ClaimantPipeline && c.Spec.PipelineRef.Name == claimant.GetName()
 	}
 	if c.Spec.CoordinatorRef != nil {
 		return claimant.ClaimantKind() == chat.ClaimantCoordinator && c.Spec.CoordinatorRef.Name == claimant.GetName()
 	}
-	return serverCount == 1
+	return false
 }
 
 // emitDropped records one signal.dropped per signal a batch lost, carrying the
@@ -884,7 +854,7 @@ func (s *Server) emitDropped(source *agentopsv1alpha1.SignalSource, signals []No
 			From:   activity.Node(activity.NodeSignalSource, source.Name),
 			Status: activity.StatusError,
 			Code:   code,
-			Detail: reason + " (" + sig.Fingerprint + ")",
+			Detail: reason + " (" + sig.InitiationID + ")",
 		})
 	}
 }
@@ -935,8 +905,8 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, sig := range in.Signals {
-		if sig.Fingerprint == "" {
-			writeJSON(w, 400, map[string]string{"error": "every signal needs a fingerprint"})
+		if sig.InitiationID == "" {
+			writeJSON(w, 400, map[string]string{"error": "every signal needs an initiationId"})
 			return
 		}
 		// A chat signal names the surface it came from, or it is unanswerable.
@@ -954,7 +924,7 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	// Receipt is recorded before any routing decision: the hop that happened is
 	// "this adapter handed the manager a signal", and it is true whether the
 	// signal is later claimed, deduped by cooldown, or dropped. It carries no
-	// conversation because none has been decided yet — the fingerprint in
+	// conversation because none has been decided yet — the initiationId in
 	// `detail` is what correlates it with the claim that follows.
 	for _, sig := range in.Signals {
 		s.Activity.Emit(activity.Event{
@@ -962,7 +932,7 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 			From:   activity.Node(activity.NodeSignalAdapter, source.Spec.Adapter),
 			To:     activity.Node(activity.NodeSignalSource, source.Name),
 			Code:   orDefault(sig.Kind, "alert"),
-			Detail: sig.Fingerprint,
+			Detail: sig.InitiationID,
 		})
 	}
 	route := s.routeSignals
