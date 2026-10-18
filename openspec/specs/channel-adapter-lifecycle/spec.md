@@ -92,6 +92,10 @@ selector reads it.
 - **WHEN** ChannelAdapters named `console` and `telegram` are both reconciled
 - **THEN** both Deployments carry `app.kubernetes.io/name: agentops-adapter`, and their Pod templates carry `app.kubernetes.io/instance: console` and `app.kubernetes.io/instance: telegram` respectively
 
+#### Scenario: A rendered Service carries the instance label
+- **WHEN** a ChannelAdapter named `telegram` is reconciled and its Service is rendered
+- **THEN** the Service carries `app.kubernetes.io/instance: telegram`
+
 ### Requirement: Channel credentials are projected into the adapter pod
 For every `Channel` of the adapter's type with `credentialsSecretRef`, the reconciler SHALL project the secret into the adapter pod spec as `envFrom` under the deterministic prefix `AGENTOPS_CRED_<CHANNEL>_` (every key `K` becomes env `<prefix>K`), resolved by the kubelet — no component reads secret values or key names through the API. Channel additions, removals, or credential changes SHALL roll the adapter pod. Sanitized-name collisions SHALL be reported as a condition, never silently overwritten.
 
