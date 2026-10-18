@@ -82,9 +82,10 @@ Invoking an AgentCapability SHALL return the created (or reused) member conversa
 identity at once and SHALL NOT wait for a result. The invoke SHALL report
 whether it created a conversation or attached to an existing one.
 
-The member's `conversationId` is the one `conversation-provenance`'s own
-requirement names — minted by the invoke, deterministically from the
-`agents[]` entry name, never from the signal that opened the root.
+The member's `conversationId` SHALL be minted by the invoke itself,
+deterministically from the `agents[]` entry name, never from the signal
+that opened the root — `conversation-provenance` records the field, this
+requirement owns how it is minted.
 
 A second invoke of the same entry attaches rather than duplicating for this
 reason: the same id-equality rule every signal routes by.
