@@ -1,0 +1,407 @@
+# Pulse (rcourtman/pulse — Proxmox/Docker/Kubernetes/TrueNAS monitoring)
+# agent bundle: the webhook signal source, the first-party mcp-pulse MCP
+# server with its two risk-split tool pairs, TWO AgentProfiles framed for
+# Community edition, and the bundle's own opt-in wiring for both. See
+# docs/integrations/pulse.md.
+# Override under the `pulse:` key of the parent chart's values.
+#
+# The WHOLE bundle is off by default and is turned on only directly
+# (`enabled: true`). Demo mode never enables it: every component needs a
+# Pulse instance and an API token no demo cluster has.
+#
+# The bundle ships NO SUBSTRATE: no AgentRuntime, no runtime ServiceAccount,
+# no LLM credential, no runtime RBAC. Those are release-wide facts and live
+# in the parent chart's `runtimes:` list and `global.agentops.runtimeDefaults`.
+#
+# Pulse sends outgoing webhooks only — there is no receiver-registration
+# concept to call into. "Registering" means THIS adapter calling Pulse's own
+# API to tell it where to post, reading the Pulse base URL and API token off
+# the served SignalSource's own `spec.config`/`spec.credentialsSecretRef`
+# (see `signal.defaultSource` below) — the SignalAdapter CRD carries no
+# generic pod-env passthrough, so that is the only delivery path that
+# actually reaches the adapter's pod. See design.md Decision 1.
+enabled: false
+
+# The signal ingest lane: the webhook-receiving SignalAdapter and, under
+# `defaultSource.enabled`, the ONE SignalSource naming it.
+#
+# THE CLAIM ON THAT SOURCE IS NOT HERE. Wiring is pipeline-only — see
+# `pipelines:` (Pipeline mode) below, or `capabilities:` (Coordinator mode).
+# Rendered with no claim, the source reports Wired=False and drops every
+# alert: this ingest lane can be shipped for a route declared anywhere,
+# including the parent chart's own `pipelines:`.
+signal:
+  enabled: true
+  # SignalAdapter CR name — also the ROUTING KEY: a SignalSource selects this
+  # implementation with spec.adapter: <name>.
+  name: pulse
+  image:
+    repository: ghcr.io/kostiantyn-matsebora/agentops-signal-pulse
+    tag: "0.1.0"
+  resources: {}
+  # WHO MAY POST WEBHOOKS HERE, when global.agentops.networkPolicy is on.
+  # Raw NetworkPolicyPeer entries, exactly like the parent chart's
+  # networkPolicy lists.
+  #
+  # EMPTY LEAVES THIS ADAPTER UNRESTRICTED, deliberately: a policy naming
+  # nobody would deny the alert lane, and a severed alert path is discovered
+  # during an incident. Under-restricting is the recoverable mistake here.
+  #
+  #   webhookFrom:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: pulse
+  webhookFrom: []
+  # EXPOSES THE WEBHOOK ENDPOINT OUTSIDE THE CLUSTER, for a Pulse instance
+  # that is not in-cluster (the common case — Pulse watches Proxmox/Docker
+  # hosts that may sit entirely outside Kubernetes).
+  #
+  # Points at the SignalAdapter reconciler's OWN ClusterIP Service
+  # (agentops-signal-<signal.name>:8080) — the same Service `defaultSource
+  # .webhookUrl` would otherwise derive, never a second Service this chart
+  # renders. Off by default: a cluster-internal Pulse needs neither this
+  # nor `webhookUrl`.
+  #
+  # Shaped exactly like the parent chart's `console.ingress` — same field
+  # names, same TLS forms — since that is this repository's one other
+  # operator-supplied external endpoint.
+  ingress:
+    enabled: false
+    # REQUIRED when enabled — a hostname cannot be guessed, e.g.
+    # pulse-adapter.example.org.
+    host: ""
+    # Additional hostnames serving the same endpoint. Each gets its own
+    # rule, and each is covered by the derived certificate below.
+    extraHosts: []
+    className: ""
+    annotations: {}
+    # Merged onto the Ingress alongside the chart's own labels.
+    labels: {}
+    # Scoped to the webhook path alone — this adapter's only OTHER route is
+    # /healthz, which costs nothing to also expose, but there is no reason
+    # to widen past what Pulse actually calls.
+    path: /webhook
+    pathType: Prefix
+    # TLS. Nothing here is required, and leaving it empty renders no `tls`
+    # section — legitimate when TLS terminates upstream at a load balancer or
+    # in a service mesh. The install notes will point out that the alert
+    # payload otherwise crosses the network in clear text.
+    #
+    # `tls` also accepts the same raw LIST form `console.ingress` does (raw
+    # Ingress tls entries). A list is rendered verbatim so a values file
+    # written for one of this chart's Ingresses works for the other.
+    tls:
+      # Existing certificate Secret. The tls[] hosts are DERIVED from
+      # `host` + `extraHosts`, so hostnames are never restated.
+      secretName: ""
+      # cert-manager issuer: adds the issuer annotation and derives
+      # secretName when it is unset.
+      clusterIssuer: ""
+      # Full raw override — a list of Ingress tls entries, used verbatim and
+      # taking precedence over the derived form.
+      existing: []
+  # The alert source. INERT until a Pipeline/AgentCapability claims it — the
+  # `pipelines:` component below, or a route under the parent chart's own
+  # `pipelines:`.
+  defaultSource:
+    enabled: false
+    # SignalSource CR name, and the {source} segment of the webhook URL
+    # (http://agentops-signal-pulse.<ns>.svc:8080/webhook/<name>).
+    name: pulse-alerts
+    # Pulse's own base URL, e.g. https://pulse.example.org. Rides
+    # spec.config.baseUrl — one of the three flat config fields this source
+    # carries, with webhookUrl and webhookHeaders below (design.md Decision 1),
+    # read by the adapter's own registration call
+    # (POST /api/notifications/webhooks). Required for the adapter to
+    # self-register; without it the source still serves webhooks, reporting
+    # RegistrationNotConfigured instead of failing.
+    baseUrl: ""
+    # The URL registered WITH Pulse as the delivery target. The adapter is a
+    # dumb transport — it never derives this itself, only reads it off this
+    # source. Empty renders the chart's own computed in-cluster Service DNS
+    # name (http://agentops-signal-pulse.<ns>.svc:8080/webhook/pulse-alerts),
+    # which only resolves for a Pulse reachable from inside THIS cluster's
+    # network.
+    #
+    # PULSE IS COMMONLY NOT IN-CLUSTER — it watches Proxmox/Docker hosts
+    # that may sit entirely outside Kubernetes. Set this to whatever you
+    # exposed this adapter's own /webhook/pulse-alerts path as.
+    #
+    # `signal.ingress` below renders that exposure for you when you already
+    # run an ingress controller — set its `host` and this to
+    # https://<that host>/webhook/pulse-alerts. Exposing it any OTHER way
+    # (a LoadBalancer Service, a NodePort, a tunnel) is still on you; this
+    # field only says what to tell Pulse once the exposure exists, by
+    # whichever path you chose.
+    webhookUrl: ""
+    # Static headers PULSE attaches to every delivery to this adapter —
+    # Pulse's own WebhookConfig.Headers field. Independent of the HMAC
+    # signing secret below: this exists for infra reasons signing doesn't
+    # reach, such as a WAF or gateway in front of `signal.ingress`
+    # requiring its own shared-secret header.
+    #
+    # PLAIN spec.config, NOT a Secret — a value here is as visible as any
+    # other SignalSource field (kubectl get signalsource -o yaml), unlike
+    # `token`/`signingSecret` below. Fine for a gateway check that is
+    # defense-in-depth, not this adapter's real security boundary.
+    #
+    #   webhookHeaders:
+    #     X-Gateway-Key: <shared secret your gateway checks>
+    webhookHeaders: {}
+    # SignalSource grouping policy (manager-side; defaults apply when empty).
+    grouping: {}
+  # The adapter's registration credential: a Pulse API token (to call
+  # POST /api/notifications/webhooks) and an optional HMAC signing secret
+  # verifying inbound deliveries (X-Pulse-Timestamp/X-Pulse-Signature).
+  # Delivered through SignalSource.spec.credentialsSecretRef — kubelet-
+  # resolved envFrom, the manager reads no Secrets. Keys `token` and
+  # `signingSecret`, exactly.
+  #
+  # EITHER an existing Secret's name OR the token/secret themselves, never
+  # both — two sources for one value is ambiguous. The token form makes the
+  # bundle create the Secret; without either, the source still serves,
+  # reporting a degraded Ready reason rather than failing the render — a
+  # token added later heals it with no pod restart.
+  credentials:
+    existingSecret: ""
+    token: ""
+    signingSecret: ""
+
+# The two AgentProfiles. IDENTITY ONLY — no allowedTools, no mcp. What each
+# may DO comes exclusively from the Pipeline/AgentCapability routing it; the
+# MCP credential lives on the MCPConfig below, never on the profile, so
+# neither carries connectivity env either.
+#
+# BOTH roles are framed for COMMUNITY EDITION: Pulse's governed
+# plan/approve/execute action flow is Pro-gated and out of reach here, so
+# neither claims it can execute a governed fix. `pulse-operator` frames its
+# two mutating tools — maintenance windows, criticality tags — as
+# annotations, never a stand-in for an actual fix.
+profiles:
+  observer:
+    enabled: true
+    name: pulse-observer
+    # The agent's OUTPUT CONTRACT. REQUIRED on the CR, with no default: both
+    # candidate defaults are wrong, so the author declares it.
+    outputFormat: blocks
+    # Inline role: this profile has no repository, so there is no
+    # .claude/agents/<name>.md to read.
+    systemPrompt: |
+      You are an on-call engineer investigating a Pulse alert (rcourtman/pulse,
+      monitoring Proxmox/Docker/Kubernetes/TrueNAS).
+
+      Your mcp__pulse__* tools — get_resources, get_metrics, get_alerts,
+      get_storage_history — are read-only, and they are your only source of
+      evidence. If a tool you need is not in your allowlist, say so plainly
+      rather than guessing.
+
+      Investigate before you conclude. An alert tells you a rule fired, not
+      why. Look at the alert's resource, check whether it is still firing now,
+      and pull enough history to tell a spike from a trend before you commit to
+      a cause.
+
+      PULSE'S GOVERNED-ACTION FLOW — PLAN, APPROVE, EXECUTE A FIX — IS A
+      PRO-TIER FEATURE AND IS OUT OF REACH ON THIS COMMUNITY-EDITION INSTALL.
+      You cannot act, and you must never describe yourself as having applied a
+      fix. State the likely cause and the evidence that supports it, and say
+      what you would recommend instead of doing it.
+
+      If the situation calls for an operator-state annotation rather than
+      silence — a maintenance window, a criticality tag — say so and name the
+      other agent: `/pulse-operator <task>`.
+
+      Answer briefly. Lead with the finding, then the evidence.
+    maxTurns: 30
+    # Names an AgentRuntime other than the parent's `default`. Empty emits no
+    # runtimeRef and falls back to `default`.
+    runtimeRef: ""
+  operator:
+    enabled: true
+    name: pulse-operator
+    outputFormat: blocks
+    systemPrompt: |
+      You are the Pulse operator-state agent for a Community-edition install of
+      Pulse (rcourtman/pulse).
+
+      PULSE'S GOVERNED-ACTION FLOW — PLAN, APPROVE, EXECUTE A FIX — IS
+      PRO-GATED AND OUT OF REACH HERE. You cannot plan, approve or execute a
+      Pulse action, and you must never describe yourself as having fixed
+      anything.
+
+      What you CAN do, through mcp__pulse__set_maintenance_window and
+      mcp__pulse__set_criticality_tag, is record operator-state annotations: a
+      maintenance window so other alerts expect the disruption, or a
+      criticality tag recording your own judgement of a resource's
+      importance. These are notes for a human or for Pulse's own alerting —
+      never a substitute for fixing anything, and you must say so when you use
+      either.
+
+      You also have every read tool pulse-observer has — get_resources,
+      get_metrics, get_alerts, get_storage_history — to investigate before you
+      annotate.
+
+      When a situation needs an actual fix, say so plainly and that a human
+      must act on Pulse directly, or through its Pro-tier governed-action flow.
+
+      Answer briefly. Lead with what you found and what you recorded, then the
+      evidence.
+    maxTurns: 30
+    runtimeRef: ""
+
+# Pulse access as MCP tools: the first-party mcp-pulse server (deployed by
+# `mcpServer:` below) plus TWO risk-split MCPConfig/MCPToolset pairs fronting
+# it — pulse-observer-mcp/pulse-observability (read) and
+# pulse-operator-mcp/pulse-admin (the two Community-tier operator-state
+# writes).
+#
+# THE REAL WALL IS WHICH TOKEN EACH PAIR'S SECRET CARRIES, not the toolset:
+# Pulse's own API tokens are scope-able (monitoring:read vs
+# monitoring:read+monitoring:write), and mcp-pulse forwards whichever token
+# the caller's bound MCPConfig supplied, deciding no reach of its own. The
+# enumerated tool lists sit ON TOP of that wall, never instead of it — a
+# `mcp__pulse__*` wildcard would span both tiers and defeat the split, so one
+# is refused at render time if ever set.
+#
+# The server key in both rendered MCPConfigs is FIXED at `pulse` and has no
+# values path: that key IS the mcp__pulse__* namespace named in the tool
+# lists below, so a rename would silently strip an agent's tools.
+mcp:
+  # The shared endpoint both pairs point at. Empty = the deployed Service
+  # below (mcpServer.enabled). Set it to point at an mcp-pulse you already
+  # run elsewhere instead of letting this chart deploy one.
+  url: ""
+  observer:
+    enabled: true
+    # MCPConfig CR name (what a Pipeline/AgentCapability puts in
+    # mcpConfigs.refs).
+    name: pulse-observer-mcp
+    # Optional header passthrough. Empty = an Authorization header sourced
+    # from the `authorization` key of the credential below.
+    headers: []
+    # Which credential this pair's header authenticates with: a Pulse API
+    # token scoped to monitoring:read (at least). EITHER an existing Secret's
+    # name OR the token itself, never both.
+    credentials:
+      existingSecret: ""
+      token: ""
+    toolset:
+      # MCPToolset CR name.
+      name: pulse-observability
+      # ENUMERATED, never `mcp__pulse__*` — see the bundle-level note above.
+      tools:
+        - "mcp__pulse__get_resources"
+        - "mcp__pulse__get_metrics"
+        - "mcp__pulse__get_alerts"
+        - "mcp__pulse__get_storage_history"
+  operator:
+    enabled: true
+    name: pulse-operator-mcp
+    headers: []
+    # A Pulse API token scoped to monitoring:read+monitoring:write (or
+    # whatever Pulse's scope_only policy names for the operator-state
+    # endpoints) — Pulse's own token decides what this caller may write, not
+    # anything rendered here.
+    credentials:
+      existingSecret: ""
+      token: ""
+    toolset:
+      name: pulse-admin
+      tools:
+        - "mcp__pulse__set_maintenance_window"
+        - "mcp__pulse__set_criticality_tag"
+
+# The mcp-pulse server WORKLOAD — FIRST-PARTY, unlike every prior bundle's
+# MCP server: `kubernetes` and `prometheus` reference a third party's
+# published image, `home-assistant` points at a vendor-served endpoint. This
+# repository builds and publishes `agentops-mcp-pulse` from
+# `platform/mcp-pulse/`.
+#
+# It holds NO Pulse credential of its own — every call forwards whatever
+# bearer token the caller's bound MCPConfig supplied, unchanged, and decides
+# no reach itself. Its own ServiceAccount, never the runtime's — setting them
+# equal FAILS the render. It needs NO Kubernetes RBAC: it reads Pulse's HTTP
+# API, not the Kubernetes API, so none is rendered for it.
+mcpServer:
+  enabled: false
+  image:
+    repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-pulse
+    tag: "0.1.0"
+  # REQUIRED when enabled: the Pulse base URL mcp-pulse forwards every tool
+  # call to. Empty FAILS the render — never defaulted, mcp-pulse has no
+  # in-cluster endpoint of its own to fall back onto.
+  backend: ""
+  port: 8080
+  # EMPTY, AND NO ACCOUNT IS RENDERED — this server reads an HTTP API over
+  # the network and mounts no Kubernetes token, so the identity it runs as
+  # reaches nothing through the API server. Name one to run it as an account
+  # you created and granted; equal to the runtime's FAILS the render.
+  serviceAccountName: ""
+  # Extra env passthrough, appended after the rendered defaults.
+  env: []
+  resources: {}
+
+# The bundle's OWN wiring — two routes, one per profile. OFF by default, and
+# that default is the load-bearing part: enabling this bundle for its
+# adapter, its tooling and its profiles must never silently acquire routes
+# beside the ones the install declared.
+#
+# BOTH routes claim the SAME shared alert source — wiring is many-to-many, so
+# two agents watching one source is the ordinary shape, not a conflict.
+#
+# UNDER `global.agentops.wiringMode: coordinator` THIS COMPONENT RENDERS
+# NOTHING — `capabilities.yaml` renders the same two routes as standalone
+# AgentCapability objects instead, claimed by the chart-rendered Coordinator
+# (`pulse.coordinatorContribution` — the SAME helper both files read, so the
+# two render paths cannot drift).
+#
+# `wiringEnabled` below says WHETHER these routes render at all, regardless
+# of which of the two shapes above `wiringMode` picks.
+wiringEnabled: false
+
+pipelines:
+  observer:
+    # Independently toggleable: set false to ship the admin route alone.
+    enabled: true
+    name: pulse-observer
+    # Display only — see kubernetes's `pipelines.observe.icon`.
+    icon: aops:observe
+    # Read under `global.agentops.wiringMode: coordinator` by the
+    # chart-rendered Coordinator's own coordinating agent. States what this
+    # agent IS and CAN DO, so a person's question matches it as readily as an
+    # alert does. Unused under `pipelines` mode.
+    description: >-
+      A Pulse monitoring investigator (rcourtman/pulse — Proxmox, Docker,
+      Kubernetes, TrueNAS). Can read live and historical resource state,
+      metrics, alerts and storage history. Cannot change anything — Pulse's
+      governed-action flow is Pro-gated and out of reach on this Community
+      install. Hand it a firing Pulse alert, or any question about the
+      monitored estate's current state.
+    # Optional per-route overrides of the two at the bottom of this stanza.
+    runtimeRef: ""
+    serviceAccountName: ""
+  operator:
+    enabled: true
+    name: pulse-operator
+    icon: aops:operate
+    description: >-
+      The Pulse operator-state agent (rcourtman/pulse). Investigates the same
+      way pulse-observer does, and can additionally record a maintenance
+      window or tag a resource's criticality — the only two mutating actions
+      Community edition exposes outside Pulse's Pro-gated governed-action
+      flow. Cannot plan, approve or execute an actual fix. Hand it an alert
+      that needs a maintenance window logged or a criticality judgement
+      recorded.
+    runtimeRef: ""
+    serviceAccountName: ""
+  # Channels BOTH routes deliver to, BY NAME — an object this bundle does not
+  # render, so the key is omitted entirely when the list is empty. Empty is a
+  # working configuration: with no thread to wait for, the conversation
+  # dispatches immediately and its answer is read from status.runs[].result.
+  channels: []
+  # WHAT EXECUTES these routes, and UNDER WHOSE IDENTITY, when a route names
+  # neither of its own. THIS BUNDLE RENDERS NEITHER OBJECT — the AgentRuntime,
+  # the runtime ServiceAccount and the credential are the PARENT's. Naming
+  # here is a reference: render the account through the parent's
+  # `rbac.runtime.serviceAccounts`, or grant it yourself.
+  runtimeRef: ""
+  serviceAccountName: ""

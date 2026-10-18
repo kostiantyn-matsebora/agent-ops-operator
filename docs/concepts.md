@@ -598,11 +598,13 @@ It is the same whether a conversation started from a Prometheus alert, a cluster
 Event or a person typing on Telegram.
 
 **A BUNDLE MAY SHIP A RUNTIME.** The reference one does: `claude` is a subchart,
-on by default, and an install using another vendor turns it off. What no bundle
-renders is the DEFAULTS or the FLOOR — defaults differing per bundle would be
-one fact in as many places as there are vendors, and a floor a bundle could
-render would make "a route naming nothing holds nothing" a claim no single file
-checks.
+on by default, and an install using another vendor turns it off.
+
+What no bundle renders is the DEFAULTS or the FLOOR — defaults differing per
+bundle would be one fact in as many places as there are vendors.
+
+A floor a bundle could render would make "a route naming nothing holds
+nothing" a claim no single file checks.
 
 ### Two blocks, and the rule separating them
 
@@ -706,21 +708,26 @@ pipelines:
 | `namespaced` | your rules, as Roles in the namespaces you list |
 
 **THERE IS NO MODE, AT EITHER LEVEL.** A release-wide `rbacMode` was deleted
-first, and the per-account one was deleted with it — a mode name is a grant nobody reviewed, and
-declaring the account rather than defaulting it does not make the word readable.
+first, and the per-account one was deleted with it — a mode name is a grant
+nobody reviewed, and declaring the account rather than defaulting it does
+not make the word readable.
+
 `agentops.runtimeReadRules` / `runtimeWriteRules` in the chart are what those
 modes expanded to, and are the copyable starting point.
 
 **AN ACCOUNT EXISTS ONLY WHERE SOMETHING IS BOUND TO IT OR SOMETHING
 AUTHENTICATES AS IT.** A bundle renders a route's account only where it also
-grants that route something; a workload that mounts no token names none. Four
-accounts once existed bound to nothing, indistinguishable from the floor while
-adding four names to every audit of who holds what.
+grants that route something. A workload that mounts no token names none.
 
-**A named posture nobody declared is a grant nobody reviewed.** A release-wide
-permission MODE used to render an account from one value, and its name described
-a state the runtime was in — which is what it once meant, and the reading that
-caused the incident it was reverted for. It is deleted, with no alias.
+Four accounts once existed bound to nothing, indistinguishable from the
+floor while adding four names to every audit of who holds what.
+
+**A named posture nobody declared is a grant nobody reviewed.** A
+release-wide permission MODE used to render an account from one value, and
+its name described a state the runtime was in.
+
+That is what it once meant, and the reading that caused the incident it
+was reverted for. It is deleted, with no alias.
 
 **NO BINDING USES A BUILT-IN ROLE** — not `cluster-admin` under `full`, not
 `view` under `readonly`. Every grant is a role this chart writes out, so an
@@ -737,10 +744,11 @@ must not out-rank the one orchestrating it.
 ### Two accounts, and the second is the useful half
 
 `serviceAccountName` in the defaults names the account every unnamed route
-INHERITS, and it is a **REFERENCE this chart does not create**. Naming is not
-creating, which is the posture adapters already have — and it is what makes
-reusing an account you already own possible at all, since creating it would
-collide on Helm's ownership check.
+INHERITS, and it is a **REFERENCE this chart does not create**.
+
+Naming is not creating, which is the posture adapters already have — and
+it is what makes reusing an account you already own possible at all, since
+creating it would collide on Helm's ownership check.
 
 | Account | Created by | Is |
 |---|---|---|
@@ -777,10 +785,11 @@ compiled MCP ConfigMaps.
 > supervisor.
 
 **Namespaced Roles were tried and reverted.** RBAC cannot express "everywhere
-except", so bounding an agent meant an allow-list: one binding per namespace per
-account, 224 objects on a 28-namespace cluster, and every new namespace
-invisible until someone edited values and redeployed. The maintenance was worse
-than the exposure it bought.
+except", so bounding an agent meant an allow-list: one binding per namespace
+per account, 224 objects on a 28-namespace cluster, and every new namespace
+invisible until someone edited values and redeployed.
+
+The maintenance was worse than the exposure it bought.
 
 ### `allowPodExecution` — the Secret boundary
 
@@ -927,8 +936,9 @@ keys are overlaid, with the later ref winning a collision.
 The `toolsets` stanza carries a `mode`, and the thing it composes against is the
 **agent's own definition**: the `tools:` frontmatter of the agent's file in the
 profile's repository — `.claude/agents/<agent>.md` on the claude and ollama
-runtimes, `.github/agents/<agent>.agent.md` on copilot. The path is the
-runtime's fact. The composition rule is the same on all of them.
+runtimes, `.github/agents/<agent>.agent.md` on copilot.
+
+The path is the runtime's fact. The composition rule is the same on all of them.
 
 **Not the profile** — the profile carries no capabilities at all.
 
@@ -1171,10 +1181,11 @@ there: a runtime is an ENGINE — an image and its pod-level defaults — and wh
 a route persists is the route's decision.
 
 **An `AgentRuntime` declares neither volume.** It keeps `spec.contextStorage`
-alone, which is the one storage question only it can answer: whether its BACKEND
-writes context to a disk at all. A runtime keeping context at a vendor API needs
-no volume and must not be given one. **The split is BACKEND SHAPE against
-PLACEMENT.**
+alone, which is the one storage question only it can answer: whether its
+BACKEND writes context to a disk at all.
+
+A runtime keeping context at a vendor API needs no volume and must not be
+given one. **The split is BACKEND SHAPE against PLACEMENT.**
 
 ### A binding names a claim or a volume, and that decides who creates what
 
@@ -1446,7 +1457,7 @@ bundle renders its routes, release-wide:
 - **Demo mode exercises that many-to-many sharing by default.** Under a
   resolved `coordinator` mode, the kubernetes bundle renders one additional,
   plain `Pipeline` (`global.demo.wiringShowcase`, nullable like
-  `pipelines.enabled`) alongside the chart-rendered `Coordinator` — the SAME
+  `wiringEnabled`) alongside the chart-rendered `Coordinator` — the SAME
   observing route, reused rather than duplicated, claiming the same cluster
   Events source and the console's chat source the Coordinator already
   claims. A cluster `Warning` event then opens two conversations side by
@@ -1931,18 +1942,21 @@ context, and a wrong guess persists nothing while looking configured.
 **Which is why the VENDOR'S BUNDLE ships the declaration for the runtime it
 ships.** The value above is `runtime-claude`'s, and it is the default in
 `chart/charts/claude/values.yaml` — beside that runtime's image and its model
-credential, which live there for the same reason. `chart/charts/ollama/` ships
-its own, `.agentops/contexts/**`, and `chart/charts/copilot/` ships
-`.copilot/session-state/**`, for the same reason again. So a default
-install with a context volume runs synchronised without anyone setting
-anything.
+credential, which live there for the same reason.
+
+`chart/charts/ollama/` ships its own, `.agentops/contexts/**`, and
+`chart/charts/copilot/` ships `.copilot/session-state/**`, for the same
+reason again. So a default install with a context volume runs synchronised
+without anyone setting anything.
 
 **Not the release-wide runtime defaults.** Those are what every runtime
-inherits, and an include list is one vendor's filesystem layout: it describes
-where claude-code files transcripts and means nothing to another backend.
-**Running one means replacing the paths** with its own, in the same section that
-carries its image and credential — a runtime that declares none gets no
-synchronisation, and nothing is inferred on its behalf.
+inherits, and an include list is one vendor's filesystem layout: it
+describes where claude-code files transcripts and means nothing to
+another backend.
+
+**Running one means replacing the paths** with its own, in the same
+section that carries its image and credential — a runtime that declares
+none gets no synchronisation, and nothing is inferred on its behalf.
 
 **`paths` is an *include* list.** Caches and tool state are then excluded by
 construction, rather than by a list that has to chase every file a vendor adds.
@@ -1957,9 +1971,11 @@ with *ephemeral* context, and the conversation is told its context is not
 promised rather than failing to start.
 
 That is the same answer continuity resolution already gives — see
-`contextStorage` above. **The two agree by construction:** a pod that failed
-here instead would make the manager promise a fresh answer and then produce
-nothing. A missing sidecar image falls back by the same one rule.
+`contextStorage` above. **The two agree by construction:** a pod that
+failed here instead would make the manager promise a fresh answer and
+then produce nothing.
+
+A missing sidecar image falls back by the same one rule.
 
 **Synchronisation strands existing context.** Without the sidecar, context sits
 at the claim root. With it, each conversation reads its own subdirectory, which
@@ -1967,9 +1983,10 @@ starts empty.
 
 Any conversation that already holds a context handle will fail its next run
 rather than answer without memory — the continuity rule working, not a
-defect. Clear each one with the reset verb below. **On an install upgrading onto
-the default, that is every conversation holding a handle**; `CHANGELOG.md`
-carries the version it lands in.
+defect. Clear each one with the reset verb below.
+
+**On an install upgrading onto the default, that is every conversation
+holding a handle.** `CHANGELOG.md` carries the version it lands in.
 
 **Copies are labelled.**
 
@@ -2342,7 +2359,8 @@ sends each of them the same `/close` on the thread it holds, so all of the above
 happens per conversation, identically.
 
 **There is deliberately no remote close verb.** No HTTP endpoint, no adapter
-contract operation and no CRD field ends a conversation, so a surface's reach is
-exactly the threads it holds. A conversation it merely observes cannot be closed
-from it, because `/channel/inbound` is reply-only and there is nowhere to post
-the command.
+contract operation and no CRD field ends a conversation, so a surface's
+reach is exactly the threads it holds.
+
+A conversation it merely observes cannot be closed from it, because
+`/channel/inbound` is reply-only and there is nowhere to post the command.

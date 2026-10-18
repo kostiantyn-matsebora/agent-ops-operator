@@ -42,8 +42,10 @@ This page is the short version of it.
 <img src="docs/assets/img/logos/prometheus.svg" width="18" alt=""> Prometheus &nbsp;·&nbsp;
 cron schedules &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/home-assistant.svg" width="18" alt=""> Home Assistant &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/pulse.svg" width="18" alt=""> Pulse &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/telegram.svg" width="18" alt=""> Telegram &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/agent-ops.svg" width="18" alt=""> the console &nbsp;·&nbsp;
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/ollama-dark.svg"><img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""></picture> Ollama &nbsp;·&nbsp;
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/github-dark.svg"><img src="docs/assets/img/logos/github-light.svg" width="18" alt=""></picture> GitHub Copilot &nbsp;·&nbsp;
 any MCP server &nbsp;·&nbsp; your own
@@ -187,18 +189,19 @@ in learning order. The reference pages are read here:
 | [docs/contracts/channel-adapter.md](docs/contracts/channel-adapter.md) | The channel adapter contract: long-poll, push, and the body grammar |
 | [docs/contracts/signal-adapter.md](docs/contracts/signal-adapter.md) | The signal adapter contract: normalize, push, and the lane rules |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](docs/claude.md) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the three runtimes |
+| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](docs/claude.md) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the three runtimes |
 | [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
 ## Contributing
 
 **[CONTRIBUTING.md](CONTRIBUTING.md)** states the workflow, which cannot be
-inferred from the tree: changes are planned as specifications in `openspec/`, and
-documentation is part of a change rather than a follow-up.
+inferred from the tree. Changes are planned as specifications in `openspec/`,
+and documentation is part of a change rather than a follow-up.
+
 [`.claude/rules/`](.claude/rules/) is the working context, one topic per file.
 **One directory per container** — `platform/` `runtimes/` `signals/` `channels/`
-`gateways/` — and the path is the published image name; the operator is
+`gateways/` — and the path is the published image name. The operator is
 `platform/manager/`.
 
 [SECURITY.md](SECURITY.md): report privately, never in an issue.
@@ -207,7 +210,7 @@ documentation is part of a change rather than a follow-up.
 ## Status
 
 **`v1alpha1` — young, and running in production for its author.** The API group is
-provisional and may be renamed before 1.0; breaking chart changes carry an upgrade
+provisional and may be renamed before 1.0. Breaking chart changes carry an upgrade
 entry in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 © 2026 [kostiantyn-matsebora](https://github.com/kostiantyn-matsebora). Licensed

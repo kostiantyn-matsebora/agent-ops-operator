@@ -7,243 +7,38 @@ description: >-
 
 next:
   eyebrow: Next
-  title: Ask it from chat
+  title: Investigate a monitoring alert
   body: >-
-    The same shape for Telegram — where a person types, and where every agent
-    answers back.
-  url: /agent-ops-operator/integrations/telegram/
+    The same shape for Pulse — one source, two agents split by what they may
+    write.
+  url: /agent-ops-operator/integrations/pulse/
 ---
 
 **Not everything worth watching is a cluster.** Home Assistant reports its own
-failures — an integration that stopped setting up, a device that will not
-answer, a problem it has already diagnosed as a repair, a package behind — in
-its log, its config entries, its repairs and its entities, and nobody reads
-those either.
+failures in its log, its config entries, its repairs and its entities —
+nobody reads those either.
 
 This bundle reads all of them, and gives you **two agents**: one that can use
 the house, one that can repair it.
 
-![A Home Assistant record — a log error here, the same path for a failed integration, a repair or a faulting sensor — is re-checked by the rules, and opens a conversation on one of two routes: one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
+![A Home Assistant record is re-checked by the rules, then opens a conversation on one of two routes — one that uses the house, one that repairs it.]({{ '/assets/img/integrations/home-assistant-light.svg' | relative_url }}){: .ao-diagram}
 
 `signals/ha` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
 1.0.0.
 
-## What you get
+## What starts work
 
-| You get | Which means |
-|---|---|
-| **An everyday agent** | Ask it to run a scene, dim the lights, check a sensor. Reached by an ordinary chat message. |
-| **A repair agent** | Reached by name, `/ha-ops <task>`, and never by accident. It reconfigures integrations and reads the logs. |
-| **Failures that reach you** | A log error that recurs, an integration still failing, a repair Home Assistant filed, a device reporting a fault — each opens a conversation. A one-off retry does not. |
-| **A split you can actually rely on** | The two agents hold **different Home Assistant credentials**, so the boundary is the token, not a setting. |
+A log error that recurs, an integration still failing, a repair Home
+Assistant filed, a device reporting a fault — each opens a conversation. A
+one-off retry does not.
 
-**`ha-ops` can also search the web** when `global.builtinToolsets` is enabled
-(`agentops-websearch`, the built-in `WebSearch` tool, on by default) — a
-changelog, an unfamiliar error, a vendor's known-issues page. The everyday
-agent (`ha-control`) stays scoped to the house and does not gain it.
+The log listing is polled every 15 seconds. Nothing in Home Assistant needs
+enabling for it.
 
-**The split is use versus fix, not read versus act.** Home Assistant has no
-read-only role, so neither credential merely looks. Both agents act — what
-separates them is the job and the reach it needs.
-
-## Turn it on
-
-```sh
-helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-  -n agent-ops --create-namespace \
-  --set home-assistant.enabled=true \
-  --set home-assistant.homeAssistant.endpoint=https://ha.example.org \
-  --set home-assistant.homeAssistant.credentials.controlToken=<everyday-token> \
-  --set home-assistant.homeAssistant.credentials.operatorToken=<admin-token> \
-  --set home-assistant.pipelines.enabled=true
-```
-
-```powershell
-helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-  -n agent-ops --create-namespace `
-  --set home-assistant.enabled=true `
-  --set home-assistant.homeAssistant.endpoint=https://ha.example.org `
-  --set home-assistant.homeAssistant.credentials.controlToken=<everyday-token> `
-  --set home-assistant.homeAssistant.credentials.operatorToken=<admin-token> `
-  --set home-assistant.pipelines.enabled=true
-```
-
-**Off by default, and demo mode never enables it.** Every component needs an
-endpoint and a token no demo cluster has.
-
-### The one decision: which two users to mint
-
-| Token | Belongs to | Mint it as |
-|---|---|---|
-| the **control** token | the everyday agent, and the MCP path | the account that **uses** the house |
-| the **operator** token | the repair agent, and the log lane | a **dedicated admin** Home Assistant user |
-
-**A token inherits its user's rights, and no toolset can narrow a credential.**
-That is why the split is two users rather than two settings.
-
-**Mint the operator user for the job, never from your own account.** The log
-lane drops any record whose text names its own user, so it cannot report an
-error an agent caused — and a token minted from the household owner's account
-silences every error that mentions them.
-
-> **The operator token is a prerequisite twice over.** Without it neither the
-> repair agent nor its route renders — and the **log lane needs it too**, because
-> `system_log/list` and `subscribe_events` are admin-only. A control token
-> connects, passes auth, and is then refused, which surfaces as `Ready=False,
-> reason=Unreachable` and reads like a network problem.
-{: .ao-callout}
-
-Prefer Secrets you already manage? Use `credentials.controlSecret` and
-`.operatorSecret` instead of the inline tokens, and `credentials.ingestSecret`
-where the log lane should use a third.
-
-### Where the answers turn up
-
-**Nowhere you can see, until you say where.** Neither route binds a channel:
-
-```sh
---set home-assistant.pipelines.channels={console}
-```
-
-```powershell
---set home-assistant.pipelines.channels={console}
-```
-
-Every answer is on the CR regardless:
-
-```sh
-kubectl get conversations -o jsonpath='{.items[*].status.runs[*].result}'
-```
-
-```powershell
-kubectl get conversations -o jsonpath='{.items[*].status.runs[*].result}'
-```
-
-### How each agent is reached
-
-| Agent | Reached by |
-|---|---|
-| the everyday one | an ordinary chat message on a surface it claims |
-| the repair one | `/ha-ops <task>`, **by name** — it claims no chat source, so nothing reaches it by accident |
-
-## The values you set
-
-Everything below is under `home-assistant:`.
-
-### What exists
-
-| Value | Default | Set it to |
-|---|---|---|
-| `enabled` | `false` | `true` to render the bundle |
-| `homeAssistant.endpoint` | **empty, required** | your Home Assistant URL |
-| `logsAdapter.enabled` | `true` | `false` for tools without the log lane |
-| `logsAdapter.source.create` | `true` | `false` to declare your own `SignalSource` |
-| `mcp.enabled` | `true` | `false` for agents with no reach into the house |
-| `mcp.toolsets.actions.enabled` | `true` | `false` for an install that may look and never touch |
-| `adminMcp.enabled` | `false` | `true` **with** `adminMcpServer.enabled` — see below |
-| `profiles.user.enabled` | `true` | `false` to drop the everyday agent |
-| `profiles.ops.enabled` | `true` | `false` to drop the repair agent |
-| `pipelines.enabled` | `false` | `true` for working routes |
-
-### What things are called
-
-Rename any of these and your own pipelines reference the new name.
-
-```yaml
-home-assistant:
-  logsAdapter:
-    source:
-      name: ha-logs                     # the SignalSource your pipeline claims
-  profiles:
-    user:
-      name: ha-user                     # the everyday AgentProfile
-    ops:
-      name: ha-operator                 # the repair AgentProfile
-  mcp:
-    name: ha-api                        # the everyday MCPConfig
-    toolsets:
-      observe:
-        name: ha-observability          # state, weather, list contents
-      actions:
-        name: ha-actions                # lights, climate, media, scenes
-  adminMcp:
-    toolset:
-      name: ha-admin                    # the repair toolset
-  pipelines:
-    control:
-      name: ha-control                  # the everyday route
-    ops:
-      name: ha-ops                      # the repair route, and the command
-                                        # that reaches it
-```
-
-### Tool names depend on the Home Assistant version
-
-**Home Assistant 2026.9 prefixes every Assist tool with a domain**, and the
-prefix differs per tool:
-
-| Before 2026.9 | 2026.9 and later |
-|---|---|
-| `GetLiveContext` | `homeassistant__GetLiveContext` |
-| `HassTurnOn` | `intent__HassTurnOn` |
-| `HassLightSet` | `light__HassLightSet` |
-| `HassGetCurrentDate`, `HassGetCurrentTime` | `llm__GetDateTime` |
-
-- Both toolsets list each tool under both names. The half your instance does
-  not register is inert.
-- **An install that overrides `mcp.toolsets.*.tools` must add the prefixed
-  names itself.** The allowlist fails closed: a list of bare names on 2026.9
-  leaves the agent with no Home Assistant tool, and nothing reports it.
-- List what your instance registers with a `tools/list` call to its
-  `/mcp_server/sse` (SSE) or `/mcp` (streamable-HTTP) endpoint.
-
-### Repairing the house is one switch made of two flags
-
-Neither renders alone — the config refuses without a server to reach, and the
-server's workload is gated on the config:
-
-```sh
---set home-assistant.adminMcp.enabled=true \
---set home-assistant.adminMcpServer.enabled=true
-```
-
-```powershell
---set home-assistant.adminMcp.enabled=true `
---set home-assistant.adminMcpServer.enabled=true
-```
-
-**Of the 78 tools that server registers, 62 ship** — registry removals
-included, since a stale entity or device is cheap to recreate and the
-operator's prompt gates the action.
-
-Sixteen stay withheld, in three classes:
-
-- restart and backups
-- software and preferences
-- deletes of what a person WROTE — automations, scripts, scenes, dashboards,
-  dashboard resources
-
-Add any of them back by restating `adminMcp.toolset.tools` — Helm replaces lists
-rather than merging them.
-
-> **The admin server authenticates by URL-path secrecy.** There is no token on
-> the MCP endpoint, so anything that can reach the Service and knows the path can
-> drive the house. The Service is ClusterIP, which bounds that to the cluster —
-> on a shared one, set `adminMcpServer.path` to a high-entropy value.
-{: .ao-callout}
-
-Already run an MCP server for your house — a HACS component, say? Point
-`adminMcp.url` at it and leave `adminMcpServer.enabled` off.
-
-## Tune what reaches you
-
-Everything below goes under `home-assistant.logsAdapter.source`. The vocabulary
-is the [cluster events
-one]({{ '/integrations/kubernetes/' | relative_url }}#tune-what-reaches-you) —
-what differs is listed after the recipes.
-
-### "Only tell me about integrations that actually broke"
+Three more surfaces beside the log are on by default (config-entry state,
+repairs, fault sensors), a fourth — a pending-update digest — is one switch
+away. Filter any of them the same way you'd filter cluster events:
 
 ```yaml
 logsAdapter:
@@ -255,114 +50,100 @@ logsAdapter:
         action: drop
 ```
 
-`for` holds, then asks Home Assistant whether the integration is still failing.
-Recovered means you never hear about it.
+Full filtering vocabulary is the [cluster events
+recipe]({{ '/integrations/kubernetes/' | relative_url }}#tune-what-reaches-you) —
+same engine, same `rules`.
 
-### "This one integration is always noisy"
+One addition: a `message` matcher, since Home Assistant records carry no
+`reason` field. Every record also carries a `surface` label (`log`,
+`config-entry`, `repair`, `sensor`, `update`) a rule can match on.
 
-```yaml
-      - matchers: ['logger=~"homeassistant.components.zwave_js.*"']
-        action: drop
-```
+## What it may reach
 
-### "Watch the house, not only its log"
-
-Three of the four surfaces beside the log are on by default. The update
-digest is one switch away. Each has one knob:
-
-```yaml
-logsAdapter:
-  source:
-    surfaces:
-      configEntries:                 # an integration in a failed state
-        enabled: true
-        states: [setup_retry, setup_error, migration_error]
-      repairs:                       # what Home Assistant filed under Repairs
-        enabled: true
-        severities: [critical, error]
-      sensors:                       # binary sensors reporting a fault
-        enabled: true
-        deviceClasses: [problem, connectivity]
-      updates:                       # ONE digest of every pending update
-        enabled: false               # the one that is off until you ask
-```
-
-Every signal carries `surface` — `log`, `config-entry`, `repair`, `sensor` or
-`update` — so a rule can pick one out:
-
-```yaml
-      - matchers: ['surface="sensor"']
-        action: drop
-```
-
-A surface that is off is never read. The shipped rules open with one per
-surface, ahead of the log rules. A values file that replaces `rules` replaces
-those too, so keep the `surface=` rules if you rewrite the list.
-
-### "Ignore anything that says it will retry"
-
-```yaml
-      - matchers: ['message=~".*Retrying.*"']
-        action: drop
-```
-
-**`message` is the one matcher this lane adds.** Home Assistant records carry no
-`reason` field, so level and logger alone cannot tell "will retry" from
-"credentials rejected".
-
-It is **match-only** and never becomes a label — a label carrying free text would
-key conversation grouping on the exact wording.
-
-### What differs from the cluster lane
-
-| | |
+| Agent | Can |
 |---|---|
-| **`message` matchers** | available here, and nowhere else |
-| **How records are seen** | the log listing is **polled**, every fifteen seconds. Nothing in Home Assistant needs enabling. `system_log: fire_event: true` in its configuration only makes a record arrive sooner |
-| **Four surfaces beside the log** | config entry state, repairs, fault sensors and pending updates, each a switch and a knob under `surfaces`. The house's entities are read once a minute. The cluster lane has one surface, the Events API |
-| **The re-check** | asks the integration's config entry state, then falls back to *was it still recurring as the window closed* — the last third of the wait, never under thirty seconds. A blip that logged for thirty seconds and stopped is churn |
-| **No time axis** | `timeIntervals` and `muteTimeIntervals` are not implemented. An unknown key is a config error, not a window that silently never fires |
+| the everyday one (`ha-user`) | act in the house through Assist intents — run a scene, dim lights, check a sensor. Reached by an ordinary chat message. |
+| the repair one (`ha-operator`) | reconfigure integrations and read the logs, through a separate admin MCP server. Reached only by name, `/ha-ops <task>`. |
 
-## Adopt it
+**Both hold different Home Assistant credentials — that's the real wall, not
+a toolset setting.** Home Assistant has no read-only role, so neither
+credential merely looks.
 
-Turn the bundle's own routes off and declare your own:
+`ha-ops` can also web-search (built in, on by default). The everyday agent
+can't.
+
+> **Mint the operator token as a dedicated admin user, never your own.** The
+> log lane drops any record naming its own user, so a token minted from the
+> household owner silences every error that mentions them. It's also a
+> double prerequisite: without it neither the repair route nor the log lane
+> works (`system_log/list` is admin-only), and the failure reads like a
+> network problem (`Ready=False, reason=Unreachable`) rather than a
+> permissions one.
+{: .ao-callout}
+
+**Home Assistant 2026.9 renamed its Assist tools with a domain prefix**
+(`HassTurnOn` → `intent__HassTurnOn`, etc.). Both toolsets list each tool
+under both names, so the half your instance doesn't register just sits
+inert.
+
+An override of `mcp.toolsets.*.tools` must add the prefixed names itself, or
+an agent on 2026.9 gets none at all, silently. Check what your instance
+registers with a `tools/list` call to its `/mcp_server/sse` endpoint.
+
+**The repair agent's admin server needs two flags together**
+(`adminMcp.enabled` + `adminMcpServer.enabled` — neither renders alone). It
+ships 62 of 78 possible tools, withholding restarts, backups, and deletes of
+anything a person wrote.
+
+It authenticates by URL-path secrecy, no token. On a shared cluster, set
+`adminMcpServer.path` to a high-entropy value.
+
+**A shell toolset reaches further than MCP does.** MCP tools are Assist
+intents and can't touch configuration. A route that also binds a shell tool
+reaches the *entire* REST API as that route's credential instead — logs,
+config entries, reloads, service calls.
+
+That's by design for the repair route (`pipelines.restAccess`, on for it and
+off for the everyday one by default), not a gap to close.
+
+## What it costs to turn on
 
 ```sh
---set home-assistant.enabled=true --set home-assistant.pipelines.enabled=false
+helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
+  -n agent-ops --create-namespace \
+  --set home-assistant.enabled=true \
+  --set home-assistant.homeAssistant.endpoint=https://ha.example.org \
+  --set home-assistant.homeAssistant.credentials.controlToken=<everyday-token> \
+  --set home-assistant.homeAssistant.credentials.operatorToken=<admin-token> \
+  --set home-assistant.wiringEnabled=true
 ```
 
 ```powershell
---set home-assistant.enabled=true --set home-assistant.pipelines.enabled=false
+helm upgrade --install agent-ops oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
+  -n agent-ops --create-namespace `
+  --set home-assistant.enabled=true `
+  --set home-assistant.homeAssistant.endpoint=https://ha.example.org `
+  --set home-assistant.homeAssistant.credentials.controlToken=<everyday-token> `
+  --set home-assistant.homeAssistant.credentials.operatorToken=<admin-token> `
+  --set home-assistant.wiringEnabled=true
 ```
 
-### Your agent, your house
+**Off by default, and demo mode never enables it.** Every component needs an
+endpoint and a token no demo cluster has.
 
-```yaml
-pipelines:
-  - name: my-house-agent
-    profile: my-assistant         # YOUR profile, from your repository
-    signalSources: [ha-logs, team-chat]
-    toolsets: [agentops-observe, ha-observability, ha-actions]
-    mcpConfigs: [ha-api]
-    channels: [team-chat]
+Prefer Secrets you already manage, or want to rename what the chart renders?
+Every value here, and the rest the chart takes, is in
+[`chart/charts/home-assistant/values.yaml`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/chart/charts/home-assistant/values.yaml)
+— `helm show values` is the full list, and this page does not repeat it.
+
+## Adopt it
+
+Turn the bundle's own routes off and wire your own, keeping the privilege
+split if it's worth keeping:
+
+```sh
+--set home-assistant.enabled=true --set home-assistant.wiringEnabled=false
 ```
-
-### One agent for the house *and* your cluster
-
-```yaml
-pipelines:
-  - name: everything
-    profile: my-assistant
-    signalSources: [ha-logs, cluster-events, team-chat]
-    toolsets: [agentops-observe, ha-observability, k8s-observability]
-    mcpConfigs: [ha-api, k8s-api]
-    channels: [team-chat]
-```
-
-### Keep the split, change the surfaces
-
-The privilege split is worth keeping even when the rest is yours — two
-pipelines, two profiles, two credentials:
 
 ```yaml
 pipelines:
@@ -381,64 +162,11 @@ pipelines:
 ```
 
 **Give the repair route no chat source.** Listing one there makes every
-unaddressed message on that surface ambiguous, and grants that route nothing it
-does not already have.
+unaddressed message on that surface ambiguous, and grants nothing the route
+doesn't already have.
 
-### What the bundle renders
-
-<!-- generated: renders bundle=home-assistant -->
-```text
-# Always
-Secret/agentops-ha-operator
-
-# Ingest lane  (logsAdapter.enabled)
-SignalAdapter/home-assistant
-SignalSource/ha-logs
-
-# MCP tooling  (mcp.enabled)
-MCPConfig/ha-api
-MCPToolset/ha-actions
-MCPToolset/ha-observability
-
-# Profiles  (profiles.user.enabled / profiles.ops.enabled)
-AgentProfile/ha-operator
-AgentProfile/ha-user
-
-# Admin MCP  (adminMcp.enabled / adminMcpServer.enabled)
-Deployment/agentops-mcp-ha
-MCPConfig/ha-admin-api
-MCPToolset/ha-admin
-Service/agentops-mcp-ha
-
-# Wiring  (pipelines.enabled)
-Pipeline/ha-control
-Pipeline/ha-ops
-```
-<!-- /generated -->
-
-- **The `SignalSource` appears only under `source.create`.**
-- **The everyday agent renders only when the house is reachable** — a profile
-  meant to use the house with no way to reach it could only apologise.
-- **Neither route carries Kubernetes RBAC.** Neither touches that API.
-
-## The reach is wider than the toolsets
-
-The toolsets bound a route's **MCP** path. They are not the whole boundary.
-
-Each agent's token sits in its profile's environment, so a route that also binds
-a shell toolset reaches the entire Home Assistant REST API **as that user**.
-
-| Path | Reach | Can it repair? |
-|---|---|---|
-| MCP | the tools the bound toolset names | no — Assist intents control devices and touch no configuration |
-| REST, via a shell tool | everything that route's credential may do | yes — logs, config entries, reloads, service calls |
-
-**That is not a leak to engineer away.** It is how the repair agent does its job,
-and the reason the everyday one is given no shell.
-
-`pipelines.restAccess` decides who gets it: unset means on for the repair route
-and off for the everyday one, `true` means both, `false` means neither — which
-leaves the repair lane mostly decorative.
+One agent wanting both the house and your cluster just lists both bundles'
+sources, toolsets and MCPConfigs on a single pipeline.
 
 ## Going deeper
 

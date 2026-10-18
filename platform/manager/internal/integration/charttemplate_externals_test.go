@@ -92,7 +92,7 @@ func TestAdaptersFacingNothingDeclareNothing(t *testing.T) {
 // them by. Only in metadata: a versioned label in a selector would make every
 // chart upgrade refuse to patch an immutable field.
 func TestBundleObjectsCarryTheChartLabel(t *testing.T) {
-	out := helmTemplate(t, allBundles("--set", "kubernetes.pipelines.enabled=true")...)
+	out := helmTemplate(t, allBundles("--set", "kubernetes.wiringEnabled=true")...)
 	for _, tc := range []struct{ kind, name, bundle string }{
 		{"SignalAdapter", "k8s-events", "kubernetes"},
 		{"SignalSource", "cluster-events", "kubernetes"},

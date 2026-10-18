@@ -11,6 +11,9 @@ dependencies:
 - name: home-assistant
   repository: ""
   version: 0.2.0
+- name: pulse
+  repository: ""
+  version: 0.1.0
 - name: claude
   repository: ""
   version: 0.1.0
@@ -20,5 +23,5 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
-digest: sha256:2509a9c6fef3df979de24989cbadf05f7c88d99b8f4f56e7e933d54aa1b9bcdd
-generated: "2026-10-11T14:18:13.969023387+03:00"
+digest: sha256:4282795ae08643bfd426783d3a43b8bbe22a73c18b0e8ff1f897394b23af1826
+generated: "2026-10-16T17:24:35.124803299Z"

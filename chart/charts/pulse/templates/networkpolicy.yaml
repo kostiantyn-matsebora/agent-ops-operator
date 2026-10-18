@@ -1,0 +1,66 @@
+{{- $np := (.Values.global.agentops).networkPolicy | default dict }}
+{{- if and .Values.enabled $np.enabled }}
+{{- if .Values.mcpServer.enabled }}
+{{- $s := .Values.mcpServer }}
+{{- $name := include "pulse.mcpServerName" . }}
+{{/*
+  The mcp-pulse server, on the same terms as the other bundles' deployed MCP
+  servers: runtime pods only. It authenticates nobody of its own — it relays
+  whatever bearer token the caller presented — so until this exists any pod
+  in the cluster can reach Pulse through it with no token at all, leaving
+  Pulse itself to refuse.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentops-runtime
+      ports:
+        - protocol: TCP
+          port: {{ $s.port }}
+{{- end }}
+{{- if .Values.signal.enabled }}
+{{- with .Values.signal.webhookFrom }}
+---
+{{/*
+  The webhook adapter, restricted to the sender.
+
+  RENDERED ONLY WHEN THE SENDER IS NAMED. An empty list leaves this adapter
+  unrestricted rather than rendering a policy with no `from`, because a
+  policy that selects the adapter and allows nobody DENIES THE ALERT LANE —
+  silently, and at the moment alerts matter most. Under-restricting is
+  recoverable. A severed alert path is discovered during an incident.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentops-signal-{{ $.Values.signal.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+spec:
+  podSelector:
+    matchLabels:
+      agentops.dev/signal-adapter: {{ $.Values.signal.name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+{{- end }}
+{{- end }}

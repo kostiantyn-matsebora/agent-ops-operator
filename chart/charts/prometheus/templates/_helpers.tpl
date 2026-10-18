@@ -25,14 +25,11 @@ agentops-mcp-prometheus
 {{ .Values.mcpServers.serviceAccountName }}
 {{- end -}}
 
-{{- /* Wiring gate. The demo branch is inert here (active has no demo path) and is
-kept only so the rule reads identically in every bundle that ships wiring. */ -}}
+{{- /* Wiring gate. Demo mode never forces it: only an explicit wiringEnabled does. */ -}}
 {{- define "prometheus.wiringActive" -}}
 {{- if include "prometheus.active" . -}}
-{{- if kindIs "bool" .Values.pipelines.enabled -}}
-{{- if .Values.pipelines.enabled }}true{{ end -}}
-{{- else if dig "demo" "enabled" false (.Values.global | default dict) -}}
-true
+{{- if kindIs "bool" .Values.wiringEnabled -}}
+{{- if .Values.wiringEnabled }}true{{ end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

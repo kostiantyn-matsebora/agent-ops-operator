@@ -1,0 +1,73 @@
+{{- /*
+Two MCPConfig/MCPToolset pairs fronting the ONE deployed mcp-pulse server
+(mcp-server.yaml). Both name the same server key and the same Service URL —
+they differ only in which Secret-backed header each supplies as the
+forwarded bearer token (design.md Decision 3).
+
+The server key is FIXED at `pulse` and has no values path: that key IS the
+mcp__pulse__* namespace named in both toolsets' tool lists, so a rename would
+silently strip an agent's tools.
+*/ -}}
+{{- if and (include "pulse.active" .) (include "pulse.observerMcpEnabled" .) }}
+{{- $mcp := .Values.mcp.observer }}
+{{- include "pulse.refuseWildcardTools" $mcp.toolset.tools }}
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $mcp.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  servers:
+    pulse:
+      type: http
+      url: {{ include "pulse.mcpServerURL" . | quote }}
+      headers:
+{{ include "pulse.observerHeaders" . | indent 8 }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $mcp.toolset.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  tools:
+{{ toYaml $mcp.toolset.tools | indent 4 }}
+{{- end }}
+{{- if and (include "pulse.active" .) (include "pulse.operatorMcpEnabled" .) }}
+{{- $mcp := .Values.mcp.operator }}
+{{- include "pulse.refuseWildcardTools" $mcp.toolset.tools }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPConfig
+metadata:
+  name: {{ $mcp.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  servers:
+    pulse:
+      type: http
+      url: {{ include "pulse.mcpServerURL" . | quote }}
+      headers:
+{{ include "pulse.operatorHeaders" . | indent 8 }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: MCPToolset
+metadata:
+  name: {{ $mcp.toolset.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  tools:
+{{ toYaml $mcp.toolset.tools | indent 4 }}
+{{- end }}

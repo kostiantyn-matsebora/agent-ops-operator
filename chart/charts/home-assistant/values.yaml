@@ -753,8 +753,14 @@ profiles:
 # renders the source, both profiles and both toolsets, so the only objects it
 # does not render are chat surfaces and channels, and those are values-supplied
 # names omitted when unset.
+#
+# Paired with the parent's `global.agentops.wiringMode`: this says WHETHER the
+# routes render, wiringMode says AS WHAT — `Pipeline`s under `pipelines` mode,
+# `AgentCapability`s on the chart-rendered `Coordinator` under `coordinator`
+# mode.
+wiringEnabled: false
+
 pipelines:
-  enabled: false
   control:
     # The user-facing route. Claims the chat sources below, so an unaddressed
     # message on those surfaces reaches ha-user.

@@ -1045,7 +1045,7 @@ func TestBundleShipsNoWiringUnlessAsked(t *testing.T) {
 		{"bundle enabled directly", []string{"--set", "kubernetes.enabled=true"}},
 		{"wiring declined under demo", []string{
 			"--set", "global.demo.enabled=true",
-			"--set", "kubernetes.pipelines.enabled=false"}},
+			"--set", "kubernetes.wiringEnabled=false"}},
 		{"no profile, no route", []string{
 			"--set", "global.demo.enabled=true",
 			"--set", "kubernetes.profile.enabled=false"}},
@@ -1062,7 +1062,7 @@ func TestBundleShipsNoWiringUnlessAsked(t *testing.T) {
 // one value, and it has to leave a bundle that still watches, profiles and tools.
 func TestDecliningWiringLeavesTheRestOfTheBundle(t *testing.T) {
 	out := helmTemplate(t, "--set", "global.demo.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=false")
+		"--set", "kubernetes.wiringEnabled=false")
 	for _, needle := range []string{
 		"kind: SignalAdapter", "name: cluster-events", "kind: AgentProfile",
 		"name: k8s-engineer", "kind: MCPConfig", "name: k8s-observability",
@@ -1888,7 +1888,7 @@ func TestHaWiringDefaultsOff(t *testing.T) {
 	// the route names, so a grep would find itself.
 	for _, doc := range splitDocs(out) {
 		if strings.Contains(doc, "\nkind: Pipeline\n") && strings.Contains(doc, "agentops-home-assistant") {
-			t.Fatalf("home-assistant.pipelines.enabled defaults false:\n%s", doc)
+			t.Fatalf("home-assistant.wiringEnabled defaults false:\n%s", doc)
 		}
 	}
 	// ...and the rest of the bundle still renders.
@@ -1901,7 +1901,7 @@ func TestHaWiringDefaultsOff(t *testing.T) {
 // agent in the list an unaddressed message is answered with.
 func TestHaBothRoutesClaimTheChatSources(t *testing.T) {
 	out := helmTemplate(t, haArgs(
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 		"--set", "home-assistant.pipelines.chatSources={console-ha,home-ops}",
 	)...)
 
@@ -1946,7 +1946,7 @@ func TestHaWithoutOperatorCredentialShipsNoFixingLane(t *testing.T) {
 		"--set", "home-assistant.enabled=true",
 		"--set", "home-assistant.homeAssistant.endpoint=https://ha.example.org",
 		"--set", "home-assistant.homeAssistant.credentials.controlSecret=ha-control",
-		"--set", "home-assistant.pipelines.enabled=true")
+		"--set", "home-assistant.wiringEnabled=true")
 	for _, doc := range splitDocs(out) {
 		if !strings.Contains(doc, "agentops-home-assistant") {
 			continue
@@ -2115,7 +2115,7 @@ func assertHaGroupsByIntegrationWithNoWindow(t *testing.T, src string) {
 func TestHaRestAccessIsPerRoute(t *testing.T) {
 	shell := "- name: agentops-shell"
 
-	derived := helmTemplate(t, haArgs("--set", "home-assistant.pipelines.enabled=true")...)
+	derived := helmTemplate(t, haArgs("--set", "home-assistant.wiringEnabled=true")...)
 	if !strings.Contains(stripComments(haDoc(t, derived, "Pipeline", "ha-ops")), shell) {
 		t.Error("the ops route needs the REST path to reconfigure anything")
 	}
@@ -2124,7 +2124,7 @@ func TestHaRestAccessIsPerRoute(t *testing.T) {
 	}
 
 	off := helmTemplate(t, haArgs(
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 		"--set", "home-assistant.pipelines.restAccess=false")...)
 	if strings.Contains(stripComments(haDoc(t, off, "Pipeline", "ha-ops")), shell) {
 		t.Error("an explicit false must take the REST path away from the ops route too")
@@ -2189,7 +2189,7 @@ func haRuleBlocks(src string) []string {
 // an entity. Those live in registries served over the WebSocket API, and an ops
 // agent without this component hands the job back.
 func TestHaAdminMcpIsOffByDefault(t *testing.T) {
-	out := helmTemplate(t, haArgs("--set", "home-assistant.pipelines.enabled=true")...)
+	out := helmTemplate(t, haArgs("--set", "home-assistant.wiringEnabled=true")...)
 	for _, absent := range []string{"ha-admin-api", "agentops-mcp-ha"} {
 		if strings.Contains(out, absent) {
 			t.Fatalf("the admin MCP path is opt-in, found %q", absent)
@@ -2201,7 +2201,7 @@ func TestHaAdminMcpIsOffByDefault(t *testing.T) {
 // touch configuration, so the split is a wall rather than an allowlist.
 func TestHaAdminMcpIsBoundToTheOpsRouteOnly(t *testing.T) {
 	out := helmTemplate(t, haArgs(
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 		"--set", "home-assistant.adminMcp.enabled=true",
 		"--set", "home-assistant.adminMcpServer.enabled=true")...)
 
@@ -2396,16 +2396,16 @@ func everyBundleCoordinator(t *testing.T, args ...string) string {
 		"--set", "global.agentops.wiringMode=coordinator",
 		"--set", "reaper.enabled=true",
 		"--set", "kubernetes.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
 		"--set", "kubernetes.pipelines.observe.enabled=true",
 		"--set", "kubernetes.pipelines.admin.enabled=true",
 		"--set", "prometheus.enabled=true",
-		"--set", "prometheus.pipelines.enabled=true",
+		"--set", "prometheus.wiringEnabled=true",
 		"--set", "home-assistant.enabled=true",
 		"--set", "home-assistant.homeAssistant.endpoint=https://ha.example.org",
 		"--set", "home-assistant.homeAssistant.credentials.controlToken=CTOK",
 		"--set", "home-assistant.homeAssistant.credentials.operatorToken=OTOK",
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 	}, args...)...)
 }
 

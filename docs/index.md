@@ -280,6 +280,11 @@ identity, mediated egress and at-least-once delivery are already in it.
   Its logs, its devices, its config. Not everything that needs looking at is a
   cluster.
 
+- ![]({{ '/assets/img/logos/pulse.svg' | relative_url }}) A homelab that explains itself
+
+  A firing Pulse alert turns up with the host, guest or container already
+  looked at, and an operator route that can record a maintenance window.
+
 - ![]({{ '/assets/img/logos/telegram.svg' | relative_url }}) An answer where your team already talks
 
   Ask it in chat and reply in the thread it answers in. The conversation keeps
