@@ -711,7 +711,7 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 			if ch.Spec.Adapter == "" {
 				continue
 			}
-			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv.Name)
+			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv)
 		}
 	}
 	return r.autoDelete(ctx, conv)
@@ -791,7 +791,7 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 			// were told it could be reopened; deletion makes that false, and
 			// correcting it is the whole point. Sending both would leave an
 			// adapter guessing whether the pair meant one ending or two.
-			r.Ops.EnqueueDeleteConversation(ctx, &ch, t.ThreadID, conv.Name)
+			r.Ops.EnqueueDeleteConversation(ctx, &ch, t.ThreadID, conv)
 			if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
 				outstanding = true
 			}
@@ -978,7 +978,7 @@ func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *agentop
 	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return
 	}
-	r.Ops.EnqueueMessage(ctx, &ch, conv.ThreadFor(ref.Name), chat.Notice(
+	r.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref.Name), chat.Notice(
 		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up."))
 }
 
@@ -1234,7 +1234,7 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 				continue
 			}
 			tid := t.ThreadID
-			r.Ops.EnqueueRunReply(ctx, &ch, conv.Name, run.RunID, &tid, msg)
+			r.Ops.EnqueueRunReply(ctx, &ch, conv, run.RunID, &tid, msg)
 		}
 	}
 	r.setDeliveryPendingCondition(ctx, conv, owed)

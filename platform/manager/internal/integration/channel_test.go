@@ -133,6 +133,7 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "prof-topic"}
 	conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-topic"}}
 	conv.Spec.Title = "needs a topic"
+	conv.Spec.ConversationID = "corr-topic-1"
 	conv.Spec.Inputs = []agentopsv1alpha1.InputItem{{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "do"}}
 	if err := k8sClient.Create(ctx, conv); err != nil {
 		t.Fatal(err)
@@ -158,6 +159,11 @@ func TestEnsureTopicRoundTripAndDispatchGate(t *testing.T) {
 	if op.Kind != chat.OpEnsureTopic || op.Conversation != "topic-1" ||
 		op.Topic == nil || op.Topic.Title != "needs a topic" {
 		t.Fatalf("op: %+v", op)
+	}
+	// OPS-9: every op leaving /channel/ops for a known conversation carries
+	// its conversationId beside its name.
+	if op.ConversationID != "corr-topic-1" {
+		t.Fatalf("op must carry the owning conversation's conversationId: %+v", op)
 	}
 
 	// adapter completes with a non-numeric thread id (string id space)

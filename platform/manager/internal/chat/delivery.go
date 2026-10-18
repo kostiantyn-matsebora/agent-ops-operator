@@ -105,7 +105,7 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 				ch.Spec.Adapter == "" {
 				continue
 			}
-			ops.EnqueueInputDelivery(ctx, &ch, conv.Name, item.ID, tid, msg)
+			ops.EnqueueInputDelivery(ctx, &ch, conv, item.ID, tid, msg)
 		}
 	}
 }

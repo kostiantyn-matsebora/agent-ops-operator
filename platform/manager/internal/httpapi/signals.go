@@ -506,7 +506,7 @@ func (s *Server) tellOriginatingSurfaces(ctx context.Context, signals []Normaliz
 		if ch := s.chatChannel(ctx, sig); ch != nil {
 			out := msg
 			out.InReplyTo = sig.Labels[LabelChatMessage]
-			s.Ops.EnqueueMessage(ctx, ch, nil, out)
+			s.Ops.EnqueueMessage(ctx, ch, nil, nil, out)
 		}
 	}
 }

@@ -257,7 +257,7 @@ func TestRunReplyFailureSurfacesUndeliveredReplyAndSuccessClearsIt(t *testing.T)
 		t.Fatal(err)
 	}
 	tid := "t-undelivered"
-	ops.EnqueueRunReply(ctx, &ch, conv.Name, "run-1", &tid, chat.AnswerMessage("the answer", ""))
+	ops.EnqueueRunReply(ctx, &ch, conv, "run-1", &tid, chat.AnswerMessage("the answer", ""))
 	op := ops.Claim("tg-undelivered")
 	if op == nil {
 		t.Fatal("run reply op expected")
@@ -272,7 +272,7 @@ func TestRunReplyFailureSurfacesUndeliveredReplyAndSuccessClearsIt(t *testing.T)
 	}
 
 	// re-derive and succeed this time
-	ops.EnqueueRunReply(ctx, &ch, conv.Name, "run-1", &tid, chat.AnswerMessage("the answer", ""))
+	ops.EnqueueRunReply(ctx, &ch, conv, "run-1", &tid, chat.AnswerMessage("the answer", ""))
 	op = ops.Claim("tg-undelivered")
 	if op == nil {
 		t.Fatal("re-derived run reply op expected")

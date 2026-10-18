@@ -110,7 +110,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// every bound channel, which is a decision, not something a stray "thanks"
 	// in an archived topic should trigger.
 	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		r.Ops.EnqueueMessage(ctx, ch, msg.ThreadID, Notice(
+		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, Notice(
 			"This conversation is closed, so nothing here reaches the agent. "+
 				"Reopen it from the console to continue with its history."))
 		return nil
@@ -543,7 +543,7 @@ func (r *Router) handleListPipelines(ctx context.Context, ch *agentopsv1alpha1.C
 		"Inside a conversation's own thread: `/exit` releases its runtime and keeps " +
 		"the conversation, `/close` ends the conversation and archives the thread.")
 	msg.Choices = choices
-	r.Ops.EnqueueMessage(ctx, ch, nil, msg)
+	r.Ops.EnqueueMessage(ctx, ch, nil, nil, msg)
 	return nil
 }
 
@@ -589,14 +589,14 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		// /close reaches HandleCommand only from a general surface, where there
 		// is no conversation to end. Answer with usage rather than "unknown
 		// pipeline": typing it here is an obvious mistake, not a typo.
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
 			"conversation's own thread. Nothing was closed."))
 		return nil
 	}
 	if cmd.Pipeline == ExitCommand {
 		// Same shape as /close's: there is no conversation on a general surface,
 		// so there is no runtime to release. Usage, not "unknown pipeline".
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/exit` releases a conversation's runtime — send it "+
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, Warn("⚠️ `/exit` releases a conversation's runtime — send it "+
 			"inside that conversation's own thread. Nothing was released."))
 		return nil
 	}
@@ -605,7 +605,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		return err
 	}
 	if claimant == nil {
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf(
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, Warn(fmt.Sprintf(
 			"⚠️ Unknown pipeline or coordinator **%s** — see `/%s`.", cmd.Pipeline, ListCommand)))
 		return nil
 	}
@@ -626,7 +626,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		ask := Warn(fmt.Sprintf("💬 Reply with the task for `/%s`.", cmd.Pipeline))
 		ask.ExpectsReply = true
 		ask.InReplyTo = messageID
-		r.Ops.EnqueueMessage(ctx, ch, nil, ask)
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, ask)
 		return nil
 	}
 	capability, err := dispatch.ResolveCapability(ctx, r.Reader, claimant)
@@ -785,7 +785,7 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 // than markup.
 func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversation, msg Message) {
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueMessage(ctx, ch, tid, msg)
+		r.Ops.EnqueueMessage(ctx, ch, conv, tid, msg)
 	})
 }
 
@@ -810,7 +810,7 @@ func (r *Router) FanOutRunReply(ctx context.Context, conv *agentopsv1alpha1.Conv
 		if run != nil && run.DeliveredTo(ch.Name) {
 			return
 		}
-		r.Ops.EnqueueRunReply(ctx, ch, conv.Name, runID, tid, msg)
+		r.Ops.EnqueueRunReply(ctx, ch, conv, runID, tid, msg)
 	})
 }
 
