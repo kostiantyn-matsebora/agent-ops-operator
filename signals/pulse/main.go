@@ -267,12 +267,22 @@ func normalize(e pulseEvent) []Signal {
 	if e.Event != "alert" {
 		return nil
 	}
-	// Severity stays OUT of the title on purpose — the console's signal card
-	// drops a label row whose value already appears as a bare word in the
-	// title (platform/console/manager.go's labelRows, TestSignalCardIsStructured),
-	// so a "🔍 <resource> — <severity>" title would silently swallow the
-	// severity label row out of the table it belongs in.
-	title := "🔍 " + e.Resource
+	// The title is the alert's own message — the human-readable sentence a
+	// person would recognize the incident by — never the bare resource name:
+	// resource/resourceType/severity/node are already carried as labels
+	// below, so repeating one as the title would only waste the
+	// conversation name's three-word budget (namewords.Words) on an
+	// identifier instead of the thing that actually happened. Severity
+	// stays OUT for the same reason the console's signal card drops a label
+	// row whose value already appears as a bare word in the title
+	// (platform/console/manager.go's labelRows, TestSignalCardIsStructured).
+	// A resource with no message (Pulse sends one for every alert, but
+	// nothing in the contract requires it) falls back to the resource name
+	// rather than opening every such conversation with the same bare "🔍".
+	title := "🔍 " + e.Message
+	if e.Message == "" {
+		title = "🔍 " + e.Resource
+	}
 	payloadJSON, _ := json.MarshalIndent(e, "", "  ")
 	return []Signal{{
 		InitiationID: e.initiationID(),
