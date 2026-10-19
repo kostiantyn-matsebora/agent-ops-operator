@@ -151,7 +151,7 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 		t.Fatalf("firing event should produce exactly one signal: %d", len(signals))
 	}
 	first := signals[0].(map[string]any)
-	if first["fingerprint"] != "pulse:vm-101:abc" || !strings.Contains(first["title"].(string), "vm-101") {
+	if first["fingerprint"] != "pulse:vm-101:abc" || !strings.Contains(first["title"].(string), "CPU high") {
 		t.Fatalf("normalization: %+v", first)
 	}
 	if _, hasKind := first["kind"]; hasKind {
@@ -167,6 +167,28 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.inbounds) != 1 {
 		t.Fatal("a resolved event must not push a signal")
+	}
+}
+
+func TestNormalizeTitleIsTheAlertMessage(t *testing.T) {
+	e := pulseEvent{Event: "alert", Resource: "master", Message: "IoT: Tion 4S Bedroom is unreachable from every current observation location by ICMP probe: context deadline exceeded"}
+	signals := normalize(e)
+	if len(signals) != 1 {
+		t.Fatalf("expected one signal, got %d", len(signals))
+	}
+	if got := signals[0].Title; got != "🔍 "+e.Message {
+		t.Fatalf("title should be the alert's message, not the bare resource: %q", got)
+	}
+}
+
+func TestNormalizeTitleFallsBackToResourceWhenMessageIsBlank(t *testing.T) {
+	e := pulseEvent{Event: "alert", Resource: "master", Message: ""}
+	signals := normalize(e)
+	if len(signals) != 1 {
+		t.Fatalf("expected one signal, got %d", len(signals))
+	}
+	if got := signals[0].Title; got != "🔍 master" {
+		t.Fatalf("a message-less alert should fall back to the resource name: %q", got)
 	}
 }
 
