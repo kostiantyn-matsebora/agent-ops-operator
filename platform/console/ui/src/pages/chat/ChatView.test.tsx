@@ -264,7 +264,7 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     expect(screen.getByTestId('unread-member-2')).toBeInTheDocument()
   })
 
-  it('Closed: a closed root that has been read is excluded, same as any other scope', async () => {
+  it('Closed: every closed conversation shows, read or not — it is the archive', async () => {
     items = [
       conv('closed-read', { phase: 'Closed', unread: false }),
       conv('closed-unread', { phase: 'Closed', unread: true }),
@@ -272,7 +272,7 @@ describe('tree-shaped scopes keep the whole tree (Mine, Unread, Working, Errored
     renderAt('/conversations')
     await userEvent.click(screen.getByTestId('scope-Archive'))
     expect(screen.getByTestId('row-closed-unread')).toBeInTheDocument()
-    expect(screen.queryByTestId('row-closed-read')).not.toBeInTheDocument()
+    expect(screen.getByTestId('row-closed-read')).toBeInTheDocument()
   })
 
   it('a tree with no match anywhere is excluded entirely', async () => {

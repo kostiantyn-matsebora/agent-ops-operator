@@ -324,17 +324,19 @@ export function ChatView() {
     }
     // All is NOT an unread filter — it is every conversation a person can
     // open, full stop, narrowed only by the generic "hide closed" rule below
-    // (so it still respects showClosed). Every OTHER scope here is unread,
-    // ANDed with its own predicate: Working/Mine/Errored/Coordinator check
-    // what they are named for plus unread, and Closed does too — it is the
-    // archive, not a dumping ground, so a READ closed conversation stays out
-    // of it the same way a read one stays out of Working or Mine.
+    // (so it still respects showClosed). Every OTHER scope here but Closed is
+    // unread, ANDed with its own predicate: Working/Mine/Errored/Coordinator
+    // check what they are named for plus unread. Closed carries no predicate
+    // at all — it is the archive, and a read conversation still belongs in
+    // it the same way a read email still belongs in "All Mail"; the server
+    // already narrowed `raw` to phase=Closed (scopeParams above), so there is
+    // nothing left to AND here, and no "show closed" checkbox either — the
+    // whole point of this scope is to show all of it, unfiltered.
     const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
       working: (c) => c.phase === 'Working' && Boolean(c.unread),
       errored: (c) => Boolean(c.errored) && Boolean(c.unread),
       mine: (c) => Boolean(c.mine) && Boolean(c.unread),
       coordinator: (c) => Boolean(c.unread),
-      closed: (c) => Boolean(c.unread),
     }
     const predicate = TREE_PREDICATE[scope.kind]
     if (predicate) {
