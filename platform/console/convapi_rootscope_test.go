@@ -56,12 +56,12 @@ func TestRootTotalCountsReadRootsExcludesMembersRespectsShowClosed(t *testing.T)
 	}
 }
 
-// The Archive badge is an unread count too, like every other scope — a READ
-// closed root does not count, even though it still belongs to the archive.
-// It also excludes a member, which the Archive list never shows on its own
-// either, and ignores showClosed: Closed's own list is exempt from that
-// filter (it IS the closed view), so its count is too.
-func TestClosedScopeCountIsAnUnreadCountExcludingMembers(t *testing.T) {
+// The Archive badge counts every closed root, read or not — it is the
+// archive, and a read entry still belongs in it the same way a read email
+// still belongs in "All Mail". It excludes a member, which the Archive list
+// never shows on its own either, and ignores showClosed: Closed's own list
+// is exempt from that filter (it IS the closed view), so its count is too.
+func TestClosedScopeCountIsATotalExcludingMembers(t *testing.T) {
 	closedRootRead := convWithPhase("closed-root-read", "Closed", tLate, "succeeded")
 	closedRootUnread := convWithPhase("closed-root-unread", "Closed", "", "succeeded")
 	closedMember := withCausedBy(convWithPhase("closed-member", "Closed", "", "succeeded"), "closed-root-unread", "k8s-ops")
@@ -71,12 +71,12 @@ func TestClosedScopeCountIsAnUnreadCountExcludingMembers(t *testing.T) {
 	h := api.Handler(http.NotFoundHandler())
 
 	got := getCounted(t, h, "/api/conversations?count=1")
-	if got.Scopes["closed"] != 1 {
-		t.Fatalf("closed scope must count only the unread closed root, excluding the read one and the member: %+v", got.Scopes)
+	if got.Scopes["closed"] != 2 {
+		t.Fatalf("closed scope must count both closed roots, read and unread, excluding the member: %+v", got.Scopes)
 	}
 	// showClosed=false must not ALSO hide it — Closed's own list never hides
 	// a closed row regardless of that toggle.
-	if got := getCounted(t, h, "/api/conversations?count=1&showClosed=false"); got.Scopes["closed"] != 1 {
+	if got := getCounted(t, h, "/api/conversations?count=1&showClosed=false"); got.Scopes["closed"] != 2 {
 		t.Fatalf("closed scope must ignore showClosed, unlike every other scope: %+v", got.Scopes)
 	}
 }

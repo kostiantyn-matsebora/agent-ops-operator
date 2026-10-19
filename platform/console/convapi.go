@@ -230,28 +230,28 @@ func isMember(s ConversationSummary) bool {
 // accumulateScopeCounts folds every row into the inbox's Working, Mine,
 // Errored, Closed and per-Pipeline/Coordinator badges.
 //
-// Every one of these is an UNREAD count, ANDed with its own predicate —
+// Every scope but Closed is an UNREAD count, ANDed with its own predicate —
 // phase, ownership, error state or wiring — matching ChatView.tsx's
-// TREE_PREDICATE exactly (each entry there also ANDs its own condition with
-// `c.unread`, Closed included). A read conversation never inflates a badge,
-// Archive's no longer excepted: browsing it is one more click away
-// (showClosed) on every other scope already, and a badge that counted a row
-// its own scope's list no longer shows was exactly the bug this exists to
-// not repeat.
+// TREE_PREDICATE exactly. A read conversation never inflates one of those.
+//
+// Closed is the one exception, on both axes: it counts every closed root
+// regardless of read state, and regardless of showClosed. It is the
+// archive — a read entry still belongs in it, the same way a read email
+// still belongs in "All Mail" — so gating it on Unread would promise fewer
+// rows than the Archive list (which carries no predicate of its own either,
+// ChatView.tsx's TREE_PREDICATE) actually holds.
 //
 // closedVisible mirrors the ONE further filter every scope's list but
 // Closed's applies: ChatView.tsx hides a closed row there unless showClosed
-// is on. Closed's OWN list is exempt from THAT filter — it is the closed
-// view — so its count is too, regardless of showClosed; it still requires
-// Unread like every other bucket here.
+// is on.
 func accumulateScopeCounts(scopes map[string]int, s ConversationSummary, closedVisible bool) {
-	if isMember(s) || !s.Unread {
+	if isMember(s) {
 		return
 	}
 	if strings.EqualFold(s.Phase, "Closed") {
 		scopes["closed"]++
 	}
-	if !closedVisible {
+	if !s.Unread || !closedVisible {
 		return
 	}
 	if strings.EqualFold(s.Phase, "Working") {
