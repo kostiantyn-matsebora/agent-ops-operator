@@ -41,7 +41,6 @@ func TestDeepCopyOnNilReceiverReturnsNilForEveryType(t *testing.T) {
 		"CooldownEntry":           func() bool { return (*CooldownEntry)(nil).DeepCopy() == nil },
 		"CredentialKeyDoc":        func() bool { return (*CredentialKeyDoc)(nil).DeepCopy() == nil },
 		"EgressMediation":         func() bool { return (*EgressMediation)(nil).DeepCopy() == nil },
-		"GroupingSpec":            func() bool { return (*GroupingSpec)(nil).DeepCopy() == nil },
 		"InflightRun":             func() bool { return (*InflightRun)(nil).DeepCopy() == nil },
 		"InputItem":               func() bool { return (*InputItem)(nil).DeepCopy() == nil },
 		"InputOrigin":             func() bool { return (*InputOrigin)(nil).DeepCopy() == nil },

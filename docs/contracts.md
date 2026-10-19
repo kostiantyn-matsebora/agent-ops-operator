@@ -184,7 +184,7 @@ is one, arrives later as an ordinary input.
 **`invoke(agent, task)`.** Starts, or attaches to, a member conversation
 running the named `agents[]` entry with `task` as its first input.
 
-Reports which happened — a live member carrying the same signature is
+Reports which happened — a live member carrying the same `conversationId` is
 ATTACHED to, never duplicated. Refused when the target is outside
 `agents[]`, when the caller's own `maxAgents` is exhausted, or when it would
 cycle the Coordinator graph (below).
@@ -516,7 +516,7 @@ scrape time from the same in-memory state `/status` reports.
 - **Labels carry only values bounded by CR count** — `pipeline`, `adapter`,
   `source`, `channel`, `kind`, `status`, `reason`.
 - **They are read from an event's structured fields** (node names, `code`),
-  never from `detail`, which may carry a fingerprint or an error message.
+  never from `detail`, which may carry an `initiationId` or an error message.
 - **A conversation, run or op id as a label would grow series without limit.**
   Those identify the specific stuck item and stay in `/status`.
 - **Nor is a model or a tool name a label.** Both are reported by a runtime
@@ -544,6 +544,6 @@ claims:
 ```sh
 curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
   -H "Authorization: Bearer $ADAPTER_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"source":"<source>","signals":[{"fingerprint":"ci-'"$BUILD_ID"'",
+  -d '{"source":"<source>","signals":[{"initiationId":"ci-'"$BUILD_ID"'",
        "kind":"task","payload":"why is the api pod crashlooping?"}]}'
 ```

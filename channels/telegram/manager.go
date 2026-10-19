@@ -114,11 +114,19 @@ type TopicDescriptor struct {
 
 // Op mirrors the manager's outbound operation shape.
 type Op struct {
-	ID           string  `json:"id"`
-	Channel      string  `json:"channel"`
-	Conversation string  `json:"conversation,omitempty"`
-	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
-	ThreadID     *string `json:"threadId,omitempty"`
+	ID           string `json:"id"`
+	Channel      string `json:"channel"`
+	Conversation string `json:"conversation,omitempty"`
+	// ConversationID is the conversation's manager-issued correlation id,
+	// carried beside Conversation. OPAQUE to this adapter — never parsed,
+	// never derived, never minted here (channel-adapter.md ADA-14). This
+	// adapter's own thread mapping stays exactly what it already was: the
+	// transport's ThreadID on one side, this id on the other, with nothing
+	// else keying it. Absent on an op for a conversation created before the
+	// field existed.
+	ConversationID string  `json:"conversationId,omitempty"`
+	Kind           string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
+	ThreadID       *string `json:"threadId,omitempty"`
 
 	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
 	Message *Message         `json:"message,omitempty"` // send, delete-conversation

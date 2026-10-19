@@ -5,7 +5,7 @@ Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Read
                Pipeline claims (there is no endpoint that names a Pipeline):
   TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }} -o jsonpath='{.data.token}' | base64 -d)
   curl -s -X POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/signal/inbound -H "Authorization: Bearer $TOKEN" \
-    -d '{"source":"<signalsource>","signals":[{"fingerprint":"ask-1","kind":"task","payload":"..."}]}'
+    -d '{"source":"<signalsource>","signals":[{"initiationId":"ask-1","kind":"task","payload":"..."}]}'
 
 Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
 Pipeline claim drops its signals (Wired=False). Capabilities are wiring too:

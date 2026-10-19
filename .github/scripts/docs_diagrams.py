@@ -134,13 +134,13 @@ DIAGRAMS: dict[str, dict] = {
         "arrows": ["bound from", "half, per toolsMode"],
     },
     "signal-adapter": {
-        "alt": "Your signal adapter watches your transport and posts normalised "
-               "signals to the manager, which groups them and opens a "
-               "conversation.",
+        "alt": "Your signal adapter watches your transport, mints an "
+               "initiationId, and posts it to the manager, which matches "
+               "it by equality and opens or resumes a conversation.",
         "cols": [
             [("your transport", "a queue, a webhook", "plain")],
-            [("your adapter", "normalises what it sees", "yours")],
-            [("the manager", "groups, then opens one", "subject")],
+            [("your adapter", "mints the initiationId", "yours")],
+            [("the manager", "matches it by equality", "subject")],
         ],
         "arrows": ["watches", "POST /signal/inbound"],
     },

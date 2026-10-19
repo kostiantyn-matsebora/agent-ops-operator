@@ -181,7 +181,7 @@ the Pipeline still cannot re-wire a conversation already running.
 
 **It exists because [sources are shareable](#sharing-a-source).** Two Pipelines
 listing one source both open a conversation per signal, and those conversations
-carry the same signature.
+carry the same `conversationId`.
 
 Without the ref, the second Pipeline's next signal would be absorbed by the
 first Pipeline's conversation and run under the wrong profile with the wrong
@@ -267,7 +267,7 @@ transport show a person the message they just typed on it?
 
 **An ingest lane**, split like `Channel`:
 
-- **Implementation-agnostic metadata** — `adapter`, `grouping`,
+- **Implementation-agnostic metadata** — `adapter`, `cooldownHours`,
   `credentialsSecretRef`.
 - **An opaque `config`** only the serving signal implementation interprets.
 
@@ -278,36 +278,42 @@ Sources no Pipeline lists drop signals with an explicit reason.
 names them all, and a signal opens a conversation on each — see
 [Sharing a source](#sharing-a-source).
 
-**Grouping stays manager-side for every type.** Signature grouping puts the same
-problem in the same conversation, and recurrence resumes the session.
-Fingerprint cooldown suppresses repeats.
+**Correlation is the sender's job, not the manager's.** Every signal carries
+`initiationId` — minted where the sender's own aggregation already happens, or
+propagated verbatim on a round trip.
+
+The manager only compares it for equality. An open conversation whose
+`conversationId` matches gets the signal as a recurrence, resuming the
+session. It parses no label and owns no grouping policy of its own.
 
 **Every signal type is adapter-served** — the manager hosts no signal
 transports.
 
-`status.cooldown[]` records fingerprint suppression for this source, as
-`{fingerprint, at}` per admitted signal, pruned past the window and bounded.
+`status.cooldown[]` records `initiationId` suppression for this source, as
+`{initiationId, at}` per admitted signal, pruned past `cooldownHours` and
+bounded.
 
 - **The in-memory map is the hot path, this is the record.** It is read on first
   use per source after a restart, so a restart mid-incident does not re-open
   conversations for signals still inside their window.
-- **Only an admitted fingerprint writes.** A suppressed re-delivery — the
+- **Only an admitted `initiationId` writes.** A suppressed re-delivery — the
   high-volume case cooldown exists for — writes nothing.
 
-**Signal labels** are what `grouping.signatureLabels` selects over, so what an
-adapter emits determines what can be grouped.
+**Signal labels are opaque context, carried onto the conversation and its
+topic descriptor** — never a correlation key. What an adapter emits shapes
+display, not routing.
 
 | Vocabulary | Keys |
 |---|---|
 | Shared | `alertgroup`, `alertname`, `namespace`, `severity`, `source` |
 | Kubernetes events adapter adds | `kind`, `name`, **`workload`** (the owning controller, e.g. `Deployment/api`, resolved through owner references), `node`, plus the involved pod's own labels |
 
-**Adapter-defined keys are reserved.** A pod label named `name` or `workload` is
-never allowed to overwrite one, because through `signatureLabels` that would
-silently rewrite grouping.
+**Adapter-defined keys are reserved.** A pod label named `name` or `workload`
+is never allowed to overwrite one, so a signal's own identifying context stays
+legible regardless of what the underlying object happens to carry.
 
-**Suppression is the adapter's job, and is distinct from grouping.** It decides
-whether a signal is emitted at all — see
+**Suppression is the adapter's job, and is distinct from correlation.** It
+decides whether a signal is emitted at all — see
 [kubernetes](integrations/kubernetes.md#tune-what-reaches-you).
 
 ### SignalAdapter
@@ -467,9 +473,9 @@ conversations — one per Pipeline**, each with that Pipeline's own profile,
 channels and capabilities. Two agents investigating one alert from two angles is
 a configuration, not a fault.
 
-**Per-source ingest policy is evaluated once, before the fan-out.** A
-fingerprint passes cooldown once and is then delivered to every server, so the
-first Pipeline cannot spend the window and starve the rest.
+**Per-source ingest policy is evaluated once, before the fan-out.** An
+`initiationId` passes cooldown once and is then delivered to every server, so
+the first Pipeline cannot spend the window and starve the rest.
 
 The counters keep the two apart:
 
@@ -1017,7 +1023,7 @@ Programmatic work is an ordinary signal:
 
 ```json
 POST /signal/inbound
-{"source":"...","signals":[{"fingerprint":"...","kind":"task","payload":"..."}]}
+{"source":"...","signals":[{"initiationId":"...","kind":"task","payload":"..."}]}
 ```
 
 - **Every Ready Pipeline listing that source originates a conversation**,
@@ -1028,9 +1034,9 @@ POST /signal/inbound
   caller picking its own wiring is what this model exists to prevent, and a
   request naming only a profile would have no wiring and therefore nothing to
   grant.
-- **A posted task inherits the target source's `grouping`** like any other
-  signal. With no `signatureLabels` declared it keys on its own fingerprint, so
-  each post is its own conversation.
+- **A posted task's correlation is the caller's own job**, exactly like any
+  other signal. A one-shot caller mints a fresh `initiationId` per request, so
+  each post is its own conversation by default.
 
 **Capabilities are declared, never inferred.** A Pipeline that declares no
 `toolsets` gives its conversations none — no default, no inheritance, and no
@@ -1309,8 +1315,9 @@ time.** No field names the root directly, so a viewer or a budget check
 follows the chain rather than reading it as already resolved.
 
 **Reuse is scoped by `causedBy`, at one hop.** Two uncaused conversations with
-one signature stay two conversations. Two members invoked by the same parent
-through the same entry, with one signature, attach to the same conversation.
+one `conversationId` stay two conversations. Two members invoked by the same
+parent through the same entry, with one `conversationId`, attach to the same
+conversation.
 
 ### The loop: invoke, result, close
 
@@ -1543,9 +1550,9 @@ no dispatch.
 
 - **Suppressing the topic is the point.** It is what stops a thousand signals
   becoming a thousand chat threads before anyone has read the first one.
-- **Its inputs, signature label and pipeline wiring snapshot are kept**, so
-  signature grouping and window reuse treat it exactly like an admitted
-  conversation.
+- **Its inputs, `conversationId` and pipeline wiring snapshot are kept**, so
+  equality routing treats it exactly like an admitted conversation — a
+  matching signal recurs onto it rather than opening a second one.
 - **The Conversation CR *is* the queue**, so the backlog survives a manager
   restart with no extra CRD.
 
@@ -1732,7 +1739,7 @@ a second source of truth beside the CRs.
 |---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
 | Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — ingest cooldown | fingerprint suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
+| Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |
@@ -2214,8 +2221,9 @@ nobody reached for it.
 
 - No runtime pod, no MCP ConfigMap, no dispatch and no work units.
 - No capacity consumed and no place in the pending backlog.
-- Absent from conversation **reuse**, so a signal whose signature matches opens
-  a NEW conversation.
+- Excluded from equality routing, so a signal carrying the same
+  `initiationId` opens a NEW conversation (`-N` suffixed) rather than
+  recurring onto the closed one.
 - Absent from every pipeline.
 - `status.closedAt` stamped, which is the origin of the delete clock.
 

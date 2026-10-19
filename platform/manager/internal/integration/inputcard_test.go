@@ -91,7 +91,7 @@ func TestAlertConversationPostsItsCard(t *testing.T) {
 	srv := apiServer()
 
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-card", []map[string]any{{
-		"fingerprint": "card-1", "labels": map[string]string{"alertname": "CardAlert", "namespace": "prod"},
+		"initiationId": "card-1", "labels": map[string]string{"alertname": "CardAlert", "namespace": "prod"},
 		"payload": "node/1 root filesystem at 97%",
 	}})
 	if rec.Code != 200 {

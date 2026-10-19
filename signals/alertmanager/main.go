@@ -9,12 +9,15 @@
 //	sources:  GET /signal/sources?adapter=<ADAPTER_NAME> (15s poll)
 //	push:     POST /signal/inbound     (normalized; alert lane)
 //
-// Normalization keeps built-in-path parity: firing-only, fingerprint verbatim
-// (sorted-label-hash fallback), raw labels, "🔍 alertname — namespace" title,
-// per-alert JSON payload. NO adapter-side grouping — signature grouping,
-// cooldown, window reuse, and recurrence stay manager-side from
-// SignalSource.spec.grouping (and routing requires the source's Pipeline
-// claim: unwired sources drop with Wired=False).
+// Normalization keeps built-in-path parity: firing-only, raw labels,
+// "🔍 alertname — namespace" title, per-alert JSON payload. initiationId is
+// the webhook's own groupKey verbatim (Alertmanager's group_by decision,
+// made upstream) — every firing alert of one group correlates to one
+// conversation — with a sorted-groupLabels-hash fallback for a nonstandard
+// sender that omits groupKey. NO adapter-side grouping beyond that —
+// cooldown and recurrence stay manager-side, keyed on initiationId (and
+// routing requires the source's Pipeline claim: unwired sources drop with
+// Wired=False).
 //
 // Auth is opt-in per source: a source with credentialsSecretRef advertises a
 // credentialEnvPrefix; the adapter then requires Authorization: Bearer
@@ -51,15 +54,20 @@ import (
 // amAlert is one entry of the standard Alertmanager webhook payload.
 type amAlert struct {
 	Status       string            `json:"status"`
-	Fingerprint  string            `json:"fingerprint"`
 	StartsAt     string            `json:"startsAt"`
 	Labels       map[string]string `json:"labels"`
 	Annotations  map[string]string `json:"annotations"`
 	GeneratorURL string            `json:"generatorURL"`
 }
 
+// amPayload is the standard Alertmanager webhook payload. GroupKey is
+// Alertmanager's own group_by decision — the correlation id every alert of
+// this group adopts verbatim. GroupLabels feeds the fallback for a
+// nonstandard sender that posts no GroupKey.
 type amPayload struct {
-	Alerts []amAlert `json:"alerts"`
+	GroupKey    string            `json:"groupKey"`
+	GroupLabels map[string]string `json:"groupLabels"`
+	Alerts      []amAlert         `json:"alerts"`
 }
 
 type adapter struct {
@@ -286,14 +294,18 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signals := normalize(payload.Alerts)
+	signals := normalize(payload)
 	if len(signals) == 0 {
 		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "no firing alerts"})
 		return
 	}
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
-		log.Printf("inbound %s: %v", name, err)
+		// %q escapes control characters in the manager's rejection message,
+		// which can echo back webhook-sourced content (initiationId, labels)
+		// — unescaped, a crafted value could forge log lines (CWE log
+		// injection, gosecurity:S5145).
+		log.Printf("inbound %q: %q", name, err.Error())
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}
@@ -301,16 +313,18 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // normalize converts firing alerts to contract signals with built-in-path
-// parity. No grouping/dedup here — the manager owns that.
-func normalize(alerts []amAlert) []Signal {
+// parity. Every signal of this webhook body shares one initiationId — the
+// group's own correlation id, resolved once per payload, never per alert.
+// No dedup/cooldown here — the manager owns that, keyed on that id.
+func normalize(payload amPayload) []Signal {
+	initiationID := payload.GroupKey
+	if initiationID == "" {
+		initiationID = groupLabelsFallbackID(payload.GroupLabels)
+	}
 	var signals []Signal
-	for _, alert := range alerts {
+	for _, alert := range payload.Alerts {
 		if alert.Status != "firing" {
 			continue
-		}
-		fp := alert.Fingerprint
-		if fp == "" {
-			fp = labelFingerprint(alert.Labels)
 		}
 		title := "🔍 " + alert.Labels["alertname"]
 		if ns := alert.Labels["namespace"]; ns != "" {
@@ -322,19 +336,19 @@ func normalize(alerts []amAlert) []Signal {
 		}
 		payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
 		signals = append(signals, Signal{
-			Fingerprint: fp,
-			Labels:      alert.Labels,
-			Title:       title,
-			Payload:     string(payloadJSON),
+			InitiationID: initiationID,
+			Labels:       alert.Labels,
+			Title:        title,
+			Payload:      string(payloadJSON),
 		})
 	}
 	return signals
 }
 
-// labelFingerprint derives a deterministic fingerprint from sorted label
-// pairs — the fallback when a sender omits Alertmanager's own fingerprint
-// (the inbound contract rejects empty fingerprints).
-func labelFingerprint(labels map[string]string) string {
+// groupLabelsFallbackID derives a deterministic id from sorted groupLabels
+// pairs — the fallback when a nonstandard sender omits Alertmanager's own
+// groupKey (the inbound contract rejects an empty initiationId).
+func groupLabelsFallbackID(labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
 		keys = append(keys, k)

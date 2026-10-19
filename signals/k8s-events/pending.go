@@ -65,7 +65,10 @@ type pendingEntry struct {
 	// that had healed two minutes before the catch-all fired.
 	lastSeen time.Time
 	// sample is the most recent signal, used as the emitted signal's base so
-	// labels, fingerprint and title stay exactly as normalize built them.
+	// labels, initiationId and title stay exactly as normalize built them —
+	// stable across members because every member of this entry shares one
+	// (source, namespace, workload), which is what normalize's initiationId
+	// is keyed on.
 	sample Signal
 }
 
@@ -174,8 +177,7 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule) {
 
 	// Refractory: this workload was reported recently, so there is nothing to
 	// add by reporting it again. The manager already collapses repeats
-	// (fingerprint cooldown, signature window reuse) — re-posting only spends
-	// round trips.
+	// (initiationId cooldown) — re-posting only spends round trips.
 	if last, ok := q.emitted[key]; ok {
 		quiet := rule.dwell
 		if quiet < minRefractory {

@@ -22,7 +22,7 @@ import (
 // /signal/inbound, where the Pipeline CLAIMING the chat source decides who
 // answers — no channel default, no creation-timestamp tiebreak.
 
-var chatFingerprint int
+var chatInitiationID int
 
 // chatMessageHandle is the transport's own handle for the arriving message, as
 // an adapter supplies it. OPAQUE to the manager, which stores and returns it
@@ -32,11 +32,11 @@ const chatMessageHandle = "tg-msg-4242"
 // chatSignal posts one general-surface message as the chat adapter would.
 func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string) *httptest.ResponseRecorder {
 	t.Helper()
-	chatFingerprint++
+	chatInitiationID++
 	return adapterReq(srv, "POST", "/signal/inbound", map[string]any{
 		"source": source,
 		"signals": []map[string]any{{
-			"fingerprint": fmt.Sprintf("tg-%d", chatFingerprint),
+			"initiationId": fmt.Sprintf("tg-%d", chatInitiationID),
 			"kind":        "chat",
 			"payload":     text,
 			"labels": map[string]string{
@@ -54,11 +54,11 @@ func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string)
 // every other test, which do not care who typed it.
 func chatSignalWithReader(t *testing.T, srv *httpapi.Server, source, channel, text, reader string) *httptest.ResponseRecorder {
 	t.Helper()
-	chatFingerprint++
+	chatInitiationID++
 	return adapterReq(srv, "POST", "/signal/inbound", map[string]any{
 		"source": source,
 		"signals": []map[string]any{{
-			"fingerprint": fmt.Sprintf("tg-%d", chatFingerprint),
+			"initiationId": fmt.Sprintf("tg-%d", chatInitiationID),
 			"kind":        "chat",
 			"payload":     text,
 			"reader":      reader,
@@ -335,7 +335,7 @@ func TestMachinePostedTaskStampsNoOriginReader(t *testing.T) {
 	reconcilePipeline(t, "origin-task-pipe")
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-origin-task", []map[string]any{
-		{"fingerprint": "task-1", "kind": "task", "payload": "run the thing"},
+		{"initiationId": "task-1", "kind": "task", "payload": "run the thing"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -385,7 +385,7 @@ func TestChatConversationIsTitledByTheMessage(t *testing.T) {
 		t.Fatalf("the source name is not a useful title for a question: %q", title)
 	}
 
-	// A long question (a distinct fingerprint, so a SECOND conversation)
+	// A long question (a distinct initiationId, so a SECOND conversation)
 	// is kept WHOLE — length limits belong to the channel that knows them
 	// (Telegram's own 128-char topic-name cap), never the manager. Still
 	// verified valid UTF-8: a long multi-byte question must never come back
@@ -421,7 +421,7 @@ func TestAlertConversationKeepsTheSourceTitle(t *testing.T) {
 	reconcilePipeline(t, "alerttitle-pipe")
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-alerttitle", []map[string]any{
-		{"fingerprint": "at-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
+		{"initiationId": "at-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -468,7 +468,7 @@ func TestChatSignalWithoutChannelLabelIsRejected(t *testing.T) {
 	rec := adapterReq(srv, "POST", "/signal/inbound", map[string]any{
 		"source": "src-nolabel",
 		"signals": []map[string]any{{
-			"fingerprint": "tg-nolabel", "kind": "chat", "payload": "hi",
+			"initiationId": "tg-nolabel", "kind": "chat", "payload": "hi",
 		}},
 	}, "test-adapter-token")
 	if rec.Code != 400 {

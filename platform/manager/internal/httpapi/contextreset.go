@@ -91,7 +91,7 @@ func (s *Server) announceContextReset(r *http.Request, conv *agentopsv1alpha1.Co
 		if err := s.Reader.Get(r.Context(), key, &ch); err != nil {
 			continue // channel gone: nobody left to tell
 		}
-		s.Ops.EnqueueMessage(r.Context(), &ch, conv.ThreadFor(ref.Name), chat.Warn(
+		s.Ops.EnqueueMessage(r.Context(), &ch, conv, conv.ThreadFor(ref.Name), chat.Warn(
 			"This conversation's stored context was reset by an operator. "+
 				"Its previous memory is gone, and the next message starts fresh."))
 	}

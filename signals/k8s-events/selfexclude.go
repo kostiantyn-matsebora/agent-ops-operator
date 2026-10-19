@@ -12,7 +12,7 @@ import (
 // Conversation whose runtime pod cannot start emits a Warning event on that
 // pod; the event becomes a signal; the signal opens a Conversation; that
 // Conversation creates another runtime pod under a NEW name, and the cycle
-// repeats without bound. Nothing downstream catches it: the fingerprint is
+// repeats without bound. Nothing downstream catches it: the initiationId is
 // fresh (new pod name), the workload is fresh (the owner is the Conversation
 // CR), and even a correct liveness re-check passes it through because the pod
 // really is still broken. The conversation cap bounds concurrent pods and the

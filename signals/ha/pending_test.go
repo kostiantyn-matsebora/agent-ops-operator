@@ -24,8 +24,8 @@ func queueFixture(v func(recordRef, time.Time) verdict) (*pendingQueue, *[]emitt
 
 func haSignal(integration, location, level string) Signal {
 	return Signal{
-		Fingerprint: "ha-logs@" + integration + "@" + location,
-		Title:       integration + ": something failed",
+		InitiationID: "ha-logs@" + integration + "@" + location,
+		Title:        integration + ": something failed",
 		Labels: map[string]string{
 			"integration": integration,
 			"logger":      "homeassistant.components." + integration,
@@ -165,6 +165,53 @@ func TestEscalationFloorIsOneMinute(t *testing.T) {
 	q.Flush(now.Add(70 * time.Second))
 	if len(*got) != 1 {
 		t.Fatalf("expected the floored window to fire, got %+v", *got)
+	}
+}
+
+// TestInitiationIDIsTheEntryNotTheSample pins the correlation id the entry
+// emits: the source+integration the dwell queue already groups by, not
+// whichever member happened to be the last one added — which member is
+// "last" is an implementation accident, and basing the id on it would split
+// one recurring integration's history across conversations depending on
+// which code path logged last.
+func TestInitiationIDIsTheEntryNotTheSample(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+	rule := compiledRule{dwell: time.Minute, escalate: 3}
+	// b.py:2 is added last, so e.sample's own InitiationID (from normalize)
+	// would be "ha-logs@zwave_js@b.py:2" if left unmodified.
+	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+	q.Add("ha-logs", haSignal("zwave_js", "b.py:2", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+	if len(*got) != 1 {
+		t.Fatalf("expected one emit, got %+v", *got)
+	}
+	if got := (*got)[0].sigs[0].InitiationID; got != "ha-logs@zwave_js" {
+		t.Fatalf("initiationId = %q, want the entry's source@integration", got)
+	}
+}
+
+// TestInitiationIDRecursAcrossDwellCycles pins the "Recovery and recurrence"
+// scenario: the same integration misbehaving again in a LATER, separate dwell
+// cycle (a fresh pendingEntry, the earlier one already flushed) must carry
+// the same initiationId so the manager appends it to the still-open
+// conversation instead of opening a new one.
+func TestInitiationIDRecursAcrossDwellCycles(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+
+	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+
+	q.now = func() time.Time { return now.Add(10 * time.Minute) } // past the refractory window
+	q.Add("ha-logs", haSignal("zwave_js", "c.py:3", "ERROR"), rule, 1)
+	q.Flush(now.Add(12 * time.Minute))
+
+	if len(*got) != 2 {
+		t.Fatalf("expected two separate emits across the two dwell cycles, got %+v", *got)
+	}
+	first, second := (*got)[0].sigs[0].InitiationID, (*got)[1].sigs[0].InitiationID
+	if first != second || first != "ha-logs@zwave_js" {
+		t.Fatalf("a recurring integration must repeat its initiationId: %q vs %q", first, second)
 	}
 }
 

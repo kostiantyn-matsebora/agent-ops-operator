@@ -25,7 +25,7 @@ the house, one that can repair it.
 
 `signals/ha` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-1.0.0.
+2.0.0.
 
 ## What starts work
 
@@ -35,6 +35,11 @@ one-off retry does not.
 
 The log listing is polled every 15 seconds. Nothing in Home Assistant needs
 enabling for it.
+
+The adapter mints an `initiationId` of `<source>@<integration>`, so every
+dwell cycle of the same failing integration lands on one conversation —
+the manager just matches the id, however many log lines it sampled in
+between.
 
 Three more surfaces beside the log are on by default (config-entry state,
 repairs, fault sensors), a fourth — a pending-update digest — is one switch

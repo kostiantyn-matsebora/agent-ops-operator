@@ -95,10 +95,10 @@ func TestDomainFromConfigEntryMessage(t *testing.T) {
 		// trailing text after it (a clause HA did not append in the live
 		// capture, but might in a future wording) must not silently defeat the
 		// whole match.
-		"Error setting up entry someone@example.com for tuya, giving up": "tuya",
-		"Setup failed for 'zwave_js': timeout talking to the stick":                                "zwave_js",
-		"Config entry 'Kitchen Hue Bridge' for hue integration not ready yet: connection refused":   "hue",
-		"Config entry 'Garage' for esphome could not authenticate: invalid password":                "esphome",
+		"Error setting up entry someone@example.com for tuya, giving up":                             "tuya",
+		"Setup failed for 'zwave_js': timeout talking to the stick":                                  "zwave_js",
+		"Config entry 'Kitchen Hue Bridge' for hue integration not ready yet: connection refused":    "hue",
+		"Config entry 'Garage' for esphome could not authenticate: invalid password":                 "esphome",
 		"Config entry 'Attic Sensor' for xiaomi_ble is not ready yet: bluetooth adapter unavailable": "xiaomi_ble",
 		// No recognizable shape: falls back to "", so the caller keeps the
 		// logger-derived identity unchanged.
@@ -159,9 +159,9 @@ func TestNormalizeNonConfigEntriesLoggerUnaffected(t *testing.T) {
 	}
 }
 
-// The fingerprint keys on Home Assistant's own dedup identity, never on the
+// initiationId keys on Home Assistant's own dedup identity, never on the
 // occurrence: a recurring error must collapse into one conversation.
-func TestNormalizeFingerprintIsStableAcrossOccurrences(t *testing.T) {
+func TestNormalizeInitiationIDIsStableAcrossOccurrences(t *testing.T) {
 	rec := logRecord{
 		Name:      "homeassistant.components.zwave_js.climate",
 		Message:   []string{"Failed to set temperature"},
@@ -176,12 +176,12 @@ func TestNormalizeFingerprintIsStableAcrossOccurrences(t *testing.T) {
 	rec.Count = 9
 	later := normalize("ha-logs", &rec)
 
-	if first.Fingerprint != later.Fingerprint {
-		t.Fatalf("fingerprint changed with the occurrence: %q vs %q", first.Fingerprint, later.Fingerprint)
+	if first.InitiationID != later.InitiationID {
+		t.Fatalf("initiationId changed with the occurrence: %q vs %q", first.InitiationID, later.InitiationID)
 	}
 	want := "ha-logs@homeassistant.components.zwave_js.climate@components/zwave_js/climate.py:412"
-	if first.Fingerprint != want {
-		t.Fatalf("fingerprint = %q, want %q", first.Fingerprint, want)
+	if first.InitiationID != want {
+		t.Fatalf("initiationId = %q, want %q", first.InitiationID, want)
 	}
 	if first.Labels["integration"] != "zwave_js" || first.Labels["level"] != "ERROR" {
 		t.Fatalf("labels = %v", first.Labels)

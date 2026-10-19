@@ -95,7 +95,7 @@ func TestActivityRecordsAConversationEndToEnd(t *testing.T) {
 func actAssertSignalOpensClaimedConversation(t *testing.T, h http.Handler, acts *activity.Log) string {
 	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "src-act", []map[string]any{
-		{"fingerprint": "act-fp-1", "labels": map[string]string{"alertname": "ActTest"}, "payload": "disk full"},
+		{"initiationId": "act-fp-1", "labels": map[string]string{"alertname": "ActTest"}, "payload": "disk full"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -279,7 +279,7 @@ func TestActivityRecordsDroppedSignals(t *testing.T) {
 	srv, acts := apiServerWithActivity()
 
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-actdrop", []map[string]any{
-		{"fingerprint": "drop-fp-1", "payload": "nobody is listening"},
+		{"initiationId": "drop-fp-1", "payload": "nobody is listening"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

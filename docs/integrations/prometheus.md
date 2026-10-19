@@ -26,12 +26,14 @@ MetricsQL is a PromQL superset, so one server serves both.
 
 `signals/alertmanager` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-1.0.0.
+2.0.0.
 
 ## What starts work
 
 A firing alert, posted to the bundle's webhook. One conversation per alert —
-the fingerprint collapses recurrences, not every repetition.
+the adapter mints its `initiationId` from Alertmanager's own `groupKey`,
+and the manager's cooldown collapses recurrences onto the same conversation
+rather than opening a second one per repetition.
 
 The agent queries the metric that fired through six read-only tools, shows
 its evidence, and recommends rather than claims to have fixed anything.

@@ -28,8 +28,8 @@ func mustUpdate(t *testing.T, raw string) tgUpdate {
 }
 
 // TestNormalizeChatSignal pins the normalized shape the manager depends on:
-// the chat lane, a per-update fingerprint, and the reserved labels that let a
-// reply find its way back to the surface the message came from.
+// the chat lane, a per-update initiationId, and the reserved labels that let
+// a reply find its way back to the surface the message came from.
 func TestNormalizeChatSignal(t *testing.T) {
 	// The CANONICAL captured update, shared with the system pack (test-only
 	// relative read, no go.mod entry): the fake Bot API replays this exact
@@ -54,8 +54,8 @@ func TestNormalizeChatSignal(t *testing.T) {
 	if sig.Kind != "chat" {
 		t.Fatalf("kind = %q, want chat", sig.Kind)
 	}
-	if sig.Fingerprint != "tg-77" {
-		t.Fatalf("fingerprint = %q, want tg-77", sig.Fingerprint)
+	if sig.InitiationID != "tg-tg-chat-77" {
+		t.Fatalf("initiationId = %q, want tg-tg-chat-77 (scoped to the source, not just the update id)", sig.InitiationID)
 	}
 	if sig.Payload != "check the disk" {
 		t.Fatalf("payload = %q", sig.Payload)
@@ -81,17 +81,36 @@ func TestSenderFallsBackToID(t *testing.T) {
 	}
 }
 
-// TestRepeatedTextGetsDistinctFingerprints: cooldown collapses on fingerprint,
-// so identical text must NOT collapse — a human repeating a request is not a
-// duplicate alert.
-func TestRepeatedTextGetsDistinctFingerprints(t *testing.T) {
+// TestRepeatedTextGetsDistinctInitiationIDs: cooldown collapses on
+// initiationId, so identical text must NOT collapse — a human repeating a
+// request is not a duplicate alert, because each message mints its own
+// fresh id rather than deriving one from the text.
+func TestRepeatedTextGetsDistinctInitiationIDs(t *testing.T) {
 	a := testAdapter(map[string]sourceConfig{"tg-chat": {ChatID: "-1001", Channel: "c"}})
 	first := mustUpdate(t, `{"update_id":1,"message":{"text":"same","chat":{"id":-1001}}}`)
 	second := mustUpdate(t, `{"update_id":2,"message":{"text":"same","chat":{"id":-1001}}}`)
 	_, a1, _ := a.normalize(first)
 	_, a2, _ := a.normalize(second)
-	if a1.Fingerprint == a2.Fingerprint {
-		t.Fatalf("identical text collapsed on fingerprint %q", a1.Fingerprint)
+	if a1.InitiationID == a2.InitiationID {
+		t.Fatalf("identical text collapsed on initiationId %q", a1.InitiationID)
+	}
+}
+
+// TestRedeliveredUpdateRepeatsItsInitiationID pins the other half of "fresh
+// mint from the update's own delivery identity": the SAME update_id
+// redelivered (a crash-retry, at-least-once delivery) must repeat the same
+// initiationId, so the manager's cooldown absorbs it instead of opening a
+// second conversation for one request.
+func TestRedeliveredUpdateRepeatsItsInitiationID(t *testing.T) {
+	a := testAdapter(map[string]sourceConfig{"tg-chat": {ChatID: "-1001", Channel: "c"}})
+	upd := mustUpdate(t, `{"update_id":9,"message":{"text":"disk check","chat":{"id":-1001}}}`)
+	_, a1, ok1 := a.normalize(upd)
+	_, a2, ok2 := a.normalize(upd)
+	if !ok1 || !ok2 {
+		t.Fatal("both deliveries should originate")
+	}
+	if a1.InitiationID != a2.InitiationID {
+		t.Fatalf("a redelivered update must repeat its initiationId: %q vs %q", a1.InitiationID, a2.InitiationID)
 	}
 }
 
@@ -238,8 +257,8 @@ func TestSelectionCarriesTheOriginalMessage(t *testing.T) {
 	if sig.Payload != "/k8s-observe who is on call?" {
 		t.Fatalf("payload = %q — the original was not carried forward", sig.Payload)
 	}
-	if sig.Fingerprint != "tg-cb-cb-1" {
-		t.Fatalf("fingerprint = %q", sig.Fingerprint)
+	if sig.InitiationID != "tg-cb-tg-chat-cb-1" {
+		t.Fatalf("initiationId = %q, want tg-cb-tg-chat-cb-1 (scoped to the source)", sig.InitiationID)
 	}
 	if sig.Labels[labelMessage] != "8" {
 		t.Fatalf("selection must link to the ORIGINAL message, got %q", sig.Labels[labelMessage])

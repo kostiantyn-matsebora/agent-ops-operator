@@ -325,7 +325,7 @@ func TestDrainSuppressionRunsBeforeInhibitionAndNeverDoubleCounts(t *testing.T) 
 }
 
 // emitDrainExceeded posts the ONE signal a forgotten cordon earns, naming the
-// node and carrying a fingerprint distinct per drain episode (start time).
+// node and carrying an initiationId distinct per drain episode (start time).
 func TestEmitDrainExceededPostsOneNodeKindSignal(t *testing.T) {
 	mgr := newFakeManager()
 	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
@@ -346,12 +346,12 @@ func TestEmitDrainExceededPostsOneNodeKindSignal(t *testing.T) {
 	}
 
 	// A second drain of the SAME node, starting later, must get a DIFFERENT
-	// fingerprint — otherwise the manager's cooldown would silence the
+	// initiationId — otherwise the manager's cooldown would silence the
 	// second forgotten cordon because it looks like a repeat of the first.
 	a.emitDrainExceeded(context.Background(), "src", "node-a", start.Add(2*time.Hour), 3)
 	got = mgr.signalsFor("src")
-	if len(got) != 2 || got[0].Fingerprint == got[1].Fingerprint {
-		t.Fatalf("two distinct drain episodes must not share a fingerprint: %+v", got)
+	if len(got) != 2 || got[0].InitiationID == got[1].InitiationID {
+		t.Fatalf("two distinct drain episodes must not share an initiationId: %+v", got)
 	}
 }
 

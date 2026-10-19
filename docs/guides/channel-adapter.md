@@ -254,9 +254,9 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
-    helm.sh/chart: "telegram-0.5.0"
+    helm.sh/chart: "telegram-0.5.1"
 spec:
-  image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.26.0"
+  image: "ghcr.io/kostiantyn-matsebora/agentops-channel-telegram:0.26.1"
   # Receives forwarded topic updates: the reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -355,7 +355,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-telegram
-    helm.sh/chart: "telegram-0.5.0"
+    helm.sh/chart: "telegram-0.5.1"
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below

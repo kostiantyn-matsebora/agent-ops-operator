@@ -1,19 +1,19 @@
 dependencies:
 - name: prometheus
   repository: ""
-  version: 0.2.0
+  version: 0.2.1
 - name: kubernetes
   repository: ""
-  version: 0.3.2
+  version: 0.4.0
 - name: telegram
   repository: ""
-  version: 0.5.0
+  version: 0.5.1
 - name: home-assistant
   repository: ""
-  version: 0.2.0
+  version: 0.2.1
 - name: pulse
   repository: ""
-  version: 0.1.0
+  version: 0.1.1
 - name: claude
   repository: ""
   version: 0.1.0
@@ -23,5 +23,5 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
-digest: sha256:4282795ae08643bfd426783d3a43b8bbe22a73c18b0e8ff1f897394b23af1826
-generated: "2026-10-16T17:24:35.124803299Z"
+digest: sha256:22c50d9ffeecf3f757dfaef9c301d40eb1e4a6f9f00d90021dbf45477195e656
+generated: "2026-10-18T21:02:31.553011187+03:00"

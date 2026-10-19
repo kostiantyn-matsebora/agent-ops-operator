@@ -14,7 +14,7 @@ alertmanager:
   name: alertmanager
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-alertmanager
-    tag: 0.7.5
+    tag: 0.8.0
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.
@@ -55,8 +55,6 @@ alertmanager:
     # Secret holding this source's bearer token; empty = unauthenticated.
     # NOTES.txt prints the matching Alertmanager authorization stanza.
     credentialsSecretRef: ""
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
-    grouping: {}
 
 # Metrics access as MCP tools: the MCPConfig (the server) and the MCPToolset
 # (permission to call it). Both matter — a config without the toolset gives an

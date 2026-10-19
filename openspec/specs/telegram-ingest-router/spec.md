@@ -206,7 +206,7 @@ the cursor.
 
 #### Scenario: A replayed batch is harmless
 - **WHEN** the router crashes before an offset is persisted and replays a batch
-- **THEN** signals collapse on fingerprint and the system converges
+- **THEN** each replayed update yields the same `initiationId` as its first delivery, so routing converges instead of duplicating conversations
 
 #### Scenario: Re-modelling the router keeps the cursor
 - **WHEN** the router moves from an adapter CR to a chart-owned Deployment

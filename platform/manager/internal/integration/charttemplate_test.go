@@ -609,16 +609,23 @@ func TestEventsAdapterRBACGrantsNodesOnlyClusterWide(t *testing.T) {
 }
 
 // Grouping by pod name is what produced hundreds of conversations: pod names
-// are unique per replica and regenerated on every rollout, so the signature
-// never repeated and window reuse could never fire.
-func TestEventsSourceGroupsByWorkload(t *testing.T) {
+// are unique per replica and regenerated on every rollout. Workload-keyed
+// correlation now lives in the adapter's own initiationId minting
+// (<source>@<namespace>/<workload>, owner-reference resolved), never in a
+// chart-rendered grouping value — the manager carries no grouping policy at
+// all. cooldownHours is pinned explicit at 0 because the adapter's own
+// pending/dwell queue is already the suppression window; the CRD's 6h
+// default would otherwise drop every repeat post of a persisting problem.
+func TestEventsSourceCarriesExplicitZeroCooldownNoGrouping(t *testing.T) {
 	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
 	src := eventsSourceDoc(t, out)
-	if !strings.Contains(src, "- workload") {
-		t.Fatalf("the events source must group by workload:\n%s", src)
+	if !strings.Contains(src, "cooldownHours: 0") {
+		t.Fatalf("the events source must pin cooldownHours to 0:\n%s", src)
 	}
-	if strings.Contains(src, "- name\n") {
-		t.Fatalf("per-pod grouping must be gone:\n%s", src)
+	for _, retired := range []string{"grouping:", "signatureLabels", "windowDays"} {
+		if strings.Contains(src, retired) {
+			t.Fatalf("the events source must carry no %s, grouping is adapter-side now:\n%s", retired, src)
+		}
 	}
 }
 
@@ -2049,7 +2056,7 @@ func TestHaDefaultRulesShape(t *testing.T) {
 	}
 	assertHaPastTenseConditionsNeverDwell(t, blocks)
 	assertHaLastRuleIsUndwelledCatchAll(t, blocks)
-	assertHaGroupsByIntegrationWithNoWindow(t, src)
+	assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow(t, src)
 }
 
 // assertHaPastTenseConditionsNeverDwell: anything describing something that
@@ -2093,14 +2100,23 @@ func assertHaLastRuleIsUndwelledCatchAll(t *testing.T, blocks []string) {
 	}
 }
 
-// assertHaGroupsByIntegrationWithNoWindow: grouping is by integration, never
-// per record, since one broken hub logs from several code paths and is one
-// conversation; and this adapter implements no time axis, so a window key
-// would be one it silently never honors rather than one it rejects.
-func assertHaGroupsByIntegrationWithNoWindow(t *testing.T, src string) {
+// assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow: grouping by
+// integration is adapter-side now (minted in the existing pending/dwell
+// logic, keyed on condition identity), never a chart-rendered value — one
+// broken hub logs from several code paths and is one conversation.
+// cooldownHours is pinned explicit at 0 because that dwell logic is already
+// the suppression window; this adapter implements no time axis either, so a
+// window key would be one it silently never honors rather than one it
+// rejects.
+func assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow(t *testing.T, src string) {
 	t.Helper()
-	if !strings.Contains(src, "- integration") {
-		t.Fatalf("the log source must group by integration:\n%s", src)
+	if !strings.Contains(src, "cooldownHours: 0") {
+		t.Fatalf("the log source must pin cooldownHours to 0:\n%s", src)
+	}
+	for _, retired := range []string{"grouping:", "signatureLabels", "windowDays"} {
+		if strings.Contains(src, retired) {
+			t.Fatalf("the log source must carry no %s, grouping is adapter-side now:\n%s", retired, src)
+		}
 	}
 	for _, absent := range []string{"timeIntervals", "muteTimeIntervals"} {
 		if strings.Contains(src, absent) {

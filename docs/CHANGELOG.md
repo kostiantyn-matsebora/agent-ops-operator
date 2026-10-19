@@ -20,6 +20,67 @@ for the source and the reference material beside this file.
   tell `cron` apart from `alertmanager`, or the console's own adapter from
   `telegram`.
 
+## [17.0.0] — 2026-10-18
+
+- `manager` 0.60.0, `console` 0.39.1.
+- `signal-alertmanager` 0.8.0, `signal-pulse` 0.1.1, `signal-ha` 0.4.2,
+  `signal-k8s-events` 0.5.0, `signal-cron` 0.2.1, `signal-telegram` 0.6.6,
+  `channel-telegram` 0.26.1.
+- Bundles `prometheus` 0.2.1, `pulse` 0.1.1, `home-assistant` 0.2.1,
+  `kubernetes` 0.4.0, `telegram` 0.5.1 — each ships the signal adapter it
+  embeds, above.
+
+### Changed
+
+**BREAKING: a signal names its own correlation id now, instead of the
+manager computing one from labels.** Every `POST /signal/inbound` signal
+carries `initiationId`, replacing `fingerprint`. The manager routes a
+recurrence by comparing it against an open conversation's `conversationId`
+— pure equality, never a derived grouping key.
+
+- `SignalSource.spec.grouping` (`signatureLabels`, `windowDays`,
+  `cooldownHours`) is GONE. The one surviving knob is a top-level
+  `spec.cooldownHours` (default 6).
+- `Conversation.spec.signature` and the `agentops.dev/signature-hash` label
+  are GONE, replaced by `spec.conversationId` — the adopted `initiationId`,
+  opaque, written once at creation.
+- **Every shipped adapter mints or propagates its own id**: Alertmanager
+  uses the webhook's own `groupKey`, Pulse its alert id, Home Assistant
+  `<source>@<integration>`, Kubernetes Events `<source>@<namespace>/<workload>`
+  (dropping the event's reason and the pod name from the key), cron the
+  source's own job identity, `signal-telegram` a fresh mint per
+  general-surface message (deterministic from the update id, so a replay
+  converges), and the console a fresh mint per new task with verbatim
+  propagation on continuation. A thread reply's continuation travels
+  `channel-telegram`'s own path (`POST /channel/inbound`), correlated by the
+  binding's `conversationId` rather than a propagated `initiationId`.
+- `/channel/ops` and every outbound op now carry `conversationId` alongside
+  the thread it binds (additive, `docs/contracts/channel-adapter.md` 1.1.0).
+- A reopen is refused while another OPEN conversation already carries the
+  same `conversationId` for that pipeline, naming the successor.
+
+See [the signal adapter specification](contracts/signal-adapter.md) (now
+2.0.0) for the full shape.
+
+### Upgrade
+
+**Apply the CRDs before you upgrade** — `SignalSource.spec.grouping` and
+`Conversation.spec.signature` are removed fields, and Helm never upgrades an
+existing CRD:
+
+```sh
+kubectl apply -f chart/crds/
+```
+
+**A 1.x signal adapter posting `fingerprint` instead of `initiationId` gets
+a `4xx`, not a silent drop.** There is no synthesis and no fallback — update
+every custom adapter to mint or propagate `initiationId` before you upgrade
+a production install. A shipped bundle adapter already does this at 17.0.0.
+
+A `SignalSource.spec.grouping` value left in your own manifests is simply
+unread after the CRD upgrade — move any non-default `cooldownHours` you set
+under `grouping` to the new top-level field.
+
 ## [16.0.0] — 2026-10-18
 
 - `signal-pulse` 0.1.0, `mcp-pulse` 0.1.0, bundle `pulse` 0.1.0.
@@ -722,34 +783,11 @@ finding: the contract is vendor-neutral.
 **Nothing changes for an install that does not enable the bundle.** The
 rendered manifest is identical.
 
-## [13.0.1] — 2026-08-24
-
-**Every component image is now published BY CI, from a tag.**
-
-### Changed
-
-
-Ten components moved to versions the release workflow built and pushed:
-`channel-telegram` 0.24.3, `console` 0.38.1, `context-sync` 0.2.2,
-`egress-proxy` 0.2.3, `gateway-telegram` 0.5.2, `housekeeping` 0.2.2,
-`signal-alertmanager` 0.7.2, `signal-ha` 0.2.2, `signal-k8s-events` 0.4.2,
-`signal-telegram` 0.6.2.
-
-**No behaviour changes.** The images are built from the same source as the
-versions they replace. What is new is HOW they got there.
-
-The previous ones were pushed by hand before this repository was public, so
-nothing in the tree recorded which commit produced them. The registry's
-immutability rule meant a tag could never be added after the fact — only a
-new version could carry one.
-
-Component tags exist for that provenance and deliberately create no GitHub
-Release: the chart version is the one an adopter types.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-13.0.1.md](changelog/CHANGELOG-13.0.1.md) | chart 13.0.1 |
 | [CHANGELOG-13.0.md](changelog/CHANGELOG-13.0.md) | chart 13.0.0 |
 | [CHANGELOG-11.0-12.0.md](changelog/CHANGELOG-11.0-12.0.md) | chart 11.0.0 through 12.0.0 |
 | [CHANGELOG-channel-telegram-0.24.2.md](changelog/CHANGELOG-channel-telegram-0.24.2.md) | channel-telegram 0.24.2 |

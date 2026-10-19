@@ -777,7 +777,12 @@ func (a *adapter) reportDrainReleased(ctx context.Context, source, node string, 
 // which drain suppression already sits ahead of.
 func (a *adapter) emitDrainExceeded(ctx context.Context, source, node string, start time.Time, suppressed int) {
 	sig := Signal{
-		Fingerprint: fmt.Sprintf("%s@/Node/%s/NodeDrainExceeded/%d", source, node, start.Unix()),
+		// Deliberately NOT the plain workload-keyed shape: this is a one-shot
+		// per-INCIDENT signal, not a recurring workload failure, and the
+		// start time keeps a second forgotten cordon on the same node from
+		// being collapsed by the manager's cooldown as a repeat of the
+		// first.
+		InitiationID: fmt.Sprintf("%s@/Node/%s/NodeDrainExceeded/%d", source, node, start.Unix()),
 		Labels: map[string]string{
 			"alertgroup": "k8s-events",
 			"alertname":  "NodeDrainExceeded",

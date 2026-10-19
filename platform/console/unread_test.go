@@ -429,7 +429,7 @@ func TestOriginationCarriesTheStartersKey(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOriginator(srv.URL, "signal-token", "console")
-	if _, err := o.Start(context.Background(), "console-chan", "alice@example.com", "sha256:opaque", "check the nodes"); err != nil {
+	if _, err := o.Start(context.Background(), "console-chan", "alice@example.com", "sha256:opaque", "check the nodes", FreshInitiationID()); err != nil {
 		t.Fatal(err)
 	}
 	sig := body["signals"].([]any)[0].(map[string]any)

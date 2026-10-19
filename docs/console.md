@@ -7,7 +7,7 @@ It is **also a channel**, so you can reply to an agent from the screen you are
 watching it on, and **also a signal source**, so you can start one.
 
 As a channel, it conforms to the [channel adapter specification](contracts/channel-adapter.md),
-version 1.0.0.
+version 1.1.0.
 
 It ships as its own pod, **enabled by default**, and is disabled with one value.
 
@@ -690,8 +690,8 @@ Its result arrives on its root as an input, and is counted there instead.
 **All is a total, not an unread count.** It is every conversation a person
 can open, read or not — unchanged from what it always meant.
 
-Every OTHER fixed scope (Working, Mine, Errored), each Pipeline or
-Coordinator, and Closed are unread counts instead.
+Every OTHER fixed scope but Closed (Working, Mine, Errored), each Pipeline or
+Coordinator, is an unread count instead.
 
 That is what made the dedicated Unread scope redundant: every category
 already carried its own unread count one level down. It was removed. All
@@ -703,7 +703,8 @@ no action of its own — the tree under its root is the only way to reach it.
 | Scope | Counts |
 |---|---|
 | All (`kind: 'all'`) | every root, read or not, excluding a closed root while "Show closed" is off |
-| Working, Mine, Errored, Closed, each Pipeline or Coordinator | unread roots its own filter admits |
+| Closed (Archive) | every closed root, read or not — the archive holds everything it ever closed |
+| Working, Mine, Errored, each Pipeline or Coordinator | unread roots its own filter admits |
 
 A Coordinator's own root conversations are reached through ITS scope, same as
 any pipeline's. There is no separate "Incidents" scope.
@@ -712,16 +713,19 @@ any pipeline's. There is no separate "Incidents" scope.
 never moves a count that belongs to a different one, computed before that
 filter applies.
 
-All is not exempt from this — it still excludes a closed root while the
-toggle is off, same as every unread-scoped one.
-
-The closed-row toggle is a different thing, not a scope. Every list but
-Closed's own hides a closed row while it is off, so a badge for one of those
-lists excludes that row too.
+Every list but Closed's own hides a closed row while the toggle is off —
+All included — so a badge for one of those lists excludes that row too.
 
 Closed's own list is exempt from that one filter — it IS the closed view —
-so its count ignores the toggle too. It still requires unread, like every
-scope here except All.
+so its count ignores the toggle too.
+
+**Unread is the separate axis Closed and All both sit outside of.** A read
+closed conversation still belongs to the archive, the same way a read
+email still belongs in "All Mail".
+
+So Closed's count, like All's, is never gated on unread either. There is
+no "show closed" checkbox on this scope — the whole point of it is to show
+everything, unfiltered.
 
 **The navigation rail's own badge, outside the Inbox, is a plain unread
 count** — `unreadTotal`, every unread root, no further filter, the same

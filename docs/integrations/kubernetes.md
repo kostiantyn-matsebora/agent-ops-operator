@@ -21,7 +21,7 @@ the events, decides which are real, and gives an agent the tools to look.
 
 `signals/k8s-events` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-1.0.0.
+2.0.0.
 
 ## What starts work
 
@@ -31,6 +31,12 @@ second reaches an agent.
 
 Rules under `kubernetes.eventsAdapter.source.rules` decide which, see
 [Tune what reaches you](#tune-what-reaches-you).
+
+The adapter mints an `initiationId` of `<source>@<namespace>/<workload>` —
+the owning Deployment or similar, resolved through owner references, never
+the Event object or its reason — and the manager matches it by equality, so
+a workload's whole run of failures across pods and restarts stays one
+conversation.
 
 ## What it may reach
 

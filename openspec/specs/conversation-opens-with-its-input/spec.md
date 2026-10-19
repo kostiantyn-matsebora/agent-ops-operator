@@ -7,7 +7,7 @@ came from, and every input is delivered to every bound channel EXCEPT the
 surface that displayed it — in parallel with dispatch, once per input and
 channel, so the human sees what happened even if the agent never answers.
 ## Requirements
-### Requirement: Inputs record where they came from; the pipeline is inferred
+### Requirement: Inputs record where they came from and the pipeline is inferred
 
 Every input SHALL record its own origin as `{kind: signal|channel|member, name}` —
 materialized state, snapshotted like `profileRef` and `channelRefs` and never set
@@ -18,9 +18,11 @@ so inputs created before this change remain valid.
 **The originating Pipeline IS recorded**, on `Conversation.spec.pipelineRef` —
 this requirement once said no such field should exist, and `pipeline-model` now
 owns the rule that replaced it: the ref is PROVENANCE, written once at creation
-and never read to resolve wiring. It exists because sources are SHAREABLE, so two
-Pipelines fanning out from one source open conversations with the same signature
-and without it the second's next signal lands on the first's conversation under
+and never read to resolve wiring.
+
+It exists because sources are SHAREABLE: two Pipelines fanning out from one
+source open conversations adopting the same `initiationId`, and without the ref
+the second Pipeline's next signal would land on the first's conversation under
 the wrong profile.
 
 A message SHALL name the pipeline by READING that ref. For a conversation

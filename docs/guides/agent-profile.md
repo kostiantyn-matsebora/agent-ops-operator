@@ -173,7 +173,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-kubernetes
-    helm.sh/chart: "kubernetes-0.3.2"
+    helm.sh/chart: "kubernetes-0.4.0"
 spec:
   # Behaviour only — no repository, and no capabilities. What this agent may DO
   # comes from the Pipelines routing it: the bundle's own wiring component when

@@ -87,7 +87,7 @@ func TestSharedSourceWiredNamesPipelineAndCoordinator(t *testing.T) {
 
 	h := apiServer().Handler()
 	rec := postSignal(t, h, testMasterToken, "src-mix", []map[string]any{
-		{"fingerprint": "mix-1", "labels": map[string]string{"alertname": "SharedMix"}, "payload": "boom"},
+		{"initiationId": "mix-1", "labels": map[string]string{"alertname": "SharedMix"}, "payload": "boom"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -114,7 +114,7 @@ func TestCoordinatorClaimedSignalOpensRootWithBoundChannelsAndBudget(t *testing.
 
 	h := apiServer().Handler()
 	rec := postSignal(t, h, testMasterToken, "src-co-root", []map[string]any{
-		{"fingerprint": "co-root-1", "labels": map[string]string{"alertname": "CoRootAlert"}, "payload": "boom"},
+		{"initiationId": "co-root-1", "labels": map[string]string{"alertname": "CoRootAlert"}, "payload": "boom"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

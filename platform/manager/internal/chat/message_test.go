@@ -60,7 +60,7 @@ func TestOpsCarryStructuredPayloads(t *testing.T) {
 		t.Fatalf("descriptor: %+v", op.Topic)
 	}
 
-	q.EnqueueMessage(ctx, ch, nil, Warn("careful"))
+	q.EnqueueMessage(ctx, ch, nil, nil, Warn("careful"))
 	op = q.Claim("slack")
 	if op == nil || op.Message == nil || op.Message.Kind != MsgNotice || op.Message.Level != NoticeWarn {
 		t.Fatalf("send must carry a typed message: %+v", op)
@@ -77,8 +77,8 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	thread := "t-1"
 	card := SignalMessage("", "vm-alerts", "DiskFull", "", nil, "boom", agentopsv1alpha1.OriginSignal)
 
-	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-1", &thread, card)
-	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-1", &thread, card) // reconcile repeat
+	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card) // reconcile repeat
 	first := q.Claim("slack")
 	if first == nil || first.ID != InputOpID("conv-1", "in-1", "c1") {
 		t.Fatalf("input card id: %+v", first)
@@ -89,18 +89,18 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	// still deduped AFTER completion — this is the half a fresh-id send lacks,
 	// and without it every reconcile would repost the alert
 	q.Complete(ctx, first.ID, OpResult{})
-	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-1", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card)
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("input card reposted after completion: %+v", again)
 	}
 	// a DIFFERENT input on the same conversation is a different card
-	q.EnqueueInputDelivery(ctx, ch, "conv-1", "in-2", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-2", &thread, card)
 	if op := q.Claim("slack"); op == nil {
 		t.Fatal("a second input must get its own card")
 	}
 	// ordinary sends are never suppressed
-	q.EnqueueMessage(ctx, ch, &thread, Notice("same words"))
-	q.EnqueueMessage(ctx, ch, &thread, Notice("same words"))
+	q.EnqueueMessage(ctx, ch, nil, &thread, Notice("same words"))
+	q.EnqueueMessage(ctx, ch, nil, &thread, Notice("same words"))
 	firstNotice := q.Claim("slack")
 	secondNotice := q.Claim("slack")
 	if firstNotice == nil || secondNotice == nil {

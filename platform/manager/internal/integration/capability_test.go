@@ -141,7 +141,7 @@ func TestSignalDrivenConversationIsEquipped(t *testing.T) {
 	}
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "sigdriven-src", []map[string]any{{
-		"fingerprint": "sig-1", "labels": map[string]string{"alertname": "BackOff"}, "payload": "boom",
+		"initiationId": "sig-1", "labels": map[string]string{"alertname": "BackOff"}, "payload": "boom",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

@@ -151,7 +151,7 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 		t.Fatalf("firing event should produce exactly one signal: %d", len(signals))
 	}
 	first := signals[0].(map[string]any)
-	if first["fingerprint"] != "pulse:vm-101:abc" || !strings.Contains(first["title"].(string), "vm-101") {
+	if first["initiationId"] != "pulse:vm-101:abc" || !strings.Contains(first["title"].(string), "CPU high") {
 		t.Fatalf("normalization: %+v", first)
 	}
 	if _, hasKind := first["kind"]; hasKind {
@@ -170,7 +170,29 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 	}
 }
 
-func TestFingerprintStableAcrossFiringAndResolvedPair(t *testing.T) {
+func TestNormalizeTitleIsTheAlertMessage(t *testing.T) {
+	e := pulseEvent{Event: "alert", Resource: "master", Message: "IoT: Tion 4S Bedroom is unreachable from every current observation location by ICMP probe: context deadline exceeded"}
+	signals := normalize(e)
+	if len(signals) != 1 {
+		t.Fatalf("expected one signal, got %d", len(signals))
+	}
+	if got := signals[0].Title; got != "🔍 "+e.Message {
+		t.Fatalf("title should be the alert's message, not the bare resource: %q", got)
+	}
+}
+
+func TestNormalizeTitleFallsBackToResourceWhenMessageIsBlank(t *testing.T) {
+	e := pulseEvent{Event: "alert", Resource: "master", Message: ""}
+	signals := normalize(e)
+	if len(signals) != 1 {
+		t.Fatalf("expected one signal, got %d", len(signals))
+	}
+	if got := signals[0].Title; got != "🔍 master" {
+		t.Fatalf("a message-less alert should fall back to the resource name: %q", got)
+	}
+}
+
+func TestInitiationIDStableAcrossFiringAndResolvedPair(t *testing.T) {
 	firing, err := parsePulseEvent([]byte(firingBody("occ-1")))
 	if err != nil {
 		t.Fatalf("parse firing: %v", err)
@@ -179,25 +201,56 @@ func TestFingerprintStableAcrossFiringAndResolvedPair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse resolved: %v", err)
 	}
-	if firing.fingerprint() != resolved.fingerprint() {
-		t.Fatalf("same occurrence must fingerprint identically: firing=%q resolved=%q",
-			firing.fingerprint(), resolved.fingerprint())
+	if firing.initiationID() != resolved.initiationID() {
+		t.Fatalf("same occurrence must carry the same initiationId across firing and resolved: firing=%q resolved=%q",
+			firing.initiationID(), resolved.initiationID())
 	}
 	other, _ := parsePulseEvent([]byte(firingBody("occ-2")))
-	if other.fingerprint() == firing.fingerprint() {
-		t.Fatal("different alert ids must fingerprint differently")
+	if other.initiationID() == firing.initiationID() {
+		t.Fatal("different alert ids must derive different initiationIds")
 	}
 }
 
-func TestFingerprintFallbackWithoutID(t *testing.T) {
+func TestInitiationIDFallbackWithoutID(t *testing.T) {
 	e1 := pulseEvent{Resource: "ct-1", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
 	e2 := pulseEvent{Resource: "ct-1", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
-	if e1.fingerprint() != e2.fingerprint() || e1.fingerprint() == "" {
-		t.Fatalf("identical fields with no id must fingerprint identically and non-empty: %q vs %q", e1.fingerprint(), e2.fingerprint())
+	if e1.initiationID() != e2.initiationID() || e1.initiationID() == "" {
+		t.Fatalf("identical fields with no id must derive the same non-empty initiationId: %q vs %q", e1.initiationID(), e2.initiationID())
 	}
 	e3 := pulseEvent{Resource: "ct-2", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
-	if e3.fingerprint() == e1.fingerprint() {
-		t.Fatal("different resources must fingerprint differently")
+	if e3.initiationID() == e1.initiationID() {
+		t.Fatal("different resources must derive different initiationIds")
+	}
+}
+
+// TestUnrelatedPulseAlertsNeverMerge pins the motivating case from the
+// signal-correlation-id proposal: a node-memory threshold alert and an
+// unreachable-device alert are unrelated problems and must open distinct
+// conversations rather than hashing to the same empty-signature bucket the
+// manager used to collapse them into.
+func TestUnrelatedPulseAlertsNeverMerge(t *testing.T) {
+	memoryThreshold := `{"event":"alert","id":"metric-threshold:memory","resource":"k8s-node-3","resourceType":"node","node":"k8s-node-3","severity":"warning","message":"memory above threshold","value":"92","startsAt":"2026-01-01T00:00:00Z"}`
+	unreachableDevice := `{"event":"alert","id":"provider-incident:8f21a","resource":"switch-12","resourceType":"device","node":"","severity":"critical","message":"device unreachable","value":"","startsAt":"2026-01-01T00:00:00Z"}`
+
+	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}}
+	a := testAdapter(t, f)
+	h := a.handler()
+
+	post(t, h, "/webhook/pulse-default", memoryThreshold)
+	post(t, h, "/webhook/pulse-default", unreachableDevice)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.inbounds) != 2 {
+		t.Fatalf("expected two separate pushes: %+v", f.inbounds)
+	}
+	idOf := func(inbound map[string]any) string {
+		signals := inbound["signals"].([]any)
+		return signals[0].(map[string]any)["initiationId"].(string)
+	}
+	id1, id2 := idOf(f.inbounds[0]), idOf(f.inbounds[1])
+	if id1 == "" || id2 == "" || id1 == id2 {
+		t.Fatalf("two unrelated Pulse alerts must carry distinct, non-empty initiationIds: %q vs %q", id1, id2)
 	}
 }
 

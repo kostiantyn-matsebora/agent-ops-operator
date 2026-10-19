@@ -20,7 +20,7 @@ func TestOriginatorAbsentWithoutASignalIdentity(t *testing.T) {
 		t.Fatal("no source name must mean no originator")
 	}
 	var o *Originator
-	_, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "hi")
+	_, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "hi", FreshInitiationID())
 	if err == nil || !strings.Contains(err.Error(), "servedBy") {
 		t.Fatalf("the error must name the fix, got %v", err)
 	}
@@ -44,7 +44,7 @@ func TestOriginatorPostsAChatSignal(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOriginator(srv.URL, "signal-token", "console")
-	reason, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "check the nodes")
+	reason, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "check the nodes", FreshInitiationID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,18 +69,44 @@ func TestOriginatorPostsAChatSignal(t *testing.T) {
 	if labels[labelChatChannel] != "console-chan" || labels[labelChatSender] != "alice" {
 		t.Fatalf("labels: %v", labels)
 	}
-	if fp, _ := sig["fingerprint"].(string); !strings.HasPrefix(fp, "console-") {
-		t.Fatalf("fingerprint: %v", sig["fingerprint"])
+	if id, _ := sig["initiationId"].(string); !strings.HasPrefix(id, "console-") {
+		t.Fatalf("initiationId: %v", sig["initiationId"])
 	}
 
 	// two messages must not dedup: a person asking twice means it twice
-	first, _ := signals[0].(map[string]any)["fingerprint"].(string)
-	if _, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "check the nodes"); err != nil {
+	first, _ := signals[0].(map[string]any)["initiationId"].(string)
+	if _, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "check the nodes", FreshInitiationID()); err != nil {
 		t.Fatal(err)
 	}
 	signals, _ = body["signals"].([]any)
-	if second, _ := signals[0].(map[string]any)["fingerprint"].(string); second == first {
-		t.Fatal("repeated messages must carry distinct fingerprints")
+	if second, _ := signals[0].(map[string]any)["initiationId"].(string); second == first {
+		t.Fatal("repeated messages must carry distinct initiationIds")
+	}
+}
+
+// TestOriginatorPropagatesAGivenInitiationIDVerbatim pins the console's
+// second case: a continuation into a conversation it already displays passes
+// that conversation's own conversationId through as initiationId, byte for
+// byte — no re-mint, no re-derivation. Start has no way to tell the two
+// cases apart itself; the caller's choice of argument IS the decision.
+func TestOriginatorPropagatesAGivenInitiationIDVerbatim(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"queued": 1, "conversations": 1})
+	}))
+	defer srv.Close()
+
+	o := NewOriginator(srv.URL, "signal-token", "console")
+	const bound = "bound-conversation-id-123"
+	if _, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "one more thing", bound); err != nil {
+		t.Fatal(err)
+	}
+	signals, _ := body["signals"].([]any)
+	sig, _ := signals[0].(map[string]any)
+	if sig["initiationId"] != bound {
+		t.Fatalf("a propagated id must reach the manager verbatim, got %v", sig["initiationId"])
 	}
 }
 
@@ -96,7 +122,7 @@ func TestOriginatorSurfacesTheDropReason(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOriginator(srv.URL, "signal-token", "console")
-	reason, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "anyone there?")
+	reason, err := o.Start(context.Background(), "console-chan", "alice", "sha256:alice", "anyone there?", FreshInitiationID())
 	if err != nil {
 		t.Fatalf("an unclaimed source is a reported reason, not a transport error: %v", err)
 	}
@@ -109,7 +135,7 @@ func TestOriginatorSurfacesTheDropReason(t *testing.T) {
 // refuses before posting rather than letting the manager reject it.
 func TestOriginatorRefusesWithoutAChannel(t *testing.T) {
 	o := NewOriginator("http://unused", "signal-token", "console")
-	if _, err := o.Start(context.Background(), "", "alice", "sha256:alice", "hi"); err == nil {
+	if _, err := o.Start(context.Background(), "", "alice", "sha256:alice", "hi", FreshInitiationID()); err == nil {
 		t.Fatal("origination without a channel must be refused")
 	}
 }

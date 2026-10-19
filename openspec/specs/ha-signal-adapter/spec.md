@@ -9,10 +9,10 @@ state, repairs, fault sensors and pending updates — each switchable, on one
 source through one rules policy.
 
 It reuses the cluster-events rule vocabulary exactly rather than inventing a
-second one, fingerprints on Home Assistant's OWN dedup identity — logger plus
-source location for a log record, the condition's own identity for a surface,
-never the occurrence — resumes where it stopped, and takes its credential as
-environment projected per SOURCE.
+second one, mints its `initiationId` from Home Assistant's OWN dedup identity
+— logger plus source location for a log record, the condition's own identity
+for a surface, never the occurrence — resumes where it stopped, and takes its
+credential as environment projected per SOURCE.
 
 Its loop breaker is the agent SURFACE: a failed agent call is logged there, and
 reporting it would reach the agent that made it.
@@ -23,18 +23,31 @@ reporting it would reach the agent that made it.
 
 `signals/ha/` SHALL be its own Go module with no dependencies outside this
 repository, reaching Home Assistant over plain HTTP and the manager over the
-`/signal/*` contract. It SHALL hold no Kubernetes client and SHALL NAME NO
-ServiceAccount, because its data source is Home Assistant, not the cluster —
-so it runs as the release floor, an account bound to nothing.
+`/signal/*` contract.
 
-It SHALL normalize what it observes into signals — `fingerprint`, `labels`,
+It SHALL hold no Kubernetes client and SHALL NAME NO ServiceAccount, because
+its data source is Home Assistant, not the cluster — so it runs as the
+release floor, an account bound to nothing.
+
+It SHALL normalize what it observes into signals — `initiationId`, `labels`,
 optional `title`, `payload`, `kind` — and post them to the manager's inbound
-endpoint. It SHALL apply no grouping, cooldown or recurrence logic: those stay
-manager-side, driven by the `SignalSource`.
+endpoint.
+
+The adapter SHALL mint each signal's `initiationId` in its existing pending
+and dwell logic — the point where it already decides what constitutes one
+problem.
+
+The id keys on the condition's own identity, never the occurrence: logger
+plus source location for a log record, the condition's identity for a
+surface. Cooldown and routing stay manager-side, keyed on that id.
 
 #### Scenario: Adapter normalizes and posts
 - **WHEN** the adapter observes a Home Assistant condition matching its configuration
-- **THEN** it posts a normalized signal to the manager and performs no grouping of its own
+- **THEN** it posts a normalized signal carrying the `initiationId` its own dwell logic minted, and no manager-side policy regroups it
+
+#### Scenario: A recurring condition repeats its id
+- **WHEN** a condition already reported recurs and is emitted again, outside the source's cooldown and while its conversation is open
+- **THEN** the signal carries the same `initiationId` and lands on that conversation as a recurrence
 
 #### Scenario: No cluster access
 - **WHEN** the adapter's workload is rendered
@@ -160,7 +173,7 @@ position past the listing on connect rather than stop observing.
 The adapter SHALL NOT emit a signal about agent-ops' own machinery. Health of
 the system is status, not signal: routing it back through ingest would open a
 conversation with an agent whose own failure produces the next signal, and nothing downstream stops
-that loop — each occurrence carries a fresh fingerprint.
+that loop — each occurrence mints a fresh `initiationId`.
 
 #### Scenario: Self-observation produces nothing
 - **WHEN** an observed condition is attributable to agent-ops' own components
@@ -188,7 +201,7 @@ normalize each into the same signal shape a log record produces, on the same
 `SignalSource`, so one route and one rules policy cover everything the
 instance reports about its own health:
 
-| Surface | One signal per | Fingerprint | Message |
+| Surface | One signal per | Correlation id (`initiationId`) | Message |
 |---|---|---|---|
 | a config entry in a failed state (`setup_retry`, `setup_error`, `migration_error` by default) | entry | domain and entry id | the entry's own reason |
 | a repair issue | issue | domain and issue id | the issue's translation key and placeholders |
@@ -196,27 +209,33 @@ instance reports about its own health:
 | pending updates — `update.*` entities in state `on` | the source (ONE digest) | the source | every pending entity with its installed and latest version |
 
 Every signal, log records included, SHALL carry a `surface` label — `log`,
-`config-entry`, `repair`, `sensor` or `update` — and the `integration` label
-SHALL name the integration the condition belongs to, so a rule can select a
-surface and grouping stays by integration. Repair severity SHALL map to the
-`level` label. The `levels` configuration SHALL apply to log records only; a
-surface is silenced by disabling it or by a rule.
+`config-entry`, `repair`, `sensor` or `update`. The `integration` label SHALL
+name the integration the condition belongs to, so a rule can select a surface
+and a reader can tell integrations apart.
+
+Repair severity SHALL map to the `level` label. The `levels` configuration
+SHALL apply to log records only — a surface is silenced by disabling it or by
+a rule.
 
 Each surface SHALL be enable-able independently in the source configuration,
-the first three enabled by default and the update digest disabled by default,
-and a disabled surface SHALL cause no read on its own account. The one read
-two consumers share is the config entry listing, which the log lane's dwell
-re-check already uses as its health predicate: with the config-entry surface
-disabled it SHALL be read only while a dwell is pending, and never otherwise.
-The set of
-config entry states, repair severities and sensor device classes that count
-SHALL each be configurable, with the defaults above.
+the first three enabled by default and the update digest disabled by default.
+A disabled surface SHALL cause no read on its own account.
+
+The one read two consumers share is the config entry listing, which the log
+lane's dwell re-check already uses as its health predicate. With the
+config-entry surface disabled it SHALL be read only while a dwell is pending,
+and never otherwise.
+
+The set of config entry states, repair severities and sensor device classes
+that count SHALL each be configurable, with the defaults above.
 
 A standing condition SHALL be reported when it appears, and again only after
 it went away and came back. The update digest SHALL be re-posted when a new
-pending update joins the set, carrying the whole set. Where the adapter
-restarts, re-reporting what still stands is permitted: the manager's
-fingerprint cooldown and signature window absorb it.
+pending update joins the set, carrying the whole set.
+
+Where the adapter restarts, re-reporting what still stands is permitted: the
+re-report repeats the same `initiationId`, so the manager's cooldown absorbs
+it or the open conversation receives it as a recurrence.
 
 #### Scenario: An integration that stopped working without logging is reported
 - **WHEN** a config entry enters `setup_retry` with a reason and no log record is written

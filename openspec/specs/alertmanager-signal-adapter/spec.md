@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The webhook-receiving Alertmanager signal adapter in `signals/alertmanager/`: a dependency-free module that serves SignalSources through the signal adapter contract, accepting Alertmanager-format webhooks and normalizing firing alerts with built-in-path parity (fingerprints, labels, titles) while grouping stays manager-side. Webhook auth is opt-in via source credentials with constant-time bearer-token comparison.
+The webhook-receiving Alertmanager signal adapter in `signals/alertmanager/`: a dependency-free module that serves SignalSources through the signal adapter contract, accepting Alertmanager-format webhooks and normalizing firing alerts carrying the sender's own group identity (`initiationId`, labels, titles) while cooldown and routing stay manager-side, keyed on that id. Webhook auth is opt-in via source credentials with constant-time bearer-token comparison.
 
 ## Requirements
 
@@ -15,26 +15,38 @@ A signal adapter in `signals/alertmanager/` (own dependency-free Go module and i
 
 #### Scenario: Alertmanager-format alerts become conversations
 - **WHEN** a SignalSource typed with the adapter's key is served and a sender posts a firing alert to `/webhook/<source>`
-- **THEN** a normalized signal is pushed to `/signal/inbound` and the manager's ingest core creates or reuses a conversation per its grouping config
+- **THEN** a normalized signal is pushed to `/signal/inbound` and the manager's ingest core creates or reuses a conversation keyed on its `initiationId`
 
 #### Scenario: Webhook endpoint is discoverable from source status
 - **WHEN** the adapter reports a served source Ready
 - **THEN** the source's Ready condition message names the `/webhook/<source>` path an operator should target
 
-### Requirement: Alerts normalize with built-in-path parity
-The adapter SHALL drop non-`firing` alerts and, per firing alert, emit one signal with: the Alertmanager `fingerprint` verbatim, or — when absent — a deterministic fallback derived by hashing the sorted label pairs (empty fingerprints are rejected by `/signal/inbound`); the raw alert label map as `labels`; title `"🔍 " + alertname` plus ` — <namespace>` when that label is present; a per-alert JSON payload carrying labels, annotations, `startsAt`, and `generatorURL`; and no `kind` (alert lane). The adapter SHALL NOT group, deduplicate, or apply cooldown — signature grouping, fingerprint cooldown, window reuse, and recurrence stay manager-side from `SignalSource.spec.grouping`.
+### Requirement: Alerts normalize carrying the sender's group identity
+The adapter SHALL drop non-`firing` alerts and, per firing alert, emit one signal with:
+
+- `initiationId`: the webhook's `groupKey` verbatim — Alertmanager's `group_by` is the grouping decision, made upstream, so every alert of one group correlates to one conversation. When the body carries no `groupKey`, a deterministic fallback derived by hashing the sorted `groupLabels` pairs (an empty id is rejected by `/signal/inbound`)
+- the raw alert label map as `labels`
+- title `"🔍 " + alertname` plus ` — <namespace>` when that label is present
+- a per-alert JSON payload carrying labels, annotations, `startsAt`, and `generatorURL`
+- no `kind` (alert lane)
+
+The adapter SHALL NOT deduplicate, apply cooldown, or route. Which alerts are one problem is the sender's `group_by` decision, carried in the id — the dedup window stays manager-side cooldown on that id, and routing stays manager-side id equality.
 
 #### Scenario: Only firing alerts produce signals
 - **WHEN** a webhook body contains two `firing` and one `resolved` alert
 - **THEN** exactly two signals are pushed and the response reports what was queued
 
-#### Scenario: Missing fingerprint gets a stable fallback
-- **WHEN** an alert arrives without a `fingerprint` field twice with identical labels
-- **THEN** both posts carry the same derived fingerprint and the manager's cooldown collapses the repeat
+#### Scenario: One group is one conversation
+- **WHEN** two firing alerts of one Alertmanager group arrive, in one webhook or across two
+- **THEN** every signal carries that group's `groupKey` as its `initiationId` and they land in one conversation
 
-#### Scenario: Grouping matches the built-in path
-- **WHEN** two firing alerts share values for the source's `signatureLabels`
-- **THEN** they land in the same conversation, exactly as the same alerts would via the built-in endpoint
+#### Scenario: Regrouping upstream re-routes
+- **WHEN** `group_by` changes upstream so an alert arrives under a `groupKey` no open conversation carries
+- **THEN** a new conversation is created adopting that id
+
+#### Scenario: Missing groupKey gets a stable fallback
+- **WHEN** a nonstandard sender posts twice without a `groupKey` and with identical `groupLabels`
+- **THEN** both posts carry the same derived `initiationId` and the manager's cooldown collapses the repeat
 
 ### Requirement: Webhook auth is opt-in via source credentials
 When a served source's listing entry advertises a `credentialEnvPrefix` (the SignalSource set `credentialsSecretRef`), the adapter SHALL require `Authorization: Bearer <token>` on `/webhook/{source}` matching the projected `AGENTOPS_CRED_<SOURCE>_TOKEN` value, compared in constant time, returning 401 on mismatch or absence. Sources without credentials SHALL accept unauthenticated posts. The manager SHALL continue to read no Secrets — the token reaches the adapter only through the existing kubelet-resolved credential projection.

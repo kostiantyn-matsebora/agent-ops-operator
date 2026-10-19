@@ -219,10 +219,7 @@ spec:
   # the reconciler and resolved by the kubelet; the manager reads no Secrets.
   credentialsSecretRef:
     name: {{ $secret }}
-  {{- with $src.grouping }}
-  grouping:
-{{ toYaml . | indent 4 }}
-  {{- end }}
+  cooldownHours: {{ $src.cooldownHours }}
   {{- /* Built as a map so the key is omitted when everything is empty: a bare
   `config:` would set spec.config to null rather than leave it unset. */}}
   {{- $cfg := dict "endpoint" (include "home-assistant.endpoint" .) }}

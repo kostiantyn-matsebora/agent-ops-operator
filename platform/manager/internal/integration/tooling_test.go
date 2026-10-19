@@ -255,7 +255,7 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 func matAssertSignalConversationMaterializesTooling(t *testing.T, ctx context.Context, srv *httpapi.Server) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
-		"fingerprint": "mat-1", "labels": map[string]string{"alertname": "MatAlert"}, "payload": "boom",
+		"initiationId": "mat-1", "labels": map[string]string{"alertname": "MatAlert"}, "payload": "boom",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -287,7 +287,7 @@ func matAssertSignalConversationMaterializesTooling(t *testing.T, ctx context.Co
 func matAssertTaskConversationInheritsClaimingPipelineTooling(t *testing.T, ctx context.Context, srv *httpapi.Server) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
-		"fingerprint": "mat-task-1", "kind": "task", "payload": "addressed",
+		"initiationId": "mat-task-1", "kind": "task", "payload": "addressed",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("task signal: %d %s", rec.Code, rec.Body.String())
@@ -319,12 +319,12 @@ func matAssertTaskConversationInheritsClaimingPipelineTooling(t *testing.T, ctx 
 func matAssertMalformedOrUnknownSourceRejected(t *testing.T, srv *httpapi.Server) {
 	t.Helper()
 	if rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
-		"kind": "task", "payload": "no fingerprint",
+		"kind": "task", "payload": "no initiationId",
 	}}); rec.Code != 400 {
-		t.Fatalf("a signal with no fingerprint must be refused: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("a signal with no initiationId must be refused: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := postSignal(t, srv.Handler(), testMasterToken, "nope", []map[string]any{{
-		"fingerprint": "mat-task-x", "kind": "task", "payload": "x",
+		"initiationId": "mat-task-x", "kind": "task", "payload": "x",
 	}}); rec.Code != 404 {
 		t.Fatalf("an unknown source must 404: %d", rec.Code)
 	}
@@ -364,7 +364,7 @@ func TestToolsModeRoundTripsFromPipelineToWorkUnit(t *testing.T) {
 	}
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "mode-src", []map[string]any{{
-		"fingerprint": "mode-1", "labels": map[string]string{"alertname": "ModeAlert"}, "payload": "boom",
+		"initiationId": "mode-1", "labels": map[string]string{"alertname": "ModeAlert"}, "payload": "boom",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

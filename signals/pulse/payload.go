@@ -100,14 +100,15 @@ func parsePulseEvent(body []byte) (pulseEvent, error) {
 	return e, nil
 }
 
-// fingerprint derives a deterministic identity for the underlying Pulse
-// alert occurrence: the resource plus Pulse's own alert id when the sender
-// provides one, falling back to a hash of the resource/type/severity/message
-// tuple when it does not (mirroring signals/alertmanager's labelFingerprint
-// fallback). startsAt and value are excluded on purpose, so a firing event
-// and its later resolved pair for the same occurrence yield the same
-// fingerprint, and a retried delivery of either does too.
-func (e pulseEvent) fingerprint() string {
+// initiationID derives this signal's correlation id from the underlying
+// Pulse alert occurrence: the resource plus Pulse's own alert id when the
+// sender provides one, falling back to a hash of the
+// resource/type/severity/message tuple when it does not (mirroring
+// signals/alertmanager's groupLabelsFallbackID). startsAt and value are
+// excluded on purpose, so a firing event and its later resolved pair for the
+// same occurrence yield the same id, and a retried delivery of either does
+// too — and two unrelated alerts (different resource/id) never collide.
+func (e pulseEvent) initiationID() string {
 	if e.ID != "" {
 		return "pulse:" + e.Resource + ":" + e.ID
 	}

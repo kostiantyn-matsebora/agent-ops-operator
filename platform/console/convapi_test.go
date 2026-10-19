@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -131,5 +135,59 @@ func TestJoinHintNamesTheCoordinatorForAnUnjoinedRoot(t *testing.T) {
 	}
 	if strings.Contains(out.JoinHint.Fix, "the Pipeline that originated it") {
 		t.Fatalf("must not fall back to the Pipeline wording for a Coordinator root: %q", out.JoinHint.Fix)
+	}
+}
+
+// handleStart is the console's one write that creates a conversation, and the
+// one production call site of Originator.Start — it must always mint a fresh
+// initiationId (design: a new task from the start form is its own
+// aggregation unit, never a continuation), not fall back to an empty or
+// manager-derived value.
+func TestHandleStartPostsAFreshInitiationID(t *testing.T) {
+	var posted map[string]any
+	signalSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/signal/inbound" {
+			t.Errorf("origination must use the signal path, got %s", r.URL.Path)
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &posted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"queued": 1, "conversations": 1})
+	}))
+	defer signalSrv.Close()
+
+	f := newFakeManager(t, ChannelInfo{Name: "console"})
+	adapter, tr, cache := consoleUnderTest(t, f)
+	adapter.refreshChannels(context.Background())
+	api := NewAPI(APIDeps{
+		Cache: cache, Transcripts: tr, Adapter: adapter,
+		Activity:   NewActivityWindow(adapter.mgr, 500),
+		Manager:    adapter.mgr,
+		Originator: NewOriginator(signalSrv.URL, "signal-token", "console"),
+		Config: &Config{
+			Namespace: "agent-ops", AdapterName: "console", UIToken: "tok",
+			WriteEnabled: true, SignalSourceName: "console",
+		},
+	})
+	h := api.Handler(http.NotFoundHandler())
+
+	rec := authed(t, h, "POST", "/api/conversations", `{"task":"check the disk"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	signals, _ := posted["signals"].([]any)
+	if len(signals) != 1 {
+		t.Fatalf("want one signal posted to the manager, got %v", posted)
+	}
+	s, _ := signals[0].(map[string]any)
+	id, _ := s["initiationId"].(string)
+	if id == "" {
+		t.Fatalf("handleStart must mint a fresh initiationId, got %v", s)
+	}
+	if !strings.HasPrefix(id, "console-") {
+		t.Fatalf("a console-originated task must carry FreshInitiationID's own shape, got %q", id)
+	}
+	if s["payload"] != "check the disk" {
+		t.Fatalf("payload: %v", s["payload"])
 	}
 }

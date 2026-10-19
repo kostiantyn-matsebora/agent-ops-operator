@@ -70,11 +70,19 @@ const ConditionTopicReady = "TopicReady"
 // communicated and `Topic` describes the thread to create. The adapter turns
 // either into whatever its surface speaks. See message.go for why.
 type Op struct {
-	ID           string  `json:"id"`
-	Channel      string  `json:"channel"`
-	Conversation string  `json:"conversation,omitempty"`
-	Kind         OpKind  `json:"kind"`
-	ThreadID     *string `json:"threadId,omitempty"` // send target; nil = general
+	ID           string `json:"id"`
+	Channel      string `json:"channel"`
+	Conversation string `json:"conversation,omitempty"`
+	// ConversationID is the owning conversation's own spec.conversationId —
+	// the sender-minted correlation id, carried BESIDE Conversation (the
+	// object's name) rather than in place of it (channel-adapter-contract
+	// OPS-9). Additive and opaque: a conformant adapter ignores it exactly as
+	// it ignores any field it does not recognise. Empty on a conversation
+	// that predates the field (legacy — never synthesized) and on an op with
+	// no owning conversation at all (a general-surface notice).
+	ConversationID string  `json:"conversationId,omitempty"`
+	Kind           OpKind  `json:"kind"`
+	ThreadID       *string `json:"threadId,omitempty"` // send target; nil = general
 
 	// Topic describes the thread to create (ensure-topic only).
 	Topic *TopicDescriptor `json:"topic,omitempty"`
@@ -195,7 +203,7 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 		id += ":r" + strconv.Itoa(int(conv.Status.Reopens))
 	}
 	q.enqueue(ctx, &Op{
-		ID: id, Channel: ch.Name, Conversation: conv.Name,
+		ID: id, Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.Spec.ConversationID,
 		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
@@ -203,10 +211,10 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 // EnqueueCloseTopic queues archiving of one conversation thread. The id is
 // stable per conversation×channel, so the reconciler re-enqueuing it on every
 // pass while the finalizer holds dedups instead of piling up.
-func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, conversation string) {
+func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string, conv *agentopsv1alpha1.Conversation) {
 	tid := threadID
 	q.enqueue(ctx, &Op{
-		ID: CloseTopicOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
+		ID: CloseTopicOpID(conv.Name, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.Spec.ConversationID,
 		Kind: OpCloseTopic, ThreadID: &tid, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
@@ -224,12 +232,12 @@ func CloseTopicOpID(conversation, channel string) string {
 // message: the manager states what happened, and escaping, splitting and
 // placement belong to whoever knows the transport. An adapter is free to ignore
 // the text and express the ending structurally instead.
-func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, conversation string) {
+func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string, conv *agentopsv1alpha1.Conversation) {
 	tid := threadID
 	msg := Notice("🗑 This conversation has been deleted, along with everything it recorded. " +
 		"The thread stays here to read. A new message starts a NEW conversation — it will not continue this one.")
 	q.enqueue(ctx, &Op{
-		ID: DeleteConversationOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
+		ID: DeleteConversationOpID(conv.Name, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.Spec.ConversationID,
 		Kind: OpDeleteConversation, ThreadID: &tid, Message: &msg,
 		channelType: ch.Spec.Adapter, stable: true,
 	})
@@ -269,8 +277,16 @@ func (q *OpQueue) Settled(id string) bool {
 // (Notice, Warn, AnswerMessage, RelayMessage, SignalMessage) — there is no
 // string-valued form on purpose, because that is what let transport markup back
 // into the manager.
-func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, msg Message) {
-	q.enqueueMessage(ctx, "send:"+sendEpoch+":"+strconv.FormatInt(sendSeq.Add(1), 36), ch, "", threadID, msg, false)
+//
+// conv is nilable: a general-surface notice (command usage, an unwired-source
+// warning) belongs to no conversation, so both Conversation and
+// ConversationID stay empty on its op rather than being guessed.
+func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
+	name, conversationID := "", ""
+	if conv != nil {
+		name, conversationID = conv.Name, conv.Spec.ConversationID
+	}
+	q.enqueueMessage(ctx, "send:"+sendEpoch+":"+strconv.FormatInt(sendSeq.Add(1), 36), ch, name, conversationID, threadID, msg, false)
 }
 
 // EnqueueFarewell posts a conversation's closing notice with a STABLE id, so a
@@ -290,7 +306,7 @@ func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Chann
 func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
 	id := fmt.Sprintf("farewell:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // EnqueueReopenNotice announces that a conversation is live again, on every
@@ -307,7 +323,7 @@ func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Chan
 func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
 	id := fmt.Sprintf("reopened:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // EnqueueEscalationMessage posts the digest an `escalate` call supplied as the
@@ -322,7 +338,7 @@ func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.
 func (q *OpQueue) EnqueueEscalationMessage(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
 	id := fmt.Sprintf("escalate:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // EnqueueInputDelivery queues ONE input's delivery to ONE channel — the event
@@ -336,9 +352,9 @@ func (q *OpQueue) EnqueueEscalationMessage(ctx context.Context, ch *agentopsv1al
 // that, a conversation would repost its alert, and everything anyone said, on
 // every reconcile.
 func (q *OpQueue) EnqueueInputDelivery(ctx context.Context, ch *agentopsv1alpha1.Channel,
-	conversation, inputID string, threadID *string, msg Message) {
+	conv *agentopsv1alpha1.Conversation, inputID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, InputOpID(conversation, inputID, ch.Name), ch, conversation, threadID, msg, true)
+	q.enqueueMessage(ctx, InputOpID(conv.Name, inputID, ch.Name), ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // InputOpID is the stable id of one input's delivery on one channel.
@@ -355,9 +371,9 @@ func InputOpID(conversation, inputID, channel string) string {
 // Ack and notice sends stay on the counter-based id: saying the same thing twice
 // is correct when a user asked twice, and neither derives from CR state.
 func (q *OpQueue) EnqueueRunReply(ctx context.Context, ch *agentopsv1alpha1.Channel,
-	conversation, runID string, threadID *string, msg Message) {
+	conv *agentopsv1alpha1.Conversation, runID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, RunReplyOpID(conversation, ch.Name, runID), ch, conversation, threadID, msg, true)
+	q.enqueueMessage(ctx, RunReplyOpID(conv.Name, ch.Name, runID), ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // RunReplyOpID is the stable id of one run's reply on one channel. Exported
@@ -380,10 +396,10 @@ func ParseRunReplyOpID(id string) (conversation, channel, runID string, ok bool)
 }
 
 func (q *OpQueue) enqueueMessage(ctx context.Context, id string, ch *agentopsv1alpha1.Channel,
-	conversation string, threadID *string, msg Message, stable bool) {
+	conversation, conversationID string, threadID *string, msg Message, stable bool) {
 
 	q.enqueue(ctx, &Op{
-		ID: id, Channel: ch.Name, Conversation: conversation,
+		ID: id, Channel: ch.Name, Conversation: conversation, ConversationID: conversationID,
 		Kind: OpSend, ThreadID: threadID, Message: &msg, channelType: ch.Spec.Adapter, stable: stable,
 	})
 }

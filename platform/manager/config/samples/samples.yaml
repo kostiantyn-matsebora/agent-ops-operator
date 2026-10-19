@@ -237,10 +237,8 @@ spec:
     # the Channel this chat is the general surface OF — replies go back here
     channel: home-ops
     # approvers: [123456789]
-  grouping:
-    # Chat defaults cooldown OFF and skips signature grouping: a person
-    # repeating a request means it twice. Set signatureLabels to opt in.
-    cooldownHours: 0
+  # Chat keeps cooldown OFF: a person repeating a request means it twice.
+  cooldownHours: 0
 ---
 # NOTE: gateway-telegram has NO CR. It produces no signals, so it is not an
 # adapter: the telegram chart owns its Deployment and injects
@@ -328,8 +326,6 @@ metadata:
   namespace: agent-ops
 spec:
   adapter: alertmanager
-  grouping:
-    signatureLabels: ["alertgroup", "alertname", "namespace"]
 ---
 # Credentialed variant: the Secret's TOKEN key is projected into the adapter
 # (AGENTOPS_CRED_ALERTS_SECURE_TOKEN) and webhooks must carry
@@ -401,10 +397,9 @@ metadata:
   namespace: agent-ops
 spec:
   adapter: k8s-events
-  # group by the failing OBJECT, so one crash-looping pod is one conversation
-  # however many times it repeats
-  grouping:
-    signatureLabels: ["namespace", "kind", "name"]
+  # one crash-looping pod is one conversation however many times it repeats —
+  # the adapter mints its initiationId from the failing OBJECT, not a
+  # source-level setting.
   config:
     # Normal events are the cluster's background hum — watching them would bury
     # real problems and burn LLM credits.
@@ -437,8 +432,9 @@ spec:
       - name: agentops-observe
 ---
 # Adapter-served signal source: opaque config interpreted only by signal-cron.
-# The grouping window makes consecutive runs land in ONE conversation, later
-# ticks resuming the agent session (a recurring job that remembers).
+# The adapter mints one initiationId for the job, so every tick lands in ONE
+# conversation, later ticks resuming the agent session (a recurring job that
+# remembers).
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
 metadata:

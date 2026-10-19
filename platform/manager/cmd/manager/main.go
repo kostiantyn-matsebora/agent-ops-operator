@@ -163,6 +163,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Equality routing (internal/httpapi), reopen's at-most-one-open check and
+	// member reuse (internal/chat) all read this index instead of the removed
+	// agentops.dev/signature-hash label. Registered before any
+	// SetupWithManager call — an index added after the cache starts is a
+	// startup error.
+	if err := controller.SetupConversationIndexes(mgr.GetFieldIndexer()); err != nil {
+		setupLog.Error(err, "conversation indexes")
+		os.Exit(1)
+	}
+
 	// Channel plumbing: built-in channel types register in-process providers
 	// here; every other type is served by an external adapter consuming the op
 	// queue over /channel/*. The manager reads no secrets — adapter auth

@@ -23,7 +23,7 @@ result to the manager.
 every kind of thing that can originate a conversation has an adapter behind
 it.
 
-![Your signal adapter watches your transport and posts normalised signals to the manager, which groups them and opens a conversation.]({{ '/assets/img/guides/signal-adapter-light.svg' | relative_url }}){: .ao-diagram}
+![Your signal adapter watches your transport, mints an initiationId, and posts it to the manager, which matches it by equality and opens or resumes a conversation.]({{ '/assets/img/guides/signal-adapter-light.svg' | relative_url }}){: .ao-diagram}
 
 ## Before you start
 
@@ -64,16 +64,16 @@ Four pieces, and the last one is somebody else's:
 3. **A `SignalSource` naming it.** The CR name is the routing key, and your
    implementation defines what its opaque `config` may hold.
 4. **A `Pipeline` claiming that source**, or its signals drop with
-   `Wired=False` (`MGR-3`).
+   `Wired=False` (`MGR-4`).
 
-**You normalise. The manager groups** (`MGR-1`). Do not implement dedup,
-cooldown or recurrence yourself:
+**You normalise and correlate. The manager only compares** (`MGR-2`). Do not
+implement dedup, cooldown or recurrence yourself:
 
 | You | The manager |
 |---|---|
 | Read your sources and their opaque `config` | Serves them, and validates against your declared schema |
 | Watch the transport | — |
-| Normalise into `{fingerprint, labels, title?, payload, kind}` | Groups by signature, applies cooldown, reuses windows, resumes sessions |
+| Normalise into `{initiationId, labels, title?, payload, kind}`, minting or propagating the id | Routes by `initiationId`/`conversationId` equality, applies cooldown, resumes sessions |
 | Persist cursors through the state API | Stores them |
 | Report config problems | Surfaces them on the source's `Ready` condition |
 
@@ -109,12 +109,21 @@ read sources from here, never assume connectivity or credentials yourself).
 ## 2. Normalise into signals
 
 ```json
-{"fingerprint": "…", "labels": {}, "title": "…", "payload": "…", "kind": "alert"}
+{"initiationId": "…", "labels": {}, "title": "…", "payload": "…", "kind": "alert"}
 ```
 
-**The fingerprint is the dedup identity of the THING, not of the occurrence**
-(`ADP-2`). `signals/k8s-events` keys on the involved object plus the reason,
-never on the Event, because Kubernetes recreates Events per recurrence.
+**`initiationId` is your own correlation id for the THING, not the
+occurrence** (`ADP-2`). Mint it where your aggregation already decides "this
+is the same problem" — the same recurring issue reuses the same id across
+occurrences.
+
+`signals/k8s-events` keys on the owning workload alone, never the Event
+object or its reason. Kubernetes recreates Event objects for every
+recurrence, and a workload can fail for several reasons across its lifetime.
+
+A round trip is the other case: when your adapter fronts a system that hands
+a manager-issued `conversationId` back to you, propagate it verbatim as the
+next signal's `initiationId` — never re-derive it.
 
 `kind` picks the lane — see
 [Lanes]({{ '/contracts/signal-adapter/' | relative_url }}#lanes). A `chat`
@@ -131,7 +140,7 @@ Wrap the signals in the envelope naming your source:
 
 ```json
 {"source": "my-source",
- "signals": [{"fingerprint": "…", "labels": {}, "title": "…",
+ "signals": [{"initiationId": "…", "labels": {}, "title": "…",
               "payload": "…", "kind": "alert"}]}
 ```
 
@@ -153,9 +162,11 @@ cooldown, so never build your own dedup to avoid them.
 
 **Verify:** post the same signal twice in a row. The response's
 `conversations` count stays at one, and `queued` reflects both posts
-accepted. On a source with `cooldownHours` set, repeating the same
-`fingerprint` after that window still collapses into the same conversation
-rather than opening a new one.
+accepted.
+
+Repeating the same `initiationId` after `cooldownHours` has passed still
+lands on that conversation while it stays OPEN — closing it first opens a
+fresh one on the next repeat instead.
 
 ## 4. Persist cursors (if you poll)
 
@@ -256,7 +267,7 @@ nothing**: no RBAC, no network policy and no credential follows from it.
 
 ## 7. Declare a SignalSource, and claim it
 
-<!-- generated: template kind=SignalSource name=my-source fields=config,grouping comments=off -->
+<!-- generated: template kind=SignalSource name=my-source fields=config,cooldownHours comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
@@ -265,16 +276,16 @@ metadata:
 spec:
   adapter: <adapter>
   config: {}
-  grouping:
-    cooldownHours: 6
-    signatureLabels:
-    - <signatureLabel>
-    windowDays: 7
+  cooldownHours: 6
 ```
 <!-- /generated -->
 
+`cooldownHours` is the one knob: how long a repeated `initiationId` is
+treated as a re-send rather than a re-notification. Size it to your own
+re-notification policy if the default of 6 does not fit.
+
 Then list that source on a Ready Pipeline's `signalSourceRefs`. Until you do,
-`Wired=False` (`MGR-3`) and every signal you push is dropped.
+`Wired=False` (`MGR-4`) and every signal you push is dropped.
 
 ```sh
 kubectl -n agent-ops get signalsource my-source
@@ -301,7 +312,7 @@ signals land.
    dependency-free Go with a five-field cron parser and restart-safe cursors.
    It conforms to the [signal adapter
    specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-   1.0.0.
+   2.0.0.
 3. **Compare a different transport** —
    [`signals/alertmanager`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/alertmanager/)
    receives webhooks,

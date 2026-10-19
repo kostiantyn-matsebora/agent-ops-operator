@@ -14,6 +14,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 )
 
 // erroringReader always fails to read, for exercising readJSON's error path —
@@ -32,6 +33,7 @@ func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, controller.ConversationIDIndexer).
 		WithObjects(objs...).Build()
 	q := &chat.OpQueue{Client: c, Namespace: "agent-ops", Registry: chat.NewRegistry()}
 	router := &chat.Router{Client: c, Reader: c, Namespace: "agent-ops", Ops: q}

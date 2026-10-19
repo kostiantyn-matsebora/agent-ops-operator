@@ -349,10 +349,14 @@ const maxTitleText = 120
 
 // normalize turns one log record into a contract signal for a source.
 //
-// The fingerprint keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
+// initiationId keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
 // deduplication key — and never on the timestamp or the occurrence count. A
 // recurring error must keep one identity, or every repeat would open a fresh
-// conversation instead of collapsing under the manager's cooldown.
+// conversation instead of recurring onto the manager's open one. This is the
+// per-record condition identity: an entry that reaches the dwell queue
+// (pending.go) and aggregates several records under one integration mints
+// its OWN, broader id there instead — the point where that grouping decision
+// is actually made.
 func normalize(source string, rec *logRecord) Signal {
 	integration := integrationOf(rec.Name)
 	text := rec.Text()
@@ -397,12 +401,12 @@ func normalize(source string, rec *logRecord) Signal {
 	}
 
 	return Signal{
-		Fingerprint: fmt.Sprintf("%s@%s", source, rec.Key()),
-		Labels:      labels,
-		Title:       fmt.Sprintf("%s: %s", integration, truncate(oneLine(text), maxTitleText)),
-		Payload:     string(payload),
-		Kind:        "alert",
-		MatchText:   text,
+		InitiationID: fmt.Sprintf("%s@%s", source, rec.Key()),
+		Labels:       labels,
+		Title:        fmt.Sprintf("%s: %s", integration, truncate(oneLine(text), maxTitleText)),
+		Payload:      string(payload),
+		Kind:         "alert",
+		MatchText:    text,
 	}
 }
 

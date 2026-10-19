@@ -36,7 +36,7 @@ func convsFromPipeline(t *testing.T, pipeline string) []agentopsv1alpha1.Convers
 
 // One alert on a source two pipelines watch opens TWO conversations, each with
 // its own profile — and spends the source's cooldown exactly once, so the
-// second pipeline is not starved by the first having "used up" the fingerprint.
+// second pipeline is not starved by the first having "used up" the id.
 func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-fan-a")
@@ -49,7 +49,7 @@ func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 	h := apiServer().Handler()
 
 	rec := postSignal(t, h, testMasterToken, "src-fan", []map[string]any{
-		{"fingerprint": "fan-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
+		{"initiationId": "fan-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "disk is full"},
 	})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -76,8 +76,8 @@ func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "src-fan"}, &src); err != nil {
 		t.Fatal(err)
 	}
-	if len(src.Status.Cooldown) != 1 || src.Status.Cooldown[0].Fingerprint != "fan-1" {
-		t.Fatalf("one fingerprint, one cooldown entry: %+v", src.Status.Cooldown)
+	if len(src.Status.Cooldown) != 1 || src.Status.Cooldown[0].InitiationID != "fan-1" {
+		t.Fatalf("one initiationId, one cooldown entry: %+v", src.Status.Cooldown)
 	}
 	if src.Status.ReceivedTotal != 1 {
 		t.Fatalf("receivedTotal counts SIGNALS, not conversations: %d", src.Status.ReceivedTotal)
@@ -85,19 +85,21 @@ func TestSharedAlertSourceFansOutToEveryPipeline(t *testing.T) {
 
 	// a re-delivery inside the window reaches NEITHER pipeline
 	if rec := postSignal(t, h, testMasterToken, "src-fan", []map[string]any{
-		{"fingerprint": "fan-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "still full"},
+		{"initiationId": "fan-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "still full"},
 	}); rec.Code != 200 {
 		t.Fatalf("re-delivery: %d %s", rec.Code, rec.Body.String())
 	}
 	if n := len(convsFromPipeline(t, "fan-a")) + len(convsFromPipeline(t, "fan-b")); n != 2 {
-		t.Fatalf("a suppressed fingerprint must open nothing new, got %d conversation(s)", n)
+		t.Fatalf("a suppressed initiationId must open nothing new, got %d conversation(s)", n)
 	}
 }
 
-// Two pipelines fanning out produce conversations with the SAME signature. The
-// recorded origin is what keeps the second pipeline's next signal out of the
-// first pipeline's conversation — without it, the group would land under the
-// wrong profile with the wrong tools.
+// Two pipelines fanning out adopt the SAME initiationId as each of their own
+// conversations' conversationId. The recorded origin (pipelineRef) is what
+// keeps the second pipeline's next signal out of the first pipeline's
+// conversation — without it, a repeat would land under the wrong profile
+// with the wrong tools (pipeline-model: "Fanned-out conversations do not
+// merge").
 func TestFannedOutConversationsNeverMerge(t *testing.T) {
 	mkProfile(t, "prof-merge-a")
 	mkProfile(t, "prof-merge-b")
@@ -108,33 +110,70 @@ func TestFannedOutConversationsNeverMerge(t *testing.T) {
 	reconcilePipeline(t, "merge-b")
 	h := apiServer().Handler()
 
-	// two signals sharing a signature (same alertname), distinct fingerprints so
-	// cooldown admits both
-	for _, fp := range []string{"merge-1", "merge-2"} {
-		if rec := postSignal(t, h, testMasterToken, "src-merge", []map[string]any{
-			{"fingerprint": fp, "labels": map[string]string{"alertname": "Flapping"}, "payload": fp},
-		}); rec.Code != 200 {
-			t.Fatalf("signal %s: %d %s", fp, rec.Code, rec.Body.String())
-		}
+	if rec := postSignal(t, h, testMasterToken, "src-merge", []map[string]any{
+		{"initiationId": "merge-1", "labels": map[string]string{"alertname": "Flapping"}, "payload": "first"},
+	}); rec.Code != 200 {
+		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
 
 	a, b := convsFromPipeline(t, "merge-a"), convsFromPipeline(t, "merge-b")
 	if len(a) != 1 || len(b) != 1 {
-		t.Fatalf("the second signal must GROUP into each pipeline's own conversation: a=%d b=%d", len(a), len(b))
-	}
-	if len(a[0].Spec.Inputs) != 2 || len(b[0].Spec.Inputs) != 2 {
-		t.Fatalf("each conversation takes both signals: a=%d inputs, b=%d inputs",
-			len(a[0].Spec.Inputs), len(b[0].Spec.Inputs))
+		t.Fatalf("each pipeline must adopt its OWN conversation for the id: a=%d b=%d", len(a), len(b))
 	}
 	if a[0].Name == b[0].Name {
 		t.Fatal("the two pipelines shared one conversation — provenance scoping is not applied")
 	}
+	if a[0].Spec.ConversationID != "merge-1" || b[0].Spec.ConversationID != "merge-1" {
+		t.Fatalf("both adopt the SAME initiationId as their own conversationId: a=%q b=%q",
+			a[0].Spec.ConversationID, b[0].Spec.ConversationID)
+	}
+
+	// A repeat of the SAME id, once each conversation already has a session
+	// (so equality routing — not cooldown — is what is under test here): give
+	// both a session directly, then feed the field index a FRESH lookup by
+	// clearing this process's cooldown record for the id.
+	for _, conv := range []*agentopsv1alpha1.Conversation{&a[0], &b[0]} {
+		patch := client.MergeFrom(conv.DeepCopy())
+		conv.Status.SessionID = "sess-" + conv.Name
+		if err := k8sClient.Status().Patch(context.Background(), conv, patch); err != nil {
+			t.Fatal(err)
+		}
+		waitForRoutingCacheToObserve(t, conv, conv.ResourceVersion)
+	}
+	// a fresh httpapi.Server stands in for "outside cooldown" without waiting
+	// out the real window — but its cooldown map recovers from the source's
+	// durable record on first use, so that record must itself look expired.
+	backdateCooldown(t, "src-merge", "merge-1")
+	h2 := apiServer().Handler()
+	if rec := postSignal(t, h2, testMasterToken, "src-merge", []map[string]any{
+		{"initiationId": "merge-1", "labels": map[string]string{"alertname": "Flapping"}, "payload": "second"},
+	}); rec.Code != 200 {
+		t.Fatalf("second delivery: %d %s", rec.Code, rec.Body.String())
+	}
+	var afterA, afterB agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: a[0].Name}, &afterA); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: b[0].Name}, &afterB); err != nil {
+		t.Fatal(err)
+	}
+	if len(afterA.Spec.Inputs) != 2 || afterA.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {
+		t.Fatalf("merge-a's own conversation must receive the repeat as a recurrence: %+v", afterA.Spec.Inputs)
+	}
+	if len(afterB.Spec.Inputs) != 2 || afterB.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {
+		t.Fatalf("merge-b's own conversation must receive the repeat as a recurrence: %+v", afterB.Spec.Inputs)
+	}
+	if n := len(convsFromPipeline(t, "merge-a")) + len(convsFromPipeline(t, "merge-b")); n != 2 {
+		t.Fatalf("neither pipeline's repeat may create or reach the other's conversation, got %d total", n)
+	}
 }
 
-// A conversation predating pipelineRef still groups while ONE pipeline serves
-// the source (the state it was created in), and is left alone once a second
-// joins — no invisible pick, and no re-opening every investigation on upgrade.
-func TestLegacyConversationGroupsOnlyWhileOnePipelineServes(t *testing.T) {
+// A conversation predating conversationId is structurally invisible to
+// equality routing — its empty id never enters the field index — so a
+// repeat of the id it would once have groupable under opens a NEW
+// conversation instead, leaving the legacy one untouched
+// (conversation-provenance: "A legacy conversation is never matched").
+func TestLegacyConversationIsNeverMatchedByEqualityRouting(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-oldconv")
 	mkSignalSource(t, "src-legacy", "am-legacy", "")
@@ -143,7 +182,7 @@ func TestLegacyConversationGroupsOnlyWhileOnePipelineServes(t *testing.T) {
 	h := apiServer().Handler()
 
 	if rec := postSignal(t, h, testMasterToken, "src-legacy", []map[string]any{
-		{"fingerprint": "leg-1", "labels": map[string]string{"alertname": "Legacy"}, "payload": "first"},
+		{"initiationId": "leg-1", "labels": map[string]string{"alertname": "Legacy"}, "payload": "first"},
 	}); rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}
@@ -151,51 +190,37 @@ func TestLegacyConversationGroupsOnlyWhileOnePipelineServes(t *testing.T) {
 	if len(convs) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(convs))
 	}
-	// strip the ref to stand in for a conversation created before the field
+	// Clear conversationId to stand in for a conversation created before the
+	// field existed — it is then structurally absent from the field index.
 	legacy := convs[0]
 	patch := client.MergeFrom(legacy.DeepCopy())
-	legacy.Spec.PipelineRef = nil
+	legacy.Spec.ConversationID = ""
 	if err := k8sClient.Patch(ctx, &legacy, patch); err != nil {
 		t.Fatal(err)
 	}
+	waitForRoutingCacheToObserve(t, &legacy, legacy.ResourceVersion)
 
-	// still ONE server: the legacy conversation absorbs the next signal
-	if rec := postSignal(t, h, testMasterToken, "src-legacy", []map[string]any{
-		{"fingerprint": "leg-2", "labels": map[string]string{"alertname": "Legacy"}, "payload": "second"},
+	// A fresh server: a repeat of "leg-1" on the SAME handler would be
+	// suppressed by cooldown before routing ever ran, which would prove
+	// nothing about equality routing itself — but a fresh server's cooldown
+	// map recovers straight from the source's durable record, so that record
+	// must itself look expired too.
+	backdateCooldown(t, "src-legacy", "leg-1")
+	h2 := apiServer().Handler()
+	if rec := postSignal(t, h2, testMasterToken, "src-legacy", []map[string]any{
+		{"initiationId": "leg-1", "labels": map[string]string{"alertname": "Legacy"}, "payload": "second"},
 	}); rec.Code != 200 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
-	var after agentopsv1alpha1.Conversation
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: legacy.Name}, &after); err != nil {
+	var afterLegacy agentopsv1alpha1.Conversation
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: legacy.Name}, &afterLegacy); err != nil {
 		t.Fatal(err)
 	}
-	if len(after.Spec.Inputs) != 2 {
-		t.Fatalf("a legacy conversation must keep grouping while one pipeline serves: %d inputs",
-			len(after.Spec.Inputs))
+	if len(afterLegacy.Spec.Inputs) != 1 {
+		t.Fatalf("the legacy conversation must be left untouched: %d inputs", len(afterLegacy.Spec.Inputs))
 	}
-
-	// a SECOND pipeline joins — the unattributable conversation is now left
-	// alone rather than handed to whichever pipeline reconciles first
-	mkProfile(t, "prof-oldconv-b")
-	mkPipeline(t, "legacy-b", []string{"src-legacy"}, nil, "prof-oldconv-b")
-	reconcilePipeline(t, "legacy-b")
-	if rec := postSignal(t, h, testMasterToken, "src-legacy", []map[string]any{
-		{"fingerprint": "leg-3", "labels": map[string]string{"alertname": "Legacy"}, "payload": "third"},
-	}); rec.Code != 200 {
-		t.Fatalf("third signal: %d %s", rec.Code, rec.Body.String())
-	}
-	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: legacy.Name}, &after); err != nil {
-		t.Fatal(err)
-	}
-	if len(after.Spec.Inputs) != 2 {
-		t.Fatalf("a shared source must not absorb an unattributable conversation: %d inputs",
-			len(after.Spec.Inputs))
-	}
-	if n := len(convsFromPipeline(t, "legacy-a")); n != 1 {
-		t.Fatalf("legacy-a should open its own attributed conversation, got %d", n)
-	}
-	if n := len(convsFromPipeline(t, "legacy-b")); n != 1 {
-		t.Fatalf("legacy-b should open its own conversation, got %d", n)
+	if n := len(convsFromPipeline(t, "legacy-a")); n != 2 {
+		t.Fatalf("a repeat of the id must adopt a NEW conversation beside the legacy one, got %d total", n)
 	}
 }
 
@@ -213,7 +238,7 @@ func TestAttributionIsExactForIdenticallyWiredPipelines(t *testing.T) {
 	h := apiServer().Handler()
 
 	if rec := postSignal(t, h, testMasterToken, "src-twin", []map[string]any{
-		{"fingerprint": "twin-1", "labels": map[string]string{"alertname": "Twin"}, "payload": "x"},
+		{"initiationId": "twin-1", "labels": map[string]string{"alertname": "Twin"}, "payload": "x"},
 	}); rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
 	}

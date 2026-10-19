@@ -221,7 +221,7 @@ func TestAlertReachesEveryChannel(t *testing.T) {
 	srv := apiServer()
 
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-allchan", []map[string]any{{
-		"fingerprint": "allchan-1", "labels": map[string]string{"alertname": "NobodyReadsMe"},
+		"initiationId": "allchan-1", "labels": map[string]string{"alertname": "NobodyReadsMe"},
 		"payload": "disk at 99%",
 	}})
 	if rec.Code != 200 {

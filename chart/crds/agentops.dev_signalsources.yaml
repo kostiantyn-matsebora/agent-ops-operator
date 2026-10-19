@@ -82,6 +82,18 @@ spec:
                   Validated by the serving adapter, never by the operator.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              cooldownHours:
+                default: 6
+                description: |-
+                  CooldownHours: suppress a repeat of the same initiationId within this
+                  window — a re-send, safe to drop under at-least-once delivery. A repeat
+                  outside the window is a re-notification and routes by id equality
+                  instead. The one surviving knob, promoted out of the removed Grouping
+                  stanza — the source carries no grouping policy any more, only this
+                  durability setting. Chat/task sources keep an effective 0 (one-shot, no
+                  suppression) via their own origination path rather than this field.
+                format: int32
+                type: integer
               credentialsSecretRef:
                 description: |-
                   CredentialsSecretRef names the Secret holding this source's transport
@@ -100,31 +112,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              grouping:
-                description: |-
-                  Grouping decides which signals share one conversation, and how long a
-                  repeat of the same fingerprint is suppressed.
-                properties:
-                  cooldownHours:
-                    default: 6
-                    description: 'CooldownHours: suppress identical fingerprints within
-                      this window.'
-                    format: int32
-                    type: integer
-                  signatureLabels:
-                    description: SignatureLabels compose the signature (signal label
-                      keys).
-                    items:
-                      type: string
-                    type: array
-                  windowDays:
-                    default: 7
-                    description: |-
-                      WindowDays: reuse an existing conversation with the same signature
-                      updated within this window.
-                    format: int32
-                    type: integer
-                type: object
             required:
             - adapter
             type: object
@@ -189,31 +176,33 @@ spec:
                 type: array
               cooldown:
                 description: |-
-                  Cooldown records fingerprint suppression for THIS source. The manager
+                  Cooldown records initiationId suppression for THIS source. The manager
                   keeps an in-memory map as the hot path, but this is the record: it is
                   loaded on first use per source after a restart, so a restart mid-incident
                   no longer re-opens conversations for signals inside an active window.
 
-                  Bounded and pruned past the window. Only a FRESH fingerprint writes here —
-                  and a fresh fingerprint already causes a conversation create or patch — so
-                  the suppressed high-volume case costs nothing.
+                  Bounded and pruned past the window. Only a FRESH id writes here — and a
+                  fresh id already causes a conversation create or patch — so the
+                  suppressed high-volume case costs nothing.
                 items:
                   description: |-
-                    CooldownEntry records when a fingerprint was last admitted, so suppression
-                    survives a manager restart. MATERIALIZED state — written by ingest, never
-                    hand-set.
+                    CooldownEntry records when an initiationId was last admitted, so
+                    suppression survives a manager restart. MATERIALIZED state — written by
+                    ingest, never hand-set.
                   properties:
                     at:
-                      description: At is when the fingerprint was last admitted; the
-                        window runs from here.
+                      description: At is when this id was last admitted; the window
+                        runs from here.
                       format: date-time
                       type: string
-                    fingerprint:
-                      description: Fingerprint identifies the signal being suppressed.
+                    initiationId:
+                      description: |-
+                        InitiationID identifies the signal being suppressed — the sender-minted
+                        correlation id cooldown now keys on, replacing the retired fingerprint.
                       type: string
                   required:
                   - at
-                  - fingerprint
+                  - initiationId
                   type: object
                 type: array
               lastReceived:

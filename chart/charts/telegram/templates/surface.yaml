@@ -92,12 +92,7 @@ spec:
     approvers:
 {{ toYaml . | indent 6 }}
     {{- end }}
-  grouping:
-    # Chat defaults cooldown OFF: a person repeating a request means it twice,
-    # and fingerprint dedup would swallow the second ask.
-    cooldownHours: {{ $s.source.cooldownHours }}
-    {{- with $s.source.signatureLabels }}
-    signatureLabels:
-{{ toYaml . | indent 6 }}
-    {{- end }}
+  # Chat defaults cooldown OFF: a person repeating a request means it twice,
+  # and initiationId dedup would swallow the second ask.
+  cooldownHours: {{ $s.source.cooldownHours }}
 {{- end }}

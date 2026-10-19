@@ -202,10 +202,10 @@ func TestInlineAndReferencedPipelinesResolveIdenticalCapabilities(t *testing.T) 
 
 // postSignalAndFindConversation posts one signal through h and returns the
 // Conversation it opened, with cleanup scheduled.
-func postSignalAndFindConversation(t *testing.T, ctx context.Context, h http.Handler, source, fingerprint string) *agentopsv1alpha1.Conversation {
+func postSignalAndFindConversation(t *testing.T, ctx context.Context, h http.Handler, source, initiationID string) *agentopsv1alpha1.Conversation {
 	t.Helper()
 	rec := postSignal(t, h, testMasterToken, source, []map[string]any{{
-		"fingerprint": fingerprint, "labels": map[string]string{"alertname": "ParityAlert"}, "payload": "boom",
+		"initiationId": initiationID, "labels": map[string]string{"alertname": "ParityAlert"}, "payload": "boom",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("signal to %s: %d %s", source, rec.Code, rec.Body.String())

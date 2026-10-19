@@ -39,7 +39,7 @@ func TestAlertConversationNameHintsAtTheAlert(t *testing.T) {
 	reconcilePipeline(t, "name-alert-pipe")
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-name-alert", []map[string]any{
-		{"fingerprint": "name-alert-1", "labels": map[string]string{"alertname": "x"},
+		{"initiationId": "name-alert-1", "labels": map[string]string{"alertname": "x"},
 			"title": "NodeDown — ns-prod"},
 	})
 	if rec.Code != 200 {
@@ -61,7 +61,7 @@ func TestJobConversationNameHintsAtTheTitle(t *testing.T) {
 	reconcilePipeline(t, "name-job-pipe")
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "src-name-job", []map[string]any{
-		{"fingerprint": "name-job-1", "labels": map[string]string{"alertname": "nightly"},
+		{"initiationId": "name-job-1", "labels": map[string]string{"alertname": "nightly"},
 			"title": "Nightly backup of prod-db", "payload": "run it", "kind": "job"},
 	})
 	if rec.Code != 200 {

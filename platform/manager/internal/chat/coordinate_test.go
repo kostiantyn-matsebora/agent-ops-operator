@@ -10,13 +10,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 )
+
+// indexConversationIDForTest is internal/controller.SetupConversationIndexes'
+// own extractor, DUPLICATED rather than imported: internal/controller already
+// imports internal/chat for its own reconcilers, so the reverse import would
+// cycle — the same shape this package's other duplicated constants
+// (runtimepod.DeriveCoordinatorToken's sibling) are pinned against. Nothing
+// here needs the cross-package pin a production path would, since this fake
+// client is the only consumer.
+func indexConversationIDForTest(obj client.Object) []string {
+	conv := obj.(*agentopsv1alpha1.Conversation)
+	if conv.Spec.ConversationID == "" {
+		return nil
+	}
+	return []string{conv.Spec.ConversationID}
+}
 
 func coordFixture(t *testing.T, objs ...client.Object) (*Router, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, indexConversationIDForTest).
 		WithObjects(objs...).Build()
 	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
 	return &Router{Client: c, Reader: c, Namespace: testNS, Ops: q}, c
@@ -552,9 +567,9 @@ func TestInvokeMemberPropagatesABrokenAncestryChain(t *testing.T) {
 }
 
 // findReusableMember's reuse rule excludes a Closed conversation even when its
-// signature and (parent, entry) match — a stale closed member must never be
-// reattached to.
-func TestInvokeMemberIgnoresAClosedMemberWithTheSameSignature(t *testing.T) {
+// conversationId and (parent, entry) match — a stale closed member must never
+// be reattached to.
+func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T) {
 	entry := agentopsv1alpha1.CoordinatorAgentEntry{
 		Name: "worker", Description: "does the work",
 		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
@@ -563,7 +578,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameSignature(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	closedMember := &agentopsv1alpha1.Conversation{}
 	closedMember.Name, closedMember.Namespace = "old-member", testNS
-	closedMember.Labels = map[string]string{labelSignatureHash: ingest.SignatureHash("invoke:worker")}
+	closedMember.Spec.ConversationID = "invoke:worker"
 	closedMember.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: caller.Name, Entry: "worker"}
 	closedMember.Status.Phase = agentopsv1alpha1.ConversationClosed
 
@@ -574,7 +589,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameSignature(t *testing.T) {
 		t.Fatalf("InvokeMember: %v", err)
 	}
 	if !result.Created || result.Member == closedMember.Name {
-		t.Fatalf("a closed member with the same signature must not be reused, got %+v", result)
+		t.Fatalf("a closed member with the same conversationId must not be reused, got %+v", result)
 	}
 }
 
