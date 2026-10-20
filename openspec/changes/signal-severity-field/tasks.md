@@ -11,15 +11,15 @@
 
 ## 2. Inbound validation — backend-developer
 
-- [ ] 2.1 Add an optional `Severity` field to `NormalizedSignal` in
+- [x] 2.1 Add an optional `Severity` field to `NormalizedSignal` in
   `internal/httpapi/signals.go`. Verify with `go build ./...`.
-- [ ] 2.2 Validate `Severity` against the four-value vocabulary ahead of
+- [x] 2.2 Validate `Severity` against the four-value vocabulary ahead of
   any routing, refusing the whole batch with a 400 naming the accepted
   values on an unmapped value. Verify with a unit test posting an unknown
   value and asserting the 400 body names all four values, and a second
   test posting no severity at all and asserting today's existing
   behavior is unchanged.
-- [ ] 2.3 Thread the validated severity onto `SignalProvenance` at
+- [x] 2.3 Thread the validated severity onto `SignalProvenance` at
   conversation creation and onto each created `ConversationInputSpec`,
   never overwriting an existing provenance on a later input. Verify with
   a unit or envtest case: a conversation opened by a `warning` signal
