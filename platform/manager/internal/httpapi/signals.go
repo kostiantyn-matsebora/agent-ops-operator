@@ -928,6 +928,28 @@ type signalInboundReq struct {
 	Signals []NormalizedSignal `json:"signals"`
 }
 
+// validateSignals returns the refusal for the first invalid signal, or "".
+func validateSignals(sigs []NormalizedSignal) string {
+	for _, sig := range sigs {
+		if sig.InitiationID == "" {
+			return "every signal needs an initiationId"
+		}
+		// Absent is unrated and always accepted; present and unmapped refuses
+		// the WHOLE batch (signal-severity: "one bad signal refuses the whole
+		// batch"), before any signal in it is routed, claimed or recorded.
+		if sig.Severity != "" && !validSeverities[sig.Severity] {
+			return fmt.Sprintf("severity %q is not one of the accepted values: %s", sig.Severity, severityVocabulary)
+		}
+		// A chat signal names the surface it came from, or it is unanswerable.
+		// Refuse it here rather than accept it and silently drop the reply.
+		if sig.Kind == KindChat && sig.Labels[LabelChatChannel] == "" {
+			return "a chat signal must carry the label " + LabelChatChannel +
+				" naming the Channel it arrived on — the reply has nowhere to go without it"
+		}
+	}
+	return ""
+}
+
 func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in signalInboundReq
@@ -935,26 +957,9 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": `need {"source","signals":[...]}`})
 		return
 	}
-	for _, sig := range in.Signals {
-		if sig.InitiationID == "" {
-			writeJSON(w, 400, map[string]string{"error": "every signal needs an initiationId"})
-			return
-		}
-		// Absent is unrated and always accepted; present and unmapped refuses
-		// the WHOLE batch (signal-severity: "one bad signal refuses the whole
-		// batch"), before any signal in it is routed, claimed or recorded.
-		if sig.Severity != "" && !validSeverities[sig.Severity] {
-			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf(
-				"severity %q is not one of the accepted values: %s", sig.Severity, severityVocabulary)})
-			return
-		}
-		// A chat signal names the surface it came from, or it is unanswerable.
-		// Refuse it here rather than accept it and silently drop the reply.
-		if sig.Kind == KindChat && sig.Labels[LabelChatChannel] == "" {
-			writeJSON(w, 400, map[string]string{"error": "a chat signal must carry the label " +
-				LabelChatChannel + " naming the Channel it arrived on — the reply has nowhere to go without it"})
-			return
-		}
+	if msg := validateSignals(in.Signals); msg != "" {
+		writeJSON(w, 400, map[string]string{"error": msg})
+		return
 	}
 	source := s.signalSource(r, w, in.Source)
 	if source == nil {

@@ -641,7 +641,7 @@ func TestFailedInputCardIsReDerivable(t *testing.T) {
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 	tid := "t1"
-	card := SignalMessage("k8s-ops", "cluster-events", "PodCrashLooping", "i1", nil, "", "the alert body", agentopsv1alpha1.OriginSignal)
+	card := SignalMessage("k8s-ops", "cluster-events", "PodCrashLooping", "i1", nil, "the alert body", agentopsv1alpha1.OriginSignal)
 
 	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "i1", &tid, card)
 	op := q.Claim("slack")

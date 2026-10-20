@@ -255,11 +255,17 @@ type TopicDescriptor struct {
 // renders a CARD from them — the block grammar never applies to it, and its
 // payload is a machine document or a person's typed words either way.
 func SignalMessage(pipeline, source, title, inputRef string, labels map[string]string,
-	severity agentopsv1alpha1.Severity, body string, originKind agentopsv1alpha1.OriginKind) Message {
+	body string, originKind agentopsv1alpha1.OriginKind) Message {
 	return Message{
 		Kind: MsgSignal, Pipeline: pipeline, Source: source, Title: title,
-		Labels: labels, Severity: severity, InputRef: inputRef, Body: body, OriginKind: originKind,
+		Labels: labels, InputRef: inputRef, Body: body, OriginKind: originKind,
 	}
+}
+
+// WithSeverity returns the message carrying the signal's declared severity.
+func (m Message) WithSeverity(severity agentopsv1alpha1.Severity) Message {
+	m.Severity = severity
+	return m
 }
 
 // AnswerMessage builds agent output with its run outcome.

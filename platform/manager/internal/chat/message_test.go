@@ -37,8 +37,8 @@ func TestManagerComposesNoTransportMarkup(t *testing.T) {
 		{"answer", AnswerMessage("**done** — restarted `api`", StatusSucceeded)},
 		{"relay", RelayMessage("telegram", "kim", "and the disks?")},
 		{"signal", SignalMessage("prod-oncall", "vm-alerts", "DiskFull", "conv-in-1",
-			map[string]string{"namespace": "prod"}, agentopsv1alpha1.SeverityWarning,
-			"node/1 root filesystem at 97%", agentopsv1alpha1.OriginSignal)},
+			map[string]string{"namespace": "prod"},
+			"node/1 root filesystem at 97%", agentopsv1alpha1.OriginSignal).WithSeverity(agentopsv1alpha1.SeverityWarning)},
 	} {
 		assertNoMarkup(t, tc.name, tc.msg)
 	}
@@ -76,7 +76,7 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ch := testChannel("c1", "slack")
 	thread := "t-1"
-	card := SignalMessage("", "vm-alerts", "DiskFull", "", nil, "", "boom", agentopsv1alpha1.OriginSignal)
+	card := SignalMessage("", "vm-alerts", "DiskFull", "", nil, "boom", agentopsv1alpha1.OriginSignal)
 
 	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card)
 	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card) // reconcile repeat
@@ -210,7 +210,7 @@ func TestAgentTextIsPassedThroughUnaltered(t *testing.T) {
 	}
 	// A signal is a card, and its payload is never touched either.
 	typed := "why won't\n<details>\nwork in my docs?\n</details>"
-	if got := SignalMessage("p", "src", "", "", nil, "", typed, agentopsv1alpha1.OriginSignal).Body; got != typed {
+	if got := SignalMessage("p", "src", "", "", nil, typed, agentopsv1alpha1.OriginSignal).Body; got != typed {
 		t.Errorf("a signal payload was rewritten:\n got  %q\n want %q", got, typed)
 	}
 }
