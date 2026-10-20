@@ -29,8 +29,13 @@ served by `signal-pulse` gains `spec.config.correlationStrategy`, `"id"` or
 
 Pulse can reuse an alert id for what it calls a new occurrence. The new
 default, `"id+startTime"`, opens a fresh conversation for that re-fire
-instead of continuing an old one. Set `correlationStrategy: id` to keep the
-previous, id-alone behavior.
+instead of continuing an old one.
+
+### Upgrade
+
+To keep the previous, id-alone behavior, set `correlationStrategy: id` on
+each `SignalSource` served by `signal-pulse`. The chart value is
+`signal.defaultSource.correlationStrategy` in the `pulse` bundle.
 
 ## [17.0.0] — 2026-10-18
 

@@ -29,6 +29,12 @@ The no-ID fallback — used only when Pulse sends no alert id at all, a hash
 of resource/type/severity/message — is unaffected by `correlationStrategy`
 and SHALL continue to omit any time component.
 
+The registered template's `startsAt` field SHALL render the alert's
+occurrence start time (`{{.StartTime}}`), which stays the same across one
+occurrence's firing and resolved events. It SHALL NOT render a per-reading
+timestamp, since that would give one occurrence a different id on every
+event.
+
 Cooldown and routing stay manager-side, keyed on the resulting id.
 
 #### Scenario: A firing event produces one signal
@@ -58,3 +64,7 @@ Cooldown and routing stay manager-side, keyed on the resulting id.
 #### Scenario: The no-ID fallback ignores correlationStrategy
 - **WHEN** a webhook body carries no Pulse alert id, regardless of the source's `correlationStrategy`
 - **THEN** `initiationId` is the existing hash of resource/type/severity/message, with no start time included
+
+#### Scenario: The registered template carries the occurrence start time
+- **WHEN** the adapter registers its webhook template with Pulse
+- **THEN** the template's `startsAt` field renders `{{.StartTime}}`, not a per-reading timestamp
