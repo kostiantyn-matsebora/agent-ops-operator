@@ -41,19 +41,19 @@
 
 ## 3. Chart and RBAC — deployment-engineer
 
-- [ ] 3.1 Add the new placeholder kind to the manager's existing `Role` in
+- [x] 3.1 Add the new placeholder kind to the manager's existing `Role` in
   `chart/templates/rbac.yaml`, same full verb set
   (`get`/`list`/`watch`/`create`/`update`/`patch`/`delete`) every other
   manager-owned kind already has there. No new ServiceAccount, Role, or
   binding. Verify: `helm template` (or the chart's render tests) shows the
   new resource name in the existing manager `Role`, and no new RBAC object.
-- [ ] 3.2 Add a `controlPlaneAuth` values block (`existingSecret` /
+- [x] 3.2 Add a `controlPlaneAuth` values block (`existingSecret` /
   `secretName`, key `token`) mirroring `adapterAuth`'s shape, and wire
   `CONTROL_PLANE_TOKEN` into `chart/templates/deployment.yaml`'s manager
   container via `secretKeyRef`, next to the existing `ADAPTER_TOKEN` entry.
   Verify: `helm template --set controlPlaneAuth.secretName=test` renders the
   env var and a Secret, same as the `adapterAuth` case does today.
-- [ ] 3.3 Render the new CRD under `chart/crds/` (carried from 1.2) and
+- [x] 3.3 Render the new CRD under `chart/crds/` (carried from 1.2) and
   confirm `helm template` does not error on an unknown kind. Verify:
   `helm template --dry-run=server` against a cluster with the CRD applied,
   per `chart.md`'s CRD-install-order note.

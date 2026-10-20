@@ -734,6 +734,20 @@ adapterAuth:
   # Pin the master token; changing it 401s EVERY adapter until its pod restarts.
   token: ""
 
+# Auth for the manager's own /control-plane/* surface — a SEPARATE,
+# dedicated credential from adapterAuth above. A caller holding the adapter
+# token or the coordinator token must not reach this surface, and a caller
+# holding THIS token must not reach theirs, so this value is never derived
+# from or compared against adapterAuth.token. Same three-source shape:
+# explicit value, then an existing Secret, then generation at install.
+controlPlaneAuth:
+  # Name of the token Secret (key: token). Generated at install, then unmanaged.
+  secretName: agentops-control-plane-token
+  # Use an existing Secret (key: token) instead of generating one.
+  existingSecret: ""
+  # Pin the token; changing it 503/401s /control-plane/* until the pod restarts.
+  token: ""
+
 # Scrape configuration for the manager's `agentops_*` metrics.
 #
 # The metrics are ALWAYS exposed on the manager's existing :9090 — this only
