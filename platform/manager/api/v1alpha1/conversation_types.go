@@ -18,6 +18,19 @@ const (
 	InputJob        InputType = "job"
 )
 
+// Severity is a signal's own urgency rating, a closed vocabulary distinct
+// from any adapter's own "severity" label. Absent means unrated — the only
+// state a signal carried before this field existed.
+// +kubebuilder:validation:Enum=critical;error;warning;info
+type Severity string
+
+const (
+	SeverityCritical Severity = "critical"
+	SeverityError    Severity = "error"
+	SeverityWarning  Severity = "warning"
+	SeverityInfo     Severity = "info"
+)
+
 // OriginKind says HOW an input reached the manager. There are three doors: a
 // signal through a claimed SignalSource, a channel the user is already looking
 // at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
@@ -61,6 +74,13 @@ type SignalProvenance struct {
 	// cost nobody chose.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
+
+	// Severity is the originating signal's own severity rating, written once
+	// at creation from the signal that opened the conversation and never
+	// rewritten by a later recurrence. Omitted wherever that signal carried
+	// none.
+	// +optional
+	Severity Severity `json:"severity,omitempty"`
 }
 
 // MaxSignalLabels bounds SignalProvenance.Labels. Comfortably above what the

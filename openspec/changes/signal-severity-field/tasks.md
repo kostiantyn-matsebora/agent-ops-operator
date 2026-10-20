@@ -1,10 +1,10 @@
 ## 1. CRD and API types — api-architect
 
-- [ ] 1.1 Add a `Severity` type (closed string enum: `critical`, `error`,
+- [x] 1.1 Add a `Severity` type (closed string enum: `critical`, `error`,
   `warning`, `info`) to `platform/manager/api/v1alpha1/`, and an optional
   `Severity` field to `SignalProvenance` and to `ConversationInputSpec`.
   Verify `cd platform/manager && go build ./...` succeeds.
-- [ ] 1.2 Regenerate deepcopy and CRDs (`controller-gen@v0.16.5`, `object`
+- [x] 1.2 Regenerate deepcopy and CRDs (`controller-gen@v0.16.5`, `object`
   then `crd` targets per `.claude/rules/build-test.md`). Verify the two
   CRD YAMLs under `chart/crds/` gain the `severity` property with its four
   enum values, and `go vet ./...` is clean.

@@ -476,6 +476,18 @@ spec:
                       set is its own business — an unbounded map on a durable object is an etcd
                       cost nobody chose.
                     type: object
+                  severity:
+                    description: |-
+                      Severity is the originating signal's own severity rating, written once
+                      at creation from the signal that opened the conversation and never
+                      rewritten by a later recurrence. Omitted wherever that signal carried
+                      none.
+                    enum:
+                    - critical
+                    - error
+                    - warning
+                    - info
+                    type: string
                   sourceRef:
                     description: SourceRef is the SignalSource this conversation came
                       from.
