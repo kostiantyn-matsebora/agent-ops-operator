@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -69,30 +70,52 @@ func (h *ProbeHandler) Put(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing key"})
 		return
 	}
-	ctx := r.Context()
-	var existing agentopsv1alpha1.ControlPlaneProbe
-	err := h.Reader.Get(ctx, types.NamespacedName{Namespace: h.Namespace, Name: name}, &existing)
-	switch {
-	case err == nil:
-		existing.Spec.Key, existing.Spec.Value = in.Key, in.Value
-		if err := h.Writer.Update(ctx, &existing); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-	case apierrors.IsNotFound(err):
-		probe := &agentopsv1alpha1.ControlPlaneProbe{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: h.Namespace},
-			Spec:       agentopsv1alpha1.ControlPlaneProbeSpec{Key: in.Key, Value: in.Value},
-		}
-		if err := h.Writer.Create(ctx, probe); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-	default:
+	if err := h.createOrUpdate(r.Context(), name, in.Key, in.Value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// createOrUpdate re-reads and retries its own read-modify-write cycle on a
+// conflict, the same shape httpapi.Server's setPhaseUnlessClosed uses for an
+// optimistically-locked update. Without this, two concurrent PUTs to a name
+// that does not exist yet both see NotFound and both Create — the loser gets
+// IsAlreadyExists — and two concurrent PUTs to an existing name both Get the
+// same resourceVersion and the loser's Update gets IsConflict. Either would
+// otherwise surface as a flat 500 for a request that, semantically, should
+// have converged to the same end state.
+func (h *ProbeHandler) createOrUpdate(ctx context.Context, name, key, value string) error {
+	for range 5 {
+		var existing agentopsv1alpha1.ControlPlaneProbe
+		err := h.Reader.Get(ctx, types.NamespacedName{Namespace: h.Namespace, Name: name}, &existing)
+		switch {
+		case err == nil:
+			existing.Spec.Key, existing.Spec.Value = key, value
+			if err := h.Writer.Update(ctx, &existing); err != nil {
+				if apierrors.IsConflict(err) {
+					continue
+				}
+				return err
+			}
+			return nil
+		case apierrors.IsNotFound(err):
+			probe := &agentopsv1alpha1.ControlPlaneProbe{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: h.Namespace},
+				Spec:       agentopsv1alpha1.ControlPlaneProbeSpec{Key: key, Value: value},
+			}
+			if err := h.Writer.Create(ctx, probe); err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					continue
+				}
+				return err
+			}
+			return nil
+		default:
+			return err
+		}
+	}
+	return fmt.Errorf("conflict writing probe %q", name)
 }
 
 // Get reads the named ControlPlaneProbe, 404 on an unknown name.
@@ -105,7 +128,7 @@ func (h *ProbeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var probe agentopsv1alpha1.ControlPlaneProbe
 	if err := h.Reader.Get(r.Context(), types.NamespacedName{Namespace: h.Namespace, Name: name}, &probe); err != nil {
 		if apierrors.IsNotFound(err) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("probe %q not found", name)})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

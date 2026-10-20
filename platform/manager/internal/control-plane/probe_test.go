@@ -1,13 +1,17 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -141,5 +145,71 @@ func TestProbePutSameNameInBodyAndRouteIsAccepted(t *testing.T) {
 	}
 	if getProbe(h, "p1").Code != 200 {
 		t.Fatal("the probe should have been stored")
+	}
+}
+
+var probeGR = schema.GroupResource{Group: "agentops.dev", Resource: "controlplaneprobes"}
+
+// flakyWriter returns one IsConflict (on Update) or IsAlreadyExists (on
+// Create) before delegating to the real Writer, modeling a second request
+// winning a race against the one under test.
+type flakyWriter struct {
+	client.Writer
+	conflictsLeft, existsLeft int
+}
+
+func (f *flakyWriter) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if f.conflictsLeft > 0 {
+		f.conflictsLeft--
+		return apierrors.NewConflict(probeGR, obj.GetName(), context.DeadlineExceeded)
+	}
+	return f.Writer.Update(ctx, obj, opts...)
+}
+
+func (f *flakyWriter) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if f.existsLeft > 0 {
+		f.existsLeft--
+		return apierrors.NewAlreadyExists(probeGR, obj.GetName())
+	}
+	return f.Writer.Create(ctx, obj, opts...)
+}
+
+// TestProbePutRetriesOnUpdateConflict covers the race two concurrent PUTs to
+// an EXISTING name produce: both Get the same resourceVersion, the loser's
+// Update gets IsConflict. The handler must retry rather than surface a flat
+// 500 for a request that should have converged.
+func TestProbePutRetriesOnUpdateConflict(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(probeTestScheme(t)).Build()
+	h := &ProbeHandler{Writer: &flakyWriter{Writer: c, conflictsLeft: 1}, Reader: c, Namespace: "agent-ops"}
+	putProbe(h, "p1", `{"key":"k1"}`) // seed the object the "update" races over
+
+	rec := putProbe(h, "p1", `{"key":"k2"}`)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (the retry should have absorbed the conflict): %s", rec.Code, rec.Body.String())
+	}
+	getRec := getProbe(h, "p1")
+	var out probeBody
+	if err := json.Unmarshal(getRec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Key != "k2" {
+		t.Fatalf("got key %q, want the retried write (k2) to have landed", out.Key)
+	}
+}
+
+// TestProbePutRetriesOnCreateAlreadyExists covers the race two concurrent
+// first-time PUTs to a NEVER-SEEN name produce: both Get NotFound, both
+// Create, the loser gets IsAlreadyExists. The handler must retry (and then
+// update, since the object now exists) rather than surface a flat 500.
+func TestProbePutRetriesOnCreateAlreadyExists(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(probeTestScheme(t)).Build()
+	h := &ProbeHandler{Writer: &flakyWriter{Writer: c, existsLeft: 1}, Reader: c, Namespace: "agent-ops"}
+
+	rec := putProbe(h, "p1", `{"key":"k1"}`)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (the retry should have absorbed the already-exists race): %s", rec.Code, rec.Body.String())
+	}
+	if getProbe(h, "p1").Code != 200 {
+		t.Fatal("the probe should have been stored after the retry")
 	}
 }

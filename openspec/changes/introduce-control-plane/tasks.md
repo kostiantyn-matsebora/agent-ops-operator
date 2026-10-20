@@ -57,6 +57,11 @@
   confirm `helm template` does not error on an unknown kind. Verify:
   `helm template --dry-run=server` against a cluster with the CRD applied,
   per `chart.md`'s CRD-install-order note.
+  **The `helm template` half is verified. The live `--dry-run=server` half is
+  NOT** — no cluster was reachable from any remote session that worked this
+  change. It is covered instead by `TestControlPlaneRoundTrip`/
+  `TestControlPlaneRBACAsEnforced` (section 5) via the dispatched
+  `system-smoke.yml` run named on the pull request, not run locally here.
 
 ## 4. Unit tests
 
