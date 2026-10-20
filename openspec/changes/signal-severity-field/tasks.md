@@ -36,30 +36,38 @@
 
 ## 4. Console — frontend-developer
 
-- [ ] 4.1 Carry `Severity` through `platform/console/transcript.go`'s
+- [x] 4.1 Carry `Severity` through `platform/console/transcript.go`'s
   `Message` struct, filled from the inbound op the same way `Payload`
   already is. Verify with a unit test.
-- [ ] 4.2 Add `severity?: string` to the frontend `Message` interface and
-  draw it on the signal card in
-  `platform/console/ui/src/pages/Conversation.tsx`, tinted per value
-  (`critical`/`error` to `--ao-danger`, `warning` to `--ao-warning`,
-  `info` to `--ao-neutral`), rendering exactly as today when absent.
-  Verify with `npm run test` in `platform/console/ui`, covering a present
-  and an absent case.
+  - Also threaded through the REHYDRATION path (`rehydrate.go`,
+    `conversations.go`'s `ConversationSummary.SignalSeverity`, read off
+    the CR's `spec.signal.severity`), the same way `SignalLabels` already
+    is — otherwise the live card's severity tag would vanish the moment
+    the console restarted. Not named by this task, but the same gap the
+    proposal's own provenance design implies should not exist, and
+    `Labels` sets the precedent for closing it.
+- [x] 4.2 Add `severity?: string` to the frontend `Message` interface and
+  draw it on the signal card. **`platform/console/ui/src/pages/Conversation.tsx`
+  does not exist in this tree** — the signal card renders in
+  `platform/console/ui/src/pages/chat/Timeline.tsx`, which is where this
+  landed, tinted per value (`critical`/`error` to `--ao-danger`, `warning`
+  to `--ao-warning`, `info` to `--ao-neutral`), rendering exactly as today
+  when absent. Verified with `npm run test` in `platform/console/ui`,
+  covering a present and an absent case.
 
 ## 5. Unit tests
 
-- [ ] 5.1 `cd platform/manager && go build ./... && go vet ./... && go
+- [x] 5.1 `cd platform/manager && go build ./... && go vet ./... && go
   test ./...` green, covering the new field, its validation, and the
   provenance/input storage behavior.
-- [ ] 5.2 `cd platform/console && go build ./... && go vet ./... && go
+- [x] 5.2 `cd platform/console && go build ./... && go vet ./... && go
   test ./...` green, covering the transcript field.
-- [ ] 5.3 `cd platform/console/ui && npm run test` green, covering the
+- [x] 5.3 `cd platform/console/ui && npm run test` green, covering the
   signal card's severity rendering.
 
 ## 6. System tests
 
-- [ ] 6.1 Nothing here is decided by a cluster. No kubelet, RBAC,
+- [x] 6.1 Nothing here is decided by a cluster. No kubelet, RBAC,
   informer, pod-lifecycle, or context-continuity behavior changes —
   validation, storage, and rendering are all unit- and envtest-covered in
   section 5.

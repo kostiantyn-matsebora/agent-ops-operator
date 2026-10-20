@@ -432,3 +432,28 @@ func TestRecordedSignalKeepsItsLabels(t *testing.T) {
 		t.Errorf("a redundant label survived on the rebuilt card:\n%s", got.Text)
 	}
 }
+
+// THE REBUILT CARD CARRIES ITS SEVERITY, the same way it carries its labels —
+// otherwise the live card's severity tag vanishes the moment the console
+// restarts.
+func TestRecordedSignalKeepsItsSeverity(t *testing.T) {
+	conv := ConversationSummary{
+		Title: "OOMKilling: radarr", Source: "cluster-events", SignalSeverity: "critical",
+	}
+	got := recordedMessage("c1", "console", RecordedInput{ID: "in-1", Text: "{}"}, conv)
+
+	if got.Severity != "critical" {
+		t.Errorf("the rebuilt card lost its severity: %q", got.Severity)
+	}
+}
+
+// A conversation whose opening signal carried no severity rebuilds with none,
+// same as the live card.
+func TestRecordedSignalWithNoSeverityStaysUnrated(t *testing.T) {
+	conv := ConversationSummary{Title: "OOMKilling: radarr", Source: "cluster-events"}
+	got := recordedMessage("c1", "console", RecordedInput{ID: "in-1", Text: "{}"}, conv)
+
+	if got.Severity != "" {
+		t.Errorf("an unrated signal must rebuild with no severity: %q", got.Severity)
+	}
+}

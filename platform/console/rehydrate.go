@@ -169,6 +169,7 @@ func recordedMessage(thread, ownChannel string, in RecordedInput, conv Conversat
 		// source that opened it — rebuilds the head, and the payload moves into
 		// the field the browser already folds.
 		msg.Text, msg.Payload = recordedSignalCard(conv), signalPayload(in)
+		msg.Severity = conv.SignalSeverity
 	case ownChannel != "" && in.Surface == ownChannel:
 		msg.Kind, msg.Sender = MsgLocal, in.Sender
 	default:
