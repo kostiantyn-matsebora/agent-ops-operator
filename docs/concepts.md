@@ -592,6 +592,20 @@ invokes named members from `spec.agents[]`.
 
 The chart ships the built-in vocabulary as three risk-split toolsets.
 
+### ControlPlaneProbe
+
+**Disposable scaffolding, to be replaced, not extended.** It carries no
+real-world meaning — a bare key/value pair, no status subresource — and
+exists solely to prove the `/control-plane/*` HTTP surface end to end
+(`docs/contracts.md`) before any real resident depends on it.
+
+- **The manager's Role holds full CRUD on it.** Every other component's own
+  Role stays read-only (`get`/`list`/`watch`), or holds nothing, if it needs
+  the kind at all. This is the pattern every future resident of
+  `/control-plane/*` follows, not a one-off for this kind.
+- **Deleted or renamed**, never grown in place, once a real first resident is
+  proposed.
+
 ## The substrate: the runtime DEFAULTS and the FLOOR
 
 **The parent chart contributes the substrate, bundles contribute domain.**

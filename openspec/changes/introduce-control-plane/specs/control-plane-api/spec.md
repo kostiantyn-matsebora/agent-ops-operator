@@ -58,23 +58,29 @@ A read SHALL return exactly the key/value pair last written for that name.
 
 | Verb | Route | Success |
 |---|---|---|
-| Create or update | `PUT /control-plane/placeholders/{name}` | 200 with the stored object |
-| Read | `GET /control-plane/placeholders/{name}` | 200 with the stored object |
+| Create or update | `PUT /control-plane/probes/{name}` | 200, body `{"ok": true}` |
+| Read | `GET /control-plane/probes/{name}` | 200 with the stored object |
 
-Request body of the `PUT`, and response body of both:
+Request body of the `PUT`:
 
 ```json
 {"name": "example", "key": "greeting", "value": "hello"}
 ```
 
-`name` in a request body is optional. When present it SHALL match the
+Response body of the `GET`:
+
+```json
+{"name": "example", "key": "greeting", "value": "hello"}
+```
+
+`name` in the `PUT` body is optional. When present it SHALL match the
 route's `{name}`, and when omitted the route's `{name}` applies.
 
 Every error response (400, 401, 404, 503) carries a JSON body with one
 `error` string:
 
 ```json
-{"error": "placeholder \"example\" not found"}
+{"error": "probe \"example\" not found"}
 ```
 
 #### Scenario: Writing then reading returns what was written

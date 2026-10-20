@@ -15,11 +15,12 @@ import (
 // is the chart's default, because a pack that tunes the install tests an
 // install nobody runs.
 type InstallValues struct {
-	Tier         string
-	AdapterToken string
-	UIToken      string
-	BotToken     string
-	ChatID       string
+	Tier              string
+	AdapterToken      string
+	ControlPlaneToken string
+	UIToken           string
+	BotToken          string
+	ChatID            string
 	// Runtime is the AgentRuntime the stub answers to.
 	Runtime string
 }
@@ -27,12 +28,13 @@ type InstallValues struct {
 // DefaultValues is the install the pack runs against.
 func DefaultValues(tier string) *InstallValues {
 	return &InstallValues{
-		Tier:         tier,
-		AdapterToken: "e2e-adapter-token-not-a-secret",
-		UIToken:      "e2e-ui-token-not-a-secret",
-		BotToken:     "1234567890:e2e-fake-bot-token",
-		ChatID:       "-1001234567890",
-		Runtime:      "stub",
+		Tier:              tier,
+		AdapterToken:      "e2e-adapter-token-not-a-secret",
+		ControlPlaneToken: "e2e-control-plane-token-not-a-secret",
+		UIToken:           "e2e-ui-token-not-a-secret",
+		BotToken:          "1234567890:e2e-fake-bot-token",
+		ChatID:            "-1001234567890",
+		Runtime:           "stub",
 	}
 }
 
@@ -56,6 +58,8 @@ image:
   tag: e2e
 adapterAuth:
   token: %[1]q
+controlPlaneAuth:
+  token: %[8]q
 global:
   agentops:
     runtimeDefaults:
@@ -118,7 +122,7 @@ prometheus:
     image: {repository: agentops-signal-alertmanager, tag: e2e}
   pipelines:
     enabled: false
-`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken, k8sMCP)
+`, v.AdapterToken, claude, v.Runtime, v.UIToken, v.ChatID, v.BotToken, k8sMCP, v.ControlPlaneToken)
 }
 
 // Install applies the CRDs, deploys the fake Bot API, and installs the chart

@@ -140,6 +140,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }}
                   key: token
+            # /control-plane/*'s own credential — a SEPARATE Secret from
+            # ADAPTER_TOKEN above, so a caller holding one cannot reach the
+            # other's surface.
+            - name: CONTROL_PLANE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controlPlaneAuth.existingSecret | default .Values.controlPlaneAuth.secretName }}
+                  key: token
             {{- /* THE FLOOR ACCOUNT, by name. An adapter naming none runs as it —
             bound to nothing, refused as a binding target, token mounted.
 

@@ -416,10 +416,11 @@ func TestMetricsScrapeTemplatesAreOptIn(t *testing.T) {
 
 // ---- chart-generated credentials --------------------------------------------
 
-// The two credentials the chart can generate, and the key each carries.
+// The credentials the chart can generate, and the key each carries.
 var generatedCredentials = []struct{ name, key string }{
 	{"agentops-adapter-token", "token"},
 	{"agentops-console-console", "uiToken"},
+	{"agentops-control-plane-token", "token"},
 }
 
 // secretDoc returns the rendered Secret of that name, or "" if none was emitted.
@@ -439,10 +440,12 @@ func secretDoc(rendered, name string) string {
 func TestExplicitTokensAreRendered(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.uiToken=pinned-ui-token",
-		"--set", "adapterAuth.token=pinned-master-token")
+		"--set", "adapterAuth.token=pinned-master-token",
+		"--set", "controlPlaneAuth.token=pinned-control-plane-token")
 	for _, c := range []struct{ secret, key, want string }{
 		{"agentops-console-console", "uiToken", "pinned-ui-token"},
 		{"agentops-adapter-token", "token", "pinned-master-token"},
+		{"agentops-control-plane-token", "token", "pinned-control-plane-token"},
 	} {
 		doc := secretDoc(out, c.secret)
 		if doc == "" {
@@ -475,7 +478,8 @@ func TestUpgradeRendersNoGeneratedCredential(t *testing.T) {
 func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	out := helmTemplate(t, "--is-upgrade",
 		"--set", "console.auth.uiToken=rotated-ui",
-		"--set", "adapterAuth.token=rotated-master")
+		"--set", "adapterAuth.token=rotated-master",
+		"--set", "controlPlaneAuth.token=rotated-control-plane")
 	for _, c := range generatedCredentials {
 		if secretDoc(out, c.name) == "" {
 			t.Fatalf("%s must render on upgrade when configured explicitly", c.name)
@@ -483,11 +487,12 @@ func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	}
 }
 
-// An install generates both, and each MUST carry the keep policy: not rendering
-// on upgrade is only safe because the object survives leaving the manifest.
-// Verified against helm — an unannotated resource dropped from the manifest is
-// deleted, so this annotation is load-bearing rather than decorative.
-func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
+// An install generates every one of them, and each MUST carry the keep
+// policy: not rendering on upgrade is only safe because the object survives
+// leaving the manifest. Verified against helm — an unannotated resource
+// dropped from the manifest is deleted, so this annotation is load-bearing
+// rather than decorative.
+func TestInstallGeneratesEveryCredentialAndKeepsThem(t *testing.T) {
 	out := helmTemplate(t)
 	for _, c := range generatedCredentials {
 		doc := secretDoc(out, c.name)
@@ -509,7 +514,8 @@ func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
 func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.existingSecret=my-console-secret",
-		"--set", "adapterAuth.existingSecret=my-adapter-secret")
+		"--set", "adapterAuth.existingSecret=my-adapter-secret",
+		"--set", "controlPlaneAuth.existingSecret=my-control-plane-secret")
 	for _, c := range generatedCredentials {
 		if doc := secretDoc(out, c.name); doc != "" {
 			t.Fatalf("no Secret may be created when one is supplied, got:\n%s", doc)
@@ -529,6 +535,40 @@ func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	}
 	if !strings.Contains(channel, "name: my-console-secret") {
 		t.Fatalf("the Channel must reference the supplied Secret by name:\n%s", channel)
+	}
+}
+
+// The credential tests above all assert on the Secret alone. None of them
+// parses the manager Deployment to check it actually carries
+// CONTROL_PLANE_TOKEN wired via secretKeyRef to that Secret's name — a
+// refactor of deployment.yaml dropping the env var, or pointing it at the
+// wrong Secret (adapterAuth's, say), would pass every one of them.
+func TestControlPlaneTokenEnvWiresToItsOwnSecret(t *testing.T) {
+	want := func(secret string) string {
+		return "name: CONTROL_PLANE_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: token"
+	}
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if deploy == "" {
+		t.Fatal("manager Deployment not rendered")
+	}
+	if !strings.Contains(deploy, want("agentops-control-plane-token")) {
+		t.Fatalf("manager Deployment must wire CONTROL_PLANE_TOKEN to the default Secret:\n%s", deploy)
+	}
+
+	renamed := findDocByKindAndMetaName(helmTemplate(t, "--set", "controlPlaneAuth.secretName=test"), "Deployment", "agentops-manager")
+	if !strings.Contains(renamed, want("test")) {
+		t.Fatalf("CONTROL_PLANE_TOKEN must follow controlPlaneAuth.secretName:\n%s", renamed)
+	}
+
+	existing := findDocByKindAndMetaName(helmTemplate(t, "--set", "controlPlaneAuth.existingSecret=my-control-plane-secret"), "Deployment", "agentops-manager")
+	if !strings.Contains(existing, want("my-control-plane-secret")) {
+		t.Fatalf("CONTROL_PLANE_TOKEN must follow controlPlaneAuth.existingSecret:\n%s", existing)
+	}
+	// ADAPTER_TOKEN must still point at its own Secret, never the control
+	// plane's — the two credentials stay isolated end to end, not just at
+	// the Secret level.
+	if !strings.Contains(deploy, "name: ADAPTER_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: agentops-adapter-token") {
+		t.Fatalf("ADAPTER_TOKEN must still reference its own Secret:\n%s", deploy)
 	}
 }
 
