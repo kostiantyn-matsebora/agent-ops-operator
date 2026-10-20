@@ -14,19 +14,19 @@
 
 ## 2. Control-plane HTTP surface — backend-developer
 
-- [ ] 2.1 Add `platform/manager/internal/control-plane/` with the
+- [x] 2.1 Add `platform/manager/internal/control-plane/` with the
   constant-time bearer-token middleware, reading `CONTROL_PLANE_TOKEN` once
   at process start, following the shape of `adapterAuth`/`coordinate`'s
   token checks in `internal/httpapi/server.go`. An empty/unset token refuses
   every request with 503. Verify: a unit test for empty-token-503,
   wrong-token-401, correct-token-pass.
-- [ ] 2.2 Add the placeholder's CRUD handlers (create-or-update-by-name,
+- [x] 2.2 Add the placeholder's CRUD handlers (create-or-update-by-name,
   read-by-name, 404 on unknown name) in the same package, operating on the
   CRD from 1.1 through the manager's existing controller-runtime client.
   Verify: a unit test for write-then-read, update-overwrites, read-unknown
   404, and a `PUT` whose body `name` differs from the route's `{name}`
   (refused, nothing stored).
-- [ ] 2.3 Register `/control-plane/*` routes on the mux in
+- [x] 2.3 Register `/control-plane/*` routes on the mux in
   `internal/httpapi/server.go` (or wherever `cmd/manager/main.go` wires the
   server), guarded by the new middleware, beside the existing
   `/signal/*`/`/channel/*`/`/work`/`/coordinate/*` groups. Verify: a unit
@@ -35,7 +35,7 @@
   groups. Also a unit test that a valid `CONTROL_PLANE_TOKEN` requesting a
   kind with no handler gets 404, and no other kind's object is created, read
   or modified.
-- [ ] 2.4 Add `CONTROL_PLANE_TOKEN` to the manager's env wiring in
+- [x] 2.4 Add `CONTROL_PLANE_TOKEN` to the manager's env wiring in
   `cmd/manager/main.go` (or the server's config struct), alongside the
   existing `os.Getenv("ADAPTER_TOKEN")` reads. Verify: `go build ./...`.
 
