@@ -416,10 +416,11 @@ func TestMetricsScrapeTemplatesAreOptIn(t *testing.T) {
 
 // ---- chart-generated credentials --------------------------------------------
 
-// The two credentials the chart can generate, and the key each carries.
+// The credentials the chart can generate, and the key each carries.
 var generatedCredentials = []struct{ name, key string }{
 	{"agentops-adapter-token", "token"},
 	{"agentops-console-console", "uiToken"},
+	{"agentops-control-plane-token", "token"},
 }
 
 // secretDoc returns the rendered Secret of that name, or "" if none was emitted.
@@ -439,10 +440,12 @@ func secretDoc(rendered, name string) string {
 func TestExplicitTokensAreRendered(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.uiToken=pinned-ui-token",
-		"--set", "adapterAuth.token=pinned-master-token")
+		"--set", "adapterAuth.token=pinned-master-token",
+		"--set", "controlPlaneAuth.token=pinned-control-plane-token")
 	for _, c := range []struct{ secret, key, want string }{
 		{"agentops-console-console", "uiToken", "pinned-ui-token"},
 		{"agentops-adapter-token", "token", "pinned-master-token"},
+		{"agentops-control-plane-token", "token", "pinned-control-plane-token"},
 	} {
 		doc := secretDoc(out, c.secret)
 		if doc == "" {
@@ -475,7 +478,8 @@ func TestUpgradeRendersNoGeneratedCredential(t *testing.T) {
 func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	out := helmTemplate(t, "--is-upgrade",
 		"--set", "console.auth.uiToken=rotated-ui",
-		"--set", "adapterAuth.token=rotated-master")
+		"--set", "adapterAuth.token=rotated-master",
+		"--set", "controlPlaneAuth.token=rotated-control-plane")
 	for _, c := range generatedCredentials {
 		if secretDoc(out, c.name) == "" {
 			t.Fatalf("%s must render on upgrade when configured explicitly", c.name)
@@ -483,11 +487,12 @@ func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	}
 }
 
-// An install generates both, and each MUST carry the keep policy: not rendering
-// on upgrade is only safe because the object survives leaving the manifest.
-// Verified against helm — an unannotated resource dropped from the manifest is
-// deleted, so this annotation is load-bearing rather than decorative.
-func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
+// An install generates every one of them, and each MUST carry the keep
+// policy: not rendering on upgrade is only safe because the object survives
+// leaving the manifest. Verified against helm — an unannotated resource
+// dropped from the manifest is deleted, so this annotation is load-bearing
+// rather than decorative.
+func TestInstallGeneratesEveryCredentialAndKeepsThem(t *testing.T) {
 	out := helmTemplate(t)
 	for _, c := range generatedCredentials {
 		doc := secretDoc(out, c.name)
@@ -509,7 +514,8 @@ func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
 func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.existingSecret=my-console-secret",
-		"--set", "adapterAuth.existingSecret=my-adapter-secret")
+		"--set", "adapterAuth.existingSecret=my-adapter-secret",
+		"--set", "controlPlaneAuth.existingSecret=my-control-plane-secret")
 	for _, c := range generatedCredentials {
 		if doc := secretDoc(out, c.name); doc != "" {
 			t.Fatalf("no Secret may be created when one is supplied, got:\n%s", doc)
