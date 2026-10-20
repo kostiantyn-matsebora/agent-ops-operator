@@ -103,7 +103,7 @@ func testAdapter(t *testing.T, f *fakeManager) *adapter {
 	a := &adapter{
 		mgr:        NewManager(mgrSrv.URL, "tok"),
 		sourceType: "pulse",
-		sources:    map[string]string{},
+		sources:    map[string]sourceState{},
 		reported:   map[string]string{},
 	}
 	a.refreshSources(context.Background())
@@ -122,8 +122,14 @@ func firingBody(id string) string {
 	return `{"event":"alert","id":"` + id + `","resource":"vm-101","resourceType":"vm","node":"pve1","severity":"critical","message":"CPU high","value":"97","startsAt":"2026-01-01T00:00:00Z"}`
 }
 
+// resolvedBody shares firingBody's startsAt on purpose — "startsAt" renders
+// Pulse's `.StartTime` (payload.go), documented to persist across an
+// occurrence's lifecycle including into its resolved event, so a firing
+// event and its later resolved pair for the same occurrence carry the same
+// startsAt. That equality is exactly what lets the "id+startTime" strategy
+// still collapse a firing/resolved pair into one initiationId.
 func resolvedBody(id string) string {
-	return `{"event":"resolved","id":"` + id + `","resource":"vm-101","resourceType":"vm","node":"pve1","severity":"critical","message":"CPU high","value":"12","startsAt":"2026-01-01T00:05:00Z"}`
+	return `{"event":"resolved","id":"` + id + `","resource":"vm-101","resourceType":"vm","node":"pve1","severity":"critical","message":"CPU high","value":"12","startsAt":"2026-01-01T00:00:00Z"}`
 }
 
 func TestWebhookRoutingAndEventFilter(t *testing.T) {
@@ -151,7 +157,9 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 		t.Fatalf("firing event should produce exactly one signal: %d", len(signals))
 	}
 	first := signals[0].(map[string]any)
-	if first["initiationId"] != "pulse:vm-101:abc" || !strings.Contains(first["title"].(string), "CPU high") {
+	// the default correlationStrategy ("id+startTime") folds startsAt in —
+	// see firingBody's fixture value.
+	if first["initiationId"] != "pulse:vm-101:abc:2026-01-01T00:00:00Z" || !strings.Contains(first["title"].(string), "CPU high") {
 		t.Fatalf("normalization: %+v", first)
 	}
 	if _, hasKind := first["kind"]; hasKind {
@@ -172,7 +180,7 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 
 func TestNormalizeTitleIsTheAlertMessage(t *testing.T) {
 	e := pulseEvent{Event: "alert", Resource: "master", Message: "IoT: Tion 4S Bedroom is unreachable from every current observation location by ICMP probe: context deadline exceeded"}
-	signals := normalize(e)
+	signals := normalize(e, correlationStrategyIDStartTime)
 	if len(signals) != 1 {
 		t.Fatalf("expected one signal, got %d", len(signals))
 	}
@@ -183,7 +191,7 @@ func TestNormalizeTitleIsTheAlertMessage(t *testing.T) {
 
 func TestNormalizeTitleFallsBackToResourceWhenMessageIsBlank(t *testing.T) {
 	e := pulseEvent{Event: "alert", Resource: "master", Message: ""}
-	signals := normalize(e)
+	signals := normalize(e, correlationStrategyIDStartTime)
 	if len(signals) != 1 {
 		t.Fatalf("expected one signal, got %d", len(signals))
 	}
@@ -192,6 +200,10 @@ func TestNormalizeTitleFallsBackToResourceWhenMessageIsBlank(t *testing.T) {
 	}
 }
 
+// TestInitiationIDStableAcrossFiringAndResolvedPair pins the behavior under
+// the new default strategy ("id+startTime") — resolvedBody shares
+// firingBody's startsAt on purpose, so this still passes without the
+// fixtures themselves changing meaning.
 func TestInitiationIDStableAcrossFiringAndResolvedPair(t *testing.T) {
 	firing, err := parsePulseEvent([]byte(firingBody("occ-1")))
 	if err != nil {
@@ -201,25 +213,83 @@ func TestInitiationIDStableAcrossFiringAndResolvedPair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse resolved: %v", err)
 	}
-	if firing.initiationID() != resolved.initiationID() {
+	if firing.initiationID(correlationStrategyIDStartTime) != resolved.initiationID(correlationStrategyIDStartTime) {
 		t.Fatalf("same occurrence must carry the same initiationId across firing and resolved: firing=%q resolved=%q",
-			firing.initiationID(), resolved.initiationID())
+			firing.initiationID(correlationStrategyIDStartTime), resolved.initiationID(correlationStrategyIDStartTime))
 	}
 	other, _ := parsePulseEvent([]byte(firingBody("occ-2")))
-	if other.initiationID() == firing.initiationID() {
+	if other.initiationID(correlationStrategyIDStartTime) == firing.initiationID(correlationStrategyIDStartTime) {
 		t.Fatal("different alert ids must derive different initiationIds")
 	}
 }
 
+// TestInitiationIDFallbackWithoutID pins the no-ID hash fallback, which
+// design.md's own non-goal keeps identical regardless of strategy — both
+// canonical strategy values are exercised here to prove that.
 func TestInitiationIDFallbackWithoutID(t *testing.T) {
-	e1 := pulseEvent{Resource: "ct-1", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
-	e2 := pulseEvent{Resource: "ct-1", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
-	if e1.initiationID() != e2.initiationID() || e1.initiationID() == "" {
-		t.Fatalf("identical fields with no id must derive the same non-empty initiationId: %q vs %q", e1.initiationID(), e2.initiationID())
+	for _, strategy := range []string{correlationStrategyID, correlationStrategyIDStartTime} {
+		t.Run(strategy, func(t *testing.T) {
+			e1 := pulseEvent{Resource: "ct-1", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
+			e2 := pulseEvent{Resource: "ct-1", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
+			if e1.initiationID(strategy) != e2.initiationID(strategy) || e1.initiationID(strategy) == "" {
+				t.Fatalf("identical fields with no id must derive the same non-empty initiationId: %q vs %q", e1.initiationID(strategy), e2.initiationID(strategy))
+			}
+			e3 := pulseEvent{Resource: "ct-2", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
+			if e3.initiationID(strategy) == e1.initiationID(strategy) {
+				t.Fatal("different resources must derive different initiationIds")
+			}
+		})
 	}
-	e3 := pulseEvent{Resource: "ct-2", ResourceType: "container", Severity: "warning", Message: "disk 90%"}
-	if e3.initiationID() == e1.initiationID() {
-		t.Fatal("different resources must derive different initiationIds")
+	if e1, e2 := (pulseEvent{Resource: "ct-1", Message: "disk 90%"}), (pulseEvent{Resource: "ct-1", Message: "disk 90%"}); e1.initiationID(correlationStrategyID) != e2.initiationID(correlationStrategyIDStartTime) {
+		t.Fatalf("the no-ID fallback must be identical across strategies: %q vs %q",
+			e1.initiationID(correlationStrategyID), e2.initiationID(correlationStrategyIDStartTime))
+	}
+}
+
+// TestWebhookInitiationIDRespectsConfiguredCorrelationStrategy is task 1.3's
+// verification: the same Pulse alert id, posted with two different start
+// times (a re-fire), collapses to one initiationId under the served
+// source's "id" strategy but yields two distinct ones under
+// "id+startTime" — proving the resolved strategy actually threads from the
+// source's own spec.config through refreshSources/served into the pushed
+// signal, not just through initiationID in isolation.
+func TestWebhookInitiationIDRespectsConfiguredCorrelationStrategy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		strategy string
+		wantSame bool
+	}{
+		{"id strategy collapses a re-fire with a new start time", `"id"`, true},
+		{"id+startTime strategy distinguishes a re-fire", `"id+startTime"`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeManager{sources: []SourceInfo{{
+				Name:   "pulse-default",
+				Config: json.RawMessage(`{"correlationStrategy":` + tc.strategy + `}`),
+			}}}
+			a := testAdapter(t, f)
+			h := a.handler()
+
+			first := `{"event":"alert","id":"refire-1","resource":"vm-101","resourceType":"vm","node":"pve1","severity":"critical","message":"CPU high","value":"97","startsAt":"2026-01-01T00:00:00Z"}`
+			second := `{"event":"alert","id":"refire-1","resource":"vm-101","resourceType":"vm","node":"pve1","severity":"critical","message":"CPU high","value":"97","startsAt":"2026-02-01T00:00:00Z"}`
+
+			post(t, h, "/webhook/pulse-default", first)
+			post(t, h, "/webhook/pulse-default", second)
+
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.inbounds) != 2 {
+				t.Fatalf("expected two pushes: %+v", f.inbounds)
+			}
+			idOf := func(i int) string {
+				signals := f.inbounds[i]["signals"].([]any)
+				return signals[0].(map[string]any)["initiationId"].(string)
+			}
+			id1, id2 := idOf(0), idOf(1)
+			if same := id1 == id2; same != tc.wantSame {
+				t.Fatalf("strategy %s: id1=%q id2=%q same=%v, want same=%v", tc.strategy, id1, id2, same, tc.wantSame)
+			}
+		})
 	}
 }
 
@@ -274,7 +344,7 @@ func TestSourceListRefresh(t *testing.T) {
 // TestHealthzOK closes the /healthz route, never exercised by any other test
 // here (every other test posts to /webhook/*).
 func TestHealthzOK(t *testing.T) {
-	a := &adapter{sources: map[string]string{}, reported: map[string]string{}}
+	a := &adapter{sources: map[string]sourceState{}, reported: map[string]string{}}
 	rec := httptest.NewRecorder()
 	a.handler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"ok":true`) {
@@ -363,7 +433,7 @@ func TestRefreshSourcesKeepsPreviousOnListError(t *testing.T) {
 	f.mu.Unlock()
 	a.refreshSources(context.Background())
 
-	if _, ok := a.served("pulse-default"); !ok {
+	if _, _, ok := a.served("pulse-default"); !ok {
 		t.Fatal("a failed source listing must not drop previously known sources")
 	}
 }
@@ -490,7 +560,7 @@ func TestConcurrentRefreshAndWebhookDelivery(t *testing.T) {
 	a := &adapter{
 		mgr:        NewManager(mgrSrv.URL, "tok"),
 		sourceType: "pulse",
-		sources:    map[string]string{},
+		sources:    map[string]sourceState{},
 		reported:   map[string]string{},
 	}
 	h := a.handler()
@@ -515,7 +585,7 @@ func TestConcurrentRefreshAndWebhookDelivery(t *testing.T) {
 
 	wg.Wait()
 
-	if _, ok := a.served("pulse-default"); !ok {
+	if _, _, ok := a.served("pulse-default"); !ok {
 		t.Fatal("the source must still be served once both goroutines finish")
 	}
 }

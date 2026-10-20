@@ -42,7 +42,7 @@ func TestWebhookTemplateMatchesParser(t *testing.T) {
 	ctx := pulseTemplateContext{
 		Event: "alert", ID: "abc123", ResourceName: "vm-101", ResourceType: "vm",
 		Node: "pve1", Level: "critical", Message: "CPU high", Value: "97",
-		Timestamp: "2026-01-01T00:00:00Z",
+		StartTime: "2026-01-01T00:00:00Z",
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {

@@ -58,17 +58,28 @@ func sanitizeLogText(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", "_"), "\r", "_")
 }
 
+// sourceState is what this adapter caches per served source between
+// registryLoop poll ticks: the resolved signing secret ("" = unsigned mode)
+// and the resolved correlationStrategy (always one of
+// normalizeCorrelationStrategy's two canonical values) initiationID derives
+// this source's signals with. Both are resolved once per tick by
+// reconcileRegistration, never re-derived per webhook request.
+type sourceState struct {
+	signingSecret       string
+	correlationStrategy string
+}
+
 type adapter struct {
 	mgr        *Manager
 	sourceType string // ADAPTER_NAME
 	listen     string
 
 	mu sync.Mutex
-	// sources maps each served source name to its resolved signing secret
-	// ("" = unsigned mode) — resolved fresh every registryLoop poll tick
-	// from that source's own spec.config/credentialsSecretRef, never cached
-	// longer than one refresh cycle.
-	sources  map[string]string
+	// sources maps each served source name to its resolved sourceState —
+	// resolved fresh every registryLoop poll tick from that source's own
+	// spec.config/credentialsSecretRef, never cached longer than one
+	// refresh cycle.
+	sources  map[string]sourceState
 	reported map[string]string
 }
 
@@ -104,7 +115,7 @@ func main() {
 		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		sourceType: sourceType,
 		listen:     listen,
-		sources:    map[string]string{},
+		sources:    map[string]sourceState{},
 		reported:   map[string]string{},
 	}
 	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
@@ -146,9 +157,10 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %q", sanitizeLogText(err.Error()))
 		return
 	}
-	next := map[string]string{}
+	next := map[string]sourceState{}
 	for _, info := range infos {
-		next[info.Name] = a.reconcileRegistration(ctx, info)
+		secret, strategy := a.reconcileRegistration(ctx, info)
+		next[info.Name] = sourceState{signingSecret: secret, correlationStrategy: strategy}
 	}
 	a.mu.Lock()
 	a.sources = next
@@ -156,13 +168,14 @@ func (a *adapter) refreshSources(ctx context.Context) {
 }
 
 // served reports whether a source name is currently listed by the manager,
-// and the signing secret to verify its inbound webhooks against ("" =
-// unsigned mode).
-func (a *adapter) served(name string) (string, bool) {
+// the signing secret to verify its inbound webhooks against ("" = unsigned
+// mode), and the resolved correlationStrategy to derive its initiationId
+// with.
+func (a *adapter) served(name string) (signingSecret, correlationStrategy string, ok bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	secret, ok := a.sources[name]
-	return secret, ok
+	state, ok := a.sources[name]
+	return state.signingSecret, state.correlationStrategy, ok
 }
 
 // servedName returns the manager-listed spelling of a served source, so a log
@@ -214,7 +227,7 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 
 func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("source")
-	signingSecret, served := a.served(name)
+	signingSecret, correlationStrategy, served := a.served(name)
 	if !served {
 		// a retried Pulse delivery covers the source-poll lag
 		writeJSON(w, 404, map[string]string{"error": "unknown or unserved source"})
@@ -243,7 +256,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signals := normalize(event)
+	signals := normalize(event, correlationStrategy)
 	if len(signals) == 0 {
 		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "not a firing alert"})
 		return
@@ -258,12 +271,13 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, res)
 }
 
-// normalize converts one parsed Pulse event into contract signals. Only
+// normalize converts one parsed Pulse event into contract signals, deriving
+// initiationId per the served source's resolved correlationStrategy. Only
 // "alert" (firing) events produce one — "resolved" produces none, so Pulse
 // sees a 2xx and does not retry, but nothing is pushed (pulse-signal-adapter
 // spec, "Firing alerts normalize into the signal contract, resolved alerts
 // do not"). No grouping/dedup here — the manager owns that.
-func normalize(e pulseEvent) []Signal {
+func normalize(e pulseEvent, strategy string) []Signal {
 	if e.Event != "alert" {
 		return nil
 	}
@@ -285,7 +299,7 @@ func normalize(e pulseEvent) []Signal {
 	}
 	payloadJSON, _ := json.MarshalIndent(e, "", "  ")
 	return []Signal{{
-		InitiationID: e.initiationID(),
+		InitiationID: e.initiationID(strategy),
 		Labels: map[string]string{
 			"resource": e.Resource, "resourceType": e.ResourceType,
 			"severity": e.Severity, "node": e.Node,

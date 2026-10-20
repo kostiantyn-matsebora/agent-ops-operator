@@ -127,6 +127,91 @@ func TestParseRegisterConfigRejectsInvalidURLs(t *testing.T) {
 	}
 }
 
+// TestNormalizeCorrelationStrategy is task 1.1's verification: the explicit
+// opt-in "id" passes through verbatim, and everything else — absent, empty,
+// the already-canonical "id+startTime", or any unrecognized string — lands
+// on the default.
+func TestNormalizeCorrelationStrategy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"absent", "", correlationStrategyIDStartTime},
+		{"empty explicit", "", correlationStrategyIDStartTime},
+		{"id", "id", correlationStrategyID},
+		{"id+startTime", "id+startTime", correlationStrategyIDStartTime},
+		{"unrecognized", "bogus", correlationStrategyIDStartTime},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeCorrelationStrategy(tc.raw); got != tc.want {
+				t.Fatalf("normalizeCorrelationStrategy(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseRegisterConfigCarriesCorrelationStrategy closes the config
+// parsing side of task 1.1: the raw spec.config.correlationStrategy value
+// reaches registerConfig verbatim (normalization happens one layer up, in
+// reconcileRegistration, never here — parseRegisterConfig only decodes).
+func TestParseRegisterConfigCarriesCorrelationStrategy(t *testing.T) {
+	cfg, err := parseRegisterConfig(json.RawMessage(`{"baseUrl":"https://pulse.example.org","correlationStrategy":"id"}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.CorrelationStrategy != "id" {
+		t.Fatalf("expected correlationStrategy to decode verbatim, got %q", cfg.CorrelationStrategy)
+	}
+}
+
+// TestReconcileRegistrationResolvesCorrelationStrategy is task 1.3's
+// wiring-level verification: reconcileRegistration resolves and returns the
+// normalized correlationStrategy from the source's own config, once per
+// call — whatever a served source's registration state (configured,
+// unconfigured, or invalid), the strategy resolution does not depend on it.
+func TestReconcileRegistrationResolvesCorrelationStrategy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{"explicit id", `{"baseUrl":"https://pulse.example.org","webhookUrl":"https://adapter.example.org/webhook/pulse-default","correlationStrategy":"id"}`,
+			correlationStrategyID},
+		{"explicit id+startTime", `{"baseUrl":"https://pulse.example.org","webhookUrl":"https://adapter.example.org/webhook/pulse-default","correlationStrategy":"id+startTime"}`,
+			correlationStrategyIDStartTime},
+		{"absent defaults", `{"baseUrl":"https://pulse.example.org","webhookUrl":"https://adapter.example.org/webhook/pulse-default"}`,
+			correlationStrategyIDStartTime},
+		{"unrecognized defaults", `{"baseUrl":"https://pulse.example.org","webhookUrl":"https://adapter.example.org/webhook/pulse-default","correlationStrategy":"bogus"}`,
+			correlationStrategyIDStartTime},
+		{"not configured for registration still resolves", `{"correlationStrategy":"id"}`, correlationStrategyID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &fakeManager{}
+			mgrSrv := mgr.server(t)
+			pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+			pulseSrv := pulse.server(t)
+			a := &adapter{
+				mgr:      NewManager(mgrSrv.URL, "tok"),
+				sources:  map[string]sourceState{},
+				reported: map[string]string{},
+			}
+			cfg := strings.Replace(tc.config, "https://pulse.example.org", pulseSrv.URL, 1)
+			info := SourceInfo{
+				Name:                "pulse-default",
+				Config:              json.RawMessage(cfg),
+				CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+			}
+			t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
+
+			_, strategy := a.reconcileRegistration(context.Background(), info)
+			if strategy != tc.want {
+				t.Fatalf("resolved correlationStrategy = %q, want %q", strategy, tc.want)
+			}
+		})
+	}
+}
+
 // TestEnsureWebhookCreateThenUpdateIdempotent is task 1.6's verification:
 // the first call creates, a repeat of the same desired state is a no-op
 // (left alone), and a changed desired state updates in place rather than
@@ -242,7 +327,7 @@ func TestReconcileRegistrationInitialFailureThenSuccessHeals(t *testing.T) {
 		mgr:        NewManager(mgrSrv.URL, "tok"),
 		sourceType: "pulse",
 		listen:     ":8080",
-		sources:    map[string]string{},
+		sources:    map[string]sourceState{},
 		reported:   map[string]string{},
 	}
 	info := SourceInfo{
@@ -291,7 +376,7 @@ func TestReconcileRegistrationNotConfiguredReportsOnce(t *testing.T) {
 	mgrSrv := mgr.server(t)
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),
-		sources:  map[string]string{},
+		sources:  map[string]sourceState{},
 		reported: map[string]string{},
 	}
 	a.reconcileRegistration(context.Background(), SourceInfo{Name: "pulse-default"})
@@ -304,16 +389,24 @@ func TestReconcileRegistrationNotConfiguredReportsOnce(t *testing.T) {
 
 // TestReconcileRegistrationInvalidConfigReportsOnce closes
 // parseRegisterConfig's error branch via the handler: a served source whose
-// spec.config is not valid JSON must degrade rather than crash.
+// spec.config is not valid JSON must degrade rather than crash. It also
+// closes this branch's own correlationStrategy return (normalizeCorrelationStrategy("")),
+// which TestReconcileRegistrationResolvesCorrelationStrategy's table does not
+// reach — there is no parseable correlationStrategy to assert on when the
+// whole config is unparseable JSON, so a source misconfigured this way still
+// resolves to the safe default rather than an empty/invalid strategy string.
 func TestReconcileRegistrationInvalidConfigReportsOnce(t *testing.T) {
 	mgr := &fakeManager{}
 	mgrSrv := mgr.server(t)
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),
-		sources:  map[string]string{},
+		sources:  map[string]sourceState{},
 		reported: map[string]string{},
 	}
-	a.reconcileRegistration(context.Background(), SourceInfo{Name: "pulse-default", Config: json.RawMessage(`{not-json`)})
+	_, strategy := a.reconcileRegistration(context.Background(), SourceInfo{Name: "pulse-default", Config: json.RawMessage(`{not-json`)})
+	if strategy != correlationStrategyIDStartTime {
+		t.Fatalf("an unparseable config must still resolve correlationStrategy to the default, got %q", strategy)
+	}
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	if len(mgr.statuses) != 1 || mgr.statuses[0]["reason"] != "InvalidConfig" {
@@ -342,7 +435,7 @@ func TestReconcileRegistrationUsesConfiguredWebhookURL(t *testing.T) {
 				mgr:        NewManager(mgrSrv.URL, "tok"),
 				sourceType: "pulse",
 				listen:     ":8080",
-				sources:    map[string]string{},
+				sources:    map[string]sourceState{},
 				reported:   map[string]string{},
 			}
 			info := SourceInfo{
@@ -379,7 +472,7 @@ func TestReconcileRegistrationNotConfiguredWithoutWebhookURL(t *testing.T) {
 
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),
-		sources:  map[string]string{},
+		sources:  map[string]sourceState{},
 		reported: map[string]string{},
 	}
 	info := SourceInfo{
@@ -430,13 +523,13 @@ func TestSigningSecretFlowsFromCredentialToVerification(t *testing.T) {
 
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),
-		sources:  map[string]string{},
+		sources:  map[string]sourceState{},
 		reported: map[string]string{},
 	}
 	a.refreshSources(context.Background())
 
-	if got, ok := a.served("pulse-default"); !ok || got != "s3cret" {
-		t.Fatalf("expected the resolved signingSecret to reach a.sources via refreshSources, got %q (served=%v)", got, ok)
+	if got, strategy, ok := a.served("pulse-default"); !ok || got != "s3cret" || strategy != correlationStrategyIDStartTime {
+		t.Fatalf("expected the resolved signingSecret to reach a.sources via refreshSources, got %q strategy=%q (served=%v)", got, strategy, ok)
 	}
 
 	h := a.handler()

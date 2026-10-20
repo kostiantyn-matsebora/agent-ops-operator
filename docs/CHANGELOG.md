@@ -20,6 +20,23 @@ for the source and the reference material beside this file.
   tell `cron` apart from `alertmanager`, or the console's own adapter from
   `telegram`.
 
+### Changed
+
+**BREAKING: the Pulse signal adapter's default `initiationId` now folds in
+the alert's start time, not just its Pulse-assigned id.** A `SignalSource`
+served by `signal-pulse` gains `spec.config.correlationStrategy`, `"id"` or
+`"id+startTime"`.
+
+Pulse can reuse an alert id for what it calls a new occurrence. The new
+default, `"id+startTime"`, opens a fresh conversation for that re-fire
+instead of continuing an old one.
+
+### Upgrade
+
+To keep the previous, id-alone behavior, set `correlationStrategy: id` on
+each `SignalSource` served by `signal-pulse`. The chart value is
+`signal.defaultSource.correlationStrategy` in the `pulse` bundle.
+
 ## [17.0.0] — 2026-10-18
 
 - `manager` 0.60.0, `console` 0.39.1.

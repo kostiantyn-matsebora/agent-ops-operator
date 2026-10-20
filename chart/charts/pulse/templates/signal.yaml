@@ -90,6 +90,20 @@ spec:
           own shared-secret header, for instance. Independent of
           credentials.signingSecret, and Pulse's own signing headers win on
           a name collision.
+      correlationStrategy:
+        type: string
+        enum: ["id", "id+startTime"]
+        description: >-
+          Which initiationId derivation this source's alerts use. "id" keys
+          on the resource and Pulse's own alert id alone — Pulse's own docs
+          say that id can be reused when the same condition fires again
+          later, so this can collapse a genuinely new occurrence into an
+          already-open conversation. "id+startTime" (the default, applied
+          when this is absent, empty, or any other value) also folds in the
+          alert's start time, so a re-fire with a new start time opens a
+          fresh conversation while a firing/resolved pair of one occurrence
+          still shares an id. Advisory only — this schema is never enforced
+          by the manager, only surfaced as ConfigValid.
     additionalProperties: false
   # Documentation only — the manager reads no Secrets and can never verify
   # this.
@@ -145,6 +159,7 @@ spec:
   {{- end }}
   {{- $_ := set $cfg "webhookUrl" $webhookUrl }}
   {{- with $src.webhookHeaders }}{{ $_ := set $cfg "webhookHeaders" . }}{{ end }}
+  {{- with $src.correlationStrategy }}{{ $_ := set $cfg "correlationStrategy" . }}{{ end }}
   {{- with $cfg }}
   config:
 {{ toYaml . | indent 4 }}

@@ -657,6 +657,43 @@ func TestPulseWebhookHeadersRideSourceConfig(t *testing.T) {
 	}
 }
 
+// correlationStrategy (pulse-correlation-strategy) selects how
+// signals/pulse derives initiationId — "id" or "id+startTime". Unset, the
+// chart renders no such key at all, so the adapter's own default applies;
+// set, it rides spec.config verbatim, same posture as webhookHeaders above.
+func TestPulseCorrelationStrategyRidesSourceConfig(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pulse.enabled=true",
+		"--set", "pulse.signal.defaultSource.enabled=true",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org",
+		"--set", "pulse.signal.defaultSource.correlationStrategy=id")
+	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
+	if !strings.Contains(doc, "correlationStrategy: id") {
+		t.Errorf("expected correlationStrategy to ride spec.config.correlationStrategy, got:\n%s", doc)
+	}
+}
+
+func TestPulseCorrelationStrategyOmittedWhenUnset(t *testing.T) {
+	out := helmTemplate(t,
+		"--set", "pulse.enabled=true",
+		"--set", "pulse.signal.defaultSource.enabled=true",
+		"--set", "pulse.signal.defaultSource.baseUrl=https://pulse.example.org")
+	doc := findDocByKindAndName(t, out, "SignalSource", "pulse-alerts")
+	if strings.Contains(doc, "correlationStrategy") {
+		t.Errorf("expected no correlationStrategy key when unset, so the adapter's own default applies, got:\n%s", doc)
+	}
+}
+
+// The SignalAdapter's configSchema is advisory metadata (adapters.md), but
+// it must still name both values the adapter code actually understands.
+func TestPulseConfigSchemaEnumeratesCorrelationStrategyValues(t *testing.T) {
+	out := helmTemplate(t, "--set", "pulse.enabled=true")
+	doc := findDocByKindAndName(t, out, "SignalAdapter", "pulse")
+	if !strings.Contains(doc, "correlationStrategy") || !strings.Contains(doc, "id+startTime") {
+		t.Errorf("expected configSchema to enumerate correlationStrategy's id/id+startTime values, got:\n%s", doc)
+	}
+}
+
 // A named Secret alone (no clusterIssuer) still derives the tls entry's
 // hosts, exactly as the clusterIssuer form does — the two are independent
 // knobs on the same derivation.

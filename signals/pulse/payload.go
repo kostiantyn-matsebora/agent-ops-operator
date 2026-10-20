@@ -24,6 +24,18 @@ package main
 // this template used `.Type` for "event", which silently dropped every real
 // alert (normalize() never saw "alert") — design.md's own Risks section had
 // flagged this exact confirmation as still open.
+//
+// "startsAt" renders `.StartTime`, NOT `.Timestamp` — a 2026-10-20 correction
+// made for the pulse-correlation-strategy change, from Pulse's own published
+// docs (docs/WEBHOOKS.md in rcourtman/Pulse), NOT a live instance: `.Timestamp`
+// is undefined there and listed alongside per-reading telemetry fields
+// (Value, Threshold, Duration), while `.StartTime` is the field Pulse's own
+// shipped PSA/ConnectWise reference templates use for "startedAt", and the
+// docs state the resolved event "retains the original member alertId and
+// startedAt." `.StartTime` is therefore occurrence-stable; `.Timestamp` is
+// not documented to be. STILL NEEDS LIVE CONFIRMATION, same as `.Event` once
+// did — this is the one field the new default correlationStrategy
+// (id+startTime, payload.go below) depends on for correctness.
 
 import (
 	"crypto/sha256"
@@ -47,7 +59,7 @@ const pulseWebhookTemplate = `{
   "severity": "{{ .Level }}",
   "message": "{{ .Message }}",
   "value": "{{ .Value }}",
-  "startsAt": "{{ .Timestamp }}"
+  "startsAt": "{{ .StartTime }}"
 }`
 
 // pulseTemplateContext documents the fields pulseWebhookTemplate assumes
@@ -64,7 +76,7 @@ type pulseTemplateContext struct {
 	Level        string
 	Message      string
 	Value        string
-	Timestamp    string
+	StartTime    string
 }
 
 // pulseEvent is the parsed shape of an inbound Pulse webhook body, matching
@@ -100,17 +112,49 @@ func parsePulseEvent(body []byte) (pulseEvent, error) {
 	return e, nil
 }
 
+// correlationStrategyID and correlationStrategyIDStartTime are the two
+// canonical strategy values initiationID understands. Any other raw config
+// value normalizes to correlationStrategyIDStartTime — see
+// normalizeCorrelationStrategy (register.go), the one place that default
+// lives.
+const (
+	correlationStrategyID          = "id"
+	correlationStrategyIDStartTime = "id+startTime"
+)
+
 // initiationID derives this signal's correlation id from the underlying
-// Pulse alert occurrence: the resource plus Pulse's own alert id when the
-// sender provides one, falling back to a hash of the
-// resource/type/severity/message tuple when it does not (mirroring
-// signals/alertmanager's groupLabelsFallbackID). startsAt and value are
-// excluded on purpose, so a firing event and its later resolved pair for the
-// same occurrence yield the same id, and a retried delivery of either does
-// too — and two unrelated alerts (different resource/id) never collide.
-func (e pulseEvent) initiationID() string {
+// Pulse alert occurrence, per the served source's correlationStrategy
+// (pulse-signal-adapter spec, "Firing alerts normalize into the signal
+// contract..."):
+//
+//   - correlationStrategyID ("id"): the resource plus Pulse's own alert id
+//     alone — today's original, collapsing behavior, kept only for a source
+//     that explicitly opts back into it.
+//   - correlationStrategyIDStartTime ("id+startTime", the default — and
+//     what every value other than exactly "id" resolves to here, so an
+//     already-normalized caller and a raw, unrecognized one land on the
+//     same safe behavior): the resource, the alert id, AND the alert's
+//     start time. Pulse's own alert id can be reused for what is actually a
+//     new occurrence (design.md), so the start time is folded in to keep a
+//     later re-fire from colliding with an earlier, unrelated occurrence
+//     that happened to reuse the same id.
+//
+// Either strategy falls back to a hash of the resource/type/severity/message
+// tuple when Pulse sends no alert id at all (mirroring
+// signals/alertmanager's groupLabelsFallbackID) — no time component there,
+// regardless of strategy, since there is no stable id to combine a start
+// time with in the first place (design.md's explicit non-goal). A firing
+// event and its later resolved pair for the same occurrence share one
+// StartsAt, so both strategies still yield the same id for that pair and for
+// a retried delivery of either; two unrelated alerts (different
+// resource/id) never collide under either strategy.
+func (e pulseEvent) initiationID(strategy string) string {
 	if e.ID != "" {
-		return "pulse:" + e.Resource + ":" + e.ID
+		id := "pulse:" + e.Resource + ":" + e.ID
+		if strategy == correlationStrategyID {
+			return id
+		}
+		return id + ":" + e.StartsAt
 	}
 	h := sha256.Sum256([]byte(strings.Join([]string{e.Resource, e.ResourceType, e.Severity, e.Message}, "|")))
 	return "pulse:" + hex.EncodeToString(h[:])[:16]

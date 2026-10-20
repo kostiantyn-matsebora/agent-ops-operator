@@ -148,6 +148,23 @@ signal:
     #   webhookHeaders:
     #     X-Gateway-Key: <shared secret your gateway checks>
     webhookHeaders: {}
+    # Which `initiationId` derivation the adapter applies to this source's
+    # alerts: `"id"` (the resource and Pulse's own alert id alone — today's
+    # pre-this-change behavior, which can collapse a later, unrelated re-fire
+    # of the same alert id into an already-open conversation) or
+    # `"id+startTime"` (also folds in the alert's start time, so a re-fire
+    # with a new start time opens a fresh conversation while a firing/
+    # resolved pair of one occurrence still shares an id).
+    #
+    # LEFT UNSET HERE ON PURPOSE — the adapter applies its own default
+    # (`"id+startTime"`) when this is absent, empty, or any value other than
+    # `"id"`. The chart never hardcodes that default itself, so a value
+    # outside Helm (editing the SignalSource directly, or a hand-authored
+    # source this bundle does not render) still gets the adapter's one
+    # answer rather than two sources of truth disagreeing.
+    #
+    #   correlationStrategy: id
+    correlationStrategy: ""
   # The adapter's registration credential: a Pulse API token (to call
   # POST /api/notifications/webhooks) and an optional HMAC signing secret
   # verifying inbound deliveries (X-Pulse-Timestamp/X-Pulse-Signature).
