@@ -32,7 +32,9 @@
   `/signal/*`/`/channel/*`/`/work`/`/coordinate/*` groups. Verify: a unit
   test asserting `ADAPTER_TOKEN` and the coordinator token both get 401 on
   `/control-plane/*`, and `CONTROL_PLANE_TOKEN` gets 401 on the other route
-  groups.
+  groups. Also a unit test that a valid `CONTROL_PLANE_TOKEN` requesting a
+  kind with no handler gets 404, and no other kind's object is created, read
+  or modified.
 - [ ] 2.4 Add `CONTROL_PLANE_TOKEN` to the manager's env wiring in
   `cmd/manager/main.go` (or the server's config struct), alongside the
   existing `os.Getenv("ADAPTER_TOKEN")` reads. Verify: `go build ./...`.
@@ -69,7 +71,8 @@
 - [ ] 5.1 Add a lane to `platform/manager/test/system/` that, against a real
   envtest/cluster API server, exercises the full round trip through
   `/control-plane/*`: correct token writes a placeholder object, a read
-  returns it, an unconfigured/wrong token is refused, and the manager's
+  returns it, an unconfigured/wrong token is refused, a request for a kind
+  with no handler returns 404 and touches no other kind, and the manager's
   Role (not a new one) is what RBAC actually grants — this is owed because
   RBAC enforcement and the CRD's establishment are both cluster-decided
   facts. Verify: `go test -tags system -count=1 -timeout 45m -v
