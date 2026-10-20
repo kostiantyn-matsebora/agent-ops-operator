@@ -39,13 +39,14 @@
 - [x] 4.1 Carry `Severity` through `platform/console/transcript.go`'s
   `Message` struct, filled from the inbound op the same way `Payload`
   already is. Verify with a unit test.
-  - Also threaded through the REHYDRATION path (`rehydrate.go`,
+  - Also threaded through the REHYDRATION path: `rehydrate.go` and
     `conversations.go`'s `ConversationSummary.SignalSeverity`, read off
-    the CR's `spec.signal.severity`), the same way `SignalLabels` already
-    is — otherwise the live card's severity tag would vanish the moment
-    the console restarted. Not named by this task, but the same gap the
-    proposal's own provenance design implies should not exist, and
-    `Labels` sets the precedent for closing it.
+    the CR's `spec.signal.severity`.
+  - Same way `SignalLabels` already is. Without it, the live card's
+    severity tag would vanish the moment the console restarted.
+  - Not named by this task, but the same gap the proposal's own
+    provenance design implies should not exist. `Labels` sets the
+    precedent for closing it.
 - [x] 4.2 Add `severity?: string` to the frontend `Message` interface and
   draw it on the signal card. **`platform/console/ui/src/pages/Conversation.tsx`
   does not exist in this tree** — the signal card renders in
@@ -81,42 +82,34 @@
   `severity` label.
 - [ ] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
   message shape both gain `severity`.
-  - **BLOCKED, not done.** `docs/contracts.md` itself holds no shape
-    table for either — both live on the two LOCKED pages below, each
-    with its own entry (7.2a, 7.2b) rather than one combined note, so
-    either blocker is found on its own line, not inferred from the
-    other's prose.
+  - **BLOCKED, not done.** No shape table lives on this page — both
+    shapes live on the two LOCKED pages below, 7.2a and 7.2b.
+
+| Blocked page | Locked by | Same-change conformance owed |
+|---|---|---|
+| `docs/contracts/signal-adapter.md` (7.2a) | `.claude/rules/signal-rules.md` | `cron`, `alertmanager`, `k8s-events`, `ha`, `telegram` |
+| `docs/contracts/channel-adapter.md` (7.2b) | `.claude/rules/channel-spec.md` | `channels/telegram`, `platform/console` |
+
+Both rule files read the same: never edited without the user's explicit
+approval.
+
+- This change's own `design.md` scopes the conformance work out on
+  purpose (Non-Goals: "Mapping any shipped adapter onto the field").
+- The code is already correct and additive — only the two spec pages are
+  unwritten.
+- Either resolution is the user's call: approve both edits plus their
+  conformance bumps, or accept the field as undocumented for now.
+
 - [ ] 7.2a `docs/contracts/signal-adapter.md`: the optional `severity` field,
   its four-value vocabulary, and the 400 refusal of an unmapped value.
-  - **BLOCKED, not done — a human decision, not an implementation gap.**
-    `.claude/rules/signal-rules.md`: "NEVER edited without the user's
-    explicit approval," and an approved edit brings every shipped
-    SIGNAL adapter — `cron`, `alertmanager`, `k8s-events`, `ha`,
-    `telegram` — into conformance IN THE SAME CHANGE, plus a version
-    bump on this page. This change's own `design.md` scopes that out on
-    purpose (Non-Goals: "Mapping any shipped adapter onto the field").
-    The code is already correct and additive (`COMPAT-2`-style: an
-    unknown field is ignored, not required) — only this VERSIONED SPEC
-    PAGE is unwritten, pending the user's explicit go-ahead (approve the
-    edit plus its conformance bump, or accept the field as an
-    intentionally-undocumented, backward-compatible extension for now).
+  - **BLOCKED, not done — a human decision.** See the table above.
 - [ ] 7.2b `docs/contracts/channel-adapter.md`: the outbound `signal`
   message's "Message fields" table gains `severity`.
-  - **BLOCKED, not done — same cause as 7.2a, a DIFFERENT locked page.**
-    `.claude/rules/channel-spec.md` states the identical rule for this
-    page: "NEVER edited without the user's explicit approval," and an
-    approved edit brings every shipped CHANNEL adapter —
-    `channels/telegram`, `platform/console` — into conformance in the
-    same change, plus a version bump here too. This one is the page this
-    PR actually edits code against: `internal/chat/message.go`'s
-    `Message`/`SignalMessage` is exactly the surface this table
-    describes, and `platform/console` (one of the two named adapters) is
-    wired to draw the field while `channels/telegram` is not — both
-    deliberate, per `design.md`'s non-goal, but both are this page's
-    conformance question to answer, not something a code change can
-    settle on its own. Same two resolutions as 7.2a: approve this edit
-    plus its conformance bump, or accept the field as undocumented here
-    for now — the user's call, not assumed.
+  - **BLOCKED, not done — a human decision.** See the table above. This
+    is the page this PR's own code touches directly:
+    `internal/chat/message.go`'s `Message`/`SignalMessage` is exactly
+    the surface that table describes, and one of its two named adapters
+    (`platform/console`) is wired to draw the field.
 - [x] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
   regenerated `docs/cr-reference.md` blocks for the two CRD-backed types.
 - [x] 7.4 `docs/console.md`: what the signal card now draws when present.
@@ -124,10 +117,11 @@
   marked non-breaking.
 - [ ] 7.6 `docs/guides/signal-adapter.md`: note that `severity` is a
   contract field no shipped adapter sets yet.
-  - **BLOCKED, not done — same cause as 7.2/7.2a/7.2b.** This guide states no
-    requirement of its own and treats `docs/contracts/signal-adapter.md`
-    as the one source of truth, deferring to it by its own stated rule.
-    Describing `severity` here before that locked page says so would
+  - **BLOCKED, not done — same cause as 7.2/7.2a/7.2b.**
+  - This guide states no requirement of its own. It treats
+    `docs/contracts/signal-adapter.md` as the one source of truth, by
+    its own stated rule.
+  - Describing `severity` here before that locked page says so would
     make the guide, not the spec, the first place a reader meets a
     claim nobody approved.
 
@@ -141,9 +135,9 @@
     `severity: 'critical'`, so the published `conversation-{light,dark}.png`
     actually show the new tag rather than refreshing to the same pixels.
   - `npm run screenshots` ran and its 18 PNGs are updated.
-  - `npm run demo` ran the recorder, but the ffmpeg encode step shells out
-    to `docker run mwader/static-ffmpeg`, and this sandbox has no docker
-    daemon reachable — **not run, not claimed done**. The one touched
-    byproduct (`console-demo-poster-light.png`, written before the failed
-    encode) was reverted rather than committed half-refreshed. A
-    workstation session with Docker owes this one.
+  - `npm run demo` ran the recorder, but the ffmpeg encode step shells
+    out to `docker run mwader/static-ffmpeg`. This sandbox has no docker
+    daemon reachable — **not run, not claimed done**.
+  - The one touched byproduct (`console-demo-poster-light.png`, written
+    before the failed encode) was reverted rather than committed
+    half-refreshed. A workstation session with Docker owes this one.
