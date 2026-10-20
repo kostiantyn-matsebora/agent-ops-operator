@@ -67,7 +67,15 @@ Request body of the `PUT`, and response body of both:
 {"name": "example", "key": "greeting", "value": "hello"}
 ```
 
-`name` in a request body, when present, SHALL match the route's `{name}`.
+`name` in a request body is optional. When present it SHALL match the
+route's `{name}`, and when omitted the route's `{name}` applies.
+
+Every error response (400, 401, 404, 503) carries a JSON body with one
+`error` string:
+
+```json
+{"error": "placeholder \"example\" not found"}
+```
 
 #### Scenario: Writing then reading returns what was written
 - **WHEN** a caller creates a placeholder object with a given name, key, and
@@ -78,6 +86,11 @@ Request body of the `PUT`, and response body of both:
 - **WHEN** a caller `PUT`s a body whose `name` differs from the route's
   `{name}`
 - **THEN** the manager responds 400 and stores nothing
+
+#### Scenario: A body without a name uses the route name
+- **WHEN** a caller `PUT`s a body that omits `name`
+- **THEN** the manager stores the object under the route's `{name}` and
+  the response carries that name
 
 #### Scenario: Reading an unknown name fails explicitly
 - **WHEN** a caller reads a placeholder object by a name that was never
