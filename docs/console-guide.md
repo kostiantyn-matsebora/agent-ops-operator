@@ -100,6 +100,9 @@ Five views, one question each.
   after a reload or a restart. Acks and notices are not persisted. They show
   as a presence row while they are live.
 
+  A signal carrying a **severity** shows a small tinted mark on its card —
+  rating, not routing. No shipped source sets one yet.
+
   A long answer opens with its **conclusion**. Named sections sit above the
   fold, and the detail behind a control you expand in place. That shape comes
   from the agent, when its profile declares `outputFormat: blocks` — an answer

@@ -108,7 +108,7 @@
     later change states it).
 - [x] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
   regenerated `docs/cr-reference.md` blocks for the two CRD-backed types.
-- [ ] 7.4 `docs/console.md`: what the signal card now draws when present.
+- [x] 7.4 `docs/console.md`: what the signal card now draws when present.
 - [x] 7.5 `docs/CHANGELOG.md`: add an entry for the new optional field,
   marked non-breaking.
 - [ ] 7.6 `docs/guides/signal-adapter.md`: note that `severity` is a
@@ -122,7 +122,17 @@
 
 ### Adopter site
 
-- [ ] 7.7 `docs/console-guide.md`: a severity mark can appear in the
+- [x] 7.7 `docs/console-guide.md`: a severity mark can appear in the
   transcript view.
-- [ ] 7.8 Re-run `npm run screenshots` and `npm run demo` in
+- [x] 7.8 Re-run `npm run screenshots` and `npm run demo` in
   `platform/console/ui` to refresh the published console captures.
+  - The fixture's one signal message (`screenshots/fixture.ts`) gained
+    `severity: 'critical'`, so the published `conversation-{light,dark}.png`
+    actually show the new tag rather than refreshing to the same pixels.
+  - `npm run screenshots` ran and its 18 PNGs are updated.
+  - `npm run demo` ran the recorder, but the ffmpeg encode step shells out
+    to `docker run mwader/static-ffmpeg`, and this sandbox has no docker
+    daemon reachable — **not run, not claimed done**. The one touched
+    byproduct (`console-demo-poster-light.png`, written before the failed
+    encode) was reverted rather than committed half-refreshed. A
+    workstation session with Docker owes this one.
