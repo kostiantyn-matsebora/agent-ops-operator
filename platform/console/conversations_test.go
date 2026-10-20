@@ -133,6 +133,25 @@ func TestSummarizeReportsAConversationBeingDeleted(t *testing.T) {
 	}
 }
 
+// summarize reads SignalSeverity off the CR the same way it already reads
+// SignalLabels, end to end through conversationView and signalSeverity —
+// not just through a ConversationSummary built by hand.
+func TestSummarizeCarriesSignalSeverity(t *testing.T) {
+	rated := obj("conversations", "rated", "1",
+		`{"profileRef":{"name":"ops"},"signal":{"sourceRef":{"name":"cluster-events"},"labels":{"a":"b"},"severity":"critical"}}`,
+		`{"phase":"Idle"}`)
+	if got := summarize(rated, nil, nil, "console", "", nil).SignalSeverity; got != "critical" {
+		t.Fatalf("SignalSeverity = %q, want %q", got, "critical")
+	}
+
+	unrated := obj("conversations", "unrated", "1",
+		`{"profileRef":{"name":"ops"},"signal":{"sourceRef":{"name":"cluster-events"}}}`,
+		`{"phase":"Idle"}`)
+	if got := summarize(unrated, nil, nil, "console", "", nil).SignalSeverity; got != "" {
+		t.Fatalf("an unrated signal must leave SignalSeverity empty, got %q", got)
+	}
+}
+
 // A dispatch stamps lastActivity AFTER the answer it dispatched for — the
 // false-unread bug the proposal names. The read report still covers it
 // (design D-D), so opening after the dispatch stamp reports once rather than
