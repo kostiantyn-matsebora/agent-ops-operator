@@ -1,14 +1,18 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -141,5 +145,72 @@ func TestProbePutSameNameInBodyAndRouteIsAccepted(t *testing.T) {
 	}
 	if getProbe(h, "p1").Code != 200 {
 		t.Fatal("the probe should have been stored")
+	}
+}
+
+func failingProbeHandler(t *testing.T, funcs interceptor.Funcs) *ProbeHandler {
+	t.Helper()
+	c := fake.NewClientBuilder().WithScheme(probeTestScheme(t)).WithInterceptorFuncs(funcs).Build()
+	return &ProbeHandler{Writer: c, Reader: c, Namespace: "agent-ops"}
+}
+
+var errBoom = errors.New("boom")
+
+func TestProbeMissingNameIsRefused(t *testing.T) {
+	h := newProbeHandler(t)
+	if rec := putProbe(h, "", `{"key":"k"}`); rec.Code != 400 {
+		t.Fatalf("put status = %d, want 400", rec.Code)
+	}
+	if rec := getProbe(h, ""); rec.Code != 400 {
+		t.Fatalf("get status = %d, want 400", rec.Code)
+	}
+}
+
+func TestProbeReadFailureIs500(t *testing.T) {
+	h := failingProbeHandler(t, interceptor.Funcs{
+		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return errBoom
+		},
+	})
+	if rec := getProbe(h, "p1"); rec.Code != 500 {
+		t.Fatalf("get status = %d, want 500", rec.Code)
+	}
+	if rec := putProbe(h, "p1", `{"key":"k"}`); rec.Code != 500 {
+		t.Fatalf("put status = %d, want 500", rec.Code)
+	}
+}
+
+func TestProbeCreateFailureIs500(t *testing.T) {
+	h := failingProbeHandler(t, interceptor.Funcs{
+		Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+			return errBoom
+		},
+	})
+	if rec := putProbe(h, "p1", `{"key":"k"}`); rec.Code != 500 {
+		t.Fatalf("put status = %d, want 500", rec.Code)
+	}
+}
+
+func TestProbeUpdateFailureIs500(t *testing.T) {
+	h := failingProbeHandler(t, interceptor.Funcs{
+		Update: func(context.Context, client.WithWatch, client.Object, ...client.UpdateOption) error {
+			return errBoom
+		},
+	})
+	putProbe(h, "p1", `{"key":"k"}`)
+	if rec := putProbe(h, "p1", `{"key":"k2"}`); rec.Code != 500 {
+		t.Fatalf("put status = %d, want 500", rec.Code)
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errBoom }
+
+func TestReadJSONBodyReadErrorIsReturned(t *testing.T) {
+	req := httptest.NewRequest("PUT", "/", errReader{})
+	var v probeBody
+	if err := readJSON(req, &v); err == nil {
+		t.Fatal("want error from unreadable body")
 	}
 }
