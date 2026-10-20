@@ -82,30 +82,41 @@
 - [ ] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
   message shape both gain `severity`.
   - **BLOCKED, not done.** `docs/contracts.md` itself holds no shape
-    table for either — both live on the two pages below, and both are
-    gated the same way 7.2a is. See the note on 7.2a — this line and 7.6
-    share its cause and its resolution.
+    table for either — both live on the two LOCKED pages below, each
+    with its own entry (7.2a, 7.2b) rather than one combined note, so
+    either blocker is found on its own line, not inferred from the
+    other's prose.
 - [ ] 7.2a `docs/contracts/signal-adapter.md`: the optional `severity` field,
   its four-value vocabulary, and the 400 refusal of an unmapped value.
   - **BLOCKED, not done — a human decision, not an implementation gap.**
-    `.claude/rules/signal-rules.md` and `.claude/rules/channel-spec.md`
-    both state their contract page is NEVER edited without the user's
-    explicit approval, and that an approved edit brings every shipped
-    adapter into conformance IN THE SAME CHANGE — for the signal
-    contract, `cron`, `alertmanager`, `k8s-events`, `ha`, `telegram`,
-    and for the channel contract, `channels/telegram`,
-    `platform/console` — plus a version bump on each page. This
-    change's own `design.md` scopes that out on purpose
-    (Non-Goals: "Mapping any shipped adapter onto the field"). Editing
-    either locked page here would either violate the approval gate or
-    silently drag in out-of-scope adapter work the proposal never asked
-    for. The code is already correct and additive
-    (`COMPAT-2`/`COMPAT-3`-style: an unknown field is ignored, not
-    required) — only the two VERSIONED SPEC PAGES are unwritten, pending
-    the user's explicit go-ahead on a follow-up (either approve the two
-    edits plus their conformance bumps, or accept the field as an
-    intentionally-undocumented, backward-compatible extension until a
-    later change states it).
+    `.claude/rules/signal-rules.md`: "NEVER edited without the user's
+    explicit approval," and an approved edit brings every shipped
+    SIGNAL adapter — `cron`, `alertmanager`, `k8s-events`, `ha`,
+    `telegram` — into conformance IN THE SAME CHANGE, plus a version
+    bump on this page. This change's own `design.md` scopes that out on
+    purpose (Non-Goals: "Mapping any shipped adapter onto the field").
+    The code is already correct and additive (`COMPAT-2`-style: an
+    unknown field is ignored, not required) — only this VERSIONED SPEC
+    PAGE is unwritten, pending the user's explicit go-ahead (approve the
+    edit plus its conformance bump, or accept the field as an
+    intentionally-undocumented, backward-compatible extension for now).
+- [ ] 7.2b `docs/contracts/channel-adapter.md`: the outbound `signal`
+  message's "Message fields" table gains `severity`.
+  - **BLOCKED, not done — same cause as 7.2a, a DIFFERENT locked page.**
+    `.claude/rules/channel-spec.md` states the identical rule for this
+    page: "NEVER edited without the user's explicit approval," and an
+    approved edit brings every shipped CHANNEL adapter —
+    `channels/telegram`, `platform/console` — into conformance in the
+    same change, plus a version bump here too. This one is the page this
+    PR actually edits code against: `internal/chat/message.go`'s
+    `Message`/`SignalMessage` is exactly the surface this table
+    describes, and `platform/console` (one of the two named adapters) is
+    wired to draw the field while `channels/telegram` is not — both
+    deliberate, per `design.md`'s non-goal, but both are this page's
+    conformance question to answer, not something a code change can
+    settle on its own. Same two resolutions as 7.2a: approve this edit
+    plus its conformance bump, or accept the field as undocumented here
+    for now — the user's call, not assumed.
 - [x] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
   regenerated `docs/cr-reference.md` blocks for the two CRD-backed types.
 - [x] 7.4 `docs/console.md`: what the signal card now draws when present.
@@ -113,7 +124,7 @@
   marked non-breaking.
 - [ ] 7.6 `docs/guides/signal-adapter.md`: note that `severity` is a
   contract field no shipped adapter sets yet.
-  - **BLOCKED, not done — same cause as 7.2/7.2a.** This guide states no
+  - **BLOCKED, not done — same cause as 7.2/7.2a/7.2b.** This guide states no
     requirement of its own and treats `docs/contracts/signal-adapter.md`
     as the one source of truth, deferring to it by its own stated rule.
     Describing `severity` here before that locked page says so would

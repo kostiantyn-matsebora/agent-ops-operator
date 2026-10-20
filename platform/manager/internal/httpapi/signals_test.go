@@ -168,36 +168,47 @@ func TestSignalInboundAbsentSeverityBehavesAsToday(t *testing.T) {
 // signal-severity: "Each vocabulary value is accepted", threaded onto
 // SignalProvenance and the opening ConversationInputSpec exactly where
 // Labels already lands.
+// signal-severity: "Each vocabulary value is accepted" — all four, not just
+// the one this test used to exercise (critical). info was previously only
+// ever named in a 400 rejection's body, never posted and stored as a valid
+// value in its own right.
 func TestSignalInboundValidSeverityThreadsOntoProvenanceAndInput(t *testing.T) {
-	source := sigTestSource("sev-valid-src", "sev-valid-t")
-	pipeline := sigTestPipeline("sev-valid-pipe", source.Name)
-	s, c := sigServer(t, source, pipeline)
+	for _, sev := range []agentopsv1alpha1.Severity{
+		agentopsv1alpha1.SeverityCritical, agentopsv1alpha1.SeverityError,
+		agentopsv1alpha1.SeverityWarning, agentopsv1alpha1.SeverityInfo,
+	} {
+		t.Run(string(sev), func(t *testing.T) {
+			source := sigTestSource("sev-valid-src-"+string(sev), "sev-valid-t")
+			pipeline := sigTestPipeline("sev-valid-pipe-"+string(sev), source.Name)
+			s, c := sigServer(t, source, pipeline)
 
-	rec := postSig(s, source.Name, []map[string]any{
-		{"initiationId": "sev-valid-1", "payload": "hello", "severity": "critical"},
-	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+			rec := postSig(s, source.Name, []map[string]any{
+				{"initiationId": "sev-valid-1", "payload": "hello", "severity": string(sev)},
+			})
+			if rec.Code != 200 {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
 
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
-	}
-	if len(convs.Items) != 1 {
-		t.Fatalf("want 1 conversation, got %d", len(convs.Items))
-	}
-	conv := convs.Items[0]
-	if conv.Spec.Signal == nil || conv.Spec.Signal.Severity != agentopsv1alpha1.SeverityCritical {
-		t.Fatalf("provenance severity wrong: %+v", conv.Spec.Signal)
-	}
-	var ci agentopsv1alpha1.ConversationInput
-	if err := c.Get(context.Background(), types.NamespacedName{
-		Namespace: sigTestNamespace, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
-		t.Fatal(err)
-	}
-	if ci.Spec.Severity != agentopsv1alpha1.SeverityCritical {
-		t.Fatalf("input severity wrong: %q", ci.Spec.Severity)
+			var convs agentopsv1alpha1.ConversationList
+			if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+				t.Fatal(err)
+			}
+			if len(convs.Items) != 1 {
+				t.Fatalf("want 1 conversation, got %d", len(convs.Items))
+			}
+			conv := convs.Items[0]
+			if conv.Spec.Signal == nil || conv.Spec.Signal.Severity != sev {
+				t.Fatalf("provenance severity wrong: %+v", conv.Spec.Signal)
+			}
+			var ci agentopsv1alpha1.ConversationInput
+			if err := c.Get(context.Background(), types.NamespacedName{
+				Namespace: sigTestNamespace, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
+				t.Fatal(err)
+			}
+			if ci.Spec.Severity != sev {
+				t.Fatalf("input severity wrong: %q", ci.Spec.Severity)
+			}
+		})
 	}
 }
 
