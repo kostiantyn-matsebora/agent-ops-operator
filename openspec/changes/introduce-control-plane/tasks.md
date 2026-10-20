@@ -89,6 +89,8 @@
 - [ ] 6.3 `docs/CHANGELOG.md`: the new CRD, the new `controlPlaneAuth` chart
   value, and the `kubectl apply -f chart/crds/` upgrade step (Helm never
   upgrades an existing CRD).
+- [ ] 6.3a `docs/configuration.md`: document the `controlPlaneAuth` chart
+  value, its generated token Secret, and the 503 an unset token yields.
 - [ ] 6.4 Run `python3 .github/scripts/docs-generate.py --check` (this
   change adds a CRD field and a chart value) and fix any reported drift.
 

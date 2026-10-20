@@ -74,6 +74,11 @@ Request body of the `PUT`, and response body of both:
   value, then reads it back by that name
 - **THEN** the response carries the same key and value
 
+#### Scenario: A body name that differs from the route name is refused
+- **WHEN** a caller `PUT`s a body whose `name` differs from the route's
+  `{name}`
+- **THEN** the manager responds 400 and stores nothing
+
 #### Scenario: Reading an unknown name fails explicitly
 - **WHEN** a caller reads a placeholder object by a name that was never
   created
