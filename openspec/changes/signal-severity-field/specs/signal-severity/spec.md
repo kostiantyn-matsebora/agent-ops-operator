@@ -27,11 +27,19 @@ and not one of the four values, responding `400` and naming the accepted
 values. Validation SHALL run ahead of any routing decision, so a refused
 signal creates nothing and appends nothing to an open conversation.
 
+The refusal is per batch. One signal with an unmapped `severity` SHALL
+refuse the whole request, and no signal in that batch is processed.
+
 #### Scenario: An unknown value is refused
 
 - **WHEN** a signal is posted with `severity: fatal`
 - **THEN** the manager responds 400 naming `critical`, `error`, `warning`,
   and `info`, and creates nothing
+
+#### Scenario: One bad signal refuses the whole batch
+
+- **WHEN** a batch posts one valid signal and one with `severity: fatal`
+- **THEN** the manager responds 400 and processes neither
 
 #### Scenario: Absent severity behaves as today
 

@@ -73,6 +73,8 @@
   `severity` label.
 - [ ] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
   message shape both gain `severity`.
+- [ ] 7.2a `docs/contracts/signal-adapter.md`: the optional `severity` field,
+  its four-value vocabulary, and the 400 refusal of an unmapped value.
 - [ ] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
   regenerated `docs/cr-reference.md` blocks for the two CRD-backed types.
 - [ ] 7.4 `docs/console.md`: what the signal card now draws when present.
