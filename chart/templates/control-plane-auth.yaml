@@ -1,7 +1,8 @@
 {{- /*
 The /control-plane/* bearer token — a SEPARATE credential from the adapter
-master token in adapter-auth.yaml. Never derived from or compared against
-adapterAuth.token: a caller scoped to one surface must not reach the other.
+master token in adapter-auth.yaml. Never derived from adapterAuth.token, and
+an explicit value equal to it FAILS the render: a caller scoped to one surface
+must not reach the other.
 
 THREE SOURCES, IN ORDER: an explicit controlPlaneAuth.token, an existing
 Secret of this name, then generation. Explicit is checked FIRST; a setting
@@ -18,6 +19,9 @@ it succeeding is what left a fresh credential on that path.
 {{- if not .Values.controlPlaneAuth.existingSecret }}
 {{- $name := .Values.controlPlaneAuth.secretName }}
 {{- $explicit := .Values.controlPlaneAuth.token | default "" }}
+{{- if and $explicit (eq $explicit (.Values.adapterAuth.token | default "")) }}
+{{- fail "controlPlaneAuth.token must differ from adapterAuth.token: one credential would open both surfaces" }}
+{{- end }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
 {{- $existingVal := "" }}
 {{- if and $existing $existing.data }}

@@ -89,29 +89,21 @@ func (h *ProbeHandler) createOrUpdate(ctx context.Context, name, key, value stri
 	for range 5 {
 		var existing agentopsv1alpha1.ControlPlaneProbe
 		err := h.Reader.Get(ctx, types.NamespacedName{Namespace: h.Namespace, Name: name}, &existing)
+		retry := false
 		switch {
 		case err == nil:
 			existing.Spec.Key, existing.Spec.Value = key, value
-			if err := h.Writer.Update(ctx, &existing); err != nil {
-				if apierrors.IsConflict(err) {
-					continue
-				}
-				return err
-			}
-			return nil
+			err = h.Writer.Update(ctx, &existing)
+			retry = apierrors.IsConflict(err)
 		case apierrors.IsNotFound(err):
 			probe := &agentopsv1alpha1.ControlPlaneProbe{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: h.Namespace},
 				Spec:       agentopsv1alpha1.ControlPlaneProbeSpec{Key: key, Value: value},
 			}
-			if err := h.Writer.Create(ctx, probe); err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					continue
-				}
-				return err
-			}
-			return nil
-		default:
+			err = h.Writer.Create(ctx, probe)
+			retry = apierrors.IsAlreadyExists(err)
+		}
+		if !retry {
 			return err
 		}
 	}

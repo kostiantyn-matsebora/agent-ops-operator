@@ -53,7 +53,7 @@
   container via `secretKeyRef`, next to the existing `ADAPTER_TOKEN` entry.
   Verify: `helm template --set controlPlaneAuth.secretName=test` renders the
   env var and a Secret, same as the `adapterAuth` case does today.
-- [x] 3.3 Render the new CRD under `chart/crds/` (carried from 1.2) and
+- [ ] 3.3 Render the new CRD under `chart/crds/` (carried from 1.2) and
   confirm `helm template` does not error on an unknown kind. Verify:
   `helm template --dry-run=server` against a cluster with the CRD applied,
   per `chart.md`'s CRD-install-order note.
