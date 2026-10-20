@@ -82,24 +82,24 @@
 
 ### Reference docs
 
-- [ ] 6.1 `docs/concepts.md`: document the placeholder CRD, its disposable
+- [x] 6.1 `docs/concepts.md`: document the placeholder CRD, its disposable
   nature stated first, and the RBAC pattern this surface establishes
   (manager Role = full CRUD, every other component's Role = read-only or
   nothing) as the rule future residents follow.
-- [ ] 6.2 `docs/contracts.md`: document the `/control-plane/*` HTTP surface
+- [x] 6.2 `docs/contracts.md`: document the `/control-plane/*` HTTP surface
   — its routes, its dedicated token auth, and the isolation from
   `ADAPTER_TOKEN`/the coordinator token.
-- [ ] 6.3 `docs/CHANGELOG.md`: the new CRD, the new `controlPlaneAuth` chart
+- [x] 6.3 `docs/CHANGELOG.md`: the new CRD, the new `controlPlaneAuth` chart
   value, and the `kubectl apply -f chart/crds/` upgrade step (Helm never
   upgrades an existing CRD).
-- [ ] 6.3a `docs/configuration.md`: document the `controlPlaneAuth` chart
+- [x] 6.3a `docs/configuration.md`: document the `controlPlaneAuth` chart
   value, its generated token Secret, and the 503 an unset token yields.
-- [ ] 6.4 Run `python3 .github/scripts/docs-generate.py --check` (this
+- [x] 6.4 Run `python3 .github/scripts/docs-generate.py --check` (this
   change adds a CRD field and a chart value) and fix any reported drift.
 
 ### Adopter site
 
-- [ ] 6.5 Confirm no adopter-facing page (landing page, Getting started,
+- [x] 6.5 Confirm no adopter-facing page (landing page, Getting started,
   Installation, guides) describes manager-internal HTTP surfaces or
   scaffolding CRDs today, so none needs a change for this proposal — state
   this explicitly rather than silently skipping it, per `documentation.md`.
