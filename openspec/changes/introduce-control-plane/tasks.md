@@ -1,12 +1,12 @@
 ## 1. Placeholder CRD type — backend-developer
 
-- [ ] 1.1 Add a new, explicitly placeholder-named kind (e.g.
+- [x] 1.1 Add a new, explicitly placeholder-named kind (e.g.
   `ControlPlaneProbe`) under `platform/manager/api/v1alpha1/`, spec-only
   (name + key/value pair, no status subresource — mirror
   `mcptoolset_types.go`'s shape). The type's doc comment states "disposable
   scaffolding, to be replaced, not extended" in its first sentence. Verify:
   `go build ./...` in `platform/manager`.
-- [ ] 1.2 Regenerate deepcopy and CRD YAML:
+- [x] 1.2 Regenerate deepcopy and CRD YAML:
   `go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 object
   paths=./api/...` then the matching `crd` invocation targeting
   `../../chart/crds`. Verify: `chart/crds/` contains the new kind's YAML and
