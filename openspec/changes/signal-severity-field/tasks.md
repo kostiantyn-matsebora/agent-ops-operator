@@ -73,15 +73,44 @@
   `severity` label.
 - [ ] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
   message shape both gain `severity`.
+  - **BLOCKED, not done.** `docs/contracts.md` itself holds no shape
+    table for either — both live on the two pages below, and both are
+    gated the same way 7.2a is. See the note on 7.2a — this line and 7.6
+    share its cause and its resolution.
 - [ ] 7.2a `docs/contracts/signal-adapter.md`: the optional `severity` field,
   its four-value vocabulary, and the 400 refusal of an unmapped value.
-- [ ] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
+  - **BLOCKED, not done — a human decision, not an implementation gap.**
+    `.claude/rules/signal-rules.md` and `.claude/rules/channel-spec.md`
+    both state their contract page is NEVER edited without the user's
+    explicit approval, and that an approved edit brings every shipped
+    adapter into conformance IN THE SAME CHANGE — for the signal
+    contract, `cron`, `alertmanager`, `k8s-events`, `ha`, `telegram`,
+    and for the channel contract, `channels/telegram`,
+    `platform/console` — plus a version bump on each page. This
+    change's own `design.md` scopes that out on purpose
+    (Non-Goals: "Mapping any shipped adapter onto the field"). Editing
+    either locked page here would either violate the approval gate or
+    silently drag in out-of-scope adapter work the proposal never asked
+    for. The code is already correct and additive
+    (`COMPAT-2`/`COMPAT-3`-style: an unknown field is ignored, not
+    required) — only the two VERSIONED SPEC PAGES are unwritten, pending
+    the user's explicit go-ahead on a follow-up (either approve the two
+    edits plus their conformance bumps, or accept the field as an
+    intentionally-undocumented, backward-compatible extension until a
+    later change states it).
+- [x] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
   regenerated `docs/cr-reference.md` blocks for the two CRD-backed types.
 - [ ] 7.4 `docs/console.md`: what the signal card now draws when present.
-- [ ] 7.5 `docs/CHANGELOG.md`: add an entry for the new optional field,
+- [x] 7.5 `docs/CHANGELOG.md`: add an entry for the new optional field,
   marked non-breaking.
 - [ ] 7.6 `docs/guides/signal-adapter.md`: note that `severity` is a
   contract field no shipped adapter sets yet.
+  - **BLOCKED, not done — same cause as 7.2/7.2a.** This guide states no
+    requirement of its own and treats `docs/contracts/signal-adapter.md`
+    as the one source of truth, deferring to it by its own stated rule.
+    Describing `severity` here before that locked page says so would
+    make the guide, not the spec, the first place a reader meets a
+    claim nobody approved.
 
 ### Adopter site
 
