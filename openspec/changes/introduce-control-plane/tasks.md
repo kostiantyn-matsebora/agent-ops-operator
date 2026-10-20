@@ -68,7 +68,7 @@
 
 ## 5. System tests
 
-- [ ] 5.1 Add a lane to `platform/manager/test/system/` that, against a real
+- [x] 5.1 Add a lane to `platform/manager/test/system/` that, against a real
   envtest/cluster API server, exercises the full round trip through
   `/control-plane/*`: correct token writes a placeholder object, a read
   returns it, an unconfigured/wrong token is refused, a request for a kind
