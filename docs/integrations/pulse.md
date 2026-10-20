@@ -23,10 +23,18 @@ way to act: an operator-state annotation.
 
 ## What starts work
 
-A firing Pulse alert, posted to the bundle's own webhook. One conversation per
-alert — the adapter mints its `initiationId` from Pulse's own alert id, and
-the manager's cooldown collapses recurrences onto the same conversation
-rather than opening a second one per repetition.
+A firing Pulse alert, posted to the bundle's own webhook. One conversation
+per occurrence — by default the adapter mints `initiationId` from Pulse's
+alert id plus its start time.
+
+Pulse can reuse an alert id for what it itself calls a new occurrence. An id
+alone would then continue an old conversation instead of opening a fresh one.
+
+Set `spec.config.correlationStrategy: id` on the source for the old,
+id-alone behavior instead: one conversation absorbing every re-fire of the
+same alert id, however long ago it last resolved. A retry and a
+firing/resolved pair of one occurrence land in the same conversation either
+way.
 
 **Pulse only sends webhooks, it has no inbound registration of its own.** So
 "registering" means this adapter calling *Pulse's* API to tell it where to

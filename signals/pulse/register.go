@@ -85,6 +85,29 @@ type registerConfig struct {
 	// this adapter's Ingress requiring its own shared-secret header, for
 	// instance. Pulse's own signing headers win on a name collision.
 	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty"`
+	// CorrelationStrategy selects how initiationID (payload.go) folds Pulse's
+	// alert id into this source's signals — "id" or "id+startTime". Resolved
+	// once per registryLoop poll tick via normalizeCorrelationStrategy below,
+	// same cadence as the signing secret, never re-derived per webhook
+	// request.
+	CorrelationStrategy string `json:"correlationStrategy,omitempty"`
+}
+
+// normalizeCorrelationStrategy resolves a served source's raw
+// correlationStrategy config value to one of the two strategies
+// pulseEvent.initiationID understands. This is the one place the default
+// lives: the explicit opt-in "id" is passed through verbatim, and
+// everything else — absent, empty, or any unrecognized value — degrades to
+// "id+startTime" rather than rejecting. There is no HTTP request to return
+// a 4xx against here (the value is read from a polled SignalSource), so a
+// typo degrades to the safer, corrected default instead of silently
+// reinstating the old collapsing behavior or crashing the adapter
+// (design.md's "Unrecognized or empty value defaults rather than rejects").
+func normalizeCorrelationStrategy(raw string) string {
+	if raw == correlationStrategyID {
+		return correlationStrategyID
+	}
+	return correlationStrategyIDStartTime
 }
 
 // parseRegisterConfig extracts this adapter's config block. No config at
@@ -139,22 +162,30 @@ func pulseCredential(info SourceInfo) (token, signingSecret string) {
 }
 
 // reconcileRegistration attempts one registration cycle for a served source
-// and reports the resulting Ready state. Returns the resolved signing
-// secret (possibly "") so the caller can cache it for inbound signature
-// verification — this adapter never stores it longer than one refresh
-// cycle. Exposed to tests directly to drive a deterministic
-// failure-then-success sequence without waiting on registryLoop's ticker.
-func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) string {
+// and reports the resulting Ready state. Returns the resolved signing secret
+// (possibly "") and the resolved correlationStrategy (always one of
+// normalizeCorrelationStrategy's two canonical values) so the caller can
+// cache both for the duration of one refresh cycle — signing secret for
+// inbound signature verification, correlationStrategy for initiationID
+// derivation — neither ever re-derived per webhook request. Exposed to
+// tests directly to drive a deterministic failure-then-success sequence
+// without waiting on registryLoop's ticker.
+func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (signingSecret, correlationStrategy string) {
 	cfg, err := parseRegisterConfig(info.Config)
 	if err != nil {
 		a.report(ctx, info.Name, "InvalidConfig", err.Error())
-		return ""
+		return "", normalizeCorrelationStrategy("")
 	}
+	raw := ""
+	if cfg != nil {
+		raw = cfg.CorrelationStrategy
+	}
+	correlationStrategy = normalizeCorrelationStrategy(raw)
 	if cfg == nil || cfg.BaseURL == "" || cfg.WebhookURL == "" {
 		a.report(ctx, info.Name, "RegistrationNotConfigured",
 			"served by signal-pulse — set spec.config.baseUrl and spec.config.webhookUrl (and a credentialsSecretRef "+
 				"holding a Pulse API token) to register this webhook with Pulse automatically")
-		return ""
+		return "", correlationStrategy
 	}
 	token, signingSecret := pulseCredential(info)
 	client := newPulseClient(cfg.BaseURL, token)
@@ -162,11 +193,11 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) st
 	if err := client.ensureWebhook(ctx, desired); err != nil {
 		a.report(ctx, info.Name, "PulseRegistrationFailed",
 			fmt.Sprintf("served, but could not register the webhook with Pulse: %v", err))
-		return signingSecret
+		return signingSecret, correlationStrategy
 	}
 	a.report(ctx, info.Name, "PulseRegistered",
 		fmt.Sprintf("served by signal-pulse — Pulse posts alerts to %s", cfg.WebhookURL))
-	return signingSecret
+	return signingSecret, correlationStrategy
 }
 
 // pulseClient is a minimal Pulse REST client, stdlib only (this module stays

@@ -78,6 +78,20 @@ shape.
   behavior changes behavior silently on upgrade, since the default flips.
   **[Mitigation]** `docs/CHANGELOG.md` documents the breaking default and
   the explicit `"id"` opt-in, per this repo's upgrade-notes convention.
+- **[Risk]** The registered template's `"startsAt"` field (`payload.go`)
+  rendered `{{.Timestamp}}` before this change, not `{{.StartTime}}` — a
+  pre-existing field choice that was harmless while `startsAt` was unused,
+  but becomes load-bearing now that the default strategy depends on it
+  being stable across one occurrence's lifecycle. Corrected to
+  `{{.StartTime}}` on the strength of Pulse's own docs (`.StartTime` is
+  what Pulse's own PSA/ConnectWise reference templates use for
+  `startedAt`, and the docs state a resolved event "retains the original
+  member alertId and startedAt." `.Timestamp` is undefined there and
+  grouped with per-reading telemetry fields. **[Mitigation]** Flagged in
+  `payload.go`'s header the same way the `.Event`/`.Type` correction once
+  was — this is doc-based, not live-instance-confirmed. Needs the same
+  real-Pulse confirmation before the next release ships it, or a Pulse
+  version note if it turns out to differ by version.
 
 ## Migration Plan
 
