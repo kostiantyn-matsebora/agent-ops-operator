@@ -538,6 +538,40 @@ func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	}
 }
 
+// The credential tests above all assert on the Secret alone. None of them
+// parses the manager Deployment to check it actually carries
+// CONTROL_PLANE_TOKEN wired via secretKeyRef to that Secret's name — a
+// refactor of deployment.yaml dropping the env var, or pointing it at the
+// wrong Secret (adapterAuth's, say), would pass every one of them.
+func TestControlPlaneTokenEnvWiresToItsOwnSecret(t *testing.T) {
+	want := func(secret string) string {
+		return "name: CONTROL_PLANE_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: token"
+	}
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if deploy == "" {
+		t.Fatal("manager Deployment not rendered")
+	}
+	if !strings.Contains(deploy, want("agentops-control-plane-token")) {
+		t.Fatalf("manager Deployment must wire CONTROL_PLANE_TOKEN to the default Secret:\n%s", deploy)
+	}
+
+	renamed := findDocByKindAndMetaName(helmTemplate(t, "--set", "controlPlaneAuth.secretName=test"), "Deployment", "agentops-manager")
+	if !strings.Contains(renamed, want("test")) {
+		t.Fatalf("CONTROL_PLANE_TOKEN must follow controlPlaneAuth.secretName:\n%s", renamed)
+	}
+
+	existing := findDocByKindAndMetaName(helmTemplate(t, "--set", "controlPlaneAuth.existingSecret=my-control-plane-secret"), "Deployment", "agentops-manager")
+	if !strings.Contains(existing, want("my-control-plane-secret")) {
+		t.Fatalf("CONTROL_PLANE_TOKEN must follow controlPlaneAuth.existingSecret:\n%s", existing)
+	}
+	// ADAPTER_TOKEN must still point at its own Secret, never the control
+	// plane's — the two credentials stay isolated end to end, not just at
+	// the Secret level.
+	if !strings.Contains(deploy, "name: ADAPTER_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: agentops-adapter-token") {
+		t.Fatalf("ADAPTER_TOKEN must still reference its own Secret:\n%s", deploy)
+	}
+}
+
 func splitDocs(rendered string) []string {
 	return strings.Split(rendered, "\n---\n")
 }
