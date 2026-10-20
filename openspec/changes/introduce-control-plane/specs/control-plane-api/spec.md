@@ -56,6 +56,19 @@ The control-plane surface SHALL let an authenticated caller create or update
 a placeholder object by name and key/value pair, and read one back by name.
 A read SHALL return exactly the key/value pair last written for that name.
 
+| Verb | Route | Success |
+|---|---|---|
+| Create or update | `PUT /control-plane/placeholders/{name}` | 200 with the stored object |
+| Read | `GET /control-plane/placeholders/{name}` | 200 with the stored object |
+
+Request body of the `PUT`, and response body of both:
+
+```json
+{"name": "example", "key": "greeting", "value": "hello"}
+```
+
+`name` in a request body, when present, SHALL match the route's `{name}`.
+
 #### Scenario: Writing then reading returns what was written
 - **WHEN** a caller creates a placeholder object with a given name, key, and
   value, then reads it back by that name

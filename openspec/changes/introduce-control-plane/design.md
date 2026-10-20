@@ -123,6 +123,11 @@ provision and rotate by hand.**
 exactly. The operational burden is one more chart value, not a new
 pattern to learn.
 
+**A new token scope moves a trust boundary.**
+→ `docs/security.md` records the threat and the control, and
+`threat-model.py` is re-run. The chart key stays in
+`docs/configuration.md`.
+
 **An unconfigured token could silently leave the surface open.**
 → Mirrored from `platform/console/auth.go`'s documented rule: an unset
 token authorizes nobody and is indistinguishable from a wrong one. The

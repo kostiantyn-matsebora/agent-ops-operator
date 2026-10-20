@@ -91,6 +91,10 @@ changes.
   pattern this surface follows.
 - `docs/contracts.md` — the new `/control-plane/*` HTTP surface and its
   token authentication.
+- `docs/security.md` — the new bearer-token surface as a threat and
+  control, and the manager-exclusive-write RBAC as a control.
+- `docs/configuration.md` — the chart value that sets the control-plane
+  token.
 - `docs/CHANGELOG.md` — the new CRD, the new chart value, the
   `kubectl apply -f chart/crds/` upgrade step.
 
