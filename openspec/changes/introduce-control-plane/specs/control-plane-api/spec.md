@@ -10,8 +10,8 @@ coordination surface it already serves.
 ### Requirement: A dedicated bearer token authenticates every request
 
 `/control-plane/*` SHALL require `Authorization: Bearer <token>`, checked
-constant-time against a token read once from its own environment variable
-at process start. The token SHALL be distinct from `ADAPTER_TOKEN` and from
+constant-time against a token read once from the `CONTROL_PLANE_TOKEN`
+environment variable at process start. The token SHALL be distinct from `ADAPTER_TOKEN` and from
 the coordinator token.
 
 #### Scenario: A correct token reaches the handler

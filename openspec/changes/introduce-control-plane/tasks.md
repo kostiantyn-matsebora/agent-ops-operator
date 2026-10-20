@@ -24,7 +24,8 @@
   read-by-name, 404 on unknown name) in the same package, operating on the
   CRD from 1.1 through the manager's existing controller-runtime client.
   Verify: a unit test for write-then-read, update-overwrites, read-unknown
-  404.
+  404, and a `PUT` whose body `name` differs from the route's `{name}`
+  (refused, nothing stored).
 - [ ] 2.3 Register `/control-plane/*` routes on the mux in
   `internal/httpapi/server.go` (or wherever `cmd/manager/main.go` wires the
   server), guarded by the new middleware, beside the existing
