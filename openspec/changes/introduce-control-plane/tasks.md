@@ -60,10 +60,10 @@
 
 ## 4. Unit tests
 
-- [ ] 4.1 `go build ./... && go vet ./... && go test ./...` passes in
+- [x] 4.1 `go build ./... && go vet ./... && go test ./...` passes in
   `platform/manager`, covering the new middleware (2.1), handlers (2.2),
   route isolation (2.3), and CRD deepcopy (1.1/1.2).
-- [ ] 4.2 Chart render tests cover the new `Role` entry (3.1) and the new
+- [x] 4.2 Chart render tests cover the new `Role` entry (3.1) and the new
   env/Secret wiring (3.2).
 
 ## 5. System tests
