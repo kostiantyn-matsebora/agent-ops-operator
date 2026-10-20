@@ -135,7 +135,7 @@
 
 - [x] 7.7 `docs/console-guide.md`: a severity mark can appear in the
   transcript view.
-- [x] 7.8 Re-run `npm run screenshots` and `npm run demo` in
+- [ ] 7.8 Re-run `npm run screenshots` and `npm run demo` in
   `platform/console/ui` to refresh the published console captures.
   - The fixture's one signal message (`screenshots/fixture.ts`) gained
     `severity: 'critical'`, so the published `conversation-{light,dark}.png`
