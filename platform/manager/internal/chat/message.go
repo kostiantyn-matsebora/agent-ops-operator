@@ -132,6 +132,11 @@ type Message struct {
 	// Labels are the signal's grouping labels, structured so each surface
 	// decides how much of them to show.
 	Labels map[string]string `json:"labels,omitempty"`
+	// Severity is the originating input's own severity rating
+	// (signal-severity) — one of critical/error/warning/info — OMITTED
+	// wherever that input carried none, the same posture as Labels. An
+	// adapter with no use for it renders the rest of the card unchanged.
+	Severity agentopsv1alpha1.Severity `json:"severity,omitempty"`
 
 	// InputRef names the ConversationInput holding the full payload, so an
 	// adapter can cite where the event lives for anyone with cluster access.
@@ -249,11 +254,11 @@ type TopicDescriptor struct {
 // A SIGNAL IS NOT PROSE. Its structured fields ARE the message and an adapter
 // renders a CARD from them — the block grammar never applies to it, and its
 // payload is a machine document or a person's typed words either way.
-func SignalMessage(pipeline, source, title, inputRef string, labels map[string]string, body string,
-	originKind agentopsv1alpha1.OriginKind) Message {
+func SignalMessage(pipeline, source, title, inputRef string, labels map[string]string,
+	severity agentopsv1alpha1.Severity, body string, originKind agentopsv1alpha1.OriginKind) Message {
 	return Message{
 		Kind: MsgSignal, Pipeline: pipeline, Source: source, Title: title,
-		Labels: labels, InputRef: inputRef, Body: body, OriginKind: originKind,
+		Labels: labels, Severity: severity, InputRef: inputRef, Body: body, OriginKind: originKind,
 	}
 }
 

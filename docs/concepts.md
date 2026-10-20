@@ -312,6 +312,22 @@ display, not routing.
 is never allowed to overwrite one, so a signal's own identifying context stays
 legible regardless of what the underlying object happens to carry.
 
+**`severity` here is a LABEL, unrelated to the normalized signal's own
+`severity` FIELD.** A posted signal may additionally carry a `severity`
+field, one of exactly `critical`, `error`, `warning`, `info`.
+
+`POST /signal/inbound` validates it and refuses an unmapped value. Absent
+means unrated, the only state a signal carried before this field existed.
+
+It is stored the same two places `labels` already is: once on the
+conversation's `SignalProvenance` at creation, and again on each
+`ConversationInput` that carries one. A later recurrence never rewrites
+the provenance.
+
+No shipped adapter populates it. `signals/k8s-events` and `signals/ha` keep
+writing their own `severity` **label**, shown in the table above, exactly
+as before.
+
 **Suppression is the adapter's job, and is distinct from correlation.** It
 decides whether a signal is emitted at all — see
 [kubernetes](integrations/kubernetes.md#tune-what-reaches-you).

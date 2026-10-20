@@ -28,7 +28,7 @@
 
 ## 3. Outbound signal message — backend-developer
 
-- [ ] 3.1 Add an optional `Severity` field to the `signal` message kind in
+- [x] 3.1 Add an optional `Severity` field to the `signal` message kind in
   `internal/chat/message.go`'s `SignalMessage`, filled from the
   input/provenance the same way `Labels` already is. Verify with a unit
   test asserting the field is present when the input carries one and
@@ -68,7 +68,7 @@
 
 ### Reference docs
 
-- [ ] 7.1 `docs/concepts.md`: note the normalized signal shape's optional
+- [x] 7.1 `docs/concepts.md`: note the normalized signal shape's optional
   `severity` field and its vocabulary, distinct from any adapter's own
   `severity` label.
 - [ ] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
