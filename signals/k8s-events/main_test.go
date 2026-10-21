@@ -505,3 +505,67 @@ func TestRunDrainSweepStopsOnCancel(t *testing.T) {
 		t.Fatal("runDrainSweep must stop once its context is cancelled")
 	}
 }
+
+// The fatal remediation must name a field the current SignalAdapter CRD
+// carries: the token mounts only for the account spec.serviceAccountName
+// references. Naming a deleted field is a remediation nobody can apply.
+func TestKubeAccessFailureNamesServiceAccountName(t *testing.T) {
+	msg := kubeAccessFailure("k8s-events", errTest("token missing"))
+	for _, want := range []string{
+		"token missing",
+		"SignalAdapter k8s-events spec.serviceAccountName",
+		"agentops-signal-k8s-events",
+		"events get/list/watch",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("remediation must contain %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "kubernetesAccess") {
+		t.Errorf("remediation names a field the CRD no longer carries:\n%s", msg)
+	}
+}
+
+type errTest string
+
+func (e errTest) Error() string { return string(e) }
+
+// A rule that can never match is configuration doing less than it says: the
+// warning compileRules already detects must reach the source's Ready report.
+func TestShadowedRuleWarningIsReportedOnReady(t *testing.T) {
+	cfg := `{"rules":[{"for":"3m"},{"matchers":["reason=\"BackOff\""],"for":"5m"}]}`
+	mgr := newFakeManager(SourceInfo{Name: "events", Config: json.RawMessage(cfg)})
+	a := newTestAdapter(mgr.start(t), nil, "unused", mustFilter(t, `{}`))
+	a.sources = map[string]*servedSource{}
+
+	a.refreshSources(context.Background())
+
+	waitFor(t, func() bool {
+		for _, st := range mgr.allStatuses() {
+			if st.Source == "events" && st.Ready && st.Reason == "AdapterReady" &&
+				strings.Contains(st.Message, "warning: rules[0] is a catch-all") &&
+				strings.Contains(st.Message, "can never match") {
+				return true
+			}
+		}
+		return false
+	})
+	if _, served := a.sources["events"]; !served {
+		t.Fatal("a shadowed rule warns — it must not stop the source being served")
+	}
+}
+
+// A well-ordered rule set adds nothing to the Ready report.
+func TestNoRuleWarningLeavesTheReadyMessagePlain(t *testing.T) {
+	cfg := `{"rules":[{"matchers":["reason=\"BackOff\""],"for":"5m"},{"for":"3m"}]}`
+	mgr := newFakeManager(SourceInfo{Name: "events", Config: json.RawMessage(cfg)})
+	a := newTestAdapter(mgr.start(t), nil, "unused", mustFilter(t, `{}`))
+	a.sources = map[string]*servedSource{}
+
+	a.refreshSources(context.Background())
+
+	waitFor(t, func() bool { return len(mgr.allStatuses()) == 1 })
+	if st := mgr.allStatuses()[0]; strings.Contains(st.Message, "warning") {
+		t.Fatalf("no warning was detected, none may be reported: %+v", st)
+	}
+}

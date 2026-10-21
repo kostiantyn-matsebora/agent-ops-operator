@@ -73,7 +73,9 @@ const ownLabelPrefix = "agentops.dev/"
 // wired in (mechanism 1 still works without it — that is its entire point).
 type selfExcluder struct {
 	// ownNamespace is the namespace this adapter runs in, injected as
-	// POD_NAMESPACE by ChannelAdapter/SignalAdapter kubernetesAccess.
+	// POD_NAMESPACE (a downward-API field) by the SignalAdapter reconciler on
+	// every adapter workload — it is not a permission, and does not depend on
+	// spec.serviceAccountName.
 	ownNamespace string
 	// cache answers the owner/label rule. Nil is valid and means only the
 	// name-prefix and namespace rules apply.

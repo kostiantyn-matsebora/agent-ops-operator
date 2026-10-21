@@ -657,3 +657,86 @@ func TestDroppedEntryStartsNoRefractoryWindow(t *testing.T) {
 		t.Fatalf("a drop must not suppress the next real problem, got %d", len(*got))
 	}
 }
+
+// ---- verification ladder rung 3: the adapter's own view ------------------------
+
+// An unsynced cache cannot say anything about a pod — absence there is not
+// "gone" — so the pod's verdict is unreadable, not a guess.
+func TestUnsyncedCacheMakesAPodUnreadable(t *testing.T) {
+	a := adapterWithCache(newObjectCache())
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("unsynced cache: got verdict %d want unreadable", got)
+	}
+	a.cache = nil
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("no cache at all: got verdict %d want unreadable", got)
+	}
+}
+
+// Denied pod reads leave a cache that looks synced (the node watcher listed)
+// but could never have held the pod. Reading that absence as "gone" would turn
+// a missing grant into a clean bill of health.
+func TestDeniedReadsMakeAPodUnreadableNotGone(t *testing.T) {
+	a := adapterWithCache(syncedCache())
+	msg := "cannot read pods: 403"
+	a.accessErr.Store(&msg)
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("denied reads: got verdict %d want unreadable", got)
+	}
+}
+
+// Rung 3 emits unconditionally: one event, never recurring, still emits when
+// the adapter could not read its own state at the close.
+func TestUnreadableOwnStateFailsOpen(t *testing.T) {
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	a := adapterWithCache(newObjectCache()) // never synced
+	var got []captured
+	q := newPendingQueue(a.health, func(source string, sigs []Signal) {
+		got = append(got, captured{source, sigs})
+	})
+	q.now = func() time.Time { return base }
+
+	q.Add("src", sigFor("prod", "Deployment/api", "Pod", "api-7f-x", "Unhealthy"), ruleWithDwell(3*time.Minute))
+	q.Flush(base.Add(4 * time.Minute))
+
+	if len(got) != 1 {
+		t.Fatalf("the adapter's own outage must never read as healthy — expected a fail-open emit: %+v", got)
+	}
+	if p := got[0].sigs[0].Payload; !strings.Contains(p, "failing open") {
+		t.Fatalf("the evidence must say the emit was unverified:\n%s", p)
+	}
+}
+
+// A tracked kind with no predicate, absent from a SYNCED cache, stays on rung
+// 2: absence is not evidence either way, so recurrence alone decides — a
+// one-off is dropped, a burst still arriving at the close is emitted.
+func TestTrackedKindAbsentFromASyncedCacheStaysRecurrenceGated(t *testing.T) {
+	a := adapterWithCache(syncedCache())
+	ref := objectRef{ns: "", kind: "Node", name: "node-gone"}
+	if got := a.health(ref); got != verdictUnknown {
+		t.Fatalf("absent tracked predicate-less kind: got verdict %d want unknown (rung 2)", got)
+	}
+
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+	sig := sigFor("", "Node/node-gone", "Node", "node-gone", "NodeNotReady")
+
+	run := func(arrivals ...time.Duration) int {
+		var got []captured
+		q := newPendingQueue(a.health, func(source string, sigs []Signal) {
+			got = append(got, captured{source, sigs})
+		})
+		for _, at := range arrivals {
+			q.now = func() time.Time { return base.Add(at) }
+			q.Add("src", sig, rule)
+		}
+		q.Flush(base.Add(3 * time.Minute))
+		return len(got)
+	}
+	if n := run(0); n != 0 {
+		t.Fatalf("a one-off on an absent tracked kind must be dropped, not failed open: %d emits", n)
+	}
+	if n := run(0, 60*time.Second, 170*time.Second); n != 1 {
+		t.Fatalf("a burst still arriving at the close must be emitted: %d emits", n)
+	}
+}

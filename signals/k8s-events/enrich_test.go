@@ -140,8 +140,8 @@ func TestNodeWithNoOwnerIsItsOwnWorkload(t *testing.T) {
 }
 
 // A tracked kind the cache has no entry for yields NO workload. Falling back to
-// the pod's own name would silently reinstate per-pod grouping, which is the
-// bug this whole change removes.
+// the pod's own name would dress a per-pod key up as a workload — the
+// per-object correlation keying on the owner exists to remove.
 // An untracked kind with no name at all (a malformed or partial
 // involvedObject) has nothing to name a workload after, so it must yield no
 // workload rather than a bare "/" — the untracked branch's other half from
@@ -190,7 +190,7 @@ func TestEnrichmentAddsNodeAndPodLabels(t *testing.T) {
 }
 
 // A user label may never rewrite the signal's own identity — through
-// signatureLabels that would silently change grouping.
+// `workload` that would silently change its initiationId.
 func TestPodLabelsCannotOverwriteReservedKeys(t *testing.T) {
 	c := syncedCache()
 	putPod(t, c, podJSON("prod", "api-1", "node-a",

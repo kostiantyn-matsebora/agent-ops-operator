@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -484,4 +485,95 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not met within 3s")
+}
+
+// ---- the relist batch bound --------------------------------------------------
+
+// An event storm on a relist loses nothing: the pass stops at the bound, keeps
+// its read position at the last EXAMINED event — events arrive out of time
+// order, so that is only honest if the pass examines oldest first — reports the
+// clip, and later passes consider the remainder.
+func TestRelistBatchBoundDefersTheRemainderAndReportsIt(t *testing.T) {
+	mgr := newFakeManager()
+	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
+	a.cap = newEmitCap(10 * maxBatchPerSrc) // the emit cap is not under test here
+	base := mustTime(t, "2026-08-08T12:00:00Z")
+	a.sources["src"].cursor = base
+
+	const total = 2*maxBatchPerSrc + 20
+	events := make([]Event, 0, total)
+	for i := 0; i < total; i++ {
+		// a stride coprime with total presents the timestamps scrambled
+		k := (i*37)%total + 1
+		e := evt("Warning", "prod", "Pod", fmt.Sprintf("pod-%03d", k), "BackOff")
+		e.LastTimestamp = base.Add(time.Duration(k) * time.Second).Format(time.RFC3339)
+		events = append(events, e)
+	}
+	ctx := context.Background()
+
+	a.deliver(ctx, events, true)
+
+	got := mgr.signalsFor("src")
+	if len(got) != maxBatchPerSrc {
+		t.Fatalf("the pass must stop at the bound: posted %d", len(got))
+	}
+	for _, s := range got {
+		var k int
+		fmt.Sscanf(s.Labels["name"], "pod-%03d", &k)
+		if k > maxBatchPerSrc {
+			t.Fatalf("a bounded pass must examine oldest first — posted %s past the oldest %d", s.Labels["name"], maxBatchPerSrc)
+		}
+	}
+	wantCursor := base.Add(maxBatchPerSrc * time.Second)
+	if !a.sources["src"].cursor.Equal(wantCursor) {
+		t.Fatalf("cursor must stop at the newest examined event %v, got %v", wantCursor, a.sources["src"].cursor)
+	}
+	st, ok := lastStatus(mgr, "BatchBoundReached")
+	if !ok || !strings.Contains(st.Message, fmt.Sprintf("%d event(s) unexamined", total-maxBatchPerSrc)) {
+		t.Fatalf("the clip must be reported on Ready, naming the count: %+v", mgr.allStatuses())
+	}
+
+	// A live event newer than the remainder must not carry the cursor past it.
+	live := evt("Warning", "prod", "Pod", "live", "BackOff")
+	live.LastTimestamp = base.Add(time.Hour).Format(time.RFC3339)
+	a.deliver(ctx, []Event{live}, false)
+	if !a.sources["src"].cursor.Equal(wantCursor) {
+		t.Fatalf("a watch pass advanced a held cursor past the unexamined remainder: %v", a.sources["src"].cursor)
+	}
+
+	// Later relists consider the remainder, and the last one releases the hold.
+	a.deliver(ctx, events, true)
+	a.deliver(ctx, events, true)
+	seen := map[string]bool{}
+	for _, s := range mgr.signalsFor("src") {
+		seen[s.Labels["name"]] = true
+	}
+	for i := 1; i <= total; i++ {
+		if name := fmt.Sprintf("pod-%03d", i); !seen[name] {
+			t.Fatalf("%s was never emitted — the bound lost it", name)
+		}
+	}
+	if a.sources["src"].cursorHeld {
+		t.Fatal("an unclipped relist must release the cursor hold")
+	}
+	if n := countReason(mgr, "BatchBoundReached"); n != 2 {
+		t.Fatalf("each clipped pass reports, the clean one does not: %d reports", n)
+	}
+}
+
+// A clipped pass whose next unexamined event shares the newest examined
+// timestamp keeps its read position strictly before it — the cursor skips
+// anything at or before itself.
+func TestBatchBoundKeepsTheCursorBeforeATiedUnexaminedEvent(t *testing.T) {
+	at := mustTime(t, "2026-08-08T12:00:00Z")
+	b := &sourceBatch{newest: at}
+	b.keepBefore(at)
+	if !b.newest.Before(at) {
+		t.Fatalf("a tie must move the read position before the unexamined event: %v", b.newest)
+	}
+	b = &sourceBatch{newest: at}
+	b.keepBefore(at.Add(time.Second))
+	if !b.newest.Equal(at) {
+		t.Fatalf("a strictly newer remainder leaves the read position alone: %v", b.newest)
+	}
 }

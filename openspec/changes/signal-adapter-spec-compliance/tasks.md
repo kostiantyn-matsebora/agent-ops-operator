@@ -39,24 +39,24 @@ not the audit.
 
 ## 3. k8s-events adapter fixes — backend-developer
 
-- [ ] 3.1 Rewrite the fatal-error and selfexclude texts naming the deleted
+- [x] 3.1 Rewrite the fatal-error and selfexclude texts naming the deleted
   `kubernetesAccess` field to name `spec.serviceAccountName` — verify by
   unit test on the message text.
-- [ ] 3.2 Report `ruleSet.warnings` on the source's Ready condition from
+- [x] 3.2 Report `ruleSet.warnings` on the source's Ready condition from
   `refreshSources` — verify by unit test with a shadowed rule.
-- [ ] 3.3 Split the unknown verdict: unreadable own state (unsynced cache,
+- [x] 3.3 Split the unknown verdict: unreadable own state (unsynced cache,
   denied reads at the close) emits fail-open, a tracked kind absent from a
   synced cache stays recurrence-gated — verify both paths by unit test.
-- [ ] 3.4 Close mute windows from the existing sweep timer: `MuteEnded`
+- [x] 3.4 Close mute windows from the existing sweep timer: `MuteEnded`
   with the count fires without a next batch, the active report carries the
   running count — verify by unit test with a lane that goes quiet.
-- [ ] 3.5 On a relist pass hitting the batch cap, advance the cursor only
+- [x] 3.5 On a relist pass hitting the batch cap, advance the cursor only
   to the newest examined event and report the clip on Ready — verify by
   unit test with >cap matches out of time order.
-- [ ] 3.6 Bound the per-pod fallback id to one informer resync tick as
+- [x] 3.6 Bound the per-pod fallback id to one informer resync tick as
   design.md states, and document the `emitDrainExceeded` cap bypass in code
   — verify fallback by unit test, bypass by the comment stating its bound.
-- [ ] 3.7 Purge stale comments: package-doc fingerprint id shape,
+- [x] 3.7 Purge stale comments: package-doc fingerprint id shape,
   `signatureLabels` in enrich.go, the outdated nodes claim in pending.go —
   verify by grep as in 1.4.
 
