@@ -84,11 +84,11 @@ not the audit.
 
 ## 6. Conformance suite — testing-specialist
 
-- [ ] 6.1 Build and run `signals/pulse` in
+- [x] 6.1 Build and run `signals/pulse` in
   `platform/manager/test/conformance/` like the other five, asserting its
   v2.0.0+ signal shape — verify `go test -tags conformance ./test/conformance/`
   passes with the new section.
-- [ ] 6.2 Add the fake-manager-observable assertions the delta names: the
+- [x] 6.2 Add the fake-manager-observable assertions the delta names: the
   pulse 404 naming its source, and the refractory window never suppressing
   a distinct id — verify the suite run.
 
@@ -96,7 +96,7 @@ not the audit.
 
 - [x] 7.1 `go build ./... && go vet ./... && go test ./...` green in every
   touched module: `signals/{pulse,alertmanager,k8s-events,ha,cron,telegram}`.
-- [ ] 7.2 `go test ./...` green in `platform/manager` (conformance helpers
+- [x] 7.2 `go test ./...` green in `platform/manager` (conformance helpers
   live in its module) plus `go test -tags conformance ./test/conformance/`.
 
 ## 8. System tests
