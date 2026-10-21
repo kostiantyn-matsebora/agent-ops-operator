@@ -312,6 +312,30 @@ func (c *objectCache) Workload(namespace, kind, name string) (string, string, bo
 	return curKind, curName, true
 }
 
+// Settled reports whether Workload's answer for this object is final: the
+// object is in the cache and its owner chain ends at an object with no
+// controller, or at a controller kind this cache does not track (Deployment,
+// StatefulSet, DaemonSet, Job, a Conversation). It is false while the object
+// itself, or any tracked hop of its chain, is still missing — the cache has not
+// caught up, and Workload would answer with a per-object or half-walked key.
+func (c *objectCache) Settled(namespace, kind, name string) bool {
+	oi, known := c.Get(namespace, kind, name)
+	if !known || oi == nil {
+		return false
+	}
+	for hop := 0; hop < 3 && oi.Owner != nil; hop++ {
+		if !c.tracks(oi.Owner.Kind) {
+			return true
+		}
+		next, ok := c.Get(namespace, oi.Owner.Kind, oi.Owner.Name)
+		if !ok || next == nil {
+			return false
+		}
+		oi = next
+	}
+	return true
+}
+
 // ---- the watcher ------------------------------------------------------------
 
 // cacheWatcher keeps an objectCache current for one resource in one scope.

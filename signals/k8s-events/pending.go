@@ -30,7 +30,13 @@ const (
 	verdictGone      verdict = iota // the object no longer exists
 	verdictHealthy                  // it exists and recovered
 	verdictUnhealthy                // it exists and is still broken
-	verdictUnknown                  // we cannot say
+	// verdictUnknown: the kind has no health predicate, so the object cannot
+	// be evaluated — rung 2 decides, on recurrence alone.
+	verdictUnknown
+	// verdictUnreadable: the adapter's OWN view is unreadable — the object
+	// cache has not synced, or its reads are denied — so nothing about the
+	// object can be evaluated at all. Rung 3: emit, failing open.
+	verdictUnreadable
 )
 
 // badWaitingReasons are container waiting states that mean broken rather than
@@ -287,28 +293,40 @@ func (q *pendingQueue) Flush(now time.Time) {
 
 // decide runs the verification ladder over an entry's members.
 //
-//	rung 1  a member has a health predicate  -> is it still unhealthy?
-//	rung 2  no predicate, but the object exists -> was it STILL RECURRING at the close?
-//	rung 3  we cannot even say it exists -> EMIT (fail open)
+//	rung 1  a member has a health predicate   -> is it still unhealthy?
+//	rung 2  no predicate                      -> was it STILL RECURRING at the close?
+//	rung 3  the adapter's own view unreadable -> EMIT (fail open)
+//
+// Rung 2 is not an existence check, either way: whether a predicate-less
+// object still exists — or whether that can be determined — is not evidence
+// of a live problem. Rung 3 is about the ADAPTER, never a kind: its own outage
+// must never read as a clean bill of health.
 //
 // An entry survives if ANY member is still unhealthy: a Deployment with one
 // broken pod out of three is a broken Deployment.
 func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
-	anyUnhealthy, anyUnknown := false, false
+	anyUnhealthy, anyUnknown, anyUnreadable := false, false, false
 	for _, ref := range e.members {
 		switch q.health(ref) {
 		case verdictUnhealthy:
 			anyUnhealthy = true
 		case verdictUnknown:
 			anyUnknown = true
+		case verdictUnreadable:
+			anyUnreadable = true
 		case verdictGone, verdictHealthy:
 			// this member resolved itself — the rollout case
 		}
 	}
 
+	note := ""
 	switch {
 	case anyUnhealthy:
 		// rung 1: confirmed still broken
+	case anyUnreadable:
+		// rung 3: the object cache could not be consulted at the close
+		note = "the object cache was unreadable at the close — emitted unverified, failing open"
+		log.Printf("dwell: %s emitted unverified — object cache unreadable at the close", e.workload)
 	case anyUnknown && e.stillRecurring(now):
 		// rung 2: no predicate, but it was still happening at the close — live
 	case anyUnknown:
@@ -325,7 +343,7 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	}
 
 	sig := e.sample
-	sig.Payload = e.evidence(now)
+	sig.Payload = e.evidence(now, note)
 	if len(e.members) > 1 {
 		sig.Title = fmt.Sprintf("%s (%d objects)", sig.Title, len(e.members))
 	}
@@ -335,7 +353,11 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 // evidence renders the accumulated burst. This is the reason dwell is a
 // feature rather than only a filter: what emits carries strictly more than the
 // N separate signals it replaced.
-func (e *pendingEntry) evidence(now time.Time) string {
+//
+// note, when set, states how the entry was verified where that departs from
+// the ordinary ladder — the fail-open rung, which a reader must be able to
+// tell apart from a confirmed problem.
+func (e *pendingEntry) evidence(now time.Time, note string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s — unhealthy for %s\n\n", e.workload, now.Sub(e.firstSeen).Round(time.Second))
 
@@ -362,6 +384,9 @@ func (e *pendingEntry) evidence(now time.Time) string {
 	fmt.Fprintf(&b, "  first seen %s, still true at %s\n",
 		e.firstSeen.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "  last seen %s before the window closed\n", now.Sub(e.lastSeen).Round(time.Second))
+	if note != "" {
+		fmt.Fprintf(&b, "  verification: %s\n", note)
+	}
 	if len(e.sample.Payload) > 0 {
 		fmt.Fprintf(&b, "\nmost recent event:\n%s\n", e.sample.Payload)
 	}

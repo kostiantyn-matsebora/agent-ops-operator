@@ -310,6 +310,36 @@ func parseNumOrName(s string, names map[string]int) (int, error) {
 	return v, nil
 }
 
+// ActiveWindow names the first referenced interval open at t, or "" if none.
+// Matchers are not consulted: this is the window's own clock, which is what
+// lets a window over a lane producing no events still report itself.
+func (rs *ruleSet) ActiveWindow(t time.Time) string {
+	if rs == nil {
+		return ""
+	}
+	for _, m := range rs.mutes {
+		if m.interval.Matches(t) {
+			return m.interval.name
+		}
+	}
+	return ""
+}
+
+// WindowOpen reports whether the named referenced interval is open at t. A
+// name the source no longer references is closed — a config edit that drops a
+// window ends it.
+func (rs *ruleSet) WindowOpen(name string, t time.Time) bool {
+	if rs == nil {
+		return false
+	}
+	for _, m := range rs.mutes {
+		if m.interval.name == name && m.interval.Matches(t) {
+			return true
+		}
+	}
+	return false
+}
+
 // MutedBy reports the interval muting this signal at time t, or "" if none.
 //
 // Overlapping intervals UNION: muted when any referenced interval matches, which

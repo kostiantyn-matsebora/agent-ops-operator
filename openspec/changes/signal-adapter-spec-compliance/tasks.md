@@ -62,14 +62,14 @@ not the audit.
 
 ## 4. HA adapter fixes — backend-developer
 
-- [ ] 4.1 Add the unreadable-log verdict (nil or stale snapshot) distinct
+- [x] 4.1 Add the unreadable-log verdict (nil or stale snapshot) distinct
   from no-predicate unknown, and emit on it unconditionally in `decide()` —
   verify by replacing `TestUnknownWithNoRecurrenceIsDropped`'s expectation
   for that path and a new stale-snapshot test.
-- [ ] 4.2 Clamp the signal payload so a batch fits the contract's 1 MiB
+- [x] 4.2 Clamp the signal payload so a batch fits the contract's 1 MiB
   inbound bound, noting the clamp in the payload — verify by unit test with
   an oversized exception.
-- [ ] 4.3 Purge current-tense "fingerprint" comments (main.go, rules.go,
+- [x] 4.3 Purge current-tense "fingerprint" comments (main.go, rules.go,
   surfaces.go) — verify by grep as in 1.4.
 
 ## 5. Cron and telegram adapter fixes — backend-developer

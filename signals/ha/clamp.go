@@ -35,10 +35,6 @@ const (
 	// clampNoteFormat is appended to a clamped payload, naming what was kept
 	// of how much and why.
 	clampNoteFormat = "\n\n[payload clamped: %d of %d bytes kept to fit the 1 MiB /signal/inbound bound]"
-	// maxClampPasses bounds the re-measure loop. JSON escaping inflates some
-	// bytes up to six-fold, so one proportional cut may still overshoot; each
-	// pass cuts by the measured overshoot and converges in two or three.
-	maxClampPasses = 8
 )
 
 // clampBatch returns sigs with every payload clamped to its share of the
@@ -54,29 +50,32 @@ func clampBatch(sigs []Signal) []Signal {
 // clampSignal cuts sig's payload until the signal's JSON encoding fits within
 // limit bytes, ending the payload with the clamp note. A signal already within
 // the limit is returned unchanged.
+//
+// JSON escaping inflates some bytes up to six-fold, so how much raw text fits
+// is found by measuring, not by arithmetic: a binary search for the longest
+// kept prefix whose encoding fits. Encoding never shrinks text, so no more
+// than limit raw bytes can fit, which keeps every measurement small.
 func clampSignal(sig Signal, limit int) Signal {
 	if encodedLen(sig) <= limit {
 		return sig
 	}
 	original := sig.Payload
-	keep := len(original)
-	for pass := 0; pass < maxClampPasses && keep > 0; pass++ {
-		over := encodedLen(sig) - limit
-		if over <= 0 {
-			return sig
-		}
-		keep -= over
-		if keep < 0 {
-			keep = 0
-		}
+	fits := func(keep int) bool {
 		sig.Payload = clampedPayload(original, keep)
+		return encodedLen(sig) <= limit
 	}
-	if encodedLen(sig) > limit {
-		// What remains is the note alone: the fields outside the payload are
-		// bounded upstream (title, labels), so the payload is all there is to
-		// give up.
-		sig.Payload = clampedPayload(original, 0)
+	lo, hi := 0, min(len(original), limit)
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if fits(mid) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
 	}
+	// lo == 0 is the note alone: the fields outside the payload are bounded
+	// upstream (title, labels), so the payload is all there is to give up.
+	sig.Payload = clampedPayload(original, lo)
 	return sig
 }
 

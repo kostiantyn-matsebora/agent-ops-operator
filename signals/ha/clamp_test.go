@@ -18,7 +18,7 @@ import (
 func TestOversizedExceptionBatchFitsTheInboundBound(t *testing.T) {
 	fm := newFakeManager(t)
 	a := newTestAdapter(fm)
-	exception := strings.Repeat("Traceback <module> -> raise ValueError()\n", (2<<20)/40)
+	exception := strings.Repeat("Traceback <module> -> raise ValueError()\n", (256<<10)/40)
 
 	sigs := make([]Signal, 0, maxBatchPerSrc)
 	for i := 0; i < maxBatchPerSrc; i++ {

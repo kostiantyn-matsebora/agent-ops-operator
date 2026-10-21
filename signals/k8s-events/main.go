@@ -7,12 +7,13 @@
 //
 //	config:   {"severities":["Warning"],"namespaces":[],"includeReasons":[]}   (opaque spec.config)
 //	cursor:   state key "last-event" via /signal/state (restart-safe)
-//	emitting: POST /signal/inbound, kind=alert, fingerprint "<source>@<ns>/<kind>/<name>/<reason>"
+//	emitting: POST /signal/inbound, kind=alert, initiationId "<source>@<namespace>/<workload>"
 //
-// The adapter normalizes and nothing more: no dedup, no grouping, no cooldown
-// beyond its restart cursor. Repetition collapses manager-side, which is why
-// the fingerprint keys on the involved OBJECT and REASON rather than on the
-// Event object (Kubernetes recreates those for a recurring problem).
+// Minting the initiationId is this adapter's correlation decision (events.go):
+// it keys on the owning WORKLOAD, never on the Event object (Kubernetes
+// recreates those for a recurring problem) nor on a pod name (regenerated every
+// rollout). Beyond that it only filters — the suppression axes and the restart
+// cursor. Cooldown, routing and recurrence are manager-side, keyed on that id.
 //
 // The SA token it mounts confers only what the chart bound to
 // agentops-signal-<name> out of band — the operator grants adapters nothing.
@@ -56,6 +57,12 @@ type servedSource struct {
 	// it are skipped on a startup/relist pass so a restart does not replay the
 	// cluster's entire event backlog.
 	cursor time.Time
+	// cursorHeld is set by a list pass that stopped at its batch bound with
+	// events left unexamined. Until a later list pass completes unclipped,
+	// watch passes do not advance the cursor — a live event newer than the
+	// deferred remainder would otherwise carry the cursor past it, and the
+	// next relist would skip what was never looked at.
+	cursorHeld bool
 }
 
 type adapter struct {
@@ -82,9 +89,15 @@ type adapter struct {
 	// clipped records the last reported clip count per source, so the
 	// condition is only rewritten when it changes.
 	clipped sync.Map
-	// muted records the active mute window and its running count per source, so
-	// the condition changes when the situation does rather than per batch.
-	muted sync.Map
+	// muted records the active mute window and its running count per source
+	// (muteState), so the condition changes when the situation does rather
+	// than per batch. muteMu serializes its read-modify-write: post() and the
+	// sweep both update it, from different goroutines.
+	muted  sync.Map
+	muteMu sync.Mutex
+	// held waits for the object cache to resolve a tracked object's owner
+	// before its event is normalized. See ownerhold.go.
+	held *ownerHold
 	// drainReported records the last reported (nodes, total) pair per source,
 	// so the Draining condition is only rewritten when the situation changes.
 	drainReported sync.Map
@@ -128,8 +141,7 @@ func main() {
 	}
 	kube, err := NewInClusterKube()
 	if err != nil {
-		log.Fatalf("kubernetes access: %v (this adapter needs kubernetesAccess: true on its SignalAdapter "+
-			"and an events get/list/watch grant bound to its ServiceAccount)", err)
+		log.Fatal(kubeAccessFailure(name, err))
 	}
 	cache := newObjectCache()
 	a := &adapter{
@@ -145,6 +157,7 @@ func main() {
 		inhibit:       newInhibitor(),
 		drain:         newDrainTracker(),
 		cap:           newEmitCap(envInt("EMIT_PER_MINUTE", defaultEmitPerMin)),
+		held:          newOwnerHold(ownerResolveWait),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -162,6 +175,18 @@ func main() {
 		sleepCtx(ctx, refreshEvery)
 	}
 	a.stopAllWatchers()
+}
+
+// kubeAccessFailure is the fatal message for an adapter that cannot reach the
+// API server with its own identity. It names only fields the current
+// SignalAdapter CRD carries: the token is mounted only for the account
+// spec.serviceAccountName references — absent, the pod runs as the release's
+// floor account, bound to nothing — and the chart renders that account
+// (agentops-signal-<adapter>) with the events grant.
+func kubeAccessFailure(adapterName string, err error) string {
+	return fmt.Sprintf("kubernetes access: %v (set SignalAdapter %s spec.serviceAccountName to an account "+
+		"bound to an events get/list/watch grant — the chart renders agentops-signal-%s with it; "+
+		"the operator grants adapters nothing)", err, adapterName, adapterName)
 }
 
 // refreshSources re-reads served sources, validates config, and reports
@@ -200,6 +225,13 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			state = "ok-nodeaccess:" + *msg
 			message += " (drain awareness unavailable: " + *msg + ")"
 		}
+		// Shadowed-rule warnings ride on whichever report stands: a rule
+		// that can never match is configuration doing less than it says,
+		// and the source object is where its author will look.
+		if w := ruleWarnings(f); w != "" {
+			state += "|warn:" + w
+			message += " (warning: " + w + ")"
+		}
 		if a.reported[info.Name] != state {
 			go func(n string) { _ = a.mgr.ReportStatus(ctx, n, ready, reason, message) }(info.Name)
 			a.reported[info.Name] = state
@@ -207,12 +239,22 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		src := &servedSource{filter: f}
 		if prev, ok := a.sources[info.Name]; ok {
 			src.cursor = prev.cursor // config edits must not replay history
+			src.cursorHeld = prev.cursorHeld
 		} else {
 			src.cursor = a.loadCursor(ctx, info.Name)
 		}
 		next[info.Name] = src
 	}
 	a.sources = next
+}
+
+// ruleWarnings joins a filter's non-fatal rule warnings, or "" when there are
+// none.
+func ruleWarnings(f *filter) string {
+	if f == nil || f.rules == nil {
+		return ""
+	}
+	return strings.Join(f.rules.warnings, "; ")
 }
 
 // loadCursor reads a source's persisted cursor. A missing or unparsable cursor
@@ -434,115 +476,249 @@ func (a *adapter) watchScope(ctx context.Context, scope string) {
 // deliver fans a batch of events out to every source whose filter matches,
 // posts one contract call per source, and advances that source's cursor.
 //
-// Post-then-persist: a crash between the two re-posts the same fingerprints,
+// Post-then-persist: a crash between the two re-posts the same initiationIds,
 // which the manager's cooldown absorbs. Losing an event would be the worse
 // failure, so the ordering is deliberate.
 func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
+	if fromList {
+		// A list pass is examined OLDEST FIRST. The batch bound may stop it
+		// part-way, and only in time order is "the newest examined event" a
+		// read position that every unexamined event lies at or after.
+		events = chronological(events)
+	}
+	now := time.Now()
 	a.mu.Lock()
 	names := make([]string, 0, len(a.sources))
 	for name := range a.sources {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	type pending struct {
-		signals []Signal
-		newest  time.Time
-	}
-	batches := map[string]*pending{}
+	batches := map[string]*sourceBatch{}
 	for _, name := range names {
-		src := a.sources[name]
-		p := &pending{}
-		for i := range events {
-			ev := &events[i]
-			// Self-exclusion runs FIRST — before matching, before the cursor.
-			// An event about agent-ops' own machinery must not reach the
-			// filters at all: no rule may re-admit it, and it must not
-			// advance a cursor as though it had been considered.
-			if excluded, _ := a.self.Excludes(ev, src.filter.includeOwnNamespace); excluded {
-				continue
-			}
-			if !src.filter.Matches(ev) {
-				continue
-			}
-			when := ev.When()
-			// Only the list pass consults the cursor: during a live watch every
-			// frame is news, and an event whose timestamps are all unparsable
-			// (zero) must not be silently dropped.
-			if fromList && !when.IsZero() && !when.After(src.cursor) {
-				continue
-			}
-			sig := normalize(name, ev, a.enrich(ev))
-			rule, hasRule := src.filter.Rule(&sig)
-			if hasRule && rule.drop {
-				continue
-			}
-
-			// Node-state suppression BEFORE inhibition and the dwell queue: a
-			// rolling reboot's events describe the drain, not a fault, and the
-			// two axes must never interact (design.md decision 1). Timed by
-			// wall clock, not the event's own (sometimes unparsable, zero)
-			// timestamp — the episode tracks how long WE have been suppressing.
-			if a.drain.Suppress(name, sig.Labels["node"], src.filter.rules, a.cache, &sig, time.Now()) {
-				continue
-			}
-
-			// Inhibition before the dwell queue: a consequence of an already
-			// reported cause must not even occupy a window.
-			a.inhibit.Observe(name, src.filter.rules, &sig)
-			if a.inhibit.Inhibited(name, src.filter.rules, &sig) {
-				continue
-			}
-
-			// The cursor advances for a deferred signal too. A restart inside a
-			// window loses at most that window, and a problem real enough to
-			// have survived verification is still emitting events — so it is
-			// re-detected within the minute. Holding the cursor back instead
-			// would replay the whole window on every restart.
-			if when.After(p.newest) {
-				p.newest = when
-			}
-
-			if hasRule && rule.dwell > 0 {
-				a.pending.Add(name, sig, rule)
-				continue
-			}
-			p.signals = append(p.signals, sig)
-			if len(p.signals) >= maxBatchPerSrc {
-				break
-			}
-		}
-		// A batch with no immediate signals but a fresh timestamp still matters:
-		// its events went into the dwell queue, and the cursor must move.
-		if len(p.signals) > 0 || !p.newest.IsZero() {
-			batches[name] = p
+		b := a.examine(name, a.sources[name], events, fromList, now)
+		// A batch with no immediate signals but a fresh timestamp still
+		// matters: its events went into the dwell queue or the owner hold, and
+		// the cursor must move. A clipped one must be reported either way.
+		if len(b.signals) > 0 || !b.newest.IsZero() || b.unexamined > 0 {
+			batches[name] = b
 		}
 	}
 	a.mu.Unlock()
 
-	for name, p := range batches {
-		if len(p.signals) > 0 && !a.post(ctx, name, p.signals) {
-			continue // cursor not advanced — the next pass retries
+	for name, b := range batches {
+		a.commit(ctx, name, b, fromList)
+	}
+}
+
+// sourceBatch is what one pass decided for one source.
+type sourceBatch struct {
+	signals []Signal
+	// newest is the read position this pass earned: the newest examined event
+	// that was admitted (deferred or immediate).
+	newest time.Time
+	// unexamined counts the events a bounded list pass never looked at.
+	unexamined int
+}
+
+// observe records an admitted event's timestamp as a read-position candidate.
+func (b *sourceBatch) observe(when time.Time) {
+	if when.After(b.newest) {
+		b.newest = when
+	}
+}
+
+// examine runs one source's pipeline over a pass. Called with a.mu held.
+//
+// The batch bound stops examination outright: past it, nothing is looked at,
+// and the read position is kept strictly BEFORE the first unexamined event so
+// a later list pass considers the remainder rather than skipping it.
+func (a *adapter) examine(name string, src *servedSource, events []Event, fromList bool, now time.Time) *sourceBatch {
+	b := &sourceBatch{}
+	for i := range events {
+		ev := &events[i]
+		if len(b.signals) >= maxBatchPerSrc {
+			b.unexamined = len(events) - i
+			b.keepBefore(ev.When())
+			break
 		}
-		if p.newest.IsZero() {
+		// Self-exclusion runs FIRST — before matching, before the cursor.
+		// An event about agent-ops' own machinery must not reach the
+		// filters at all: no rule may re-admit it, and it must not
+		// advance a cursor as though it had been considered.
+		if excluded, _ := a.self.Excludes(ev, src.filter.includeOwnNamespace); excluded {
 			continue
 		}
+		if !src.filter.Matches(ev) {
+			continue
+		}
+		when := ev.When()
+		// Only the list pass consults the cursor: during a live watch every
+		// frame is news, and an event whose timestamps are all unparsable
+		// (zero) must not be silently dropped.
+		if fromList && !when.IsZero() && !when.After(src.cursor) {
+			continue
+		}
+		// The cursor advances for a held or deferred signal too. A restart
+		// inside a window loses at most that window, and a problem real
+		// enough to have survived verification is still emitting events — so
+		// it is re-detected within the minute. Holding the cursor back instead
+		// would replay the whole window on every restart.
+		if a.awaitsOwner(ev) {
+			a.held.Hold(name, *ev, now)
+			b.observe(when)
+			continue
+		}
+		sig, out := a.admit(name, src, ev, now)
+		if out == admitSkipped {
+			continue
+		}
+		b.observe(when)
+		if out == admitImmediate {
+			b.signals = append(b.signals, sig)
+		}
+	}
+	return b
+}
+
+// keepBefore caps the read position strictly before the first unexamined
+// event. Events are in time order, so only one sharing the newest examined
+// timestamp needs this: the cursor skips anything at or before itself.
+func (b *sourceBatch) keepBefore(firstUnexamined time.Time) {
+	if !firstUnexamined.IsZero() && !b.newest.Before(firstUnexamined) {
+		b.newest = firstUnexamined.Add(-time.Nanosecond)
+	}
+}
+
+// admitOutcome is what the pipeline did with one event.
+type admitOutcome int
+
+const (
+	admitSkipped   admitOutcome = iota // dropped by rule, drain or inhibition
+	admitDeferred                      // placed in the dwell queue
+	admitImmediate                     // to be posted now
+)
+
+// admit normalizes one event and runs it through the suppression axes in
+// their fixed order: rule drop, node drain, inhibition, then dwell.
+func (a *adapter) admit(name string, src *servedSource, ev *Event, now time.Time) (Signal, admitOutcome) {
+	sig := normalize(name, ev, a.enrich(ev))
+	rule, hasRule := src.filter.Rule(&sig)
+	if hasRule && rule.drop {
+		return Signal{}, admitSkipped
+	}
+	// Node-state suppression BEFORE inhibition and the dwell queue: a
+	// rolling reboot's events describe the drain, not a fault, and the two
+	// axes must never interact (design.md decision 1). Timed by wall clock,
+	// not the event's own (sometimes unparsable, zero) timestamp — the
+	// episode tracks how long WE have been suppressing.
+	if a.drain.Suppress(name, sig.Labels["node"], src.filter.rules, a.cache, &sig, now) {
+		return Signal{}, admitSkipped
+	}
+	// Inhibition before the dwell queue: a consequence of an already
+	// reported cause must not even occupy a window.
+	a.inhibit.Observe(name, src.filter.rules, &sig)
+	if a.inhibit.Inhibited(name, src.filter.rules, &sig) {
+		return Signal{}, admitSkipped
+	}
+	if hasRule && rule.dwell > 0 {
+		a.pending.Add(name, sig, rule)
+		return sig, admitDeferred
+	}
+	return sig, admitImmediate
+}
+
+// commit posts one source's batch and moves its read position.
+func (a *adapter) commit(ctx context.Context, name string, b *sourceBatch, fromList bool) {
+	if fromList {
+		// A clean list pass releases a hold a clipped one placed; a clipped
+		// one places it. Set before the post, so a failed post still holds.
 		a.mu.Lock()
-		src, ok := a.sources[name]
-		if ok && p.newest.After(src.cursor) {
-			src.cursor = p.newest
+		if src, ok := a.sources[name]; ok {
+			src.cursorHeld = b.unexamined > 0
 		}
 		a.mu.Unlock()
-		if ok {
-			if err := a.mgr.PutState(ctx, name, cursorKey, p.newest.Format(time.RFC3339)); err != nil && ctx.Err() == nil {
-				log.Printf("persisting cursor for %s: %v", name, err)
-			}
+	}
+	// The clip FIRST: anything the post reports after it is the graver fact
+	// and must be the one left standing on the Ready condition.
+	if b.unexamined > 0 {
+		a.reportBatchBound(ctx, name, b.unexamined)
+	}
+	if len(b.signals) > 0 && !a.post(ctx, name, b.signals) {
+		return // cursor not advanced — the next pass retries
+	}
+	if b.newest.IsZero() {
+		return
+	}
+	a.mu.Lock()
+	src, ok := a.sources[name]
+	advance := ok && b.newest.After(src.cursor) && (fromList || !src.cursorHeld)
+	if advance {
+		src.cursor = b.newest
+	}
+	a.mu.Unlock()
+	if !advance {
+		return
+	}
+	if err := a.mgr.PutState(ctx, name, cursorKey, b.newest.Format(time.RFC3339)); err != nil && ctx.Err() == nil {
+		log.Printf("persisting cursor for %s: %v", name, err)
+	}
+}
+
+// reportBatchBound surfaces a list pass that stopped at its batch bound. Not a
+// loss — the read position stayed at the last examined event — but a bound the
+// adapter imposed on itself, so it is reported rather than merely applied.
+func (a *adapter) reportBatchBound(ctx context.Context, source string, unexamined int) {
+	msg := fmt.Sprintf("relist pass stopped at its %d-signal batch bound with %d event(s) unexamined — "+
+		"the read position stays at the last examined event and a later pass considers the remainder",
+		maxBatchPerSrc, unexamined)
+	log.Printf("%s: %s", source, msg)
+	_ = a.mgr.ReportStatus(ctx, source, true, "BatchBoundReached", msg)
+}
+
+// chronological returns the events oldest first. Undated events (zero time)
+// sort first: they bypass the cursor anyway, so their position cannot move it.
+func chronological(events []Event) []Event {
+	out := append([]Event(nil), events...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].When().Before(out[j].When()) })
+	return out
+}
+
+// releaseHeld re-runs the pipeline for every held event whose owner chain has
+// settled or whose bounded wait has expired, and posts what survives.
+func (a *adapter) releaseHeld(ctx context.Context, now time.Time) {
+	if a.held == nil {
+		return
+	}
+	ready := a.held.Release(now, func(ev *Event) bool {
+		return a.cache.Settled(ev.Namespace(), ev.InvolvedObject.Kind, ev.InvolvedObject.Name)
+	})
+	bySource := map[string][]Signal{}
+	a.mu.Lock()
+	for i := range ready {
+		it := &ready[i]
+		src, ok := a.sources[it.source]
+		if !ok {
+			continue // source no longer served
 		}
+		// Self-exclusion again: mechanism 2 may answer now that the cache
+		// knows the object, where it could not at first sight.
+		if excluded, _ := a.self.Excludes(&it.ev, src.filter.includeOwnNamespace); excluded {
+			continue
+		}
+		if sig, out := a.admit(it.source, src, &it.ev, now); out == admitImmediate {
+			bySource[it.source] = append(bySource[it.source], sig)
+		}
+	}
+	a.mu.Unlock()
+	for source, sigs := range bySource {
+		a.post(ctx, source, sigs)
 	}
 }
 
 // post sends a batch through the emit cap and reports clipping. It is the
-// single exit from this adapter: both the immediate path and the dwell queue
-// go through it, so the cap cannot be bypassed by one of them.
+// exit for every event-derived signal: the immediate path, the owner hold and
+// the dwell queue all go through it, so the cap cannot be bypassed by one of
+// them. The one signal that does not — emitDrainExceeded — says why.
 func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 	// MUTE FIRST, and note WHERE this sits: after the dwell queue (both callers
 	// have already been through it) and before the emit cap.
@@ -611,6 +787,9 @@ func (a *adapter) applyMute(source string, sigs []Signal, now time.Time) ([]Sign
 type muteState struct {
 	window string
 	count  int
+	// reported is the count the standing Muted report names, so the sweep
+	// re-reports only when the running count has moved.
+	reported int
 }
 
 // reportPostFailure surfaces a rejected or unreachable manager on the source's
@@ -636,41 +815,93 @@ func (a *adapter) reportPostRecovered(ctx context.Context, source string) {
 	_ = a.mgr.ReportStatus(ctx, source, true, "AdapterReady", "posting to the manager again")
 }
 
-// reportMute surfaces an ACTIVE window and, when it closes, what it cost.
+// reportMute accumulates what one batch muted, and reports a window the first
+// time it is seen muting. The running count after that, and the close, are the
+// sweep's to report (sweepMute) — driven by the window's own clock.
 //
 // Muting is NEVER silent. A muted lane and an idle lane are indistinguishable
 // from outside and only one of them means the cluster is healthy, so "why has
 // nothing arrived since four?" is answerable from the source object rather than
 // from adapter logs. Same reasoning as emit-cap clipping, one axis over.
+//
+// A batch with nothing muted closes nothing: a narrowed window lets unrelated
+// signals through while it is still open, and a quiet lane sends no batch at
+// all — so the close is decided by the clock, never inferred from a batch.
 func (a *adapter) reportMute(ctx context.Context, source string, muted int, window string) {
+	if muted == 0 {
+		return
+	}
+	a.muteMu.Lock()
+	cur := a.muteStateOf(source)
+	opened := cur.window == ""
+	if opened {
+		cur.window = window
+	}
+	cur.count += muted
+	if opened {
+		cur.reported = cur.count
+	}
+	a.muted.Store(source, cur)
+	a.muteMu.Unlock()
+	if opened {
+		a.reportMuteActive(ctx, source, cur)
+	}
+}
+
+// sweepMute advances one source's mute window against the clock: it opens a
+// window that started over a quiet lane, re-reports a running count that
+// moved, and closes a window whose interval has ended with its final count —
+// zero included — whether or not any event arrived to notice.
+func (a *adapter) sweepMute(ctx context.Context, source string, rs *ruleSet, now time.Time) {
+	a.muteMu.Lock()
+	cur := a.muteStateOf(source)
+	var ended muteState
+	if cur.window != "" && !rs.WindowOpen(cur.window, now) {
+		ended, cur = cur, muteState{}
+	}
+	report := false
+	switch {
+	case cur.window == "":
+		if w := rs.ActiveWindow(now); w != "" {
+			cur, report = muteState{window: w}, true
+		}
+	case cur.count != cur.reported:
+		cur.reported, report = cur.count, true
+	}
+	if cur.window == "" {
+		a.muted.Delete(source)
+	} else {
+		a.muted.Store(source, cur)
+	}
+	a.muteMu.Unlock()
+
+	if ended.window != "" {
+		msg := fmt.Sprintf("time interval %q ended: %d event(s) were muted while it was active",
+			ended.window, ended.count)
+		log.Printf("%s: %s", source, msg)
+		_ = a.mgr.ReportStatus(ctx, source, true, "MuteEnded", msg)
+	}
+	if report {
+		a.reportMuteActive(ctx, source, cur)
+	}
+}
+
+// muteStateOf reads a source's mute state. Called with muteMu held.
+func (a *adapter) muteStateOf(source string) muteState {
 	prev, _ := a.muted.Load(source)
 	cur, _ := prev.(muteState)
+	return cur
+}
 
-	if muted > 0 {
-		next := muteState{window: window, count: cur.count + muted}
-		a.muted.Store(source, next)
-		if cur.window == window {
-			return // already reported this window; the count is summarised on close
-		}
-		msg := fmt.Sprintf("muted by time interval %q — events matching this window are being "+
-			"suppressed on purpose; this lane is configured, not idle", window)
-		log.Printf("%s: %s", source, msg)
-		// Ready stays TRUE: the source is doing exactly what it was told. Marking
-		// it unhealthy for obeying its own configuration would train an operator
-		// to ignore the condition.
-		go func() { _ = a.mgr.ReportStatus(ctx, source, true, "Muted", msg) }()
-		return
-	}
-
-	// Nothing muted in this batch: if a window was active, it has closed.
-	if cur.window == "" {
-		return
-	}
-	a.muted.Store(source, muteState{})
-	msg := fmt.Sprintf("time interval %q ended: %d event(s) were muted while it was active",
-		cur.window, cur.count)
+// reportMuteActive names the open window and its running count.
+func (a *adapter) reportMuteActive(ctx context.Context, source string, st muteState) {
+	msg := fmt.Sprintf("muted by time interval %q — %d event(s) muted so far; events matching this "+
+		"window are being suppressed on purpose; this lane is configured, not idle", st.window, st.count)
 	log.Printf("%s: %s", source, msg)
-	go func() { _ = a.mgr.ReportStatus(ctx, source, true, "MuteEnded", msg) }()
+	// Ready stays TRUE: the source is doing exactly what it was told. Marking
+	// it unhealthy for obeying its own configuration would train an operator
+	// to ignore the condition.
+	_ = a.mgr.ReportStatus(ctx, source, true, "Muted", msg)
 }
 
 // reportClipping surfaces a clipped window on the source's condition. Silent
@@ -692,8 +923,13 @@ func (a *adapter) reportClipping(ctx context.Context, source string, clipped int
 }
 
 // runDwellFlusher decides pending entries whose window has closed.
+//
+// It also releases the owner hold on the same tick: a held event's wait is
+// bounded by ownerResolveWait, and checking it at the dwell's granularity
+// adds at most one dwellTick to that bound.
 func (a *adapter) runDwellFlusher(ctx context.Context) {
 	for ctx.Err() == nil {
+		a.releaseHeld(ctx, time.Now())
 		a.pending.Flush(time.Now())
 		sleepCtx(ctx, dwellTick)
 	}
@@ -702,15 +938,20 @@ func (a *adapter) runDwellFlusher(ctx context.Context) {
 // runDrainSweep advances every served source's drain episodes on a timer,
 // independent of event flow — a forgotten cordon with nothing left generating
 // events would otherwise never trip its bound.
+//
+// The same timer drives mute windows (sweepMute), for the same reason: a
+// window over a lane that went quiet would otherwise never report its close.
 func (a *adapter) runDrainSweep(ctx context.Context) {
 	for ctx.Err() == nil {
 		a.mu.Lock()
 		names := make([]string, 0, len(a.sources))
 		bounds := map[string]time.Duration{}
+		rules := map[string]*ruleSet{}
 		for name, src := range a.sources {
 			names = append(names, name)
 			if src.filter != nil && src.filter.rules != nil {
 				bounds[name] = src.filter.rules.drainBound
+				rules[name] = src.filter.rules
 			}
 		}
 		a.mu.Unlock()
@@ -726,6 +967,7 @@ func (a *adapter) runDrainSweep(ctx context.Context) {
 				}
 			}
 			a.reportDrainActive(ctx, name)
+			a.sweepMute(ctx, name, rules[name], now)
 		}
 		sleepCtx(ctx, dwellTick)
 	}
@@ -775,6 +1017,12 @@ func (a *adapter) reportDrainReleased(ctx context.Context, source, node string, 
 // It bypasses mute deliberately — muting NOTIFICATIONS is exactly the silence
 // this signal exists to prevent — and bypasses the dwell queue and inhibition,
 // which drain suppression already sits ahead of.
+//
+// It bypasses the emit cap too, and that bypass is deliberately bounded: one
+// signal per node per drain (the episode's exceeded flag fires it once, and
+// only a fresh drain re-arms it), so its volume can never be a runaway. Routed
+// through the cap, a source already clipping would silence exactly the one
+// signal this bound exists to deliver.
 func (a *adapter) emitDrainExceeded(ctx context.Context, source, node string, start time.Time, suppressed int) {
 	sig := Signal{
 		// Deliberately NOT the plain workload-keyed shape: this is a one-shot

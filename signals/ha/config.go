@@ -275,8 +275,9 @@ func (f *filter) Rule(sig *Signal) (compiledRule, bool) {
 // position: homeassistant.components.<domain>.* for built-ins,
 // custom_components.<domain>.* for everything installed by hand. Anything else
 // is core, and the logger's own name IS the integration — never empty, because
-// this label is what conversations group on and an empty grouping key would
-// merge every unrelated core error into one conversation.
+// this label keys the dwell queue's entries, and so a dwelled condition's
+// initiationId, and an empty key would merge every unrelated core error into
+// one conversation.
 func integrationOf(logger string) string {
 	switch {
 	case strings.HasPrefix(logger, "homeassistant.components."):
@@ -355,8 +356,8 @@ const maxTitleText = 120
 // conversation instead of recurring onto the manager's open one. This is the
 // per-record condition identity: an entry that reaches the dwell queue
 // (pending.go) and aggregates several records under one integration mints
-// its OWN, broader id there instead — the point where that grouping decision
-// is actually made.
+// its OWN, broader id there instead — the point where that same-problem
+// decision is actually made.
 func normalize(source string, rec *logRecord) Signal {
 	integration := integrationOf(rec.Name)
 	text := rec.Text()

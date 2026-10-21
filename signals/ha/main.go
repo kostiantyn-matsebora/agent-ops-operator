@@ -9,15 +9,16 @@
 //	config:   {"endpoint":"https://ha.example.org","levels":["ERROR"],"rules":[...]}
 //	credential: AGENTOPS_CRED_<SOURCE>_token, projected by the reconciler
 //	cursor:   state key "last-record" via /signal/state (restart-safe)
-//	emitting: POST /signal/inbound, kind=alert, fingerprint "<source>@<logger>@<file:line>"
+//	emitting: POST /signal/inbound, kind=alert, initiationId "<source>@<logger>@<file:line>"
+//	          for a zero-dwell rule, "<source>@<integration>" for a dwelled one
 //
-// The adapter normalizes and nothing more: no grouping and no cooldown. What
+// The adapter mints each signal's initiationId and applies no cooldown. What
 // it keeps is its restart cursor and, per record, the timestamp of the last
 // occurrence it considered — so one occurrence is considered once whichever
-// of the two arrival paths brings it. Repetition across occurrences collapses
-// manager-side, which is why the fingerprint keys on the LOGGER and SOURCE
-// LOCATION — Home Assistant's own deduplication key — rather than on the
-// occurrence.
+// of the two arrival paths brings it. Cooldown and routing are manager-side,
+// keyed on that id, which is why it keys on the LOGGER and SOURCE LOCATION —
+// Home Assistant's own deduplication key — or on the integration a dwell
+// coalesces under, and never on the occurrence.
 //
 // Run single-instance (the reconciler's singleton default): two sessions would
 // double-post every record.
@@ -455,7 +456,7 @@ func (a *adapter) runPoller(ctx context.Context, source string, sess *haSession)
 // sweep reads the log listing once and does two things with it: stores it as
 // the source's health snapshot, and — when consider is set — feeds every record
 // newer than the cursor through the rule path. Home Assistant's listing is a
-// deduplicated map keyed exactly as the fingerprint is, whose entry's timestamp
+// deduplicated map keyed exactly as a record's initiationId is, whose entry's timestamp
 // and count advance on every recurrence, so a recurring record shows up here as
 // a newer one: that is what the dwell's "still recurring at the close" rung is
 // fed by on an install that fires no events.
@@ -788,7 +789,7 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 
 // advance moves and persists a source's cursor.
 //
-// Post-then-persist: a crash between the two re-posts the same fingerprints,
+// Post-then-persist: a crash between the two re-posts the same initiationIds,
 // which the manager's cooldown absorbs. Losing a record would be the worse
 // failure, so the ordering is deliberate.
 func (a *adapter) advance(ctx context.Context, source string, at time.Time) {
