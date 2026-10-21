@@ -323,6 +323,25 @@ func (k *Kube) resourcePath(kind string) string {
 	return prefix + "/namespaces/" + url.PathEscape(k.Namespace) + "/" + url.PathEscape(kind)
 }
 
+// Get fetches one object by name directly from the API server, bypassing the
+// watch cache entirely. Not a list-and-filter: a single-item GET, for a
+// caller that needs a definitive answer for an object the watch has not (or
+// no longer) delivered — a 404 here means the object really is absent now,
+// not merely unseen.
+func (k *Kube) Get(ctx context.Context, kind, name string) (*Object, error) {
+	resp, err := k.get(ctx, k.resourcePath(kind)+"/"+url.PathEscape(name), 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var obj Object
+	if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {
+		return nil, fmt.Errorf("decoding %s %s: %w", kind, name, err)
+	}
+	obj.Kind = kind
+	return &obj, nil
+}
+
 // List returns every object of a kind in the console's namespace plus the
 // resourceVersion to start watching from.
 //

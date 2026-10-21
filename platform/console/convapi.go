@@ -337,6 +337,26 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleChannelFeed serves the console channel's GENERAL feed — a thread-less
+// `send` the manager fanned out with no conversation behind it (an /agents
+// listing reply, say). The adapter already parks these on the `channel:<name>`
+// pseudo-thread rather than dropping them; this is what reads that thread
+// back, mirroring Telegram's general topic.
+//
+// No durable record backs this feed — unlike a conversation's transcript,
+// there is no Conversation CR to merge against, so the live buffer IS the
+// whole answer and a console restart loses it like any other transcript.
+func (a *API) handleChannelFeed(w http.ResponseWriter, r *http.Request) {
+	channel := a.adapter.PrimaryChannel()
+	messages := []Message{}
+	if channel != "" {
+		if thread := a.transcripts.Thread("channel:" + channel); thread != nil {
+			messages = thread
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"channel": channel, "messages": messages})
+}
+
 // ConversationView projects one conversation into what its page shows, MINUS
 // the two parts that arrive on streams of their own: the transcript, which the
 // message events append to, and the activity events.

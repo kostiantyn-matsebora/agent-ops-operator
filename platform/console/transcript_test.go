@@ -125,6 +125,21 @@ func TestInputIDOfRecoversAColonDelimitedInputID(t *testing.T) {
 // the run id is the REMAINDER after the third ':', never assumed colon-free,
 // so the two sides of this op id cannot drift apart on what a run id may
 // contain.
+// B4: the published shape (docs/contracts/channel-adapter.md, "Delivery
+// operation ids are published shapes") anchors `input:<conversation>:<input>:
+// <channel>` BY POSITION — conversation and channel are Kubernetes names and
+// cannot contain the separator, so whatever sits between the first and the
+// last ':' is the free-form segment, however many separators IT contains.
+// This is the same property TestInputIDOfRecoversAColonDelimitedInputID pins
+// above; this case states it against the contract's own wording rather than
+// a specific coordination dedup id shape.
+func TestInputIDOfAnchorsOnThePublishedShapeByPosition(t *testing.T) {
+	got := inputIDOf("input:conv-1:free:form:with:separators:console")
+	if want := "free:form:with:separators"; got != want {
+		t.Fatalf("got %q, want %q — conversation and channel must still be recovered by position", got, want)
+	}
+}
+
 func TestRunIDOfRecoversAColonDelimitedRunID(t *testing.T) {
 	cases := []struct {
 		name, opID, want string

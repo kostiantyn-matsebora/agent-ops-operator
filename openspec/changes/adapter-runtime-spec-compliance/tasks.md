@@ -78,19 +78,19 @@ the behaviour, design.md the approach.
 
 ## 4. Console adapter fixes — backend-developer
 
-- [ ] 4.1 the `channel:<name>` pseudo-thread is served by the transcript
+- [x] 4.1 the `channel:<name>` pseudo-thread is served by the transcript
   API as the channel's general feed (B1, server half). Verify: `go test`
   reads back a thread-less send.
-- [ ] 4.2 `delete-conversation` and `close-topic` without a thread id
+- [x] 4.2 `delete-conversation` and `close-topic` without a thread id
   complete with an error instead of silent success (B3). Verify: `go test`
   asserts the error result.
-- [ ] 4.3 `ensure-topic` always answers `console-<uid>` — a cache miss
+- [x] 4.3 `ensure-topic` always answers `console-<uid>` — a cache miss
   resolves the UID or errors for redelivery, and the name-based fallback is
   deleted (B5). Verify: `go test` cache-miss case.
-- [ ] 4.4 vocabulary revision is read from the long-poll's
+- [x] 4.4 vocabulary revision is read from the long-poll's
   `X-Agentops-Vocabulary-Revision` header and drives the refetch (B6).
   Verify: `go test` asserts a header change triggers it.
-- [ ] 4.5 the input-id parser anchors on the published shape by position
+- [x] 4.5 the input-id parser anchors on the published shape by position
   (name segments cannot contain the separator) and cites the contract
   (B4). Verify: `go test` with an input id whose free segment contains the
   separator.
