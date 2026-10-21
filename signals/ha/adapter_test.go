@@ -22,6 +22,11 @@ type statusReport struct {
 	Message string `json:"message"`
 }
 
+// contractInboundBound is docs/contracts/signal-adapter.md's bound on a
+// `POST /signal/inbound` body, restated here so the double does not borrow the
+// constant the code under test is held to.
+const contractInboundBound = 1 << 20
+
 type fakeManager struct {
 	srv *httptest.Server
 
@@ -63,7 +68,10 @@ func newFakeManager(t *testing.T, sources ...SourceInfo) *fakeManager {
 			Source  string   `json:"source"`
 			Signals []Signal `json:"signals"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		// The contract's inbound body bound, enforced as the manager does: a
+		// batch over it is refused whole.
+		body := http.MaxBytesReader(w, r.Body, contractInboundBound)
+		if err := json.NewDecoder(body).Decode(&in); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}

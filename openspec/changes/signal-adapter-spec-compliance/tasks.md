@@ -23,18 +23,18 @@ not the audit.
 
 ## 2. Alertmanager adapter fixes — backend-developer
 
-- [ ] 2.1 Rewrite the degraded-registration remediation to name
+- [x] 2.1 Rewrite the degraded-registration remediation to name
   `spec.serviceAccountName` and the chart-rendered account, never a retired
   field — verify by unit test on the message text.
-- [ ] 2.2 Make `send_resolved` a `*bool` omitted when unset, matching every
+- [x] 2.2 Make `send_resolved` a `*bool` omitted when unset, matching every
   other knob — verify the omission unit test now covers it.
-- [ ] 2.3 Degrade to RegistrationManual instead of writing a placeholder
+- [x] 2.3 Degrade to RegistrationManual instead of writing a placeholder
   URL when `POD_NAMESPACE` is unset with a mounted token — verify by unit
   test on that branch.
-- [ ] 2.4 Surface a malformed `register` block as RegistrationManual naming
+- [x] 2.4 Surface a malformed `register` block as RegistrationManual naming
   the parse problem, distinct from an absent block — verify by unit test
   with a mistyped block.
-- [ ] 2.5 Purge the stale `kubernetesAccess` comment in main.go — verify by
+- [x] 2.5 Purge the stale `kubernetesAccess` comment in main.go — verify by
   grep as in 1.4.
 
 ## 3. k8s-events adapter fixes — backend-developer
