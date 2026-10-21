@@ -2,11 +2,16 @@ package integration
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/configschema"
 )
 
 // Chart-render assertions for the console bundle.
@@ -3439,5 +3444,85 @@ func TestHomeAssistantSurfaceCanBeSwitchedOffInValues(t *testing.T) {
 	}
 	if n := strings.Count(surfaces, "enabled: true"); n != 2 {
 		t.Fatalf("switching one surface off must leave the other two on, got %d:\n%s", n, surfaces)
+	}
+}
+
+// ---- telegram configSchema -------------------------------------------------
+
+// adapterConfigSchemaDoc is the ONE shape read out of a rendered ChannelAdapter
+// or SignalAdapter document — just enough to reach spec.configSchema as its own
+// raw JSON, which is what `internal/configschema` compiles.
+type adapterConfigSchemaDoc struct {
+	Spec struct {
+		ConfigSchema json.RawMessage `json:"configSchema"`
+	} `json:"spec"`
+}
+
+// compiledAdapterSchema renders the schema a named adapter CR actually ships,
+// the same document the manager's ConfigValid condition compiles — so a
+// template edit that breaks the JSON Schema is caught here, not only by an
+// envtest reconcile.
+func compiledAdapterSchema(t *testing.T, out, kind, name string) *configschema.Schema {
+	t.Helper()
+	doc := findDocByKindAndName(t, out, kind, name)
+	var parsed adapterConfigSchemaDoc
+	if err := yaml.Unmarshal([]byte(doc), &parsed); err != nil {
+		t.Fatalf("parsing %s/%s: %v", kind, name, err)
+	}
+	if len(parsed.Spec.ConfigSchema) == 0 {
+		t.Fatalf("%s/%s rendered no configSchema:\n%s", kind, name, doc)
+	}
+	s, err := configschema.Compile(parsed.Spec.ConfigSchema)
+	if err != nil {
+		t.Fatalf("%s/%s configSchema must compile: %v", kind, name, err)
+	}
+	return s
+}
+
+// A misspelled config key used to validate silently — the schema declared
+// properties but never closed the object, so "aprovers" (missing a "p") would
+// reach the adapter unflagged instead of reporting on ConfigValid (A8). Both
+// implementations' schemas are pinned: the channel side's and the signal
+// side's are two separate documents and a fix to one must not leave the other
+// behind.
+func TestTelegramConfigSchemaRejectsMisspelledKey(t *testing.T) {
+	out := helmTemplate(t, "--set", "telegram.enabled=true")
+
+	for _, tc := range []struct {
+		kind, name    string
+		conforming    string
+		nearMiss      string
+		misspelledKey string
+	}{
+		{"ChannelAdapter", "telegram",
+			`{"chatId":"-100"}`,
+			`{"chatId":"-100","aprovers":[123]}`,
+			"aprovers"},
+		{"SignalAdapter", "telegram",
+			`{"chatId":"-100","channel":"k8s-ops"}`,
+			`{"chatId":"-100","channel":"k8s-ops","aprovers":[123]}`,
+			"aprovers"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			s := compiledAdapterSchema(t, out, tc.kind, tc.name)
+
+			if vs := configschema.Validate(s, []byte(tc.conforming)); len(vs) != 0 {
+				t.Fatalf("a conforming config must validate clean, got: %v", vs)
+			}
+
+			vs := configschema.Validate(s, []byte(tc.nearMiss))
+			if len(vs) == 0 {
+				t.Fatalf("%s/%s must reject an unknown key (additionalProperties: false), got no violations", tc.kind, tc.name)
+			}
+			var named bool
+			for _, v := range vs {
+				if strings.Contains(v.Message, tc.misspelledKey) {
+					named = true
+				}
+			}
+			if !named {
+				t.Fatalf("violation must name the misspelled key %q, got: %v", tc.misspelledKey, vs)
+			}
+		})
 	}
 }

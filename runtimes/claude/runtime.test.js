@@ -27,8 +27,8 @@ process.env.HOME = HOME; // controls SESSIONS_DIR
 
 const {
   gitEnv, repoURL, run, clearDir, syncRepo, formatEvent,
-  confirmContextMissing, sessionFileExists, contextIdOf, strip, extractBrief, SESSIONS_DIR,
-  pollNextUnit, reportDone,
+  checkContextPresence, sessionFileExists, contextIdOf, strip, extractBrief, SESSIONS_DIR,
+  pollNextUnit, reportDone, isDefinitiveRejection,
 } = require('./runtime');
 
 // Stubs the built-in global `fetch` for the duration of one test and
@@ -38,6 +38,17 @@ function withFetch(t, impl) {
   const real = global.fetch;
   global.fetch = impl;
   t.after(() => { global.fetch = real; });
+}
+
+// Captures console.error lines for the duration of one test, restoring the
+// real one after — used to assert a refused /work/done report is logged
+// rather than dropped silently.
+function withConsoleError(t) {
+  const lines = [];
+  const real = console.error;
+  console.error = (...args) => lines.push(args.join(' '));
+  t.after(() => { console.error = real; });
+  return lines;
 }
 
 // ---- gitEnv / repoURL, default (no auth configured) ---------------------------
@@ -213,29 +224,54 @@ test('sessionFileExists returns false rather than throwing for a directory that 
   assert.strictEqual(await sessionFileExists(path.join(os.tmpdir(), 'agentops-never-created'), 'x'), false);
 });
 
-// ---- confirmContextMissing: real timers, real filesystem ---------------------------
+// C1: a readdir error that is NOT "the directory does not exist" must
+// propagate rather than read as "not found" — simulated here with ENOTDIR,
+// a real fs error raised by calling readdir on a plain file.
+test('sessionFileExists propagates a non-ENOENT fs error instead of swallowing it as not-found', async () => {
+  const file = path.join(tmp('agentops-notadir-'), 'plain-file');
+  fs.writeFileSync(file, 'x');
+  await assert.rejects(sessionFileExists(file, 'x'), /ENOTDIR/);
+});
 
-test('confirmContextMissing returns true immediately for an empty context id', async () => {
+// ---- checkContextPresence: real timers, real filesystem ---------------------------
+
+test('checkContextPresence returns missing immediately for an empty context id', async () => {
   const start = Date.now();
-  assert.strictEqual(await confirmContextMissing(''), true);
+  assert.strictEqual(await checkContextPresence(''), 'missing');
   assert.ok(Date.now() - start < 100, 'no ladder is walked for an id that was never set');
 });
 
-test('confirmContextMissing finds a reappearing file on its first check', async () => {
+test('checkContextPresence finds a reappearing file on its first check', async () => {
   const projDir = path.join(SESSIONS_DIR, 'proj-reappear');
   fs.mkdirSync(projDir, { recursive: true });
   fs.writeFileSync(path.join(projDir, 'sess-here-now.jsonl'), '{}');
   const start = Date.now();
-  const missing = await confirmContextMissing('here-now');
-  assert.strictEqual(missing, false, 'the file is present, so it is not missing');
+  const presence = await checkContextPresence('here-now');
+  assert.strictEqual(presence, 'present');
   assert.ok(Date.now() - start < 3000, 'found on the first check, so the full ladder is not walked');
 });
 
-test('confirmContextMissing walks the full ladder and confirms loss when nothing ever appears', async () => {
+test('checkContextPresence walks the full ladder and confirms loss when nothing ever appears', async () => {
   const start = Date.now();
-  const missing = await confirmContextMissing('genuinely-nowhere');
-  assert.strictEqual(missing, true);
+  const presence = await checkContextPresence('genuinely-nowhere');
+  assert.strictEqual(presence, 'missing');
   assert.ok(Date.now() - start >= 5000, 'all three waits (500+1500+3000ms) must be spent before concluding loss');
+});
+
+// C1: an unreadable store (ENOTDIR, not ENOENT) must report 'unavailable'
+// and must not walk the rest of the ladder — an I/O error does not clear up
+// by waiting.
+test('checkContextPresence reports unavailable fast when the store itself cannot be read', async () => {
+  const real = fs.promises.readdir;
+  fs.promises.readdir = (dir, opts) => (dir === SESSIONS_DIR ? Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })) : real(dir, opts));
+  try {
+    const start = Date.now();
+    const presence = await checkContextPresence('whatever');
+    assert.strictEqual(presence, 'unavailable');
+    assert.ok(Date.now() - start < 3000, 'an unreadable store fails fast, not after the full ladder');
+  } finally {
+    fs.promises.readdir = real;
+  }
 });
 
 // ---- pollNextUnit --------------------------------------------------------------
@@ -321,4 +357,61 @@ test('reportDone retries past a thrown network error, not just a non-ok response
   });
   await reportDone({ runId: 'r4' }, { result: 'ok' });
   assert.strictEqual(calls, 2);
+});
+
+// ---- isDefinitiveRejection (1.5) -------------------------------------------------
+
+test('isDefinitiveRejection is true for an ordinary 4xx', () => {
+  assert.strictEqual(isDefinitiveRejection(400), true);
+  assert.strictEqual(isDefinitiveRejection(404), true);
+  assert.strictEqual(isDefinitiveRejection(422), true);
+  assert.strictEqual(isDefinitiveRejection(499), true);
+});
+
+test('isDefinitiveRejection excludes 408 and 429, the two "try again" 4xxs', () => {
+  assert.strictEqual(isDefinitiveRejection(408), false);
+  assert.strictEqual(isDefinitiveRejection(429), false);
+});
+
+test('isDefinitiveRejection is false outside the 4xx range', () => {
+  assert.strictEqual(isDefinitiveRejection(500), false);
+  assert.strictEqual(isDefinitiveRejection(200), false);
+  assert.strictEqual(isDefinitiveRejection(399), false);
+});
+
+// 1.5: a definitive 4xx (not 408/429) must never be retried — it is logged
+// with status and body, and the loop returns to let the caller resume
+// polling for the next work unit.
+test('reportDone does not retry a definitive 400, and logs the status and body', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: false, status: 400, text: async () => 'runId must not be empty' };
+  });
+  const logged = withConsoleError(t);
+  const start = Date.now();
+  await reportDone({ runId: 'r5' }, { result: 'ok' });
+  assert.strictEqual(calls, 1, 'a definitive rejection is not retried');
+  assert.ok(Date.now() - start < 2000, 'no retry wait is spent on a definitive rejection');
+  assert.ok(logged.some((l) => l.includes('400') && l.includes('runId must not be empty')), `expected the status and body logged, got: ${logged.join(' | ')}`);
+});
+
+test('reportDone keeps retrying a 429 (rate limit), unlike a definitive 4xx', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2, status: 429, text: async () => 'slow down' };
+  });
+  await reportDone({ runId: 'r6' }, { result: 'ok' });
+  assert.strictEqual(calls, 2, 'a 429 is transient and keeps the bounded retry');
+});
+
+test('reportDone keeps retrying a 500, unlike a definitive 4xx', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2, status: 500, text: async () => 'internal error' };
+  });
+  await reportDone({ runId: 'r7' }, { result: 'ok' });
+  assert.strictEqual(calls, 2, 'a 5xx is transient and keeps the bounded retry');
 });

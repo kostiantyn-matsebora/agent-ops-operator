@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { translate, commandAllowed, decide, parseShellPattern, parseMcpPattern } = require('./vocabulary');
+const { translate, commandAllowed, decide, parseShellPattern, parseMcpPattern, inventoryGaps } = require('./vocabulary');
 
 // ---- the mapping table, every row -------------------------------------------
 
@@ -201,6 +201,32 @@ test('a shell denial with no fullCommandText falls back to an empty string in th
   const d = decide(translate([]), { kind: 'shell' });
   assert.strictEqual(d.allow, false);
   assert.match(d.why, /no shell grant matches: $/);
+});
+
+// ---- inventory check: a granted mcp: target must name a CONNECTED server ----
+// ---- (P4 — matching C4's intent: check tool-grant inventory per work unit, --
+// ---- mcp: targets included) -------------------------------------------------
+
+test('translate() records which servers an mcp: grant named', () => {
+  const g = translate(['mcp__kubernetes__pods_list', 'mcp__github__list_issues']);
+  assert.deepStrictEqual([...g.mcpServerNames].sort(), ['github', 'kubernetes']);
+});
+
+test('a grant naming a server this run did not connect to is a gap', () => {
+  const g = translate(['mcp__kubernetes__pods_list']);
+  const gaps = inventoryGaps(g.mcpServerNames, new Set());
+  assert.strictEqual(gaps.length, 1);
+  assert.match(gaps[0], /kubernetes/);
+});
+
+test('a grant naming a connected server is not a gap', () => {
+  const g = translate(['mcp__kubernetes__pods_list']);
+  assert.deepStrictEqual(inventoryGaps(g.mcpServerNames, new Set(['kubernetes'])), []);
+});
+
+test('no mcp grant at all reports no gaps', () => {
+  const g = translate(['Read', 'Bash']);
+  assert.deepStrictEqual(inventoryGaps(g.mcpServerNames, new Set()), []);
 });
 
 test('nothing granted denies everything', () => {

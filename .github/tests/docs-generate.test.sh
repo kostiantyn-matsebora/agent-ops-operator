@@ -53,4 +53,98 @@ after2=$(cd "$ROOT" && git status --porcelain -- docs | sort)
 assert_equals "$before" "$after2"
 
 rm -rf "$tmp"
+
+# The `struct-table` marker: a second source of truth (a Go struct, not a CRD)
+# for the work-unit/report shapes `docs/contracts/runtime.md` states as law.
+# This was tried once already by `runtime-specification` and reversed in the
+# same change: a Go doc comment copied verbatim produced unreadable table
+# cells. So this exercises the two things that matter about THIS attempt
+# rather than that one — fields read correctly off json tags, and `--check`'s
+# own staleness comparison (`produced != path.read_text()`) actually catches a
+# struct that moved — against a throwaway fixture, never the real
+# dispatch.go/server.go (which --check already covers once a page carries the
+# marker).
+pytmp=$(mktemp -d)
+cat > "$pytmp/check_struct_table.py" <<'PYEOF'
+import importlib.util
+import pathlib
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    "docs_generate", repo / ".github/scripts/docs-generate.py"
+)
+mod = importlib.util.module_from_spec(spec)
+sys.modules["docs_generate"] = mod
+spec.loader.exec_module(mod)
+
+tmp = pathlib.Path(sys.argv[2])
+go_file = tmp / "fixture.go"
+go_file.write_text(
+    "package fixture\n\n"
+    "type Sample struct {\n"
+    "\t// Name is the sample's own name, never blank.\n"
+    "\tName string `json:\"name\"`\n"
+    "\t// Count is optional, omitted when zero.\n"
+    "\tCount int32 `json:\"count,omitempty\"`\n"
+    "}\n"
+)
+
+rows = mod.go_struct_fields(go_file, "Sample")
+want = [
+    {"path": "name", "type": "string", "required": True,
+     "description": "The sample's own name, never blank."},
+    {"path": "count", "type": "integer", "required": False,
+     "description": "Optional, omitted when zero."},
+]
+assert rows == want, f"fields read incorrectly: {rows}"
+print("ok: json tags, Go types and doc comments read correctly")
+
+doc = tmp / "runtime-test.md"
+marker = f"<!-- generated: struct-table file={go_file} struct=Sample -->\n"
+body = mod.build_struct_table(str(go_file), "Sample")
+doc.write_text(marker + body + "<!-- /generated -->\n")
+
+fresh = mod.rewrite(doc, {})
+assert fresh == doc.read_text(), "freshly generated content must already be up to date"
+print("ok: --check reports no drift immediately after generating")
+
+original = go_file.read_text()
+mutations = {
+    "a field added with no regeneration": original.replace(
+        "}\n", "\t// Extra is new and nobody ran the generator for it.\n"
+        "\tExtra string `json:\"extra,omitempty\"`\n}\n"
+    ),
+    "a field removed with no regeneration": original.replace(
+        "\t// Count is optional, omitted when zero.\n"
+        "\tCount int32 `json:\"count,omitempty\"`\n", ""
+    ),
+    "a field's wire name renamed with no regeneration": original.replace(
+        'json:"count,omitempty"', 'json:"amount,omitempty"'
+    ),
+}
+for label, mutated in mutations.items():
+    assert mutated != original, f"{label}: fixture did not actually change"
+    go_file.write_text(mutated)
+    stale = mod.rewrite(doc, {})
+    assert stale != doc.read_text(), f"--check must flag drift: {label}"
+    go_file.write_text(original)
+    print(f"ok: --check catches {label}")
+PYEOF
+
+it "struct-table: fields are read off json tags, types and doc comments correctly"
+out=$(python3 "$pytmp/check_struct_table.py" "$ROOT" "$pytmp" 2>&1)
+assert_status 0 "$?"
+assert_contains "$out" "json tags, Go types and doc comments read correctly"
+
+it "struct-table: --check's own staleness comparison catches an added field"
+assert_contains "$out" "catches a field added with no regeneration"
+
+it "struct-table: --check's own staleness comparison catches a removed field"
+assert_contains "$out" "catches a field removed with no regeneration"
+
+it "struct-table: --check's own staleness comparison catches a renamed field"
+assert_contains "$out" "catches a field's wire name renamed with no regeneration"
+
+rm -rf "$pytmp"
 summary

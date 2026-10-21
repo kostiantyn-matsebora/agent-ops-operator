@@ -94,6 +94,79 @@ func TestConnectListToolsCallAndCloseOverRealHTTPTransport(t *testing.T) {
 	}
 }
 
+// An unset ${VAR} reference must fail expansion outright rather than expand
+// to "" — os.ExpandEnv's silent-empty behaviour would start a server on a
+// wrong, unflagged value instead of refusing it (O8). A bare $VAR (no
+// braces) is left untouched: only the documented ${VAR} form is a reference.
+func TestExpandEnvStrict(t *testing.T) {
+	t.Setenv("AGENTOPS_TEST_SET_VAR", "value")
+	got, err := expandEnvStrict("prefix-${AGENTOPS_TEST_SET_VAR}-suffix")
+	if err != nil || got != "prefix-value-suffix" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	if _, err := expandEnvStrict("${AGENTOPS_TEST_DEFINITELY_UNSET}"); err == nil ||
+		!strings.Contains(err.Error(), "AGENTOPS_TEST_DEFINITELY_UNSET") {
+		t.Errorf("want an error naming the unset variable, got %v", err)
+	}
+	if got, err := expandEnvStrict("$HOME"); err != nil || got != "$HOME" {
+		t.Errorf("bare $VAR must pass through unexpanded: %q %v", got, err)
+	}
+}
+
+// An unset ${VAR} in one server's env must fail only THAT server's connect —
+// Connect already logs and skips a failed server, so the rest of the pod's
+// MCP tools must stay reachable.
+func TestConnectSkipsOnlyTheServerReferencingAnUnsetVar(t *testing.T) {
+	var logs []string
+	logf := func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
+	m := &MCPClient{CallTimeout: time.Second}
+	m.Connect(context.Background(), mcpConfig{Servers: map[string]mcpServer{
+		"bad": {Command: "/bin/true", Env: map[string]string{"TOKEN": "${AGENTOPS_TEST_DEFINITELY_UNSET_VAR}"}},
+	}}, logf)
+	if _, ok := m.sessions["bad"]; ok {
+		t.Error("a server referencing an unset variable must not connect")
+	}
+	found := false
+	for _, l := range logs {
+		if strings.Contains(l, "bad") && strings.Contains(l, "AGENTOPS_TEST_DEFINITELY_UNSET_VAR") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the unset-var server must be logged by name with the missing variable: %v", logs)
+	}
+}
+
+// Headers parsed from mcp.json must actually reach the wire on the HTTP MCP
+// transport (O2) — a server that rejects a request missing its expected
+// auth header proves the header arrived, not just that it was parsed.
+func TestConnectSendsConfiguredHeadersOnHTTPTransport(t *testing.T) {
+	var gotAuth string
+	server := mcp.NewServer(&mcp.Implementation{Name: "auth-probe", Version: "0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "ping"}, func(_ context.Context, _ *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil, nil
+	})
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		handler.ServeHTTP(w, r)
+	}))
+	defer httpSrv.Close()
+
+	logf := func(string, ...any) {}
+	m := &MCPClient{CallTimeout: 5 * time.Second}
+	m.Connect(context.Background(), mcpConfig{Servers: map[string]mcpServer{
+		"auth": {URL: httpSrv.URL, Headers: map[string]string{"Authorization": "Bearer t0ken"}},
+	}}, logf)
+	if _, ok := m.sessions["auth"]; !ok {
+		t.Fatal("connect must succeed")
+	}
+	m.ListTools(context.Background(), NewRegistry(), logf)
+	if gotAuth != "Bearer t0ken" {
+		t.Errorf("want the configured header on the wire, got %q", gotAuth)
+	}
+}
+
 // m.call's content-rendering loop has two branches TestMCPToolsAreRegisteredAndCalled
 // does not reach: a non-text Content item (marshalled as JSON) and an empty
 // Content list falling back to StructuredContent.

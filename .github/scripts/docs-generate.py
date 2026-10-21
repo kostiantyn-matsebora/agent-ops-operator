@@ -935,6 +935,121 @@ def field_table(rows: list[dict]) -> list[str]:
     return out
 
 
+# --------------------------------------------------------------------------
+# Go struct schema tables (the `struct-table` marker)
+# --------------------------------------------------------------------------
+#
+# A SECOND source of truth, beside `chart/crds/`: the manager's own Go structs,
+# for the work-unit and completion-report shapes `docs/contracts/runtime.md`
+# states as law but no CRD describes -- they travel over `GET /work` /
+# `POST /work/done`, never through the API server.
+#
+# `runtime-specification` built this once already and reversed it in the same
+# change (its own task 3.3): a Go doc comment is written in normal Go style --
+# a paragraph of rationale, why the field exists, what it replaced -- and
+# copying that verbatim into a table cell produced unreadable rows. This
+# generator avoids repeating that: GO_FIELD_RE / field_table() do the parsing
+# and rendering this already owns, and only the FIRST SENTENCE of a doc
+# comment reaches the Description column, exactly the trim `first_sentence`
+# already performs for a template's YAML comments.
+
+GO_FIELD_RE = re.compile(r"^\s*([A-Z]\w*)\s+([^\s`]+)\s+`([^`]*)`\s*$")
+
+
+def go_type(token: str) -> str:
+    """A Go type token in the bracket notation `type_of` uses for a CRD schema
+    (`[]Turn`, `map[string]string`) -- one table style for both sources.
+
+    A leading `*` carries no meaning here: `omitempty` on the json tag is what
+    the Required column reads, so a pointer and its pointee render identically.
+    """
+    token = token.removeprefix("*")
+    if token.startswith("[]"):
+        return f"[]{go_type(token[2:])}"
+    m = re.match(r"^map\[([^\]]+)\](.+)$", token)
+    if m:
+        return f"map[{go_type(m.group(1))}]{go_type(m.group(2))}"
+    token = token.rsplit(".", 1)[-1]  # drop a package qualifier
+    return {
+        "int": "integer", "int32": "integer", "int64": "integer",
+        "float32": "number", "float64": "number", "bool": "boolean",
+    }.get(token, token)
+
+
+def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
+    """Every json-tagged field of one Go struct, as field_table() rows.
+
+    Scope is deliberately narrow: a single-line `Name Type `json:"..."`` `
+    declaration, no embedding, no multi-line tags -- this reads a SHAPE, not a
+    compiler, and a struct outside that shape fails loudly rather than
+    silently skipping a field (`docs-generate.py --check` is the gate that
+    catches a renamed or added field; it must never catch one it never saw).
+    """
+    if not path.is_file():
+        raise SystemExit(f"{path}: no such file")
+    text = path.read_text()
+    open_m = re.search(rf"(?m)^type {re.escape(struct)} struct \{{\s*$", text)
+    if not open_m:
+        raise SystemExit(f"{path}: no `type {struct} struct {{` declaration")
+    depth, i = 1, open_m.end()
+    while depth and i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    if depth:
+        raise SystemExit(f"{path}: `{struct}` struct never closes")
+    body = text[open_m.end():i - 1]
+
+    rows: list[dict] = []
+    comment: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            comment = []
+            continue
+        if stripped.startswith("//"):
+            comment.append(stripped.removeprefix("//").strip())
+            continue
+        m = GO_FIELD_RE.match(line)
+        if not m:
+            raise SystemExit(
+                f"{path}: `{struct}` has a field line this generator cannot "
+                f"parse -- scope is one field per line, a single-line struct "
+                f"tag: {line!r}"
+            )
+        name, gotype, tag = m.groups()
+        jm = re.search(r'json:"([^"]*)"', tag)
+        json_name = jm.group(1).split(",")[0] if jm else ""
+        if not json_name or json_name == "-":
+            comment = []  # untagged or explicitly off the wire
+            continue
+        opts = jm.group(1).split(",")[1:]
+        desc = " ".join(comment)
+        for lead in (f"{name} is ", f"{name} are "):
+            if desc.startswith(lead):
+                desc = desc[len(lead):]
+                break
+        desc = one_line(first_sentence(desc)) if desc else ""
+        if desc:
+            desc = desc[0].upper() + desc[1:]
+            if not desc.endswith((".", "!", "?")):
+                desc += "."
+        rows.append({
+            "path": json_name,
+            "type": go_type(gotype),
+            "required": "omitempty" not in opts,
+            "description": desc,
+        })
+        comment = []
+    return rows
+
+
+def build_struct_table(file: str, struct: str) -> str:
+    rows = go_struct_fields(REPO / file, struct)
+    return "\n".join(field_table(rows)) + "\n"
+
 
 # --------------------------------------------------------------------------
 # Injection
@@ -975,9 +1090,13 @@ def generate_block(attrs: dict[str, str], schemas: dict[str, dict]) -> str:
         # emits a resource; this emits a table, which is why the dispatcher
         # returns the whole block rather than the text to wrap in one.
         return build_renders(attrs["bundle"])
+    elif "struct-table" in attrs:
+        # A second table-shaped marker, same reason: it emits a `| Field | ...`
+        # block, not a resource to fence as yaml.
+        return build_struct_table(attrs["file"], attrs["struct"])
     else:
         raise SystemExit(
-            f"marker declares none of template, example or renders: {attrs}"
+            f"marker declares none of template, example, renders or struct-table: {attrs}"
         )
     return f"```yaml\n{yaml_text}\n```\n"
 

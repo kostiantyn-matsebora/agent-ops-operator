@@ -194,6 +194,37 @@ function dedup(list) {
 // immediately before the trailing positional `prompt` are the fixes;
 // `--append-system-prompt <value>` needs neither, since a REQUIRED-argument
 // option already consumes the very next token unconditionally.
+// logUngrantedTools cross-checks the allowlist this process asked the CLI to
+// grant against what the vendor's own `init` event says actually exists —
+// its built-in tools, and the MCP servers it connected to. A grant naming
+// neither is a typo or a stale wiring reference: nothing enforces it, the
+// model is simply never offered it, and this log line is the only way
+// anyone operating the pod finds out — the run itself answers normally and
+// never says a requested tool went ungranted.
+//
+// `entry` may carry a scoping suffix (`Bash(git *)`) or be an MCP pattern
+// (`mcp__<server>__<tool>`, `mcp__<server>`); only the base tool name or the
+// server segment is checked, since the vendor's `tools` list and `connected`
+// server set carry no scoping of their own.
+function logUngrantedTools(allowed, vendorTools, mcpServers, log = () => {}) {
+  const vendor = new Set(vendorTools || []);
+  const connected = new Set((mcpServers || []).filter((s) => s && s.status === 'connected').map((s) => s.name));
+  for (const entry of allowed || []) {
+    const base = String(entry).split('(')[0].trim();
+    if (!base) continue;
+    if (base.startsWith('mcp__')) {
+      const server = base.slice('mcp__'.length).split('__')[0];
+      if (!connected.has(server)) {
+        log(`[runtime] granted "${entry}" names no connected MCP server — check the toolset wiring`);
+      }
+      continue;
+    }
+    if (!vendor.has(base)) {
+      log(`[runtime] granted "${entry}" names no vendor tool the CLI reports — check the toolset wiring`);
+    }
+  }
+}
+
 function buildClaudeArgs({ contextId, systemPrompt, allowed, maxTurns, mcpConfig, prompt }) {
   return [
     ...(contextId ? [`--resume=${contextId}`] : []),
@@ -213,5 +244,5 @@ function buildClaudeArgs({ contextId, systemPrompt, allowed, maxTurns, mcpConfig
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
   splitList, parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
-  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs,
+  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools,
 };

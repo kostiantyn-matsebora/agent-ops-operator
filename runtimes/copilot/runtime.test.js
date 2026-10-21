@@ -5,10 +5,12 @@
 // CONTROL_URL/CONVO_ID (or the credential) are unset — all guarded on
 // `require.main === module` (see runtime.js) so this suite can `require()`
 // the module for its pure/subprocess-driving pieces without any of that
-// firing. The SDK itself (getClient/checkInventory/openSession/attempt/
-// runCopilot) is loaded lazily inside getClient() and deliberately never
-// exercised here — a test suite that needs the real Copilot SDK to run is a
-// test suite that does not run.
+// firing. `getClient`/`checkInventory`/`runCopilot` load the real SDK lazily
+// inside `getClient()` and are deliberately never exercised here — a test
+// suite that needs the real Copilot SDK to run is a test suite that does not
+// run. `attempt` and `resolveContinuity` take the SDK CLIENT as a plain
+// parameter rather than reaching for `getClient()` themselves, so they are
+// exercised below against a fake client object instead.
 'use strict';
 
 const test = require('node:test');
@@ -31,9 +33,26 @@ process.env.WORKSPACE = tmp('agentops-copilot-workspace-');
 
 const {
   gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt,
-  contextIdOf, sessionConfig, finish, WORKSPACE,
+  contextIdOf, sessionConfig, finish, resolveContinuity, attempt, WORKSPACE, SESSIONS_DIR,
   pollNextUnit, reportDone,
 } = require('./runtime');
+
+// fakeSession/fakeClient stand in for the real Copilot SDK — attempt() takes
+// the client as a plain parameter rather than reaching for getClient() itself,
+// which is exactly what makes it exercisable here without the real SDK.
+function fakeSession(content, { onError } = {}) {
+  return {
+    on: () => () => {},
+    sendAndWait: onError ? async () => { throw onError; } : async () => ({ data: { content } }),
+    disconnect: async () => {},
+  };
+}
+function fakeClient({ createSession, resumeSession } = {}) {
+  return {
+    createSession: createSession || (async () => fakeSession('')),
+    resumeSession: resumeSession || (async () => fakeSession('')),
+  };
+}
 
 // Stubs the built-in global `fetch` for the duration of one test and
 // restores it after, even on failure -- the same shape `t.mock` would give,
@@ -222,6 +241,104 @@ test('finish drops the internal openError field and attaches continuity', () => 
   assert.ok(!('openError' in out));
 });
 
+// ---- attempt(): brief extraction (P1) and exitCode omission (P6) -----------
+
+test('attempt extracts the <brief> block into its own field and removes it from result', async () => {
+  const c = fakeClient({ createSession: async () => fakeSession('All done.\n\n<brief>\nFixed the restart loop\n</brief>') });
+  const out = await attempt(c, {}, {}, 'do it');
+  assert.strictEqual(out.brief, 'Fixed the restart loop');
+  assert.ok(!out.result.includes('<brief>'), 'the tag must not survive into result');
+  assert.ok(!out.result.includes('Fixed the restart loop'), 'the brief text must not be duplicated in result');
+  assert.strictEqual(out.result.trim(), 'All done.');
+  assert.strictEqual(out.exitCode, 0, 'a run that actually executed still reports its outcome');
+});
+
+test('attempt reports no brief field when the agent writes none', async () => {
+  const c = fakeClient({ createSession: async () => fakeSession('just an ordinary answer') });
+  const out = await attempt(c, {}, {}, 'do it');
+  assert.strictEqual('brief' in out, false);
+  assert.strictEqual(out.result, 'just an ordinary answer');
+});
+
+test('attempt reports no exitCode when the session never opens — no process ever ran', async () => {
+  const c = fakeClient({ createSession: async () => { throw new Error('auth failed'); } });
+  const out = await attempt(c, {}, {}, 'do it');
+  assert.strictEqual(out.status, 'failed');
+  assert.strictEqual('exitCode' in out, false);
+  assert.match(out.openError, /auth failed/);
+});
+
+test('attempt reports no exitCode when a resume cannot open the session either', async () => {
+  const c = fakeClient({ resumeSession: async () => { throw new Error('session not found'); } });
+  const out = await attempt(c, { runtimeContextId: 'ctx-1' }, {}, 'do it');
+  assert.strictEqual('exitCode' in out, false);
+  assert.strictEqual(out.openError, 'session not found');
+});
+
+test('attempt reports exitCode 1 (not omitted) when the session opened but the run itself failed', async () => {
+  const c = fakeClient({ createSession: async () => fakeSession('', { onError: new Error('model call failed') }) });
+  const out = await attempt(c, {}, {}, 'do it');
+  assert.strictEqual(out.status, 'failed');
+  assert.strictEqual(out.exitCode, 1, 'a session that opened and ran has a real outcome to report');
+});
+
+// ---- resolveContinuity: P2/P3 — any resume failure re-checks, unreadable ----
+// ---- counts as present, a failed retry is never reported `continued` -------
+
+const noSleep = { delays: [0, 0, 0], sleep: async () => {} };
+
+function markPresent(id) {
+  fs.mkdirSync(path.join(SESSIONS_DIR, id), { recursive: true });
+}
+
+test('resolveContinuity reports continued straight away when the first attempt opened fine', async () => {
+  const first = { status: 'succeeded', result: 'ok', sessionId: 'present-1' };
+  const out = await resolveContinuity('present-1', first, () => { throw new Error('must not retry'); }, noSleep);
+  assert.strictEqual(out.continuity, 'continued');
+  assert.strictEqual(out.result, 'ok');
+});
+
+test('a resume failure whose text does NOT say "session not found" still triggers the re-check, not an immediate continued claim', async () => {
+  const id = 'weird-error-id';
+  markPresent(id);
+  let retries = 0;
+  const first = { status: 'failed', openError: 'ECONNRESET: the vendor transport dropped', result: 'x' };
+  const retry = () => { retries++; return { status: 'succeeded', result: 'recovered', sessionId: id }; };
+  const out = await resolveContinuity(id, first, retry, noSleep);
+  assert.strictEqual(retries, 1, 'any open failure re-checks and retries, not only one naming the session missing');
+  assert.strictEqual(out.continuity, 'continued');
+  assert.strictEqual(out.result, 'recovered');
+});
+
+test('an unreadable store counts as PRESENT, not absence, so it retries rather than failing as lost', async () => {
+  let retries = 0;
+  const first = { status: 'failed', openError: 'session not found', result: 'x' };
+  const retry = () => { retries++; return { status: 'succeeded', result: 'recovered', sessionId: 'unreadable-id' }; };
+  const opts = { ...noSleep, probe: async () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); } };
+  const out = await resolveContinuity('unreadable-id', first, retry, opts);
+  assert.strictEqual(retries, 1);
+  assert.strictEqual(out.continuity, 'continued');
+});
+
+test('a failed retry is never reported as continued', async () => {
+  const id = 'present-but-retry-fails';
+  markPresent(id);
+  const first = { status: 'failed', openError: 'session not found', result: 'x' };
+  const retry = () => ({ status: 'failed', openError: 'still cannot open it', result: 'y' });
+  const out = await resolveContinuity(id, first, retry, noSleep);
+  assert.strictEqual('continuity' in out, false, 'no continuity claim is made for a retry that also failed');
+  assert.match(out.result, /resume: still cannot open it/);
+  assert.ok(!('openError' in out), 'the internal field never reaches the report');
+});
+
+test('a confirmed absence reports unavailable with no exitCode (no process ever ran)', async () => {
+  const first = { status: 'failed', openError: 'session not found', result: 'x' };
+  const out = await resolveContinuity('genuinely-gone-id', first, () => { throw new Error('must not retry'); }, noSleep);
+  assert.strictEqual(out.continuity, 'unavailable');
+  assert.strictEqual('exitCode' in out, false);
+  assert.match(out.continuityReason, /could not be reached/);
+});
+
 test('onEvent feeds the run report as the transcript is written', () => {
   const { newCallRecorder } = require('./report');
   const s = { lastText: '', toolCalls: 0, turns: 0, errors: [], toolNames: new Map(), calls: newCallRecorder() };
@@ -314,5 +431,45 @@ test('reportDone retries past a thrown network error, not just a non-ok response
     return { ok: true };
   });
   await reportDone({ runId: 'r4' }, { result: 'ok' });
+  assert.strictEqual(calls, 2);
+});
+
+// ---- reportDone: a definitive 4xx is not retried (spec delta "/work/done") --
+
+test('reportDone does not retry a definitive 400 — one call, logged, then returns', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: false, status: 400, text: async () => 'result exceeds the bound' };
+  });
+  const origError = console.error;
+  const logged = [];
+  console.error = (...args) => logged.push(args.join(' '));
+  try {
+    await reportDone({ runId: 'r5' }, { result: 'ok' });
+  } finally {
+    console.error = origError;
+  }
+  assert.strictEqual(calls, 1, 'a definitive rejection must not be retried');
+  assert.ok(logged.some((l) => l.includes('400') && l.includes('result exceeds the bound')), 'the status and body are logged');
+});
+
+test('reportDone retries a 429, which is transient despite being a 4xx', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2, status: calls >= 2 ? 200 : 429, text: async () => 'rate limited' };
+  });
+  await reportDone({ runId: 'r6' }, { result: 'ok' });
+  assert.strictEqual(calls, 2, '429 keeps the bounded retry rather than being treated as definitive');
+});
+
+test('reportDone retries a 5xx rather than treating it as a definitive rejection', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2, status: calls >= 2 ? 200 : 503, text: async () => 'unavailable' };
+  });
+  await reportDone({ runId: 'r7' }, { result: 'ok' });
   assert.strictEqual(calls, 2);
 });
