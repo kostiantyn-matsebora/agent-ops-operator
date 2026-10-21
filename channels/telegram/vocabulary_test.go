@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // ---- the transport-local spelling ---------------------------------------
@@ -468,6 +469,27 @@ func TestPipelinesAreListedBeforeBuiltins(t *testing.T) {
 	}
 	if lastPipeline > firstBuiltin {
 		t.Fatalf("a builtin was listed before a pipeline: %+v", cmds)
+	}
+}
+
+// A11: a command description over Telegram's cap is cut on RUNES, not bytes —
+// a byte cut can split a multi-byte character (an icon's own emoji, or
+// non-ASCII text in a Pipeline's own description) and Telegram rejects the
+// result.
+func TestDescriptionTruncationIsRuneSafe(t *testing.T) {
+	// 254 single-byte characters put byte offset 255 — exactly where a
+	// byte-indexed cut at telegramMaxDescription(256)-1 would land — in the
+	// MIDDLE of the first 3-byte rune that follows.
+	desc := strings.Repeat("a", 254) + strings.Repeat("中", 50)
+	v := Vocabulary{Revision: "r", Entries: []VocabularyEntry{
+		{Kind: "pipeline", Name: "plain", Description: desc, Position: "general"},
+	}}
+	got := commandsFor(v)[0].Description
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated description is not valid UTF-8: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n > telegramMaxDescription {
+		t.Fatalf("description is %d runes, over the %d cap", n, telegramMaxDescription)
 	}
 }
 

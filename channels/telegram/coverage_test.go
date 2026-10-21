@@ -410,6 +410,38 @@ func TestAsDocumentOnlyAppliesToOversizedSignals(t *testing.T) {
 	}
 }
 
+// A11: a caption over Telegram's cap is cut on PLAIN text before rendering,
+// never on the rendered HTML after — a rune cut on rendered markup can land
+// inside an entity (`&amp;` sliced to `&am`) and Telegram refuses the whole
+// caption for it.
+func TestAsDocumentCaptionTruncationNeverSplitsAnEntity(t *testing.T) {
+	// A title built entirely of "&" forces escape() to expand every character
+	// to "&amp;" (5 bytes each) — a naive post-render byte/rune cut at 1024
+	// lands inside one of those almost certainly.
+	hugeTitle := strings.Repeat("&", 2000)
+	caption, _, ok := asDocument(Message{
+		Kind: MsgSignal, Title: hugeTitle, Body: strings.Repeat("x", documentThreshold+1),
+	})
+	if !ok {
+		t.Fatal("an oversized signal must qualify")
+	}
+	if len(caption) > telegramCaptionLimit {
+		t.Fatalf("caption is %d bytes, over Telegram's %d cap", len(caption), telegramCaptionLimit)
+	}
+	// EVERY "&" in the rendered caption must be the start of a COMPLETE named
+	// entity — never a lone "&" or a truncated "&amp" with no trailing ";",
+	// which is exactly what a rune cut through the middle of one produces.
+	for i, r := range caption {
+		if r != '&' {
+			continue
+		}
+		rest := caption[i:]
+		if !strings.HasPrefix(rest, "&amp;") && !strings.HasPrefix(rest, "&lt;") && !strings.HasPrefix(rest, "&gt;") {
+			t.Fatalf("an incomplete entity at byte %d: %q", i, rest[:min(10, len(rest))])
+		}
+	}
+}
+
 // degradeQuotes is what SendWith falls back to on a Bot API old enough to
 // refuse `<blockquote expandable>` — a plain quote with a visible marker
 // instead of an unclosed tag the transport would reject outright.

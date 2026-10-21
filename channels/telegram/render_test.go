@@ -63,12 +63,12 @@ func TestMarkdownSubsetRenders(t *testing.T) {
 // whole-text escape() pass that runs before link matching covers &, < and >
 // but not a bare ", so the href composer must add that one itself.
 func TestLinkHrefIsQuoteSafe(t *testing.T) {
-	out := markdownToHTML(`[click](https://x.test/"><script>alert(1)</script>)`)
-	if strings.Contains(out, `"><script>`) {
-		t.Fatalf("an unescaped quote broke out of the href attribute: %q", out)
+	out := markdownToHTML(`[click](https://x.test/"quoted")`)
+	if strings.Contains(out, `href="https://x.test/"quoted"`) {
+		t.Fatalf("a raw quote closed the href attribute early: %q", out)
 	}
-	if !strings.Contains(out, `&quot;`) {
-		t.Fatalf("want the quote escaped as an entity, got %q", out)
+	if !strings.Contains(out, `href="https://x.test/&quot;quoted&quot;"`) {
+		t.Fatalf("want the quote escaped as an entity inside one unbroken attribute, got %q", out)
 	}
 }
 

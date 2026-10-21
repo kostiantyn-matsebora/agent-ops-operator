@@ -50,28 +50,28 @@ the behaviour, design.md the approach.
 
 ## 3. Telegram adapter contract fixes — backend-developer
 
-- [ ] 3.1 one retry budget per OPERATION — every call's wait, retry and
+- [x] 3.1 one retry budget per OPERATION — every call's wait, retry and
   HTTP timeout charges one total minted from `reclaimAfterSeconds` (A2).
   Verify: `go test` drives a multi-call op into the bound and asserts
   failure before the reclaim interval.
-- [ ] 3.2 dial errors, timeouts and 5xx are retried inside the budget (A1),
+- [x] 3.2 dial errors, timeouts and 5xx are retried inside the budget (A1),
   close-topic riding the same rule with a completed op never re-attempted
   (A9). Verify: `go test` with injected transient failures.
-- [ ] 3.3 pacing charges every outbound Bot API call, `setMyCommands`
+- [x] 3.3 pacing charges every outbound Bot API call, `setMyCommands`
   included (A3). Verify: `go test` asserts token spend per call.
-- [ ] 3.4 `SendDocument` goes through the shared relay response path —
+- [x] 3.4 `SendDocument` goes through the shared relay response path —
   `retry_after` honoured, a gateway rejection surfaced with status and
   body, general-topic fallback applied (A4). Verify: `go test` cases per
   response shape.
-- [ ] 3.5 a choice whose `callback_data` cannot fit degrades to text,
+- [x] 3.5 a choice whose `callback_data` cannot fit degrades to text,
   never dropped (A5), and a topic `callback_query` is parsed and dispatched
   so selecting a choice sends the original message inbound (A6). Verify:
   `go test` render and dispatch cases.
-- [ ] 3.6 fold-order chunking — title and named sections lead chunk one
+- [x] 3.6 fold-order chunking — title and named sections lead chunk one
   when they fit, folded content never precedes them (A7), and the stale
   "no parsing happens here" comments go. Verify: `go test` chunking cases
   including the overflow scenario.
-- [ ] 3.7 `DeleteTopic` tolerates thread-not-found on redelivery (A10),
+- [x] 3.7 `DeleteTopic` tolerates thread-not-found on redelivery (A10),
   and escaping is fixed — href-safe URLs, caption truncation before HTML
   rendering, rune-safe command descriptions (A11). Verify: `go test` case
   per edge.
