@@ -66,7 +66,13 @@ type OpMessage struct {
 	Source   string            `json:"source,omitempty"`
 	Title    string            `json:"title,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
-	InputRef string            `json:"inputRef,omitempty"`
+	// Severity is a SIGNAL's optional urgency rating — closed vocabulary
+	// (critical/error/warning/info), carried next to Labels exactly the way
+	// the manager's own internal/chat/message.go composes it. Read through
+	// SignalSeverity, which gates it to the "signal" kind the same way
+	// SignalPayload does.
+	Severity string `json:"severity,omitempty"`
+	InputRef string `json:"inputRef,omitempty"`
 	// OriginKind is this signal's v1alpha1.OriginKind ("signal" | "channel" |
 	// "member"), matching the manager's own OpMessage.OriginKind field name
 	// exactly (internal/chat/message.go). "member" is the one value this
@@ -541,4 +547,15 @@ func (m *OpMessage) SignalPayload() string {
 		return ""
 	}
 	return strings.TrimSpace(m.Body)
+}
+
+// SignalSeverity is the raw severity rating of a `signal`, for a surface
+// that can tint it. Empty for every other kind, mirroring SignalPayload —
+// and empty whenever the originating signal carried none, matching the
+// wire's own `omitempty`.
+func (m *OpMessage) SignalSeverity() string {
+	if m == nil || m.Kind != "signal" {
+		return ""
+	}
+	return m.Severity
 }

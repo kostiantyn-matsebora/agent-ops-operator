@@ -273,6 +273,7 @@ type convView struct {
 		Signal *struct {
 			SourceRef *Ref              `json:"sourceRef,omitempty"`
 			Labels    map[string]string `json:"labels,omitempty"`
+			Severity  string            `json:"severity,omitempty"`
 		} `json:"signal,omitempty"`
 		Title string `json:"title,omitempty"`
 		// OriginReader names whoever STARTED this conversation, in the opaque
@@ -348,8 +349,14 @@ type ConversationSummary struct {
 	// ConversationInput, which is deleted with the queue entry — so a card lost
 	// its label table the moment the console restarted.
 	SignalLabels map[string]string `json:"signalLabels,omitempty"`
-	Phase        string            `json:"phase,omitempty"`
-	Inflight     *Inflight         `json:"inflight,omitempty"`
+	// SignalSeverity is the severity the signal that OPENED this conversation
+	// carried, kept on the CR for the same reason SignalLabels is — so a
+	// rebuilt card still shows it after a console restart. Empty wherever that
+	// signal carried none, or on a conversation created before the field
+	// existed.
+	SignalSeverity string    `json:"signalSeverity,omitempty"`
+	Phase          string    `json:"phase,omitempty"`
+	Inflight       *Inflight `json:"inflight,omitempty"`
 	// Runs is populated in the DETAIL view only; list rows carry RunCount
 	// instead, because a result is a whole agent message and thousands of them
 	// do not belong in a listing.
@@ -528,7 +535,8 @@ func summarize(obj *Object, pipelines, coordinators []*Object, consoleChannel, r
 		Profile: v.Spec.ProfileRef.Name, Pipeline: AttributePipeline(obj, pipelines),
 		Coordinator: AttributeCoordinator(obj, coordinators),
 		Source:      signalSource(v), SignalLabels: signalLabels(v),
-		Phase: v.Status.Phase, Inflight: v.Status.Inflight, Runs: v.Status.Runs,
+		SignalSeverity: signalSeverity(v),
+		Phase:          v.Status.Phase, Inflight: v.Status.Inflight, Runs: v.Status.Runs,
 		Threads: v.Status.Threads, RuntimePod: v.Status.RuntimePod,
 		LastActivity: v.Status.LastActivity, Created: obj.Metadata.CreationTimestamp,
 		Queued:      len(v.Spec.Inputs),
@@ -652,4 +660,13 @@ func signalLabels(v convView) map[string]string {
 		return nil
 	}
 	return v.Spec.Signal.Labels
+}
+
+// signalSeverity is the severity the signal that opened this conversation
+// carried, or "" when it carried none, or when there is no signal at all.
+func signalSeverity(v convView) string {
+	if v.Spec.Signal == nil {
+		return ""
+	}
+	return v.Spec.Signal.Severity
 }

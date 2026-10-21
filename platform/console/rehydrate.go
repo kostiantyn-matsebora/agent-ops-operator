@@ -169,6 +169,12 @@ func recordedMessage(thread, ownChannel string, in RecordedInput, conv Conversat
 		// source that opened it — rebuilds the head, and the payload moves into
 		// the field the browser already folds.
 		msg.Text, msg.Payload = recordedSignalCard(conv), signalPayload(in)
+		// Same limitation recordedSignalCard's labels already carry: this is
+		// the OPENING signal's severity, not this specific recurrence's own —
+		// RecordedInput (status.runs[].inputs[]) keeps no per-input severity,
+		// same as it keeps no per-input labels. A card rebuilt after a
+		// restart can show a stale rating for a recurrence that escalated.
+		msg.Severity = conv.SignalSeverity
 	case ownChannel != "" && in.Surface == ownChannel:
 		msg.Kind, msg.Sender = MsgLocal, in.Sender
 	default:

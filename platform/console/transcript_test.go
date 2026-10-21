@@ -193,3 +193,46 @@ func TestAppendOpRendersAnOrdinarySignalWithAnyOriginKind(t *testing.T) {
 		t.Fatalf("an ordinary signal origin must render as always: %+v", got)
 	}
 }
+
+// Severity flows through exactly like Payload does: a signal carrying one
+// shows up on the composed transcript Message, carried structured rather
+// than flattened into Text.
+func TestAppendOpCarriesSeverity(t *testing.T) {
+	tr := NewTranscripts()
+	tr.AppendOp("input:c1:in-1:console", "c1",
+		&OpMessage{Kind: "signal", Source: "cluster-events", Body: "disk at 99%", Severity: "critical"}, "console")
+	got := tr.Thread("c1")
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if got[0].Severity != "critical" {
+		t.Errorf("Severity = %q, want %q", got[0].Severity, "critical")
+	}
+}
+
+// A signal carrying no severity must compose a Message with an empty
+// Severity — the closed-vocabulary field is optional, and absence is today's
+// only state, unchanged.
+func TestAppendOpOmitsSeverityWhenAbsent(t *testing.T) {
+	tr := NewTranscripts()
+	tr.AppendOp("input:c1:in-1:console", "c1",
+		&OpMessage{Kind: "signal", Source: "cluster-events", Body: "disk at 99%"}, "console")
+	got := tr.Thread("c1")
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if got[0].Severity != "" {
+		t.Errorf("Severity = %q, want empty", got[0].Severity)
+	}
+}
+
+// Severity is gated to the "signal" kind, mirroring SignalPayload: it must
+// never leak onto an answer, relay or notice even if the field were set.
+func TestOnlySignalsCarrySeverity(t *testing.T) {
+	for _, kind := range []string{"answer", "relay", "notice"} {
+		m := &OpMessage{Kind: kind, Body: "some text", Severity: "critical"}
+		if s := m.SignalSeverity(); s != "" {
+			t.Errorf("%s offered a severity to carry: %q", kind, s)
+		}
+	}
+}

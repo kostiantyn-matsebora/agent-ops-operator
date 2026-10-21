@@ -732,6 +732,15 @@ export interface Message {
    * inside the text it is a wall of JSON between the card and the reply box.
    */
   payload?: string
+  /**
+   * A SIGNAL's optional urgency rating — closed vocabulary (`critical` |
+   * `error` | `warning` | `info`). Carried structured, like `payload`, so
+   * the card can tint it rather than parsing it back out of `text`.
+   *
+   * Absent whenever the originating signal carried none, which is every
+   * signal today — no shipped adapter sets it yet.
+   */
+  severity?: string
 }
 
 /**

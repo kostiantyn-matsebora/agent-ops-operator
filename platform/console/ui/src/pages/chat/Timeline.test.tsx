@@ -69,6 +69,47 @@ describe('a coordinator root interleaves extraItems with its own messages by tim
   })
 })
 
+describe('a signal card draws severity where present (console-adapter spec)', () => {
+  it('tints a critical severity with --ao-danger', () => {
+    const messages = [msg('sig-1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure', severity: 'critical' })]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    const mark = screen.getByLabelText('severity: critical')
+    expect(mark).toHaveTextContent('critical')
+    expect(mark).toHaveStyle({ color: 'var(--ao-danger)' })
+  })
+
+  it('tints an error severity with --ao-danger, the same as critical', () => {
+    const messages = [msg('sig-1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure', severity: 'error' })]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    expect(screen.getByLabelText('severity: error')).toHaveStyle({ color: 'var(--ao-danger)' })
+  })
+
+  it('tints a warning severity with --ao-warning', () => {
+    const messages = [msg('sig-1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure', severity: 'warning' })]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    expect(screen.getByLabelText('severity: warning')).toHaveStyle({ color: 'var(--ao-warning)' })
+  })
+
+  it('tints an info severity with --ao-neutral', () => {
+    const messages = [msg('sig-1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure', severity: 'info' })]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    expect(screen.getByLabelText('severity: info')).toHaveStyle({ color: 'var(--ao-neutral)' })
+  })
+
+  it('renders exactly as before when the signal carries no severity — no empty mark, no layout shift', () => {
+    const messages = [msg('sig-1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure' })]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    expect(screen.queryByLabelText(/^severity:/)).toBeNull()
+    expect(screen.getByText('Disk pressure')).toBeInTheDocument()
+  })
+
+  it('never draws a severity mark on a non-signal message, even if one were carried', () => {
+    const messages = [msg('a1', 'agent', '2024-01-01T00:00:00Z', { text: 'the answer', severity: 'critical' })]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    expect(screen.queryByLabelText(/^severity:/)).toBeNull()
+  })
+})
+
 describe('an ack is presence, never a bubble', () => {
   it('drops the ack from the transcript and shows the typing row instead', () => {
     const messages = [msg('m1', 'agent', '2024-01-01T00:00:00Z'), msg('m2', 'ack', '2024-01-01T00:00:01Z', { text: 'On it…' })]

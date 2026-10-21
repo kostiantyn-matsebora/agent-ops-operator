@@ -43,6 +43,42 @@ function speakerStyle(kind: string) {
   return SPEAKER_STYLE[kind] ?? { icon: 'aops:system', tint: 'var(--ao-text)' }
 }
 
+// Severity's four-value vocabulary, tinted from the theme's EXISTING status
+// tokens — no new one is added for this (console-adapter spec). `critical`
+// and `error` share one tint: both are the danger case, just two names for
+// how a sender decided to spell it.
+const SEVERITY_TINT: Record<string, string> = {
+  critical: 'var(--ao-danger)',
+  error: 'var(--ao-danger)',
+  warning: 'var(--ao-warning)',
+  info: 'var(--ao-neutral)',
+}
+
+/**
+ * The severity mark on a signal card — a small tinted tag, the same visual
+ * idiom the Avatar above already uses for a status tint (border + text in
+ * the tint colour, `--ao-surface-alt` behind it) rather than a new pattern.
+ *
+ * Absent whenever the message carries no severity, which is every signal
+ * today (no shipped adapter sets the field yet) — rendering nothing here
+ * leaves the card exactly as it was before this existed.
+ */
+function SeverityTag({ severity }: Readonly<{ severity: string }>) {
+  const tint = SEVERITY_TINT[severity] ?? 'var(--ao-neutral)'
+  return (
+    <span
+      aria-label={`severity: ${severity}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', marginBottom: 4, padding: '1px 8px',
+        borderRadius: 10, fontSize: '0.75em', fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: '0.02em', color: tint, border: `1px solid ${tint}`, background: 'var(--ao-surface-alt)',
+      }}
+    >
+      {severity}
+    </span>
+  )
+}
+
 function Avatar({ kind, icon }: Readonly<{ kind: string; icon?: string }>) {
   const style = speakerStyle(kind)
   return (
@@ -243,6 +279,9 @@ export function Timeline({
                       </strong>
                       <time style={{ color: 'var(--ao-text-subtle)', fontSize: '0.85em' }}>{new Date(m.at).toLocaleTimeString()}</time>
                     </header>
+                  )}
+                  {m.kind === 'signal' && m.severity && (
+                    <div><SeverityTag severity={m.severity} /></div>
                   )}
                   {agentText(m.kind) ? <Blocks blocks={parse(m.text)} /> : <Markdown>{m.text}</Markdown>}
                   {m.payload && <Fold text={fence(m.payload)} label="Payload" />}

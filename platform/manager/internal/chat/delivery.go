@@ -66,9 +66,9 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
 		}
-		body, inputRef, labels := item.Payload, "", map[string]string(nil)
+		body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
 		if ci := InputPayload(ctx, reader, ns, item); ci != nil {
-			body, inputRef, labels = ci.Spec.Payload, ci.Name, ci.Spec.Labels
+			body, inputRef, labels, severity = ci.Spec.Payload, ci.Name, ci.Spec.Labels, ci.Spec.Severity
 		}
 		surface := item.OriginSurface(labels)
 		surfaceEchoes := true
@@ -90,7 +90,7 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 				}
 				resolved = true
 			}
-			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body, item.Origin.Kind)
+			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body, item.Origin.Kind).WithSeverity(severity)
 		}
 		for _, ref := range conv.Spec.ChannelRefs {
 			if !item.DeliverTo(ref.Name, surface, surfaceEchoes) {

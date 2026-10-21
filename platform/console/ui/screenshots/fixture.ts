@@ -544,6 +544,7 @@ const conversationDetail: ConversationDetail = {
     {
       id: 'm1', thread: 'console/cluster-events-7c1d4e', kind: 'signal',
       text: 'Signal from cluster-events — checkout-api in namespace storefront has restarted 5 times in 10 minutes (BackOff).',
+      severity: 'critical',
       at: ago(96),
     },
     {

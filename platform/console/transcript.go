@@ -100,6 +100,13 @@ type Message struct {
 	// inside Text it is a wall of JSON between the card and the reply box.
 	Payload string `json:"payload,omitempty"`
 
+	// Severity is a SIGNAL's optional urgency rating, carried the same way
+	// Payload is — a structured field the browser can tint rather than a
+	// chip buried in Text. Closed vocabulary (critical/error/warning/info);
+	// empty when the originating signal carried none, matching the wire's
+	// own omitempty all the way from internal/chat/message.go.
+	Severity string `json:"severity,omitempty"`
+
 	// runID is the RUN this bubble reports, when it reports one. Internal
 	// correlation only, exactly like recordID — and the same lesson: a bubble
 	// and the durable run behind it are ONE message wearing two ids, so the
@@ -203,7 +210,7 @@ func (t *Transcripts) AppendOp(opID, thread string, m *OpMessage, ownChannel str
 		}
 	}
 	msg := Message{ID: opID, Thread: thread, Kind: kind, Sender: sender, Text: text,
-		At: nowRFC3339(), Choices: m.Choices, Payload: m.SignalPayload(),
+		At: nowRFC3339(), Choices: m.Choices, Payload: m.SignalPayload(), Severity: m.SignalSeverity(),
 		recordID: record, runID: runIDOf(opID)}
 	t.append(msg, kind == MsgAck || kind == MsgRelay)
 	return true

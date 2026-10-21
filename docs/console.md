@@ -626,6 +626,14 @@ whole thread this way, starting at the message that opened it.
 Only acks and notices are lost, rendered as a presence row rather than a
 bubble while they last.
 
+**A signal's card draws its severity when the message carries one.** A
+small tinted mark, tied to the theme's existing danger/warning/neutral
+tones (`critical`/`error`/`warning`/`info`).
+
+A card whose message carries none renders exactly as it did before this
+existed. It survives a console restart the same way the card's label
+table already does.
+
 A new-messages divider sits above the first uncounted message. Opening
 scrolls to it, and the view autoscrolls only while already at the bottom,
 with a jump pill showing the count otherwise.

@@ -20,8 +20,8 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 19 |
 | [AgentRuntime](#agentruntime) | yes | 46 |
-| [Conversation](#conversation) | no — the operator does | 48 |
-| [ConversationInput](#conversationinput) | no — the operator does | 5 |
+| [Conversation](#conversation) | no — the operator does | 49 |
+| [ConversationInput](#conversationinput) | no — the operator does | 6 |
 
 ## AgentProfile
 
@@ -493,6 +493,7 @@ ConversationSpec pins a conversation to its chat surfaces and an agent profile, 
 | `serviceAccountName` | `string` |  |  |
 | `signal` | `object` |  | Signal is what the ORIGINATING SIGNAL was, for attribution. PROVENANCE, exactly like PipelineRef: written once at creation, read only for display, and nothing is ever resolved through it. It is on the CONVERSATION because a conversation has exactly one originating signal — reuse is scoped to one conversationId and one pipeline, so every signal that lands here came from the same source carrying the same correlation id. IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the labels were on the `ConversationInput`, which is DELETED with the queue entry. So a finished conversation kept its answer, kept the question, and could not say what started it — a viewer showed the phase, the profile and the pipeline of an alert and not the source that fired it or a single one of its labels. The same loss `status.runs[].inputs[]` was added to fix, two fields over. Absent on conversations created before this field, and on anything a channel started. Render it as absent rather than guessing. |
 | `signal.labels` | `map[string]string` |  | Labels are the signal's own context, as the adapter sent them — opaque attribution only, rendered on signal cards. They feed no routing decision: the manager routes purely by ConversationID/InitiationID equality, never by a label. BOUNDED at MaxSignalLabels. A Conversation is long-lived where the ConversationInput that used to hold these was not, and an adapter's label set is its own business — an unbounded map on a durable object is an etcd cost nobody chose. |
+| `signal.severity` | `string` |  | Severity is the originating signal's own severity rating, written once at creation from the signal that opened the conversation and never rewritten by a later recurrence. Omitted wherever that signal carried none. |
 | `signal.sourceRef` | `object` |  | SourceRef is the SignalSource this conversation came from. |
 | `signal.sourceRef.name` | `string` | **yes** | Name of the referenced object. |
 | `title` | `string` |  | Title is bounded by MaxConversationTitle — see that constant's own comment for why a cap belongs HERE despite the message-body rule against transport-shaped limits. |
@@ -593,6 +594,7 @@ ConversationInputSpec carries a large out-of-line work-unit payload.
 | `conversationRef.name` | `string` | **yes** | Name of the referenced object. |
 | `labels` | `map[string]string` |  | Labels are the originating signal's labels, kept beside the payload rather than on the Conversation: they are per-input, they can be numerous, and this object exists precisely to hold the bulky half of an input. They travel so an adapter can RENDER them — a label table, a chip row, or nothing — from the same data that named the topic. Grouping already consumed them at ingest; this is presentation, and the manager does not decide how much of it a surface shows. |
 | `payload` | `string` | **yes** |  |
+| `severity` | `string` |  | Severity is the originating signal's own severity rating for this occurrence, kept per-input the same way Labels is — each recurrence keeps its own, never retroactively rewriting the provenance. Omitted wherever the originating signal carried none. |
 | `type` | `string` | **yes** | InputType classifies a work unit. |
 
 ### status

@@ -61,6 +61,15 @@ type NormalizedSignal struct {
 	// a one-off ask from a machine), or "chat" (task lane, from a human on a
 	// chat surface).
 	Kind string `json:"kind,omitempty"`
+	// Severity is the signal's own optional urgency rating — one of exactly
+	// the four values validSeverities accepts. Absent means unrated, the only
+	// state a signal carried before this field existed. Validated ahead of any
+	// routing decision (handleSignalInbound), then threaded onto the
+	// conversation's SignalProvenance (write-once, at creation only) and onto
+	// each created ConversationInputSpec (per occurrence) — the same two
+	// stops, and the same write-once rule, Labels already follows.
+	// +optional
+	Severity agentopsv1alpha1.Severity `json:"severity,omitempty"`
 	// Reader is the OPAQUE key of the person who sent this — a salted hash the
 	// originating surface computed, never an identity. Its only use is stamping
 	// their own read watermark when their thread is created, so a conversation
@@ -97,6 +106,20 @@ const KindJob = "job"
 // KindAlert is the default lane: read-only investigation prompt, grouped by
 // the sender's own initiationId.
 const KindAlert = "alert"
+
+// validSeverities is the closed vocabulary POST /signal/inbound accepts for a
+// signal's optional Severity — named once so the acceptance check and the 400
+// response naming the accepted values can never drift apart.
+var validSeverities = map[agentopsv1alpha1.Severity]bool{
+	agentopsv1alpha1.SeverityCritical: true,
+	agentopsv1alpha1.SeverityError:    true,
+	agentopsv1alpha1.SeverityWarning:  true,
+	agentopsv1alpha1.SeverityInfo:     true,
+}
+
+// severityVocabulary names the four accepted values, verbatim, in the 400 a
+// signal's unmapped severity gets.
+const severityVocabulary = "critical, error, warning, info"
 
 // oneShot reports whether a kind is a one-shot lane — a later signal is a
 // SEPARATE request rather than more news about a standing subject. Chat and
@@ -714,6 +737,10 @@ func (s *Server) createConversationForGroup(ctx context.Context, source *agentop
 			// The first signal's labels represent the group: they all share one
 			// initiationId, so they agree on everything the group was formed over.
 			Labels: boundedLabels(group[0].Labels),
+			// Written once, here, at creation only — never touched by a later
+			// recurrence (appendInputToConversation does not set it), exactly
+			// like Labels above.
+			Severity: group[0].Severity,
 		},
 		Title:          title,
 		ConversationID: initiationID,
@@ -779,6 +806,10 @@ func (s *Server) appendInputToConversation(ctx context.Context, source *agentops
 		// The first signal's labels represent the group: they all share one
 		// initiationId, so they agree on everything the group was formed over.
 		Labels: group[0].Labels,
+		// Per-occurrence, same as Labels: this input keeps its own severity,
+		// never the provenance's — a later recurrence disagreeing with the
+		// signal that opened the conversation is recorded here, not there.
+		Severity: group[0].Severity,
 	}
 	if err := s.Client.Create(ctx, ci); err != nil {
 		return "", false, err
@@ -897,6 +928,28 @@ type signalInboundReq struct {
 	Signals []NormalizedSignal `json:"signals"`
 }
 
+// validateSignals returns the refusal for the first invalid signal, or "".
+func validateSignals(sigs []NormalizedSignal) string {
+	for _, sig := range sigs {
+		if sig.InitiationID == "" {
+			return "every signal needs an initiationId"
+		}
+		// Absent is unrated and always accepted; present and unmapped refuses
+		// the WHOLE batch (signal-severity: "one bad signal refuses the whole
+		// batch"), before any signal in it is routed, claimed or recorded.
+		if sig.Severity != "" && !validSeverities[sig.Severity] {
+			return fmt.Sprintf("severity %q is not one of the accepted values: %s", sig.Severity, severityVocabulary)
+		}
+		// A chat signal names the surface it came from, or it is unanswerable.
+		// Refuse it here rather than accept it and silently drop the reply.
+		if sig.Kind == KindChat && sig.Labels[LabelChatChannel] == "" {
+			return "a chat signal must carry the label " + LabelChatChannel +
+				" naming the Channel it arrived on — the reply has nowhere to go without it"
+		}
+	}
+	return ""
+}
+
 func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in signalInboundReq
@@ -904,18 +957,9 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": `need {"source","signals":[...]}`})
 		return
 	}
-	for _, sig := range in.Signals {
-		if sig.InitiationID == "" {
-			writeJSON(w, 400, map[string]string{"error": "every signal needs an initiationId"})
-			return
-		}
-		// A chat signal names the surface it came from, or it is unanswerable.
-		// Refuse it here rather than accept it and silently drop the reply.
-		if sig.Kind == KindChat && sig.Labels[LabelChatChannel] == "" {
-			writeJSON(w, 400, map[string]string{"error": "a chat signal must carry the label " +
-				LabelChatChannel + " naming the Channel it arrived on — the reply has nowhere to go without it"})
-			return
-		}
+	if msg := validateSignals(in.Signals); msg != "" {
+		writeJSON(w, 400, map[string]string{"error": msg})
+		return
 	}
 	source := s.signalSource(r, w, in.Source)
 	if source == nil {

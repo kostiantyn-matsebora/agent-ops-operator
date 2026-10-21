@@ -37,7 +37,8 @@ func TestManagerComposesNoTransportMarkup(t *testing.T) {
 		{"answer", AnswerMessage("**done** — restarted `api`", StatusSucceeded)},
 		{"relay", RelayMessage("telegram", "kim", "and the disks?")},
 		{"signal", SignalMessage("prod-oncall", "vm-alerts", "DiskFull", "conv-in-1",
-			map[string]string{"namespace": "prod"}, "node/1 root filesystem at 97%", agentopsv1alpha1.OriginSignal)},
+			map[string]string{"namespace": "prod"},
+			"node/1 root filesystem at 97%", agentopsv1alpha1.OriginSignal).WithSeverity(agentopsv1alpha1.SeverityWarning)},
 	} {
 		assertNoMarkup(t, tc.name, tc.msg)
 	}
