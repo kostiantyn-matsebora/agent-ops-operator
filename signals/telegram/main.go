@@ -1,6 +1,6 @@
 // signal-telegram: the chat ORIGINATION adapter. A message on a Telegram
 // chat's general surface is a signal like any other — it goes through the same
-// claim check, cooldown, grouping and observability as an alert or a cron job,
+// claim check, cooldown and observability as an alert or a cron job,
 // instead of creating a Conversation down a private path.
 //
 //	updates: POST /updates            (from gateway-telegram; LISTEN_ADDR, default :8080)
@@ -503,8 +503,10 @@ func title(text string) string {
 			break
 		}
 	}
-	if len(text) > max {
-		return text[:max] + "…"
+	// Cut on a rune boundary: a byte cut can split a multi-byte character
+	// and hand the manager invalid UTF-8.
+	if runes := []rune(text); len(runes) > max {
+		return string(runes[:max]) + "…"
 	}
 	return text
 }

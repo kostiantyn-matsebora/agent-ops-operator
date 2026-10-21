@@ -113,25 +113,53 @@ func TestDesiredVMACCarriesRouteTuning(t *testing.T) {
 		}
 	}
 	webhook = spec["receivers"].([]any)[0].(map[string]any)["webhook_configs"].([]any)[0].(map[string]any)
-	if _, present := webhook["max_alerts"]; present {
-		t.Fatalf("unset max_alerts must be omitted: %+v", webhook)
+	for _, k := range []string{"max_alerts", "send_resolved"} {
+		if _, present := webhook[k]; present {
+			t.Fatalf("unset %s must be omitted, so the sender's default governs: %+v", k, webhook)
+		}
+	}
+
+	// a set send_resolved is carried either way — false is a choice, not unset
+	for _, want := range []bool{true, false} {
+		set := &registerSpec{SendResolved: &want}
+		spec = desiredVMAC("s", "monitoring", "http://svc/webhook/s", set)["spec"].(map[string]any)
+		webhook = spec["receivers"].([]any)[0].(map[string]any)["webhook_configs"].([]any)[0].(map[string]any)
+		if got, present := webhook["send_resolved"]; !present || got != want {
+			t.Fatalf("send_resolved=%v must be carried: %+v", want, webhook)
+		}
 	}
 }
 
 func TestParseRegister(t *testing.T) {
-	if parseRegister(nil) != nil {
-		t.Fatal("empty config must yield no registration")
+	for _, absent := range []string{"", `{"other":1}`, `{"register":null}`} {
+		if reg, err := parseRegister(json.RawMessage(absent)); reg != nil || err != nil {
+			t.Fatalf("config %q must yield no registration and no error: %+v %v", absent, reg, err)
+		}
 	}
-	if parseRegister(json.RawMessage(`{"other":1}`)) != nil {
-		t.Fatal("config without register must yield none")
-	}
-	reg := parseRegister(json.RawMessage(`{"register":{"namespace":"mon","sendResolved":true}}`))
-	if reg == nil || reg.Namespace != "mon" || !reg.SendResolved {
-		t.Fatalf("register parsed wrong: %+v", reg)
+	reg, err := parseRegister(json.RawMessage(`{"register":{"namespace":"mon","sendResolved":true}}`))
+	if err != nil || reg == nil || reg.Namespace != "mon" || reg.SendResolved == nil || !*reg.SendResolved {
+		t.Fatalf("register parsed wrong: %+v %v", reg, err)
 	}
 	// namespace is optional — the adapter falls back to its own
-	if reg := parseRegister(json.RawMessage(`{"register":{}}`)); reg == nil || reg.Namespace != "" {
-		t.Fatalf("bare register block must parse with an empty namespace: %+v", reg)
+	if reg, err := parseRegister(json.RawMessage(`{"register":{}}`)); err != nil || reg == nil || reg.Namespace != "" || reg.SendResolved != nil {
+		t.Fatalf("bare register block must parse with an empty namespace and unset knobs: %+v %v", reg, err)
+	}
+}
+
+// A present-but-unparsable block is an error naming what failed, never
+// mistaken for an absent block.
+func TestParseRegisterMalformedIsAnError(t *testing.T) {
+	cases := map[string]struct{ config, want string }{
+		"type mismatch":  {`{"register":{"maxAlerts":"ten"}}`, "maxAlerts"},
+		"unknown key":    {`{"register":{"groupWiat":"1m"}}`, `unknown field "groupWiat"`},
+		"not an object":  {`{"register":"monitoring"}`, "malformed register block"},
+		"config garbage": {`[1,2]`, "not a JSON object"},
+	}
+	for name, c := range cases {
+		reg, err := parseRegister(json.RawMessage(c.config))
+		if reg != nil || err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%s: want an error naming %q, got %+v %v", name, c.want, reg, err)
+		}
 	}
 }
 
@@ -262,9 +290,38 @@ func TestRegistrationDefaultsToAdapterNamespace(t *testing.T) {
 // token at the fixed mount path, so this exercises the actual file-read
 // failure rather than faking an absent file.
 func TestNewInClusterClientNotMounted(t *testing.T) {
-	client, reason := newInClusterClient()
+	client, reason := newInClusterClient("vm-alertmanager")
 	if client != nil || !strings.Contains(reason, "token not mounted") {
 		t.Fatalf("expected the not-mounted degradation, got client=%v reason=%q", client, reason)
+	}
+	assertNamesLiveAccountFields(t, reason)
+}
+
+// assertNamesLiveAccountFields pins the remediation an operator can actually
+// follow: the CRD field that mounts a token, the account the chart renders
+// for it, and the grant — never a field the CRD no longer carries.
+func assertNamesLiveAccountFields(t *testing.T, msg string) {
+	t.Helper()
+	for _, want := range []string{
+		"SignalAdapter vm-alertmanager spec.serviceAccountName",
+		"agentops-signal-vm-alertmanager",
+		"alertmanager.registration.enabled",
+		"vmalertmanagerconfigs.operator.victoriametrics.com",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("remediation must name %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "kubernetesAccess") {
+		t.Fatalf("remediation names a field the CRD does not carry: %s", msg)
+	}
+}
+
+func TestAccountRemediationText(t *testing.T) {
+	want := "set SignalAdapter vm-alertmanager spec.serviceAccountName to an account bound to that grant — " +
+		"the prometheus chart renders agentops-signal-vm-alertmanager with it under alertmanager.registration.enabled"
+	if got := accountRemediation("vm-alertmanager"); got != want {
+		t.Fatalf("remediation text:\n got %s\nwant %s", got, want)
 	}
 }
 

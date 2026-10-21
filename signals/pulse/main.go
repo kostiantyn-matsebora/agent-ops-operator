@@ -40,6 +40,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -230,7 +231,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	signingSecret, correlationStrategy, served := a.served(name)
 	if !served {
 		// a retried Pulse delivery covers the source-poll lag
-		writeJSON(w, 404, map[string]string{"error": "unknown or unserved source"})
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown or unserved source %q", name)})
 		return
 	}
 
@@ -276,7 +277,8 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // "alert" (firing) events produce one — "resolved" produces none, so Pulse
 // sees a 2xx and does not retry, but nothing is pushed (pulse-signal-adapter
 // spec, "Firing alerts normalize into the signal contract, resolved alerts
-// do not"). No grouping/dedup here — the manager owns that.
+// do not"). Correlation is minted here, as the initiationId; cooldown,
+// routing and recurrence are the manager's.
 func normalize(e pulseEvent, strategy string) []Signal {
 	if e.Event != "alert" {
 		return nil

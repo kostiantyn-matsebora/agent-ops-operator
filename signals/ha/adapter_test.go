@@ -364,7 +364,14 @@ func TestHealthLadder(t *testing.T) {
 		snap *healthSnapshot
 		want verdict
 	}{
-		{"no snapshot at all", nil, verdictUnknown},
+		{"no snapshot at all", nil, verdictUnreadable},
+		// A read failed through the close and left an older view in place:
+		// nothing about the closing part was observed, whatever it records.
+		{"stale snapshot", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 3}},
+			entries: map[string][]string{},
+			at:      since.Add(-time.Second),
+		}, verdictUnreadable},
 		{"config entry still failing", &healthSnapshot{
 			records: map[string]logRecord{key: {Count: 3}},
 			entries: map[string][]string{"hue": {"setup_retry"}},
@@ -409,9 +416,54 @@ func TestHealthLadder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Every case but the staleness ones reads a view taken inside the
+			// closing part, as the flusher's refresh guarantees in production.
+			if tc.snap != nil && tc.snap.at.IsZero() {
+				tc.snap.at = since.Add(time.Second)
+			}
 			a := adapterWithSnapshot(tc.snap)
 			if got := a.health(ref, since); got != tc.want {
 				t.Fatalf("health = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A snapshot taken before the window's closing part is the log becoming
+// unreadable mid-window: the flusher's refreshes failed and left the old view in
+// place. The one-off record it holds must emit (fail open), where the same
+// record against a fresh view is dropped as quiet — the live defect this pins
+// is an HA outage turning a still-failing record into silence.
+func TestStaleSnapshotFailsOpen(t *testing.T) {
+	opened := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	dwell := 3 * time.Minute
+	closeAt := opened.Add(dwell)
+	logger, location := "homeassistant.core", "core.py:1"
+	cases := []struct {
+		name     string
+		takenAt  time.Time
+		wantEmit bool
+	}{
+		{"fresh snapshot, no recurrence", closeAt.Add(-dwellTick), false},
+		{"stale snapshot, no recurrence", opened.Add(10 * time.Second), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := adapterWithSnapshot(&healthSnapshot{
+				records: map[string]logRecord{logger + "@" + location: {Count: 1}},
+				entries: map[string][]string{},
+				at:      tc.takenAt,
+			})
+			var got []Signal
+			q := newPendingQueue(a.health, func(_ string, sigs []Signal) { got = append(got, sigs...) })
+			q.now = func() time.Time { return opened }
+			q.Add("ha-logs", Signal{
+				InitiationID: "ha-logs@" + logger + "@" + location,
+				Labels:       map[string]string{"integration": logger, "logger": logger, "location": location, "level": "ERROR"},
+			}, compiledRule{dwell: dwell, escalate: 99}, 1)
+			q.Flush(closeAt)
+			if emitted := len(got) == 1; emitted != tc.wantEmit {
+				t.Fatalf("emitted = %v (%+v), want %v", emitted, got, tc.wantEmit)
 			}
 		})
 	}

@@ -202,6 +202,55 @@ func TestRefreshSourcesIsIdempotentAndTracksTransitions(t *testing.T) {
 	}
 }
 
+// TestRefreshSourcesReReportsRecreatedSource pins the reported-map prune: a
+// source deleted and recreated under the same name with the identical invalid
+// config must report Ready=False again, not match the deleted object's stale
+// entry and stay silent.
+func TestRefreshSourcesReReportsRecreatedSource(t *testing.T) {
+	var mu sync.Mutex
+	var calls []statusCall
+	invalid := SourceInfo{Name: "job", Config: rawConfig(t, sourceConfig{Schedule: "nope", Input: "x"})}
+	list := []SourceInfo{invalid}
+	srv := newSourcesServer(t, &list, &calls, &mu)
+	defer srv.Close()
+
+	a := &adapter{
+		mgr:        NewManager(srv.URL, "t"),
+		sourceType: "cron",
+		sources:    map[string]servedSource{},
+		reported:   map[string]string{},
+	}
+	a.refreshSources(context.Background()) // served, invalid -> 1 report
+
+	mu.Lock()
+	list = nil // deleted
+	mu.Unlock()
+	a.refreshSources(context.Background())
+
+	a.mu.Lock()
+	if len(a.reported) != 0 {
+		a.mu.Unlock()
+		t.Fatalf("expected the deleted source's entry pruned, got %+v", a.reported)
+	}
+	a.mu.Unlock()
+
+	mu.Lock()
+	list = []SourceInfo{invalid} // recreated, identical config
+	mu.Unlock()
+	a.refreshSources(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("expected the recreated source to re-report, got %+v", calls)
+	}
+	for _, c := range calls {
+		if c.name != "job" || c.ready || c.reason != "InvalidConfig" {
+			t.Fatalf("expected two Ready=False InvalidConfig reports, got %+v", calls)
+		}
+	}
+}
+
 // TestRefreshSourcesKeepsPreviousOnListError closes the mgr.Sources()
 // error branch: a broken manager must not wipe out sources already being
 // served.

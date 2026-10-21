@@ -27,6 +27,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -59,22 +60,38 @@ type registerSpec struct {
 	GroupInterval  string `json:"groupInterval,omitempty"`
 	RepeatInterval string `json:"repeatInterval,omitempty"`
 	// MaxAlerts caps alerts per webhook post (0 = Alertmanager's default).
-	MaxAlerts    int  `json:"maxAlerts,omitempty"`
-	SendResolved bool `json:"sendResolved,omitempty"`
+	MaxAlerts int `json:"maxAlerts,omitempty"`
+	// SendResolved is a pointer so "unset" stays distinguishable from false:
+	// unset omits the key and the sender's own default governs, like every
+	// other knob in this block.
+	SendResolved *bool `json:"sendResolved,omitempty"`
 }
 
-// parseRegister extracts the register block ("" config or no block → nil).
-func parseRegister(config json.RawMessage) *registerSpec {
+// parseRegister extracts the register block. An empty config, or one with no
+// (or a null) `register` key, is ABSENT: (nil, nil). A block that is present
+// but does not parse — a mistyped value, an unknown key, a non-object — is an
+// error, never treated as absent: a typo'd key would otherwise silently
+// change routing, or skip registration altogether.
+func parseRegister(config json.RawMessage) (*registerSpec, error) {
 	if len(config) == 0 {
-		return nil
+		return nil, nil
 	}
 	var wrap struct {
-		Register *registerSpec `json:"register"`
+		Register json.RawMessage `json:"register"`
 	}
-	if err := json.Unmarshal(config, &wrap); err != nil || wrap.Register == nil {
-		return nil
+	if err := json.Unmarshal(config, &wrap); err != nil {
+		return nil, fmt.Errorf("source config is not a JSON object: %w", err)
 	}
-	return wrap.Register
+	if len(wrap.Register) == 0 || string(wrap.Register) == "null" {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(wrap.Register))
+	dec.DisallowUnknownFields()
+	var reg registerSpec
+	if err := dec.Decode(&reg); err != nil {
+		return nil, fmt.Errorf("malformed register block: %w", err)
+	}
+	return &reg, nil
 }
 
 // kubeClient is a minimal in-cluster Kubernetes REST client.
@@ -86,13 +103,34 @@ type kubeClient struct {
 
 const saMount = "/var/run/secrets/kubernetes.io/serviceaccount"
 
+// registrationGrant is the permission self-registration needs, in the
+// target namespace — the same rules the chart's registration Role carries.
+const registrationGrant = "get/list/create/update/patch on vmalertmanagerconfigs.operator.victoriametrics.com"
+
+// errForbidden marks an API refusal (401/403): the remedy is a grant bound to
+// the adapter's account, which only the caller can name.
+var errForbidden = errors.New("forbidden")
+
+// accountRemediation tells the operator where the adapter's identity comes
+// from, naming only fields the current SignalAdapter CRD carries: the token is
+// mounted only for the account spec.serviceAccountName references, and the
+// prometheus chart renders that account (agentops-signal-<adapter>) beside its
+// registration Role when alertmanager.registration.enabled is set.
+func accountRemediation(adapterName string) string {
+	return fmt.Sprintf(
+		"set SignalAdapter %s spec.serviceAccountName to an account bound to that grant — "+
+			"the prometheus chart renders agentops-signal-%s with it under alertmanager.registration.enabled",
+		adapterName, adapterName)
+}
+
 // newInClusterClient builds a client from the mounted SA. A nil client (with
 // the returned reason) means the token is not available — registration then
 // degrades to instructions.
-func newInClusterClient() (*kubeClient, string) {
+func newInClusterClient(adapterName string) (*kubeClient, string) {
 	tok, err := os.ReadFile(saMount + "/token")
 	if err != nil {
-		return nil, "ServiceAccount token not mounted (set SignalAdapter.spec.kubernetesAccess: true)"
+		return nil, "ServiceAccount token not mounted (registration needs " + registrationGrant + "; " +
+			accountRemediation(adapterName) + ")"
 	}
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if host == "" {
@@ -161,7 +199,10 @@ func desiredVMAC(source, namespace, webhookURL string, reg *registerSpec) map[st
 			route[key] = val
 		}
 	}
-	webhook := map[string]any{"url": webhookURL, "send_resolved": reg.SendResolved}
+	webhook := map[string]any{"url": webhookURL}
+	if reg.SendResolved != nil {
+		webhook["send_resolved"] = *reg.SendResolved
+	}
 	if reg.MaxAlerts > 0 {
 		webhook["max_alerts"] = reg.MaxAlerts
 	}
@@ -245,7 +286,7 @@ func apiFailure(verb, ref string, code int, body []byte, err error) error {
 	}
 	switch code {
 	case 401, 403:
-		return fmt.Errorf("%s %s forbidden (grant the adapter ServiceAccount get/list/create/update/patch on vmalertmanagerconfigs.operator.victoriametrics.com in %s)", verb, ref, strings.SplitN(ref, "/", 2)[0])
+		return fmt.Errorf("%s %s %w (grant %s in %s)", verb, ref, errForbidden, registrationGrant, strings.SplitN(ref, "/", 2)[0])
 	case 404:
 		return fmt.Errorf("%s %s: VMAlertmanagerConfig CRD or namespace not found (is the VictoriaMetrics operator installed?)", verb, ref)
 	default:

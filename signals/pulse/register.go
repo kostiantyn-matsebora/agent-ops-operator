@@ -34,6 +34,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,11 +81,12 @@ type registerConfig struct {
 	// internal/notifications/notifications.go WebhookConfig.Headers) —
 	// static headers PULSE attaches to every delivery to this adapter.
 	//
-	// Independent of SigningSecret: HMAC verification needs no header
-	// Pulse's own source doesn't already send unconditionally. This exists
-	// for infra reasons HMAC does not reach — a WAF or gateway in front of
-	// this adapter's Ingress requiring its own shared-secret header, for
-	// instance. Pulse's own signing headers win on a name collision.
+	// HMAC verification needs no header Pulse's own source doesn't already
+	// send unconditionally. This exists for infra reasons HMAC does not
+	// reach — a WAF or gateway in front of this adapter's Ingress requiring
+	// its own shared-secret header, for instance. Pulse's own signing
+	// headers win on a name collision, and so does the secret digest this
+	// adapter adds when a signing secret is configured (registeredHeaders).
 	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty"`
 	// CorrelationStrategy selects how initiationID (payload.go) folds Pulse's
 	// alert id into this source's signals — "id" or "id+startTime". Resolved
@@ -170,11 +173,19 @@ func pulseCredential(info SourceInfo) (token, signingSecret string) {
 // derivation — neither ever re-derived per webhook request. Exposed to
 // tests directly to drive a deterministic failure-then-success sequence
 // without waiting on registryLoop's ticker.
+//
+// The signing secret is resolved FIRST and returned on every path:
+// verification follows the secret, never the registration
+// (pulse-signal-adapter spec). A source whose config is absent, incomplete
+// or invalid still enforces its configured secret, so a hand-registered
+// Pulse presenting that secret verifies exactly as an adapter-registered
+// one does, and an unsigned post is refused rather than accepted.
 func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (signingSecret, correlationStrategy string) {
+	token, signingSecret := pulseCredential(info)
 	cfg, err := parseRegisterConfig(info.Config)
 	if err != nil {
 		a.report(ctx, info.Name, "InvalidConfig", err.Error())
-		return "", normalizeCorrelationStrategy("")
+		return signingSecret, normalizeCorrelationStrategy("")
 	}
 	raw := ""
 	if cfg != nil {
@@ -185,9 +196,8 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 		a.report(ctx, info.Name, "RegistrationNotConfigured",
 			"served by signal-pulse — set spec.config.baseUrl and spec.config.webhookUrl (and a credentialsSecretRef "+
 				"holding a Pulse API token) to register this webhook with Pulse automatically")
-		return "", correlationStrategy
+		return signingSecret, correlationStrategy
 	}
-	token, signingSecret := pulseCredential(info)
 	client := newPulseClient(cfg.BaseURL, token)
 	desired := desiredWebhook(info.Name, cfg.WebhookURL, signingSecret, cfg.WebhookHeaders)
 	if err := client.ensureWebhook(ctx, desired); err != nil {
@@ -264,21 +274,54 @@ type pulseWebhookConfig struct {
 // webhook list, mirroring signals/alertmanager's registrationName.
 func webhookName(source string) string { return "agentops-" + source }
 
+// secretDigestHeader is the registered header carrying a one-way digest of
+// the signing secret. Pulse redacts the stored signingSecret on read but
+// returns registered headers verbatim, so this header is what lets the
+// create-or-repair comparison see a rotated secret at all.
+const secretDigestHeader = "X-Agentops-Secret-Digest"
+
+// secretDigest renders secretDigestHeader's value: "sha256:<hex>" of the
+// signing secret. One-way, and sent only to the Pulse instance that already
+// holds the secret itself.
+func secretDigest(signingSecret string) string {
+	sum := sha256.Sum256([]byte(signingSecret))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // desiredWebhook renders the webhook object this adapter wants registered.
 func desiredWebhook(source, webhookURL, signingSecret string, headers map[string]string) pulseWebhookConfig {
 	return pulseWebhookConfig{
 		Name:          webhookName(source),
 		URL:           webhookURL,
 		Template:      pulseWebhookTemplate,
-		Headers:       headers,
+		Headers:       registeredHeaders(headers, signingSecret),
 		SigningSecret: signingSecret,
 		Enabled:       true,
 	}
 }
 
+// registeredHeaders composes the operator's webhookHeaders with the secret
+// digest, copying rather than mutating the parsed config map. The digest
+// wins a name collision: an operator-set value under that name would blind
+// rotation detection. No secret, no digest — so dropping the secret is
+// itself drift the comparison repairs.
+func registeredHeaders(headers map[string]string, signingSecret string) map[string]string {
+	if signingSecret == "" {
+		return headers
+	}
+	out := make(map[string]string, len(headers)+1)
+	for k, v := range headers {
+		out[k] = v
+	}
+	out[secretDigestHeader] = secretDigest(signingSecret)
+	return out
+}
+
 // comparable strips fields Pulse may not echo back on read — the signing
-// secret is sensitive and commonly redacted — so idempotence comparison
-// never flaps on a field it can never actually observe.
+// secret is sensitive and redacted — so idempotence comparison never flaps
+// on a field it can never actually observe. Headers are KEPT: they carry
+// secretDigestHeader, the field through which a rotated secret shows as
+// drift.
 func (c pulseWebhookConfig) comparable() pulseWebhookConfig {
 	c.ID = ""
 	c.SigningSecret = ""
@@ -286,8 +329,8 @@ func (c pulseWebhookConfig) comparable() pulseWebhookConfig {
 }
 
 // ensureWebhook creates or repairs this adapter's Generic webhook in Pulse.
-// Idempotent: a webhook already matching the desired body (sans secret) is
-// left alone; one that differs is updated in place — matching
+// Idempotent: a webhook already matching the desired body (sans secret,
+// but with the secret's digest header) is left alone; one that differs is updated in place — matching
 // signals/alertmanager's create-or-repair posture for its own sender
 // object.
 func (c *pulseClient) ensureWebhook(ctx context.Context, desired pulseWebhookConfig) error {

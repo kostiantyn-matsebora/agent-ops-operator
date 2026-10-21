@@ -851,6 +851,7 @@ func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 		a.reportClipping(ctx, source, clipped)
 		return false
 	}
+	allowed = clampBatch(allowed)
 	if err := a.mgr.Inbound(ctx, source, allowed); err != nil {
 		if ctx.Err() == nil {
 			log.Printf("posting %d signals for %s: %v", len(allowed), source, err)
@@ -1016,7 +1017,14 @@ type listing struct {
 //
 //	rung 1  the integration has config entries -> is any of them still failing?
 //	rung 2  no predicate -> was the record STILL occurring as the window closed?
-//	rung 3  no snapshot at all -> cannot say
+//	rung 3  no snapshot, or a stale one -> the log is unreadable: verdictUnreadable
+//
+// Rung 3 is checked FIRST and is distinct from rung 2's "no predicate": rung 2
+// judges recurrence from a log that was read through the close, rung 3 has no
+// such read to judge from. A snapshot is stale when it was taken before the
+// window's closing part began — the flusher refreshes every dwellTick while
+// anything is pending, so a healthy session always lands one inside that part,
+// and a failed read leaves the old one in place to age out into this verdict.
 //
 // Only integrations with config entries carry a predicate. Core loggers (and
 // YAML-configured integrations, which have no entries) fall to rung 2
@@ -1051,14 +1059,14 @@ func (a *adapter) health(ref recordRef, since time.Time) verdict {
 	if isSurface {
 		switch {
 		case !surfaceRead:
-			return verdictUnknown
+			return verdictUnreadable
 		case standing:
 			return verdictUnhealthy
 		}
 		return verdictHealthy
 	}
-	if snap == nil {
-		return verdictUnknown
+	if snap == nil || snap.at.Before(since) {
+		return verdictUnreadable
 	}
 
 	states, hasPredicate := snap.entries[ref.integration]

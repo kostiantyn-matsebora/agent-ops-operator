@@ -68,14 +68,46 @@ func TestDwellDropsWhenRecovered(t *testing.T) {
 
 // No health predicate is the common case for core loggers. Then RECURRENCE is
 // what the log itself can prove — and only recurrence that was still going as
-// the window closed. A one-off never emits.
+// the window closed. A one-off never emits, PROVIDED the log was read through
+// the close. When it could not be read at all, the same one-off fails open:
+// an unreadable Home Assistant is itself an incident, never quiet churn.
 func TestUnknownWithNoRecurrenceIsDropped(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnknown })
-	rule := compiledRule{dwell: 2 * time.Minute, escalate: 3}
-	q.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
-	q.Flush(now.Add(3 * time.Minute))
-	if len(*got) != 0 {
-		t.Fatal("a one-off record with no predicate and no recurrence must not emit")
+	cases := []struct {
+		name     string
+		verdict  verdict
+		wantEmit bool
+	}{
+		{"log read, no predicate", verdictUnknown, false},
+		{"log unreadable at the close", verdictUnreadable, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q, got, now := queueFixture(func(recordRef, time.Time) verdict { return tc.verdict })
+			rule := compiledRule{dwell: 2 * time.Minute, escalate: 3}
+			q.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
+			q.Flush(now.Add(3 * time.Minute))
+			if emitted := len(*got) == 1; emitted != tc.wantEmit {
+				t.Fatalf("emitted = %v (%+v), want %v", emitted, *got, tc.wantEmit)
+			}
+		})
+	}
+}
+
+// No other member's verdict swallows the fail-open emit: an entry whose one
+// member recovered and whose other cannot be read still emits.
+func TestUnreadableIsNotSwallowedByARecoveredMember(t *testing.T) {
+	q, got, now := queueFixture(func(ref recordRef, _ time.Time) verdict {
+		if ref.location == "a.py:1" {
+			return verdictHealthy
+		}
+		return verdictUnreadable
+	})
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), rule, 1)
+	q.Add("ha-logs", haSignal("hue", "b.py:2", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+	if len(*got) != 1 {
+		t.Fatalf("an unreadable member must emit whatever its siblings say, got %+v", *got)
 	}
 }
 

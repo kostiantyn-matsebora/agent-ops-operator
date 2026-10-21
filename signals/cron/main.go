@@ -115,6 +115,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %v", err)
 		return
 	}
+	a.pruneReported(infos)
 	next := map[string]servedSource{}
 	for _, info := range infos {
 		var cfg sourceConfig
@@ -152,6 +153,25 @@ func (a *adapter) refreshSources(ctx context.Context) {
 	a.mu.Lock()
 	a.sources = next
 	a.mu.Unlock()
+}
+
+// pruneReported drops the last-reported status of every source the manager no
+// longer serves. Without it a deleted source's entry outlives the object, so a
+// recreation under the same name with the same invalid config would match the
+// stale entry and never re-report Ready=False — and the map would grow with
+// every source ever seen.
+func (a *adapter) pruneReported(infos []SourceInfo) {
+	served := make(map[string]struct{}, len(infos))
+	for _, info := range infos {
+		served[info.Name] = struct{}{}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for name := range a.reported {
+		if _, ok := served[name]; !ok {
+			delete(a.reported, name)
+		}
+	}
 }
 
 // evaluate fires the latest elapsed tick of one source, if any. Fire-then-

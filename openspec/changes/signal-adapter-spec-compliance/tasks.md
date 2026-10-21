@@ -6,17 +6,17 @@ not the audit.
 
 ## 1. Pulse adapter fixes — backend-developer
 
-- [ ] 1.1 Register `X-Agentops-Secret-Digest: sha256:<hex>` of the signing
+- [x] 1.1 Register `X-Agentops-Secret-Digest: sha256:<hex>` of the signing
   secret in `webhookHeaders` and keep it in the create-or-repair comparison,
   so a rotated secret updates the webhook in place — verify with a unit test
   rotating the secret against a redacting fake Pulse.
-- [ ] 1.2 Make signature enforcement follow the secret, not registration
+- [x] 1.2 Make signature enforcement follow the secret, not registration
   state: a configured `signingSecret` verifies inbound posts even when
   `baseUrl`/`webhookUrl` are absent or invalid — verify with a
   hand-registered-Pulse unit test.
-- [ ] 1.3 Name the source in the 404 body for an unknown or unserved
+- [x] 1.3 Name the source in the 404 body for an unknown or unserved
   webhook path — verify by unit test asserting the body names it.
-- [ ] 1.4 Purge stale comments: manager-side "grouping" (manager.go,
+- [x] 1.4 Purge stale comments: manager-side "grouping" (manager.go,
   main.go) and current-tense "fingerprint" (payload.go) — verify
   `grep -rn 'grouping\|fingerprint' signals/pulse/` returns only record
   markers or nothing.
@@ -74,12 +74,12 @@ not the audit.
 
 ## 5. Cron and telegram adapter fixes — backend-developer
 
-- [ ] 5.1 Prune cron's `reported` map to the served set on every refresh —
+- [x] 5.1 Prune cron's `reported` map to the served set on every refresh —
   verify by unit test: delete + recreate a source with identical invalid
   config re-reports Ready=False.
-- [ ] 5.2 Truncate telegram's `title()` on a rune boundary — verify by unit
+- [x] 5.2 Truncate telegram's `title()` on a rune boundary — verify by unit
   test with a multi-byte message around the cut.
-- [ ] 5.3 Purge stale "grouping" comments in both adapters and cron's
+- [x] 5.3 Purge stale "grouping" comments in both adapters and cron's
   two-value kind enum comment — verify by grep as in 1.4.
 
 ## 6. Conformance suite — testing-specialist

@@ -14,7 +14,7 @@
 // the webhook's own groupKey verbatim (Alertmanager's group_by decision,
 // made upstream) — every firing alert of one group correlates to one
 // conversation — with a sorted-groupLabels-hash fallback for a nonstandard
-// sender that omits groupKey. NO adapter-side grouping beyond that —
+// sender that omits groupKey. The adapter correlates nothing beyond that —
 // cooldown and recurrence stay manager-side, keyed on initiationId (and
 // routing requires the source's Pipeline claim: unwired sources drop with
 // Wired=False).
@@ -29,6 +29,8 @@
 // "vm-alertmanager" — hand-deployed instances set it themselves; in-cluster
 // the reconciler injects the CR name), LISTEN_ADDR (default ":8080" —
 // in-cluster the reconciler injects it from SignalAdapter.spec.port),
+// POD_NAMESPACE (downward API, always injected by the reconciler — without it
+// the adapter cannot compute its own webhook URL and registers nothing),
 // projected AGENTOPS_CRED_* vars.
 package main
 
@@ -38,6 +40,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -73,7 +76,7 @@ type amPayload struct {
 type adapter struct {
 	mgr        *Manager
 	sourceType string
-	podNS      string // downward-API namespace ("" without kubernetesAccess)
+	podNS      string // downward-API namespace ("" only when hand-deployed without it)
 	listen     string
 	kube       *kubeClient // nil = no in-cluster access
 	kubeReason string      // why kube is nil (instruction path)
@@ -107,7 +110,7 @@ func main() {
 	if listen == "" {
 		listen = ":8080"
 	}
-	kube, kubeReason := newInClusterClient()
+	kube, kubeReason := newInClusterClient(sourceType)
 	a := &adapter{
 		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		sourceType: sourceType,
@@ -173,10 +176,15 @@ func (a *adapter) refreshSources(ctx context.Context) {
 // the webhook is live whether or not the sender could be configured for it,
 // so registration trouble reports instructions rather than unserving.
 func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (string, string) {
-	reg := parseRegister(info.Config)
+	reg, err := parseRegister(info.Config)
+	if err != nil {
+		// a block that does not parse is never an absent one: say what failed
+		// and attempt no registration until the block is corrected
+		return reasonRegistrationManual, manualInstructions(info.Name, a.podNS, a.manualURL(info.Name), err.Error())
+	}
 	if reg == nil {
 		// no registration asked for: name the path an operator should target
-		return "AdapterReady", fmt.Sprintf("served by signal-alertmanager — POST %s", a.endpoint(info.Name))
+		return reasonAdapterReady, fmt.Sprintf("served by signal-alertmanager — POST %s", a.endpoint(info.Name))
 	}
 	// default to our own namespace: vm-operator selects VMAlertmanagerConfigs
 	// from everywhere by default, so this needs no cross-namespace grant
@@ -184,21 +192,44 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 	if ns == "" {
 		ns = a.podNS
 	}
-	url := a.endpoint(info.Name)
-	if a.kube == nil || ns == "" {
-		reason := a.kubeReason
-		if reason == "" {
-			reason = "namespace unknown (POD_NAMESPACE unset and config.register.namespace empty)"
-		}
-		return "RegistrationManual", manualInstructions(info.Name, ns, url, reason)
+	if a.podNS == "" {
+		// No namespace fact means no webhook URL. A placeholder written into
+		// the sender's live config looks registered and delivers nothing, so
+		// computing no URL means registering no object.
+		return reasonRegistrationManual, manualInstructions(info.Name, ns, a.manualURL(info.Name),
+			"own webhook URL unknown: POD_NAMESPACE is unset — fill in the adapter's namespace")
 	}
-	ref, err := a.kube.ensureRegistration(ctx, info.Name, ns, url, reg)
+	return a.register(ctx, info.Name, ns, reg)
+}
+
+// register ensures the sender-side object for a source whose webhook URL and
+// target namespace are both known, and returns the Ready reason/message.
+func (a *adapter) register(ctx context.Context, source, ns string, reg *registerSpec) (string, string) {
+	url := a.endpoint(source)
+	if a.kube == nil {
+		return reasonRegistrationManual, manualInstructions(source, ns, url, a.kubeReason)
+	}
+	ref, err := a.kube.ensureRegistration(ctx, source, ns, url, reg)
 	if err != nil {
-		return "RegistrationManual", manualInstructions(info.Name, ns, url, err.Error())
+		cause := err.Error()
+		if errors.Is(err, errForbidden) {
+			cause += "; " + accountRemediation(a.sourceType)
+		}
+		return reasonRegistrationManual, manualInstructions(source, ns, url, cause)
 	}
-	return "AdapterReady", fmt.Sprintf(
+	return reasonAdapterReady, fmt.Sprintf(
 		"served by signal-alertmanager — POST %s; sender registered in VMAlertmanagerConfig %s", url, ref)
 }
+
+// Ready reasons this adapter reports for a source.
+const (
+	reasonAdapterReady       = "AdapterReady"
+	reasonRegistrationManual = "RegistrationManual"
+)
+
+// namespaceSlot stands in for the adapter's namespace in a URL shape the
+// operator must complete by hand.
+const namespaceSlot = "<adapter-namespace>"
 
 // manualInstructions renders the degraded message: why registration could not
 // happen, and exactly what to do instead.
@@ -211,6 +242,16 @@ func manualInstructions(source, namespace, url, cause string) string {
 		"served, but could not register the sender automatically (%s). Configure it by hand: "+
 			"create VMAlertmanagerConfig %s (or add a webhook receiver to your Alertmanager) posting to %s",
 		cause, target, url)
+}
+
+// manualURL is the URL an operator should configure by hand: the real one
+// when computable, otherwise its shape with the unknown namespace left as a
+// slot to fill in — shown in a message, never written into the sender.
+func (a *adapter) manualURL(source string) string {
+	if a.podNS == "" {
+		return webhookURL(a.sourceType, namespaceSlot, a.listen, source)
+	}
+	return a.endpoint(source)
 }
 
 // endpoint is this adapter's webhook URL for a source (in-cluster form when

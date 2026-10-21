@@ -589,3 +589,28 @@ func TestConcurrentRefreshAndWebhookDelivery(t *testing.T) {
 		t.Fatal("the source must still be served once both goroutines finish")
 	}
 }
+
+// TestUnknownSourceRefusalNamesIt is task 1.3's verification: the 404 for an
+// unknown or unserved webhook path names the source it failed to match, so a
+// misrouted Pulse delivery is diagnosable from the response alone.
+func TestUnknownSourceRefusalNamesIt(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}}
+	h := testAdapter(t, f).handler()
+
+	rec := post(t, h, "/webhook/pulse-other", firingBody("abc"))
+	if rec.Code != 404 {
+		t.Fatalf("unserved source: %d %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("404 body must be JSON: %v", err)
+	}
+	if !strings.Contains(body["error"], `"pulse-other"`) {
+		t.Fatalf("404 body must name the source, got %q", body["error"])
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.inbounds) != 0 {
+		t.Fatalf("a refused source must push nothing: %d pushes", len(f.inbounds))
+	}
+}
