@@ -98,11 +98,25 @@ type FakeManager struct {
 
 	rejectSignals int // HTTP status to answer /signal/inbound with; 0 = accept
 	rejectInbound int
+	// reclaimAfterSeconds is stamped on every delivered op, as the real
+	// manager's chat.ReclaimAfter does. Defaults to that same constant (300)
+	// and is overridable so the retry-budget conformance assertion (A1/A2)
+	// can run against a window small enough to finish in test time, rather
+	// than literally waiting out the real 5-minute default.
+	reclaimAfterSeconds int
 	// rejectOpsAsNonLeader counts down the next /channel/ops polls answered
 	// with 503 before falling back to the ordinary 204/200 behavior —
 	// durable-chat-ops-broker's non-leader rejection, simulated without a
 	// second manager process.
 	rejectOpsAsNonLeader int
+}
+
+// SetReclaimAfterSeconds changes the claim window stamped on every delivered
+// op from here on. See the field's own doc comment.
+func (f *FakeManager) SetReclaimAfterSeconds(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reclaimAfterSeconds = n
 }
 
 // RejectOpsAsNonLeader makes the fake answer the next n GET /channel/ops
@@ -121,7 +135,7 @@ func (f *FakeManager) RejectOpsAsNonLeader(n int) {
 // process still holds a long-poll blocks forever.
 func NewFakeManager(t *testing.T, token string) *FakeManager {
 	t.Helper()
-	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}}
+	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}, reclaimAfterSeconds: 300}
 	t.Cleanup(func() { f.Close() })
 	f.cond = sync.NewCond(&f.mu)
 	mux := http.NewServeMux()
@@ -346,10 +360,11 @@ func (f *FakeManager) handleOps(w http.ResponseWriter, r *http.Request) {
 	}
 	raw := f.queue[0]
 	f.queue = f.queue[1:]
+	reclaim := f.reclaimAfterSeconds
 	f.mu.Unlock()
 	var op map[string]any
 	_ = json.Unmarshal(raw, &op)
-	op["reclaimAfterSeconds"] = 300
+	op["reclaimAfterSeconds"] = reclaim
 	writeJSON(w, 200, op)
 }
 

@@ -39,12 +39,25 @@ type FakeAPIServer struct {
 	watchers map[string][]chan []byte
 	rv       int
 	requests []string
+	// fails injects a transport-level rejection for an EXACT request path (no
+	// query), for the retry-budget conformance assertion (A1/A2): a console
+	// reading an uncached object's UID goes through this path, and a sustained
+	// 5xx here is the one way to make that read see real backpressure rather
+	// than a client-side mock.
+	fails map[string]*failRule
+}
+
+// failRule is one injected rejection for a path. remaining<0 means every
+// request to the path fails until ClearFailPath.
+type failRule struct {
+	status    int
+	remaining int
 }
 
 // NewFakeAPIServer starts the fake and writes the ServiceAccount files.
 func NewFakeAPIServer(t *testing.T) *FakeAPIServer {
 	t.Helper()
-	f := &FakeAPIServer{objects: map[string][]map[string]any{}, watchers: map[string][]chan []byte{}, rv: 1}
+	f := &FakeAPIServer{objects: map[string][]map[string]any{}, watchers: map[string][]chan []byte{}, rv: 1, fails: map[string]*failRule{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", f.handle)
 	f.srv = httptest.NewUnstartedServer(mux)
@@ -116,6 +129,38 @@ func (f *FakeAPIServer) Push(path, eventType string, obj map[string]any) {
 	}
 }
 
+// FailPath makes the next `times` requests to path (the exact request path,
+// no query string — e.g. a single-item GET like .../conversations/c1)
+// answer with status instead of the ordinary list/get/watch response. times
+// < 0 fails every request until ClearFailPath.
+func (f *FakeAPIServer) FailPath(path string, status, times int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fails[path] = &failRule{status: status, remaining: times}
+}
+
+// ClearFailPath removes any injected rejection for path.
+func (f *FakeAPIServer) ClearFailPath(path string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.fails, path)
+}
+
+// consumeFail reports whether path has an injected rejection left to serve,
+// decrementing a bounded rule.
+func (f *FakeAPIServer) consumeFail(path string) (int, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.fails[path]
+	if !ok || r.remaining == 0 {
+		return 0, false
+	}
+	if r.remaining > 0 {
+		r.remaining--
+	}
+	return r.status, true
+}
+
 // Requests lists the paths the adapter asked for.
 func (f *FakeAPIServer) Requests() []string {
 	f.mu.Lock()
@@ -151,6 +196,10 @@ func (f *FakeAPIServer) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.requests = append(f.requests, r.URL.RequestURI())
 	f.mu.Unlock()
+	if status, failing := f.consumeFail(path); failing {
+		http.Error(w, "injected failure", status)
+		return
+	}
 	q := r.URL.Query()
 	if q.Get("watch") == "1" || q.Get("watch") == "true" {
 		f.watch(w, r, path)

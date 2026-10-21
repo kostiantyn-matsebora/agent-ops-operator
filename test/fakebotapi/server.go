@@ -25,11 +25,18 @@
 //	GET    /control/calls        every recorded call, oldest first; ?method= filters
 //	DELETE /control/calls        forget recorded calls
 //	GET    /control/consumers    {"active":n,"maxConcurrent":m,"conflicts":c} for getUpdates
+//	POST   /control/fail         inject a 429/5xx rejection ahead of the next real
+//	                             answer for one method — body {"method","mode"
+//	                             ("429"|"5xx"),"retryAfter","forever"}; forever=false
+//	                             (default) queues ONE rejection, forever=true makes
+//	                             every call to method fail until cleared
+//	DELETE /control/fail         ?method= clears both the queue and the forever rule
 //	GET    /healthz
 package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -72,11 +79,26 @@ type Server struct {
 	polling       map[string]int
 	maxConcurrent int
 	conflicts     int
+
+	// failQueue holds one-shot injected failures per method, consumed FIFO —
+	// a conformance assertion over the per-operation retry budget (A1/A2)
+	// needs a REAL 429/5xx off the wire, not a client-side mock, so the
+	// backpressure a caller absorbs is the same shape the real Bot API sends.
+	// failForever is a sticky rule served once the queue is empty, for
+	// "backpressure that never clears".
+	failQueue   map[string][]failRule
+	failForever map[string]failRule
+}
+
+// failRule is one injected Bot API rejection.
+type failRule struct {
+	Mode       string // "429" or "5xx"
+	RetryAfter int    // seconds; 429 only
 }
 
 // New builds an empty fake.
 func New() *Server {
-	s := &Server{nextID: 1, polling: map[string]int{}}
+	s := &Server{nextID: 1, polling: map[string]int{}, failQueue: map[string][]failRule{}, failForever: map[string]failRule{}}
 	s.cond = sync.NewCond(&s.mu)
 	return s
 }
@@ -89,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /control/calls", s.handleCalls)
 	mux.HandleFunc("DELETE /control/calls", s.handleReset)
 	mux.HandleFunc("GET /control/consumers", s.handleConsumers)
+	mux.HandleFunc("POST /control/fail", s.handleFail)
+	mux.HandleFunc("DELETE /control/fail", s.handleClearFail)
 	// A Bot API path is /bot<token>/<method>; ServeMux wildcards must be whole
 	// segments, so the split is done by hand.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +232,71 @@ func (s *Server) handleConsumers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) handleFail(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Method     string `json:"method"`
+		Mode       string `json:"mode"`
+		RetryAfter int    `json:"retryAfter"`
+		Forever    bool   `json:"forever"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Method == "" {
+		http.Error(w, "method is required", http.StatusBadRequest)
+		return
+	}
+	rule := failRule{Mode: in.Mode, RetryAfter: in.RetryAfter}
+	s.mu.Lock()
+	if in.Forever {
+		s.failForever[in.Method] = rule
+	} else {
+		s.failQueue[in.Method] = append(s.failQueue[in.Method], rule)
+	}
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleClearFail(w http.ResponseWriter, r *http.Request) {
+	method := r.URL.Query().Get("method")
+	s.mu.Lock()
+	delete(s.failQueue, method)
+	delete(s.failForever, method)
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// consumeFail returns the next injected failure for method, if any, draining
+// a one-shot queue entry before falling back to a sticky "forever" rule.
+func (s *Server) consumeFail(method string) (failRule, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if q := s.failQueue[method]; len(q) > 0 {
+		s.failQueue[method] = q[1:]
+		return q[0], true
+	}
+	if r, ok := s.failForever[method]; ok {
+		return r, true
+	}
+	return failRule{}, false
+}
+
+// writeFail answers call AS Telegram would reject it — a real 429 with a
+// stated retry_after, or a bare 5xx — so a caller's retry loop sees the exact
+// shape it has to absorb from the real API, never a test-side shortcut.
+func writeFail(w http.ResponseWriter, rule failRule) {
+	switch rule.Mode {
+	case "429":
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"ok": false, "error_code": http.StatusTooManyRequests,
+			"description": fmt.Sprintf("Too Many Requests: retry after %d", rule.RetryAfter),
+			"parameters":  map[string]any{"retry_after": rule.RetryAfter},
+		})
+	default: // "5xx"
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"ok": false, "error_code": http.StatusInternalServerError,
+			"description": "Internal Server Error",
+		})
+	}
+}
+
 func (s *Server) handleBot(w http.ResponseWriter, r *http.Request, token, method string) {
 	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -241,6 +330,17 @@ func (s *Server) handleBot(w http.ResponseWriter, r *http.Request, token, method
 			if _, ok := call.Body[k]; !ok && len(v) > 0 {
 				call.Body[k] = v[0]
 			}
+		}
+	}
+
+	// Injected backpressure pre-empts every outbound method — never
+	// getUpdates, which has no retry budget to pin and whose own long-poll
+	// semantics are unrelated.
+	if method != "getUpdates" {
+		if rule, failing := s.consumeFail(method); failing {
+			s.record(call)
+			writeFail(w, rule)
+			return
 		}
 	}
 
