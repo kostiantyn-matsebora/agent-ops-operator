@@ -15,9 +15,9 @@ import (
 // on the manager's API port, bearer-token auth). Adapters need no Kubernetes
 // access — source config and status conditions go through this API;
 // normalized signals, each carrying its sender-minted initiationId, go in
-// through /signal/inbound and the manager applies cooldown/recurrence itself. Copied verbatim from
-// signals/alertmanager/manager.go — the contract is identical across every
-// signal adapter.
+// through /signal/inbound and the manager applies cooldown/recurrence
+// itself. The code is copied verbatim from signals/alertmanager/manager.go —
+// the contract is identical across every signal adapter.
 type Manager struct {
 	BaseURL string
 	Token   string

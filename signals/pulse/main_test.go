@@ -341,6 +341,48 @@ func TestSourceListRefresh(t *testing.T) {
 	}
 }
 
+// TestRecreatedSourceIsReportedAgain pins pruneReported: a source deleted and
+// recreated under the same name, reaching the same reason and message, must
+// get its Ready condition posted again — the new object has none — and a
+// source no longer served leaves nothing behind in the reported map.
+func TestRecreatedSourceIsReportedAgain(t *testing.T) {
+	f := &fakeManager{sources: []SourceInfo{{Name: "pulse-default"}}}
+	a := testAdapter(t, f)
+	posts := func() int {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		n := 0
+		for _, s := range f.statuses {
+			if s["name"] == "pulse-default" {
+				n++
+			}
+		}
+		return n
+	}
+	if got := posts(); got != 1 {
+		t.Fatalf("first refresh must report once: %d", got)
+	}
+
+	f.mu.Lock()
+	f.sources = nil
+	f.mu.Unlock()
+	a.refreshSources(context.Background())
+	a.mu.Lock()
+	_, kept := a.reported["pulse-default"]
+	a.mu.Unlock()
+	if kept {
+		t.Fatal("an unserved source's last report must be pruned")
+	}
+
+	f.mu.Lock()
+	f.sources = []SourceInfo{{Name: "pulse-default"}}
+	f.mu.Unlock()
+	a.refreshSources(context.Background())
+	if got := posts(); got != 2 {
+		t.Fatalf("a recreated source must be reported again: %d posts", got)
+	}
+}
+
 // TestHealthzOK closes the /healthz route, never exercised by any other test
 // here (every other test posts to /webhook/*).
 func TestHealthzOK(t *testing.T) {

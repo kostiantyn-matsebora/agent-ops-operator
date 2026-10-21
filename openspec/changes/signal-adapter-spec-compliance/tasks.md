@@ -120,8 +120,8 @@ Reference docs:
   `telegram.md`, and `docs/guides/signal-adapter.md` for cron — verify by
   grep for the version across the six pages.
 - [x] 9.3 `docs/CHANGELOG.md`: the observable fixes (pulse secret rotation,
-  alertmanager degradation, k8s-events clip/mute/fail-open, ha fail-open),
-  newest first.
+  alertmanager degradation, k8s-events clip/mute/fail-open, ha fail-open)
+  under `Fixed`, pulse signature enforcement under `Security`, newest first.
 - [x] 9.4 `.claude/rules/signal-rules.md` and `.claude/rules/structure.md`:
   the five-adapter enumerations gain `signals/pulse` — verify by grep.
 

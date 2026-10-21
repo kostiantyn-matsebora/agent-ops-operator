@@ -242,7 +242,8 @@ A condition still recurring after the window closes is re-posted under the
 same `initiationId`, and the manager routes it as a recurrence (`MGR-2`).
 
 `signals/ha` and `signals/k8s-events` declare the window, each sized to the
-emitting rule's dwell. No other shipped adapter uses it.
+emitting rule's own dwell, floored at one minute. No other shipped adapter
+uses it.
 
 ### Security posture
 

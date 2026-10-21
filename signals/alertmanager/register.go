@@ -32,6 +32,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -85,6 +86,9 @@ func parseRegister(config json.RawMessage) (*registerSpec, error) {
 	if len(wrap.Register) == 0 || string(wrap.Register) == "null" {
 		return nil, nil
 	}
+	if err := requireExactRegisterKeys(wrap.Register); err != nil {
+		return nil, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(wrap.Register))
 	dec.DisallowUnknownFields()
 	var reg registerSpec
@@ -92,6 +96,36 @@ func parseRegister(config json.RawMessage) (*registerSpec, error) {
 		return nil, fmt.Errorf("malformed register block: %w", err)
 	}
 	return &reg, nil
+}
+
+// registerKeys is the exact key set the register block accepts, read off
+// registerSpec's own json tags so the two cannot drift.
+var registerKeys = func() map[string]bool {
+	keys := map[string]bool{}
+	t := reflect.TypeOf(registerSpec{})
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		keys[name] = true
+	}
+	return keys
+}()
+
+// requireExactRegisterKeys refuses a key that only case-folds onto a known
+// one. encoding/json matches field names case-insensitively, even under
+// DisallowUnknownFields, so `SendResolved` or a second `NAMESPACE` would be
+// applied (the last one winning) while the chart's case-sensitive configSchema
+// reports the same block invalid.
+func requireExactRegisterKeys(block json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(block, &fields); err != nil {
+		return fmt.Errorf("malformed register block: %w", err)
+	}
+	for key := range fields {
+		if !registerKeys[key] {
+			return fmt.Errorf("malformed register block: unknown field %q", key)
+		}
+	}
+	return nil
 }
 
 // kubeClient is a minimal in-cluster Kubernetes REST client.

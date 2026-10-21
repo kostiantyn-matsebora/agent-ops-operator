@@ -390,6 +390,32 @@ func TestReconcileRegistrationURLUnknownRegistersNothing(t *testing.T) {
 	}
 }
 
+// TestReconcileRegistrationURLUnknownWithoutTokenNamesBoth pins that a
+// hand-deployed adapter missing BOTH the namespace fact and the token reports
+// both causes at once, and still names the object to create in full, with
+// the unknown namespace as a slot.
+func TestReconcileRegistrationURLUnknownWithoutTokenNamesBoth(t *testing.T) {
+	f := &fakeManager{}
+	a := testAdapter(t, f)
+	a.listen = ":8080"
+	a.kube, a.kubeReason = nil, "not running in a cluster (KUBERNETES_SERVICE_HOST unset)"
+
+	reason, msg := a.reconcileRegistration(context.Background(),
+		SourceInfo{Name: "vm-alerts", Config: json.RawMessage(`{"register":{}}`)})
+	if reason != "RegistrationManual" {
+		t.Fatalf("expected manual degradation, got %s: %s", reason, msg)
+	}
+	for _, want := range []string{
+		"POD_NAMESPACE is unset",
+		"not running in a cluster",
+		"VMAlertmanagerConfig <adapter-namespace>/agentops-vm-alerts",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("instructions missing %q: %s", want, msg)
+		}
+	}
+}
+
 // TestReconcileRegistrationMalformedBlockIsNamed pins that a register block
 // which does not parse surfaces as RegistrationManual naming the parse
 // problem, attempts no API call, and is distinct from an absent block.

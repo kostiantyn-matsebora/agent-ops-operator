@@ -65,10 +65,22 @@ instead of continuing an old one.
   surfaces as a warning on the source's Ready condition.
 - `signal-k8s-events`: a mute window now reports its close even when the
   lane has gone quiet, with a count of zero.
+- **`signal-k8s-events`: an unreadable object cache now fails OPEN.** A pod
+  whose health cannot be read at the close — the cache has not synced, or its
+  pod reads are denied — is emitted, marked unverified in its payload. It
+  used to be dropped unless it was still recurring.
 - **`signal-ha`: an unreadable system log now fails OPEN.** A record still
   failing when the log becomes unreadable is emitted, where it used to be
   dropped as churn. Expect MORE signals during a Home Assistant outage, not
   fewer — that is the specification's fail-open rule working.
+
+### Security
+
+- **`signal-pulse`: a configured `signingSecret` is now enforced on every
+  delivery, whether or not the adapter registered the webhook itself.** A
+  source whose `baseUrl`/`webhookUrl` was absent, incomplete or invalid used
+  to accept unsigned posts. A hand-registered Pulse presenting the same
+  secret now verifies exactly as an adapter-registered one does.
 
 ### Upgrade
 

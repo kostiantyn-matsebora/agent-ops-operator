@@ -330,9 +330,9 @@ func (c pulseWebhookConfig) comparable() pulseWebhookConfig {
 
 // ensureWebhook creates or repairs this adapter's Generic webhook in Pulse.
 // Idempotent: a webhook already matching the desired body (sans secret,
-// but with the secret's digest header) is left alone; one that differs is updated in place — matching
-// signals/alertmanager's create-or-repair posture for its own sender
-// object.
+// but with the secret's digest header) is left alone; one that differs is
+// updated in place — matching signals/alertmanager's create-or-repair
+// posture for its own sender object.
 func (c *pulseClient) ensureWebhook(ctx context.Context, desired pulseWebhookConfig) error {
 	code, body, err := c.do(ctx, "GET", "/api/notifications/webhooks", nil)
 	if err != nil {

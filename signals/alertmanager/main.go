@@ -196,8 +196,12 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 		// No namespace fact means no webhook URL. A placeholder written into
 		// the sender's live config looks registered and delivers nothing, so
 		// computing no URL means registering no object.
-		return reasonRegistrationManual, manualInstructions(info.Name, ns, a.manualURL(info.Name),
-			"own webhook URL unknown: POD_NAMESPACE is unset — fill in the adapter's namespace")
+		cause := "own webhook URL unknown: POD_NAMESPACE is unset — fill in the adapter's namespace"
+		if a.kube == nil {
+			// both causes at once, or fixing the first only reveals the second
+			cause += "; " + a.kubeReason
+		}
+		return reasonRegistrationManual, manualInstructions(info.Name, ns, a.manualURL(info.Name), cause)
 	}
 	return a.register(ctx, info.Name, ns, reg)
 }
@@ -232,12 +236,14 @@ const (
 const namespaceSlot = "<adapter-namespace>"
 
 // manualInstructions renders the degraded message: why registration could not
-// happen, and exactly what to do instead.
+// happen, and exactly what to do instead. An unknown namespace (no
+// POD_NAMESPACE, no block namespace) is shown as the slot to fill in, so the
+// object to create is always named in full.
 func manualInstructions(source, namespace, url, cause string) string {
-	target := registrationName(source)
-	if namespace != "" {
-		target = namespace + "/" + target
+	if namespace == "" {
+		namespace = namespaceSlot
 	}
+	target := namespace + "/" + registrationName(source)
 	return fmt.Sprintf(
 		"served, but could not register the sender automatically (%s). Configure it by hand: "+
 			"create VMAlertmanagerConfig %s (or add a webhook receiver to your Alertmanager) posting to %s",

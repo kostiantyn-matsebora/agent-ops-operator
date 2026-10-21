@@ -154,6 +154,10 @@ func TestParseRegisterMalformedIsAnError(t *testing.T) {
 		"unknown key":    {`{"register":{"groupWiat":"1m"}}`, `unknown field "groupWiat"`},
 		"not an object":  {`{"register":"monitoring"}`, "malformed register block"},
 		"config garbage": {`[1,2]`, "not a JSON object"},
+		// encoding/json folds case even under DisallowUnknownFields; the
+		// chart's configSchema does not, so neither may the adapter
+		"case-folded key":   {`{"register":{"SendResolved":true}}`, `unknown field "SendResolved"`},
+		"case-variant twin": {`{"register":{"namespace":"a","NAMESPACE":"b"}}`, `unknown field "NAMESPACE"`},
 	}
 	for name, c := range cases {
 		reg, err := parseRegister(json.RawMessage(c.config))

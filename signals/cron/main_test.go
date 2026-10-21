@@ -251,6 +251,76 @@ func TestRefreshSourcesReReportsRecreatedSource(t *testing.T) {
 	}
 }
 
+// TestRefreshSourcesRetriesAFailedStatusReport pins reportOnce: a status post
+// the manager rejects is not remembered as sent, so the next refresh posts it
+// again rather than leaving the source's Ready condition unset until its
+// config changes.
+func TestRefreshSourcesRetriesAFailedStatusReport(t *testing.T) {
+	var mu sync.Mutex
+	var attempts []statusCall
+	failStatus := true
+	list := []SourceInfo{
+		{Name: "job", Config: rawConfig(t, sourceConfig{Schedule: "nope", Input: "x"})},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/signal/sources":
+			mu.Lock()
+			_ = json.NewEncoder(w).Encode(list)
+			mu.Unlock()
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			var body struct {
+				Ready  bool   `json:"ready"`
+				Reason string `json:"reason"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			defer mu.Unlock()
+			attempts = append(attempts, statusCall{name: "job", ready: body.Ready, reason: body.Reason})
+			if failStatus {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	a := &adapter{
+		mgr:        NewManager(srv.URL, "t"),
+		sourceType: "cron",
+		sources:    map[string]servedSource{},
+		reported:   map[string]string{},
+	}
+	a.refreshSources(context.Background()) // post rejected
+
+	a.mu.Lock()
+	if _, ok := a.reported["job"]; ok {
+		a.mu.Unlock()
+		t.Fatalf("a rejected status post must not be recorded as reported, got %+v", a.reported)
+	}
+	a.mu.Unlock()
+
+	mu.Lock()
+	failStatus = false
+	mu.Unlock()
+	a.refreshSources(context.Background()) // retried, accepted
+	a.refreshSources(context.Background()) // accepted state unchanged, no post
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("expected the rejected post retried exactly once, got %+v", attempts)
+	}
+	for _, c := range attempts {
+		if c.ready || c.reason != "InvalidConfig" {
+			t.Fatalf("expected two Ready=False InvalidConfig attempts, got %+v", attempts)
+		}
+	}
+}
+
 // TestRefreshSourcesKeepsPreviousOnListError closes the mgr.Sources()
 // error branch: a broken manager must not wipe out sources already being
 // served.
@@ -265,7 +335,7 @@ func TestRefreshSourcesKeepsPreviousOnListError(t *testing.T) {
 		mgr:        NewManager(srv.URL, "t"),
 		sourceType: "cron",
 		sources:    existing,
-		reported:   map[string]string{},
+		reported:   map[string]string{"kept": reportedReady},
 	}
 	a.refreshSources(context.Background())
 
@@ -273,6 +343,11 @@ func TestRefreshSourcesKeepsPreviousOnListError(t *testing.T) {
 	defer a.mu.Unlock()
 	if _, ok := a.sources["kept"]; !ok {
 		t.Fatalf("expected previous sources to survive a list error, got %+v", a.sources)
+	}
+	// A failed list is no evidence of deletion: pruning on it would re-post
+	// every source's status after each manager blip.
+	if a.reported["kept"] != reportedReady {
+		t.Fatalf("expected the reported map to survive a list error, got %+v", a.reported)
 	}
 }
 
