@@ -1,6 +1,6 @@
 ## 1. CRD types and validation — api-architect
 
-- [ ] 1.1 Add `AttributeFilterOperator` (`In`/`NotIn`/`Exists`/`DoesNotExist`,
+- [x] 1.1 Add `AttributeFilterOperator` (`In`/`NotIn`/`Exists`/`DoesNotExist`,
       `+kubebuilder:validation:Enum` on the field) and
       `AttributeFilterRequirement{Key, Operator, Values}` to
       `platform/manager/api/v1alpha1/signalsource_types.go`. Add
@@ -16,7 +16,7 @@
 
 ## 2. Ingest filtering — backend-developer
 
-- [ ] 2.1 In `platform/manager/internal/httpapi/signals.go`'s
+- [x] 2.1 In `platform/manager/internal/httpapi/signals.go`'s
       `handleSignalInbound`, right after the unconditional `signal.received`
       emission and before the `routeSignals`/`routeChatSignals` lane split,
       partition `in.Signals` into `admitted`/`filteredOut` against
@@ -30,7 +30,7 @@
       routes normally, one failing requirement drops before cooldown, empty
       or absent `attributeFilters` admits everything unchanged, and a
       value-arity-malformed requirement fails closed.
-- [ ] 2.2 Add `activity.CodeFiltered = "filtered"` beside
+- [x] 2.2 Add `activity.CodeFiltered = "filtered"` beside
       `CodeUnclaimed`/`CodeAtCapacity`/`CodeAmbiguous` in
       `platform/manager/internal/activity/event.go`. Call
       `s.emitDropped(source, filteredOut, activity.CodeFiltered, reason)` for
@@ -39,12 +39,12 @@
       with a unit test that `logFiltered: false` suppresses only this event,
       while an `Unclaimed`/`AtCapacity`/`Ambiguous` drop on the same source
       still emits unconditionally.
-- [ ] 2.3 Add a `ReasonFiltered` constant beside `ReasonAtCapacity` and set the
+- [x] 2.3 Add a `ReasonFiltered` constant beside `ReasonAtCapacity` and set the
       batch response `reason` whenever `filteredOut` is non-empty, matching
       how the existing three reasons are reported through `out["reason"]`.
       Verify with an httpapi test asserting `reason` is set on a
       partially-filtered batch and unset on a fully-admitted one.
-- [ ] 2.4 Verify, with a unit test, that a fully-filtered batch never calls
+- [x] 2.4 Verify, with a unit test, that a fully-filtered batch never calls
       `s.cooldown`/`cd.Fresh` and never changes `status.receivedTotal` —
       the insertion point in 2.1 keeps a filtered signal out of both lanes
       entirely, so this test is a regression guard on that property rather
@@ -52,7 +52,7 @@
 
 ## 3. Unit tests
 
-- [ ] 3.1 Run `go build ./... && go vet ./... && go test ./...` in
+- [x] 3.1 Run `go build ./... && go vet ./... && go test ./...` in
       `platform/manager` (this change's worktree), covering 1.1's generated
       CRD/deepcopy, 2.1-2.4's filter/logging/reason/bookkeeping behavior, and
       the manager's envtest suite (`KUBEBUILDER_ASSETS=... go test ./...`,
@@ -61,7 +61,7 @@
 
 ## 4. System tests
 
-- [ ] 4.1 Not applicable — filtering is pure CRD-validated config evaluated
+- [x] 4.1 Not applicable — filtering is pure CRD-validated config evaluated
       in-process against already-normalized Go structs. No kubelet, RBAC,
       informer or pod-lifecycle decision is involved. Admission-time enum
       enforcement is exercised by the envtest suite in section 3, not the
@@ -71,15 +71,15 @@
 
 ### Reference docs
 
-- [ ] 5.1 Update the `SignalSource` field reference in `docs/concepts.md`
+- [x] 5.1 Update the `SignalSource` field reference in `docs/concepts.md`
       with `attributeFilters` and `logFiltered`.
-- [ ] 5.2 Run `python3 .github/scripts/docs-generate.py` (and `--check`) from
+- [x] 5.2 Run `python3 .github/scripts/docs-generate.py` (and `--check`) from
       this change's worktree to regenerate `docs/cr-reference.md`'s
       `SignalSource` fields table with both new fields.
 
 ### Adopter site
 
-- [ ] 5.3 Add a hand-written section to `docs/guides/signal-adapter.md`
+- [x] 5.3 Add a hand-written section to `docs/guides/signal-adapter.md`
       explaining how to filter a source (`attributeFilters`'
       `key`/`operator`/`values`, and `logFiltered`), extend that guide's
       generated `SignalSource` example block's

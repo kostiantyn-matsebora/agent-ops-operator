@@ -6,6 +6,39 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// AttributeFilterOperator is the matching test an AttributeFilterRequirement
+// applies — the same four operators a Kubernetes matchExpressions entry
+// supports. An owned type rather than metav1.LabelSelectorRequirement's own
+// Operator field, so the CRD schema carries a real enum: the upstream field
+// has no +kubebuilder:validation:Enum marker, and embedding it verbatim would
+// accept any string, silently ignoring one it cannot evaluate.
+// +kubebuilder:validation:Enum=In;NotIn;Exists;DoesNotExist
+type AttributeFilterOperator string
+
+const (
+	AttributeFilterIn           AttributeFilterOperator = "In"
+	AttributeFilterNotIn        AttributeFilterOperator = "NotIn"
+	AttributeFilterExists       AttributeFilterOperator = "Exists"
+	AttributeFilterDoesNotExist AttributeFilterOperator = "DoesNotExist"
+)
+
+// AttributeFilterRequirement is one matchExpressions-shaped test against a
+// signal's normalized labels. Values is required for In/NotIn and must stay
+// empty for Exists/DoesNotExist — that arity rule is NOT enforced by the CRD
+// schema (only Operator's enum is), so a malformed requirement is instead
+// evaluated as never-satisfied at ingest (fail closed, never open).
+type AttributeFilterRequirement struct {
+	// Key is the attribute label name to test.
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
+	// Operator selects the test. See AttributeFilterOperator.
+	Operator AttributeFilterOperator `json:"operator"`
+	// Values is the comparison set for In/NotIn, and must be empty for
+	// Exists/DoesNotExist.
+	// +optional
+	Values []string `json:"values,omitempty"`
+}
+
 // SignalSourceSpec maps a signal stream to conversations with a profile:
 // type-agnostic routing metadata plus an opaque per-type config that only the
 // serving signal implementation interprets.
@@ -41,6 +74,20 @@ type SignalSourceSpec struct {
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	Config *runtime.RawExtension `json:"config,omitempty"`
+	// AttributeFilters narrows which signals this source admits, evaluated
+	// against the normalized signal's labels with Kubernetes label-selector
+	// semantics. A signal must satisfy EVERY requirement to be admitted.
+	// Empty or unset admits everything — identical to today's behavior.
+	// Evaluated before cooldown and before routing: a filtered signal spends
+	// no cooldown state and never reaches a serving pipeline.
+	// +optional
+	AttributeFilters []AttributeFilterRequirement `json:"attributeFilters,omitempty"`
+	// LogFiltered governs whether a signal dropped by AttributeFilters is
+	// still recorded as a signal.dropped activity event. Nullable, default
+	// true when unset — set false to silence a known-noisy filter. Has no
+	// effect on any other drop reason, which always logs.
+	// +optional
+	LogFiltered *bool `json:"logFiltered,omitempty"`
 }
 
 // CooldownEntry records when an initiationId was last admitted, so

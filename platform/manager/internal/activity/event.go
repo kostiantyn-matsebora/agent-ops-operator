@@ -128,6 +128,9 @@ const (
 	// and a surface that stops opening conversations must still be diagnosable
 	// without reading chat scrollback.
 	CodeAmbiguous = "ambiguous"
+	// CodeFiltered: the signal failed the source's attributeFilters. Gated by
+	// SignalSource.Spec.LogFiltered — the only drop code any field silences.
+	CodeFiltered = "filtered"
 )
 
 // Status values. Failure is RECORDED, never omitted: an operations console that

@@ -76,6 +76,46 @@ spec:
                 x-kubernetes-validations:
                 - message: spec.adapter is immutable
                   rule: self == oldSelf
+              attributeFilters:
+                description: |-
+                  AttributeFilters narrows which signals this source admits, evaluated
+                  against the normalized signal's labels with Kubernetes label-selector
+                  semantics. A signal must satisfy EVERY requirement to be admitted.
+                  Empty or unset admits everything — identical to today's behavior.
+                  Evaluated before cooldown and before routing: a filtered signal spends
+                  no cooldown state and never reaches a serving pipeline.
+                items:
+                  description: |-
+                    AttributeFilterRequirement is one matchExpressions-shaped test against a
+                    signal's normalized labels. Values is required for In/NotIn and must stay
+                    empty for Exists/DoesNotExist — that arity rule is NOT enforced by the CRD
+                    schema (only Operator's enum is), so a malformed requirement is instead
+                    evaluated as never-satisfied at ingest (fail closed, never open).
+                  properties:
+                    key:
+                      description: Key is the attribute label name to test.
+                      minLength: 1
+                      type: string
+                    operator:
+                      description: Operator selects the test. See AttributeFilterOperator.
+                      enum:
+                      - In
+                      - NotIn
+                      - Exists
+                      - DoesNotExist
+                      type: string
+                    values:
+                      description: |-
+                        Values is the comparison set for In/NotIn, and must be empty for
+                        Exists/DoesNotExist.
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - key
+                  - operator
+                  type: object
+                type: array
               config:
                 description: |-
                   Config carries whatever the signal type needs; schema-less by design.
@@ -112,6 +152,13 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              logFiltered:
+                description: |-
+                  LogFiltered governs whether a signal dropped by AttributeFilters is
+                  still recorded as a signal.dropped activity event. Nullable, default
+                  true when unset — set false to silence a known-noisy filter. Has no
+                  effect on any other drop reason, which always logs.
+                type: boolean
             required:
             - adapter
             type: object

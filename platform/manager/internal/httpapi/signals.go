@@ -367,6 +367,43 @@ func (s *Server) recordCooldown(ctx context.Context, source *agentopsv1alpha1.Si
 // in the response for machine origins, spoken on the surface for chat.
 const ReasonAtCapacity = "pending conversation backlog is full — signals dropped"
 
+// ReasonFiltered is the drop reason reported on the batch response whenever
+// any signal failed the source's attributeFilters — the same "overwrite is
+// acceptable, single-string summary" convention ReasonAtCapacity already
+// uses.
+const ReasonFiltered = "signal failed the source's attributeFilters — signal(s) dropped"
+
+// partitionByAttributeFilters splits signals into admitted/filteredOut
+// against source.Spec.AttributeFilters, evaluated against each signal's own
+// Labels. An empty or absent filter list admits everything, unchanged from
+// today — ingest.Admits already returns true for a nil/empty requirement
+// list, so that guarantee holds without a special case here.
+func partitionByAttributeFilters(source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal) (admitted, filteredOut []NormalizedSignal) {
+	if len(source.Spec.AttributeFilters) == 0 {
+		return signals, nil
+	}
+	reqs := make([]ingest.FilterRequirement, 0, len(source.Spec.AttributeFilters))
+	for _, f := range source.Spec.AttributeFilters {
+		reqs = append(reqs, ingest.FilterRequirement{Key: f.Key, Operator: string(f.Operator), Values: f.Values})
+	}
+	for _, sig := range signals {
+		if ingest.Admits(reqs, sig.Labels) {
+			admitted = append(admitted, sig)
+		} else {
+			filteredOut = append(filteredOut, sig)
+		}
+	}
+	return admitted, filteredOut
+}
+
+// logFiltered reports whether a filtered-out signal still gets a
+// signal.dropped record — true (the default) unless the source explicitly
+// sets LogFiltered to false. The only drop code this field gates; every
+// other emitDropped call site logs unconditionally.
+func logFiltered(source *agentopsv1alpha1.SignalSource) bool {
+	return source.Spec.LogFiltered == nil || *source.Spec.LogFiltered
+}
+
 // bumpReceived records ingest on the source (the single place lastReceived /
 // receivedTotal move).
 func (s *Server) bumpReceived(ctx context.Context, source *agentopsv1alpha1.SignalSource, n int) {
@@ -979,16 +1016,30 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 			Detail: sig.InitiationID,
 		})
 	}
+	admitted, filteredOut := partitionByAttributeFilters(source, in.Signals)
+	if len(filteredOut) > 0 && logFiltered(source) {
+		s.emitDropped(source, filteredOut, activity.CodeFiltered,
+			"signal failed the source's attributeFilters")
+	}
+
 	route := s.routeSignals
-	if isChat(in.Signals) {
+	if isChat(admitted) {
 		route = func(ctx context.Context, src *agentopsv1alpha1.SignalSource, sigs []NormalizedSignal, _ combineFunc) (int, int, string, error) {
 			return s.routeChatSignals(ctx, src, sigs)
 		}
 	}
-	queued, touched, reason, err := route(r.Context(), source, in.Signals, combineJoined)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
+	var queued, touched int
+	var reason string
+	var err error
+	if len(admitted) > 0 {
+		queued, touched, reason, err = route(r.Context(), source, admitted, combineJoined)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if reason == "" && len(filteredOut) > 0 {
+		reason = ReasonFiltered
 	}
 	out := map[string]any{"queued": queued, "conversations": touched}
 	if reason != "" {

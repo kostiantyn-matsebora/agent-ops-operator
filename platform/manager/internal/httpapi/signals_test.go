@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 )
 
@@ -28,7 +29,8 @@ func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, controller.ConversationIDIndexer).
 		WithObjects(objs...).Build()
-	return &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master"}, c
+	return &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
+		Activity: activity.New(64)}, c
 }
 
 // sigTestSource is a minimal SignalSource fixture.
@@ -38,6 +40,9 @@ func sigTestSource(name, adapter string) *agentopsv1alpha1.SignalSource {
 	src.Spec.Adapter = adapter
 	return src
 }
+
+// falsePtr is a *bool pointing at false, for setting SignalSource.Spec.LogFiltered.
+func falsePtr() *bool { b := false; return &b }
 
 // sigTestPipeline is a Ready Pipeline claiming the given source, its
 // capability inlined — no AgentProfile/AgentRuntime object is needed, since
@@ -276,5 +281,262 @@ func TestSignalInboundRecurrenceNeverRewritesProvenanceSeverity(t *testing.T) {
 	}
 	if recurCI.Spec.Severity != agentopsv1alpha1.SeverityError {
 		t.Fatalf("the recurrence's OWN input must record its own severity (error), got %q", recurCI.Spec.Severity)
+	}
+}
+
+// signalsource-attribute-filter: "A signal matching every requirement routes
+// normally" — a filtered source still admits a signal that satisfies its
+// attributeFilters, identically to no filter declared.
+func TestSignalInboundAttributeFilterAdmitsMatchingSignal(t *testing.T) {
+	source := sigTestSource("attrfilter-match-src", "attrfilter-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"payments"}},
+	}
+	pipeline := sigTestPipeline("attrfilter-match-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-match-1", "payload": "hello", "labels": map[string]string{"team": "payments"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 1 {
+		t.Fatalf("a matching signal must route normally — want 1 conversation, got %d", len(convs.Items))
+	}
+}
+
+// signalsource-attribute-filter: "A signal failing one requirement is
+// dropped before cooldown" — the signal never reaches a serving pipeline,
+// never consumes cooldown state, and never bumps receivedTotal.
+func TestSignalInboundAttributeFilterDropsFailingSignalBeforeCooldown(t *testing.T) {
+	source := sigTestSource("attrfilter-drop-src", "attrfilter-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"payments"}},
+	}
+	pipeline := sigTestPipeline("attrfilter-drop-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-drop-1", "payload": "hello", "labels": map[string]string{"team": "search"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["reason"] != ReasonFiltered {
+		t.Fatalf("reason = %v, want %q", resp["reason"], ReasonFiltered)
+	}
+
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 0 {
+		t.Fatalf("a filtered signal must never reach a serving pipeline — want 0 conversations, got %d", len(convs.Items))
+	}
+
+	var refreshed agentopsv1alpha1.SignalSource
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: sigTestNamespace, Name: source.Name}, &refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Status.ReceivedTotal != 0 {
+		t.Fatalf("a filtered signal must never bump receivedTotal, got %d", refreshed.Status.ReceivedTotal)
+	}
+	if len(refreshed.Status.Cooldown) != 0 {
+		t.Fatalf("a filtered signal must never consume cooldown state, got %+v", refreshed.Status.Cooldown)
+	}
+
+	events, _ := s.Activity.Since("", 0)
+	found := false
+	for _, e := range events {
+		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeFiltered {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a filtered drop must be recorded as a signal.dropped event by default (logFiltered unset)")
+	}
+}
+
+// signalsource-attribute-filter: "Empty or absent attributeFilters admits
+// everything" — a source with the field explicitly set to an empty list
+// behaves identically to one that never declared it.
+func TestSignalInboundEmptyAttributeFiltersAdmitsEverything(t *testing.T) {
+	source := sigTestSource("attrfilter-empty-src", "attrfilter-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{}
+	pipeline := sigTestPipeline("attrfilter-empty-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-empty-1", "payload": "hello"},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 1 {
+		t.Fatalf("an empty filter list must admit every signal — want 1 conversation, got %d", len(convs.Items))
+	}
+}
+
+// signalsource-attribute-filter: "A value-count-malformed requirement fails
+// closed" — an In requirement with no Values passes the CRD's operator enum
+// but is evaluated as never-satisfied, so the signal it gates is dropped
+// rather than admitted.
+func TestSignalInboundAttributeFilterFailsClosedOnMalformedRequirement(t *testing.T) {
+	source := sigTestSource("attrfilter-malformed-src", "attrfilter-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: nil},
+	}
+	pipeline := sigTestPipeline("attrfilter-malformed-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-malformed-1", "payload": "hello", "labels": map[string]string{"team": "payments"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 0 {
+		t.Fatalf("a malformed requirement must fail closed — want 0 conversations, got %d", len(convs.Items))
+	}
+}
+
+// signalsource-attribute-filter: the batch response's "reason" is set
+// whenever any signal in the batch was filtered out — even a PARTIALLY
+// filtered batch, where the admitted remainder still routes — and left
+// unset on a batch nothing was filtered from, matching the convention
+// ReasonAtCapacity already follows.
+func TestSignalInboundAttributeFilterReasonSetOnPartialBatchUnsetOnFullAdmit(t *testing.T) {
+	source := sigTestSource("attrfilter-partial-src", "attrfilter-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"payments"}},
+	}
+	pipeline := sigTestPipeline("attrfilter-partial-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-partial-ok", "payload": "fine", "labels": map[string]string{"team": "payments"}},
+		{"initiationId": "attrfilter-partial-bad", "payload": "boom", "labels": map[string]string{"team": "search"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["reason"] != ReasonFiltered {
+		t.Fatalf("a partially-filtered batch must report reason=%q, got %v", ReasonFiltered, resp["reason"])
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 1 {
+		t.Fatalf("the admitted remainder must still route — want 1 conversation, got %d", len(convs.Items))
+	}
+
+	// A fully-admitted batch on a DIFFERENT source — same filter, nothing
+	// fails it — must leave "reason" unset entirely.
+	cleanSource := sigTestSource("attrfilter-clean-src", "attrfilter-t")
+	cleanSource.Spec.AttributeFilters = source.Spec.AttributeFilters
+	cleanPipeline := sigTestPipeline("attrfilter-clean-pipe", cleanSource.Name)
+	s2, _ := sigServer(t, cleanSource, cleanPipeline)
+	rec2 := postSig(s2, cleanSource.Name, []map[string]any{
+		{"initiationId": "attrfilter-clean-1", "payload": "fine", "labels": map[string]string{"team": "payments"}},
+	})
+	if rec2.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec2.Code, rec2.Body.String())
+	}
+	var resp2 map[string]any
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp2["reason"]; ok {
+		t.Fatalf("a fully-admitted batch must leave reason unset, got %v", resp2["reason"])
+	}
+}
+
+// signalsource-attribute-filter: "logFiltered false suppresses only the
+// filtered-drop record" — the signal is still dropped, but no signal.dropped
+// event is recorded for it.
+func TestSignalInboundLogFilteredFalseSuppressesFilteredDropEvent(t *testing.T) {
+	source := sigTestSource("attrfilter-silent-src", "attrfilter-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"payments"}},
+	}
+	source.Spec.LogFiltered = falsePtr()
+	pipeline := sigTestPipeline("attrfilter-silent-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-silent-1", "payload": "hello", "labels": map[string]string{"team": "search"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 0 {
+		t.Fatalf("the signal must still be dropped — want 0 conversations, got %d", len(convs.Items))
+	}
+
+	events, _ := s.Activity.Since("", 0)
+	for _, e := range events {
+		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeFiltered {
+			t.Fatalf("logFiltered:false must suppress the filtered-drop event, got %+v", e)
+		}
+	}
+}
+
+// signalsource-attribute-filter: "Other drop reasons still log regardless of
+// logFiltered" — an unclaimed source with logFiltered:false still records
+// its CodeUnclaimed drop, since that field gates only CodeFiltered.
+func TestSignalInboundLogFilteredFalseDoesNotSuppressOtherDropCodes(t *testing.T) {
+	source := sigTestSource("attrfilter-unclaimed-src", "attrfilter-t")
+	source.Spec.LogFiltered = falsePtr()
+	s, c := sigServer(t, source) // no Pipeline claims it: Wired=False
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "attrfilter-unclaimed-1", "payload": "hello"},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 0 {
+		t.Fatalf("want 0 conversations, got %d", len(convs.Items))
+	}
+
+	events, _ := s.Activity.Since("", 0)
+	found := false
+	for _, e := range events {
+		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeUnclaimed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("logFiltered must not suppress an unclaimed-source drop")
 	}
 }
