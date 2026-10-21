@@ -396,24 +396,30 @@ func (e *pendingEntry) evidence(now time.Time, note string) string {
 // health is the adapter's verification ladder over the object cache.
 //
 // Only Pod carries a health predicate. Node, Job, PVC and every other kind fall
-// to rung 2 (recurrence), deliberately: giving them predicates would mean
-// watching nodes, jobs and PVCs, and the reasons that concern them
-// (NodeNotReady, disk pressure, BackoffLimitExceeded) ship with `for: 0` and so
-// are never verified at all. Paying three more RBAC grants for a path the
-// defaults never take is not a trade worth making.
+// to rung 2 (recurrence), deliberately, and BEFORE any cache read: whether such
+// an object is present, absent or undeterminable must not change its verdict.
+// Giving Job and PVC predicates would mean watching them — more external RBAC
+// grants — and Node is cached for drain awareness only, its entry keeping no
+// status to judge. The reasons that concern those kinds (NodeNotReady, disk
+// pressure, BackoffLimitExceeded) ship with `for: 0` and so are never verified
+// at all.
+//
+// For a Pod the adapter's own view comes first: no cache, a cache that has not
+// synced, or a pods/replicasets grant found missing all answer unreadable (rung
+// 3) — a pod absent from a cache that could not have listed it is not gone.
 func (a *adapter) health(ref objectRef) verdict {
-	if a.cache == nil {
+	if ref.kind != "Pod" {
 		return verdictUnknown
+	}
+	if a.cache == nil || !a.cache.Synced() || a.accessErr.Load() != nil {
+		return verdictUnreadable
 	}
 	oi, known := a.cache.Get(ref.ns, ref.kind, ref.name)
 	if !known {
-		return verdictUnknown
+		return verdictUnreadable
 	}
 	if oi == nil {
 		return verdictGone
-	}
-	if ref.kind != "Pod" {
-		return verdictUnknown
 	}
 	switch oi.Phase {
 	case "Failed":
