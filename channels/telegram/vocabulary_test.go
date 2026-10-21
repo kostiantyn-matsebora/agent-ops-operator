@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---- the transport-local spelling ---------------------------------------
@@ -254,13 +255,48 @@ func TestNoChoicesMeansNoKeyboard(t *testing.T) {
 }
 
 // A choice whose payload will not fit is left out of the KEYBOARD only — the
-// manager's prose still names it and its addressed form, which is the same
-// fallback a transport with no controls gets.
+// caller folds it back in as TEXT instead (A5), the same fallback a transport
+// with no controls at all gets (ADA-8). Never simply dropped: oversizedChoices
+// is what tells the caller which ones need that fallback.
 func TestOversizedChoiceFallsBackToProse(t *testing.T) {
 	long := strings.Repeat("a", telegramMaxCallbackData)
-	kb := inlineKeyboard([]Choice{{Label: long, Command: "/" + long}})
+	choices := []Choice{{Label: long, Command: "/" + long}}
+	kb := inlineKeyboard(choices)
 	if kb != nil {
 		t.Fatalf("oversized callback data was sent: %v", kb)
+	}
+	over := oversizedChoices(choices)
+	if len(over) != 1 {
+		t.Fatalf("oversizedChoices = %v, want the one dropped choice named", over)
+	}
+	chunks := appendChoiceFallback([]string{"the answer"}, over)
+	if len(chunks) != 1 || !strings.Contains(chunks[0], long) {
+		t.Fatalf("the oversized choice's own text must survive in the message: %v", chunks)
+	}
+}
+
+// A choice that DOES fit never grows an extra fallback line — only what the
+// keyboard could not carry gets folded back in as text.
+func TestFittingChoiceGetsNoTextFallback(t *testing.T) {
+	choices := []Choice{{Label: "Approve", Command: "/approve"}}
+	chunks := appendChoiceFallback([]string{"the answer"}, oversizedChoices(choices))
+	if len(chunks) != 1 || chunks[0] != "the answer" {
+		t.Fatalf("a fitting choice must not be duplicated as text: %v", chunks)
+	}
+}
+
+// When the fallback text does not fit the last chunk, it becomes its own
+// chunk rather than being cut to make room — losing the choice is worse than
+// one more short message.
+func TestOverflowingChoiceFallbackBecomesItsOwnChunk(t *testing.T) {
+	long := strings.Repeat("a", telegramMaxCallbackData)
+	full := strings.Repeat("x", telegramMessageLimit)
+	chunks := appendChoiceFallback([]string{full}, oversizedChoices([]Choice{{Label: long, Command: "/" + long}}))
+	if len(chunks) != 2 {
+		t.Fatalf("want the fallback as a second chunk, got %d chunk(s)", len(chunks))
+	}
+	if !strings.Contains(chunks[1], long) {
+		t.Fatalf("the second chunk must carry the fallback text: %q", chunks[1])
 	}
 }
 
@@ -340,6 +376,61 @@ func TestForwardedSelectionIsInertInTheChannelAdapter(t *testing.T) {
 	a.dispatch(context.Background(), upd)
 }
 
+// A6: tapping a choice INSIDE A TOPIC sends the ORIGINAL command back
+// inbound, never Telegram's own callback_data encoding — the manager has no
+// idea what "p:k8s-observe" means, only what the choice itself said ("/k8s-observe").
+func TestTappedChoiceDispatchesTheOriginalCommandInbound(t *testing.T) {
+	a, got := testAdapter(t, map[string]channelConfig{"telegram-ops": {ChatID: "-1001"}})
+	bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer bot.Close()
+	a.clients["|"] = NewTelegram(bot.URL, "gw-token")
+
+	var upd tgUpdate
+	mustJSON(t, `{"update_id":31,"callback_query":{"id":"cb-2","data":"p:k8s-observe",
+		"from":{"id":42},
+		"message":{"chat":{"id":-1001},"is_topic_message":true,"message_thread_id":7}}}`, &upd)
+	a.dispatch(context.Background(), upd)
+
+	if len(*got) != 1 {
+		t.Fatalf("want one inbound push from the tap, got %d", len(*got))
+	}
+	in := (*got)[0]
+	if in.Text != "/k8s-observe" {
+		t.Fatalf("text = %q, want the ORIGINAL command, not callback_data's own encoding", in.Text)
+	}
+	if in.ThreadID == nil || *in.ThreadID != "7" {
+		t.Fatalf("threadId = %v, want 7", in.ThreadID)
+	}
+	if in.Channel != "telegram-ops" {
+		t.Fatalf("channel = %q", in.Channel)
+	}
+}
+
+// An unapproved tapper's selection is dropped exactly like an unapproved
+// typed message — the same approver gate, exercised on the tap path.
+func TestTappedChoiceRespectsApprovers(t *testing.T) {
+	a, got := testAdapter(t, map[string]channelConfig{
+		"telegram-ops": {ChatID: "-1001", Approvers: []int64{42}},
+	})
+	bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer bot.Close()
+	a.clients["|"] = NewTelegram(bot.URL, "gw-token")
+
+	var upd tgUpdate
+	mustJSON(t, `{"update_id":32,"callback_query":{"id":"cb-3","data":"p:k8s-observe",
+		"from":{"id":99},
+		"message":{"chat":{"id":-1001},"is_topic_message":true,"message_thread_id":7}}}`, &upd)
+	a.dispatch(context.Background(), upd)
+
+	if len(*got) != 0 {
+		t.Fatalf("an unapproved tap must not reach inbound: %v", *got)
+	}
+}
+
 func botAPI(t *testing.T, body *map[string]any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -397,6 +488,56 @@ func TestMissingIconLeavesTheDescriptionAlone(t *testing.T) {
 // failed: registration silently did nothing on a live cluster while every unit
 // test passed. This drives the real path — a manager serving a vocabulary, a
 // served channel, and a Bot API recording what it was told.
+
+// A3: setMyCommands is an outbound Bot API call like any other, so it must be
+// paced like one — a vocabulary change touching many served chats at once
+// must not fire a burst of registrations with nothing spent from any budget.
+func TestSyncCommandsSpendsAPacingTokenPerChat(t *testing.T) {
+	var setCalls int
+	bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/setMyCommands") {
+			setCalls++
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer bot.Close()
+
+	mgr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/channel/vocabulary" {
+			_ = json.NewEncoder(w).Encode(vocab())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mgr.Close()
+
+	a := &adapter{
+		mgr: NewManager(mgr.URL, "tok"), menu: newMenu(), pace: newPacer(),
+		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	a.channels["home-ops"] = servedChannel{
+		cfg: channelConfig{ChatID: "-100"}, gatewayURL: bot.URL, gatewayToken: "gw-token",
+	}
+	// This chat's bucket never yields a token and never really sleeps for one
+	// either — deterministic and instant, so what fails the run is observably
+	// the PACING GATE, not a slow refill a long enough test would outlast.
+	blocked := newBucket(0.0001, 0)
+	blocked.sleep = func(context.Context, time.Duration) bool { return false }
+	a.pace.mu.Lock()
+	a.pace.chats["-100"] = blocked
+	a.pace.mu.Unlock()
+
+	a.syncCommands(context.Background(), "rev-1")
+
+	if setCalls != 0 {
+		t.Fatalf("setMyCommands must be paced like any other outbound call, got %d call(s) on an exhausted budget", setCalls)
+	}
+	// The revision must NOT be recorded as synced — the pacing gate failed the
+	// work, so a later poll with budget available must try again.
+	if !a.menu.stale("rev-1") {
+		t.Fatal("a paced-out run must not consume the revision")
+	}
+}
 
 func TestSyncCommandsRegistersForEveryServedChat(t *testing.T) {
 	var setCalls []map[string]any

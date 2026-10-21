@@ -90,6 +90,74 @@ func TestGatewayOwnRejectionIsReportedNotDecoded(t *testing.T) {
 	}
 }
 
+// ---- A4: SendDocument goes through the SAME response path as everything else
+
+// A document send rides out a 429 exactly like a chunked text send — the same
+// call() response path, not a bespoke one with no retry logic at all.
+func TestSendDocumentHonoursRetryAfter(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			_, _ = w.Write([]byte(rateLimited))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer srv.Close()
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	if err := tg.SendDocument(context.Background(), "-100", nil, "a.txt", "cap", "content"); err != nil {
+		t.Fatalf("sendDocument must ride out a 429: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("want one retry, got %d calls", n)
+	}
+}
+
+// A gateway-level rejection (not Telegram's JSON shape) surfaces with its
+// status and body, identically to an ordinary API call — never a bare decode
+// error that hides which credential or method was wrong.
+func TestSendDocumentSurfacesAGatewayRejection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing or invalid bearer token", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	tg := NewTelegram(srv.URL, "wrong-token")
+
+	err := tg.SendDocument(context.Background(), "-100", nil, "a.txt", "cap", "content")
+	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "missing or invalid bearer token") {
+		t.Fatalf("err = %v, want it to name the gateway's status and body", err)
+	}
+}
+
+// A document aimed at a gone thread falls back to the general surface — the
+// same fallback SendWith applies, now shared rather than reimplemented.
+func TestSendDocumentFallsBackToGeneralOnAGoneThread(t *testing.T) {
+	var threadIDs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		threadIDs = append(threadIDs, r.FormValue("message_thread_id"))
+		if r.FormValue("message_thread_id") != "" {
+			_, _ = w.Write([]byte(`{"ok":false,"description":"Bad Request: message thread not found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer srv.Close()
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	tid := int64(42)
+	if err := tg.SendDocument(context.Background(), "-100", &tid, "a.txt", "cap", "content"); err != nil {
+		t.Fatalf("a gone thread must fall back to the general surface: %v", err)
+	}
+	if len(threadIDs) != 2 || threadIDs[0] != "42" || threadIDs[1] != "" {
+		t.Fatalf("want a threaded attempt then a general-surface retry, got %v", threadIDs)
+	}
+}
+
 // A served channel's spec.config MUST NOT choose its gateway binding: anyone
 // able to edit a Channel would otherwise redirect that bot's calls to a host
 // of their choosing. Only the credential Secret — which already holds the

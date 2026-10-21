@@ -108,6 +108,44 @@ func TestExecuteSendsAnOrdinaryMessage(t *testing.T) {
 	}
 }
 
+// A5: an oversized choice's callback_data cannot become a keyboard button, and
+// execute()'s "send" case must fold it back into the SENT TEXT rather than
+// drop it — the end-to-end path a unit test on appendChoiceFallback alone
+// cannot pin.
+func TestExecuteFoldsAnOversizedChoiceIntoTheSentText(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	defer srv.Close()
+
+	a := &adapter{
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, gatewayURL: srv.URL, gatewayToken: "gw-token"}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
+	}
+	long := strings.Repeat("a", telegramMaxCallbackData)
+	msg := Message{Kind: MsgAnswer, Body: "pick one", Choices: []Choice{
+		{Label: "fits", Command: "/approve"},
+		{Label: long, Command: "/" + long},
+	}}
+	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "send", Message: &msg})
+	if opErr != "" {
+		t.Fatalf("opErr = %q, want empty", opErr)
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("want exactly one sendMessage, got %d", len(bodies))
+	}
+	if !strings.Contains(bodies[0], long) {
+		t.Fatalf("the oversized choice must still reach the reader, as text: %s", bodies[0])
+	}
+	if !strings.Contains(bodies[0], `"callback_data":"p:approve"`) {
+		t.Fatalf("the fitting choice must still be a control: %s", bodies[0])
+	}
+}
+
 // A send with no message is meaningless and must be reported, not sent as an
 // empty string.
 func TestExecuteSendWithoutAMessageIsReported(t *testing.T) {
