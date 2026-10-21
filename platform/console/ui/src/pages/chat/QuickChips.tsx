@@ -2,8 +2,6 @@ import type { ReactNode } from 'react'
 import { Button, Tooltip } from '@patternfly/react-core'
 import { ArchiveIcon, SignOutAltIcon } from '@patternfly/react-icons'
 import { useVocabulary } from '../../api/hooks'
-import { PlainText } from '../../components/Text'
-import type { Choice } from '../../api/types'
 
 // Ported from `prototype/States.html`'s chip row, with ONE explicit
 // deviation from it: the user instructed directly, more than once, that
@@ -14,6 +12,12 @@ import type { Choice } from '../../api/types'
 // instruction): offering to start a redundant new conversation with a
 // pipeline/coordinator you are already talking to was confusing, not useful.
 // Starting a new conversation is the "New conversation" modal's job now.
+//
+// An offered CHOICE chip used to render here too, for the latest message
+// only. It moved into `Timeline.tsx`, WITH the message that offers it (B2:
+// "the console shows each message's choices with that message") — this
+// component now carries only the thread's own built-in commands, which have
+// no message to render beside.
 
 const COMMAND_HINT: Record<string, string> = {
   exit: 'release this conversation’s runtime, keep the conversation',
@@ -28,27 +32,21 @@ const COMMAND_ICON: Record<string, ReactNode> = {
 export interface QuickChipsProps {
   /** Writes are off entirely — console-quick-actions: "no start chip is shown". */
   canWrite: boolean
-  /** The latest message's offered choices, if any. */
-  choices?: Choice[]
   /** Runs a thread command (`/exit`, `/close`) immediately — never inserted
    * into the composer for the user to send themselves. `/close`'s own
    * confirmation gate lives in the sender, not here. */
   onRunCommand?: (text: string) => void
-  /** Inserts text into the OPEN conversation's composer, for an offered choice
-   * — absent when none is open. */
-  onInsertCommand?: (text: string) => void
 }
 
-export function QuickChips({ canWrite, choices, onRunCommand, onInsertCommand }: Readonly<QuickChipsProps>) {
+export function QuickChips({ canWrite, onRunCommand }: Readonly<QuickChipsProps>) {
   const vocabulary = useVocabulary()
   if (!canWrite) return null
   const entries = vocabulary.data?.entries ?? []
   const threadCommands = onRunCommand
     ? entries.filter((e) => e.kind === 'builtin' && e.position === 'thread')
     : []
-  const offered = choices ?? []
 
-  if (threadCommands.length === 0 && offered.length === 0) return null
+  if (threadCommands.length === 0) return null
 
   return (
     <div
@@ -65,11 +63,6 @@ export function QuickChips({ canWrite, choices, onRunCommand, onInsertCommand }:
             onClick={() => onRunCommand?.(`/${e.name}`)}
           />
         </Tooltip>
-      ))}
-      {offered.map((c) => (
-        <Button key={`choice-${c.command}`} variant="secondary" size="sm" onClick={() => onInsertCommand?.(`${c.command} `)}>
-          <PlainText>{c.label || c.command}</PlainText>
-        </Button>
       ))}
     </div>
   )

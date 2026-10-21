@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Badge, Tooltip } from '@patternfly/react-core'
 import {
-  ArchiveIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, UserIcon,
+  ArchiveIcon, ExclamationCircleIcon, HashtagIcon, InProgressIcon, ListIcon, UserIcon,
 } from '@patternfly/react-icons'
 import { useInboxCounts, useVocabulary } from '../../api/hooks'
 import { Icon } from '../../components/Icon'
@@ -27,6 +27,11 @@ export type Scope =
   | { kind: 'errored' }
   | { kind: 'pipeline' | 'coordinator'; name: string }
   | { kind: 'closed' }
+  // Not a conversation filter — picking it navigates straight to the
+  // channel's general feed (GeneralFeedPane), same as clicking a row does
+  // for an ordinary conversation. ChatView.tsx intercepts it before it ever
+  // becomes the list's own query scope.
+  | { kind: 'general' }
 
 export function scopeKey(s: Scope): string {
   return 'name' in s ? `${s.kind}:${s.name}` : s.kind
