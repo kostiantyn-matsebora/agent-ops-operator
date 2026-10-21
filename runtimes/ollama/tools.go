@@ -264,21 +264,30 @@ func (r *Registry) Gate(allowed []string) (granted []Tool, unavailable []string,
 			uninterpretable = append(uninterpretable, p)
 			continue
 		}
-		matched := false
-		for _, name := range r.order {
-			if patternMatches(p, name) {
-				matched = true
-				if !seen[name] {
-					seen[name] = true
-					granted = append(granted, r.tools[name])
-				}
-			}
-		}
+		var matched bool
+		granted, matched = r.grant(p, seen, granted)
 		if !matched {
 			unavailable = append(unavailable, p)
 		}
 	}
 	return granted, unavailable, ignored, uninterpretable
+}
+
+// grant appends every not-yet-granted tool the pattern names, and reports
+// whether it named any.
+func (r *Registry) grant(pattern string, seen map[string]bool, granted []Tool) ([]Tool, bool) {
+	matched := false
+	for _, name := range r.order {
+		if !patternMatches(pattern, name) {
+			continue
+		}
+		matched = true
+		if !seen[name] {
+			seen[name] = true
+			granted = append(granted, r.tools[name])
+		}
+	}
+	return granted, matched
 }
 
 func toolDefs(tools []Tool) []ToolDef {

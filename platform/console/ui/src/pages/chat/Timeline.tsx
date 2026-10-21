@@ -227,7 +227,7 @@ export function Timeline({
   // The LATEST message overall (B2) — not the latest among those carrying
   // choices. An older message's choices answer a prompt the conversation has
   // moved past, so they degrade even if nothing newer offered any of its own.
-  const latestMessageId = messages.length > 0 ? messages[messages.length - 1].id : undefined
+  const latestMessageId = messages.at(-1)?.id
   const runGroups = useMemo(() => groupRunEvents(events), [events])
   const watermark = readAt ? Date.parse(readAt) : undefined
   const firstUnreadId = useMemo(() => {

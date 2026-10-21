@@ -1134,7 +1134,7 @@
     {
       "id": "telegram-adapter-enabled",
       "pattern": "telegramAdapter\\.enabled",
-      "says": "telegram.enabled is the one gate the whole bundle renders under; the flat telegramAdapter.enabled value gates nothing",
+      "says": "telegram.enabled is the one gate the whole bundle renders under, and the flat telegramAdapter.enabled value gates nothing",
       "allow": [
         "removed",
         "retired",

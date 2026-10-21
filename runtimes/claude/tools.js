@@ -208,7 +208,7 @@ function dedup(list) {
 // server set carry no scoping of their own.
 function logUngrantedTools(allowed, vendorTools, mcpServers, log = () => {}) {
   const vendor = new Set(vendorTools || []);
-  const connected = new Set((mcpServers || []).filter((s) => s && s.status === 'connected').map((s) => s.name));
+  const connected = new Set((mcpServers || []).filter((s) => s?.status === 'connected').map((s) => s.name));
   for (const entry of allowed || []) {
     const base = String(entry).split('(')[0].trim();
     if (!base) continue;

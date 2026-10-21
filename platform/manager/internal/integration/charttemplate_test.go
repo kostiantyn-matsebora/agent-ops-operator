@@ -3514,15 +3514,19 @@ func TestTelegramConfigSchemaRejectsMisspelledKey(t *testing.T) {
 			if len(vs) == 0 {
 				t.Fatalf("%s/%s must reject an unknown key (additionalProperties: false), got no violations", tc.kind, tc.name)
 			}
-			var named bool
-			for _, v := range vs {
-				if strings.Contains(v.Message, tc.misspelledKey) {
-					named = true
-				}
-			}
-			if !named {
+			if !namesKey(vs, tc.misspelledKey) {
 				t.Fatalf("violation must name the misspelled key %q, got: %v", tc.misspelledKey, vs)
 			}
 		})
 	}
+}
+
+// namesKey reports whether any violation's message mentions key.
+func namesKey(vs []configschema.Violation, key string) bool {
+	for _, v := range vs {
+		if strings.Contains(v.Message, key) {
+			return true
+		}
+	}
+	return false
 }

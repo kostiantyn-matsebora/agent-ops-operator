@@ -268,6 +268,63 @@ function exitRuntime(rowName: string) {
   void api.send(rowName, '/exit')
 }
 
+// Every OTHER scope here but All and Closed is unread, ANDed with its own
+// predicate: Working/Mine/Errored/Coordinator check what they are named for
+// plus unread.
+const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
+  working: (c) => c.phase === 'Working' && Boolean(c.unread),
+  errored: (c) => Boolean(c.errored) && Boolean(c.unread),
+  mine: (c) => Boolean(c.mine) && Boolean(c.unread),
+  coordinator: (c) => Boolean(c.unread),
+}
+
+/** The rows a scope shows, narrowed client-side from the server's snapshot. */
+function visibleItems(all: ConversationSummary[], scope: Scope, showClosed: boolean): ConversationSummary[] {
+  let raw = all
+  if (scope.kind === 'coordinator') {
+    // `c.causedBy` truthy alone is not enough — it admits a member of ANY
+    // coordinator, not just this scope's. A member carries no field naming
+    // which coordinator it ultimately belongs to, only its immediate
+    // parent (`causedBy.parent`), so membership is decided by walking to
+    // the uncaused root — within the UNFILTERED snapshot, since the
+    // walk needs every ancestor still present — and checking THAT root's
+    // own `coordinator` field.
+    const byName = new Map(raw.map((c) => [c.name, c]))
+    raw = raw.filter((c) => byName.get(rootNameOf(all, c))?.coordinator === scope.name)
+  }
+  // All is NOT an unread filter — it is every conversation a person can
+  // open, full stop, narrowed only by the generic "hide closed" rule below
+  // (so it still respects showClosed). Closed carries no predicate at all —
+  // it is the archive, and a read conversation still belongs in it the same
+  // way a read email still belongs in "All Mail"; the server already narrowed
+  // `raw` to phase=Closed (scopeParams above), so there is nothing left to
+  // AND here, and no "show closed" checkbox either.
+  const predicate = TREE_PREDICATE[scope.kind]
+  if (predicate) {
+    raw = withTreeContext(raw, predicate)
+  }
+  // Closed conversations are hidden by default everywhere except the
+  // dedicated Closed scope, where showing them is the whole point —
+  // narrowed CLIENT-SIDE, like the coordinator scope above, since there is
+  // no server-side "exclude closed" param to ask for instead.
+  if (!showClosed && scope.kind !== 'closed') {
+    raw = raw.filter((c) => c.phase !== 'Closed')
+  }
+  return raw
+}
+
+/** The thread pane's content: the general feed, one conversation, or the empty prompt. */
+function ThreadSlot({ name, narrow, onBack }: Readonly<{ name?: string; narrow: boolean; onBack: () => void }>) {
+  if (name === GENERAL_FEED_NAME) return <GeneralFeedPane onBack={narrow ? onBack : undefined} />
+  if (name) return <ThreadPane name={name} onBack={narrow ? onBack : undefined} />
+  if (narrow) return null
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+      <Empty title="Select a conversation">Choose one from the list, or start a new one.</Empty>
+    </div>
+  )
+}
+
 export function ChatView() {
   const { name } = useParams<{ name?: string }>()
   const navigate = useNavigate()
@@ -310,48 +367,7 @@ export function ChatView() {
   const markRead = useMarkRead()
   const markUnread = useMarkUnread()
 
-  const items = useMemo(() => {
-    let raw = data?.items ?? []
-    if (scope.kind === 'coordinator') {
-      // `c.causedBy` truthy alone is not enough — it admits a member of ANY
-      // coordinator, not just this scope's. A member carries no field naming
-      // which coordinator it ultimately belongs to, only its immediate
-      // parent (`causedBy.parent`), so membership is decided by walking to
-      // the uncaused root — within the UNFILTERED snapshot, since the
-      // walk needs every ancestor still present — and checking THAT root's
-      // own `coordinator` field.
-      const byName = new Map(raw.map((c) => [c.name, c]))
-      raw = raw.filter((c) => byName.get(rootNameOf(raw, c))?.coordinator === scope.name)
-    }
-    // All is NOT an unread filter — it is every conversation a person can
-    // open, full stop, narrowed only by the generic "hide closed" rule below
-    // (so it still respects showClosed). Every OTHER scope here but Closed is
-    // unread, ANDed with its own predicate: Working/Mine/Errored/Coordinator
-    // check what they are named for plus unread. Closed carries no predicate
-    // at all — it is the archive, and a read conversation still belongs in
-    // it the same way a read email still belongs in "All Mail"; the server
-    // already narrowed `raw` to phase=Closed (scopeParams above), so there is
-    // nothing left to AND here, and no "show closed" checkbox either — the
-    // whole point of this scope is to show all of it, unfiltered.
-    const TREE_PREDICATE: Partial<Record<Scope['kind'], (c: ConversationSummary) => boolean>> = {
-      working: (c) => c.phase === 'Working' && Boolean(c.unread),
-      errored: (c) => Boolean(c.errored) && Boolean(c.unread),
-      mine: (c) => Boolean(c.mine) && Boolean(c.unread),
-      coordinator: (c) => Boolean(c.unread),
-    }
-    const predicate = TREE_PREDICATE[scope.kind]
-    if (predicate) {
-      raw = withTreeContext(raw, predicate)
-    }
-    // Closed conversations are hidden by default everywhere except the
-    // dedicated Closed scope, where showing them is the whole point —
-    // narrowed CLIENT-SIDE, like the coordinator scope above, since there is
-    // no server-side "exclude closed" param to ask for instead.
-    if (!showClosed && scope.kind !== 'closed') {
-      raw = raw.filter((c) => c.phase !== 'Closed')
-    }
-    return raw
-  }, [data, scope, showClosed])
+  const items = useMemo(() => visibleItems(data?.items ?? [], scope, showClosed), [data, scope, showClosed])
 
   useArrivals(data, setNewNames, scopeKey(scope))
 
@@ -642,19 +658,7 @@ export function ChatView() {
           onChange={(w) => updateLayout({ listWidth: w })}
         />
       )}
-      {showingThread && (name ? (
-        name === GENERAL_FEED_NAME ? (
-          <GeneralFeedPane onBack={narrow ? () => navigate('/conversations') : undefined} />
-        ) : (
-          <ThreadPane name={name} onBack={narrow ? () => navigate('/conversations') : undefined} />
-        )
-      ) : (
-        !narrow && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-            <Empty title="Select a conversation">Choose one from the list, or start a new one.</Empty>
-          </div>
-        )
-      ))}
+      {showingThread && <ThreadSlot name={name} narrow={narrow} onBack={() => navigate('/conversations')} />}
     </section>
   )
 }
