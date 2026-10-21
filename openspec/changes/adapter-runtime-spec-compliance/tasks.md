@@ -106,10 +106,10 @@ the behaviour, design.md the approach.
 
 ## 6. Chart gate and docs tooling — deployment-engineer
 
-- [ ] 6.1 the telegram `configSchema` sets `additionalProperties: false`
+- [x] 6.1 the telegram `configSchema` sets `additionalProperties: false`
   so a misspelled key reports on `ConfigValid` (A8). Verify: chart render
   test asserts the schema rejects a near-miss key.
-- [ ] 6.2 `docs-generate.py` renders the work-unit and report schema
+- [x] 6.2 `docs-generate.py` renders the work-unit and report schema
   tables from the manager's Go structs under a declared marker in
   `docs/contracts/runtime.md`. Verify: the script suite covers the new
   generator and `--check` fails when a struct field moves.
