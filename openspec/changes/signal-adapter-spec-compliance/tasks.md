@@ -94,7 +94,7 @@ not the audit.
 
 ## 7. Unit tests
 
-- [ ] 7.1 `go build ./... && go vet ./... && go test ./...` green in every
+- [x] 7.1 `go build ./... && go vet ./... && go test ./...` green in every
   touched module: `signals/{pulse,alertmanager,k8s-events,ha,cron,telegram}`.
 - [ ] 7.2 `go test ./...` green in `platform/manager` (conformance helpers
   live in its module) plus `go test -tags conformance ./test/conformance/`.
