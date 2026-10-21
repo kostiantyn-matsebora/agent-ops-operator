@@ -101,7 +101,7 @@ not the audit.
 
 ## 8. System tests
 
-- [ ] 8.1 Nothing here is decided by a cluster — every fix is
+- [x] 8.1 Nothing here is decided by a cluster — every fix is
   adapter-internal logic or spec text, pinned by unit tests and the
   cluster-less conformance suite. No kubelet, RBAC, informer or pod
   lifecycle behavior changed.
