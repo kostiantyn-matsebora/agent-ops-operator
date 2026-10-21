@@ -216,7 +216,9 @@ func pulseAssertUnknownSourceRefusalNamesIt(t *testing.T, p *Process) {
 }
 
 // pulseAssertRejectedPostSurfaced: a rejected manager post fails the
-// delivery, so Pulse retries it — never a 2xx over a dropped signal.
+// delivery, so Pulse retries it — never a 2xx over a dropped signal. The
+// retry, once the manager accepts again, repeats the rejected post's
+// initiationId.
 func pulseAssertRejectedPostSurfaced(t *testing.T, mgr *FakeManager, p *Process, hook PulseWebhook) {
 	t.Helper()
 	mgr.RejectSignals(500)
@@ -228,4 +230,31 @@ func pulseAssertRejectedPostSurfaced(t *testing.T, mgr *FakeManager, p *Process,
 	if p.Exited() {
 		t.Fatalf("a rejected post must not kill the adapter")
 	}
+	rejectedID := pulseLastRejectedID(t, mgr)
+	mgr.RejectSignals(0)
+	if code, resp := pulseDeliver(t, hook.URL, hook, alert, true); code != 200 {
+		t.Fatalf("Pulse's retry of the failed delivery must be accepted: %d %s", code, resp)
+	}
+	posts := accepted(mgr, pulseSource)
+	if got := posts[len(posts)-1].Signals[0]["initiationId"]; got != rejectedID {
+		t.Fatalf("a re-send after a rejected post must repeat its initiationId: %q, then %v", rejectedID, got)
+	}
+}
+
+// pulseLastRejectedID is the initiationId of the most recent rejected post
+// for the pulse source.
+func pulseLastRejectedID(t *testing.T, mgr *FakeManager) string {
+	t.Helper()
+	posts := mgr.SignalPosts()
+	for i := len(posts) - 1; i >= 0; i-- {
+		if posts[i].Source == pulseSource && posts[i].Rejected && len(posts[i].Signals) > 0 {
+			id, _ := posts[i].Signals[0]["initiationId"].(string)
+			if id == "" {
+				t.Fatalf("the rejected post carried no initiationId: %v", posts[i].Signals[0])
+			}
+			return id
+		}
+	}
+	t.Fatalf("the rejected delivery never reached the manager — a 5xx over no post is not a surfaced rejection")
+	return ""
 }

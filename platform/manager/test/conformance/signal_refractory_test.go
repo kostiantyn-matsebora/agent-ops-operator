@@ -22,14 +22,24 @@ import (
 // contract's one-minute floor. Everything below must land inside it.
 const refractoryFloor = time.Minute
 
+// refractorySettle is how long A's chatter is watched for after B lands. It
+// outlasts the 2s dwell plus either adapter's flush interval, so chatter the
+// window failed to hold has been decided by then, whatever order the adapter
+// flushes in.
+const refractorySettle = 10 * time.Second
+
 // assertRefractoryNeverSuppressesADistinctID drives the sequence above.
 // recurA and raiseB each deliver one condition's upstream evidence, enough
 // for the adapter's dwell to verify it as still recurring at the close.
 func assertRefractoryNeverSuppressesADistinctID(t *testing.T, mgr *FakeManager, source string, recurA, raiseB func()) {
 	t.Helper()
+	// A's window cannot open before A's first evidence is delivered, so the
+	// age measured from here is an upper bound on the window's real age. The
+	// moment the fake sees A's post is later than the adapter's emit, and
+	// would under-count it.
+	windowOpenedNoEarlier := time.Now()
 	recurA()
 	waitFor(t, "condition A to dwell and emit", 60*time.Second, func() bool { return len(accepted(mgr, source)) >= 1 })
-	windowOpened := time.Now()
 	first := accepted(mgr, source)[0]
 	assertNormalized(t, first, source)
 	idA, _ := first.Signals[0]["initiationId"].(string)
@@ -49,12 +59,24 @@ func assertRefractoryNeverSuppressesADistinctID(t *testing.T, mgr *FakeManager, 
 		}
 		return false
 	})
-	if elapsed := time.Since(windowOpened); elapsed >= refractoryFloor {
-		t.Fatalf("B arrived %s after A emitted, past the window floor — this run proves nothing about the window", elapsed)
+	settled := time.Now().Add(refractorySettle)
+	for {
+		assertNoRepostInsideWindow(t, mgr, source, idA, idB, windowOpenedNoEarlier)
+		if !time.Now().Before(settled) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	// A's chatter dwelled no longer than B and was delivered first, so had
-	// the window not held it back it would have been decided in the same
-	// flush as B, or an earlier one.
+}
+
+// assertNoRepostInsideWindow fails if any post after A's emission carries A's
+// id. The window's age is checked first: past the floor a re-post would be
+// legitimate, so the run must fail as inconclusive, never as a violation.
+func assertNoRepostInsideWindow(t *testing.T, mgr *FakeManager, source, idA, idB string, windowOpenedNoEarlier time.Time) {
+	t.Helper()
+	if age := time.Since(windowOpenedNoEarlier); age >= refractoryFloor {
+		t.Fatalf("the run reached %s past A's first evidence, beyond the window floor — this run proves nothing about the window", age)
+	}
 	for _, p := range accepted(mgr, source)[1:] {
 		for _, s := range p.Signals {
 			if s["initiationId"] == idA {

@@ -76,6 +76,57 @@ func TestClampCutsOnARuneBoundary(t *testing.T) {
 	}
 }
 
+// The binary search lands on the LONGEST kept prefix that fits, and that
+// prefix ends on a rune boundary. Checked against every possible cut, at every
+// limit from the note alone up to the unclamped size, over text mixing one- to
+// four-byte runes, six-fold JSON escapes and a quote — and once more with a
+// stray continuation byte, which no cut may land in front of.
+func TestClampFindsTheLongestFittingRuneBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		valid   bool
+	}{
+		{"valid UTF-8", strings.Repeat("aé€😀<\"", 12), true},
+		{"a stray continuation byte", strings.Repeat("aé€😀<\x80\"", 12), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertClampOptimalAtEveryLimit(t, tc.payload, tc.valid)
+		})
+	}
+}
+
+func assertClampOptimalAtEveryLimit(t *testing.T, payload string, valid bool) {
+	t.Helper()
+	base := Signal{InitiationID: "ha-logs@x", Payload: payload}
+	isBoundary := func(k int) bool { return k == len(payload) || utf8.RuneStart(payload[k]) }
+	sizeAt := func(k int) int {
+		return encodedLen(Signal{InitiationID: base.InitiationID, Payload: clampedPayload(payload, k)})
+	}
+	for limit := sizeAt(0); limit < encodedLen(base); limit++ {
+		best := 0
+		for k := 0; k <= len(payload); k++ {
+			if isBoundary(k) && sizeAt(k) <= limit {
+				best = k
+			}
+		}
+		got := clampSignal(base, limit)
+		if n := encodedLen(got); n > limit {
+			t.Fatalf("limit %d: encoded %d bytes, over the limit", limit, n)
+		}
+		kept := got.Payload[:strings.LastIndex(got.Payload, "\n\n[payload clamped: ")]
+		if !strings.HasPrefix(payload, kept) || !isBoundary(len(kept)) {
+			t.Fatalf("limit %d: kept %d bytes, not a prefix ending on a rune boundary", limit, len(kept))
+		}
+		if len(kept) != best {
+			t.Fatalf("limit %d: kept %d bytes, the longest fitting cut keeps %d", limit, len(kept), best)
+		}
+		if valid && !utf8.ValidString(got.Payload) {
+			t.Fatalf("limit %d: clamped payload is not valid UTF-8", limit)
+		}
+	}
+}
+
 // A limit too small for any of the payload keeps the note alone.
 func TestClampKeepsTheNoteWhenNothingFits(t *testing.T) {
 	sig := clampSignal(Signal{InitiationID: "ha-logs@x", Payload: strings.Repeat("x", 4096)}, 64)

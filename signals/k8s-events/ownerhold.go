@@ -85,9 +85,11 @@ func (h *ownerHold) Len() int {
 // ships with `for: 0` precisely so that it is never delayed.
 //
 // A nil hold or a nil cache holds nothing — tests that drive deliver against a
-// cold cache construct the adapter without one.
+// cold cache construct the adapter without one. Nor does a cache whose reads
+// are denied: the grant is external, so no wait lets it catch up, and holding
+// would only delay every event by the full bound.
 func (a *adapter) awaitsOwner(ev *Event) bool {
-	if a.held == nil || a.cache == nil {
+	if a.held == nil || a.cache == nil || a.accessErr.Load() != nil {
 		return false
 	}
 	kind := ev.InvolvedObject.Kind

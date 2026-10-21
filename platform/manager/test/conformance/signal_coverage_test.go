@@ -3,8 +3,10 @@
 package conformance
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 )
@@ -21,22 +23,41 @@ var signalImplementations = map[string]func(*testing.T){
 	"signals/telegram":     TestSignalTelegramConformance,
 }
 
-// shippedSignalModules lists every Go module directly under signals/.
+// shippedSignalModules lists every directory under signals/ that ships an
+// image, by .github/components.sh's own rule: it holds a go.mod or a
+// Dockerfile, at any depth, node_modules excluded. A non-Go adapter ships
+// from its Dockerfile alone, so a go.mod-only listing would miss it.
 func shippedSignalModules(t *testing.T) []string {
 	t.Helper()
-	root := filepath.Join(repoRoot(), "signals")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("reading signals/: %v", err)
+	repo := repoRoot()
+	root := filepath.Join(repo, "signals")
+	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+		t.Fatalf("signals/ is not a directory at the repository root: %v", err)
 	}
-	var mods []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	seen := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		if _, err := os.Stat(filepath.Join(root, e.Name(), "go.mod")); err == nil {
-			mods = append(mods, "signals/"+e.Name())
+		if d.IsDir() && d.Name() == "node_modules" {
+			return filepath.SkipDir
 		}
+		if d.IsDir() || (d.Name() != "go.mod" && d.Name() != "Dockerfile") {
+			return nil
+		}
+		rel, err := filepath.Rel(repo, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		seen[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking signals/: %v", err)
+	}
+	mods := make([]string, 0, len(seen))
+	for m := range seen {
+		mods = append(mods, m)
 	}
 	sort.Strings(mods)
 	return mods
@@ -63,5 +84,22 @@ func TestSignalImplementationListNamesNoMissingModule(t *testing.T) {
 		if !present[m] {
 			t.Errorf("signalImplementations lists %s, which is not a module under signals/", m)
 		}
+	}
+}
+
+// Mapping a new module to an existing adapter's test would satisfy the
+// listing check while running nothing against the new binary.
+func TestEachSignalModuleHasItsOwnConformanceTest(t *testing.T) {
+	owner := map[uintptr]string{}
+	for m, fn := range signalImplementations {
+		if fn == nil {
+			t.Errorf("signalImplementations lists %s with no test", m)
+			continue
+		}
+		ptr := reflect.ValueOf(fn).Pointer()
+		if prev, dup := owner[ptr]; dup {
+			t.Errorf("%s and %s share one conformance test — each adapter binary needs its own", prev, m)
+		}
+		owner[ptr] = m
 	}
 }

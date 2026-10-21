@@ -477,6 +477,119 @@ func TestStaleSnapshotFailsOpen(t *testing.T) {
 	}
 }
 
+// A snapshot taken inside the closing part says the log was read THEN. When
+// the latest read failed, or the session ended, the log is unreadable AT the
+// close: rung 3, whatever the snapshot holds and however long the closing
+// part is. Without the mark, a Home Assistant lost late in a long window was
+// judged against its last good view, and a one-off record dropped as quiet.
+func TestUnreadableAtTheCloseOutranksAFreshSnapshot(t *testing.T) {
+	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue",
+		location: "light.py:88", countAtOpen: 1}
+	since := time.Date(2026, 8, 21, 12, 2, 0, 0, time.UTC)
+	for _, entries := range []map[string][]string{
+		{},                       // no predicate: would otherwise be rung 2's quiet drop
+		{"hue": {"loaded"}},      // a loaded entry: would otherwise be healthy
+		{"hue": {"setup_retry"}}, // still failing: rung 3 still answers first
+	} {
+		a := adapterWithSnapshot(&healthSnapshot{
+			records: map[string]logRecord{ref.key(): {Count: 1}},
+			entries: entries,
+			at:      since.Add(time.Second),
+		})
+		a.sources["ha-logs"].unreadable = true
+		if got := a.health(ref, since); got != verdictUnreadable {
+			t.Fatalf("entries %v: health = %v, want verdictUnreadable", entries, got)
+		}
+	}
+}
+
+// A source the adapter no longer serves was withdrawn, not lost: its pending
+// conditions are gone, and nothing is posted for it.
+func TestWithdrawnSourceIsGoneNotUnreadable(t *testing.T) {
+	a := &adapter{sources: map[string]*servedSource{}}
+	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue", location: "light.py:88"}
+	if got := a.health(ref, time.Now()); got != verdictGone {
+		t.Fatalf("health = %v, want verdictGone", got)
+	}
+}
+
+// readListing is what keeps the mark honest: a failed read sets it and keeps
+// the last snapshot, and the next successful read clears it.
+func TestReadListingMarksTheLogUnreadable(t *testing.T) {
+	ha := newFakeHA(t, "secret")
+	f, err := parseConfig(json.RawMessage(`{"endpoint":"` + ha.URL + `"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &adapter{sources: map[string]*servedSource{"ha-logs": {filter: f}}}
+	a.pending = newPendingQueue(a.health, func(string, []Signal) {})
+	unreadable := func() (bool, *healthSnapshot) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.sources["ha-logs"].unreadable, a.sources["ha-logs"].snapshot
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sess, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if _, err := a.readListing(ctx, "ha-logs", sess); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if flagged, snap := unreadable(); flagged || snap == nil {
+		t.Fatalf("after a good read: unreadable=%v snapshot=%v, want false and a snapshot", flagged, snap)
+	}
+	_, good := unreadable()
+
+	sess.Close()
+	if _, err := a.readListing(ctx, "ha-logs", sess); err == nil {
+		t.Fatal("a read on a closed session must fail")
+	}
+	if flagged, snap := unreadable(); !flagged || snap != good {
+		t.Fatalf("after a failed read: unreadable=%v, snapshot kept=%v, want true and true", flagged, snap == good)
+	}
+
+	again, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	defer again.Close()
+	if _, err := a.readListing(ctx, "ha-logs", again); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if flagged, _ := unreadable(); flagged {
+		t.Fatal("a successful read must clear the mark")
+	}
+}
+
+// A dwell flush can decide more integrations at once than one batch holds.
+// Every signal past the batch size must still reach the manager, in further
+// batches, rather than being cut with nothing reporting it.
+func TestPostSplitsMoreThanOneBatch(t *testing.T) {
+	fm := newFakeManager(t)
+	a := newTestAdapter(fm)
+	a.cap = newEmitCap(10 * maxBatchPerSrc)
+	total := 2*maxBatchPerSrc + 7
+	sigs := make([]Signal, total)
+	for i := range sigs {
+		sigs[i] = Signal{InitiationID: fmt.Sprintf("ha-logs@integration-%d", i)}
+	}
+	if !a.post(context.Background(), "ha-logs", sigs) {
+		t.Fatalf("post reported a failure: %+v", fm.Status())
+	}
+	posted := fm.Posted()
+	if len(posted) != total {
+		t.Fatalf("posted %d signals, want all %d", len(posted), total)
+	}
+	for i, sig := range posted {
+		if want := sigs[i].InitiationID; sig.InitiationID != want {
+			t.Fatalf("signal %d = %q, want %q (order kept)", i, sig.InitiationID, want)
+		}
+	}
+}
+
 func TestCredentialTokenErrors(t *testing.T) {
 	if _, err := credentialToken(SourceInfo{Name: "ha-logs"}); err == nil ||
 		!strings.Contains(err.Error(), "credentialsSecretRef") {

@@ -317,7 +317,7 @@ func TestCursorSkipsAlreadySeenEventsOnList(t *testing.T) {
 	fresh := evt("Warning", "prod", "Pod", "fresh", "BackOff")
 	fresh.LastTimestamp = "2026-08-08T13:00:00Z"
 
-	a.deliver(context.Background(), []Event{old, same, fresh}, true)
+	a.deliver(context.Background(), []Event{old, same, fresh}, pass{list: true})
 
 	got := mgr.signalsFor("src")
 	if len(got) != 1 || got[0].Labels["name"] != "fresh" {
@@ -340,7 +340,7 @@ func TestWatchPassIgnoresCursor(t *testing.T) {
 
 	old := evt("Warning", "prod", "Pod", "old", "BackOff")
 	old.LastTimestamp = "2026-08-08T11:00:00Z"
-	a.deliver(context.Background(), []Event{old}, false)
+	a.deliver(context.Background(), []Event{old}, pass{})
 
 	if len(mgr.signalsFor("src")) != 1 {
 		t.Fatal("watch-delivered events must not be filtered by the cursor")
@@ -354,7 +354,7 @@ func TestUndatedEventIsStillEmitted(t *testing.T) {
 	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
 	a.sources["src"].cursor = mustTime(t, "2026-08-08T12:00:00Z")
 
-	a.deliver(context.Background(), []Event{evt("Warning", "prod", "Pod", "undated", "BackOff")}, true)
+	a.deliver(context.Background(), []Event{evt("Warning", "prod", "Pod", "undated", "BackOff")}, pass{list: true})
 	if len(mgr.signalsFor("src")) != 1 {
 		t.Fatal("an undated event must not be dropped by the cursor check")
 	}
@@ -375,7 +375,7 @@ func TestFailedPostLeavesCursorAlone(t *testing.T) {
 
 	fresh := evt("Warning", "prod", "Pod", "fresh", "BackOff")
 	fresh.LastTimestamp = "2026-08-08T13:00:00Z"
-	a.deliver(context.Background(), []Event{fresh}, true)
+	a.deliver(context.Background(), []Event{fresh}, pass{list: true})
 
 	if !a.sources["src"].cursor.Equal(before) {
 		t.Fatalf("cursor advanced despite a failed post — events would be lost: %v", a.sources["src"].cursor)
@@ -511,7 +511,7 @@ func TestRelistBatchBoundDefersTheRemainderAndReportsIt(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	a.deliver(ctx, events, true)
+	a.deliver(ctx, events, pass{list: true})
 
 	got := mgr.signalsFor("src")
 	if len(got) != maxBatchPerSrc {
@@ -536,14 +536,14 @@ func TestRelistBatchBoundDefersTheRemainderAndReportsIt(t *testing.T) {
 	// A live event newer than the remainder must not carry the cursor past it.
 	live := evt("Warning", "prod", "Pod", "live", "BackOff")
 	live.LastTimestamp = base.Add(time.Hour).Format(time.RFC3339)
-	a.deliver(ctx, []Event{live}, false)
+	a.deliver(ctx, []Event{live}, pass{})
 	if !a.sources["src"].cursor.Equal(wantCursor) {
 		t.Fatalf("a watch pass advanced a held cursor past the unexamined remainder: %v", a.sources["src"].cursor)
 	}
 
 	// Later relists consider the remainder, and the last one releases the hold.
-	a.deliver(ctx, events, true)
-	a.deliver(ctx, events, true)
+	a.deliver(ctx, events, pass{list: true})
+	a.deliver(ctx, events, pass{list: true})
 	seen := map[string]bool{}
 	for _, s := range mgr.signalsFor("src") {
 		seen[s.Labels["name"]] = true
@@ -553,7 +553,7 @@ func TestRelistBatchBoundDefersTheRemainderAndReportsIt(t *testing.T) {
 			t.Fatalf("%s was never emitted — the bound lost it", name)
 		}
 	}
-	if a.sources["src"].cursorHeld {
+	if a.sources["src"].cursorHeld() {
 		t.Fatal("an unclipped relist must release the cursor hold")
 	}
 	if n := countReason(mgr, "BatchBoundReached"); n != 2 {
@@ -561,19 +561,116 @@ func TestRelistBatchBoundDefersTheRemainderAndReportsIt(t *testing.T) {
 	}
 }
 
-// A clipped pass whose next unexamined event shares the newest examined
-// timestamp keeps its read position strictly before it — the cursor skips
-// anything at or before itself.
-func TestBatchBoundKeepsTheCursorBeforeATiedUnexaminedEvent(t *testing.T) {
-	at := mustTime(t, "2026-08-08T12:00:00Z")
-	b := &sourceBatch{newest: at}
-	b.keepBefore(at)
-	if !b.newest.Before(at) {
-		t.Fatalf("a tie must move the read position before the unexamined event: %v", b.newest)
+// A run of events sharing one timestamp is finished, never split, so no
+// unexamined event can share the read position — the cursor skips anything at
+// or before itself, and only a strictly newer remainder is safe to defer.
+//
+// A run LONGER than the bound is the case splitting could never survive: the
+// read position could not advance past the run, so every relist re-posted the
+// same bound's worth and never reached the rest, and the hold it placed pinned
+// the cursor for good.
+func TestBatchBoundNeverSplitsARunSharingOneTimestamp(t *testing.T) {
+	mgr := newFakeManager()
+	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
+	a.cap = newEmitCap(10 * maxBatchPerSrc) // the emit cap is not under test here
+	base := mustTime(t, "2026-08-08T12:00:00Z")
+	a.sources["src"].cursor = base
+
+	tied := base.Add(time.Second)
+	const run = maxBatchPerSrc + 10
+	events := make([]Event, 0, run+5)
+	for i := 0; i < run; i++ {
+		e := evt("Warning", "prod", "Pod", fmt.Sprintf("tied-%03d", i), "BackOff")
+		e.LastTimestamp = tied.Format(time.RFC3339)
+		events = append(events, e)
 	}
-	b = &sourceBatch{newest: at}
-	b.keepBefore(at.Add(time.Second))
-	if !b.newest.Equal(at) {
-		t.Fatalf("a strictly newer remainder leaves the read position alone: %v", b.newest)
+	for i := 0; i < 5; i++ {
+		e := evt("Warning", "prod", "Pod", fmt.Sprintf("later-%d", i), "BackOff")
+		e.LastTimestamp = tied.Add(time.Duration(i+1) * time.Second).Format(time.RFC3339)
+		events = append(events, e)
+	}
+	ctx := context.Background()
+
+	a.deliver(ctx, events, pass{list: true})
+
+	if got := len(mgr.signalsFor("src")); got != run {
+		t.Fatalf("the whole tied run must be examined in one pass: posted %d want %d", got, run)
+	}
+	if !a.sources["src"].cursor.Equal(tied) {
+		t.Fatalf("the cursor must reach the tied run's timestamp: %v", a.sources["src"].cursor)
+	}
+	if st, ok := lastStatus(mgr, "BatchBoundReached"); !ok || !strings.Contains(st.Message, "5 event(s) unexamined") {
+		t.Fatalf("the strictly newer remainder is the clip, and is reported: %+v", mgr.allStatuses())
+	}
+
+	a.deliver(ctx, events, pass{list: true})
+	if got := len(mgr.signalsFor("src")); got != run+5 {
+		t.Fatalf("the next relist must reach the remainder and nothing already examined: %d posted", got)
+	}
+	if a.sources["src"].cursorHeld() {
+		t.Fatal("the unclipped relist must release the cursor hold")
+	}
+}
+
+// A source naming several namespaces is listed once per namespace. One
+// scope's clean pass says nothing about another scope's deferred remainder, so
+// it must neither release that hold nor carry the cursor past it.
+func TestOneScopesCleanListDoesNotReleaseAnothersHold(t *testing.T) {
+	mgr := newFakeManager()
+	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{"namespaces":["a","b"]}`))
+	a.cap = newEmitCap(10 * maxBatchPerSrc) // the emit cap is not under test here
+	base := mustTime(t, "2026-08-08T12:00:00Z")
+	a.sources["src"].cursor = base
+
+	const total = maxBatchPerSrc + 10
+	inA := make([]Event, 0, total)
+	for i := 1; i <= total; i++ {
+		e := evt("Warning", "a", "Pod", fmt.Sprintf("a-%03d", i), "BackOff")
+		e.LastTimestamp = base.Add(time.Duration(i) * time.Second).Format(time.RFC3339)
+		inA = append(inA, e)
+	}
+	newer := evt("Warning", "b", "Pod", "b-1", "BackOff")
+	newer.LastTimestamp = base.Add(time.Hour).Format(time.RFC3339)
+	ctx := context.Background()
+
+	a.deliver(ctx, inA, pass{scope: "a", list: true})
+	held := a.sources["src"].cursor
+	a.deliver(ctx, []Event{newer}, pass{scope: "b", list: true})
+
+	if !a.sources["src"].cursorHeld() {
+		t.Fatal("scope b's clean list released scope a's hold")
+	}
+	if !a.sources["src"].cursor.Equal(held) {
+		t.Fatalf("scope b's list carried the cursor past scope a's remainder: %v, held at %v",
+			a.sources["src"].cursor, held)
+	}
+
+	a.deliver(ctx, inA, pass{scope: "a", list: true})
+	seen := map[string]bool{}
+	for _, s := range mgr.signalsFor("src") {
+		seen[s.Labels["name"]] = true
+	}
+	for i := 1; i <= total; i++ {
+		if name := fmt.Sprintf("a-%03d", i); !seen[name] {
+			t.Fatalf("%s was never emitted — another scope's pass lost it", name)
+		}
+	}
+	if a.sources["src"].cursorHeld() {
+		t.Fatal("scope a's own clean relist must release its hold")
+	}
+}
+
+// A scope whose watcher is stopped will never list again, so its hold is
+// released — or the cursor would never move on a watch pass again.
+func TestStoppingAScopeReleasesItsCursorHold(t *testing.T) {
+	a := newTestAdapter(nil, nil, "src", mustFilter(t, `{"namespaces":["a"]}`))
+	a.sources["src"].holdCursor("gone", true)
+	a.watchers["gone"] = func() {}
+
+	a.reconcileWatchers(context.Background())
+	t.Cleanup(a.stopAllWatchers)
+
+	if a.sources["src"].cursorHeld() {
+		t.Fatal("a stopped scope's hold must be released")
 	}
 }

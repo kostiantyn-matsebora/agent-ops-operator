@@ -404,14 +404,15 @@ func (e *pendingEntry) evidence(now time.Time, note string) string {
 // pressure, BackoffLimitExceeded) ship with `for: 0` and so are never verified
 // at all.
 //
-// For a Pod the adapter's own view comes first: no cache, a cache that has not
-// synced, or a pods/replicasets grant found missing all answer unreadable (rung
-// 3) — a pod absent from a cache that could not have listed it is not gone.
+// For a Pod the adapter's own view comes first: no cache, a pods/replicasets
+// grant found missing, or no landed pod list covering the pod's namespace all
+// answer unreadable (rung 3) — a pod absent from a cache that could not have
+// listed it is not gone.
 func (a *adapter) health(ref objectRef) verdict {
 	if ref.kind != "Pod" {
 		return verdictUnknown
 	}
-	if a.cache == nil || !a.cache.Synced() || a.accessErr.Load() != nil {
+	if a.cache == nil || a.accessErr.Load() != nil {
 		return verdictUnreadable
 	}
 	oi, known := a.cache.Get(ref.ns, ref.kind, ref.name)

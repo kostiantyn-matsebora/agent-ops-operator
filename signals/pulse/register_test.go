@@ -23,9 +23,32 @@ type fakePulse struct {
 	creates  int
 	updates  int
 	fail     bool // when true, every call 500s (simulates Pulse being down)
-	// redactSecret, when true, blanks signingSecret on every GET — Pulse's
-	// real read posture — while headers come back verbatim.
-	redactSecret bool
+	// Every GET masks the stored secret and header values (maskLikePulse)
+	// unconditionally, because Pulse itself has no unmasked read.
+}
+
+// pulseMasked is what Pulse's GET /api/notifications/webhooks returns in
+// place of every stored header value and a configured signing secret.
+// Settled against Pulse's own source, not restated from this adapter:
+// internal/api/alerting/notifications.go GetWebhooks → maskedWebhookResponse
+// (maskedWebhookSecret), identical in v6.5.0 (the version payload.go was
+// confirmed live against) and on main as of 2026-10-21. Header KEYS come
+// back, header VALUES never do.
+const pulseMasked = "***REDACTED***"
+
+// maskLikePulse renders one stored webhook the way Pulse's list returns it.
+func maskLikePulse(wh pulseWebhookConfig) pulseWebhookConfig {
+	if wh.SigningSecret != "" {
+		wh.SigningSecret = pulseMasked
+	}
+	if len(wh.Headers) > 0 {
+		masked := make(map[string]string, len(wh.Headers))
+		for k := range wh.Headers {
+			masked[k] = pulseMasked
+		}
+		wh.Headers = masked
+	}
+	return wh
 }
 
 func (f *fakePulse) server(t *testing.T) *httptest.Server {
@@ -40,10 +63,7 @@ func (f *fakePulse) server(t *testing.T) *httptest.Server {
 		}
 		list := make([]pulseWebhookConfig, 0, len(f.webhooks))
 		for _, wh := range f.webhooks {
-			if f.redactSecret {
-				wh.SigningSecret = ""
-			}
-			list = append(list, wh)
+			list = append(list, maskLikePulse(wh))
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	})
@@ -574,7 +594,7 @@ func TestSigningSecretFlowsFromCredentialToVerification(t *testing.T) {
 func TestRotatedSigningSecretRepairsDespiteRedaction(t *testing.T) {
 	mgr := &fakeManager{}
 	mgrSrv := mgr.server(t)
-	pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}, redactSecret: true}
+	pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
 	pulseSrv := pulse.server(t)
 	a := &adapter{
 		mgr:      NewManager(mgrSrv.URL, "tok"),

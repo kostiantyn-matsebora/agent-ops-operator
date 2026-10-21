@@ -57,12 +57,52 @@ type servedSource struct {
 	// it are skipped on a startup/relist pass so a restart does not replay the
 	// cluster's entire event backlog.
 	cursor time.Time
-	// cursorHeld is set by a list pass that stopped at its batch bound with
-	// events left unexamined. Until a later list pass completes unclipped,
-	// watch passes do not advance the cursor — a live event newer than the
-	// deferred remainder would otherwise carry the cursor past it, and the
-	// next relist would skip what was never looked at.
-	cursorHeld bool
+	// heldBy names the scopes whose latest list pass stopped at its batch
+	// bound with events left unexamined. While any scope holds, no pass but
+	// that scope's own list moves the cursor — a live event, or another
+	// scope's list, newer than the deferred remainder would otherwise carry
+	// the cursor past it, and the next relist would skip what was never
+	// looked at. Per scope, because a source naming several namespaces is
+	// listed once per namespace, and one scope's clean pass says nothing
+	// about another's remainder.
+	heldBy map[string]bool
+}
+
+// holdCursor records whether a scope's latest list pass left a remainder.
+func (s *servedSource) holdCursor(scope string, held bool) {
+	if !held {
+		delete(s.heldBy, scope)
+		return
+	}
+	if s.heldBy == nil {
+		s.heldBy = map[string]bool{}
+	}
+	s.heldBy[scope] = true
+}
+
+// cursorHeld reports whether any scope's deferred remainder pins the cursor.
+func (s *servedSource) cursorHeld() bool {
+	return len(s.heldBy) > 0
+}
+
+// mayAdvance reports whether a pass may move the cursor: when no scope holds
+// it, or when the only scope holding it is this pass's own list — the newest
+// event that list examined is an honest read position for its own scope.
+func (s *servedSource) mayAdvance(p pass) bool {
+	for scope := range s.heldBy {
+		if !p.list || scope != p.scope {
+			return false
+		}
+	}
+	return true
+}
+
+// pass names where a batch was read: the namespace scope its watcher covers
+// ("" for cluster-wide), and whether it is a list — cursor-gated and bounded —
+// or a live watch frame.
+type pass struct {
+	scope string
+	list  bool
 }
 
 type adapter struct {
@@ -239,7 +279,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		src := &servedSource{filter: f}
 		if prev, ok := a.sources[info.Name]; ok {
 			src.cursor = prev.cursor // config edits must not replay history
-			src.cursorHeld = prev.cursorHeld
+			src.heldBy = prev.heldBy
 		} else {
 			src.cursor = a.loadCursor(ctx, info.Name)
 		}
@@ -315,6 +355,7 @@ func (a *adapter) reconcileWatchers(ctx context.Context) {
 		if !want[scope] {
 			cancel()
 			delete(a.watchers, scope)
+			a.releaseCursorHolds(scope)
 			log.Printf("stopped watcher for scope %q", scopeName(scope))
 		}
 	}
@@ -326,6 +367,16 @@ func (a *adapter) reconcileWatchers(ctx context.Context) {
 		a.watchers[scope] = cancel
 		go a.watchScope(wctx, scope)
 		log.Printf("watching events in scope %q", scopeName(scope))
+	}
+}
+
+// releaseCursorHolds drops a stopped scope's cursor holds. No list pass will
+// run in that scope again to release them, and whichever scope now covers its
+// namespaces lists from the held cursor, so the remainder is still considered.
+// Called with a.mu held.
+func (a *adapter) releaseCursorHolds(scope string) {
+	for _, src := range a.sources {
+		src.holdCursor(scope, false)
 	}
 }
 
@@ -456,10 +507,10 @@ func (a *adapter) watchScope(ctx context.Context, scope string) {
 		}
 		// The initial list is the replay-prone one: filter it against each
 		// source's cursor so a restart re-emits nothing.
-		a.deliver(ctx, events, true)
+		a.deliver(ctx, events, pass{scope: scope, list: true})
 
 		err = a.kube.WatchEvents(ctx, scope, rv, func(ev Event) {
-			a.deliver(ctx, []Event{ev}, false)
+			a.deliver(ctx, []Event{ev}, pass{scope: scope})
 		})
 		switch {
 		case ctx.Err() != nil:
@@ -479,8 +530,8 @@ func (a *adapter) watchScope(ctx context.Context, scope string) {
 // Post-then-persist: a crash between the two re-posts the same initiationIds,
 // which the manager's cooldown absorbs. Losing an event would be the worse
 // failure, so the ordering is deliberate.
-func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
-	if fromList {
+func (a *adapter) deliver(ctx context.Context, events []Event, p pass) {
+	if p.list {
 		// A list pass is examined OLDEST FIRST. The batch bound may stop it
 		// part-way, and only in time order is "the newest examined event" a
 		// read position that every unexamined event lies at or after.
@@ -495,7 +546,7 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 	sort.Strings(names)
 	batches := map[string]*sourceBatch{}
 	for _, name := range names {
-		b := a.examine(name, a.sources[name], events, fromList, now)
+		b := a.examine(name, a.sources[name], events, p.list, now)
 		// A batch with no immediate signals but a fresh timestamp still
 		// matters: its events went into the dwell queue or the owner hold, and
 		// the cursor must move. A clipped one must be reported either way.
@@ -506,7 +557,7 @@ func (a *adapter) deliver(ctx context.Context, events []Event, fromList bool) {
 	a.mu.Unlock()
 
 	for name, b := range batches {
-		a.commit(ctx, name, b, fromList)
+		a.commit(ctx, name, b, p)
 	}
 }
 
@@ -529,16 +580,22 @@ func (b *sourceBatch) observe(when time.Time) {
 
 // examine runs one source's pipeline over a pass. Called with a.mu held.
 //
-// The batch bound stops examination outright: past it, nothing is looked at,
-// and the read position is kept strictly BEFORE the first unexamined event so
-// a later list pass considers the remainder rather than skipping it.
+// The batch bound stops examination outright, at the first event NEWER than
+// the last one examined: past it, nothing is looked at, so every unexamined
+// event lies strictly after the read position and a later list pass considers
+// the remainder rather than skipping it.
+//
+// A run of events sharing one timestamp is finished, never split. The cursor
+// is a timestamp and cannot point between them, so a split run would leave
+// the read position before the whole run — and a run longer than the bound
+// would then pin every pass at the same place, re-posting the same bound's
+// worth and never reaching the rest.
 func (a *adapter) examine(name string, src *servedSource, events []Event, fromList bool, now time.Time) *sourceBatch {
 	b := &sourceBatch{}
 	for i := range events {
 		ev := &events[i]
-		if len(b.signals) >= maxBatchPerSrc {
+		if len(b.signals) >= maxBatchPerSrc && !ev.When().Equal(events[i-1].When()) {
 			b.unexamined = len(events) - i
-			b.keepBefore(ev.When())
 			break
 		}
 		// Self-exclusion runs FIRST — before matching, before the cursor.
@@ -580,15 +637,6 @@ func (a *adapter) examine(name string, src *servedSource, events []Event, fromLi
 	return b
 }
 
-// keepBefore caps the read position strictly before the first unexamined
-// event. Events are in time order, so only one sharing the newest examined
-// timestamp needs this: the cursor skips anything at or before itself.
-func (b *sourceBatch) keepBefore(firstUnexamined time.Time) {
-	if !firstUnexamined.IsZero() && !b.newest.Before(firstUnexamined) {
-		b.newest = firstUnexamined.Add(-time.Nanosecond)
-	}
-}
-
 // admitOutcome is what the pipeline did with one event.
 type admitOutcome int
 
@@ -628,13 +676,15 @@ func (a *adapter) admit(name string, src *servedSource, ev *Event, now time.Time
 }
 
 // commit posts one source's batch and moves its read position.
-func (a *adapter) commit(ctx context.Context, name string, b *sourceBatch, fromList bool) {
-	if fromList {
-		// A clean list pass releases a hold a clipped one placed; a clipped
-		// one places it. Set before the post, so a failed post still holds.
+func (a *adapter) commit(ctx context.Context, name string, b *sourceBatch, p pass) {
+	if p.list {
+		// A clean list pass releases the hold its scope's clipped one placed;
+		// a clipped one places it. Set before the post, so a failed post still
+		// holds. A pass finishing after its scope was stopped places nothing:
+		// no list will run there again to release it (releaseCursorHolds).
 		a.mu.Lock()
-		if src, ok := a.sources[name]; ok {
-			src.cursorHeld = b.unexamined > 0
+		if src, ok := a.sources[name]; ok && ctx.Err() == nil {
+			src.holdCursor(p.scope, b.unexamined > 0)
 		}
 		a.mu.Unlock()
 	}
@@ -651,7 +701,7 @@ func (a *adapter) commit(ctx context.Context, name string, b *sourceBatch, fromL
 	}
 	a.mu.Lock()
 	src, ok := a.sources[name]
-	advance := ok && b.newest.After(src.cursor) && (fromList || !src.cursorHeld)
+	advance := ok && b.newest.After(src.cursor) && src.mayAdvance(p)
 	if advance {
 		src.cursor = b.newest
 	}
@@ -697,8 +747,8 @@ func (a *adapter) releaseHeld(ctx context.Context, now time.Time) {
 	for i := range ready {
 		it := &ready[i]
 		src, ok := a.sources[it.source]
-		if !ok {
-			continue // source no longer served
+		if !ok || !src.filter.Matches(&it.ev) {
+			continue // source no longer served, or its config edit no longer covers the event
 		}
 		// Self-exclusion again: mechanism 2 may answer now that the cache
 		// knows the object, where it could not at first sight.

@@ -269,7 +269,7 @@ func TestDeliverSuppressesEventsOnADrainingNode(t *testing.T) {
 
 	ev := evt("Warning", "prod", "Pod", "cilium-abc", "NodeNotReady")
 	ev.LastTimestamp = "2026-08-08T13:00:00Z"
-	a.deliver(context.Background(), []Event{ev}, false)
+	a.deliver(context.Background(), []Event{ev}, pass{})
 
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("an event on a draining node must not be emitted: %+v", got)
@@ -304,7 +304,7 @@ func TestDrainSuppressionRunsBeforeInhibitionAndNeverDoubleCounts(t *testing.T) 
 
 	cause := evt("Warning", "prod", "Pod", "cilium-abc", "NodeNotReady")
 	cause.LastTimestamp = "2026-08-08T13:00:00Z"
-	a.deliver(context.Background(), []Event{cause}, false)
+	a.deliver(context.Background(), []Event{cause}, pass{})
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("the cause event must be drain-suppressed, not emitted: %+v", got)
 	}
@@ -315,7 +315,7 @@ func TestDrainSuppressionRunsBeforeInhibitionAndNeverDoubleCounts(t *testing.T) 
 	a.cache.put(&objectInfo{Kind: "Node", Name: "node-a"})
 	target := evt("Warning", "prod", "Pod", "cilium-abc", "Unhealthy")
 	target.LastTimestamp = "2026-08-08T13:05:00Z"
-	a.deliver(context.Background(), []Event{target}, false)
+	a.deliver(context.Background(), []Event{target}, pass{})
 
 	got := mgr.signalsFor("src")
 	if len(got) != 1 || got[0].Labels["alertname"] != "Unhealthy" {

@@ -673,6 +673,24 @@ func TestUnsyncedCacheMakesAPodUnreadable(t *testing.T) {
 	}
 }
 
+// A cache whose node list landed but whose pod list has not — the node list is
+// small and lands first, and a pod list may keep failing short of a 403 — is
+// still unreadable for a pod. Reading that absence as "gone" would drop the
+// entry as healed during the adapter's own outage.
+func TestAPartlyListedCacheMakesAPodUnreadableNotGone(t *testing.T) {
+	c := newObjectCache()
+	c.markListed("Node", "")
+	c.markListed("ReplicaSet", "prod")
+	a := adapterWithCache(c)
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("no pod list landed: got verdict %d want unreadable", got)
+	}
+	c.markListed("Pod", "prod")
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictGone {
+		t.Fatalf("absent from a landed pod list: got verdict %d want gone", got)
+	}
+}
+
 // Denied pod reads leave a cache that looks synced (the node watcher listed)
 // but could never have held the pod. Reading that absence as "gone" would turn
 // a missing grant into a clean bill of health.

@@ -122,6 +122,11 @@ type servedSource struct {
 	key string
 	// snapshot is the verification ladder's view of this instance.
 	snapshot *healthSnapshot
+	// unreadable is set when the latest log read failed or the session that
+	// carries reads ended, and cleared by the next successful read. A snapshot
+	// inside the closing part says the log was read THEN — this says whether
+	// it still can be, which is what "unreadable at the close" asks.
+	unreadable bool
 	// standing is, per surface, the set of condition keys currently standing
 	// — the dedup for STATES, as seen is for occurrences. A condition is fed to
 	// consider when it enters the set and forgotten when it leaves, so its
@@ -266,6 +271,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			// unless they changed where or as whom we connect.
 			src.cursor = prev.cursor
 			src.snapshot = prev.snapshot
+			src.unreadable = prev.unreadable
 			src.seen = prev.seen
 			src.standing = prev.standing
 			src.pendingUpdates = prev.pendingUpdates
@@ -395,6 +401,11 @@ func (a *adapter) runSession(ctx context.Context, source string) {
 		case <-sess.Done():
 			a.mu.Lock()
 			delete(a.sessions, source)
+			// No session, no reads: the log stays unreadable until a
+			// reconnected session's first read succeeds.
+			if src, ok := a.sources[source]; ok {
+				src.unreadable = true
+			}
 			a.mu.Unlock()
 			if ctx.Err() == nil {
 				err := sess.Err()
@@ -837,16 +848,31 @@ func (a *adapter) connectionFor(source string) (endpoint, token string, ok bool)
 	return src.filter.endpoint, src.token, true
 }
 
-// post sends a batch through the emit cap and reports clipping. It is the
+// post sends signals through the emit cap and reports clipping. It is the
 // single exit from this adapter: both the immediate path and the dwell queue go
 // through it, so the cap cannot be bypassed by one of them.
+//
+// More than maxBatchPerSrc signals — a dwell flush deciding many integrations
+// at once — go out as several batches, never cut to the first: a signal past
+// the batch size would otherwise vanish with nothing reporting it, where the
+// cap reports every signal it clips. It reports true only if every batch was
+// handed over.
 func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 	if len(sigs) == 0 {
 		return false
 	}
-	if len(sigs) > maxBatchPerSrc {
-		sigs = sigs[:maxBatchPerSrc]
+	posted := true
+	for len(sigs) > 0 {
+		n := min(len(sigs), maxBatchPerSrc)
+		posted = a.postBatch(ctx, source, sigs[:n]) && posted
+		sigs = sigs[n:]
 	}
+	return posted
+}
+
+// postBatch sends one batch of at most maxBatchPerSrc signals — the size the
+// payload clamp's per-signal share is computed for.
+func (a *adapter) postBatch(ctx context.Context, source string, sigs []Signal) bool {
 	allowed, clipped := a.cap.Allow(source, sigs)
 	if len(allowed) == 0 {
 		a.reportClipping(ctx, source, clipped)
@@ -955,14 +981,20 @@ func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSe
 // to consider. ONE read serves both jobs: a snapshot older than the record
 // just considered could not see the recurrence that was just fed in.
 //
-// A failed read leaves the previous snapshot in place rather than clearing it:
-// the ladder's answer for "cannot say" already exists, and clearing would turn
-// a momentary hiccup into a verdict.
+// A failed read leaves the previous snapshot in place rather than clearing it,
+// and marks the source unreadable instead: the snapshot still records what
+// was last observed, the mark says the log cannot be observed now, and the
+// ladder's rung 3 reads both.
 func (a *adapter) readListing(ctx context.Context, source string, sess *haSession) (listing, error) {
 	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
 	defer cancel()
 	records, err := sess.SystemLog(cctx)
 	if err != nil {
+		a.mu.Lock()
+		if src, ok := a.sources[source]; ok {
+			src.unreadable = true
+		}
+		a.mu.Unlock()
 		return listing{}, err
 	}
 	snap := &healthSnapshot{
@@ -999,6 +1031,7 @@ func (a *adapter) readListing(ctx context.Context, source string, sess *haSessio
 	a.mu.Lock()
 	if src, ok := a.sources[source]; ok {
 		src.snapshot = snap
+		src.unreadable = false
 	}
 	a.mu.Unlock()
 	return out, nil
@@ -1018,14 +1051,24 @@ type listing struct {
 //
 //	rung 1  the integration has config entries -> is any of them still failing?
 //	rung 2  no predicate -> was the record STILL occurring as the window closed?
-//	rung 3  no snapshot, or a stale one -> the log is unreadable: verdictUnreadable
+//	rung 3  the log is unreadable at the close -> verdictUnreadable
 //
 // Rung 3 is checked FIRST and is distinct from rung 2's "no predicate": rung 2
 // judges recurrence from a log that was read through the close, rung 3 has no
-// such read to judge from. A snapshot is stale when it was taken before the
-// window's closing part began — the flusher refreshes every dwellTick while
-// anything is pending, so a healthy session always lands one inside that part,
-// and a failed read leaves the old one in place to age out into this verdict.
+// such read to judge from. The log is unreadable when any of these holds:
+//
+//   - no snapshot was ever taken
+//   - the snapshot is stale: taken before the window's closing part began. The
+//     flusher refreshes every dwellTick while anything is pending, so a healthy
+//     session always lands one inside that part
+//   - the latest read failed, or the session ended (servedSource.unreadable).
+//     A snapshot inside the closing part proves the log was read then, not
+//     that it still can be — without this, an instance lost late in a long
+//     window would be judged quiet for up to a third of the dwell
+//
+// A source no longer served is none of these. It was withdrawn, not lost, so
+// its conditions are gone: the adapter posts nothing for a source it does not
+// serve.
 //
 // Only integrations with config entries carry a predicate. Core loggers (and
 // YAML-configured integrations, which have no entries) fall to rung 2
@@ -1041,16 +1084,17 @@ type listing struct {
 func (a *adapter) health(ref recordRef, since time.Time) verdict {
 	a.mu.Lock()
 	src, ok := a.sources[ref.source]
-	var snap *healthSnapshot
+	if !ok {
+		a.mu.Unlock()
+		return verdictGone
+	}
+	snap, unreadable := src.snapshot, src.unreadable
 	standing, isSurface, surfaceRead := false, false, false
-	if ok {
-		snap = src.snapshot
-		if surface := surfaceOfName(ref.logger); surface != "" {
-			isSurface = true
-			set, read := src.standing[surface]
-			surfaceRead = read
-			standing = set[ref.logger+"@"+ref.location]
-		}
+	if surface := surfaceOfName(ref.logger); surface != "" {
+		isSurface = true
+		set, read := src.standing[surface]
+		surfaceRead = read
+		standing = set[ref.logger+"@"+ref.location]
 	}
 	a.mu.Unlock()
 	// A surface condition's own truth is whether it still stands on the
@@ -1066,7 +1110,7 @@ func (a *adapter) health(ref recordRef, since time.Time) verdict {
 		}
 		return verdictHealthy
 	}
-	if snap == nil || snap.at.Before(since) {
+	if snap == nil || snap.at.Before(since) || unreadable {
 		return verdictUnreadable
 	}
 

@@ -15,9 +15,15 @@ import (
 // FakePulse is the slice of Pulse's REST API signal-pulse speaks: the
 // notification-webhooks list, create and update calls, behind Pulse's
 // bearer API token. It stores what the adapter registered, and redacts the
-// signing secret on read the way Pulse does, so the adapter's
-// create-or-repair comparison runs against the shape it meets in
-// production.
+// signing secret on read.
+//
+// THE SHAPE IS signals/pulse's OWN READING OF PULSE'S SOURCE, NOT A CAPTURE —
+// the paths, the WebhookConfig field names, the redaction and the bearer
+// scheme are restated from register.go's doc comments. So this double lets
+// the suite pin the agent-ops side of the contract (normalization, ids,
+// scoping, refusal, failure), but it cannot catch the adapter being wrong
+// about Pulse itself. That half needs a live Pulse (payload.go records which
+// fields one has confirmed).
 type FakePulse struct {
 	srv   *httptest.Server
 	Token string
@@ -76,7 +82,9 @@ func (f *FakePulse) Unauthorized() int {
 
 func (f *FakePulse) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != f.Token {
+		// The exact scheme, never a bare token: TrimPrefix alone would accept
+		// an Authorization header that dropped "Bearer ".
+		if got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); !ok || got != f.Token {
 			f.mu.Lock()
 			f.unauthorized++
 			f.mu.Unlock()

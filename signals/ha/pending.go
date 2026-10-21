@@ -32,9 +32,9 @@ const (
 	verdictUnhealthy                // it exists and is still broken
 	verdictUnknown                  // it was observed, but no predicate says whether it is broken
 	// verdictUnreadable: the adapter's own view is unreadable — no snapshot,
-	// or none taken within the window's closing part — so nothing about the
-	// close was observed at all. Distinct from verdictUnknown: recurrence can
-	// only be judged from a log that was actually read.
+	// none taken within the window's closing part, or the latest read failed —
+	// so the close was not observed. Distinct from verdictUnknown: recurrence
+	// can only be judged from a log that was actually read.
 	verdictUnreadable
 )
 

@@ -33,7 +33,7 @@ func TestACacheCatchingUpDoesNotSplitAWorkload(t *testing.T) {
 	a, mgr := heldAdapter(t)
 	ctx := context.Background()
 
-	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "api-7f8d9-xk2p9", "BackOff")}, false)
+	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "api-7f8d9-xk2p9", "BackOff")}, pass{})
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("an unresolved pod must be held, not emitted per-pod: %+v", got)
 	}
@@ -69,7 +69,7 @@ func TestAnUnresolvedOwnerIsReleasedAfterOneTick(t *testing.T) {
 	a, mgr := heldAdapter(t)
 	ctx := context.Background()
 
-	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "gone-pod", "BackOff")}, false)
+	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "gone-pod", "BackOff")}, pass{})
 	a.releaseHeld(ctx, time.Now().Add(ownerResolveWait-time.Second))
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("released before the bound: %+v", got)
@@ -87,7 +87,7 @@ func TestAnUnownedPodIsNotHeld(t *testing.T) {
 	a, mgr := heldAdapter(t)
 	putPod(t, a.cache, podJSON("prod", "bare", "n1", nil, nil, false, "Running"))
 
-	a.deliver(context.Background(), []Event{evt("Warning", "prod", "Pod", "bare", "BackOff")}, false)
+	a.deliver(context.Background(), []Event{evt("Warning", "prod", "Pod", "bare", "BackOff")}, pass{})
 
 	got := mgr.signalsFor("src")
 	if len(got) != 1 || got[0].InitiationID != "src@prod/Pod/bare" || a.held.Len() != 0 {
@@ -100,7 +100,7 @@ func TestAnUnownedPodIsNotHeld(t *testing.T) {
 func TestANodeEventIsNeverHeld(t *testing.T) {
 	a, mgr := heldAdapter(t)
 
-	a.deliver(context.Background(), []Event{evt("Warning", "", "Node", "node-1", "NodeNotReady")}, false)
+	a.deliver(context.Background(), []Event{evt("Warning", "", "Node", "node-1", "NodeNotReady")}, pass{})
 
 	if got := mgr.signalsFor("src"); len(got) != 1 || a.held.Len() != 0 {
 		t.Fatalf("a Node event must emit immediately: %+v", got)
@@ -113,7 +113,7 @@ func TestAHeldEventIsSelfExcludedAtRelease(t *testing.T) {
 	a, mgr := heldAdapter(t)
 	ctx := context.Background()
 
-	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "worker-x", "BackOff")}, false)
+	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "worker-x", "BackOff")}, pass{})
 	putPod(t, a.cache, podJSON("prod", "worker-x", "n1", map[string]string{"agentops.dev/conversation": "c"},
 		nil, false, "Running"))
 	a.releaseHeld(ctx, time.Now())
