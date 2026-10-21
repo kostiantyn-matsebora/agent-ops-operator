@@ -143,7 +143,7 @@ the behaviour, design.md the approach.
 
 ## 9. System tests
 
-- [ ] 9.1 extend the system pack's storage-outage coverage to assert the
+- [x] 9.1 extend the system pack's storage-outage coverage to assert the
   real claude runtime reports `unavailable` (never `continued`) through a
   failed resume, and run the pack (`go test -tags system`) against this
   working copy's tree — not the default branch's images.
