@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 2.0.0**
+**Version 2.1.0**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -94,7 +94,7 @@ surface.
 
 | Status | Body |
 |---|---|
-| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `initiationId` (naming the field, never synthesized — `MGR-3`), or a `chat` signal missing its channel label (`LANE-2`) |
+| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `initiationId` (naming the field, never synthesized — `MGR-3`), a `chat` signal missing its channel label (`LANE-2`), or any signal's `severity` outside the four accepted values (`API-6`) |
 | `401` / `403` | see [Security posture](#security-posture) |
 | `200` | `{"queued": <n>, "conversations": <n>, "reason": "<optional>"}` |
 
@@ -108,11 +108,13 @@ surface.
 | `payload` | string | no | The raw content handed to the agent, stored out of band. Never parsed as prose by the manager. |
 | `kind` | string | no | Selects the [lane](#lanes). Absent reads as `alert`. |
 | `reader` | string | no | `chat` lane only. An opaque, salted hash of the sender — never an identity — used only to stamp their own read watermark so their own message is not shown back to them as unread. |
+| `severity` | string | no | One of `critical`, `error`, `warning`, `info` — see [Enums](#enums). Absent means unrated, the only state a signal carried before this field existed. Unrelated to any adapter's own `severity` label — see [Compatibility](#compatibility). |
 
 | ID | Requirement |
 |---|---|
 | `API-2` | `queued`/`conversations` count the signals accepted and the conversations they touched, which may be fewer than `len(signals)` under cooldown. |
 | `API-3` | At-least-once delivery MUST be safe. A re-sent `initiationId` within the source's cooldown window collapses rather than opening a second conversation. |
+| `API-6` | A `severity` outside the four accepted values MUST refuse the WHOLE batch with `400`, naming the four accepted values. No adapter is required to send it. |
 
 ## Lanes
 
@@ -265,6 +267,7 @@ An adapter implementing none of these stays fully conformant — see
 | Enum | Values | Reading |
 |---|---|---|
 | `kind` | `alert`, `job`, `task`, `chat` | Absent or unrecognized reads as `alert`. |
+| `severity` | `critical`, `error`, `warning`, `info` | Absent means unrated. Unrecognized refuses the whole batch with `400` (`API-6`). |
 
 ## Bounds
 
@@ -283,6 +286,7 @@ An adapter implementing none of these stays fully conformant — see
 | `COMPAT-2` | The manager MUST ignore inbound payload fields it does not know. |
 | `COMPAT-3` | An adapter MUST ignore source-listing fields it does not know. |
 | `COMPAT-4` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
+| `COMPAT-5` | `severity` is UNRELATED to any adapter-defined `severity` **label**. `signals/k8s-events` and `signals/ha` each write their own `severity` label on their own scale, read by nothing as this field — see [concepts](../concepts.md#signalsource). |
 
 | Version part | Moves when |
 |---|---|
@@ -296,9 +300,18 @@ An adapter implementing every requirement on this page except [Optional
 capabilities](#optional-capabilities) is fully conformant — no optional
 capability is required, see [Compatibility](#compatibility).
 
+`severity` is purely additive and optional to send (`COMPAT-2`).
+
+| Adapter | Sends `severity` |
+|---|---|
+| `signals/cron`, `signals/alertmanager`, `signals/k8s-events`, `signals/ha`, `signals/telegram` | none of them, today |
+
+All five stay fully conformant with this version unchanged.
+
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.1.0 | 2026-10-21 | A normalized signal may carry an optional `severity` — one of `critical`, `error`, `warning`, `info` (`API-6`, [Enums](#enums)). Unmapped refuses the whole batch with `400` naming the four values. Unrelated to any adapter's own `severity` **label** (`COMPAT-5`). ADDITIVE: no shipped adapter sends it yet, and none needs to change to stay conformant. |
 | 2.0.0 | 2026-10-18 | BREAKING. `fingerprint` is replaced by the sender-minted `initiationId`, required on every signal — minted where the sender's aggregation already happens, or propagated verbatim from a round-tripped `conversationId`. The manager's grouping provision (`labels`×`signatureLabels`, window reuse) is removed — routing is pure `conversationId` equality, and cooldown keys on `initiationId`. A missing `initiationId` is rejected `4xx` naming the field, with no compatibility shim — a `1.x` adapter gets the same rejection. |
 | 1.0.0 | 2026-10-17 | Initial release. |

@@ -130,6 +130,12 @@ next signal's `initiationId` — never re-derive it.
 signal must carry the label `agentops.dev/channel` (`LANE-3`), or the post is
 refused — its reply would have nowhere to go.
 
+A signal may also carry `severity` — one of `critical`, `error`, `warning`,
+`info` — see
+[Normalized signal]({{ '/contracts/signal-adapter/' | relative_url }}#normalized-signal).
+No shipped adapter sets it yet, so leaving it out is correct, not
+incomplete.
+
 **Verify:** every signal in your batch names a `kind` from the table above,
 and any `chat` one carries `agentops.dev/channel` — station 3 is where the
 refusal would otherwise surface.

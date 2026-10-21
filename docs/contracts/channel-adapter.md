@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.1.0**
+**Version 1.2.0**
 
 This specification gives everything necessary to build and maintain a
 `ChannelAdapter` — a component agent-ops does not ship, that carries a
@@ -317,6 +317,7 @@ presentation.
 | `source` | string | no | *(signal)* The `SignalSource` the input came from. |
 | `title` | string | no | *(signal)* The conversation title. |
 | `labels` | map of string to string | no | *(signal)* The signal's grouping labels. |
+| `severity` | string | no | *(signal)* One of `critical`, `error`, `warning`, `info` — see [Enums](#enums). Absent means the originating signal carried none. ADDITIVE: an adapter ignoring it stays fully conformant. |
 | `inputRef` | string | no | *(signal)* The `ConversationInput` holding the full payload. |
 | `originKind` | string | no | *(signal)* `signal`, `channel`, or `member` — purely additive, for an adapter that distinguishes a coordination member's result from an ordinary signal. |
 | `choices` | array of [Choice](#a-message-choice) | no | *(any kind)* Offered actions. Never dropped — they are the reader's only account of what is on offer. |
@@ -467,6 +468,7 @@ An adapter implementing none of these stays fully conformant — see
 | `status` | `succeeded`, any other string | Reported on an `answer`, from the run's own outcome. |
 | `outcome` (read report) | `marked`, `skipped`, `failed` | — |
 | `originKind` | `signal`, `channel`, `member` | — |
+| `severity` | `critical`, `error`, `warning`, `info` | *(signal)* Absent means the originating signal carried none — see [signal adapter `API-6`](signal-adapter.md#post-signalinbound). |
 
 ## Compatibility
 
@@ -502,9 +504,19 @@ An adapter implementing every requirement on this page except
 [Optional capabilities](#optional-capabilities) is fully conformant — no
 optional capability is required.
 
+`severity` on the typed message is purely additive (`COMPAT-2`).
+
+| Adapter | Treats `severity` as |
+|---|---|
+| `channels/telegram` | an unknown field, ignored |
+| `platform/console` | a presentation choice local to its own signal card |
+
+Both stay fully conformant with this version unchanged.
+
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
+| 1.2.0 | 2026-10-21 | The typed message's `signal` kind may carry an optional `severity` — one of `critical`, `error`, `warning`, `info`, mirroring the signal adapter contract's own field. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.1.0 | 2026-10-18 | Every `/channel/ops` operation additionally carries the conversation's `conversationId` (`OPS-9`, `MGR-12`), opaque to the adapter. A channel adapter MUST NOT mint one (`ADA-14`, `IN-4`) — it only translates it to and from the transport's thread id. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.0.0 | 2026-10-17 | Initial release. |

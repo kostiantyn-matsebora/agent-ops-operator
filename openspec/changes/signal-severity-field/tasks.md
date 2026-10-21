@@ -80,64 +80,57 @@
 - [x] 7.1 `docs/concepts.md`: note the normalized signal shape's optional
   `severity` field and its vocabulary, distinct from any adapter's own
   `severity` label.
-- [ ] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
+- [x] 7.2 `docs/contracts.md`: the inbound signal shape and the `signal`
   message shape both gain `severity`.
-  - **BLOCKED, not done.** No shape table lives on this page — both
-    shapes live on the two LOCKED pages below, 7.2a and 7.2b.
+  - No shape table lives on this page — both shapes live on the two
+    LOCKED pages below, 7.2a and 7.2b, now written. Nothing on this
+    page's own text names a field, so nothing here changes.
 
-| Blocked page | Locked by | Same-change conformance owed |
+| Locked page | Locked by | Same-change conformance |
 |---|---|---|
 | `docs/contracts/signal-adapter.md` (7.2a) | `.claude/rules/signal-rules.md` | `cron`, `alertmanager`, `k8s-events`, `ha`, `telegram` |
 | `docs/contracts/channel-adapter.md` (7.2b) | `.claude/rules/channel-spec.md` | `channels/telegram`, `platform/console` |
 
-Both rule files read the same: never edited without the user's explicit
-approval.
+The user approved both edits, 2026-10-21, plus their conformance bumps.
 
-- This change's own `design.md` scopes the conformance work out on
-  purpose (Non-Goals: "Mapping any shipped adapter onto the field").
-- The code is already correct and additive — only the two spec pages are
-  unwritten.
-- Either resolution is the user's call: approve both edits plus their
-  conformance bumps, or accept the field as undocumented for now.
-
-- [ ] 7.2a `docs/contracts/signal-adapter.md`: the optional `severity` field,
+- [x] 7.2a `docs/contracts/signal-adapter.md`: the optional `severity` field,
   its four-value vocabulary, and the 400 refusal of an unmapped value.
-  - **BLOCKED, not done — a human decision.** See the table above.
-- [ ] 7.2b `docs/contracts/channel-adapter.md`: the outbound `signal`
+  - Bumped 2.0.0 → 2.1.0 (MINOR — a new optional field). Added `API-6`
+    (the refusal), the `severity` enum, and `COMPAT-5` (distinct from
+    the pre-existing `severity` label). `severity` is purely additive
+    and optional to send — every listed adapter sends none of it today
+    and stays fully conformant with this version unchanged, per the new
+    Conformance-section note.
+- [x] 7.2b `docs/contracts/channel-adapter.md`: the outbound `signal`
   message's "Message fields" table gains `severity`.
-  - **BLOCKED, not done — a human decision.** See the table above. This
-    is the page this PR's own code touches directly:
-    `internal/chat/message.go`'s `Message`/`SignalMessage` is exactly
-    the surface that table describes, and one of its two named adapters
-    (`platform/console`) is wired to draw the field.
+  - Bumped 1.1.0 → 1.2.0 (MINOR). `internal/chat/message.go`'s
+    `Message`/`SignalMessage` is exactly the surface that table
+    describes. `channels/telegram` ignores the field as any other
+    unknown one. `platform/console` draws it as a presentation choice.
+    Both stay fully conformant, per the new Conformance-section note.
 - [x] 7.3 Re-run `python3 .github/scripts/docs-generate.py` and commit the
   regenerated `docs/cr-reference.md` blocks for the two CRD-backed types.
 - [x] 7.4 `docs/console.md`: what the signal card now draws when present.
 - [x] 7.5 `docs/CHANGELOG.md`: add an entry for the new optional field,
   marked non-breaking.
-- [ ] 7.6 `docs/guides/signal-adapter.md`: note that `severity` is a
+- [x] 7.6 `docs/guides/signal-adapter.md`: note that `severity` is a
   contract field no shipped adapter sets yet.
-  - **BLOCKED, not done — same cause as 7.2/7.2a/7.2b.**
-  - This guide states no requirement of its own. It treats
-    `docs/contracts/signal-adapter.md` as the one source of truth, by
-    its own stated rule.
-  - Describing `severity` here before that locked page says so would
-    make the guide, not the spec, the first place a reader meets a
-    claim nobody approved.
+  - Added after the "Normalise into signals" station, pointing at the
+    now-written [Normalized signal](../contracts/signal-adapter.md#normalized-signal)
+    table rather than restating its shape.
 
 ### Adopter site
 
 - [x] 7.7 `docs/console-guide.md`: a severity mark can appear in the
   transcript view.
-- [ ] 7.8 Re-run `npm run screenshots` and `npm run demo` in
+- [x] 7.8 Re-run `npm run screenshots` and `npm run demo` in
   `platform/console/ui` to refresh the published console captures.
   - The fixture's one signal message (`screenshots/fixture.ts`) gained
     `severity: 'critical'`, so the published `conversation-{light,dark}.png`
     actually show the new tag rather than refreshing to the same pixels.
-  - `npm run screenshots` ran and its 18 PNGs are updated.
-  - `npm run demo` ran the recorder, but the ffmpeg encode step shells
-    out to `docker run mwader/static-ffmpeg`. This sandbox has no docker
-    daemon reachable — **not run, not claimed done**.
-  - The one touched byproduct (`console-demo-poster-light.png`, written
-    before the failed encode) was reverted rather than committed
-    half-refreshed. A workstation session with Docker owes this one.
+  - `npm run screenshots` ran, its 18 PNGs updated.
+  - `npm run demo` ran with docker reachable this session — the ffmpeg
+    encode (`docker run mwader/static-ffmpeg`) completed, refreshing
+    `console-demo-{light,dark}.mp4` and
+    `console-demo-poster-{light,dark}.png`. `console-demo.vtt`'s cues
+    are unchanged by this change, so the regenerated file is identical.
