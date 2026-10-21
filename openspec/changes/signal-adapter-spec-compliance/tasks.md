@@ -110,24 +110,24 @@ not the audit.
 
 Reference docs:
 
-- [ ] 9.1 `docs/contracts/signal-adapter.md`: the refractory allowance, the
+- [x] 9.1 `docs/contracts/signal-adapter.md`: the refractory allowance, the
   2.2.0 changelog entry, version moved, `signals/pulse` added to every
   shipped-adapter enumeration on the page including the severity-senders
   table — **the approved deltas authorize this edit** (`signal-rules.md`)
   — verify against the `signal-adapter-contract` delta.
-- [ ] 9.2 Claimed versions move to 2.2.0: `docs/integrations/pulse.md`
+- [x] 9.2 Claimed versions move to 2.2.0: `docs/integrations/pulse.md`
   (claim added), `home-assistant.md`, `kubernetes.md`, `prometheus.md`,
   `telegram.md`, and `docs/guides/signal-adapter.md` for cron — verify by
   grep for the version across the six pages.
-- [ ] 9.3 `docs/CHANGELOG.md`: the observable fixes (pulse secret rotation,
+- [x] 9.3 `docs/CHANGELOG.md`: the observable fixes (pulse secret rotation,
   alertmanager degradation, k8s-events clip/mute/fail-open, ha fail-open),
   newest first.
-- [ ] 9.4 `.claude/rules/signal-rules.md` and `.claude/rules/structure.md`:
+- [x] 9.4 `.claude/rules/signal-rules.md` and `.claude/rules/structure.md`:
   the five-adapter enumerations gain `signals/pulse` — verify by grep.
 
 Adopter site:
 
-- [ ] 9.5 `docs/guides/signal-adapter.md` is the one adopter page touched
+- [x] 9.5 `docs/guides/signal-adapter.md` is the one adopter page touched
   (9.2). Landing page, introduction, getting-started, installation and the
   other guides describe none of the changed behaviours — re-check at finish
   and tick as the claim.

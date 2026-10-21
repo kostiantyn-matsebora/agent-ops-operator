@@ -7,7 +7,7 @@ container, one directory, grouped by runtime role.
 |---|---|---|
 | `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` `mcp-aops` | product components |
 | `runtimes/` | `claude` `ollama` `copilot` | client side of the work contract |
-| `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
+| `signals/` | `cron` `alertmanager` `k8s-events` `ha` `pulse` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | no agent-ops contract |
 | `test/` | `stubruntime` `fakebotapi` `fixtures` | NOT components — excluded by `components.sh`, asserted by test |
@@ -69,6 +69,7 @@ All three are optional bundles under `chart/charts/<name>/`, off by default.
 | `signals/alertmanager/` | webhook adapter, standard Alertmanager payload (renamed from `signal-vmalertmanager`, `register.go` keeps `VMAlertmanagerConfig`) |
 | `signals/ha/` | Home Assistant adapter, polls `system_log/list` every 15s. Fingerprint keys on LOGGER + SOURCE LOCATION |
 | `signals/k8s-events/` | cluster Events adapter, in-cluster `net/http`, no client-go — fingerprint keys on OBJECT + reason |
+| `signals/pulse/` | Pulse webhook adapter — registers its own webhook through Pulse's API, verifies signed deliveries, `initiationId` from alert id + start time by default |
 
 ### Beside a conversation
 

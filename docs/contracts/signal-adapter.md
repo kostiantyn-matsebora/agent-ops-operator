@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 2.1.0**
+**Version 2.2.0**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -196,7 +196,7 @@ condition.
 |---|---|
 | `ADP-1` | Read sources from [`GET /signal/sources`](#get-signalsources) — never assume connectivity or credentials, both are the manager's to serve. |
 | `ADP-2` | Supply `initiationId` one of two ways: MINTED where the adapter's own aggregation already happens — the same recurring problem reusing the same id across occurrences — or PROPAGATED verbatim when a round trip hands back a manager-issued `conversationId`, with no re-derivation. For example, a chat reply in a bound thread propagates the `conversationId` stamped on that binding, and an adapter fronting an external system that accepts input can carry a `conversationId` outward and propagate it back unchanged when that system's response arrives — both are the propagated case, not a special lane. The manager never determines an id and treats it opaquely either way. |
-| `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, or recurrence itself — those are the manager's, per `MGR-2`. |
+| `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, or recurrence itself — those are the manager's, per `MGR-2`. The one named carve-out is the [post-emit refractory window](#post-emit-refractory-window), `ADP-8`. |
 | `ADP-4` | An observing adapter MUST NOT emit a signal about agent-ops' own machinery — see [Self-exclusion](#self-exclusion). |
 
 ### Self-exclusion
@@ -220,6 +220,29 @@ it, matching any of:
 | `ADP-5` | Name prefix — the object's name starts with an agent-ops-reserved prefix. |
 | `ADP-6` | Owner or label — the object is owned by, or labeled as, an agent-ops kind. |
 | `ADP-7` | Own namespace — the object lives in agent-ops' own namespace. |
+
+### Post-emit refractory window
+
+The one carve-out beside `ADP-3`. It bounds an adapter's own re-post chatter
+after it emits, and decides nothing about recurrence.
+
+| ID | Requirement |
+|---|---|
+| `ADP-8` | An adapter MAY suppress its own re-posts of a signal it emitted, for a window after that emit, only within every bound below. Outside them `ADP-3` applies as written, and an undeclared suppression is a conformance gap. |
+
+| Bound | Rule |
+|---|---|
+| post-emit only | The window opens only when the adapter itself emitted a signal. A condition never reported is never suppressed. |
+| one id | It suppresses only re-posts carrying the emitted signal's own `initiationId`, never collapsing distinct ids. |
+| length | No longer than the emitting rule's own dwell, with a floor of one minute. |
+| no substitute | The manager's cooldown stays the dedup authority. The window only saves round trips cooldown would have absorbed. |
+| declared | An adapter relying on the window MUST declare it, with its length, in its own specification. |
+
+A condition still recurring after the window closes is re-posted under the
+same `initiationId`, and the manager routes it as a recurrence (`MGR-2`).
+
+`signals/ha` and `signals/k8s-events` declare the window, each sized to the
+emitting rule's dwell. No other shipped adapter uses it.
 
 ### Security posture
 
@@ -302,16 +325,24 @@ capability is required, see [Compatibility](#compatibility).
 
 `severity` is purely additive and optional to send (`COMPAT-2`).
 
-| Adapter | Sends `severity` |
-|---|---|
-| `signals/cron`, `signals/alertmanager`, `signals/k8s-events`, `signals/ha`, `signals/telegram` | none of them, today |
+Every shipped adapter claims the version it conforms to on its own page.
 
-All five stay fully conformant with this version unchanged.
+| Adapter | Claims its version on | Sends `severity` |
+|---|---|---|
+| `signals/cron` | `docs/guides/signal-adapter.md` | no |
+| `signals/alertmanager` | `docs/integrations/prometheus.md` | no |
+| `signals/k8s-events` | `docs/integrations/kubernetes.md` | no |
+| `signals/ha` | `docs/integrations/home-assistant.md` | no |
+| `signals/pulse` | `docs/integrations/pulse.md` | no |
+| `signals/telegram` | `docs/integrations/telegram.md` | no |
+
+All six conform to this version.
 
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.2.0 | 2026-10-21 | The [post-emit refractory window](#post-emit-refractory-window) is named as the one carve-out beside `ADP-3` (`ADP-8`): a bounded quiet period on an emitted `initiationId`, declared per adapter. Only `signals/ha` and `signals/k8s-events` use it. `signals/pulse` joins every shipped-adapter enumeration on this page — it was omitted, which never exempted it. ADDITIVE: no adapter needs to change to stay conformant. |
 | 2.1.0 | 2026-10-21 | A normalized signal may carry an optional `severity` — one of `critical`, `error`, `warning`, `info` (`API-6`, [Enums](#enums)). Unmapped refuses the whole batch with `400` naming the four values. Unrelated to any adapter's own `severity` **label** (`COMPAT-5`). ADDITIVE: no shipped adapter sends it yet, and none needs to change to stay conformant. |
 | 2.0.0 | 2026-10-18 | BREAKING. `fingerprint` is replaced by the sender-minted `initiationId`, required on every signal — minted where the sender's aggregation already happens, or propagated verbatim from a round-tripped `conversationId`. The manager's grouping provision (`labels`×`signatureLabels`, window reuse) is removed — routing is pure `conversationId` equality, and cooldown keys on `initiationId`. A missing `initiationId` is rejected `4xx` naming the field, with no compatibility shim — a `1.x` adapter gets the same rejection. |
 | 1.0.0 | 2026-10-17 | Initial release. |

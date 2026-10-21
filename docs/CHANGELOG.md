@@ -30,6 +30,11 @@ for the source and the reference material beside this file.
   — a Cilium Hubble service map, Grafana, `kubectl get pods -l` — could not
   tell `cron` apart from `alertmanager`, or the console's own adapter from
   `telegram`.
+- The [signal adapter specification](contracts/signal-adapter.md) moves to
+  2.2.0. It names the post-emit refractory window as the one carve-out from
+  its no-dedup rule (`ADP-8`), and lists `signals/pulse` beside the other
+  five shipped adapters. Additive — no adapter needs to change to stay
+  conformant.
 
 ### Changed
 
@@ -41,6 +46,29 @@ served by `signal-pulse` gains `spec.config.correlationStrategy`, `"id"` or
 Pulse can reuse an alert id for what it calls a new occurrence. The new
 default, `"id+startTime"`, opens a fresh conversation for that re-fire
 instead of continuing an old one.
+
+### Fixed
+
+- **`signal-pulse`: a rotated signing secret now heals the registered
+  webhook on its own.** Before, every delivery after a rotation was refused
+  `401` until the webhook was re-registered by hand.
+- `signal-pulse`: the `404` for an unmatched source now names the source.
+- `signal-alertmanager` and `signal-k8s-events`: a degraded registration now
+  points at `spec.serviceAccountName`, not a field the CRD no longer has.
+- `signal-alertmanager`: a malformed `register:` block now degrades to a
+  manual-registration message naming the parse problem. It used to fail
+  silently.
+- `signal-k8s-events`: a relist pass that hits its batch cap now reports the
+  clip on the source's Ready condition. It used to skip the remaining events
+  without a trace.
+- `signal-k8s-events`: a suppression rule shadowed by an earlier one now
+  surfaces as a warning on the source's Ready condition.
+- `signal-k8s-events`: a mute window now reports its close even when the
+  lane has gone quiet, with a count of zero.
+- **`signal-ha`: an unreadable system log now fails OPEN.** A record still
+  failing when the log becomes unreadable is emitted, where it used to be
+  dropped as churn. Expect MORE signals during a Home Assistant outage, not
+  fewer — that is the specification's fail-open rule working.
 
 ### Upgrade
 
