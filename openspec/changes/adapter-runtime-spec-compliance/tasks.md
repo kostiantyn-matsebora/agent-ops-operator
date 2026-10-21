@@ -116,13 +116,13 @@ the behaviour, design.md the approach.
 
 ## 7. Conformance suite additions — testing-specialist
 
-- [ ] 7.1 a send without `threadId` must end user-visible or complete with
+- [x] 7.1 a send without `threadId` must end user-visible or complete with
   an error (pins B1). Verify: `go test -tags conformance` green for both
   adapters.
-- [ ] 7.2 `delete-conversation` acts or completes with an error, never a
+- [x] 7.2 `delete-conversation` acts or completes with an error, never a
   silent no-op (pins B3). Verify: `go test -tags conformance` green for
   both adapters.
-- [ ] 7.3 one operation's total in-process retry time stays below
+- [x] 7.3 one operation's total in-process retry time stays below
   `reclaimAfterSeconds` under injected 429/5xx (pins A1, A2). Verify:
   `go test -tags conformance` green for both adapters.
 
