@@ -594,39 +594,44 @@ func TestSignalInboundAttributeFilterOperatorsThroughHTTPAPI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			suffix := strings.ToLower(tc.name)
-			source := sigTestSource("attrfilter-op-"+suffix+"-src", "attrfilter-op-"+suffix+"-t")
-			source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{tc.requirement}
-			pipeline := sigTestPipeline("attrfilter-op-"+suffix+"-pipe", source.Name)
-			s, c := sigServer(t, source, pipeline)
-
-			rec := postSig(s, source.Name, []map[string]any{
-				{"initiationId": "op-admit-1", "payload": "fine", "labels": tc.admitLabels},
-				{"initiationId": "op-drop-1", "payload": "boom", "labels": tc.dropLabels},
-			})
-			if rec.Code != 200 {
-				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-			}
-			var resp map[string]any
-			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-				t.Fatal(err)
-			}
-			if resp["reason"] != ReasonFiltered {
-				t.Fatalf("operator %s: reason = %v, want %q", tc.name, resp["reason"], ReasonFiltered)
-			}
-
-			var convs agentopsv1alpha1.ConversationList
-			if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-				t.Fatal(err)
-			}
-			if len(convs.Items) != 1 {
-				t.Fatalf("operator %s: want exactly 1 admitted conversation, got %d", tc.name, len(convs.Items))
-			}
-			if convs.Items[0].Spec.ConversationID != "op-admit-1" {
-				t.Fatalf("operator %s: the routed conversation must be the ADMITTED signal, got conversationId %q",
-					tc.name, convs.Items[0].Spec.ConversationID)
-			}
+			checkAttributeFilterOperator(t, tc.name, tc.requirement, tc.admitLabels, tc.dropLabels)
 		})
+	}
+}
+
+func checkAttributeFilterOperator(t *testing.T, name string, requirement agentopsv1alpha1.AttributeFilterRequirement, admitLabels, dropLabels map[string]string) {
+	t.Helper()
+	suffix := strings.ToLower(name)
+	source := sigTestSource("attrfilter-op-"+suffix+"-src", "attrfilter-op-"+suffix+"-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{requirement}
+	pipeline := sigTestPipeline("attrfilter-op-"+suffix+"-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{"initiationId": "op-admit-1", "payload": "fine", "labels": admitLabels},
+		{"initiationId": "op-drop-1", "payload": "boom", "labels": dropLabels},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["reason"] != ReasonFiltered {
+		t.Fatalf("operator %s: reason = %v, want %q", name, resp["reason"], ReasonFiltered)
+	}
+
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 1 {
+		t.Fatalf("operator %s: want exactly 1 admitted conversation, got %d", name, len(convs.Items))
+	}
+	if convs.Items[0].Spec.ConversationID != "op-admit-1" {
+		t.Fatalf("operator %s: the routed conversation must be the ADMITTED signal, got conversationId %q",
+			name, convs.Items[0].Spec.ConversationID)
 	}
 }
 
