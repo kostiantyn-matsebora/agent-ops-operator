@@ -5,46 +5,46 @@ the behaviour, design.md the approach.
 
 ## 1. Runtime continuity and report truthfulness — backend-developer
 
-- [ ] 1.1 claude: an unreadable session store is an outage — readdir errors
+- [x] 1.1 claude: an unreadable session store is an outage — readdir errors
   propagate to the `unavailable` path instead of reading as "not found"
   (C1). Verify: `node --test` case feeding a readdir error asserts
   `continuity: unavailable` and no loss verdict.
-- [ ] 1.2 claude: a failed resume never reports `continued` — the retry
+- [x] 1.2 claude: a failed resume never reports `continued` — the retry
   path reports what happened, and a retry that finds no session fails as
   lost, not continued (C2, C3). Verify: `node --test` cases per outcome.
-- [ ] 1.3 ollama: a context-store error reports `unavailable`, never
+- [x] 1.3 ollama: a context-store error reports `unavailable`, never
   `continued` with the same handle (O1). Verify: `go test` case asserting
   the report against a failing store.
-- [ ] 1.4 copilot: any resume failure triggers the re-check, unreadable
+- [x] 1.4 copilot: any resume failure triggers the re-check, unreadable
   counts as present, and a failed retry is never reported `continued`
   (P2, P3). Verify: `node --test` cases for non-"session not found"
   failures and the failed-retry report.
-- [ ] 1.5 all three: `POST /work/done` stops retrying on a definitive 4xx
+- [x] 1.5 all three: `POST /work/done` stops retrying on a definitive 4xx
   (not 408/429) — logged with status and body, polling resumes. Transient
   failures keep bounded retry. Verify: unit test per runtime against a fake
   manager returning 400.
-- [ ] 1.6 all three: `exitCode` is omitted when no process ran (C6, O6,
+- [x] 1.6 all three: `exitCode` is omitted when no process ran (C6, O6,
   P6). Verify: unit tests assert the field is absent on prompt-read and
   spawn-error reports.
 
 ## 2. Runtime tooling, workspace and output fixes — backend-developer
 
-- [ ] 2.1 copilot: extract `<brief>` from the result into the report's
+- [x] 2.1 copilot: extract `<brief>` from the result into the report's
   `brief` field, like claude and ollama (P1). Verify: `node --test` asserts
   the field and that the block leaves `result`.
-- [ ] 2.2 ollama: parsed `mcpServer.Headers` are sent on the HTTP MCP
+- [x] 2.2 ollama: parsed `mcpServer.Headers` are sent on the HTTP MCP
   transport (O2). Verify: `go test` against a fake server asserting the
   auth header arrives.
-- [ ] 2.3 ollama built-ins: Grep refuses a symlink escaping the workspace
+- [x] 2.3 ollama built-ins: Grep refuses a symlink escaping the workspace
   (O3), Bash captured output is bounded in memory (O4), a mid-string `*`
   pattern is logged as uninterpretable rather than "unavailable" (O5), an
   unset `${VAR}` in MCP config fails that server instead of expanding empty
   (O8), and the prompt-file/agent-name joins go through a safeJoin (O7).
   Verify: `go test` case per behaviour.
-- [ ] 2.4 all three: a failed clone fails the run with a reason, and
+- [x] 2.4 all three: a failed clone fails the run with a reason, and
   `git fetch`/`reset` exit codes are checked (C5, O9, P7). Verify: unit
   test per runtime against a failing git invocation.
-- [ ] 2.5 claude logs every granted entry no vendor tool or connected MCP
+- [x] 2.5 claude logs every granted entry no vendor tool or connected MCP
   server provides (C4). copilot checks inventory per work unit, `mcp:`
   targets included (P4). Verify: `node --test` cases in both runtimes.
 

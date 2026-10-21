@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,7 +56,7 @@ func TestRunUnitFailsTheRunWhenSyncFails(t *testing.T) {
 	repo := Repo{URL: filepath.Join(t.TempDir(), "does-not-exist-agentops-repo"), Ref: "main", Workspace: t.TempDir()}
 	agent, _ := newAgent(t, &scripted{})
 	var logged []string
-	logf := func(f string, a ...any) { logged = append(logged, f) }
+	logf := func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
 	res := runUnit(context.Background(), repo, Builtins{}, &MCPClient{}, agent, WorkUnit{PromptText: "q"}, logf)
 	if res.Status != "failed" || !strings.Contains(res.Result, "workspace sync failed") {
 		t.Errorf("%+v", res)

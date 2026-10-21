@@ -161,6 +161,10 @@ func TestConnectSendsConfiguredHeadersOnHTTPTransport(t *testing.T) {
 	if _, ok := m.sessions["auth"]; !ok {
 		t.Fatal("connect must succeed")
 	}
+	// Closed before the deferred httpSrv.Close(): a live session holds its
+	// standalone SSE stream open, and httptest.Server.Close() blocks waiting
+	// for outstanding requests to finish rather than forcing them closed.
+	defer m.Close()
 	m.ListTools(context.Background(), NewRegistry(), logf)
 	if gotAuth != "Bearer t0ken" {
 		t.Errorf("want the configured header on the wire, got %q", gotAuth)
