@@ -523,6 +523,39 @@ scrape time from the same in-memory state `/status` reports.
   rather than declared by a CR, so neither is bounded by CR count. They stay in
   the events, and the call metrics key on `target` instead.
 
+## The control-plane contract
+
+**One named, additive HTTP surface for operational configuration** —
+`/control-plane/*`, a package and route prefix inside the manager, not a new
+component: same process, same container, same ServiceAccount.
+
+Guarded by its own dedicated bearer token, `CONTROL_PLANE_TOKEN`.
+
+- **A single flat shared secret**, checked constant-time, the same shape
+  `ADAPTER_TOKEN` and the coordinator token already use.
+- **A distinct credential from both.** A caller holding one must not reach
+  the other's surface.
+- **An unconfigured token refuses every request with 503**, never falling
+  open — the same rule `/channel/*` and `/signal/*` follow.
+
+| Route | Guards |
+|---|---|
+| `PUT /control-plane/probes/{name}` | create-or-update the named `ControlPlaneProbe` by name |
+| `GET /control-plane/probes/{name}` | read it back, 404 on an unknown name |
+
+A request for a kind this surface does not yet handle is 404 and touches no
+object — never a partial create, read or modify of a different kind.
+
+`ControlPlaneProbe` (`docs/concepts.md`) is the disposable placeholder this
+surface was proven against.
+
+| Role | On a kind behind `/control-plane/*` |
+|---|---|
+| The manager's own Role | full CRUD |
+| Any other component's Role | read-only, or nothing |
+
+This pattern applies to whatever resident lands here next.
+
 ## HTTP API
 
 | Endpoint | Purpose |
@@ -533,6 +566,7 @@ scrape time from the same in-memory state `/status` reports.
 | `GET/POST/PUT /signal/*` | adapter-facing signal contract (bearer token, see signal adapter contract) |
 | `GET/POST /activity*` | per-hop telemetry (bearer token, see activity contract) |
 | `POST /coordinate/*` | the aops MCP server's verbs and read tools (per-conversation or channel-reader bearer token, see aops MCP server contract) |
+| `PUT/GET /control-plane/*` | operational-configuration surface (dedicated bearer token, see control-plane contract) |
 | `GET /status`, `GET /pipelines/{name}/resolved` | manager introspection (bearer token) |
 | `GET /healthz` | liveness |
 | `:9090/metrics` | controller-runtime metrics + the `agentops_*` set above |

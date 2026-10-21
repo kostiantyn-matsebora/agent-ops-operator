@@ -384,6 +384,9 @@ func main() {
 		StorageBreaker:         breaker,
 		MaxActiveConversations: maxActive,
 		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),
+		// /control-plane/*'s own dedicated secret — deliberately a distinct
+		// env var from ADAPTER_TOKEN, never derived from it (design.md).
+		ControlPlaneToken: os.Getenv("CONTROL_PLANE_TOKEN"),
 		// durable-chat-ops-broker: the SAME identity the reconciler's claims
 		// carry, so a replica that is not the current Lease holder rejects a
 		// channel-ops poll (503) instead of answering from an OpQueue the

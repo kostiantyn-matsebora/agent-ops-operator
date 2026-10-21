@@ -18,6 +18,11 @@ for the source and the reference material beside this file.
   values. Absent severity behaves exactly as before this field existed —
   not breaking for any adapter or manifest that sends none. No shipped
   adapter populates it yet.
+- A new `/control-plane/*` HTTP surface on the manager, guarded by its own
+  `controlPlaneAuth` token, for operational configuration going forward. It
+  ships with one disposable placeholder CRD, `ControlPlaneProbe`, proving the
+  surface end to end — see [contracts](contracts.md#the-control-plane-contract)
+  and [concepts](concepts.md#controlplaneprobe).
 - `SignalAdapter`/`ChannelAdapter` workloads carry `app.kubernetes.io/instance`
   (the CR name), on top of the unchanged `app.kubernetes.io/name`. Every
   instance of a given adapter kind used to render the same
@@ -42,6 +47,11 @@ instead of continuing an old one.
 To keep the previous, id-alone behavior, set `correlationStrategy: id` on
 each `SignalSource` served by `signal-pulse`. The chart value is
 `signal.defaultSource.correlationStrategy` in the `pulse` bundle.
+
+Helm never upgrades an existing CRD. Run
+`kubectl apply -f chart/crds/` before `helm upgrade` to pick up the new
+`ControlPlaneProbe` CRD, or the `/control-plane/*` surface's handlers fail
+against a kind the cluster does not have.
 
 ## [17.0.0] — 2026-10-18
 

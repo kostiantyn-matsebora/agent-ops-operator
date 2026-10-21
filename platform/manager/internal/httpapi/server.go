@@ -57,6 +57,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	controlplane "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/control-plane"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
@@ -89,6 +90,14 @@ type Server struct {
 	Ops          *chat.OpQueue
 	Router       *chat.Router
 	AdapterToken string
+
+	// ControlPlaneToken guards /control-plane/* (internal/control-plane). A
+	// single flat shared secret, its OWN env var (CONTROL_PLANE_TOKEN) —
+	// deliberately isolated from AdapterToken and the coordinator token, so
+	// a caller holding one can never reach the other's surface. Empty
+	// disables the surface (503), the same unconfigured-is-unauthorized
+	// rule AdapterToken follows.
+	ControlPlaneToken string
 
 	// Activity is the per-hop telemetry log served by /activity*. A nil log is
 	// inert, so every emission site can call it unguarded.
@@ -174,6 +183,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /status", s.anyAdapterAuth(s.handleStatus))
 	mux.HandleFunc("GET /pipelines/{name}/resolved", s.anyAdapterAuth(s.handlePipelineResolved))
 	s.RegisterCoordinateRoutes(mux)
+	// /control-plane/*: its own package, its own dedicated token — see
+	// internal/control-plane's doc comment for why this is not folded into
+	// adapterAuth/the coordinator token.
+	controlplane.RegisterRoutes(mux, s.ControlPlaneToken, s.Client, s.Reader, s.Namespace)
 	return s.leaderProxyMiddleware(mux)
 }
 
