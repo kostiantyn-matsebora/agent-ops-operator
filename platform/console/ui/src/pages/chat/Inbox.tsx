@@ -139,6 +139,15 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
           alignItems: 'center', gap: 4, padding: '10px 0', overflowY: 'auto',
         }}
       >
+        <Tooltip content="General feed">
+          <IconButton
+            active={sameScope(activeScope, { kind: 'general' })}
+            onClick={() => onSelectScope({ kind: 'general' })}
+          >
+            <HashtagIcon />
+          </IconButton>
+        </Tooltip>
+        <Divider />
         {fixed.map((f) => (
           <Tooltip
             key={scopeKey(f.scope)}
@@ -192,6 +201,14 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         overflowY: 'auto', height: '100%',
       }}
     >
+      <Section title="CHANNEL">
+        <Row
+          icon={<HashtagIcon />}
+          label="General feed"
+          active={sameScope(activeScope, { kind: 'general' })}
+          onClick={() => onSelectScope({ kind: 'general' })}
+        />
+      </Section>
       <Section title="INBOX">
         {fixed.map((f) => (
           <Row

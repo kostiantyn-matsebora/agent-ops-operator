@@ -97,10 +97,10 @@ the behaviour, design.md the approach.
 
 ## 5. Console UI fixes — frontend-developer
 
-- [ ] 5.1 the SPA renders the channel general feed so thread-less sends
+- [x] 5.1 the SPA renders the channel general feed so thread-less sends
   and their choices are visible (B1, UI half). Verify: vitest case plus a
   dev-server screenshot of the feed, per the visual check.
-- [ ] 5.2 each message's choices render with that message, only the latest
+- [x] 5.2 each message's choices render with that message, only the latest
   set interactive, superseded ones degrading to a visible list (B2).
   Verify: vitest case plus a screenshot showing an older message's choices.
 

@@ -16,6 +16,7 @@ import { Inbox, sameScope, scopeKey, type Scope } from './Inbox'
 import { ConversationRow } from './ConversationRow'
 import { SelectionBar } from './SelectionBar'
 import { ThreadPane } from './ThreadPane'
+import { GENERAL_FEED_NAME, GeneralFeedPane } from './GeneralFeedPane'
 import { buildTree, rootNameOf } from './tree'
 import type { ConversationSummary } from '../../api/types'
 
@@ -393,6 +394,17 @@ export function ChatView() {
     setSelected((prev) => withMembership(prev, rowName, checked))
   }
 
+  // `general` is not a conversation filter — picking it opens the channel's
+  // general feed directly in the thread pane, the same place a conversation
+  // row opens (B1, UI half). It never becomes the list's own query scope.
+  function selectScope(s: Scope) {
+    if (s.kind === 'general') {
+      void navigate(`/conversations/${GENERAL_FEED_NAME}`)
+      return
+    }
+    setScope(s)
+  }
+
   function openRow(rowName: string, e?: React.MouseEvent) {
     if (isMultiSelectClick(e)) {
       setSelectionMode(true)
@@ -475,7 +487,7 @@ export function ChatView() {
           <Inbox
             activeScope={scope}
             onSelectScope={(s) => {
-              setScope(s)
+              selectScope(s)
               setMobileInboxOpen(false)
             }}
             collapsed={false}
@@ -491,7 +503,7 @@ export function ChatView() {
               <div style={{ width: inboxWidth, flex: 'none', overflow: 'hidden', borderRight: '1px solid var(--ao-border)' }}>
                 <Inbox
                   activeScope={scope}
-                  onSelectScope={setScope}
+                  onSelectScope={selectScope}
                   collapsed={layout.inboxCollapsed}
                   onToggleCollapsed={() => updateLayout({ inboxCollapsed: !layout.inboxCollapsed })}
                   showClosed={showClosed}
@@ -631,7 +643,11 @@ export function ChatView() {
         />
       )}
       {showingThread && (name ? (
-        <ThreadPane name={name} onBack={narrow ? () => navigate('/conversations') : undefined} />
+        name === GENERAL_FEED_NAME ? (
+          <GeneralFeedPane onBack={narrow ? () => navigate('/conversations') : undefined} />
+        ) : (
+          <ThreadPane name={name} onBack={narrow ? () => navigate('/conversations') : undefined} />
+        )
       ) : (
         !narrow && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>

@@ -136,6 +136,9 @@ const BRIEF_1 = conv('brief-1', { brief: 'Investigating a recurring timeout.' })
 // composer on click, never sent straight away (unlike the exit/close icon
 // chips, which run immediately).
 const CHOICES_1 = conv('choices-1')
+// Two messages, each offering a choice — the OLDER one's must degrade to a
+// plain list (B2), since it answers a prompt the conversation moved past.
+const CHOICES_OLDER = conv('choices-older')
 // A root whose Coordinator already escalated — the "Escalated" divider in
 // its own transcript.
 const ROOT_ESCALATED = conv('root-escalated', {
@@ -145,7 +148,7 @@ const ROOT_ESCALATED = conv('root-escalated', {
 
 const ALL = [
   ROOT, MID, PLAIN, RICH, ROOT_JOINED, ROOT_INVOKE_ORDER, MID_INVOKE_ORDER, ROOT_CLOCK_SKEW, MID_CLOCK_SKEW,
-  UNREAD_JOINED, PRESENCE_WORKING, PRESENCE_IDLE, BRIEF_1, ROOT_ESCALATED,
+  UNREAD_JOINED, PRESENCE_WORKING, PRESENCE_IDLE, BRIEF_1, CHOICES_OLDER, ROOT_ESCALATED,
 ]
 const DETAILS: Record<string, ConversationDetail> = {
   'root-1': detailFor(ROOT, {
@@ -180,6 +183,18 @@ const DETAILS: Record<string, ConversationDetail> = {
       id: 'm1', thread: 'choices-1', kind: 'agent', text: 'Approve the restart?', at: '2024-01-01T00:00:00Z',
       choices: [{ command: '/approve', label: 'Approve' }],
     }],
+  }),
+  'choices-older': detailFor(CHOICES_OLDER, {
+    transcript: [
+      {
+        id: 'm1', thread: 'choices-older', kind: 'agent', text: 'Approve the restart?', at: '2024-01-01T00:00:00Z',
+        choices: [{ command: '/approve', label: 'Approve' }],
+      },
+      {
+        id: 'm2', thread: 'choices-older', kind: 'agent', text: 'Approve the follow-up?', at: '2024-01-01T00:01:00Z',
+        choices: [{ command: '/approve-2', label: 'Approve follow-up' }],
+      },
+    ],
   }),
   'root-escalated': detailFor(ROOT_ESCALATED, {
     transcript: [{ id: 'm1', thread: 'root-escalated', kind: 'agent', text: 'escalating to a human', at: '2024-01-01T00:09:00Z' }],
@@ -599,6 +614,17 @@ describe('an offered choice chip inserts, a thread command chip runs (item: inse
     renderPane('choices-1')
     await userEvent.click(screen.getByText('Approve'))
     expect(screen.getByLabelText('message')).toHaveValue('/approve ')
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('renders each message\'s choices with it, only the latest set interactive (B2)', async () => {
+    renderPane('choices-older')
+    // The older message's choice is VISIBLE but not a button — a plain list.
+    const stale = screen.getByText('Approve')
+    expect(stale.closest('button')).toBeNull()
+    // The latest message's own choice is still a real, clickable control.
+    await userEvent.click(screen.getByText('Approve follow-up'))
+    expect(screen.getByLabelText('message')).toHaveValue('/approve-2 ')
     expect(sendSpy).not.toHaveBeenCalled()
   })
 
