@@ -128,16 +128,16 @@ the behaviour, design.md the approach.
 
 ## 8. Unit tests
 
-- [ ] 8.1 `go test ./...` green in every touched Go module —
+- [x] 8.1 `go test ./...` green in every touched Go module —
   `platform/manager`, `runtimes/ollama`, `channels/telegram`,
   `platform/console`.
-- [ ] 8.2 `node --test` green in `runtimes/claude` and `runtimes/copilot`.
-- [ ] 8.3 console UI vitest suite green (`npm test` in
+- [x] 8.2 `node --test` green in `runtimes/claude` and `runtimes/copilot`.
+- [x] 8.3 console UI vitest suite green (`npm test` in
   `platform/console/ui`).
-- [ ] 8.4 chart render tests green, the new configSchema assertion
+- [x] 8.4 chart render tests green, the new configSchema assertion
   included.
-- [ ] 8.5 the docs-script suite green for the `docs-generate.py` generator.
-- [ ] 8.6 `go test -tags conformance -count=1 ./test/conformance/` green
+- [x] 8.5 the docs-script suite green for the `docs-generate.py` generator.
+- [x] 8.6 `go test -tags conformance -count=1 ./test/conformance/` green
   with the three new assertions, run against this working copy's adapter
   binaries.
 
