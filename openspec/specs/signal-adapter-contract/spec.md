@@ -55,9 +55,13 @@ Chat is an instance of this rule, not a special lane. A fresh human request is i
 - **THEN** its id was supplied sender-side — minted from the sender's own aggregation or propagated verbatim from a round trip — and the manager only compares it for equality
 
 ### Requirement: Normalized signals enter through one inbound endpoint
-The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{source, signals: [{initiationId, labels, title?, payload?, kind?}]}` where `kind` is `alert` (default), `job`, `task`, or `chat`.
+The manager SHALL expose `POST /signal/inbound` (non-leader-gated) accepting `{source, signals: [{initiationId, labels, title?, payload?, kind?, severity?}]}` where `kind` is `alert` (default), `job`, `task`, or `chat`.
 
 `initiationId` is the sender-minted correlation id and is REQUIRED on every signal. "These N signals are one problem" is decided wherever the id was minted — the sender or its adapter — never by the manager.
+
+`severity` is OPTIONAL. When present, it SHALL be one of exactly `critical`, `error`, `warning`, or `info` — the vocabulary `signal-severity` owns. Absent SHALL mean unrated, the only state a signal carried before this field existed.
+
+A signal carrying any other value SHALL be refused with `400` naming the four accepted values. Validation SHALL run before any routing, so a refused signal creates nothing.
 
 The manager SHALL route each signal by pure id equality through its single ingest core:
 
@@ -109,6 +113,14 @@ Delivery is at-least-once. A duplicate `initiationId` within the source's cooldo
 #### Scenario: Unknown source rejected
 - **WHEN** `/signal/inbound` names a SignalSource that does not exist
 - **THEN** the manager responds 404 and creates nothing
+
+#### Scenario: An unknown severity value is refused
+- **WHEN** a signal is posted with `severity: fatal`
+- **THEN** the manager responds 400 naming `critical`, `error`, `warning`, and `info`, and no conversation or input is created
+
+#### Scenario: A valid severity is accepted
+- **WHEN** a signal is posted with `severity: critical`
+- **THEN** the manager accepts it and routes it exactly as a signal with no severity would route
 
 ### Requirement: Programmatic origination has no endpoint of its own
 The manager SHALL expose no HTTP route that creates a Conversation from a directly named `Pipeline`. A caller that wants to start work SHALL post a signal to a `SignalSource` a Ready Pipeline claims, so that which agent answers, on which channels, with which capabilities is decided by declared wiring rather than chosen by the caller.
