@@ -152,28 +152,42 @@ the behaviour, design.md the approach.
 
 Reference docs:
 
-- [ ] 10.1 `docs/contracts/channel-adapter.md`: per-operation retry-budget
+- [x] 10.1 `docs/contracts/channel-adapter.md`: per-operation retry-budget
   wording, the published input id shape, ADA-11.1 citing
   `sharedOutputFormat` instead of the retired profile field (S2), and the
-  version moved per its own versioning rule.
-- [ ] 10.2 `docs/contracts/runtime.md`: numbered conformance checklist,
+  version moved per its own versioning rule. Moved to 1.3.0. **S2 note:**
+  `sharedOutputFormat` never existed in shipped code — the field has
+  always been `AgentProfile.spec.outputFormat`, which ADA-11.1 already
+  cited correctly. The stale `sharedOutputFormat` name lives only in
+  `openspec/specs/adapter-rendered-messages/spec.md:233`, a pre-existing
+  gap outside this change's scope, left for a follow-up.
+- [x] 10.2 `docs/contracts/runtime.md`: numbered conformance checklist,
   the generated schema tables under their marker, the startup-crash
   ruling, the `/work/done` definitive-rejection rows, and the version
-  moved.
-- [ ] 10.3 the three runtime pages' spec-version claims match the pages'
+  moved. Moved to 1.1.0.
+- [x] 10.3 the three runtime pages' spec-version claims match the pages'
   actual conformance after the fixes.
-- [ ] 10.4 `docs/CHANGELOG.md` entry for the adopter-observable behaviour
+- [x] 10.4 `docs/CHANGELOG.md` entry for the adopter-observable behaviour
   fixes.
-- [ ] 10.5 record `telegramAdapter.enabled` in
+- [x] 10.5 record `telegramAdapter.enabled` in
   `.claude/rules/retired-vocabulary.md` and
-  `.github/retired-vocabulary.json`, and run the guard clean.
-- [ ] 10.6 `python3 .github/scripts/docs-generate.py` rerun and `--check`
+  `.github/retired-vocabulary.json`, and run the guard clean. (Recorded in
+  `.github/retired-vocabulary.json`, which is where every term actually
+  lives — `retired-vocabulary.md` carries no per-term table to add to.)
+- [x] 10.6 `python3 .github/scripts/docs-generate.py` rerun and `--check`
   clean.
 - [ ] 10.7 console UI changed, so rerun `npm run screenshots` AND
-  `npm run demo` in `platform/console/ui`.
+  `npm run demo` in `platform/console/ui`. **`npm run screenshots` done**
+  (9 PNGs regenerated). **`npm run demo` NOT run** — it shells out to
+  `docker run mwader/static-ffmpeg` and no docker daemon is available in
+  this remote session. Needs a re-run wherever docker is available before
+  this is archivable. The published demo video/poster still reflect the
+  pre-change UI until then.
 
 Adopter site:
 
-- [ ] 10.8 checked the landing page, introduction, getting-started,
-  installation and guides for claims the fixes make untrue — update any
-  found, tick with "none found" otherwise.
+- [x] 10.8 checked the landing page, introduction, getting-started,
+  installation and guides for claims the fixes make untrue — "none
+  found": existing mentions of continuity/thread ids/etc. are illustrative
+  wire-format examples, not behavior claims, and the telegram/console
+  pages already use the live `telegram.enabled` key.

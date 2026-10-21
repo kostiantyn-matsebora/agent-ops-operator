@@ -18,7 +18,7 @@ next:
 Telegram is where the work gets asked for, and where the answer arrives.
 
 It conforms to the [channel adapter specification]({{ '/contracts/channel-adapter/' | relative_url }}), version
-1.1.0.
+1.3.0.
 
 ![One poller reads every update for a bot token: a message on the group surface starts a conversation, and a message in a topic continues the one that owns it.]({{ '/assets/img/integrations/telegram-light.svg' | relative_url }}){: .ao-diagram}
 

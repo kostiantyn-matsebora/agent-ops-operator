@@ -152,7 +152,9 @@ The documented migration SHALL sequence shutdown of the previously-polling adapt
 - **THEN** the router resumes from the offset the previous adapter persisted, rather than re-reading old updates
 
 ### Requirement: Chart deploys the adapter opt-in
-The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR (gated on `telegramAdapter.enabled`, default **false**) instead of a bespoke Deployment template. The chart SHALL contain no channel-type-specific workload templates.
+The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR instead of a bespoke Deployment template. The chart SHALL contain no channel-type-specific workload templates.
+
+The CR SHALL be gated on the Telegram bundle's `telegram.enabled` value (default **false**), the one gate the whole bundle renders under. The retired flat `telegramAdapter.enabled` value gates nothing.
 
 The `ChannelAdapter` reconciler owns the workload, auth injection, and credential projection. The chart's remaining role is the CRD and the gated CR.
 
@@ -161,7 +163,7 @@ The `ChannelAdapter` reconciler owns the workload, auth injection, and credentia
 - **THEN** no Telegram adapter resources are produced
 
 #### Scenario: Enabled renders only a CR
-- **WHEN** `telegramAdapter.enabled=true`
+- **WHEN** `telegram.enabled=true`
 - **THEN** the rendered output contains the telegram `ChannelAdapter` and no Deployment for it (the reconciler creates the workload)
 
 ### Requirement: Chart-shipped ChannelAdapter declares the telegram config schema
@@ -172,7 +174,7 @@ The declaration SHALL live beside the `image` reference in the same template so 
 The adapter binary SHALL be unchanged — it plays no role in the declaration.
 
 #### Scenario: Declaration matches the parser
-- **WHEN** the chart renders with `telegramAdapter.enabled=true`
+- **WHEN** the chart renders with `telegram.enabled=true`
 - **THEN** the `ChannelAdapter` for telegram declares exactly the fields the adapter's config parser accepts, with `chatId` required
 
 #### Scenario: Misconfigured channel flagged before the adapter sees it

@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 This specification gives everything necessary to build and maintain an
 `AgentRuntime` — a harness agent-ops does not ship.
@@ -61,21 +61,27 @@ Long-polls for this conversation's next work unit.
 
 ### Work unit
 
+<!-- generated: struct-table file=platform/manager/internal/dispatch/dispatch.go struct=WorkUnit -->
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `runId` | string | yes | Unique id for this unit, echoed back in the completion report. |
-| `convo` | string | yes | The `Conversation` this unit belongs to. |
-| `threadId` | string | no | The bound channel's thread id. Set only for a single-channel conversation. |
-| `runtimeContextId` | string | no | The runtime's own context handle from the last run. Empty means start fresh. |
-| `resumeSessionId` | string | no | **Deprecated.** Former name of `runtimeContextId`, sent for one release. |
-| `promptFile` | string | no | Repo-relative path to the profile's own prompt file. |
-| `promptText` | string | no | The fully rendered prompt, from a built-in template. |
-| `promptVars` | map of string to string | no | Template variables for `promptFile`. |
-| `agent` | string | no | The agent definition's name, resolved from the checked-out repository. |
-| `systemPrompt` | string | no | Inline role text, appended to the agent's own system prompt. |
-| `allowedTools` | string | no | The wiring's half of the tool allowlist, comma-separated. |
-| `toolsMode` | string | no | `merge` or `overwrite` — see [Composing the allowlist](#composing-the-allowlist). |
-| `maxTurns` | integer | no | The profile's turn budget for this run. |
+| `runId` | `string` | **yes** | A unique id for this unit, echoed back in the completion report. |
+| `convo` | `string` | **yes** | The Conversation this unit belongs to. |
+| `threadId` | `string` |  | The bound channel's thread id, present only for a conversation bound to exactly one channel. |
+| `runtimeContextId` | `string` |  | The runtime's OWN handle for this conversation's accumulated context, echoed back from the last run. |
+| `resumeSessionId` | `string` |  | The former name of RuntimeContextID, sent alongside it for ONE release so a runtime image can be upgraded independently of the manager. |
+| `promptFile` | `string` |  | A repo-relative path to render, when the profile supplies its own prompt file. |
+| `promptText` | `string` |  | The fully rendered prompt, when the manager rendered it from a built-in template. |
+| `promptVars` | `map[string]string` |  | PromptVars carries template variables for PromptFile. |
+| `agent` | `string` |  | The agent definition's name, for the runtime to resolve from the checked-out repository. |
+| `systemPrompt` | `string` |  | Inline role text the runtime APPENDS to the agent's system prompt. |
+| `allowedTools` | `string` |  | The wiring's half of the tool allowlist, comma-separated. |
+| `toolsMode` | `string` |  | "merge" or "overwrite", directing how AllowedTools composes with the agent definition's own declared tools. |
+| `maxTurns` | `integer` |  | The profile's turn budget for this run, when set. |
+<!-- /generated -->
+
+`resumeSessionId` is **deprecated** — the former name of `runtimeContextId`,
+sent alongside it for one release. `toolsMode` is `merge` or `overwrite` —
+see [Composing the allowlist](#composing-the-allowlist).
 
 | ID | Requirement |
 |---|---|
@@ -106,40 +112,49 @@ Reports a run's outcome and closes out the inflight unit.
 
 ### Completion report
 
+<!-- generated: struct-table file=platform/manager/internal/httpapi/server.go struct=workDone -->
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `convo` | string | yes | The `Conversation` this report is for. |
-| `runId` | string | yes | The unit's own `runId`, round-tripped. |
-| `status` | string | yes | `succeeded` or `failed` — see [Enums](#enums). |
-| `exitCode` | integer | no | The process exit code, when there is one to report. |
-| `runtimeContextId` | string | no | The context handle this run leaves behind, to continue next time. |
-| `sessionId` | string | no | **Deprecated.** Former spelling of `runtimeContextId`, accepted for one release. |
-| `continuity` | string | no | `continued`, `new`, or `unavailable` — see [Enums](#enums). |
-| `continuityReason` | string | no | Free text explaining why a context could not be continued. |
-| `result` | string | no | The run's answer. |
-| `brief` | string | no | A one- or two-sentence summary of the conversation. |
-| `turns[]` | array of Turn | no | One entry per model call — see [Turns](#turns). |
-| `toolCalls[]` | array of ToolCall | no | One entry per tool call — see [Tool calls](#tool-calls). |
+| `convo` | `string` | **yes** | The Conversation this report is for. |
+| `runId` | `string` | **yes** | The unit's own RunID, round-tripped. |
+| `status` | `string` | **yes** | "succeeded" or "failed". |
+| `exitCode` | `integer` |  | The process exit code, when the runtime has one to report. |
+| `runtimeContextId` | `string` |  | The handle for the context this run leaves behind — the one to continue next time. |
+| `sessionId` | `string` |  | The retired spelling, accepted for one release so an older runtime image keeps working. |
+| `continuity` | `string` |  | Continuity says what happened to the context this run was asked to continue: "continued", "new", or "unavailable" (a new one was needed because the named context could not be reached). |
+| `continuityReason` | `string` |  | Free text from the runtime explaining why a context could not be continued. |
+| `result` | `string` |  | The run's answer. |
+| `brief` | `string` |  | What the runtime extracted as this conversation's one- or two-sentence description (design D-I) — a contract field, never a parsed section of Result. |
+| `turns` | `[]Turn` |  | One entry per model call this run made, bounded in count and field size (workreport.go). |
+| `toolCalls` | `[]ToolCall` |  | One entry per tool call this run made, bounded in count and field size (workreport.go). |
+<!-- /generated -->
+
+`sessionId` is **deprecated** — the former spelling of `runtimeContextId`,
+accepted for one release.
 
 #### Turns
 
+<!-- generated: struct-table file=platform/manager/internal/httpapi/workreport.go struct=Turn -->
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `model` | string | no | The model the call went to, as the runtime names it. |
-| `tokensIn` | integer | no | Input tokens consumed, cache reads included. |
-| `tokensOut` | integer | no | Output tokens produced. |
-| `cacheReadTokens` | integer | no | Part of `tokensIn` served from the provider's prompt cache. |
-| `cacheCreationTokens` | integer | no | Part of `tokensIn` written into the provider's prompt cache. |
-| `stopReason` | string | no | Why the model stopped: end of turn, tool use, max tokens. |
+| `model` | `string` |  | The model the call went to, as the runtime names it. |
+| `tokensIn` | `integer` |  | Every input token the call consumed, cache reads included, as far as the vendor reports them. |
+| `tokensOut` | `integer` |  | The output tokens the call produced. |
+| `cacheReadTokens` | `integer` |  | The part of TokensIn served from the provider's prompt cache. |
+| `cacheCreationTokens` | `integer` |  | The part of TokensIn written INTO the provider's prompt cache by this call — where a cache a later turn reads was made. |
+| `stopReason` | `string` |  | Why the model stopped: end of turn, tool use, max tokens. |
+<!-- /generated -->
 
 #### Tool calls
 
+<!-- generated: struct-table file=platform/manager/internal/httpapi/workreport.go struct=ToolCall -->
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `tool` | string | yes | `Bash`, `Read`, or `mcp__<server>__<tool>`. |
-| `server` | string | no | The MCP server reached. Empty for a built-in tool. |
-| `durationMs` | integer | no | Wall time from the call to its result. |
-| `resultBytes` | integer | no | Size of what the tool returned. |
+| `tool` | `string` | **yes** | The tool's name in the agent-ops vocabulary: `Bash`, `Read`, or `mcp__<server>__<tool>`. |
+| `server` | `string` |  | The MCP server the call reached. |
+| `durationMs` | `integer` |  | The wall time from the call to its result. |
+| `resultBytes` | `integer` |  | The size of the result the tool returned. |
+<!-- /generated -->
 
 | ID | Requirement |
 |---|---|
@@ -149,6 +164,24 @@ Reports a run's outcome and closes out the inflight unit.
 | `API-7` | A fact the runtime cannot determine MUST be omitted, never reported as zero. |
 | `API-8` | A tool's input or output MUST NOT be reported. |
 | `API-9` | Neither array is reported when the run made neither a model call nor a tool call. |
+
+### Delivering the report
+
+A definitive rejection means the manager refused the report's content, and
+resending the same bytes cannot change the verdict. Retrying it only blocks
+the poll loop.
+
+| Response | Runtime behaviour |
+|---|---|
+| transport error, timeout, `408`, `429`, any `5xx` | bounded retry, then log the loss and resume polling |
+| any other `4xx` | NO retry — log the status and body, resume polling |
+| `2xx` | done |
+
+| ID | Requirement |
+|---|---|
+| `API-10` | A definitive rejection — any `4xx` other than `408`/`429` — MUST NOT be retried. |
+| `API-11` | A transport error, timeout, `408`, `429`, or any `5xx` MUST get a bounded retry before the runtime gives up and resumes polling. |
+| `API-12` | Every undelivered report MUST leave a log line carrying the response status and body. A report MUST NEVER be dropped silently. |
 
 ## Lifecycle
 
@@ -163,8 +196,10 @@ Reports a run's outcome and closes out the inflight unit.
 | ID | Requirement |
 |---|---|
 | `LC-1` | One inflight unit per conversation. A runtime polling while Working MUST get nothing back. |
-| `LC-2` | A runtime MUST exit on exactly one condition: no work for `RUNTIME_IDLE_TTL_M` minutes. |
+| `LC-2` | A runtime MUST exit on exactly one LIFECYCLE condition: no work for `RUNTIME_IDLE_TTL_M` minutes. |
 | `LC-3` | `/exit` deletes the pod. Refused while a run is in progress. |
+| `LC-4` | Missing or unusable required configuration, detected before the first `GET /work` poll, MUST end the process with a nonzero exit naming what is missing. That is a CRASH the kubelet surfaces and restarts, not a lifecycle exit, and it does not breach `LC-2`'s one-exit rule. |
+| `LC-5` | Honouring the pod's own termination signal is likewise not a lifecycle exit. |
 
 ## Runtime's obligations
 
@@ -286,10 +321,49 @@ describes," and adding it would be MINOR, not MAJOR.
 
 A runtime implementing every requirement on this page except
 [Optional capabilities](#optional-capabilities) is fully conformant — no
-optional capability is required, see [Compatibility](#compatibility).
+optional capability is required, see [Compatibility](#compatibility). A
+conformance claim is this checklist walked item by item, each with its own
+verdict, never an impression of the whole:
+
+1. Long-polls `GET /work` while able to accept work. `204` is not an error (`API-1`).
+2. A work unit carries exactly one of `promptFile`/`promptText` (`API-2`).
+3. Where continuity is possible, context named by `runtimeContextId` is restored before `GET /work` answers (`API-3`).
+4. `turns[]`/`toolCalls[]` are trimmed to the [bounds](#bounds) before posting (`API-4`).
+5. `runtimeContextId`/`brief` are LATEST-WINS — absent leaves the stored value untouched (`API-5`).
+6. `turns[]`/`toolCalls[]` become one activity hop each, never written to the `Conversation` (`API-6`).
+7. A fact the runtime cannot determine is omitted, never reported as zero (`API-7`).
+8. A tool's input or output is never reported (`API-8`).
+9. Neither array is reported when the run made neither a model call nor a tool call (`API-9`).
+10. A definitive `4xx` (not `408`/`429`) from `POST /work/done` is never retried (`API-10`).
+11. A transport error, timeout, `408`, `429`, or any `5xx` gets a bounded retry before giving up (`API-11`).
+12. Every undelivered report leaves a log line carrying the response status and body — never dropped silently (`API-12`).
+13. One inflight unit per conversation — polling while Working gets nothing back (`LC-1`).
+14. The runtime exits on exactly one LIFECYCLE condition: no work for `RUNTIME_IDLE_TTL_M` minutes (`LC-2`).
+15. `/exit` deletes the pod, refused while a run is in progress (`LC-3`).
+16. Missing or unusable required configuration before the first poll ends the process with a nonzero exit naming the gap — a crash, not a lifecycle exit (`LC-4`).
+17. Honouring the pod's own termination signal is likewise not a lifecycle exit (`LC-5`).
+18. Clones `REPO_URL`/`REPO_REF` with the environment's git credentials, when `REPO_URL` is not empty (`RT-1`).
+19. Executes the returned unit, streaming progress to stdout, never a transport of its own (`RT-2`).
+20. Composes the tool allowlist as `toolsMode` directs (`RT-3`).
+21. A runtime that cannot see a repository uses `allowedTools` as-is (`RT-3.1`).
+22. An empty allowlist stays empty — no tool substitutes for one nobody declared (`RT-3.2`).
+23. An absent or unreadable agent definition contributes nothing (`RT-3.3`).
+24. The definition path is runtime-specific, per vendor (`RT-3.4`).
+25. The manager never reads a secret — every credential compiles to `valueFrom`/`envFrom` (`SEC-1`).
+26. `AOPS_MCP_TOKEN` is derived, never stored (`SEC-2`).
+27. The operator grants the runtime no Kubernetes permissions of its own (`SEC-3`).
+28. One pod per conversation, created and owned by the manager (`MGR-1`).
+29. Context is checkpointed before `POST /work/done` reaches the manager (`MGR-2`).
+30. A pod that never reaches `Running` is reaped at a deadline (`MGR-3`).
+31. The manager supplies every variable in [Environment](#environment), and the profile's git credentials (`MGR-4`).
+32. An empty `REPO_URL` is never read as an error or as "clone the default" (`MGR-5`).
+33. A runtime ignores work-unit fields it does not know (`COMPAT-1`).
+34. The manager ignores report fields it does not know (`COMPAT-2`).
+35. A published section anchor is a stable name — renaming one is MAJOR (`COMPAT-3`).
 
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
+| 1.1.0 | 2026-10-21 | Added the startup-configuration-failure crash ruling (`LC-4`, `LC-5`) — missing or unusable required config before the first poll is a nonzero crash, not a lifecycle exit. Added the `/work/done` definitive-rejection table (`API-10`, `API-11`, `API-12`) — a definitive `4xx` is never retried, a transient failure keeps its bounded retry, and every undelivered report is logged. The work-unit and completion-report tables are now GENERATED from the manager's own Go structs, and [Conformance](#conformance) is now a numbered checklist reaching every requirement on this page. ADDITIVE: no wire field changed, and a runtime already failing fast and respecting the retry/no-retry split stays fully conformant. |
 | 1.0.0 | 2026-10-17 | Initial release. |

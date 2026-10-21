@@ -1130,6 +1130,25 @@
         "formerly",
         "RETIRED"
       ]
+    },
+    {
+      "id": "telegram-adapter-enabled",
+      "pattern": "telegramAdapter\\.enabled",
+      "says": "telegram.enabled is the one gate the whole bundle renders under; the flat telegramAdapter.enabled value gates nothing",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "gone",
+        "gates nothing",
+        "flat",
+        "replaced",
+        "renamed",
+        "is now",
+        "migration"
+      ]
     }
   ]
 }
