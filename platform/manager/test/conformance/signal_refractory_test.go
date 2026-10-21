@@ -39,15 +39,9 @@ func assertRefractoryNeverSuppressesADistinctID(t *testing.T, mgr *FakeManager, 
 
 	var idB string
 	waitFor(t, "distinct condition B to be posted while A's window is open", 45*time.Second, func() bool {
-		for _, p := range accepted(mgr, source)[1:] {
-			for _, s := range p.Signals {
-				if id, _ := s["initiationId"].(string); id != idA {
-					idB = id
-					return true
-				}
-			}
-		}
-		return false
+		id, ok := postedIDOtherThan(mgr, source, idA)
+		idB = id
+		return ok
 	})
 	if elapsed := time.Since(windowOpened); elapsed >= refractoryFloor {
 		t.Fatalf("B arrived %s after A emitted, past the window floor — this run proves nothing about the window", elapsed)
@@ -55,13 +49,32 @@ func assertRefractoryNeverSuppressesADistinctID(t *testing.T, mgr *FakeManager, 
 	// A's chatter dwelled no longer than B and was delivered first, so had
 	// the window not held it back it would have been decided in the same
 	// flush as B, or an earlier one.
+	if reposted := postedIDs(mgr, source, func(id string) bool { return id == idA }); len(reposted) > 0 {
+		t.Fatalf("A's chatter inside its own window was re-posted under %q (B is %q)", idA, idB)
+	}
+}
+
+// postedIDs returns the initiationIds of every signal after the first post
+// that satisfy keep.
+func postedIDs(mgr *FakeManager, source string, keep func(id string) bool) []string {
+	var ids []string
 	for _, p := range accepted(mgr, source)[1:] {
 		for _, s := range p.Signals {
-			if s["initiationId"] == idA {
-				t.Fatalf("A's chatter inside its own window was re-posted under %q (B is %q)", idA, idB)
+			if id, _ := s["initiationId"].(string); keep(id) {
+				ids = append(ids, id)
 			}
 		}
 	}
+	return ids
+}
+
+// postedIDOtherThan returns the first posted initiationId that is not idA.
+func postedIDOtherThan(mgr *FakeManager, source, idA string) (string, bool) {
+	ids := postedIDs(mgr, source, func(id string) bool { return id != idA })
+	if len(ids) == 0 {
+		return "", false
+	}
+	return ids[0], true
 }
 
 // ---- signal-ha -------------------------------------------------------------

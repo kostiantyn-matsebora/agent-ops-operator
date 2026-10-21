@@ -541,43 +541,49 @@ func (a *adapter) examine(name string, src *servedSource, events []Event, fromLi
 			b.keepBefore(ev.When())
 			break
 		}
-		// Self-exclusion runs FIRST — before matching, before the cursor.
-		// An event about agent-ops' own machinery must not reach the
-		// filters at all: no rule may re-admit it, and it must not
-		// advance a cursor as though it had been considered.
-		if excluded, _ := a.self.Excludes(ev, src.filter.includeOwnNamespace); excluded {
-			continue
-		}
-		if !src.filter.Matches(ev) {
-			continue
-		}
-		when := ev.When()
-		// Only the list pass consults the cursor: during a live watch every
-		// frame is news, and an event whose timestamps are all unparsable
-		// (zero) must not be silently dropped.
-		if fromList && !when.IsZero() && !when.After(src.cursor) {
-			continue
-		}
-		// The cursor advances for a held or deferred signal too. A restart
-		// inside a window loses at most that window, and a problem real
-		// enough to have survived verification is still emitting events — so
-		// it is re-detected within the minute. Holding the cursor back instead
-		// would replay the whole window on every restart.
-		if a.awaitsOwner(ev) {
-			a.held.Hold(name, *ev, now)
-			b.observe(when)
-			continue
-		}
-		sig, out := a.admit(name, src, ev, now)
-		if out == admitSkipped {
-			continue
-		}
-		b.observe(when)
-		if out == admitImmediate {
-			b.signals = append(b.signals, sig)
-		}
+		a.examineOne(name, src, ev, fromList, now, b)
 	}
 	return b
+}
+
+// examineOne runs one event through self-exclusion, the filters, the cursor
+// and admission, recording what it did in b. Called with a.mu held.
+func (a *adapter) examineOne(name string, src *servedSource, ev *Event, fromList bool, now time.Time, b *sourceBatch) {
+	// Self-exclusion runs FIRST — before matching, before the cursor.
+	// An event about agent-ops' own machinery must not reach the
+	// filters at all: no rule may re-admit it, and it must not
+	// advance a cursor as though it had been considered.
+	if excluded, _ := a.self.Excludes(ev, src.filter.includeOwnNamespace); excluded {
+		return
+	}
+	if !src.filter.Matches(ev) {
+		return
+	}
+	when := ev.When()
+	// Only the list pass consults the cursor: during a live watch every
+	// frame is news, and an event whose timestamps are all unparsable
+	// (zero) must not be silently dropped.
+	if fromList && !when.IsZero() && !when.After(src.cursor) {
+		return
+	}
+	// The cursor advances for a held or deferred signal too. A restart
+	// inside a window loses at most that window, and a problem real
+	// enough to have survived verification is still emitting events — so
+	// it is re-detected within the minute. Holding the cursor back instead
+	// would replay the whole window on every restart.
+	if a.awaitsOwner(ev) {
+		a.held.Hold(name, *ev, now)
+		b.observe(when)
+		return
+	}
+	sig, out := a.admit(name, src, ev, now)
+	if out == admitSkipped {
+		return
+	}
+	b.observe(when)
+	if out == admitImmediate {
+		b.signals = append(b.signals, sig)
+	}
 }
 
 // keepBefore caps the read position strictly before the first unexamined

@@ -662,40 +662,44 @@ func TestSigningSecretEnforcedWithoutRegistration(t *testing.T) {
 		{"invalid baseUrl", `{"baseUrl":"not-a-url","webhookUrl":"https://pulse-adapter.example.org/webhook/pulse-default"}`},
 		{"mistyped", `{"baseUrl":42}`},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			src := SourceInfo{Name: "pulse-default", CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_"}
-			if tc.config != "" {
-				src.Config = json.RawMessage(tc.config)
-			}
-			t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "s3cret")
-			f := &fakeManager{sources: []SourceInfo{src}}
-			h := testAdapter(t, f).handler()
-			body := firingBody("hand-registered")
-			ts := strconv.FormatInt(time.Now().Unix(), 10)
+		t.Run(tc.name, func(t *testing.T) { assertSigningSecretEnforced(t, tc.config) })
+	}
+}
 
-			signed := func(secret string) *httptest.ResponseRecorder {
-				req := httptest.NewRequest("POST", "/webhook/pulse-default", strings.NewReader(body))
-				req.Header.Set("X-Pulse-Timestamp", ts)
-				req.Header.Set("X-Pulse-Signature", sign(t, secret, ts, []byte(body)))
-				rec := httptest.NewRecorder()
-				h.ServeHTTP(rec, req)
-				return rec
-			}
-			if rec := post(t, h, "/webhook/pulse-default", body); rec.Code != 401 {
-				t.Fatalf("an unsigned post must be refused while a secret is configured: %d %s", rec.Code, rec.Body.String())
-			}
-			if rec := signed("wrong-secret"); rec.Code != 401 {
-				t.Fatalf("a wrongly signed post must be refused: %d %s", rec.Code, rec.Body.String())
-			}
-			if rec := signed("s3cret"); rec.Code != 200 {
-				t.Fatalf("a post signed by a hand-registered Pulse must verify: %d %s", rec.Code, rec.Body.String())
-			}
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			if len(f.inbounds) != 1 {
-				t.Fatalf("exactly the verified post must push: %d pushes", len(f.inbounds))
-			}
-		})
+// assertSigningSecretEnforced posts unsigned, wrongly signed and correctly
+// signed bodies at a source carrying config, and expects only the last to push.
+func assertSigningSecretEnforced(t *testing.T, config string) {
+	src := SourceInfo{Name: "pulse-default", CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_"}
+	if config != "" {
+		src.Config = json.RawMessage(config)
+	}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "s3cret")
+	f := &fakeManager{sources: []SourceInfo{src}}
+	h := testAdapter(t, f).handler()
+	body := firingBody("hand-registered")
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+
+	signed := func(secret string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/webhook/pulse-default", strings.NewReader(body))
+		req.Header.Set("X-Pulse-Timestamp", ts)
+		req.Header.Set("X-Pulse-Signature", sign(t, secret, ts, []byte(body)))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := post(t, h, "/webhook/pulse-default", body); rec.Code != 401 {
+		t.Fatalf("an unsigned post must be refused while a secret is configured: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := signed("wrong-secret"); rec.Code != 401 {
+		t.Fatalf("a wrongly signed post must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := signed("s3cret"); rec.Code != 200 {
+		t.Fatalf("a post signed by a hand-registered Pulse must verify: %d %s", rec.Code, rec.Body.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.inbounds) != 1 {
+		t.Fatalf("exactly the verified post must push: %d pushes", len(f.inbounds))
 	}
 }
 

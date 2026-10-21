@@ -398,15 +398,44 @@ func decodeNode(raw json.RawMessage) (*objectInfo, error) {
 	return n.info(), nil
 }
 
+// list fills the cache from one list of the scope and returns its
+// resourceVersion for the watch that follows.
+func (w *cacheWatcher) list(ctx context.Context, scope string) (string, error) {
+	var list struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	rv, err := w.kube.ListInto(ctx, w.pathFor(scope), &list)
+	if err != nil {
+		return "", err
+	}
+	for _, raw := range list.Items {
+		if oi, err := w.decode(raw); err == nil {
+			w.cache.put(oi)
+		}
+	}
+	w.cache.markSynced()
+	return rv, nil
+}
+
+// applyFrame folds one watch frame into the cache.
+func (w *cacheWatcher) applyFrame(frameType string, obj json.RawMessage) {
+	oi, err := w.decode(obj)
+	if err != nil {
+		return
+	}
+	if frameType == "DELETED" {
+		w.cache.drop(oi.Namespace, oi.Kind, oi.Name)
+		return
+	}
+	w.cache.put(oi)
+}
+
 // run keeps one scope current: list, then watch, relisting on expiry. It
 // mirrors watchScope's shape deliberately — same relist contract, same
 // cancellation semantics.
 func (w *cacheWatcher) run(ctx context.Context, scope string) {
 	for ctx.Err() == nil {
-		var list struct {
-			Items []json.RawMessage `json:"items"`
-		}
-		rv, err := w.kube.ListInto(ctx, w.pathFor(scope), &list)
+		rv, err := w.list(ctx, scope)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -418,24 +447,8 @@ func (w *cacheWatcher) run(ctx context.Context, scope string) {
 			sleepCtx(ctx, relistBackoff)
 			continue
 		}
-		for _, raw := range list.Items {
-			if oi, err := w.decode(raw); err == nil {
-				w.cache.put(oi)
-			}
-		}
-		w.cache.markSynced()
 
-		err = w.kube.WatchFrames(ctx, w.pathFor(scope), rv, func(frameType string, obj json.RawMessage) {
-			oi, decErr := w.decode(obj)
-			if decErr != nil {
-				return
-			}
-			if frameType == "DELETED" {
-				w.cache.drop(oi.Namespace, oi.Kind, oi.Name)
-				return
-			}
-			w.cache.put(oi)
-		})
+		err = w.kube.WatchFrames(ctx, w.pathFor(scope), rv, w.applyFrame)
 		switch {
 		case ctx.Err() != nil:
 			return
