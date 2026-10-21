@@ -367,26 +367,38 @@ func TestSignalInboundAttributeFilterDropsFailingSignalBeforeCooldown(t *testing
 }
 
 // signalsource-attribute-filter: "Empty or absent attributeFilters admits
-// everything" — a source with the field explicitly set to an empty list
-// behaves identically to one that never declared it.
-func TestSignalInboundEmptyAttributeFiltersAdmitsEverything(t *testing.T) {
-	source := sigTestSource("attrfilter-empty-src", "attrfilter-t")
-	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{}
-	pipeline := sigTestPipeline("attrfilter-empty-pipe", source.Name)
-	s, c := sigServer(t, source, pipeline)
+// everything" — a source with the field explicitly set to an empty list, and
+// one that never declared it at all (nil), both behave identically to no
+// filter existing.
+func TestSignalInboundNilOrEmptyAttributeFiltersAdmitsEverything(t *testing.T) {
+	cases := []struct {
+		name    string
+		filters []agentopsv1alpha1.AttributeFilterRequirement
+	}{
+		{name: "nil", filters: nil},
+		{name: "empty", filters: []agentopsv1alpha1.AttributeFilterRequirement{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := sigTestSource("attrfilter-"+tc.name+"-src", "attrfilter-t")
+			source.Spec.AttributeFilters = tc.filters
+			pipeline := sigTestPipeline("attrfilter-"+tc.name+"-pipe", source.Name)
+			s, c := sigServer(t, source, pipeline)
 
-	rec := postSig(s, source.Name, []map[string]any{
-		{"initiationId": "attrfilter-empty-1", "payload": "hello"},
-	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
-	}
-	if len(convs.Items) != 1 {
-		t.Fatalf("an empty filter list must admit every signal — want 1 conversation, got %d", len(convs.Items))
+			rec := postSig(s, source.Name, []map[string]any{
+				{"initiationId": "attrfilter-" + tc.name + "-1", "payload": "hello"},
+			})
+			if rec.Code != 200 {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			var convs agentopsv1alpha1.ConversationList
+			if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+				t.Fatal(err)
+			}
+			if len(convs.Items) != 1 {
+				t.Fatalf("%s filters must admit every signal — want 1 conversation, got %d", tc.name, len(convs.Items))
+			}
+		})
 	}
 }
 
@@ -538,5 +550,182 @@ func TestSignalInboundLogFilteredFalseDoesNotSuppressOtherDropCodes(t *testing.T
 	}
 	if !found {
 		t.Fatal("logFiltered must not suppress an unclaimed-source drop")
+	}
+}
+
+// signalsource-attribute-filter: "A signal matching every requirement routes
+// normally" / "A signal failing one requirement is dropped" — exercised here
+// through NotIn/Exists/DoesNotExist, not just In (the only operator the
+// other httpapi tests above use). ingest.Admits already pins each operator's
+// semantics at the unit level; this confirms the handler actually wires
+// AttributeFilters through for every operator, not just the one it happens
+// to be tested with elsewhere.
+func TestSignalInboundAttributeFilterOperatorsThroughHTTPAPI(t *testing.T) {
+	cases := []struct {
+		name        string
+		requirement agentopsv1alpha1.AttributeFilterRequirement
+		admitLabels map[string]string
+		dropLabels  map[string]string
+	}{
+		{
+			name: "NotIn",
+			requirement: agentopsv1alpha1.AttributeFilterRequirement{
+				Key: "team", Operator: agentopsv1alpha1.AttributeFilterNotIn, Values: []string{"blocked"},
+			},
+			admitLabels: map[string]string{"team": "payments"},
+			dropLabels:  map[string]string{"team": "blocked"},
+		},
+		{
+			name: "Exists",
+			requirement: agentopsv1alpha1.AttributeFilterRequirement{
+				Key: "team", Operator: agentopsv1alpha1.AttributeFilterExists,
+			},
+			admitLabels: map[string]string{"team": "payments"},
+			dropLabels:  map[string]string{"other": "x"},
+		},
+		{
+			name: "DoesNotExist",
+			requirement: agentopsv1alpha1.AttributeFilterRequirement{
+				Key: "team", Operator: agentopsv1alpha1.AttributeFilterDoesNotExist,
+			},
+			admitLabels: map[string]string{"other": "x"},
+			dropLabels:  map[string]string{"team": "payments"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			suffix := strings.ToLower(tc.name)
+			source := sigTestSource("attrfilter-op-"+suffix+"-src", "attrfilter-op-"+suffix+"-t")
+			source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{tc.requirement}
+			pipeline := sigTestPipeline("attrfilter-op-"+suffix+"-pipe", source.Name)
+			s, c := sigServer(t, source, pipeline)
+
+			rec := postSig(s, source.Name, []map[string]any{
+				{"initiationId": "op-admit-1", "payload": "fine", "labels": tc.admitLabels},
+				{"initiationId": "op-drop-1", "payload": "boom", "labels": tc.dropLabels},
+			})
+			if rec.Code != 200 {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			var resp map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp["reason"] != ReasonFiltered {
+				t.Fatalf("operator %s: reason = %v, want %q", tc.name, resp["reason"], ReasonFiltered)
+			}
+
+			var convs agentopsv1alpha1.ConversationList
+			if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+				t.Fatal(err)
+			}
+			if len(convs.Items) != 1 {
+				t.Fatalf("operator %s: want exactly 1 admitted conversation, got %d", tc.name, len(convs.Items))
+			}
+			if convs.Items[0].Spec.ConversationID != "op-admit-1" {
+				t.Fatalf("operator %s: the routed conversation must be the ADMITTED signal, got conversationId %q",
+					tc.name, convs.Items[0].Spec.ConversationID)
+			}
+		})
+	}
+}
+
+// signalsource-attribute-filter: "A signal failing one requirement is
+// dropped before cooldown" — with MULTIPLE requirements, exercised through
+// the httpapi layer rather than only ingest.Admits, to confirm the AND
+// across requirements survives the conversion into the handler's own
+// []ingest.FilterRequirement.
+func TestSignalInboundAttributeFilterMultipleRequirementsRequiresAll(t *testing.T) {
+	source := sigTestSource("attrfilter-and-src", "attrfilter-and-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"payments"}},
+		{Key: "env", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"prod"}},
+	}
+	pipeline := sigTestPipeline("attrfilter-and-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		// Satisfies BOTH requirements: must route.
+		{"initiationId": "and-both-1", "payload": "fine", "labels": map[string]string{"team": "payments", "env": "prod"}},
+		// Satisfies only the FIRST requirement — the second's failure must
+		// still drop it, not be forgiven by the first one passing.
+		{"initiationId": "and-one-1", "payload": "boom", "labels": map[string]string{"team": "payments", "env": "staging"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 1 {
+		t.Fatalf("a signal failing only the SECOND requirement must still be dropped — want 1 conversation, got %d", len(convs.Items))
+	}
+	if convs.Items[0].Spec.ConversationID != "and-both-1" {
+		t.Fatalf("the routed conversation must be the one satisfying BOTH requirements, got conversationId %q",
+			convs.Items[0].Spec.ConversationID)
+	}
+}
+
+// signalsource-attribute-filter: design.md's "filtering happens once ...
+// ahead of the lane split" — a chat-kind signal failing attributeFilters is
+// dropped exactly like an alert/job/task signal, never reaching
+// routeChatSignals, never bumping receivedTotal.
+func TestSignalInboundAttributeFilterDropsChatKindSignal(t *testing.T) {
+	source := sigTestSource("attrfilter-chat-src", "attrfilter-chat-t")
+	source.Spec.AttributeFilters = []agentopsv1alpha1.AttributeFilterRequirement{
+		{Key: "team", Operator: agentopsv1alpha1.AttributeFilterIn, Values: []string{"payments"}},
+	}
+	// A Pipeline claims the source so the chat lane, if ever wrongly reached,
+	// would have exactly one server to route to (never ambiguous) — isolating
+	// the assertion to "filtering happened before the chat split", not
+	// "nothing claims this chat source".
+	pipeline := sigTestPipeline("attrfilter-chat-pipe", source.Name)
+	s, c := sigServer(t, source, pipeline)
+
+	rec := postSig(s, source.Name, []map[string]any{
+		{
+			"initiationId": "attrfilter-chat-1", "kind": KindChat, "payload": "hello",
+			// chatChannel is never resolved — the signal never reaches
+			// routeChatSignals — so an unresolvable channel name is fine here.
+			"labels": map[string]string{"team": "search", LabelChatChannel: "nonexistent-channel"},
+		},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["reason"] != ReasonFiltered {
+		t.Fatalf("a filtered chat signal must report reason=%q, got %v", ReasonFiltered, resp["reason"])
+	}
+
+	var convs agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(convs.Items) != 0 {
+		t.Fatalf("a filtered chat signal must never open a conversation — want 0, got %d", len(convs.Items))
+	}
+
+	var refreshed agentopsv1alpha1.SignalSource
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: sigTestNamespace, Name: source.Name}, &refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Status.ReceivedTotal != 0 {
+		t.Fatalf("a filtered chat signal must never bump receivedTotal, got %d", refreshed.Status.ReceivedTotal)
+	}
+
+	events, _ := s.Activity.Since("", 0)
+	found := false
+	for _, e := range events {
+		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeFiltered {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a filtered chat signal must still be recorded as a signal.dropped event (logFiltered unset)")
 	}
 }

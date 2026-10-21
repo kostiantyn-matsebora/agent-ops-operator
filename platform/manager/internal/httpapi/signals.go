@@ -386,8 +386,12 @@ func partitionByAttributeFilters(source *agentopsv1alpha1.SignalSource, signals 
 	for _, f := range source.Spec.AttributeFilters {
 		reqs = append(reqs, ingest.FilterRequirement{Key: f.Key, Operator: string(f.Operator), Values: f.Values})
 	}
+	// Compiled ONCE for the whole batch — every signal shares this source's
+	// one requirement list, so building the selector per signal would redo
+	// the same conversion and validation work for every signal in the batch.
+	filter := ingest.Compile(reqs)
 	for _, sig := range signals {
-		if ingest.Admits(reqs, sig.Labels) {
+		if filter.Admits(sig.Labels) {
 			admitted = append(admitted, sig)
 		} else {
 			filteredOut = append(filteredOut, sig)
@@ -1018,8 +1022,7 @@ func (s *Server) handleSignalInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	admitted, filteredOut := partitionByAttributeFilters(source, in.Signals)
 	if len(filteredOut) > 0 && logFiltered(source) {
-		s.emitDropped(source, filteredOut, activity.CodeFiltered,
-			"signal failed the source's attributeFilters")
+		s.emitDropped(source, filteredOut, activity.CodeFiltered, ReasonFiltered)
 	}
 
 	route := s.routeSignals

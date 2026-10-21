@@ -16,24 +16,25 @@ type FilterRequirement struct {
 	Values   []string
 }
 
-// Admits reports whether labels satisfies every requirement — the same
-// semantics a Kubernetes label selector applies, since each requirement is
-// converted into a metav1.LabelSelectorRequirement and handed to
-// metav1.LabelSelectorAsSelector/Selector.Matches rather than reimplemented.
-//
-// A requirement that fails to construct a valid Requirement (e.g. In/NotIn
-// with no values, or Exists/DoesNotExist with some) FAILS CLOSED: the whole
-// selector is treated as never-satisfied rather than skipping just that one
-// requirement, so a malformed filter can only narrow admission, never widen
-// it (design: "A malformed value/operator combination fails closed").
-//
-// An empty requirements list always admits — the empty-filter case is the
-// caller's to special-case for the "zero behavior change" guarantee, but
-// Admits itself already returns true for it since an empty selector matches
-// everything.
-func Admits(requirements []FilterRequirement, attrs map[string]string) bool {
+// Filter is requirements compiled once, ready to test many signals without
+// re-converting or re-validating the same list per signal. A batch ingest
+// call has one requirement list and many signals — compiling once and
+// reusing is what keeps evaluating a whole batch linear in the number of
+// signals rather than the signals times the requirement count.
+type Filter struct {
+	selector labels.Selector
+	// malformed is set when the requirements could not build a valid
+	// selector (see Admits's own fail-closed contract) — captured here
+	// rather than returned from Compile so a caller gets one thing to hold
+	// per filter, not a (*Filter, error) pair to thread through a loop.
+	malformed bool
+}
+
+// Compile builds requirements into a Filter once. An empty list compiles to
+// a Filter that admits everything, matching Admits's own empty-list case.
+func Compile(requirements []FilterRequirement) *Filter {
 	if len(requirements) == 0 {
-		return true
+		return &Filter{selector: labels.Everything()}
 	}
 	exprs := make([]metav1.LabelSelectorRequirement, 0, len(requirements))
 	for _, r := range requirements {
@@ -45,7 +46,34 @@ func Admits(requirements []FilterRequirement, attrs map[string]string) bool {
 	}
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchExpressions: exprs})
 	if err != nil {
+		return &Filter{malformed: true}
+	}
+	return &Filter{selector: selector}
+}
+
+// Admits reports whether attrs satisfies every requirement this Filter was
+// compiled from — the same semantics a Kubernetes label selector applies,
+// since each requirement was converted into a metav1.LabelSelectorRequirement
+// and handed to metav1.LabelSelectorAsSelector/Selector.Matches rather than
+// reimplemented.
+//
+// A requirement that failed to construct a valid Requirement at Compile time
+// (e.g. In/NotIn with no values, or Exists/DoesNotExist with some) FAILS
+// CLOSED here: the whole selector is treated as never-satisfied rather than
+// skipping just that one requirement, so a malformed filter can only narrow
+// admission, never widen it (design: "A malformed value/operator combination
+// fails closed").
+func (f *Filter) Admits(attrs map[string]string) bool {
+	if f.malformed {
 		return false
 	}
-	return selector.Matches(labels.Set(attrs))
+	return f.selector.Matches(labels.Set(attrs))
+}
+
+// Admits is the single-shot convenience form of Compile(requirements).Admits
+// (attrs) — same fail-closed contract, same empty-list "admits everything"
+// case. Prefer Compile directly when testing many signals against one
+// requirement list, since this re-compiles on every call.
+func Admits(requirements []FilterRequirement, attrs map[string]string) bool {
+	return Compile(requirements).Admits(attrs)
 }
