@@ -155,7 +155,9 @@ A chat surface applies the contract's one id rule — minted or propagated — a
 | a new human request | minting — the request is its own aggregation unit | a FRESH `initiationId`, own conversation by construction |
 | a person writing into a thread the manager already bound | propagation — the thread carries the manager-issued id back | the `conversationId` the manager stamped on that thread binding, passed through verbatim |
 
-A fresh origination id SHALL be minted deterministically from the transport's own delivery identity (the update or message id) scoped to the matched SOURCE, never from the delivery identity alone.
+A fresh origination id SHALL be minted deterministically from the transport's own delivery identity, scoped to the matched SOURCE — never from the delivery identity alone.
+
+The delivery identity is whichever id the transport attached to this input: the update, the message or the selection. A selection answering a surface's choice prompt mints exactly as a typed message does.
 
 A transport's delivery id is typically scoped per sender, so two SignalSources a Pipeline shares (sources are shareable, never exclusive) could otherwise collide on the same bare id.
 
@@ -185,6 +187,11 @@ No chat-specific routing branch and no second addressing mode SHALL exist manage
 
 - **WHEN** the transport re-delivers the same update after a crash
 - **THEN** the signal repeats the same `initiationId` and routes to the conversation the first delivery opened, rather than opening a second one
+
+#### Scenario: A selection mints from its own delivery id
+
+- **WHEN** a person answers a surface's choice prompt and the transport delivers that answer as a selection carrying its own delivery id
+- **THEN** the minted `initiationId` derives from the selection's id scoped to the source, so a re-delivered selection routes to the conversation the first delivery opened
 
 #### Scenario: Two sources never collide on the same bare delivery id
 

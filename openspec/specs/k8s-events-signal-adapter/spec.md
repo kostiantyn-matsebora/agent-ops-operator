@@ -3,7 +3,9 @@
 ## Purpose
 
 The Kubernetes events signal adapter in `signals/k8s-events/`: a dependency-free module that serves SignalSources naming its `SignalAdapter` CR through the signal adapter contract, watching core `v1` Events with its own ServiceAccount token and normalizing them into `kind: alert` signals with a deterministic workload-keyed `initiationId`, so cooldown, routing, and recurrence stay manager-side.
+
 ## Requirements
+
 ### Requirement: Kubernetes events run as a signal adapter
 A signal adapter in `signals/k8s-events/` (own dependency-free Go module and image, precedents `signals/cron/` and `channels/telegram/`) SHALL serve SignalSources whose `spec.adapter` names its `SignalAdapter` CR (default name `k8s-events`) through the signal adapter contract, watching core `v1` Events via the in-cluster Kubernetes API using its own ServiceAccount token (no client-go). Per-source `config` SHALL support `severities` (Event `type` values, default `["Warning"]`), `namespaces` (empty or absent = all namespaces the granted RBAC allows), the ordered `rules` and `route` stanzas defined by the `k8s-event-suppression` capability, and the legacy `includeReasons`/`excludeReasons` exact-match filters, which SHALL remain accepted and translate to equivalent rules. Invalid config (unknown severity value, malformed matcher, unparsable duration, or malformed shape) SHALL be reported as a False Ready condition on that source via the contract status API while other sources keep being served. No signal-type constant SHALL be added to `api/v1alpha1`: the adapter CR's NAME is the routing key, and there are no built-in signal types.
 
@@ -41,10 +43,20 @@ and `node`, which rules matchers, inhibition and display select on.
 
 The `workload` label — and with it the id — SHALL be resolved through owner
 references (Pod → ReplicaSet → Deployment, and the equivalent chain for other
-controllers), never by parsing the object's name. Name-based inference breaks
-on StatefulSets, DaemonSets, and bare pods.
+controllers), never by parsing the object's name.
+
+Name-based inference breaks on StatefulSets, DaemonSets, and bare pods.
 
 When no controller owns the object, `workload` SHALL name the object itself.
+
+Resolution lag SHALL NOT re-mint per-object grouping. When a tracked kind's
+owning workload cannot yet be resolved because the adapter's own cache has
+not caught up, the adapter SHALL hold the event for a short bounded wait
+rather than emit under the object's own name.
+
+The object-keyed id applies only to an object confirmed unowned, or to one
+still unresolved when that wait expires — so a momentary cache lag delays the
+signal, and never loses it.
 
 The adapter SHALL apply suppression per the `k8s-event-suppression`
 capability. Suppression is filtering, which has always been the adapter's
@@ -61,6 +73,10 @@ role, and is distinct from correlation.
 #### Scenario: Workload comes from owner references
 - **WHEN** an event's involved object is a pod named `app-0` owned by a StatefulSet, or `app-xk2p9` owned by a DaemonSet
 - **THEN** the id keys on the owning controller in both cases, with no dependence on the shape of the pod name
+
+#### Scenario: A cache catching up does not split a workload's conversation
+- **WHEN** a pod's event arrives before the adapter's cache holds its owning ReplicaSet, and the owner appears within the bounded wait
+- **THEN** the emitted signal carries the workload-keyed id, never a per-pod one
 
 #### Scenario: An unowned pod is its own workload
 - **WHEN** an event's involved object is a bare pod with no owner references
@@ -102,4 +118,3 @@ The adapter SHALL implement the `signal-self-exclusion` invariant: events whose 
 #### Scenario: A failing runtime pod does not create a conversation
 - **WHEN** a runtime pod cannot be scheduled and emits `FailedScheduling` warnings under successive pod names
 - **THEN** no signal is emitted for any of them, and the create-fail-create cycle does not start
-

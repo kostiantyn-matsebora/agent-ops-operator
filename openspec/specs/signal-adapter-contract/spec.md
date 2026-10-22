@@ -14,7 +14,7 @@ A `1.x` adapter during rollout gets the same answer — a loud contract violatio
 
 The specification's COMPAT section SHALL state this rule: there is no compatibility shim, because a manager-synthesized id would re-mint grouping policy in the manager, which this contract forbids.
 
-Replacing `fingerprint` with `initiationId` is a MAJOR move. The specification version SHALL be `2.0.0`, and its changelog SHALL record the replacement under that version.
+Replacing `fingerprint` with `initiationId` was a MAJOR move. The changelog SHALL record the replacement under version `2.0.0`, whatever later additive versions the page carries.
 
 #### Scenario: A 1.x adapter is refused loudly
 
@@ -23,7 +23,7 @@ Replacing `fingerprint` with `initiationId` is a MAJOR move. The specification v
 
 #### Scenario: The contract names its own break
 
-- **WHEN** a reader opens the published specification at `2.0.0`
+- **WHEN** a reader opens the published specification
 - **THEN** the changelog records the `fingerprint` → `initiationId` replacement under `2.0.0`, and the COMPAT section states that a missing id is rejected rather than repaired
 
 ### Requirement: The id is the sender's, never the manager's
@@ -351,6 +351,7 @@ version that adapter conforms to.
 | `signals/alertmanager` | `docs/integrations/prometheus.md` |
 | `signals/k8s-events` | `docs/integrations/kubernetes.md` |
 | `signals/ha` | `docs/integrations/home-assistant.md` |
+| `signals/pulse` | `docs/integrations/pulse.md` |
 | `signals/telegram` | `docs/integrations/telegram.md` |
 | `signals/cron` | `docs/guides/signal-adapter.md` — it has no page of its own |
 
@@ -370,8 +371,8 @@ version that adapter conforms to.
 A change that moves the MAJOR or MINOR version of
 `docs/contracts/signal-adapter.md` MUST, in the same change, bring every
 shipped signal adapter — `signals/cron`, `signals/alertmanager`,
-`signals/k8s-events`, `signals/ha`, `signals/telegram` — into conformance with
-the new version.
+`signals/k8s-events`, `signals/ha`, `signals/pulse`, `signals/telegram` —
+into conformance with the new version.
 
 The same change MUST move the version every shipped adapter page claims. The
 change is not finished while any shipped adapter conforms only to the previous
@@ -380,9 +381,10 @@ version, so the specification never runs ahead of what ships.
 A PATCH-only change alters no obligation, so it is exempt from the adapter walk
 and the claimed versions stay as they are.
 
-The first version, `1.0.0`, documents shipped behavior. It needs no adapter
-change, but the change MUST walk the checklist for all five adapters and fix
-any gap it finds before the version is claimed.
+The first version, `1.0.0`, documented shipped behavior and walked that
+checklist for the five adapters that shipped then. `signals/pulse` joined the
+enumeration at `2.2.0` — a shipped adapter a list omits is exempt from
+nothing, so the omission was the defect, never an exemption.
 
 #### Scenario: The specification version moves
 
@@ -419,3 +421,45 @@ NEVER edited without the user's explicit approval.
   without the user's explicit approval
 - **THEN** the rule directs it to stop and ask, and the session reports the
   conflict instead of editing
+
+### Requirement: A post-emit refractory window is the one named allowance in the no-dedup rule
+
+The no-dedup obligation stands: an adapter MUST NOT implement dedup, cooldown
+or recurrence. The manager's cooldown on `initiationId` is the one dedup
+authority.
+
+The specification SHALL name ONE carve-out beside that obligation — the
+post-emit refractory window. It bounds an adapter's own re-post chatter, and
+decides nothing about recurrence.
+
+| Bound | Rule |
+|---|---|
+| post-emit only | the window opens only when the adapter itself emitted a signal — a condition never reported is never suppressed |
+| one id | it suppresses only re-posts carrying the emitted signal's own `initiationId`, never collapsing distinct ids |
+| length | no longer than the emitting rule's own dwell, with a floor of one minute |
+| no substitute | the manager's cooldown stays the dedup authority — the window only saves round trips cooldown would have absorbed |
+| declared | an adapter relying on the window SHALL declare it, with its length, in that adapter's own capability spec |
+
+Naming the allowance is an additive change. The specification version SHALL
+move to `2.2.0`, and its changelog SHALL record the allowance under that
+version.
+
+#### Scenario: A suppressed re-post changes nothing the manager would have kept
+
+- **WHEN** an adapter emitted a signal and the same condition recurs within the declared window
+- **THEN** no re-post is made, and the conversation's state equals what the manager's cooldown would have produced for that re-post
+
+#### Scenario: Distinct ids are never collapsed by the window
+
+- **WHEN** a different condition with its own `initiationId` arises while another id's window is open
+- **THEN** its signal is posted normally
+
+#### Scenario: Recurrence past the window repeats the id
+
+- **WHEN** the emitted condition still recurs after the window closes
+- **THEN** the adapter re-posts under the same `initiationId` and the manager routes it as a recurrence
+
+#### Scenario: An undeclared suppression is a conformance gap
+
+- **WHEN** an adapter suppresses its own post-emit re-posts and its capability spec declares no window
+- **THEN** the adapter is judged against the no-dedup obligation as written, and the suppression is a conformance gap
