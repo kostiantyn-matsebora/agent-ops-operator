@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -80,7 +81,21 @@ func pulseStartAdapterAndAssertRegistration(t *testing.T, mgr *FakeManager, puls
 		t.Fatalf("exactly one webhook must be registered, got %d: %+v", len(hooks), hooks)
 	}
 	hook := hooks[0]
-	if hook.URL != webhookURL || !hook.Enabled || hook.SigningSecret != pulseSigningSecret {
+	registered, err := url.Parse(hook.URL)
+	if err != nil {
+		t.Fatalf("the registered URL does not parse: %v", err)
+	}
+	// The registered URL carries a rotation-detection digest of the signing
+	// secret on its query string (signals/pulse/register.go) — Pulse masks
+	// every registered header's VALUE on read, so the digest cannot ride in
+	// a header. Check the digest first, then compare the target ignoring
+	// that query, rather than an exact string match.
+	wantDigest := sha256.Sum256([]byte(pulseSigningSecret))
+	if got := registered.Query().Get("agentops_secret_digest"); got != "sha256:"+hex.EncodeToString(wantDigest[:]) {
+		t.Fatalf("the registered URL must carry a digest of the signing secret for rotation detection, got %q in %s", got, hook.URL)
+	}
+	registered.RawQuery = ""
+	if registered.String() != webhookURL || !hook.Enabled || hook.SigningSecret != pulseSigningSecret {
 		t.Fatalf("the registered webhook must target this adapter's endpoint, enabled, with the source's secret: %+v", hook)
 	}
 	waitFor(t, "a Ready report naming the registration", 10*time.Second, func() bool {
