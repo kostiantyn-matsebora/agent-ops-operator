@@ -299,6 +299,23 @@ bounded.
 - **Only an admitted `initiationId` writes.** A suppressed re-delivery — the
   high-volume case cooldown exists for — writes nothing.
 
+**`spec.attributeFilters` narrows which signals this source admits**, a list
+of `key`/`operator`/`values` requirements shaped like a Kubernetes
+`matchExpressions` entry (`In`, `NotIn`, `Exists`, `DoesNotExist`), evaluated
+against the normalized signal's `labels`.
+
+- A signal must satisfy EVERY requirement to be admitted. Failing any one
+  drops it before cooldown is consulted and before any pipeline sees it — a
+  filtered signal spends no cooldown state and is never counted received.
+- Empty or unset admits everything, identical to today's behavior.
+- An unknown `operator` is rejected by the API server at creation, not
+  silently ignored at ingest.
+
+**`spec.logFiltered`** (nullable, default `true`) governs only whether a
+filtered-out signal is still recorded as a `signal.dropped` activity event.
+Set `false` to silence a known-noisy filter — every other drop reason keeps
+logging regardless of this field.
+
 **Signal labels are opaque context, carried onto the conversation and its
 topic descriptor** — never a correlation key. What an adapter emits shapes
 display, not routing.

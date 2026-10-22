@@ -15,7 +15,7 @@ API group: `agentops.dev/v1alpha1`. Every kind is namespaced.
 | [Pipeline](#pipeline) | yes | 32 |
 | [MCPToolset](#mcptoolset) | yes | 1 |
 | [MCPConfig](#mcpconfig) | yes | 5 |
-| [SignalSource](#signalsource) | yes | 5 |
+| [SignalSource](#signalsource) | yes | 10 |
 | [SignalAdapter](#signaladapter) | yes | 21 |
 | [Channel](#channel) | yes | 4 |
 | [ChannelAdapter](#channeladapter) | yes | 19 |
@@ -237,10 +237,15 @@ SignalSourceSpec maps a signal stream to conversations with a profile: type-agno
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `adapter` | `string` | **yes** | Adapter names the SignalAdapter serving this source — a REFERENCE, not an attribute: the named adapter's implementation defines and validates Config's schema. Sibling of Config by design (see Channel.Adapter). |
+| `attributeFilters` | `[]object` |  | AttributeFilters narrows which signals this source admits, evaluated against the normalized signal's labels with Kubernetes label-selector semantics. A signal must satisfy EVERY requirement to be admitted. Empty or unset admits everything — identical to today's behavior. Evaluated before cooldown and before routing: a filtered signal spends no cooldown state and never reaches a serving pipeline. |
+| `attributeFilters[].key` | `string` | **yes** | Key is the attribute label name to test. |
+| `attributeFilters[].operator` | `string` | **yes** | Operator selects the test. See AttributeFilterOperator. |
+| `attributeFilters[].values` | `[]string` |  | Values is the comparison set for In/NotIn, and must be empty for Exists/DoesNotExist. |
 | `config` | `free-form` |  | Config carries whatever the signal type needs; schema-less by design. Validated by the serving adapter, never by the operator. |
 | `cooldownHours` | `integer` |  | CooldownHours: suppress a repeat of the same initiationId within this window — a re-send, safe to drop under at-least-once delivery. A repeat outside the window is a re-notification and routes by id equality instead. The one surviving knob, promoted out of the removed Grouping stanza — the source carries no grouping policy any more, only this durability setting. Chat/task sources keep an effective 0 (one-shot, no suppression) via their own origination path rather than this field. |
 | `credentialsSecretRef` | `object` |  | CredentialsSecretRef names the Secret holding this source's transport credentials (e.g. an API key). The operator only writes the NAME into the serving adapter's pod spec (kubelet-resolved envFrom projection); nothing reads the Secret's values through the API. |
 | `credentialsSecretRef.name` | `string` |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+| `logFiltered` | `boolean` |  | LogFiltered governs whether a signal dropped by AttributeFilters is still recorded as a signal.dropped activity event. Nullable, default true when unset — set false to silence a known-noisy filter. Has no effect on any other drop reason, which always logs. |
 
 ### status
 
