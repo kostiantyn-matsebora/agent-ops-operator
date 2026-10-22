@@ -976,6 +976,29 @@ def go_type(token: str) -> str:
     }.get(token, token)
 
 
+def _go_struct_body(path: pathlib.Path, text: str, struct: str) -> str:
+    """The text between one Go struct's opening and matching closing brace.
+
+    Braces inside a comment or a backtick tag are prose, not structure, so
+    the depth count skips over them rather than toggling on them.
+    """
+    open_m = re.search(rf"(?m)^type {re.escape(struct)} struct \{{\s*$", text)
+    if not open_m:
+        raise SystemExit(f"{path}: no `type {struct} struct {{` declaration")
+    skip_re = re.compile(r"//[^\n]*|/\*.*?\*/|`[^`]*`", re.S)
+    depth, i = 1, open_m.end()
+    while depth and i < len(text):
+        skipped = skip_re.match(text, i)
+        if skipped:
+            i = skipped.end()
+            continue
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    if depth:
+        raise SystemExit(f"{path}: `{struct}` struct never closes")
+    return text[open_m.end():i - 1]
+
+
 def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
     """Every json-tagged field of one Go struct, as field_table() rows.
 
@@ -987,26 +1010,7 @@ def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
     """
     if not path.is_file():
         raise SystemExit(f"{path}: no such file")
-    text = path.read_text()
-    open_m = re.search(rf"(?m)^type {re.escape(struct)} struct \{{\s*$", text)
-    if not open_m:
-        raise SystemExit(f"{path}: no `type {struct} struct {{` declaration")
-    # Braces inside a comment or a backtick tag are prose, not structure.
-    skip_re = re.compile(r"//[^\n]*|/\*.*?\*/|`[^`]*`", re.S)
-    depth, i = 1, open_m.end()
-    while depth and i < len(text):
-        skipped = skip_re.match(text, i)
-        if skipped:
-            i = skipped.end()
-            continue
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-        i += 1
-    if depth:
-        raise SystemExit(f"{path}: `{struct}` struct never closes")
-    body = text[open_m.end():i - 1]
+    body = _go_struct_body(path, path.read_text(), struct)
 
     rows: list[dict] = []
     comment: list[str] = []
