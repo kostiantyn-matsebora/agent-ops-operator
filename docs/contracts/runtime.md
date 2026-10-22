@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.1.0**
+**Version 2.0.0**
 
 This specification gives everything necessary to build and maintain an
 `AgentRuntime` — a harness agent-ops does not ship.
@@ -365,5 +365,5 @@ verdict, never an impression of the whole:
 
 | Version | Date | Changed |
 |---|---|---|
-| 1.1.0 | 2026-10-21 | Added the startup-configuration-failure crash ruling (`LC-4`, `LC-5`) — missing or unusable required config before the first poll is a nonzero crash, not a lifecycle exit. Added the `/work/done` definitive-rejection table (`API-10`, `API-11`, `API-12`) — a definitive `4xx` is never retried, a transient failure keeps its bounded retry, and every undelivered report is logged. The work-unit and completion-report tables are now GENERATED from the manager's own Go structs, and [Conformance](#conformance) is now a numbered checklist reaching every requirement on this page. ADDITIVE: no wire field changed, and a runtime already failing fast and respecting the retry/no-retry split stays fully conformant. |
+| 2.0.0 | 2026-10-22 | Added the startup-configuration-failure crash ruling (`LC-4`, `LC-5`) — missing or unusable required config before the first poll is a nonzero crash, not a lifecycle exit. Added the `/work/done` definitive-rejection table (`API-10`, `API-11`, `API-12`) — a definitive `4xx` is never retried, a transient failure keeps its bounded retry, and every undelivered report is logged. The work-unit and completion-report tables are now GENERATED from the manager's own Go structs, and [Conformance](#conformance) is now a numbered checklist reaching every requirement on this page. BREAKING: `API-10`/`11`/`12` constrain a `/work/done` 4xx response that 1.0.0 left unconstrained — a runtime that retried a definitive rejection forever was conformant with 1.0.0 and stops conforming here, per this page's own Compatibility rule. |
 | 1.0.0 | 2026-10-17 | Initial release. |
