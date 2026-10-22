@@ -68,14 +68,46 @@ func TestDwellDropsWhenRecovered(t *testing.T) {
 
 // No health predicate is the common case for core loggers. Then RECURRENCE is
 // what the log itself can prove — and only recurrence that was still going as
-// the window closed. A one-off never emits.
+// the window closed. A one-off never emits, PROVIDED the log was read through
+// the close. When it could not be read at all, the same one-off fails open:
+// an unreadable Home Assistant is itself an incident, never quiet churn.
 func TestUnknownWithNoRecurrenceIsDropped(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnknown })
-	rule := compiledRule{dwell: 2 * time.Minute, escalate: 3}
-	q.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
-	q.Flush(now.Add(3 * time.Minute))
-	if len(*got) != 0 {
-		t.Fatal("a one-off record with no predicate and no recurrence must not emit")
+	cases := []struct {
+		name     string
+		verdict  verdict
+		wantEmit bool
+	}{
+		{"log read, no predicate", verdictUnknown, false},
+		{"log unreadable at the close", verdictUnreadable, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q, got, now := queueFixture(func(recordRef, time.Time) verdict { return tc.verdict })
+			rule := compiledRule{dwell: 2 * time.Minute, escalate: 3}
+			q.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
+			q.Flush(now.Add(3 * time.Minute))
+			if emitted := len(*got) == 1; emitted != tc.wantEmit {
+				t.Fatalf("emitted = %v (%+v), want %v", emitted, *got, tc.wantEmit)
+			}
+		})
+	}
+}
+
+// No other member's verdict swallows the fail-open emit: an entry whose one
+// member recovered and whose other cannot be read still emits.
+func TestUnreadableIsNotSwallowedByARecoveredMember(t *testing.T) {
+	q, got, now := queueFixture(func(ref recordRef, _ time.Time) verdict {
+		if ref.location == "a.py:1" {
+			return verdictHealthy
+		}
+		return verdictUnreadable
+	})
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), rule, 1)
+	q.Add("ha-logs", haSignal("hue", "b.py:2", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+	if len(*got) != 1 {
+		t.Fatalf("an unreadable member must emit whatever its siblings say, got %+v", *got)
 	}
 }
 
@@ -229,6 +261,74 @@ func TestRefractoryQuietsARepeatingProblem(t *testing.T) {
 	q.Flush(now.Add(20 * time.Second))
 	if len(*got) != 1 {
 		t.Fatalf("the refractory window must suppress an immediate repeat, got %d emits", len(*got))
+	}
+}
+
+// The refractory window's declared bound (ha-signal-adapter spec, "The dwell
+// queue declares a post-emit refractory window"): the emitting rule's own
+// dwell, floored at one minute, measured from the emit. Each row repeats the
+// condition at a point only one reading of that bound gets right — past a
+// short dwell but inside the floor, past the floor but inside a long dwell,
+// and just past each. A repeat past the window posts again under the SAME
+// initiationId, which is what lets the manager append it as a recurrence.
+func TestRefractoryWindowIsTheDwellFlooredAtAMinute(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		dwell     time.Duration
+		afterEmit time.Duration
+		wantPost  bool
+	}{
+		{"short dwell, past the dwell, inside the floor", 5 * time.Second, 30 * time.Second, false},
+		{"short dwell, past the floor", 5 * time.Second, time.Minute + time.Second, true},
+		{"long dwell, past the floor, inside the dwell", 5 * time.Minute, 2 * time.Minute, false},
+		{"long dwell, past the dwell", 5 * time.Minute, 5*time.Minute + time.Second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+			rule := compiledRule{dwell: tc.dwell, escalate: 99}
+			q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+			emittedAt := now.Add(tc.dwell)
+			q.Flush(emittedAt)
+			if len(*got) != 1 {
+				t.Fatalf("expected the first emit, got %+v", *got)
+			}
+
+			repeatAt := emittedAt.Add(tc.afterEmit)
+			q.now = func() time.Time { return repeatAt }
+			q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 2)
+			q.Flush(repeatAt.Add(tc.dwell))
+
+			if posted := len(*got) == 2; posted != tc.wantPost {
+				t.Fatalf("re-posted = %v (%d emits), want %v", posted, len(*got), tc.wantPost)
+			}
+			if tc.wantPost {
+				if first, second := (*got)[0].sigs[0].InitiationID, (*got)[1].sigs[0].InitiationID; first != second {
+					t.Fatalf("a repeat past the window must carry the same initiationId: %q then %q", first, second)
+				}
+			}
+		})
+	}
+}
+
+// The window is per id: inside one condition's refractory window, a DIFFERENT
+// condition still emits. The allowance quiets re-posts of the same id and
+// never collapses distinct ones.
+func TestRefractoryNeverCollapsesDistinctIDs(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+	emittedAt := now.Add(time.Minute)
+	q.Flush(emittedAt)
+
+	q.now = func() time.Time { return emittedAt.Add(10 * time.Second) }
+	q.Add("ha-logs", haSignal("hue", "light.py:88", "ERROR"), rule, 1)
+	q.Flush(emittedAt.Add(2 * time.Minute))
+
+	if len(*got) != 2 {
+		t.Fatalf("a distinct condition inside another's window must emit, got %d emits", len(*got))
+	}
+	if id := (*got)[1].sigs[0].InitiationID; id != "ha-logs@hue" {
+		t.Fatalf("second emit initiationId = %q, want ha-logs@hue", id)
 	}
 }
 

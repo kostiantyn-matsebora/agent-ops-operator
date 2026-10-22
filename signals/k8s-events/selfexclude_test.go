@@ -135,7 +135,7 @@ func TestDeliverEmitsNothingForRuntimePodEvents(t *testing.T) {
 	ordinary := evt("Warning", "prod", "Pod", "api-xk2p9", "BackOff")
 	ordinary.LastTimestamp = "2026-08-08T13:00:00Z"
 
-	a.deliver(context.Background(), []Event{own, ordinary}, false)
+	a.deliver(context.Background(), []Event{own, ordinary}, pass{})
 
 	got := mgr.signalsFor("src")
 	if len(got) != 1 {
@@ -159,7 +159,7 @@ func TestSuccessiveRuntimePodNamesAllExcluded(t *testing.T) {
 		e.LastTimestamp = "2026-08-08T13:00:00Z"
 		events = append(events, e)
 	}
-	a.deliver(context.Background(), events, false)
+	a.deliver(context.Background(), events, pass{})
 
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("no runtime pod event may produce a signal, whatever its name: %+v", got)

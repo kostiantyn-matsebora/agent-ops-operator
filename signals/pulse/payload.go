@@ -14,7 +14,7 @@ package main
 // payload template). This is a deliberate, documented choice consistent
 // with the "firing"/"resolved" semantics the adapter contract already uses:
 // an "event" field carrying exactly "alert" (firing) or "resolved", plus the
-// resource/alert identity fields a fingerprint needs.
+// resource/alert identity fields initiationID (below) correlates on.
 //
 // CONFIRMED against a real Pulse instance (v6.5.0) on 2026-10-17, via its own
 // `GET /api/notifications/webhook-templates` response for the "generic"
@@ -95,7 +95,7 @@ type pulseEvent struct {
 
 // parsePulseEvent decodes one inbound webhook body against pulseEvent's
 // shape. Event and Resource are the two fields every downstream use
-// (firing/resolved routing, fingerprinting) depends on — a body missing
+// (firing/resolved routing, initiationID) depends on — a body missing
 // either is not a Pulse webhook this adapter understands, so it is rejected
 // here rather than normalized into a signal with a blank identity.
 func parsePulseEvent(body []byte) (pulseEvent, error) {

@@ -131,9 +131,10 @@ func TestSignalAlertmanagerConformance(t *testing.T) {
 	if _, hasKind := post.Signals[0]["kind"]; hasKind {
 		t.Fatalf("alert-lane signals carry no kind: %v", post.Signals[0])
 	}
-	// An unknown source is refused, not silently accepted.
-	if code, _ := postJSON(t, p.URL()+"/webhook/nope", body, nil); code != 404 {
-		t.Fatalf("unknown source must be 404, got %d", code)
+	// An unknown source is refused, not silently accepted, and the refusal
+	// names the source it refused.
+	if code, resp := postJSON(t, p.URL()+"/webhook/nope", body, nil); code != 404 || !strings.Contains(resp, `nope`) {
+		t.Fatalf("unknown source must be 404 naming the source, got %d %s", code, resp)
 	}
 	// A rejected post is SURFACED to the caller: the webhook fails.
 	mgr.RejectSignals(500)
@@ -188,7 +189,7 @@ func TestSignalTelegramConformance(t *testing.T) {
 func TestSignalK8sEventsConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
 	api := NewFakeAPIServer(t)
-	p := k8sEventsStartAdapterAndAssertWatch(t, mgr, api)
+	p := k8sEventsStartAdapterAndAssertWatch(t, mgr, api, `{"namespaces":["apps"]}`)
 	k8sEventsAssertEventBecomesNormalizedSignal(t, mgr, api)
 	k8sEventsAssertRejectedPostRetriedOrReported(t, mgr, api, p)
 }
@@ -204,9 +205,9 @@ func k8sEventsEventPayload(now, name string) map[string]any {
 	}
 }
 
-func k8sEventsStartAdapterAndAssertWatch(t *testing.T, mgr *FakeManager, api *FakeAPIServer) *Process {
+func k8sEventsStartAdapterAndAssertWatch(t *testing.T, mgr *FakeManager, api *FakeAPIServer, config string) *Process {
 	t.Helper()
-	mgr.ServeSources(SourceInfo{Name: "events", Config: json.RawMessage(`{"namespaces":["apps"]}`)})
+	mgr.ServeSources(SourceInfo{Name: "events", Config: json.RawMessage(config)})
 	env := append(contractEnv(mgr, "k8s-events", 0), api.Env()...)
 	p := start(t, "signal-k8s-events", build(t, "signals/k8s-events"), env)
 	waitFor(t, "the adapter to list its sources", 15*time.Second, func() bool { return mgr.Listed("signal", "k8s-events") > 0 })
@@ -272,15 +273,14 @@ func k8sEventsAssertRejectedPostRetriedOrReported(t *testing.T, mgr *FakeManager
 func TestSignalHAConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
 	ha := NewFakeHA(t, "ha-long-lived-token")
-	p := haStartAdapterAndAssertAuthenticatedSubscription(t, mgr, ha)
+	p := haStartAdapterAndAssertAuthenticatedSubscription(t, mgr, ha, `{"endpoint":"`+ha.Endpoint()+`","backfill":false}`)
 	rec := haAssertLogRecordBecomesNormalizedSignal(t, mgr, ha)
 	haAssertRejectedPostRetriedOrReported(t, mgr, ha, p, rec)
 }
 
-func haStartAdapterAndAssertAuthenticatedSubscription(t *testing.T, mgr *FakeManager, ha *FakeHA) *Process {
+func haStartAdapterAndAssertAuthenticatedSubscription(t *testing.T, mgr *FakeManager, ha *FakeHA, config string) *Process {
 	t.Helper()
-	mgr.ServeSources(SourceInfo{Name: "ha", CredentialEnvPrefix: "AGENTOPS_CRED_HA_",
-		Config: json.RawMessage(`{"endpoint":"` + ha.Endpoint() + `","backfill":false}`)})
+	mgr.ServeSources(SourceInfo{Name: "ha", CredentialEnvPrefix: "AGENTOPS_CRED_HA_", Config: json.RawMessage(config)})
 	env := append(contractEnv(mgr, "home-assistant", 0), "AGENTOPS_CRED_HA_token=ha-long-lived-token")
 	p := start(t, "signal-ha", build(t, "signals/ha"), env)
 	waitFor(t, "an authenticated subscription", 30*time.Second, func() bool {

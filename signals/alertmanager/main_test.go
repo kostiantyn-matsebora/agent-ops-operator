@@ -360,23 +360,97 @@ func TestRefreshSourcesKeepsPreviousOnListError(t *testing.T) {
 	}
 }
 
-// TestReconcileRegistrationNamespaceUnknownWithNoReason closes the defensive
-// fallback message reconcileRegistration renders when it has neither a
-// kubeReason nor a namespace to blame — a shape newInClusterClient itself
-// never produces (it always pairs a nil client with a reason), but the
-// degradation must still name something instead of an empty cause.
-func TestReconcileRegistrationNamespaceUnknownWithNoReason(t *testing.T) {
+// TestReconcileRegistrationURLUnknownRegistersNothing pins the branch where
+// a token IS mounted but POD_NAMESPACE is unset: the adapter cannot compute
+// its own webhook URL, so it writes no object (a placeholder URL would look
+// registered and deliver nothing) and hands the operator the URL shape.
+func TestReconcileRegistrationURLUnknownRegistersNothing(t *testing.T) {
 	f := &fakeManager{}
 	a := testAdapter(t, f)
-	cfg := json.RawMessage(`{"register":{}}`)
+	a.listen = ":8080"
+	api := &fakeAPI{}
+	a.kube = api.client(t) // token mounted
+	cfg := json.RawMessage(`{"register":{"namespace":"monitoring"}}`)
+
 	reason, msg := a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
-	if reason != "RegistrationManual" || !strings.Contains(msg, "namespace unknown") {
-		t.Fatalf("expected the namespace-unknown fallback: %s %s", reason, msg)
+	if reason != "RegistrationManual" {
+		t.Fatalf("expected manual degradation, got %s: %s", reason, msg)
+	}
+	for _, want := range []string{
+		"POD_NAMESPACE is unset",
+		"http://agentops-signal-vm-alertmanager.<adapter-namespace>.svc:8080/webhook/vm-alerts",
+		"monitoring/agentops-vm-alerts",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("instructions missing %q: %s", want, msg)
+		}
+	}
+	if api.writes != 0 || len(api.objects) != 0 {
+		t.Fatalf("no object may be written without a computable URL: %d writes, %v", api.writes, api.objects)
+	}
+}
+
+// TestReconcileRegistrationURLUnknownWithoutTokenNamesBoth pins that a
+// hand-deployed adapter missing BOTH the namespace fact and the token reports
+// both causes at once, and still names the object to create in full, with
+// the unknown namespace as a slot.
+func TestReconcileRegistrationURLUnknownWithoutTokenNamesBoth(t *testing.T) {
+	f := &fakeManager{}
+	a := testAdapter(t, f)
+	a.listen = ":8080"
+	a.kube, a.kubeReason = nil, "not running in a cluster (KUBERNETES_SERVICE_HOST unset)"
+
+	reason, msg := a.reconcileRegistration(context.Background(),
+		SourceInfo{Name: "vm-alerts", Config: json.RawMessage(`{"register":{}}`)})
+	if reason != "RegistrationManual" {
+		t.Fatalf("expected manual degradation, got %s: %s", reason, msg)
+	}
+	for _, want := range []string{
+		"POD_NAMESPACE is unset",
+		"not running in a cluster",
+		"VMAlertmanagerConfig <adapter-namespace>/agentops-vm-alerts",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("instructions missing %q: %s", want, msg)
+		}
+	}
+}
+
+// TestReconcileRegistrationMalformedBlockIsNamed pins that a register block
+// which does not parse surfaces as RegistrationManual naming the parse
+// problem, attempts no API call, and is distinct from an absent block.
+func TestReconcileRegistrationMalformedBlockIsNamed(t *testing.T) {
+	f := &fakeManager{}
+	a := testAdapter(t, f)
+	a.podNS, a.listen = "agent-ops", ":8080"
+	api := &fakeAPI{}
+	a.kube = api.client(t)
+
+	cfg := json.RawMessage(`{"register":{"namespace":"monitoring","maxAlerts":"ten"}}`)
+	reason, msg := a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
+	if reason != "RegistrationManual" {
+		t.Fatalf("a malformed block must not read as absent: %s %s", reason, msg)
+	}
+	for _, want := range []string{"malformed register block", "maxAlerts", "/webhook/vm-alerts"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("instructions missing %q: %s", want, msg)
+		}
+	}
+	if api.writes != 0 || len(api.objects) != 0 {
+		t.Fatalf("a malformed block must attempt no registration: %d writes", api.writes)
+	}
+
+	// correcting the block heals on the next pass
+	reason, msg = a.reconcileRegistration(context.Background(),
+		SourceInfo{Name: "vm-alerts", Config: json.RawMessage(`{"register":{"namespace":"monitoring","maxAlerts":10}}`)})
+	if reason != "AdapterReady" || !strings.Contains(msg, "monitoring/agentops-vm-alerts") {
+		t.Fatalf("corrected block should register: %s %s", reason, msg)
 	}
 }
 
 // TestReconcileRegistrationEnsureRegistrationErrorDegradesToManual closes
-// the branch where kube access exists but the write itself fails.
+// the branch where kube access exists but the write itself fails, and pins
+// that a refusal names the account to bind the grant to.
 func TestReconcileRegistrationEnsureRegistrationErrorDegradesToManual(t *testing.T) {
 	f := &fakeManager{}
 	a := testAdapter(t, f)
@@ -387,6 +461,15 @@ func TestReconcileRegistrationEnsureRegistrationErrorDegradesToManual(t *testing
 	reason, msg := a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
 	if reason != "RegistrationManual" || !strings.Contains(msg, "forbidden") {
 		t.Fatalf("ensureRegistration failure should degrade to manual instructions: %s %s", reason, msg)
+	}
+	assertNamesLiveAccountFields(t, msg)
+
+	// a non-permission failure names no account: binding one would not help
+	missing := &fakeAPI{noCRD: true}
+	a.kube = missing.client(t)
+	_, msg = a.reconcileRegistration(context.Background(), SourceInfo{Name: "vm-alerts", Config: cfg})
+	if !strings.Contains(msg, "CRD") || strings.Contains(msg, "serviceAccountName") {
+		t.Fatalf("a missing CRD should be named without an account remediation: %s", msg)
 	}
 }
 

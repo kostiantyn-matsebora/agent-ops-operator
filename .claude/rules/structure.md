@@ -7,7 +7,7 @@ container, one directory, grouped by runtime role.
 |---|---|---|
 | `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` `mcp-aops` | product components |
 | `runtimes/` | `claude` `ollama` `copilot` | client side of the work contract |
-| `signals/` | `cron` `alertmanager` `k8s-events` `ha` `telegram` | push to `/signal/inbound` |
+| `signals/` | `cron` `alertmanager` `k8s-events` `ha` `pulse` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | no agent-ops contract |
 | `test/` | `stubruntime` `fakebotapi` `fixtures` | NOT components — excluded by `components.sh`, asserted by test |
@@ -37,7 +37,7 @@ Own Go module, the only one with dependencies.
 |---|---|
 | `api/v1alpha1/` | CRD types + deepcopy. CRD YAML in `chart/crds/` |
 | `cmd/manager/main.go` | wiring: reconciler, httpapi, chat, env config |
-| `internal/ingest/` | signature grouping, fingerprint cooldown |
+| `internal/ingest/` | `initiationId` cooldown, no grouping or signature derivation |
 | `internal/runtimepod/` | runtime pod builder |
 | `internal/addressing/` | `/<pipeline> <task>` parsing, one segment, no `:<agent>` override |
 | `internal/controller/` | Conversation/ChannelAdapter/SignalAdapter/Channel/SignalSource/Pipeline reconcilers, admission gate (FIFO, idle eviction), close-topics finalizer |
@@ -67,8 +67,9 @@ All three are optional bundles under `chart/charts/<name>/`, off by default.
 | `signals/telegram/` | chat origination adapter, holds no credentials |
 | `signals/cron/` | reference signal adapter, 5-field cron parser |
 | `signals/alertmanager/` | webhook adapter, standard Alertmanager payload (renamed from `signal-vmalertmanager`, `register.go` keeps `VMAlertmanagerConfig`) |
-| `signals/ha/` | Home Assistant adapter, polls `system_log/list` every 15s. Fingerprint keys on LOGGER + SOURCE LOCATION |
-| `signals/k8s-events/` | cluster Events adapter, in-cluster `net/http`, no client-go — fingerprint keys on OBJECT + reason |
+| `signals/ha/` | Home Assistant adapter, polls `system_log/list` every 15s. `initiationId` keys on source+integration once dwelled, on the record's own identity before |
+| `signals/k8s-events/` | cluster Events adapter, in-cluster `net/http`, no client-go — `initiationId` keys on the workload, resolved through owner references |
+| `signals/pulse/` | Pulse webhook adapter — registers its own webhook through Pulse's API, verifies signed deliveries, `initiationId` from alert id + start time by default |
 
 ### Beside a conversation
 

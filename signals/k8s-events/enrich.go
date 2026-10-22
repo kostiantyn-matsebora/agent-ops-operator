@@ -2,17 +2,16 @@ package main
 
 // Signal enrichment: the labels an Event cannot carry on its own.
 //
-// The point of `workload` is grouping. The bundle used to group by
-// [namespace, kind, name], where name is a POD name — unique per replica and
-// regenerated on every rollout — so conversation count scaled with
-// pods × rollouts and the manager's window reuse could never fire, because the
-// signature never repeated. Resolving the owning controller instead gives a key
-// that is stable across rollouts and shared by every replica.
+// The point of `workload` is correlation: the initiationId keys on it
+// (events.go). Keying on the involved object instead — a POD name, unique per
+// replica and regenerated on every rollout — made conversation count scale
+// with pods × rollouts. Resolving the owning controller gives a key that is
+// stable across rollouts and shared by every replica.
 
 // reservedLabels are the label keys this adapter defines. Pod labels are
 // copied in alongside them but may never overwrite one: a user label named
-// `name` or `namespace` would otherwise silently rewrite the signal's identity
-// and, through signatureLabels, its grouping.
+// `name`, `namespace` or `workload` would otherwise silently rewrite the
+// signal's identity — and, through `workload`, its initiationId.
 var reservedLabels = map[string]bool{
 	"alertgroup": true,
 	"alertname":  true,
@@ -45,13 +44,12 @@ type enrichment struct {
 //     since it carries no owner reference to walk.
 //
 //   - a kind the cache DOES track but has no entry for (a pod that has not
-//     landed yet, or a cold cache) yields NO workload label at all. Falling
-//     back to the pod's own name here would silently reinstate exactly the
-//     per-pod grouping this change exists to remove; leaving it empty groups
-//     the unresolvable ones together, which errs toward fewer conversations
-//     rather than more. A Node absent from a SYNCED cache is a stronger
-//     claim — the node is gone — so this is the same rule paying for itself
-//     twice, not a new one.
+//     landed yet, or a cold cache) yields NO workload label at all — never
+//     the pod's own name dressed up as a workload. deliver holds such an
+//     event for one bounded wait first (ownerhold.go), so it normally
+//     arrives here resolved; one still unresolved when the wait expires is
+//     keyed by normalize on the object itself, which is what the id means
+//     for an object whose owner cannot be found.
 func (a *adapter) enrich(ev *Event) enrichment {
 	kind, name, ns := ev.InvolvedObject.Kind, ev.InvolvedObject.Name, ev.Namespace()
 	if a.cache == nil {

@@ -30,7 +30,12 @@ const (
 	verdictGone      verdict = iota // the condition's subject no longer exists
 	verdictHealthy                  // it exists and recovered
 	verdictUnhealthy                // it exists and is still broken
-	verdictUnknown                  // we cannot say
+	verdictUnknown                  // it was observed, but no predicate says whether it is broken
+	// verdictUnreadable: the adapter's own view is unreadable — no snapshot,
+	// none taken within the window's closing part, or the latest read failed —
+	// so the close was not observed. Distinct from verdictUnknown: recurrence
+	// can only be judged from a log that was actually read.
+	verdictUnreadable
 )
 
 // pendingEntry is one integration's accumulating evidence.
@@ -281,12 +286,14 @@ func (q *pendingQueue) Flush(now time.Time) {
 //
 //	rung 1  the integration has a health predicate  -> is it still broken?
 //	rung 2  no predicate, but we can read the log   -> was it STILL RECURRING at the close?
-//	rung 3  we cannot say at all                    -> EMIT (fail open)
+//	rung 3  the log itself is unreadable            -> EMIT (fail open)
 //
 // An entry survives if ANY member is still unhealthy: an integration with one
-// broken code path is a broken integration.
+// broken code path is a broken integration. Rung 3 is unconditional — an
+// unreadable Home Assistant is itself an incident, never quiet churn, so no
+// other member's verdict and no recurrence test may swallow it.
 func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
-	anyUnhealthy, anyUnknown := false, false
+	anyUnhealthy, anyUnknown, anyUnreadable := false, false, false
 	since := e.closingSince(now)
 	for _, ref := range e.members {
 		switch q.health(ref, since) {
@@ -294,12 +301,17 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 			anyUnhealthy = true
 		case verdictUnknown:
 			anyUnknown = true
+		case verdictUnreadable:
+			anyUnreadable = true
 		case verdictGone, verdictHealthy:
 			// this member resolved itself — the retry-and-succeed case
 		}
 	}
 
 	switch {
+	case anyUnreadable:
+		// rung 3: the close was not observed — fail open
+		log.Printf("dwell: %s emitted unverified — its state could not be read at the close (fail open)", e.integration)
 	case anyUnhealthy:
 		// rung 1: confirmed still broken
 	case anyUnknown && e.stillRecurring(now):
@@ -323,7 +335,7 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	}
 	// The entry's own key — source + integration — IS the condition identity
 	// this queue already decides "same problem" by (it is what the
-	// refractory window and the due-entry grouping key on). A member's own
+	// refractory window and the entries map key on). A member's own
 	// per-record id (normalize's source@logger@location) only identifies
 	// which record happened to be the latest sample, which would drift
 	// across dwell cycles whenever breadth makes a different member last —

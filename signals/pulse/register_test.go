@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,32 @@ type fakePulse struct {
 	creates  int
 	updates  int
 	fail     bool // when true, every call 500s (simulates Pulse being down)
+	// Every GET masks the stored secret and header values (maskLikePulse)
+	// unconditionally, because Pulse itself has no unmasked read.
+}
+
+// pulseMasked is what Pulse's GET /api/notifications/webhooks returns in
+// place of every stored header value and a configured signing secret.
+// Settled against Pulse's own source, not restated from this adapter:
+// internal/api/alerting/notifications.go GetWebhooks → maskedWebhookResponse
+// (maskedWebhookSecret), identical in v6.5.0 (the version payload.go was
+// confirmed live against) and on main as of 2026-10-21. Header KEYS come
+// back, header VALUES never do.
+const pulseMasked = "***REDACTED***"
+
+// maskLikePulse renders one stored webhook the way Pulse's list returns it.
+func maskLikePulse(wh pulseWebhookConfig) pulseWebhookConfig {
+	if wh.SigningSecret != "" {
+		wh.SigningSecret = pulseMasked
+	}
+	if len(wh.Headers) > 0 {
+		masked := make(map[string]string, len(wh.Headers))
+		for k := range wh.Headers {
+			masked[k] = pulseMasked
+		}
+		wh.Headers = masked
+	}
+	return wh
 }
 
 func (f *fakePulse) server(t *testing.T) *httptest.Server {
@@ -37,7 +64,7 @@ func (f *fakePulse) server(t *testing.T) *httptest.Server {
 		}
 		list := make([]pulseWebhookConfig, 0, len(f.webhooks))
 		for _, wh := range f.webhooks {
-			list = append(list, wh)
+			list = append(list, maskLikePulse(wh))
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	})
@@ -419,7 +446,9 @@ func TestReconcileRegistrationInvalidConfigReportsOnce(t *testing.T) {
 // webhookUrl the source carries, verbatim — never deriving one of its own
 // (same posture as channels/telegram and signals/ha). Covers both the
 // chart-computed in-cluster form and an operator-set external one; the
-// adapter cannot tell them apart and must not try to.
+// adapter cannot tell them apart and must not try to. No signing secret is
+// configured here, so no digest parameter is added (see
+// TestSignedWebhookURLCarriesDigestInQuery for the signed form).
 func TestReconcileRegistrationUsesConfiguredWebhookURL(t *testing.T) {
 	for _, webhookURL := range []string{
 		"http://agentops-signal-pulse.agent-ops.svc:8080/webhook/pulse-default",
@@ -556,5 +585,250 @@ func TestSigningSecretFlowsFromCredentialToVerification(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != 401 {
 		t.Fatalf("wrongly signed request must be rejected: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRotatedSigningSecretRepairsDespiteRedaction is task 1.1's
+// verification: against a Pulse that redacts the stored secret on read, an
+// unchanged secret is still a no-op, and a rotated one is detected through
+// the digest on the registered URL and updated in place, carrying the new
+// secret — driven through reconcileRegistration exactly as consecutive
+// ensure passes would run it.
+func TestRotatedSigningSecretRepairsDespiteRedaction(t *testing.T) {
+	mgr := &fakeManager{}
+	mgrSrv := mgr.server(t)
+	pulse := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+	pulseSrv := pulse.server(t)
+	a := &adapter{
+		mgr:      NewManager(mgrSrv.URL, "tok"),
+		sources:  map[string]sourceState{},
+		reported: map[string]string{},
+	}
+	info := SourceInfo{
+		Name:                "pulse-default",
+		Config:              json.RawMessage(`{"baseUrl":"` + pulseSrv.URL + `","webhookUrl":"https://pulse-adapter.example.org/webhook/pulse-default"}`),
+		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+	}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_token", "tok")
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "old-secret")
+
+	a.reconcileRegistration(context.Background(), info)
+	a.reconcileRegistration(context.Background(), info)
+	pulse.mu.Lock()
+	if pulse.creates != 1 || pulse.updates != 0 {
+		t.Fatalf("an unchanged secret behind redaction must be a no-op: creates=%d updates=%d", pulse.creates, pulse.updates)
+	}
+	pulse.mu.Unlock()
+
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "new-secret")
+	if secret, _ := a.reconcileRegistration(context.Background(), info); secret != "new-secret" {
+		t.Fatalf("the rotated secret must be what inbound verification uses, got %q", secret)
+	}
+
+	pulse.mu.Lock()
+	defer pulse.mu.Unlock()
+	if pulse.creates != 1 || pulse.updates != 1 || len(pulse.webhooks) != 1 {
+		t.Fatalf("a rotated secret must repair the webhook in place: creates=%d updates=%d webhooks=%d",
+			pulse.creates, pulse.updates, len(pulse.webhooks))
+	}
+	wh := pulse.webhooks["agentops-pulse-default"]
+	if wh.SigningSecret != "new-secret" {
+		t.Fatalf("the repaired webhook must carry the new secret, got %q", wh.SigningSecret)
+	}
+	if got := digestParam(t, wh.URL); got != secretDigest("new-secret") {
+		t.Fatalf("the repaired webhook URL must carry the new secret's digest, got %q", got)
+	}
+	if _, ok := wh.Headers[secretDigestParam]; ok || len(wh.Headers) != 0 {
+		t.Fatalf("the digest must never travel as a header, which Pulse masks on read: %+v", wh.Headers)
+	}
+}
+
+// digestParam returns secretDigestParam from a registered webhook URL.
+func digestParam(t *testing.T, raw string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("registered URL %q does not parse: %v", raw, err)
+	}
+	return u.Query().Get(secretDigestParam)
+}
+
+// TestSignedWebhookURLCarriesDigestInQuery pins signedWebhookURL: the digest
+// is "sha256:<hex>", rides the URL's query beside any parameter the
+// operator's webhookUrl already carries, replaces a stale value under the
+// same name, and is absent when no secret is configured.
+func TestSignedWebhookURLCarriesDigestInQuery(t *testing.T) {
+	// pinned vector: sha256("s3cret"), computed independently of this module
+	const wantDigest = "sha256:1ec1c26b50d5d3c58d9583181af8076655fe00756bf7285940ba3670f99fcba0"
+	if got := secretDigest("s3cret"); got != wantDigest {
+		t.Fatalf("digest = %q, want %q", got, wantDigest)
+	}
+
+	const base = "https://pulse-adapter.example.org/webhook/pulse-default"
+	signed := signedWebhookURL(base, "s3cret")
+	u, err := url.Parse(signed)
+	if err != nil {
+		t.Fatalf("signed URL %q does not parse: %v", signed, err)
+	}
+	if u.Scheme+"://"+u.Host+u.Path != base || u.Query().Get(secretDigestParam) != wantDigest {
+		t.Fatalf("expected the digest on the unchanged base URL, got %q", signed)
+	}
+
+	withQuery := signedWebhookURL(base+"?gw=edge&"+secretDigestParam+"=stale", "s3cret")
+	q, err := url.Parse(withQuery)
+	if err != nil {
+		t.Fatalf("signed URL %q does not parse: %v", withQuery, err)
+	}
+	if q.Query().Get("gw") != "edge" || q.Query()[secretDigestParam][0] != wantDigest || len(q.Query()[secretDigestParam]) != 1 {
+		t.Fatalf("expected the operator's query kept and the digest replacing a stale one, got %q", withQuery)
+	}
+
+	if got := signedWebhookURL(base, ""); got != base {
+		t.Fatalf("no secret must register the URL unchanged, got %q", got)
+	}
+}
+
+// TestSignedWebhookURLStillRoutesToTheSource closes the receiving side of
+// the URL-borne digest: Pulse posts to the registered URL verbatim, query
+// and all, and the inbound mux must still route it by path to the source
+// and verify it.
+func TestSignedWebhookURLStillRoutesToTheSource(t *testing.T) {
+	src := SourceInfo{Name: "pulse-default", CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_"}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "s3cret")
+	f := &fakeManager{sources: []SourceInfo{src}}
+	h := testAdapter(t, f).handler()
+
+	signed, err := url.Parse(signedWebhookURL("http://adapter/webhook/pulse-default", "s3cret"))
+	if err != nil {
+		t.Fatalf("signed URL does not parse: %v", err)
+	}
+	body := firingBody("query-routed")
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	req := httptest.NewRequest("POST", signed.RequestURI(), strings.NewReader(body))
+	req.Header.Set("X-Pulse-Timestamp", ts)
+	req.Header.Set("X-Pulse-Signature", sign(t, "s3cret", ts, []byte(body)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("a delivery to the signed URL must route to its source: %d %s", rec.Code, rec.Body.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.inbounds) != 1 {
+		t.Fatalf("the routed delivery must push: %d pushes", len(f.inbounds))
+	}
+}
+
+// TestEnsureWebhookOperatorHeadersComparedByKey pins comparable()'s header
+// handling against a Pulse that masks every header value on read: unchanged
+// operator headers are a no-op, an added header key is drift repaired in
+// place.
+func TestEnsureWebhookOperatorHeadersComparedByKey(t *testing.T) {
+	f := &fakePulse{webhooks: map[string]pulseWebhookConfig{}}
+	srv := f.server(t)
+	client := newPulseClient(srv.URL, "tok")
+
+	headers := map[string]string{"X-Gateway-Key": "shared"}
+	desired := desiredWebhook("pulse-default", "http://x/webhook/pulse-default", "s3cret", headers)
+	for i := 0; i < 2; i++ {
+		if err := client.ensureWebhook(context.Background(), desired); err != nil {
+			t.Fatalf("ensure %d: %v", i, err)
+		}
+	}
+	f.mu.Lock()
+	if f.creates != 1 || f.updates != 0 {
+		t.Fatalf("masked header values must not read as drift: creates=%d updates=%d", f.creates, f.updates)
+	}
+	f.mu.Unlock()
+
+	added := desiredWebhook("pulse-default", "http://x/webhook/pulse-default", "s3cret",
+		map[string]string{"X-Gateway-Key": "shared", "X-Second": "v"})
+	if err := client.ensureWebhook(context.Background(), added); err != nil {
+		t.Fatalf("ensure with an added header: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.creates != 1 || f.updates != 1 || f.webhooks["agentops-pulse-default"].Headers["X-Second"] != "v" {
+		t.Fatalf("an added header key must repair in place: creates=%d updates=%d", f.creates, f.updates)
+	}
+}
+
+// TestSigningSecretEnforcedWithoutRegistration is task 1.2's verification,
+// the hand-registered-Pulse case: a source carrying a signing secret but no
+// usable registration config — absent, incomplete or invalid — still
+// enforces the secret (TestReconcileRegistrationInvalidConfigKeepsSecret
+// covers non-JSON config, which the fake manager cannot carry). A correctly
+// signed post verifies, a wrongly signed
+// or unsigned one is refused with 401 and pushes nothing.
+func TestSigningSecretEnforcedWithoutRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+	}{
+		{"no config", ""},
+		{"no webhookUrl", `{"baseUrl":"https://pulse.example.org"}`},
+		{"invalid baseUrl", `{"baseUrl":"not-a-url","webhookUrl":"https://pulse-adapter.example.org/webhook/pulse-default"}`},
+		{"mistyped", `{"baseUrl":42}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertSigningSecretEnforced(t, tc.config) })
+	}
+}
+
+// assertSigningSecretEnforced posts unsigned, wrongly signed and correctly
+// signed bodies at a source carrying config, and expects only the last to push.
+func assertSigningSecretEnforced(t *testing.T, config string) {
+	src := SourceInfo{Name: "pulse-default", CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_"}
+	if config != "" {
+		src.Config = json.RawMessage(config)
+	}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "s3cret")
+	f := &fakeManager{sources: []SourceInfo{src}}
+	h := testAdapter(t, f).handler()
+	body := firingBody("hand-registered")
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+
+	signed := func(secret string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/webhook/pulse-default", strings.NewReader(body))
+		req.Header.Set("X-Pulse-Timestamp", ts)
+		req.Header.Set("X-Pulse-Signature", sign(t, secret, ts, []byte(body)))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := post(t, h, "/webhook/pulse-default", body); rec.Code != 401 {
+		t.Fatalf("an unsigned post must be refused while a secret is configured: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := signed("wrong-secret"); rec.Code != 401 {
+		t.Fatalf("a wrongly signed post must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := signed("s3cret"); rec.Code != 200 {
+		t.Fatalf("a post signed by a hand-registered Pulse must verify: %d %s", rec.Code, rec.Body.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.inbounds) != 1 {
+		t.Fatalf("exactly the verified post must push: %d pushes", len(f.inbounds))
+	}
+}
+
+// TestReconcileRegistrationInvalidConfigKeepsSecret closes task 1.2's
+// non-JSON branch directly: a source whose spec.config does not parse at all
+// still returns its configured signing secret for enforcement.
+func TestReconcileRegistrationInvalidConfigKeepsSecret(t *testing.T) {
+	mgr := &fakeManager{}
+	mgrSrv := mgr.server(t)
+	a := &adapter{
+		mgr:      NewManager(mgrSrv.URL, "tok"),
+		sources:  map[string]sourceState{},
+		reported: map[string]string{},
+	}
+	t.Setenv("AGENTOPS_CRED_PULSE_DEFAULT_signingSecret", "s3cret")
+	secret, _ := a.reconcileRegistration(context.Background(), SourceInfo{
+		Name:                "pulse-default",
+		Config:              json.RawMessage(`{not-json`),
+		CredentialEnvPrefix: "AGENTOPS_CRED_PULSE_DEFAULT_",
+	})
+	if secret != "s3cret" {
+		t.Fatalf("an invalid config must not disable signature enforcement, got secret %q", secret)
 	}
 }

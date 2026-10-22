@@ -45,7 +45,7 @@ The deltas are normative. Summary of what they settled:
 | Decision | Settled as |
 |---|---|
 | Refractory window | blessed as the contract's ONE named ADP-3 carve-out, five bounds, declared per adapter — `ha` and `k8s-events` deltas carry the declarations |
-| Pulse secret rotation | create-or-repair keys on a non-secret digest registered beside the webhook, so redaction cannot blind the repair |
+| Pulse secret rotation | create-or-repair keys on a non-secret digest carried in the registered webhook URL's query, the one data field Pulse returns unmasked, so redaction cannot blind the repair |
 | Pulse token rotation | "heals without manual re-registration" — env is fixed per pod lifetime, so the heal follows the next pod start |
 | ha id scope | the dwell-path mint wins — dwelled conditions key on source+integration, zero-dwell on the record's own identity |
 | Suppression rung 3 | the scenarios win — recurrence gates undeterminable existence, fail-open applies to the adapter's OWN unreadable state |
@@ -57,10 +57,22 @@ deliberate: the unsigned-inbound fix had no clean spec sentence without it.
 
 ### Implementation decisions
 
-- **Pulse digest header.** `X-Agentops-Secret-Digest: sha256:<hex>` of the
-  signing secret, registered in `webhookHeaders`. Pulse returns headers
-  unredacted, so `comparable()` keeps them and rotation shows as drift.
-  The delta deliberately does not pin the name — this design does.
+- **Pulse digest parameter.** `agentops_secret_digest=sha256:<hex>` of the
+  signing secret, set on the registered webhook URL's query beside any query
+  `webhookUrl` already carries. `comparable()` keeps the URL, so rotation
+  shows as drift. The delta deliberately does not pin the name — this
+  design does.
+  - **Not a header.** Pulse's `GetWebhooks` masks every header VALUE as
+    `***REDACTED***` on read, so a digest header reads back as constant
+    drift and re-PUTs every poll tick. The first build did exactly that.
+  - **Not `name` or `template`.** `name` is the lookup key, so a digest in
+    it would create a duplicate on rotation. `template` is the
+    notification body.
+  - **Routing is unaffected.** The inbound mux matches method and path
+    only.
+  - **Operator headers compare by KEY.** Their values come back masked
+    too. An added or removed header repairs, a changed value under the same
+    key needs a manual re-registration.
 - **k8s-events relist clip.** On a list pass that hits the batch cap, the
   cursor advances only to the newest EXAMINED event, and the clip is
   reported on the source's Ready condition. No pagination rework — the
@@ -101,9 +113,9 @@ deliberate: the unsigned-inbound fix had no clean spec sentence without it.
 - [Blessing the refractory window weakens ADP-3's simplicity] → the five
   bounds table keeps it inert: same id, post-emit, dwell-capped, declared.
   An adapter cannot grow a dedup policy inside it.
-- [Pulse digest header leaks secret material] → sha256 of the secret is
-  one-way, and the header travels only to the Pulse instance that already
-  holds the secret itself.
+- [Pulse digest parameter leaks secret material] → sha256 of the secret is
+  one-way. Unlike a masked header, a URL query can reach access logs on
+  the delivery path, so the secret must stay high-entropy.
 - [The ha id-scope delta ratifies coarser grouping than the old surfaces
   table promised] → deliberate: the shipped defaults already behave this
   way, and per-entry ids under a dwell would split one integration's
@@ -119,5 +131,5 @@ existing third-party adapters stay conformant at 2.0.0 claims.
 
 ## Open Questions
 
-None. The one deferred constant (pulse digest header name) is settled
+None. The one deferred constant (pulse digest parameter name) is settled
 above.

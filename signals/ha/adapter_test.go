@@ -22,6 +22,11 @@ type statusReport struct {
 	Message string `json:"message"`
 }
 
+// contractInboundBound is docs/contracts/signal-adapter.md's bound on a
+// `POST /signal/inbound` body, restated here so the double does not borrow the
+// constant the code under test is held to.
+const contractInboundBound = 1 << 20
+
 type fakeManager struct {
 	srv *httptest.Server
 
@@ -63,7 +68,10 @@ func newFakeManager(t *testing.T, sources ...SourceInfo) *fakeManager {
 			Source  string   `json:"source"`
 			Signals []Signal `json:"signals"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		// The contract's inbound body bound, enforced as the manager does: a
+		// batch over it is refused whole.
+		body := http.MaxBytesReader(w, r.Body, contractInboundBound)
+		if err := json.NewDecoder(body).Decode(&in); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
@@ -364,7 +372,14 @@ func TestHealthLadder(t *testing.T) {
 		snap *healthSnapshot
 		want verdict
 	}{
-		{"no snapshot at all", nil, verdictUnknown},
+		{"no snapshot at all", nil, verdictUnreadable},
+		// A read failed through the close and left an older view in place:
+		// nothing about the closing part was observed, whatever it records.
+		{"stale snapshot", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 3}},
+			entries: map[string][]string{},
+			at:      since.Add(-time.Second),
+		}, verdictUnreadable},
 		{"config entry still failing", &healthSnapshot{
 			records: map[string]logRecord{key: {Count: 3}},
 			entries: map[string][]string{"hue": {"setup_retry"}},
@@ -409,11 +424,169 @@ func TestHealthLadder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Every case but the staleness ones reads a view taken inside the
+			// closing part, as the flusher's refresh guarantees in production.
+			if tc.snap != nil && tc.snap.at.IsZero() {
+				tc.snap.at = since.Add(time.Second)
+			}
 			a := adapterWithSnapshot(tc.snap)
 			if got := a.health(ref, since); got != tc.want {
 				t.Fatalf("health = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A snapshot taken before the window's closing part is the log becoming
+// unreadable mid-window: the flusher's refreshes failed and left the old view in
+// place. The one-off record it holds must emit (fail open), where the same
+// record against a fresh view is dropped as quiet — the live defect this pins
+// is an HA outage turning a still-failing record into silence.
+func TestStaleSnapshotFailsOpen(t *testing.T) {
+	opened := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	dwell := 3 * time.Minute
+	closeAt := opened.Add(dwell)
+	logger, location := "homeassistant.core", "core.py:1"
+	cases := []struct {
+		name     string
+		takenAt  time.Time
+		wantEmit bool
+	}{
+		{"fresh snapshot, no recurrence", closeAt.Add(-dwellTick), false},
+		{"stale snapshot, no recurrence", opened.Add(10 * time.Second), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := adapterWithSnapshot(&healthSnapshot{
+				records: map[string]logRecord{logger + "@" + location: {Count: 1}},
+				entries: map[string][]string{},
+				at:      tc.takenAt,
+			})
+			var got []Signal
+			q := newPendingQueue(a.health, func(_ string, sigs []Signal) { got = append(got, sigs...) })
+			q.now = func() time.Time { return opened }
+			q.Add("ha-logs", Signal{
+				InitiationID: "ha-logs@" + logger + "@" + location,
+				Labels:       map[string]string{"integration": logger, "logger": logger, "location": location, "level": "ERROR"},
+			}, compiledRule{dwell: dwell, escalate: 99}, 1)
+			q.Flush(closeAt)
+			if emitted := len(got) == 1; emitted != tc.wantEmit {
+				t.Fatalf("emitted = %v (%+v), want %v", emitted, got, tc.wantEmit)
+			}
+		})
+	}
+}
+
+// A snapshot taken inside the closing part says the log was read THEN. When
+// the latest read failed, or the session ended, the log is unreadable AT the
+// close: rung 3, whatever the snapshot holds and however long the closing
+// part is. Without the mark, a Home Assistant lost late in a long window was
+// judged against its last good view, and a one-off record dropped as quiet.
+func TestUnreadableAtTheCloseOutranksAFreshSnapshot(t *testing.T) {
+	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue",
+		location: "light.py:88", countAtOpen: 1}
+	since := time.Date(2026, 8, 21, 12, 2, 0, 0, time.UTC)
+	for _, entries := range []map[string][]string{
+		{},                       // no predicate: would otherwise be rung 2's quiet drop
+		{"hue": {"loaded"}},      // a loaded entry: would otherwise be healthy
+		{"hue": {"setup_retry"}}, // still failing: rung 3 still answers first
+	} {
+		a := adapterWithSnapshot(&healthSnapshot{
+			records: map[string]logRecord{ref.key(): {Count: 1}},
+			entries: entries,
+			at:      since.Add(time.Second),
+		})
+		a.sources["ha-logs"].unreadable = true
+		if got := a.health(ref, since); got != verdictUnreadable {
+			t.Fatalf("entries %v: health = %v, want verdictUnreadable", entries, got)
+		}
+	}
+}
+
+// A source the adapter no longer serves was withdrawn, not lost: its pending
+// conditions are gone, and nothing is posted for it.
+func TestWithdrawnSourceIsGoneNotUnreadable(t *testing.T) {
+	a := &adapter{sources: map[string]*servedSource{}}
+	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue", location: "light.py:88"}
+	if got := a.health(ref, time.Now()); got != verdictGone {
+		t.Fatalf("health = %v, want verdictGone", got)
+	}
+}
+
+// readListing is what keeps the mark honest: a failed read sets it and keeps
+// the last snapshot, and the next successful read clears it.
+func TestReadListingMarksTheLogUnreadable(t *testing.T) {
+	ha := newFakeHA(t, "secret")
+	f, err := parseConfig(json.RawMessage(`{"endpoint":"` + ha.URL + `"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &adapter{sources: map[string]*servedSource{"ha-logs": {filter: f}}}
+	a.pending = newPendingQueue(a.health, func(string, []Signal) {})
+	unreadable := func() (bool, *healthSnapshot) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.sources["ha-logs"].unreadable, a.sources["ha-logs"].snapshot
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sess, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if _, err := a.readListing(ctx, "ha-logs", sess); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if flagged, snap := unreadable(); flagged || snap == nil {
+		t.Fatalf("after a good read: unreadable=%v snapshot=%v, want false and a snapshot", flagged, snap)
+	}
+	_, good := unreadable()
+
+	sess.Close()
+	if _, err := a.readListing(ctx, "ha-logs", sess); err == nil {
+		t.Fatal("a read on a closed session must fail")
+	}
+	if flagged, snap := unreadable(); !flagged || snap != good {
+		t.Fatalf("after a failed read: unreadable=%v, snapshot kept=%v, want true and true", flagged, snap == good)
+	}
+
+	again, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	defer again.Close()
+	if _, err := a.readListing(ctx, "ha-logs", again); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if flagged, _ := unreadable(); flagged {
+		t.Fatal("a successful read must clear the mark")
+	}
+}
+
+// A dwell flush can decide more integrations at once than one batch holds.
+// Every signal past the batch size must still reach the manager, in further
+// batches, rather than being cut with nothing reporting it.
+func TestPostSplitsMoreThanOneBatch(t *testing.T) {
+	fm := newFakeManager(t)
+	a := newTestAdapter(fm)
+	a.cap = newEmitCap(10 * maxBatchPerSrc)
+	total := 2*maxBatchPerSrc + 7
+	sigs := make([]Signal, total)
+	for i := range sigs {
+		sigs[i] = Signal{InitiationID: fmt.Sprintf("ha-logs@integration-%d", i)}
+	}
+	if !a.post(context.Background(), "ha-logs", sigs) {
+		t.Fatalf("post reported a failure: %+v", fm.Status())
+	}
+	posted := fm.Posted()
+	if len(posted) != total {
+		t.Fatalf("posted %d signals, want all %d", len(posted), total)
+	}
+	for i, sig := range posted {
+		if want := sigs[i].InitiationID; sig.InitiationID != want {
+			t.Fatalf("signal %d = %q, want %q (order kept)", i, sig.InitiationID, want)
+		}
 	}
 }
 

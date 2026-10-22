@@ -15,7 +15,7 @@ import (
 // on the manager's API port, bearer-token auth). Adapters need no Kubernetes
 // access — source config and status conditions go through this API;
 // normalized signals go in through /signal/inbound and the manager applies
-// grouping/cooldown/recurrence itself.
+// cooldown and recurrence itself, keyed on the adapter-minted initiationId.
 type Manager struct {
 	BaseURL string
 	Token   string

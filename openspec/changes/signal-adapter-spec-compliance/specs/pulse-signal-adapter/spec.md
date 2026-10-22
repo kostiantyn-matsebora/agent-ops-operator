@@ -18,9 +18,15 @@ Pulse redacts the stored signing secret on read, so comparing the stored
 object can never see a rotated secret.
 
 The comparison SHALL instead key on a non-secret one-way digest of the
-configured signing secret, registered beside the webhook where Pulse returns
-it unredacted — a registered header. A digest mismatch SHALL update the
-webhook in place, pushing the current secret.
+configured signing secret.
+
+The digest is registered beside the webhook, in the one field Pulse returns
+unredacted: an `agentops_secret_digest` query parameter on the registered
+webhook URL. Pulse masks every registered header's value on read, not only
+a field named "secret", so a header cannot carry this digest.
+
+A digest mismatch SHALL update the webhook in place, pushing the current
+secret.
 
 A failed registration attempt SHALL NOT crash-loop the pod. The adapter
 SHALL retry on a fixed interval until registration succeeds, and SHALL keep

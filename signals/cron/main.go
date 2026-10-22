@@ -115,6 +115,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %v", err)
 		return
 	}
+	a.pruneReported(infos)
 	next := map[string]servedSource{}
 	for _, info := range infos {
 		var cfg sourceConfig
@@ -129,29 +130,68 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		} else if sched, err = ParseCron(cfg.Schedule); err != nil {
 			problem = "spec.config.schedule: " + err.Error()
 		}
-		a.mu.Lock()
-		last := a.reported[info.Name]
-		a.mu.Unlock()
 		if problem != "" {
-			if last != problem {
-				_ = a.mgr.ReportStatus(ctx, info.Name, false, "InvalidConfig", problem)
-				a.mu.Lock()
-				a.reported[info.Name] = problem
-				a.mu.Unlock()
-			}
+			a.reportOnce(ctx, info.Name, false, "InvalidConfig", problem)
 			continue // keep serving the other sources
 		}
-		if last != "ok" {
-			_ = a.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady", "served by signal-cron")
-			a.mu.Lock()
-			a.reported[info.Name] = "ok"
-			a.mu.Unlock()
-		}
+		a.reportOnce(ctx, info.Name, true, "AdapterReady", "served by signal-cron")
 		next[info.Name] = servedSource{sched: sched, cfg: cfg}
 	}
 	a.mu.Lock()
 	a.sources = next
 	a.mu.Unlock()
+}
+
+// reportedReady is the reported-map entry for a source last reported Ready.
+// An invalid source's entry is its problem text instead, so a changed problem
+// re-reports too.
+const reportedReady = "ok"
+
+// reportOnce posts a source's Ready condition unless the manager already
+// accepted that same state. The entry is recorded only after the post
+// succeeds: recording a failed post would suppress the report until the
+// config changed, leaving the source's Ready condition unset or stale.
+func (a *adapter) reportOnce(ctx context.Context, name string, ready bool, reason, message string) {
+	state := message
+	if ready {
+		state = reportedReady
+	}
+	a.mu.Lock()
+	unchanged := a.reported[name] == state
+	a.mu.Unlock()
+	if unchanged {
+		return
+	}
+	if err := a.mgr.ReportStatus(ctx, name, ready, reason, message); err != nil {
+		log.Printf("report status %s: %v (retried next refresh)", name, err)
+		return
+	}
+	a.mu.Lock()
+	a.reported[name] = state
+	a.mu.Unlock()
+}
+
+// pruneReported drops the last-reported status of every source the manager no
+// longer serves. Without it a deleted source's entry outlives the object, so a
+// recreation under the same name with the same invalid config would match the
+// stale entry and never re-report Ready=False — and the map would grow with
+// every source ever seen.
+//
+// Called only after a successful list. A failed list prunes nothing, as it
+// keeps `sources`: entries are written only for listed names, so the map
+// cannot grow during an outage, and the first successful list prunes it.
+func (a *adapter) pruneReported(infos []SourceInfo) {
+	served := make(map[string]struct{}, len(infos))
+	for _, info := range infos {
+		served[info.Name] = struct{}{}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for name := range a.reported {
+		if _, ok := served[name]; !ok {
+			delete(a.reported, name)
+		}
+	}
 }
 
 // evaluate fires the latest elapsed tick of one source, if any. Fire-then-

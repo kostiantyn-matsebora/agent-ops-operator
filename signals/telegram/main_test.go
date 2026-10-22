@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func testAdapter(sources map[string]sourceConfig) *adapter {
@@ -168,6 +169,29 @@ func TestTitleTruncates(t *testing.T) {
 	}
 	if got := title("first line\nsecond line"); got != "first line" {
 		t.Fatalf("title = %q, want first line only", got)
+	}
+}
+
+// TestTitleTruncatesOnRuneBoundary pins the cut to whole characters: 59 ASCII
+// bytes then a 4-byte emoji puts byte 60 inside the emoji, where a byte cut
+// would split it and emit invalid UTF-8.
+func TestTitleTruncatesOnRuneBoundary(t *testing.T) {
+	text := strings.Repeat("a", 59) + strings.Repeat("😀", 10)
+	got := title(text)
+	if !utf8.ValidString(got) {
+		t.Fatalf("title is not valid UTF-8: %q", got)
+	}
+	want := strings.Repeat("a", 59) + "😀" + "…"
+	if got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+
+	cyrillic := strings.Repeat("ж", 70) // 2 bytes each
+	if got := title(cyrillic); got != strings.Repeat("ж", 60)+"…" {
+		t.Fatalf("title = %q, want 60 whole runes + ellipsis", got)
+	}
+	if title(strings.Repeat("ж", 60)) != strings.Repeat("ж", 60) {
+		t.Fatalf("a 60-rune title must pass through untruncated")
 	}
 }
 

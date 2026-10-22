@@ -37,7 +37,7 @@ runs holds a bot token.
 `signals/telegram`, the chat-origination adapter behind this bundle, conforms
 to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.0.0.
+2.2.0.
 
 ## Turn it on
 

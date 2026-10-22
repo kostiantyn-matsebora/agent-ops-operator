@@ -14,8 +14,8 @@ import (
 // Manager is a client for the operator's signal adapter contract (/signal/*
 // on the manager's API port, bearer-token auth): source config, cursor state,
 // and status conditions all go through this API; normalized signals go in
-// through /signal/inbound and the manager applies grouping/cooldown/recurrence
-// itself.
+// through /signal/inbound, and the manager applies cooldown, routing and
+// recurrence itself, keyed on the initiationId this adapter mints.
 //
 // This adapter's Kubernetes access (kube.go) is for its DATA SOURCE only — the
 // cluster's Events. Nothing about the contract needs it: the operator grants
