@@ -89,6 +89,8 @@ go_file.write_text(
     "\tCount int32 `json:\"count,omitempty\"`\n"
     "\t// Legacy is kept for a deployment with no explicit wire name.\n"
     "\tLegacy string `json:\",omitempty\"`\n"
+    "\t// Internal carries no struct tag at all.\n"
+    "\tInternal string\n"
     "}\n"
 )
 
@@ -104,6 +106,7 @@ want = [
 assert rows == want, f"fields read incorrectly: {rows}"
 print("ok: json tags, Go types and doc comments read correctly")
 print("ok: an empty tag name keeps the Go field name instead of being dropped")
+print("ok: a field with no struct tag at all is skipped, not a parse error")
 
 doc = tmp / "runtime-test.md"
 marker = f"<!-- generated: struct-table file={go_file} struct=Sample -->\n"
@@ -144,6 +147,9 @@ assert_contains "$out" "json tags, Go types and doc comments read correctly"
 
 it "struct-table: an empty tag name keeps the Go field name instead of being dropped"
 assert_contains "$out" "an empty tag name keeps the Go field name instead of being dropped"
+
+it "struct-table: a field with no struct tag at all is skipped, not a parse error"
+assert_contains "$out" "a field with no struct tag at all is skipped, not a parse error"
 
 it "struct-table: --check's own staleness comparison catches an added field"
 assert_contains "$out" "catches a field added with no regeneration"

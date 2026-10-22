@@ -954,6 +954,7 @@ def field_table(rows: list[dict]) -> list[str]:
 # already performs for a template's YAML comments.
 
 GO_FIELD_RE = re.compile(r"^\s*([A-Z]\w*)\s+([^\s`]+)\s+`([^`]*)`\s*$")
+GO_UNTAGGED_FIELD_RE = re.compile(r"^\s*([A-Z]\w*)\s+([^\s`]+)\s*$")
 
 
 def go_type(token: str) -> str:
@@ -1004,6 +1005,8 @@ def _go_field_row(path: pathlib.Path, struct: str, line: str, comment: list[str]
     the wire (untagged, or `json:"-"`)."""
     m = GO_FIELD_RE.match(line)
     if not m:
+        if GO_UNTAGGED_FIELD_RE.match(line):
+            return None  # no struct tag at all -- never on the wire
         raise SystemExit(
             f"{path}: `{struct}` has a field line this generator cannot "
             f"parse -- scope is one field per line, a single-line struct "
