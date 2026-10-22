@@ -394,27 +394,38 @@ func (a *adapter) runSession(ctx context.Context, source string) {
 		go a.runPoller(ctx, source, sess)
 		go a.runStatesLoop(ctx, source, sess)
 
-		select {
-		case <-ctx.Done():
-			sess.Close()
+		if !a.awaitSessionEnd(ctx, source, sess) {
 			return
-		case <-sess.Done():
-			a.mu.Lock()
-			delete(a.sessions, source)
-			// No session, no reads: the log stays unreadable until a
-			// reconnected session's first read succeeds.
-			if src, ok := a.sources[source]; ok {
-				src.unreadable = true
-			}
-			a.mu.Unlock()
-			if ctx.Err() == nil {
-				err := sess.Err()
-				log.Printf("%s: session ended: %v — reconnecting", source, err)
-				a.report(ctx, source, "closed", false, "Disconnected",
-					fmt.Sprintf("the Home Assistant connection ended (%v); reconnecting", err))
-				sleepCtx(ctx, connectBackoff)
-			}
 		}
+	}
+}
+
+// awaitSessionEnd blocks until the context is cancelled or the session ends.
+// Returns false when the caller should stop (shutdown); true when it should
+// reconnect — having marked the source unreadable and reported the
+// disconnect first.
+func (a *adapter) awaitSessionEnd(ctx context.Context, source string, sess *haSession) bool {
+	select {
+	case <-ctx.Done():
+		sess.Close()
+		return false
+	case <-sess.Done():
+		a.mu.Lock()
+		delete(a.sessions, source)
+		// No session, no reads: the log stays unreadable until a
+		// reconnected session's first read succeeds.
+		if src, ok := a.sources[source]; ok {
+			src.unreadable = true
+		}
+		a.mu.Unlock()
+		if ctx.Err() == nil {
+			err := sess.Err()
+			log.Printf("%s: session ended: %v — reconnecting", source, err)
+			a.report(ctx, source, "closed", false, "Disconnected",
+				fmt.Sprintf("the Home Assistant connection ended (%v); reconnecting", err))
+			sleepCtx(ctx, connectBackoff)
+		}
+		return true
 	}
 }
 

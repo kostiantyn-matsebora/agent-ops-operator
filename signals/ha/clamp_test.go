@@ -104,26 +104,42 @@ func assertClampOptimalAtEveryLimit(t *testing.T, payload string, valid bool) {
 		return encodedLen(Signal{InitiationID: base.InitiationID, Payload: clampedPayload(payload, k)})
 	}
 	for limit := sizeAt(0); limit < encodedLen(base); limit++ {
-		best := 0
-		for k := 0; k <= len(payload); k++ {
-			if isBoundary(k) && sizeAt(k) <= limit {
-				best = k
-			}
+		best := bruteForceLongestFittingCut(payload, limit, isBoundary, sizeAt)
+		assertClampedAtLimitMatches(t, clampSignal(base, limit), payload, limit, isBoundary, best, valid)
+	}
+}
+
+// bruteForceLongestFittingCut is the oracle assertClampOptimalAtEveryLimit
+// checks clampSignal's binary search against: the longest rune-boundary
+// prefix whose encoding fits limit, found by trying every candidate.
+func bruteForceLongestFittingCut(payload string, limit int, isBoundary func(int) bool, sizeAt func(int) int) int {
+	best := 0
+	for k := 0; k <= len(payload); k++ {
+		if isBoundary(k) && sizeAt(k) <= limit {
+			best = k
 		}
-		got := clampSignal(base, limit)
-		if n := encodedLen(got); n > limit {
-			t.Fatalf("limit %d: encoded %d bytes, over the limit", limit, n)
-		}
-		kept := got.Payload[:strings.LastIndex(got.Payload, "\n\n[payload clamped: ")]
-		if !strings.HasPrefix(payload, kept) || !isBoundary(len(kept)) {
-			t.Fatalf("limit %d: kept %d bytes, not a prefix ending on a rune boundary", limit, len(kept))
-		}
-		if len(kept) != best {
-			t.Fatalf("limit %d: kept %d bytes, the longest fitting cut keeps %d", limit, len(kept), best)
-		}
-		if valid && !utf8.ValidString(got.Payload) {
-			t.Fatalf("limit %d: clamped payload is not valid UTF-8", limit)
-		}
+	}
+	return best
+}
+
+// assertClampedAtLimitMatches checks one limit's clampSignal result against
+// the brute-force oracle's best cut: it fits, it is a rune-boundary prefix
+// of payload, it is the longest such prefix, and — for a valid-UTF-8 input —
+// the clamped payload stays valid UTF-8.
+func assertClampedAtLimitMatches(t *testing.T, got Signal, payload string, limit int, isBoundary func(int) bool, best int, valid bool) {
+	t.Helper()
+	if n := encodedLen(got); n > limit {
+		t.Fatalf("limit %d: encoded %d bytes, over the limit", limit, n)
+	}
+	kept := got.Payload[:strings.LastIndex(got.Payload, "\n\n[payload clamped: ")]
+	if !strings.HasPrefix(payload, kept) || !isBoundary(len(kept)) {
+		t.Fatalf("limit %d: kept %d bytes, not a prefix ending on a rune boundary", limit, len(kept))
+	}
+	if len(kept) != best {
+		t.Fatalf("limit %d: kept %d bytes, the longest fitting cut keeps %d", limit, len(kept), best)
+	}
+	if valid && !utf8.ValidString(got.Payload) {
+		t.Fatalf("limit %d: clamped payload is not valid UTF-8", limit)
 	}
 }
 
