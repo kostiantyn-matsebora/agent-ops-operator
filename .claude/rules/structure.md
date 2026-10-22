@@ -37,7 +37,7 @@ Own Go module, the only one with dependencies.
 |---|---|
 | `api/v1alpha1/` | CRD types + deepcopy. CRD YAML in `chart/crds/` |
 | `cmd/manager/main.go` | wiring: reconciler, httpapi, chat, env config |
-| `internal/ingest/` | signature grouping, fingerprint cooldown |
+| `internal/ingest/` | `initiationId` cooldown, no grouping or signature derivation |
 | `internal/runtimepod/` | runtime pod builder |
 | `internal/addressing/` | `/<pipeline> <task>` parsing, one segment, no `:<agent>` override |
 | `internal/controller/` | Conversation/ChannelAdapter/SignalAdapter/Channel/SignalSource/Pipeline reconcilers, admission gate (FIFO, idle eviction), close-topics finalizer |
