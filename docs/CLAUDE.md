@@ -123,10 +123,11 @@ path. Plugins are limited to the set Pages enables by default.
   - **A STRUCT'S JSON SHAPE comes from the same run** —
     `<!-- generated: struct-table file=<path> struct=<name> -->` fills a
     Field/Type/Required/Description table from one Go struct's json-tagged
-    fields and doc comments. `contracts/runtime.md`'s work-unit and
-    completion-report schemas use it. Scope is deliberately narrow — a
-    single-line `Name Type` + json tag, no embedding — so `--check` fails
-    loudly on a shape it cannot read rather than silently skipping a field.
+    fields and doc comments. `contracts/runtime.md` carries one of these
+    per wire shape it documents — work unit, completion report, and each
+    nested telemetry struct. Scope is deliberately narrow — a single-line
+    `Name Type` + json tag, no embedding — so `--check` fails loudly on a
+    shape it cannot read rather than silently skipping a field.
   - **A page declares what it wants in an HTML comment**
     (`<!-- generated: … -->`) and the generator fills the block beneath it. CI
     regenerates everything and FAILS on a difference, which is the only thing

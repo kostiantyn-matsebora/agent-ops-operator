@@ -1031,11 +1031,14 @@ def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
             )
         name, gotype, tag = m.groups()
         jm = re.search(r'json:"([^"]*)"', tag)
-        json_name = jm.group(1).split(",")[0] if jm else ""
-        if not json_name or json_name == "-":
-            comment = []  # untagged or explicitly off the wire
+        if not jm:
+            comment = []  # untagged -- never on the wire
             continue
-        opts = jm.group(1).split(",")[1:]
+        tag_name, *opts = jm.group(1).split(",")
+        if tag_name == "-":
+            comment = []  # explicitly off the wire
+            continue
+        json_name = tag_name or name  # an empty tag name keeps the Go name
         desc = " ".join(comment)
         for lead in (f"{name} is ", f"{name} are "):
             if desc.startswith(lead):

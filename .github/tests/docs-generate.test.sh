@@ -87,6 +87,8 @@ go_file.write_text(
     "\tName string `json:\"name\"`\n"
     "\t// Count is optional, omitted when zero.\n"
     "\tCount int32 `json:\"count,omitempty\"`\n"
+    "\t// Legacy is kept for a deployment with no explicit wire name.\n"
+    "\tLegacy string `json:\",omitempty\"`\n"
     "}\n"
 )
 
@@ -96,9 +98,12 @@ want = [
      "description": "The sample's own name, never blank."},
     {"path": "count", "type": "integer", "required": False,
      "description": "Optional, omitted when zero."},
+    {"path": "Legacy", "type": "string", "required": False,
+     "description": "Kept for a deployment with no explicit wire name."},
 ]
 assert rows == want, f"fields read incorrectly: {rows}"
 print("ok: json tags, Go types and doc comments read correctly")
+print("ok: an empty tag name keeps the Go field name instead of being dropped")
 
 doc = tmp / "runtime-test.md"
 marker = f"<!-- generated: struct-table file={go_file} struct=Sample -->\n"
@@ -136,6 +141,9 @@ it "struct-table: fields are read off json tags, types and doc comments correctl
 out=$(python3 "$pytmp/check_struct_table.py" "$ROOT" "$pytmp" 2>&1)
 assert_status 0 "$?"
 assert_contains "$out" "json tags, Go types and doc comments read correctly"
+
+it "struct-table: an empty tag name keeps the Go field name instead of being dropped"
+assert_contains "$out" "an empty tag name keeps the Go field name instead of being dropped"
 
 it "struct-table: --check's own staleness comparison catches an added field"
 assert_contains "$out" "catches a field added with no regeneration"
