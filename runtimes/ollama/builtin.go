@@ -161,13 +161,19 @@ func (b Builtins) grep(ctx context.Context, raw json.RawMessage) (string, bool, 
 		// follow it wherever it points. Confine it the same way resolve()
 		// confines a starting path: a target outside the workspace, or one
 		// that cannot be evaluated (broken link), is refused, never read.
+		readPath := p
 		if d.Type()&fs.ModeSymlink != 0 {
 			target, err := filepath.EvalSymlinks(p)
 			if err != nil || !within(root, target) {
 				return nil
 			}
+			// Read the RESOLVED path, not the symlink again: re-reading
+			// through p would re-resolve it a second time, and a link
+			// swapped between the two resolutions could point outside root
+			// on the read even though the check above saw it safely inside.
+			readPath = target
 		}
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(readPath)
 		if err != nil || bytes.IndexByte(data, 0) >= 0 {
 			return nil // unreadable or binary
 		}

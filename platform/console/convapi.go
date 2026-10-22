@@ -343,17 +343,24 @@ func (a *API) handleConversation(w http.ResponseWriter, r *http.Request) {
 // pseudo-thread rather than dropping them; this is what reads that thread
 // back, mirroring Telegram's general topic.
 //
+// Merged across EVERY served channel, not just the primary one: a console
+// instance can serve more than one Channel CR (refreshChannels keeps one
+// pseudo-thread per name), and a thread-less send can land on any of them.
+// Reading only the primary's would silently drop exactly what this feed
+// exists to stop dropping.
+//
 // No durable record backs this feed — unlike a conversation's transcript,
 // there is no Conversation CR to merge against, so the live buffer IS the
 // whole answer and a console restart loses it like any other transcript.
 func (a *API) handleChannelFeed(w http.ResponseWriter, r *http.Request) {
 	channel := a.adapter.PrimaryChannel()
 	messages := []Message{}
-	if channel != "" {
-		if thread := a.transcripts.Thread("channel:" + channel); thread != nil {
-			messages = thread
+	for _, name := range a.adapter.ChannelNames() {
+		if thread := a.transcripts.Thread("channel:" + name); len(thread) > 0 {
+			messages = append(messages, thread...)
 		}
 	}
+	sort.SliceStable(messages, func(i, j int) bool { return messages[i].At < messages[j].At })
 	writeJSON(w, http.StatusOK, map[string]any{"channel": channel, "messages": messages})
 }
 
