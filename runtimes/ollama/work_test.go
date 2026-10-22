@@ -128,6 +128,46 @@ func TestReportRetriesThenGivesUpNamingTheLastError(t *testing.T) {
 	}
 }
 
+// A DEFINITIVE rejection -- a 4xx the manager will never accept unchanged --
+// must be logged with its status and body and NOT retried: resending the
+// same bytes cannot change the verdict, so the poll loop must resume at
+// once rather than spend ten minutes re-sending a report that will never be
+// accepted (1.5, pins the runtime-contract delta's rejection rule).
+func TestReportDoesNotRetryOnADefinitiveRejection(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("result field exceeds the bound"))
+	}))
+	defer srv.Close()
+	c := &Control{BaseURL: srv.URL, HTTP: srv.Client()}
+	var slept []time.Duration
+	err := c.Report(context.Background(), "r1", RunResult{}, func(d time.Duration) { slept = append(slept, d) })
+	if err == nil || !strings.Contains(err.Error(), "400") || !strings.Contains(err.Error(), "result field exceeds the bound") {
+		t.Fatalf("want an error naming the status and body, got %v", err)
+	}
+	if calls != 1 || len(slept) != 0 {
+		t.Errorf("a definitive rejection must not be retried: calls=%d slept=%v", calls, slept)
+	}
+}
+
+// 408 and 429 are 4xx too, but both are transient by nature and must keep
+// their bounded retry rather than being treated as definitive.
+func TestIsDefinitiveRejectionExemptsTimeoutAndRateLimit(t *testing.T) {
+	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooManyRequests} {
+		if isDefinitiveRejection(status) {
+			t.Errorf("status %d must keep its retry, not be treated as definitive", status)
+		}
+	}
+	if !isDefinitiveRejection(http.StatusBadRequest) {
+		t.Error("an ordinary 400 must be definitive")
+	}
+	if isDefinitiveRejection(http.StatusServiceUnavailable) {
+		t.Error("a 5xx must never be treated as definitive")
+	}
+}
+
 // A transport-level failure (not an HTTP status) is retried the same way and
 // its error is what's returned once the budget is exhausted.
 func TestReportRetriesOnTransportFailureToo(t *testing.T) {

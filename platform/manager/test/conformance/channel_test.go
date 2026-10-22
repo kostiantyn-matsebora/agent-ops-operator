@@ -68,6 +68,9 @@ func TestChannelTelegramConformance(t *testing.T) {
 	tgAssertInboundPushForwarded(t, mgr, p)
 	tgAssertNoRelayLoopOrUnauthenticated(t, mgr)
 	tgAssertCloseTopicIdempotent(t, mgr, topic)
+	tgAssertThreadlessSendVisibleOrError(t, mgr, bot)
+	tgAssertDeleteConversationActsOrErrors(t, mgr, bot)
+	tgAssertRetryBudgetStaysUnderReclaimWindow(t, mgr, bot)
 }
 
 // tgStartFakeBotAPI starts the Bot API double as a BINARY too — the same one
@@ -92,6 +95,41 @@ func botCallsFor(t *testing.T, bot *Process, method string) []map[string]any {
 	var calls []map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&calls)
 	return calls
+}
+
+// botQueueFail arms the Bot API double to reject the NEXT call to method with
+// a real 429 (carrying retryAfter) or a bare 5xx, exactly once.
+func botQueueFail(t *testing.T, bot *Process, method, mode string, retryAfter int) {
+	t.Helper()
+	botFail(t, bot, method, mode, retryAfter, false)
+}
+
+// botFailForever arms the double to reject EVERY call to method until
+// botClearFail — backpressure that never clears (A1/A2's "unending" case).
+func botFailForever(t *testing.T, bot *Process, method, mode string, retryAfter int) {
+	t.Helper()
+	botFail(t, bot, method, mode, retryAfter, true)
+}
+
+func botFail(t *testing.T, bot *Process, method, mode string, retryAfter int, forever bool) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"method": method, "mode": mode, "retryAfter": retryAfter, "forever": forever})
+	resp, err := http.Post(bot.URL()+"/control/fail", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
+// botClearFail disarms any injected failure for method.
+func botClearFail(t *testing.T, bot *Process, method string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodDelete, bot.URL()+"/control/fail?method="+method, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 }
 
 // tgStartGateway starts gateway-telegram as a BINARY, the same one the
@@ -314,6 +352,133 @@ func tgAssertCloseTopicIdempotent(t *testing.T, mgr *FakeManager, topic Completi
 	}
 }
 
+// tgAssertThreadlessSendVisibleOrError: a `send` with no threadId at all must
+// either surface somewhere a person can see it or fail outright — never
+// complete successfully with nothing to show for it (B1). Telegram's visible
+// fallback is the chat's GENERAL surface: SendWith with a nil thread id omits
+// message_thread_id, which Telegram (and this fake) route to General.
+func tgAssertThreadlessSendVisibleOrError(t *testing.T, mgr *FakeManager, bot *Process) {
+	t.Helper()
+	before := len(botCallsFor(t, bot, "sendMessage"))
+	send := map[string]any{"id": "op-send-nothread", "channel": "ops", "conversation": "c1", "kind": "send",
+		"message": map[string]any{"kind": "answer", "body": "general surface fallback", "status": "succeeded"}}
+	mgr.QueueOp(send)
+	waitFor(t, "thread-less send completion", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send-nothread"); return n > 0 })
+	_, c := completionsFor(mgr, "op-send-nothread")
+	if c.Error != "" {
+		return // scenario 2: an explicit error is an accepted outcome too.
+	}
+	// scenario 1: it must be VISIBLE — a new sendMessage with no thread id.
+	sends := botCallsFor(t, bot, "sendMessage")
+	if len(sends) <= before {
+		t.Fatalf("a thread-less send completed successfully with no sendMessage call at all")
+	}
+	body, _ := sends[len(sends)-1]["body"].(map[string]any)
+	if _, hasThread := body["message_thread_id"]; hasThread {
+		t.Fatalf("a thread-less send must land on the GENERAL surface (no message_thread_id), got %v", body)
+	}
+	if !strings.Contains(fmt.Sprint(body["text"]), "general surface fallback") {
+		t.Fatalf("the general-surface send must carry the op's own message: %v", body)
+	}
+}
+
+// tgAssertDeleteConversationActsOrErrors pins B3 in both reachable states: a
+// thread the adapter holds is actually closed, and a missing thread id never
+// completes as a silent success.
+func tgAssertDeleteConversationActsOrErrors(t *testing.T, mgr *FakeManager, bot *Process) {
+	t.Helper()
+	// Cannot act: no threadId at all.
+	missing := map[string]any{"id": "op-del-missing", "channel": "ops", "conversation": "c1", "kind": "delete-conversation"}
+	mgr.QueueOp(missing)
+	waitFor(t, "delete-conversation without a thread id completes", 20*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-del-missing"); return n > 0 })
+	if _, c := completionsFor(mgr, "op-del-missing"); c.Error == "" {
+		t.Fatalf("delete-conversation with no thread id must not silently succeed")
+	}
+
+	// Held: a fresh topic this run created, named for this assertion so it
+	// never collides with the topic the rest of the suite is still using.
+	mgr.QueueOp(map[string]any{"id": "op-topic-del", "channel": "ops", "conversation": "c-del", "kind": "ensure-topic",
+		"topic": map[string]any{"conversation": "c-del", "title": "delete-conversation probe", "kind": "task"}})
+	waitFor(t, "probe topic created", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-topic-del"); return n > 0 })
+	_, topic := completionsFor(mgr, "op-topic-del")
+	if topic.Error != "" || topic.ThreadID == "" {
+		t.Fatalf("probe ensure-topic: %+v", topic)
+	}
+	before := len(botCallsFor(t, bot, "closeForumTopic"))
+	held := map[string]any{"id": "op-del-held", "channel": "ops", "conversation": "c-del", "kind": "delete-conversation",
+		"threadId": topic.ThreadID}
+	mgr.QueueOp(held)
+	waitFor(t, "delete-conversation for a held thread completes", 20*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-del-held"); return n > 0 })
+	if _, c := completionsFor(mgr, "op-del-held"); c.Error != "" {
+		t.Fatalf("delete-conversation for a thread the adapter holds must act, not error: %+v", c)
+	}
+	if got := len(botCallsFor(t, bot, "closeForumTopic")); got <= before {
+		t.Fatalf("delete-conversation for a held thread left no observable transport effect: closeForumTopic calls %d -> %d", before, got)
+	}
+}
+
+// tgAssertRetryBudgetStaysUnderReclaimWindow pins A1/A2: injected 429/5xx
+// backpressure is absorbed in-process, but the operation never spends more
+// than the claim window doing it. Run LAST — it reshapes the fake manager's
+// claim window and the bot double's failure queue for the rest of the test.
+func tgAssertRetryBudgetStaysUnderReclaimWindow(t *testing.T, mgr *FakeManager, bot *Process) {
+	t.Helper()
+	// budget = reclaimSeconds/2 = 6s (Op.RetryBudget) — generous above the ~3s
+	// the two scripted absorbed failures actually cost (1s retry_after plus
+	// one transientBackoff), so ordinary scheduling jitter can never flip a
+	// should-succeed retry into a budget failure.
+	const reclaimSeconds = 12
+	mgr.SetReclaimAfterSeconds(reclaimSeconds)
+
+	// A fresh topic, so this assertion's sendMessage calls are unambiguous.
+	mgr.QueueOp(map[string]any{"id": "op-topic-retry", "channel": "ops", "conversation": "c-retry", "kind": "ensure-topic",
+		"topic": map[string]any{"conversation": "c-retry", "title": "retry budget probe", "kind": "task"}})
+	waitFor(t, "probe topic created", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-topic-retry"); return n > 0 })
+	_, topic := completionsFor(mgr, "op-topic-retry")
+	if topic.Error != "" || topic.ThreadID == "" {
+		t.Fatalf("probe ensure-topic: %+v", topic)
+	}
+
+	// Scenario 1: backpressure that CLEARS — a 429 then a bare 5xx, each
+	// absorbed, then the real answer. Completes inside the window.
+	botQueueFail(t, bot, "sendMessage", "429", 1)
+	botQueueFail(t, bot, "sendMessage", "5xx", 0)
+	start := time.Now()
+	absorbed := map[string]any{"id": "op-send-absorbed", "channel": "ops", "conversation": "c-retry", "kind": "send", "threadId": topic.ThreadID,
+		"message": map[string]any{"kind": "answer", "body": "absorbed backpressure", "status": "succeeded"}}
+	mgr.QueueOp(absorbed)
+	waitFor(t, "absorbed-backpressure send completes", 20*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-send-absorbed"); return n > 0 })
+	elapsed := time.Since(start)
+	if _, c := completionsFor(mgr, "op-send-absorbed"); c.Error != "" {
+		t.Fatalf("absorbed 429/5xx backpressure must still complete the op: %+v", c)
+	}
+	if elapsed >= reclaimSeconds*time.Second {
+		t.Fatalf("absorbed-backpressure send took %s, must stay strictly below the %ds claim window", elapsed, reclaimSeconds)
+	}
+
+	// Scenario 2: backpressure that NEVER clears. The op must be abandoned
+	// (failed) comfortably before the claim window ends, not silently ride
+	// past it.
+	botFailForever(t, bot, "sendMessage", "429", 1)
+	t.Cleanup(func() { botClearFail(t, bot, "sendMessage") })
+	start = time.Now()
+	unending := map[string]any{"id": "op-send-unending", "channel": "ops", "conversation": "c-retry", "kind": "send", "threadId": topic.ThreadID,
+		"message": map[string]any{"kind": "answer", "body": "unending backpressure", "status": "succeeded"}}
+	mgr.QueueOp(unending)
+	waitFor(t, "unending-backpressure send gives up", 20*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-send-unending"); return n > 0 })
+	elapsed = time.Since(start)
+	if _, c := completionsFor(mgr, "op-send-unending"); c.Error == "" {
+		t.Fatalf("unending 429 backpressure must fail the op, never silently exceed the claim window")
+	}
+	if elapsed >= reclaimSeconds*time.Second {
+		t.Fatalf("unending-backpressure send took %s to give up, must stay strictly below the %ds claim window", elapsed, reclaimSeconds)
+	}
+}
+
 // ---- console -----------------------------------------------------------------
 
 func TestConsoleConformance(t *testing.T) {
@@ -411,5 +576,108 @@ func TestConsoleConformance(t *testing.T) {
 	if mgr.Unauthorized() != 0 {
 		t.Fatalf("%d unauthenticated requests reached the manager", mgr.Unauthorized())
 	}
+	consoleAssertThreadlessSendVisibleOrError(t, mgr, p)
+	consoleAssertDeleteConversationActsOrErrors(t, mgr, p, topic.ThreadID)
+	consoleAssertOperationNeverExceedsReclaimWindow(t, mgr, api, convPath)
 	assertRetriesAtOnceAfterNonLeaderRejection(t, mgr, "console", "c1")
+}
+
+// consoleReadJSON GETs an authenticated console endpoint and decodes it.
+func consoleReadJSON(t *testing.T, p *Process, path string) map[string]any {
+	t.Helper()
+	req, _ := http.NewRequest("GET", p.URL()+path, nil)
+	req.Header.Set("Authorization", "Bearer ui-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out
+}
+
+// consoleAssertThreadlessSendVisibleOrError pins B1 for the console: a `send`
+// with no threadId either lands on the channel's general feed (design:
+// "Thread-less console sends surface as the channel's general feed",
+// convapi.go's GET /api/channel/feed) or fails outright — never a success
+// with nothing anywhere to show for it.
+func consoleAssertThreadlessSendVisibleOrError(t *testing.T, mgr *FakeManager, p *Process) {
+	t.Helper()
+	send := map[string]any{"id": "op-send-nothread", "channel": "console", "conversation": "c1", "kind": "send",
+		"message": map[string]any{"kind": "answer", "body": "general feed fallback", "status": "succeeded"}}
+	mgr.QueueOp(send)
+	waitFor(t, "thread-less send completion", 20*time.Second, func() bool { n, _ := completionsFor(mgr, "op-send-nothread"); return n > 0 })
+	_, c := completionsFor(mgr, "op-send-nothread")
+	if c.Error != "" {
+		return // scenario 2: an explicit error is an accepted outcome too.
+	}
+	// scenario 1: it must be VISIBLE on the channel's general feed.
+	out := consoleReadJSON(t, p, "/api/channel/feed")
+	b, _ := json.Marshal(out["messages"])
+	if !strings.Contains(string(b), "general feed fallback") {
+		t.Fatalf("a thread-less send completed successfully but is nowhere visible: feed=%s", b)
+	}
+}
+
+// consoleAssertDeleteConversationActsOrErrors pins B3 for the console in both
+// reachable states: a held thread is archived (an observable transport
+// effect: the tombstone message), and a missing thread id never completes as
+// a silent success.
+func consoleAssertDeleteConversationActsOrErrors(t *testing.T, mgr *FakeManager, p *Process, heldThreadID string) {
+	t.Helper()
+	// Cannot act: no threadId at all.
+	missing := map[string]any{"id": "op-del-missing", "channel": "console", "conversation": "c1", "kind": "delete-conversation"}
+	mgr.QueueOp(missing)
+	waitFor(t, "delete-conversation without a thread id completes", 20*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-del-missing"); return n > 0 })
+	if _, c := completionsFor(mgr, "op-del-missing"); c.Error == "" {
+		t.Fatalf("delete-conversation with no thread id must not silently succeed")
+	}
+
+	// Held: the thread established earlier in this run.
+	held := map[string]any{"id": "op-del-held", "channel": "console", "conversation": "c1", "kind": "delete-conversation",
+		"threadId": heldThreadID}
+	mgr.QueueOp(held)
+	waitFor(t, "delete-conversation for a held thread completes", 20*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-del-held"); return n > 0 })
+	if _, c := completionsFor(mgr, "op-del-held"); c.Error != "" {
+		t.Fatalf("delete-conversation for a thread the adapter holds must act, not error: %+v", c)
+	}
+	waitFor(t, "the transcript to carry the archive tombstone", 10*time.Second, func() bool {
+		b, _ := json.Marshal(consoleReadJSON(t, p, "/api/conversations/c1")["transcript"])
+		return strings.Contains(string(b), "archived")
+	})
+}
+
+// consoleAssertOperationNeverExceedsReclaimWindow pins A1/A2 for the console.
+// The console carries no per-operation retry loop of its own (cache.go's
+// GetOrFetch makes exactly ONE direct read on a cache miss, see adapter.go's
+// threadID) — it ignores reclaimAfterSeconds entirely, which OPS-4/OPS-5
+// make fully conformant PROVIDED it still never silently outlives the claim
+// window. This drives that one direct read through a sustained 500 — the
+// shape backpressure takes for a GET — and pins the outcome: the operation
+// completes (as a failure) near-instantly, nowhere close to the window,
+// rather than hanging past it.
+func consoleAssertOperationNeverExceedsReclaimWindow(t *testing.T, mgr *FakeManager, api *FakeAPIServer, convPath string) {
+	t.Helper()
+	const conversation = "c-retry-budget"
+	path := convPath + "/" + conversation
+	api.FailPath(path, http.StatusInternalServerError, -1) // never clears
+	defer api.ClearFailPath(path)
+
+	start := time.Now()
+	mgr.QueueOp(map[string]any{"id": "op-retry-budget", "channel": "console", "conversation": conversation, "kind": "ensure-topic",
+		"topic": map[string]any{"conversation": conversation, "title": "retry budget probe", "kind": "task"}})
+	waitFor(t, "ensure-topic completes under unending backpressure", 10*time.Second,
+		func() bool { n, _ := completionsFor(mgr, "op-retry-budget"); return n > 0 })
+	elapsed := time.Since(start)
+	if _, c := completionsFor(mgr, "op-retry-budget"); c.Error == "" {
+		t.Fatalf("ensure-topic against an unreachable conversation read must not silently succeed: %+v", c)
+	}
+	// chat.ReclaimAfter — the documented default a console ignoring the field
+	// is judged against (OPS-5) — is 5 minutes.
+	if docDefault := 5 * time.Minute; elapsed >= docDefault {
+		t.Fatalf("ensure-topic must complete well inside the documented %s reclaim window, took %s", docDefault, elapsed)
+	}
 }

@@ -33,6 +33,18 @@ func escape(s string) string {
 	return r.Replace(s)
 }
 
+// escapeHref makes a URL safe inside an href="..." attribute.
+//
+// By the time a link reaches here, the whole message has already gone through
+// escape() for &, < and > — markdownToHTML runs that pass before matching
+// links at all. What that pass does NOT cover is the quote that would
+// otherwise close the attribute early: a URL carrying a literal `"` (crafted,
+// or copy-pasted from somewhere that embeds one) would let whatever follows
+// in the source text be read as new markup rather than more of the href.
+func escapeHref(s string) string {
+	return strings.ReplaceAll(s, `"`, "&quot;")
+}
+
 var (
 	// The language is CAPTURED, not discarded: Telegram highlights a fenced
 	// block tagged `<pre><code class="language-X">`, and the tag is the only
@@ -101,11 +113,15 @@ func markdownToHTML(md string) string {
 
 	out := escape(withoutFences)
 	out = codeRe.ReplaceAllStringFunc(out, func(m string) string {
-		return stash("<code>" + codeRe.FindStringSubmatch(m)[1] + "</code>")
+		return stash("<code>" + codeRe.FindStringSubmatch(m)[1] + codeClose)
 	})
 	out = boldRe.ReplaceAllString(out, "<b>$1</b>")
 	out = italicRe.ReplaceAllString(out, "$1<i>$2</i>")
-	out = linkRe.ReplaceAllString(out, `<a href="$2">$1</a>`)
+	out = linkRe.ReplaceAllStringFunc(out, func(m string) string {
+		g := linkRe.FindStringSubmatch(m)
+		text, href := g[1], g[2]
+		return `<a href="` + escapeHref(href) + `">` + text + "</a>"
+	})
 
 	for i, b := range blocks {
 		out = strings.ReplaceAll(out, fmt.Sprintf("\x00%d\x00", i), b)
@@ -200,13 +216,12 @@ func alignColumns(rows [][]string) string {
 
 // ---- blocks ----------------------------------------------------------------
 //
-// The manager parses agent output into blocks and this renders them. NO PARSING
-// HAPPENS HERE, and none should ever be added: the grammar is meaning, which is
-// the manager's half of the contract, and an adapter recognising tags would be
-// the second parser this shape exists to prevent.
-//
-// What arrives is already structured, so the only Telegram-shaped decisions
-// left are the ones this file exists for — which tag, how long, where to split.
+// THIS ADAPTER PARSES the block grammar itself (blocks.go) — nothing upstream
+// does. The manager composes meaning and never the grammar's shape; parsing it
+// for rendering is this adapter's own half of the contract (ADA-2, ADA-11,
+// invariants.md). What this file does with the parsed blocks is purely
+// Telegram-shaped: which tag becomes which HTML, how long a chunk may run,
+// where it splits.
 
 // expandableQuotes is whether this Bot API supports `<blockquote expandable>`,
 // added in Bot API 7.2. It LATCHES OFF the first time a send is refused for it.
@@ -460,7 +475,7 @@ func renderSignal(m Message) string {
 		for _, k := range keys {
 			parts = append(parts, escape(k)+"="+escape(m.Labels[k]))
 		}
-		b.WriteString("\n<code>" + strings.Join(parts, "  ") + "</code>")
+		b.WriteString("\n<code>" + strings.Join(parts, "  ") + codeClose)
 	}
 	if body := strings.TrimSpace(m.Body); body != "" {
 		b.WriteString("\n" + payloadBlock(body))
@@ -527,6 +542,9 @@ func splitHTML(s string) []string {
 }
 
 const quoteClose = "</blockquote>"
+
+// codeClose ends an inline code span in Telegram HTML.
+const codeClose = "</code>"
 
 // openQuote returns the opening tag still unclosed at the end of s, or "".
 //
@@ -605,6 +623,16 @@ func utf8Boundary(s string, i int) bool {
 // chunks still read fine in a thread, a dozen does not.
 const documentThreshold = 3 * telegramMessageLimit
 
+// telegramCaptionLimit is the Bot API cap on a document's caption.
+const telegramCaptionLimit = 1024
+
+// signalCaptionTitleLimit bounds the one field in a signal card long enough to
+// blow past telegramCaptionLimit on its own — an alert's own title can run to
+// a full sentence. Cut HERE, on PLAIN text, before anything is rendered: a
+// title this short leaves the composed caption almost always under the cap
+// without ever touching rendered markup.
+const signalCaptionTitleLimit = 200
+
 // asDocument decides whether a signal's payload should be attached instead of
 // posted, and returns the caption (the card WITHOUT the payload) plus the raw
 // payload to upload.
@@ -618,9 +646,23 @@ func asDocument(m Message) (caption, content string, ok bool) {
 	}
 	head := m
 	head.Body = "" // the card, minus the payload it is about to carry as a file
+	// Truncate the SOURCE field before rendering, never the rendered HTML
+	// after: cutting composed markup by rune count can land inside an entity
+	// (`&amp;` sliced to `&am`) or a tag, and Telegram refuses the whole
+	// caption for either (A11).
+	head.Title = truncateRunes(head.Title, signalCaptionTitleLimit)
 	caption = renderSignal(head)
-	if len(caption) > 1024 { // Telegram's caption limit
-		caption = truncateRunes(caption, 1024)
+	if len(caption) > telegramCaptionLimit {
+		// Still over — almost certainly a large label set, the one field left
+		// with no bound of its own. Drop it rather than cut rendered markup;
+		// the full event stays reachable through InputRef.
+		head.Labels = nil
+		caption = renderSignal(head)
+	}
+	if len(caption) > telegramCaptionLimit {
+		// A last resort that should be unreachable once the above holds: still
+		// safer than sending an over-cap caption the Bot API refuses outright.
+		caption = truncateRunes(caption, telegramCaptionLimit)
 	}
 	return caption, m.Body, true
 }
@@ -652,6 +694,39 @@ func renderChunks(mn *menu, m Message) []string {
 		}
 	}
 	return splitHTML(renderMessage(mn, m))
+}
+
+// choiceFallbackLine renders one offered choice as text — for a choice whose
+// callback_data cannot fit Telegram's keyboard, so it is never silently
+// dropped (ADA-8, A5).
+func choiceFallbackLine(c Choice) string {
+	label := c.Label
+	if label == "" {
+		label = c.Command
+	}
+	return "• " + escape(label) + ": <code>" + escape(c.Command) + codeClose
+}
+
+// appendChoiceFallback folds the choices inlineKeyboard left out onto the
+// chunk that carries the keyboard — the reader's only account of an action
+// that could not become a button, which must survive even when the control
+// cannot (A5). Appended to that chunk when it still fits the message limit,
+// sent as its own chunk when it does not.
+func appendChoiceFallback(chunks []string, overflow []Choice) []string {
+	if len(overflow) == 0 || len(chunks) == 0 {
+		return chunks
+	}
+	lines := make([]string, len(overflow))
+	for i, c := range overflow {
+		lines[i] = choiceFallbackLine(c)
+	}
+	text := strings.Join(lines, "\n")
+	last := len(chunks) - 1
+	if combined := chunks[last] + "\n\n" + text; len(combined) <= telegramMessageLimit {
+		chunks[last] = combined
+		return chunks
+	}
+	return append(chunks, text)
 }
 
 // degradeQuotes rewrites an already-rendered message for a Bot API with no

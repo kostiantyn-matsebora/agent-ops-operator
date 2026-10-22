@@ -518,7 +518,11 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		//
 		// The controls hang off the LAST chunk, where the reader ends up, and
 		// the reply linkage off the first, which is the one that answers.
-		chunks := renderChunks(a.menu, *op.Message)
+		//
+		// A choice whose callback_data cannot fit the keyboard is not simply
+		// left out of it — it is folded onto that same last chunk as text, so
+		// it is never silently dropped (A5, ADA-8).
+		chunks := appendChoiceFallback(renderChunks(a.menu, *op.Message), oversizedChoices(op.Message.Choices))
 		for i, chunk := range chunks {
 			extras := SendExtras{}
 			if i == 0 {
@@ -652,6 +656,10 @@ func (a *adapter) handleUpdate(w http.ResponseWriter, r *http.Request) {
 // deliberate — it is what lets the router stay configuration-free — so both
 // sides carry the same test table.
 func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
+	if cq := upd.CallbackQuery; cq != nil {
+		a.dispatchCallback(ctx, cq)
+		return
+	}
 	m := upd.Message
 	if m == nil || m.Chat == nil || m.Text == "" {
 		return
@@ -677,6 +685,54 @@ func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
 			log.Printf("inbound %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		}
 		return // first matching channel wins
+	}
+}
+
+// dispatchCallback turns a tapped inline button back into the command it
+// stands for, and pushes it inbound exactly as if the reader had typed it —
+// never Telegram's own callback_data encoding, which means nothing to the
+// manager (A6). choicePrefix is inlineKeyboard's own marker: data this stack
+// did not encode belongs to nothing this adapter attached, and is ignored.
+//
+// A SELECTION ON THE GENERAL SURFACE IS INERT HERE, for the same reason a
+// typed message is: origination is the signal path's, and this adapter must
+// never start a conversation from a tap any more than from a typed word.
+func (a *adapter) dispatchCallback(ctx context.Context, cq *tgCallbackQuery) {
+	if cq.Message == nil || cq.Message.Chat == nil || !cq.Message.IsTopicMessage {
+		return
+	}
+	cmd, ok := strings.CutPrefix(cq.Data, choicePrefix)
+	if !ok {
+		return
+	}
+	chatID := strconv.FormatInt(cq.Message.Chat.ID, 10)
+	for _, name := range a.channelNames() {
+		sc, ok := a.channel(name)
+		if !ok || sc.cfg.ChatID != chatID {
+			continue
+		}
+		if len(sc.cfg.Approvers) > 0 && (cq.From == nil || !containsID(sc.cfg.Approvers, cq.From.ID)) {
+			a.answerCallback(ctx, sc, cq.ID)
+			return // not an approved user — acknowledge, but ignore the tap
+		}
+		threadID := strconv.FormatInt(cq.Message.MessageThreadID, 10)
+		if err := a.mgr.Inbound(ctx, name, &threadID, "/"+cmd); err != nil {
+			log.Printf("inbound callback %s: %s", sanitizeLogText(name), sanitizeLog(err))
+		}
+		a.answerCallback(ctx, sc, cq.ID)
+		return // first matching channel wins
+	}
+}
+
+// answerCallback clears Telegram's own loading spinner on the tapped button.
+// Best-effort: the inbound push already happened, and failing the update over
+// a UI courtesy would make the manager retry work that already landed.
+func (a *adapter) answerCallback(ctx context.Context, sc servedChannel, id string) {
+	if id == "" {
+		return
+	}
+	if _, err := a.client(sc).API(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id}); err != nil {
+		log.Printf("answerCallbackQuery: %s", sanitizeLog(err))
 	}
 }
 

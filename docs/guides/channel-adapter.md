@@ -272,6 +272,7 @@ spec:
   # reports ConfigValid, the adapter stays the authority.
   configSchema:
     type: object
+    additionalProperties: false
     properties:
       chatId:
         type: string

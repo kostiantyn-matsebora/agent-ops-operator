@@ -23,10 +23,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog } = require('./tools');
-const { translate, decide } = require('./vocabulary');
+const { translate, decide, inventoryGaps } = require('./vocabulary');
 const { loadMcpServers } = require('./mcp');
 const { confirmContextMissing } = require('./continuity');
-const { newCallRecorder } = require('./report');
+const { newCallRecorder, extractBrief } = require('./report');
 
 const CONTROL_URL = process.env.CONTROL_URL || '';
 const CONVO_ID = process.env.CONVO_ID || '';
@@ -125,8 +125,10 @@ async function syncRepo() {
     const r = await run('git', ['clone', '--depth', '1', '-b', REPO_REF, repoURL(), '.'], { cwd: WORKSPACE, env: gitEnv() });
     if (r.code !== 0) throw new Error(`git clone: ${r.err.slice(-400)}`);
   } else {
-    await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
-    await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
+    const fetch = await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
+    if (fetch.code !== 0) throw new Error(`git fetch: ${fetch.err.slice(-400)}`);
+    const reset = await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
+    if (reset.code !== 0) throw new Error(`git reset: ${reset.err.slice(-400)}`);
   }
 }
 
@@ -158,12 +160,11 @@ async function getClient() {
 }
 
 // checkInventory logs every mapped built-in the runtime did not register. A
-// wire name is a vendor fact that moves; a wrong one must surface on the first
-// run, not as a tool that silently never appears.
-let inventoryChecked = false;
+// wire name is a vendor fact that moves; a wrong one must surface on every
+// run, not just the first — a server bound after the pod started, or a
+// toolset re-wired mid-conversation, changes what this process should warn
+// about between one work unit and the next.
 async function checkInventory(available) {
-  if (inventoryChecked) return;
-  inventoryChecked = true;
   try {
     const c = await getClient();
     // WITH A MODEL, always: the model-less catalog names `str_replace_editor`
@@ -304,15 +305,22 @@ async function attempt(c, unit, cfg, prompt, denials = []) {
     // `openError` to tell "not found" from everything else.
     const msg = String(e.message || e);
     console.log(`[runtime] could not open the Copilot session: ${msg}`);
-    return { status: 'failed', exitCode: 1, sessionId: contextIdOf(unit) || null, result: `could not open the Copilot session: ${msg}`, openError: msg };
+    // No `exitCode`: the session never opened, so no run ever executed —
+    // there is no process outcome to report.
+    return { status: 'failed', sessionId: contextIdOf(unit) || null, result: `could not open the Copilot session: ${msg}`, openError: msg };
   }
   const { session, id } = opened;
   const off = session.on((ev) => onEvent(ev, state));
   const started = Date.now();
-  let status = 'succeeded', result = '';
+  let status = 'succeeded', result = '', brief = '';
   try {
     const ev = await session.sendAndWait({ prompt }, RUN_TIMEOUT_MS);
-    result = (ev && ev.data && typeof ev.data.content === 'string' ? ev.data.content : state.lastText) || '';
+    const raw = (typeof ev?.data?.content === 'string' ? ev.data.content : state.lastText) || '';
+    // Extracted BEFORE the 2000-char cap below: a brief written late in a
+    // long answer must not be sliced away with the rest.
+    const extracted = extractBrief(raw);
+    result = extracted.text;
+    brief = extracted.brief;
     if (state.errors.length && !result) { status = 'failed'; result = state.errors.join('\n'); }
     // NEVER an empty success. A turn that ends without text — a rejected tool
     // call ends it, verified — is reported as a failure that says why.
@@ -330,14 +338,13 @@ async function attempt(c, unit, cfg, prompt, denials = []) {
     try { await session.disconnect(); } catch {}
   }
   process.stdout.write(`\n=== RESULT (${status}, ${state.turns} turns, ${state.toolCalls} tool calls, ${Math.round((Date.now() - started) / 1000)}s) ===\n${result}\n`);
-  return { status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000), ...state.calls.report() };
+  return { status, exitCode: status === 'succeeded' ? 0 : 1, sessionId: id, result: result.slice(0, 2000), ...(brief ? { brief } : {}), ...state.calls.report() };
 }
-
-const NOT_FOUND = /session not found/i;
 
 async function runCopilot(unit) {
   const p = resolvePrompt(unit);
-  if (p.error) return { status: 'failed', exitCode: -1, result: p.error };
+  // No `exitCode`: the prompt could not even be assembled, so nothing ran.
+  if (p.error) return { status: 'failed', result: p.error };
 
   const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
   const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
@@ -361,25 +368,41 @@ async function runCopilot(unit) {
   try {
     c = await getClient();
   } catch (e) {
-    return { status: 'failed', exitCode: 1, result: `copilot sdk: ${e.message}` };
+    // No `exitCode`: the client never came up, so no run ever started.
+    return { status: 'failed', result: `copilot sdk: ${e.message}` };
   }
   await checkInventory(grant.available);
+  for (const gap of inventoryGaps(grant.mcpServerNames, new Set(Object.keys(mcp.servers)))) {
+    console.log(`[runtime] WARNING: ${gap}`);
+  }
   const denials = [];
   const cfg = sessionConfig(unit, grant, mcp, denials);
 
   const first = await attempt(c, unit, cfg, p.prompt, denials);
   if (!id) return finish(first, 'new');
+  return resolveContinuity(id, first, () => attempt(c, unit, cfg, p.prompt, denials));
+}
+
+// resolveContinuity decides what a RESUME's outcome reports, given the first
+// attempt's result and a way to retry. Pulled out of runCopilot so the
+// decision is testable without the Copilot SDK: any open failure re-checks
+// the store (never trusting what the SDK's error text happens to say), an
+// unreadable store counts as PRESENT (confirmContextMissing's own rule, so it
+// takes the retry branch, never the lost one), and a failed retry is reported
+// for what it is — never a continuity claim ('continued') it did not earn.
+//
+// `confirmOpts` threads straight through to confirmContextMissing, exactly as
+// that module's own tests use it, so a test here needs no real delay either.
+async function resolveContinuity(id, first, retry, confirmOpts) {
   if (!first.openError) return finish(first, 'continued');
 
-  // The resume did not open. A store that says NOT FOUND and one that merely
-  // did not answer must not be treated alike.
-  if (!NOT_FOUND.test(first.openError)) {
-    return finish({ ...first, result: `resume: ${first.openError}` }, 'continued');
-  }
-  if (!(await confirmContextMissing(SESSIONS_DIR, id))) {
-    console.log('[runtime] context reappeared on re-check — the store was slow, not empty');
-    const retried = await attempt(c, unit, cfg, p.prompt, denials);
-    if (retried.openError) return finish({ ...retried, result: `resume: ${retried.openError}` }, 'continued');
+  if (!(await confirmContextMissing(SESSIONS_DIR, id, confirmOpts))) {
+    console.log('[runtime] context present, or the store did not answer, on re-check — retrying');
+    const retried = await retry();
+    if (retried.openError) {
+      const { openError, ...rest } = retried;
+      return { ...rest, result: `resume: ${openError}` };
+    }
     return finish(retried, 'continued');
   }
 
@@ -392,7 +415,7 @@ async function runCopilot(unit) {
   console.log(`[runtime] ${reason} — failing rather than answering without it`);
   return {
     status: 'failed',
-    exitCode: 1,
+    // No `exitCode`: the resume never opened a session, so no run executed.
     sessionId: id,
     continuity: 'unavailable',
     continuityReason: reason,
@@ -416,7 +439,7 @@ function finish(out, continuity) {
 // — that only happens when this file is the process entry point.
 module.exports = {
   gitEnv, repoURL, run, clearDir, syncRepo, onEvent, resolvePrompt, contextIdOf,
-  sessionConfig, finish,
+  sessionConfig, finish, resolveContinuity, attempt,
   SESSIONS_DIR, WORKSPACE, COPILOT_HOME,
 };
 
@@ -443,8 +466,17 @@ async function pollNextUnit() {
   try { return await res.json(); } catch { return undefined; }
 }
 
+// 408 (timeout) and 429 (rate limit) are themselves transient, not a verdict
+// on the report's content, so they keep the bounded retry below rather than
+// being treated as the definitive rejection every OTHER 4xx is.
+const TRANSIENT_4XX = new Set([408, 429]);
+
 // Retries for up to ten minutes (60 * 10s) rather than failing the run: the
 // manager's own outage must not discard a result Copilot already produced.
+// A DEFINITIVE 4xx is different — resending the same bytes cannot change the
+// manager's verdict, so retrying would only block the poll loop. Every
+// undelivered report leaves a log line carrying the status and body (or the
+// transport error), so nothing is dropped silently.
 async function reportDone(unit, out) {
   // The handle under BOTH names for one release: the current one, and the
   // retired spelling so this image also works against an older manager.
@@ -455,15 +487,29 @@ async function reportDone(unit, out) {
     ...rest,
     ...(sessionId ? { runtimeContextId: sessionId, sessionId } : {}),
   };
+  const body = JSON.stringify(done);
+  let lastFailure = 'no attempt reached a response';
   for (let i = 0; i < 60; i++) {
+    let r;
     try {
-      const r = await fetch(`${CONTROL_URL}/work/done`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(done),
-      });
-      if (r.ok) return;
-    } catch {}
+      r = await fetch(`${CONTROL_URL}/work/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    } catch (e) {
+      lastFailure = `transport error: ${e.message}`;
+      await sleep(10000);
+      continue;
+    }
+    if (r.ok) return;
+    if (r.status >= 400 && r.status < 500 && !TRANSIENT_4XX.has(r.status)) {
+      // The body is the control plane's text, not ours: strip control
+      // characters so it cannot forge a log line.
+      const text = (await r.text().catch(() => '')).replace(/[\x00-\x1f\x7f]+/g, ' ');
+      console.error(`[runtime] work/done refused permanently (${r.status}): ${text} — not retrying, resuming polling`);
+      return;
+    }
+    lastFailure = `status ${r.status}`;
     await sleep(10000);
   }
+  console.error(`[runtime] work/done still undelivered after the retry budget — ${lastFailure}, resuming polling`);
 }
 
 // Exported alongside the module.exports object above rather than folded
@@ -472,6 +518,18 @@ async function reportDone(unit, out) {
 // visually beside the loop code they test.
 module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
+
+// A checkout the run cannot trust must fail the run, with a reason, never
+// proceed with whatever the workspace happened to hold from before.
+async function runUnit(unit) {
+  try {
+    await syncRepo();
+  } catch (e) {
+    console.error(`[runtime] sync: ${e.message}`);
+    return { status: 'failed', result: `repository checkout: ${e.message}` };
+  }
+  return runCopilot(unit);
+}
 
 async function runLoop() {
   console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_DIR}`);
@@ -489,10 +547,11 @@ async function runLoop() {
     const unit = await pollNextUnit();
     if (!unit) continue;
     lastWork = Date.now();
-    try { await syncRepo(); } catch (e) { console.error(`[runtime] sync: ${e.message}`); }
-    const out = await runCopilot(unit);
+    // Strictly serial per conversation: one inflight unit, so the await in
+    // the loop is the invariant, not an oversight.
+    const out = await runUnit(unit); // NOSONAR
     lastWork = Date.now();
-    await reportDone(unit, out);
+    await reportDone(unit, out); // NOSONAR
   }
   process.exit(0);
 }

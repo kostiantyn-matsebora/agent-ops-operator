@@ -154,12 +154,53 @@ func TestNoModelFailsTheRunReadably(t *testing.T) {
 
 func TestEmptyPromptAndInferenceFailure(t *testing.T) {
 	a, _ := newAgent(t, &scripted{})
-	if res := a.Run(context.Background(), WorkUnit{}); res.Status != "failed" || res.Result != "empty prompt" {
+	res := a.Run(context.Background(), WorkUnit{})
+	if res.Status != "failed" || res.Result != "empty prompt" {
 		t.Errorf("%+v", res)
 	}
+	if res.ExitCode != nil {
+		t.Errorf("no model turn ran -- exitCode must be omitted, got %v", *res.ExitCode)
+	}
 	a.Chat = &scripted{err: io.ErrUnexpectedEOF}
-	if res := a.Run(context.Background(), WorkUnit{PromptText: "q"}); res.Status != "failed" || !strings.Contains(res.Result, "inference failed") || res.RuntimeContextID == "" {
+	res = a.Run(context.Background(), WorkUnit{PromptText: "q"})
+	if res.Status != "failed" || !strings.Contains(res.Result, "inference failed") || res.RuntimeContextID == "" {
 		t.Errorf("the handle is surrendered even on failure: %+v", res)
+	}
+	if res.ExitCode == nil || *res.ExitCode != 1 {
+		t.Errorf("a model turn was attempted -- exitCode must be present, got %v", res.ExitCode)
+	}
+}
+
+// A context store that ERRORS reading (not a confirmed-absent handle) is an
+// OUTAGE: the report must say `unavailable`, never `continued` with the same
+// handle -- `continued` would tell the manager a recovery happened when the
+// store never answered at all (O1).
+func TestContextStoreErrorReportsUnavailableNeverContinued(t *testing.T) {
+	a, _ := newAgent(t, &scripted{replies: []Message{text("x")}})
+	// A regular file sitting where the store's directory should be fails
+	// every read with ENOTDIR -- the store not answering, not a miss.
+	if err := os.WriteFile(a.Store.Dir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := a.Run(context.Background(), WorkUnit{PromptText: "q", RuntimeContextID: "oc-0a1b2c3d4e5f"})
+	if res.Status != "failed" || res.Continuity != ContinuityUnavailable || !strings.Contains(res.Result, "unavailable") {
+		t.Errorf("%+v", res)
+	}
+	if res.Continuity == ContinuityContinued {
+		t.Error("a store outage must never be reported as a recovered continuation")
+	}
+}
+
+// The prompt-file join must refuse a traversal out of the workspace rather
+// than silently reading whatever the joined path lands on (O7).
+func TestPromptFileTraversalFailsTheRun(t *testing.T) {
+	a, _ := newAgent(t, &scripted{})
+	res := a.Run(context.Background(), WorkUnit{PromptFile: "../../../../etc/passwd"})
+	if res.Status != "failed" || !strings.Contains(res.Result, "escapes") {
+		t.Errorf("%+v", res)
+	}
+	if res.ExitCode != nil {
+		t.Errorf("no model turn ran -- exitCode must be omitted, got %v", *res.ExitCode)
 	}
 }
 

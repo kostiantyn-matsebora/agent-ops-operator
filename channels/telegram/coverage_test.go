@@ -108,6 +108,44 @@ func TestExecuteSendsAnOrdinaryMessage(t *testing.T) {
 	}
 }
 
+// A5: an oversized choice's callback_data cannot become a keyboard button, and
+// execute()'s "send" case must fold it back into the SENT TEXT rather than
+// drop it — the end-to-end path a unit test on appendChoiceFallback alone
+// cannot pin.
+func TestExecuteFoldsAnOversizedChoiceIntoTheSentText(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	defer srv.Close()
+
+	a := &adapter{
+		channels: map[string]servedChannel{"tg": {cfg: channelConfig{ChatID: "-100"}, gatewayURL: srv.URL, gatewayToken: "gw-token"}},
+		reported: map[string]string{},
+		clients:  map[string]*Telegram{},
+	}
+	long := strings.Repeat("a", telegramMaxCallbackData)
+	msg := Message{Kind: MsgAnswer, Body: "pick one", Choices: []Choice{
+		{Label: "fits", Command: "/approve"},
+		{Label: long, Command: "/" + long},
+	}}
+	_, opErr := a.execute(context.Background(), &Op{Channel: "tg", Kind: "send", Message: &msg})
+	if opErr != "" {
+		t.Fatalf("opErr = %q, want empty", opErr)
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("want exactly one sendMessage, got %d", len(bodies))
+	}
+	if !strings.Contains(bodies[0], long) {
+		t.Fatalf("the oversized choice must still reach the reader, as text: %s", bodies[0])
+	}
+	if !strings.Contains(bodies[0], `"callback_data":"p:approve"`) {
+		t.Fatalf("the fitting choice must still be a control: %s", bodies[0])
+	}
+}
+
 // A send with no message is meaningless and must be reported, not sent as an
 // empty string.
 func TestExecuteSendWithoutAMessageIsReported(t *testing.T) {
@@ -369,6 +407,38 @@ func TestAsDocumentOnlyAppliesToOversizedSignals(t *testing.T) {
 	}
 	if strings.Contains(caption, strings.Repeat("x", documentThreshold+1)) {
 		t.Fatal("the caption must NOT carry the payload — that is what makes it a caption and not a duplicate")
+	}
+}
+
+// A11: a caption over Telegram's cap is cut on PLAIN text before rendering,
+// never on the rendered HTML after — a rune cut on rendered markup can land
+// inside an entity (`&amp;` sliced to `&am`) and Telegram refuses the whole
+// caption for it.
+func TestAsDocumentCaptionTruncationNeverSplitsAnEntity(t *testing.T) {
+	// A title built entirely of "&" forces escape() to expand every character
+	// to "&amp;" (5 bytes each) — a naive post-render byte/rune cut at 1024
+	// lands inside one of those almost certainly.
+	hugeTitle := strings.Repeat("&", 2000)
+	caption, _, ok := asDocument(Message{
+		Kind: MsgSignal, Title: hugeTitle, Body: strings.Repeat("x", documentThreshold+1),
+	})
+	if !ok {
+		t.Fatal("an oversized signal must qualify")
+	}
+	if len(caption) > telegramCaptionLimit {
+		t.Fatalf("caption is %d bytes, over Telegram's %d cap", len(caption), telegramCaptionLimit)
+	}
+	// EVERY "&" in the rendered caption must be the start of a COMPLETE named
+	// entity — never a lone "&" or a truncated "&amp" with no trailing ";",
+	// which is exactly what a rune cut through the middle of one produces.
+	for i, r := range caption {
+		if r != '&' {
+			continue
+		}
+		rest := caption[i:]
+		if !strings.HasPrefix(rest, "&amp;") && !strings.HasPrefix(rest, "&lt;") && !strings.HasPrefix(rest, "&gt;") {
+			t.Fatalf("an incomplete entity at byte %d: %q", i, rest[:min(10, len(rest))])
+		}
 	}
 }
 

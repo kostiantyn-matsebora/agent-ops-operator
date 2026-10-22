@@ -17,6 +17,25 @@ const MAX_TURNS = 200;
 const MAX_TOOL_CALLS = 200;
 const MAX_FIELD = 200;
 
+// MAX_BRIEF mirrors ConversationStatus.Brief's MaxLength — bounding here means
+// a value this runtime reports never gets silently truncated by the manager
+// mid-sentence.
+const MAX_BRIEF = 512;
+
+// extractBrief pulls a standalone `<brief>...</brief>` block (format.md) out of
+// the agent's final text, mirroring the block grammar's own recognition rule —
+// the tag alone on its own line — closely enough for this one tag, without
+// pulling in the full parser channels/telegram and the console each carry for
+// the tags a reader actually sees. `brief` is a CONTRACT FIELD, never a
+// displayed section, so it is removed from what becomes `result` (same rule,
+// same shape, as runtimes/claude and runtimes/ollama).
+function extractBrief(text) {
+  const m = /^<brief>[ \t]*\r?\n([\s\S]*?)\r?\n^<\/brief>[ \t]*(?:\r?\n)*/m.exec(text);
+  if (!m) return { text, brief: '' };
+  const brief = m[1].trim().replace(/\s+/g, ' ').slice(0, MAX_BRIEF);
+  return { text: (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim(), brief };
+}
+
 /** Copilot's built-in names, back in the agent-ops vocabulary. */
 const FROM_BUILTIN = Object.freeze(Object.fromEntries(Object.entries(BUILTIN).map(([ours, theirs]) => [theirs, ours])));
 
@@ -99,4 +118,4 @@ function newCallRecorder(now = Date.now) {
   };
 }
 
-module.exports = { newCallRecorder, toolIdentity, MAX_TURNS, MAX_TOOL_CALLS, MAX_FIELD };
+module.exports = { newCallRecorder, toolIdentity, extractBrief, MAX_TURNS, MAX_TOOL_CALLS, MAX_FIELD, MAX_BRIEF };

@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 1.2.0**
+**Version 1.3.0**
 
 This specification gives everything necessary to build and maintain a
 `ChannelAdapter` — a component agent-ops does not ship, that carries a
@@ -96,6 +96,22 @@ that delivers an op, the `204` and the `503` alike. See
 | `OPS-3` | An adapter not implementing a kind MAY complete it with an `error`, or ignore it. |
 | `OPS-9` | Every operation additionally carries `conversationId`, beside the channel and conversation names it already carries. The field is ADDITIVE — an adapter that ignores it MUST remain fully conformant, declaring the same `contract` version. |
 
+### Delivery operation ids are published shapes
+
+The manager mints stable ids for the two `send` operations that deliver
+conversation content:
+
+| Delivery | Id shape |
+|---|---|
+| an agent's reply, per run | `send:<conversation>:<channel>:<runId>` |
+| a person's input, fanned out | `input:<conversation>:<input>:<channel>` |
+
+| ID | Requirement |
+|---|---|
+| `OPS-10` | Each published shape MUST stay stable across redelivery and manager restarts — it is what makes at-least-once delivery deduplicable. |
+| `OPS-11` | A consumer MAY parse a published shape. The conversation and channel segments are Kubernetes names, which cannot contain the separator, so the one remaining segment is recovered by position, whatever it contains. |
+| `ADA-15` | An adapter MUST treat an id matching no published shape as opaque — completing the operation by that id verbatim and inferring nothing from its content. An unpublished id can change without breaking anyone. |
+
 ### The claim window
 
 It embeds every field of [the operation envelope](#the-operation-envelope),
@@ -107,7 +123,7 @@ plus:
 
 | ID | Requirement |
 |---|---|
-| `OPS-4` | An adapter absorbing transport backpressure in-process MUST budget its total wait strictly below `reclaimAfterSeconds`, or a second claimant may post the same op again. |
+| `OPS-4` | An adapter absorbing transport backpressure in-process MUST budget the total wait, retry and timeout of every call ONE operation makes strictly below `reclaimAfterSeconds`, or a second claimant may post the same op again. An adapter exceeding the interval converts the manager's at-least-once redelivery into a duplicate the transport cannot deduplicate, because the message has already been posted. |
 | `OPS-5` | `reclaimAfterSeconds` is ADDITIVE and optional to act on. An adapter that ignores it is fully conformant, falling back to its own conservative default. |
 
 **The claim itself is recorded on the Conversation**, as
@@ -145,12 +161,16 @@ Completes a claimed op.
 ### Backpressure is the adapter's to absorb
 
 A transport that says "slow down" — HTTP 429, a `retry_after`, a
-token-bucket rejection — is not an operation failure.
+token-bucket rejection — is RETRYABLE backpressure, not an operation
+failure. A TERMINAL failure — a missing thread, a rejected credential, a
+reason retrying cannot fix — is reported at once, never ridden out.
 
 | ID | Requirement |
 |---|---|
 | `ADA-3` | An adapter MUST absorb a retryable backpressure signal inside its claim window, waiting the interval the transport stated rather than a backoff it computed instead. |
 | `ADA-3.1` | An adapter MUST report an op failed only when the condition is terminal, or when riding it out would overrun the claim. |
+| `ADA-3.2` | The retry budget is PER OPERATION, never per transport call. An operation making several calls — a reopen plus a create, one send per chunk, a fallback — MUST charge every call's wait, retry and own timeout against the one budget. |
+| `ADA-3.3` | Reporting a retryable condition as an operation failure is permitted but degrades the system to the manager's recovery path for a condition the adapter could have ridden out. An adapter MUST NOT treat it as the normal path. |
 | `ADA-4` | An adapter MUST pace its own sending so bursts are spread rather than rejected, and MUST gate pacing before it CLAIMS an op, never before it sends. |
 
 ## POST /channel/inbound
@@ -424,10 +444,11 @@ All `/channel/*` calls carry `Authorization: Bearer <token>`.
 |---|---|
 | `ADA-1` | **Consume the `/channel/*` endpoints it needs** — poll, complete, inbound replies, channel listing, cursor state, channel status. |
 | `ADA-2` | **Parse the body grammar** — the markdown subset plus the block grammar, under the shared `structured-agent-output` recognition rules. |
-| `ADA-3`/`ADA-3.1`/`ADA-4` | **Absorb retryable backpressure inside the claim window**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
+| `ADA-3`/`ADA-3.1`/`ADA-3.2`/`ADA-3.3`/`ADA-4` | **Absorb retryable backpressure inside the claim window, PER OPERATION never per call**, and **own its outbound pacing** — see [Backpressure](#backpressure-is-the-adapters-to-absorb). |
 | `ADA-5` | **Never re-ingest its own outbound post as inbound.** |
 | `ADA-6` | **Declare `echoesOwnMessages` truthfully**, and decide for itself what its transport can express from the UNFILTERED vocabulary. |
 | `ADA-14` | **Never create, derive, or alter a `conversationId`** — translate it to and from the transport's own thread id, and nothing more. |
+| `ADA-15` | **Treat an id matching no published shape as opaque** — see [Delivery operation ids](#delivery-operation-ids-are-published-shapes). |
 
 ### Optional capabilities
 
@@ -490,6 +511,8 @@ its own integer series, unrelated to this document's semver:
 
 | Document version | Wire `contract` value |
 |---|---|
+| 1.3.0 | `2` |
+| 1.2.0 | `2` |
 | 1.1.0 | `2` |
 | 1.0.0 | `2` |
 
@@ -517,6 +540,7 @@ Both stay fully conformant with this version unchanged.
 
 | Version | Date | Changed |
 |---|---|---|
+| 1.3.0 | 2026-10-21 | The retry budget is explicitly PER OPERATION, never per transport call — every call an operation makes charges one total (`ADA-3.2`, `ADA-3.3`, `OPS-4`). Published the two delivery operation id shapes, `send:<conversation>:<channel>:<runId>` and `input:<conversation>:<input>:<channel>` (`OPS-10`, `OPS-11`, `ADA-15`) — any other id stays opaque. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the published shapes stays fully conformant. |
 | 1.2.0 | 2026-10-21 | The typed message's `signal` kind may carry an optional `severity` — one of `critical`, `error`, `warning`, `info`, mirroring the signal adapter contract's own field. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.1.0 | 2026-10-18 | Every `/channel/ops` operation additionally carries the conversation's `conversationId` (`OPS-9`, `MGR-12`), opaque to the adapter. A channel adapter MUST NOT mint one (`ADA-14`, `IN-4`) — it only translates it to and from the transport's thread id. ADDITIVE: the wire `contract` value is unchanged, and an adapter ignoring the field stays fully conformant. |
 | 1.0.0 | 2026-10-17 | Initial release. |

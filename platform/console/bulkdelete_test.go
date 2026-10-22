@@ -195,7 +195,7 @@ func TestVerbsRequireTheWriteGate(t *testing.T) {
 func TestReopenMakesTheConsoleThreadLiveAgain(t *testing.T) {
 	f := newFakeManager(t)
 	adapter, transcripts, _ := consoleUnderTest(t, f, closedConversation("conv-1"))
-	tid := adapter.threadID("conv-1")
+	tid := mustThreadID(t, adapter, "conv-1")
 
 	// close: the thread is archived and says so
 	adapter.execute(context.Background(), &Op{Kind: "close-topic", Conversation: "conv-1", ThreadID: &tid})
@@ -218,7 +218,7 @@ func TestReopenMakesTheConsoleThreadLiveAgain(t *testing.T) {
 func TestEnsureTopicOnALiveThreadSaysNothing(t *testing.T) {
 	f := newFakeManager(t)
 	adapter, transcripts, _ := consoleUnderTest(t, f, joinedConversation("conv-2"))
-	tid := adapter.threadID("conv-2")
+	tid := mustThreadID(t, adapter, "conv-2")
 
 	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2"})
 	adapter.execute(context.Background(), &Op{Kind: "ensure-topic", Conversation: "conv-2"})
@@ -274,7 +274,7 @@ func TestALiveConversationStaysTypeable(t *testing.T) {
 func TestDeleteConversationLeavesAReadableArchivedTranscript(t *testing.T) {
 	f := newFakeManager(t)
 	adapter, transcripts, _ := consoleUnderTest(t, f, closedConversation("conv-1"))
-	tid := adapter.threadID("conv-1")
+	tid := mustThreadID(t, adapter, "conv-1")
 
 	msg := OpMessage{Kind: "notice", Body: "This conversation has been deleted."}
 	if _, opErr := adapter.execute(context.Background(), &Op{

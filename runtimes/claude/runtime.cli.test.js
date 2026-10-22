@@ -64,6 +64,23 @@ case "$FAKE_MODE" in
     echo '{"type":"result","subtype":"success","num_turns":1,"duration_ms":1,"result":"answered anyway","session_id":"sess-3"}'
     exit 0
     ;;
+  reappear_then_ok)
+    # First invocation "loses" the session; the SECOND (the one retry, after
+    # the context reappears on re-check) actually recovers it — exercising
+    # C2/C3's claim that the retry is judged by what it actually did.
+    if [ -f "$FAKE_COUNTER_FILE" ]; then
+      echo '{"type":"result","subtype":"success","num_turns":1,"duration_ms":1,"result":"recovered on retry","session_id":"sess-reappear-ok"}'
+      exit 0
+    fi
+    touch "$FAKE_COUNTER_FILE"
+    echo 'no conversation found with session ID xyz' 1>&2
+    exit 1
+    ;;
+  with_init)
+    echo '{"type":"system","subtype":"init","model":"m","tools":["Read","Bash"],"mcp_servers":[{"name":"kubernetes","status":"connected"},{"name":"ghost","status":"failed"}]}'
+    echo '{"type":"result","subtype":"success","num_turns":1,"duration_ms":1,"result":"ok","session_id":"sess-init"}'
+    exit 0
+    ;;
 esac
 `;
 
@@ -107,16 +124,34 @@ test('a resumed run that fails but still names a session is not treated as lost'
   assert.strictEqual(out.continuity, 'continued');
 });
 
-test('a resumed run whose context reappears mid-check retries once and reports continued', async () => {
-  const projDir = path.join(process.env.HOME, '.claude', 'projects', 'proj1');
+test('a resumed run whose context reappears mid-check, and whose retry actually resumes, reports continued', async () => {
+  const projDir = path.join(process.env.HOME, '.claude', 'projects', 'proj2');
   fs.mkdirSync(projDir, { recursive: true });
-  fs.writeFileSync(path.join(projDir, 'sess-reappear.jsonl'), '{}');
+  fs.writeFileSync(path.join(projDir, 'sess-reappear-ok.jsonl'), '{}');
 
-  process.env.FAKE_MODE = 'lost';
+  process.env.FAKE_MODE = 'reappear_then_ok';
+  process.env.FAKE_COUNTER_FILE = path.join(tmp('agentops-counter-'), 'attempts');
   const start = Date.now();
-  const out = await runClaude({ promptText: 'hi', runId: 'r-reappear', runtimeContextId: 'sess-reappear' });
+  const out = await runClaude({ promptText: 'hi', runId: 'r-reappear-ok', runtimeContextId: 'sess-reappear-ok' });
+  assert.strictEqual(out.status, 'succeeded');
+  assert.match(out.result, /recovered on retry/);
   assert.strictEqual(out.continuity, 'continued');
   assert.ok(Date.now() - start < 3000, 'found on the first check — the full ladder must not run');
+});
+
+// C2, C3: the retry itself can also fail to resume — the store answered
+// "present" (a file matching the handle is there), but the vendor's own
+// retried invocation still could not use it. That must NEVER be reported as
+// `continued`: nothing was actually recovered.
+test('a resumed run whose retry still cannot resume reports no continuity claim, not continued', async () => {
+  const projDir = path.join(process.env.HOME, '.claude', 'projects', 'proj3');
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(path.join(projDir, 'sess-reappear-fail.jsonl'), '{}');
+
+  process.env.FAKE_MODE = 'lost'; // both the first attempt AND the retry report "no conversation found"
+  const out = await runClaude({ promptText: 'hi', runId: 'r-reappear-fail', runtimeContextId: 'sess-reappear-fail' });
+  assert.strictEqual(out.status, 'failed');
+  assert.strictEqual('continuity' in out, false, 'absent means no claim, never a false continued');
 });
 
 test('a resumed run whose context is genuinely gone fails without answering', async () => {
@@ -164,7 +199,9 @@ test('a promptFile is read from the workspace and its {{vars}} substituted', asy
 
 test('an empty prompt (no promptText, no promptFile) fails without spawning anything', async () => {
   const out = await runClaude({ runId: 'r-empty' });
-  assert.deepStrictEqual(out, { status: 'failed', exitCode: -1, result: 'empty prompt' });
+  // C6: nothing was ever spawned, so exitCode is OMITTED entirely — not
+  // present as -1, null or 0.
+  assert.deepStrictEqual(out, { status: 'failed', result: 'empty prompt' });
 });
 
 test('a promptFile that escapes the workspace fails to read rather than following it out', async () => {
@@ -172,6 +209,7 @@ test('a promptFile that escapes the workspace fails to read rather than followin
   assert.strictEqual(out.status, 'failed');
   assert.match(out.result, /^prompt read: /);
   assert.match(out.result, /escapes the workspace/);
+  assert.strictEqual('exitCode' in out, false, 'a prompt-read failure never spawned a process');
 });
 
 test('an agent declaration and full wiring (system prompt, thread, max-turns) all reach a successful run', async () => {
@@ -200,4 +238,43 @@ test('a run whose stream shows no calls reports none', async () => {
   process.env.FAKE_MODE = 'badjson';
   const out = await runClaude({ promptText: 'hi', runId: 'r-silent' });
   assert.ok(!('turns' in out) && !('toolCalls' in out), 'a silent run adds nothing to the report');
+});
+
+// ---- C4: granted-but-nonexistent tools are logged ------------------------------
+
+function withConsoleLog(t) {
+  const lines = [];
+  const real = console.log;
+  console.log = (...args) => { lines.push(args.join(' ')); };
+  t.after(() => { console.log = real; });
+  return lines;
+}
+
+test('a grant naming no vendor tool and no connected MCP server is logged, not silently accepted', async (t) => {
+  fs.mkdirSync(path.join(process.env.WORKSPACE, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(process.env.WORKSPACE, '.claude', 'agents', 'over-granted.md'), '---\ntools: Read, Bash, Edit, mcp__kubernetes__pods_list, mcp__ghost__anything\n---\n');
+  process.env.FAKE_MODE = 'with_init'; // vendor reports tools=[Read,Bash], mcp_servers=[kubernetes:connected, ghost:failed]
+  const logged = withConsoleLog(t);
+  const out = await runClaude({ promptText: 'hi', runId: 'r-ungranted', agent: 'over-granted' });
+  assert.strictEqual(out.status, 'succeeded');
+  assert.ok(logged.some((l) => l.includes('"Edit"') && l.includes('no vendor tool')), `expected Edit flagged, got: ${logged.join(' | ')}`);
+  assert.ok(logged.some((l) => l.includes('mcp__ghost__anything') && l.includes('no connected MCP server')), `expected the ghost MCP grant flagged, got: ${logged.join(' | ')}`);
+  assert.ok(!logged.some((l) => l.includes('"Read"') && l.includes('no vendor tool')), 'Read is a real vendor tool and must not be flagged');
+  assert.ok(!logged.some((l) => l.includes('mcp__kubernetes__pods_list') && l.includes('no connected')), 'kubernetes is connected and must not be flagged');
+});
+
+// ---- C1 end to end: an unreadable store never reports continued or lost -------
+
+test('a resumed run whose session store cannot be read reports unavailable, not continued or lost', async (t) => {
+  const { SESSIONS_DIR } = require('./runtime');
+  const real = fs.promises.readdir;
+  fs.promises.readdir = (dir, opts) => (dir === SESSIONS_DIR ? Promise.reject(Object.assign(new Error('stale handle'), { code: 'ESTALE' })) : real(dir, opts));
+  t.after(() => { fs.promises.readdir = real; });
+
+  process.env.FAKE_MODE = 'lost';
+  const out = await runClaude({ promptText: 'hi', runId: 'r-store-outage', runtimeContextId: 'sess-whatever-store-down' });
+  assert.strictEqual(out.status, 'failed');
+  assert.strictEqual(out.continuity, 'unavailable');
+  assert.match(out.continuityReason, /store itself errored/);
+  assert.doesNotMatch(out.continuityReason, /no session files under/, 'an outage must not be worded as a confirmed loss');
 });

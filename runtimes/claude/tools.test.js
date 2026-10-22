@@ -10,7 +10,7 @@ const path = require('path');
 const {
   MODE_MERGE, MODE_OVERWRITE,
   parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
-  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs,
+  safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools,
 } = require('./tools');
 
 // mkRepo builds a throwaway checkout containing the given agent definitions.
@@ -293,4 +293,53 @@ test('buildClaudeArgs always carries permission-mode, output-format and strict-m
   assert.strictEqual(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
   assert.strictEqual(args[args.indexOf('--output-format') + 1], 'stream-json');
   assert.ok(args.includes('--strict-mcp-config'));
+});
+
+// ---- logUngrantedTools (C4) ----------------------------------------------------
+
+test('logUngrantedTools logs a bare tool name the vendor does not report', () => {
+  const logged = [];
+  logUngrantedTools(['Read', 'Edit'], ['Read'], [], (m) => logged.push(m));
+  assert.strictEqual(logged.length, 1);
+  assert.match(logged[0], /"Edit"/);
+  assert.match(logged[0], /no vendor tool/);
+});
+
+test('logUngrantedTools does not log a bare tool name the vendor does report', () => {
+  const logged = [];
+  logUngrantedTools(['Read'], ['Read', 'Bash'], [], (m) => logged.push(m));
+  assert.deepStrictEqual(logged, []);
+});
+
+test('logUngrantedTools strips a scoping suffix before checking the base tool', () => {
+  const logged = [];
+  logUngrantedTools(['Bash(git *)'], ['Bash'], [], (m) => logged.push(m));
+  assert.deepStrictEqual(logged, []);
+});
+
+test('logUngrantedTools logs an MCP grant naming a server that never connected', () => {
+  const logged = [];
+  logUngrantedTools(['mcp__kubernetes__pods_list'], [], [{ name: 'kubernetes', status: 'failed' }], (m) => logged.push(m));
+  assert.strictEqual(logged.length, 1);
+  assert.match(logged[0], /mcp__kubernetes__pods_list/);
+  assert.match(logged[0], /no connected MCP server/);
+});
+
+test('logUngrantedTools does not log an MCP grant whose server is connected', () => {
+  const logged = [];
+  logUngrantedTools(['mcp__kubernetes__pods_list'], [], [{ name: 'kubernetes', status: 'connected' }], (m) => logged.push(m));
+  assert.deepStrictEqual(logged, []);
+});
+
+test('logUngrantedTools logs an MCP grant naming a server nobody ever reported', () => {
+  const logged = [];
+  logUngrantedTools(['mcp__ghost__anything'], ['Read'], [], (m) => logged.push(m));
+  assert.strictEqual(logged.length, 1);
+  assert.match(logged[0], /mcp__ghost__anything/);
+});
+
+test('logUngrantedTools is silent on an empty allowlist', () => {
+  const logged = [];
+  logUngrantedTools([], ['Read'], [], (m) => logged.push(m));
+  assert.deepStrictEqual(logged, []);
 });

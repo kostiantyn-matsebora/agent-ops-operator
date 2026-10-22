@@ -105,11 +105,11 @@ func commandsFor(v Vocabulary) []BotCommand {
 	return out
 }
 
+// truncate cuts to max RUNES, not bytes — a byte cut can split a multi-byte
+// character (an icon's emoji, or non-ASCII text in a Pipeline's own
+// description) and Telegram rejects the result.
 func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
+	return truncateRunes(s, max)
 }
 
 // menu tracks what this adapter last registered, so Telegram is called only
@@ -231,6 +231,16 @@ func (a *adapter) syncCommands(ctx context.Context, revision string) {
 		if unchanged {
 			continue
 		}
+		// setMyCommands is an outbound Bot API call like any other (A3) — it
+		// shares the per-chat budget sendMessage and the forum-topic lifecycle
+		// already spend from, or a vocabulary change touching many served
+		// chats at once floods the very rejection this file exists to avoid.
+		// Nil-safe: a pacer-less adapter (built directly in a test) paces
+		// nothing rather than panicking on a nil pointer.
+		if a.pace != nil && !a.pace.forChat(chatID).wait(ctx) {
+			done = false
+			continue
+		}
 		if err := a.client(sc).SetCommands(ctx, chatID, cmds); err != nil {
 			log.Printf("register commands for chat %s: %v", chatID, err)
 			done = false // retry this revision on the next poll
@@ -345,6 +355,25 @@ func inlineKeyboard(choices []Choice) any {
 		return nil
 	}
 	return map[string]any{"inline_keyboard": rows}
+}
+
+// fitsCallbackData reports whether a choice's command, encoded the way
+// inlineKeyboard encodes it, stays inside Telegram's callback_data cap.
+func fitsCallbackData(c Choice) bool {
+	return len(choicePrefix+strings.TrimPrefix(c.Command, "/")) <= telegramMaxCallbackData
+}
+
+// oversizedChoices reports which offered choices inlineKeyboard left out of
+// the keyboard because their callback_data would not fit. They are not lost
+// (ADA-8): the caller renders them as text instead (A5).
+func oversizedChoices(choices []Choice) []Choice {
+	var out []Choice
+	for _, c := range choices {
+		if !fitsCallbackData(c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // commandMention matches a slash-command mention in rendered prose. It captures

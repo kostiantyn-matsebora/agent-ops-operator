@@ -49,6 +49,21 @@ instead of continuing an old one.
 
 ### Fixed
 
+- Every agent runtime (`claude`, `ollama`, `copilot`) now reports continuity
+  truthfully — `continued` only when a context was actually resumed, never
+  on a failed resume. A false `continued` claim used to record a recovery
+  on the storage breaker that never happened.
+- The `copilot` runtime now extracts `<brief>` from the agent's output, so
+  `status.brief` updates instead of the block rendering in chat as a named
+  section.
+- The `ollama` runtime now sends MCP auth headers on HTTP MCP servers —
+  dropped before, so an authenticated server (including `aops`) failed.
+- The Telegram channel adapter's in-process retry budget is now per
+  operation, not per transport call, so a chunked or multi-call send can no
+  longer exceed the manager's reclaim window and double-post.
+- A console send carrying no thread id is now visible on the channel's
+  general feed, instead of completing as success with nothing to show for
+  it.
 - **`signal-pulse`: a rotated signing secret now heals the registered
   webhook on its own.** Before, every delivery after a rotation was refused
   `401` until the webhook was re-registered by hand.

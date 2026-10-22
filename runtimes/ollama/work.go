@@ -12,8 +12,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -46,6 +48,10 @@ func (u WorkUnit) ContextID() string {
 	return u.ResumeSessionID
 }
 
+// exitCode is the pointer RunResult.ExitCode wants -- a literal can't have
+// its address taken inline.
+func exitCode(n int32) *int32 { return &n }
+
 // Continuity values the manager understands.
 const (
 	ContinuityContinued   = "continued"
@@ -55,8 +61,12 @@ const (
 
 // RunResult is what executing a unit produced, before it is addressed.
 type RunResult struct {
-	Status           string `json:"status"`
-	ExitCode         int32  `json:"exitCode"`
+	Status string `json:"status"`
+	// ExitCode is the run's synthetic process result -- set once the model
+	// loop has made at least one turn, omitted entirely when nothing ran
+	// (a bad prompt, a missing model, an unreadable context: the manager
+	// must not read a code here as "ran and failed").
+	ExitCode         *int32 `json:"exitCode,omitempty"`
 	RuntimeContextID string `json:"runtimeContextId,omitempty"`
 	Continuity       string `json:"continuity,omitempty"`
 	ContinuityReason string `json:"continuityReason,omitempty"`
@@ -117,6 +127,12 @@ func (c *Control) Poll(ctx context.Context) (*WorkUnit, error) {
 // Report POSTs /work/done with the reference runtime's cadence: up to 60
 // attempts, ten seconds apart. The report is the one durable fact about the
 // run, so it is worth ten minutes of trying.
+//
+// A DEFINITIVE rejection -- any 4xx other than 408/429 -- means the manager
+// refused the report's content: resending the same bytes cannot change the
+// verdict, so it is logged with its status and body and NOT retried, the
+// caller's own poll loop resuming immediately. A transport error, a timeout
+// or any other status keeps the bounded retry.
 func (c *Control) Report(ctx context.Context, runID string, r RunResult, sleep func(time.Duration)) error {
 	body, _ := json.Marshal(doneReport{Convo: c.Convo, RunID: runID, RunResult: r, SessionID: r.RuntimeContextID})
 	var last error
@@ -127,16 +143,29 @@ func (c *Control) Report(ctx context.Context, runID string, r RunResult, sleep f
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := c.HTTP.Do(req)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode/100 == 2 {
-				return nil
-			}
-			last = fmt.Errorf("POST /work/done: %s", resp.Status)
-		} else {
+		if err != nil {
 			last = err
+			sleep(10 * time.Second)
+			continue
 		}
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if resp.StatusCode/100 == 2 {
+			return nil
+		}
+		if isDefinitiveRejection(resp.StatusCode) {
+			return fmt.Errorf("POST /work/done: definitive rejection, not retried: %s: %s",
+				resp.Status, strings.TrimSpace(string(respBody)))
+		}
+		last = fmt.Errorf("POST /work/done: %s", resp.Status)
 		sleep(10 * time.Second)
 	}
 	return last
+}
+
+// isDefinitiveRejection is a 4xx the manager will never accept unchanged --
+// 408 (timeout) and 429 (rate limit) are transient by nature and keep their
+// retry instead.
+func isDefinitiveRejection(status int) bool {
+	return status/100 == 4 && status != http.StatusRequestTimeout && status != http.StatusTooManyRequests
 }

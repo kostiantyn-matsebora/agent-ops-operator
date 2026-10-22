@@ -36,6 +36,27 @@ func envInt(name string, def int) int {
 
 func logf(format string, a ...any) { fmt.Fprintf(os.Stdout, format+"\n", a...) }
 
+// runUnit syncs the checkout before running a unit against it, and FAILS the
+// run with a reason when that sync fails, rather than running the agent
+// against a workspace that may be stale, half-cloned, or simply gone --
+// `repo.Sync` already surfaces every git failure (clone, fetch, reset), but
+// doing nothing with that error beyond a log line let the loop carry on as
+// if the checkout were fine (O9). No process ran here either, so ExitCode
+// stays omitted.
+func runUnit(ctx context.Context, repo Repo, builtins Builtins, mcpc *MCPClient, agent *Agent, unit WorkUnit, logf func(string, ...any)) RunResult {
+	if err := repo.Sync(ctx); err != nil {
+		reason := fmt.Sprintf("workspace sync failed: %v", err)
+		logf("[runtime] %s", reason)
+		return RunResult{Status: "failed", Result: reason}
+	}
+	// A registry PER UNIT: the built-ins, plus whatever the MCP servers list
+	// now that the proxy has seen this unit's grants.
+	agent.Registry = NewRegistry()
+	builtins.Register(agent.Registry)
+	mcpc.ListTools(ctx, agent.Registry, logf)
+	return agent.Run(ctx, unit)
+}
+
 func main() {
 	controlURL := os.Getenv("CONTROL_URL")
 	convo := os.Getenv("CONVO_ID")
@@ -113,19 +134,11 @@ func main() {
 			continue
 		}
 		lastWork = time.Now()
-		if err := repo.Sync(ctx); err != nil {
-			logf("[runtime] sync: %v", err)
-		}
 		if info, err := ollama.Check(ctx); err == nil {
 			agent.ModelCanCallTools = info.Tools || !info.Present
 			agent.Model = ollama.Model
 		}
-		// A registry PER UNIT: the built-ins, plus whatever the MCP servers list
-		// now that the proxy has seen this unit's grants.
-		agent.Registry = NewRegistry()
-		builtins.Register(agent.Registry)
-		mcpc.ListTools(ctx, agent.Registry, logf)
-		res := agent.Run(ctx, *unit)
+		res := runUnit(ctx, repo, builtins, mcpc, agent, *unit, logf)
 		lastWork = time.Now()
 		fmt.Fprintf(os.Stdout, "\n=== RESULT (%s) ===\n%s\n", res.Status, res.Result)
 		if err := control.Report(ctx, unit.RunID, res, time.Sleep); err != nil {

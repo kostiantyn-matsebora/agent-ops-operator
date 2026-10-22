@@ -1,5 +1,5 @@
 import type {
-  VocabularyResponse, ChartResponse, CloseRequest, CloseResponse,
+  VocabularyResponse, ChannelFeed, ChartResponse, CloseRequest, CloseResponse,
   DeleteResponse, ConversationDetail, ConversationGraph,
   ConversationPage, Detail, Finding, KindInfo, InventoryRow, MarkReadRequest,
   MarkReadResponse, Overview, ActivityResponse, Queues, Session, SourcesResponse, TopologyResponse,
@@ -61,6 +61,9 @@ export const api = {
     request<ConversationGraph>(`/api/conversations/${name}/graph`),
 
   sources: () => request<SourcesResponse>('/api/sources'),
+  // The channel's general feed — thread-less sends, mirroring Telegram's
+  // general topic (B1, UI half).
+  channelFeed: () => request<ChannelFeed>('/api/channel/feed'),
   vocabulary: () => request<VocabularyResponse>('/api/vocabulary'),
   start: (task: string, source?: string) =>
     request<{ source: string; note: string }>('/api/conversations', {

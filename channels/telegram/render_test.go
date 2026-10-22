@@ -59,6 +59,19 @@ func TestMarkdownSubsetRenders(t *testing.T) {
 	}
 }
 
+// A11: a quote inside a URL must not close the href attribute early — the
+// whole-text escape() pass that runs before link matching covers &, < and >
+// but not a bare ", so the href composer must add that one itself.
+func TestLinkHrefIsQuoteSafe(t *testing.T) {
+	out := markdownToHTML(`[click](https://x.test/"quoted")`)
+	if strings.Contains(out, `href="https://x.test/"quoted"`) {
+		t.Fatalf("a raw quote closed the href attribute early: %q", out)
+	}
+	if !strings.Contains(out, `href="https://x.test/&quot;quoted&quot;"`) {
+		t.Fatalf("want the quote escaped as an entity inside one unbroken attribute, got %q", out)
+	}
+}
+
 // A fenced block is lifted out BEFORE emphasis is applied, because `*` and `_`
 // inside a shell snippet or a log line are not emphasis and turning them into
 // tags corrupts the very thing being quoted.
@@ -357,9 +370,11 @@ func TestNoticeWithBlocksIsFolded(t *testing.T) {
 	}
 }
 
-// THE CONCLUSION LEADS THE FIRST CHUNK. Above-the-fold content is bounded by
-// the manager, so it fits together and a reader who sees only one message still
-// sees the answer.
+// THE CONCLUSION LEADS THE FIRST CHUNK. No component bounds above-the-fold
+// content size — that claim is gone (design.md) — so the ADAPTER guarantees
+// the fold order itself: here the title and the one named section are short
+// enough to fit together, and the reader who sees only the first message
+// still sees the answer.
 func TestSplitPrefersBlockBoundaries(t *testing.T) {
 	expandableQuotes.Store(true)
 	chunks := renderChunks(newMenu(), blockMsg(MsgAnswer,
@@ -381,6 +396,53 @@ func TestSplitPrefersBlockBoundaries(t *testing.T) {
 		// Telegram rejects the message outright.
 		if got, want := strings.Count(c, "<blockquote"), strings.Count(c, "</blockquote>"); got != want {
 			t.Fatalf("chunk %d has %d open and %d close quote tags", i, got, want)
+		}
+	}
+}
+
+// A7, THE OVERFLOW CASE: when the title and the named sections ALONE exceed
+// one message, they must still fill the LEADING chunks in the agent's own
+// order, and no folded content may appear before the last of them — the
+// adapter's own guarantee now that nothing upstream bounds their size.
+func TestOversizedAboveTheFoldContentStillLeads(t *testing.T) {
+	expandableQuotes.Store(true)
+	title := strings.Repeat("Big answer. ", 400)          // alone over telegramMessageLimit
+	section := strings.Repeat("Root cause detail. ", 400) // alone over telegramMessageLimit too
+	chunks := renderChunks(newMenu(), blockMsg(MsgAnswer,
+		Block{Role: RoleTitle, Text: title},
+		Block{Role: RoleSection, Label: "cause", Text: section},
+		Block{Role: RoleDetails, Text: "the short tail"},
+	))
+	if len(chunks) < 3 {
+		t.Fatalf("an oversized title and section must each split their own chunks, got %d", len(chunks))
+	}
+	foldIdx := -1
+	for i, c := range chunks {
+		if strings.Contains(c, "the short tail") {
+			foldIdx = i
+			break
+		}
+	}
+	if foldIdx < 0 {
+		t.Fatal("the folded content went missing")
+	}
+	// Every chunk BEFORE the one carrying the fold must itself carry only
+	// above-the-fold content, never the fold arriving early.
+	for i := 0; i < foldIdx; i++ {
+		if strings.Contains(chunks[i], "the short tail") {
+			t.Fatalf("chunk %d carries folded content before the fold's own chunk", i)
+		}
+	}
+	// And nothing AFTER the fold's chunk may carry above-the-fold text either
+	// — once the fold starts, nothing above it follows.
+	for i := foldIdx + 1; i < len(chunks); i++ {
+		if strings.Contains(chunks[i], "Root cause detail") || strings.Contains(chunks[i], "Big answer") {
+			t.Fatalf("chunk %d carries above-the-fold content after the fold began", i)
+		}
+	}
+	for i, c := range chunks {
+		if len(c) > telegramMessageLimit {
+			t.Fatalf("chunk %d is %d bytes, over the %d limit", i, len(c), telegramMessageLimit)
 		}
 	}
 }
@@ -430,8 +492,8 @@ func TestOnlyQuoteErrorsLatchTheFeatureOff(t *testing.T) {
 //
 // A version bump would only mean something if the manager could serve the older
 // shape, which would mean the manager parsing — the thing this design removed.
-// Compatibility is `AgentProfile.spec.sharedOutputFormat`, which is off until an
-// install whose adapters understand the grammar turns it on.
+// Compatibility is `AgentProfile.spec.outputFormat`, a required field with no
+// default — a profile declares `none` until its adapters understand the grammar.
 func TestTheGrammarIsNotAWireVersion(t *testing.T) {
 	if ContractVersion != "2" {
 		t.Fatalf("contract moved to %q — parsing a body needs no new version", ContractVersion)

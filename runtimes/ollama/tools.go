@@ -117,6 +117,27 @@ func unquoteAll(in []string) []string {
 	return out
 }
 
+// safeJoin resolves root joined with segments and refuses a result that
+// escapes root through `..` or an absolute segment — the agent name and a
+// work unit's prompt file both arrive from the manager, not from data this
+// process controls, so a naive filepath.Join is a traversal rather than a
+// path. Returns an error on escape, so a caller treats it exactly like a
+// missing file: read nothing, never a path outside the tree it meant.
+func safeJoin(root string, segments ...string) (string, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(append([]string{absRoot}, segments...)...))
+	if err != nil {
+		return "", err
+	}
+	if target != absRoot && !strings.HasPrefix(target, absRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q escapes %q", filepath.Join(segments...), root)
+	}
+	return target, nil
+}
+
 // agentDeclaredTools reads .claude/agents/<agent>.md under workspace. Every
 // failure yields an empty list; the run continues either way. logf receives a
 // one-line reason when something was there but could not be used.
@@ -124,7 +145,12 @@ func agentDeclaredTools(workspace, agent string, logf func(string, ...any)) []st
 	if workspace == "" || agent == "" {
 		return nil
 	}
-	text, err := os.ReadFile(filepath.Join(workspace, ".claude", "agents", agent+".md"))
+	path, err := safeJoin(workspace, ".claude", "agents", agent+".md")
+	if err != nil {
+		logf("[runtime] agent name %q: %v — treating it as declaring no tools", agent, err)
+		return nil
+	}
+	text, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -180,6 +206,19 @@ func patternMatches(pattern, name string) bool {
 // isNarrowing reports a specifier this runtime cannot honour.
 func isNarrowing(pattern string) bool { return strings.Contains(pattern, "(") }
 
+// isUninterpretable reports a wildcard position this runtime's matcher
+// cannot read as a pattern at all -- patternMatches understands exactly one
+// shape, an exact name or a single TRAILING `*`. A `*` anywhere else, or more
+// than one in the pattern, is not "no such tool" (unavailable) but a pattern
+// this runtime was never able to evaluate, and the two must not be reported
+// the same way.
+func isUninterpretable(pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return false
+	}
+	return strings.Count(pattern, "*") > 1 || !strings.HasSuffix(pattern, "*")
+}
+
 // Tool is one executable tool, from either source.
 type Tool struct {
 	Name        string
@@ -211,29 +250,44 @@ func (r *Registry) Get(name string) (Tool, bool) { t, ok := r.tools[name]; retur
 // Gate applies the allowlist ONCE, before the request: the returned tools are
 // the only ones advertised. It also reports what the allowlist named that
 // nothing here provides — per the catalog rule, a runtime provides what it can
-// and REPORTS what it cannot — and every narrowing specifier it ignored.
-func (r *Registry) Gate(allowed []string) (granted []Tool, unavailable []string, ignored []string) {
+// and REPORTS what it cannot — every narrowing specifier it ignored, and every
+// wildcard position it could not interpret at all (distinct from "no such
+// tool": the pattern itself defeated this runtime's matcher).
+func (r *Registry) Gate(allowed []string) (granted []Tool, unavailable []string, ignored []string, uninterpretable []string) {
 	seen := map[string]bool{}
 	for _, p := range allowed {
 		if isNarrowing(p) {
 			ignored = append(ignored, p)
 			continue
 		}
-		matched := false
-		for _, name := range r.order {
-			if patternMatches(p, name) {
-				matched = true
-				if !seen[name] {
-					seen[name] = true
-					granted = append(granted, r.tools[name])
-				}
-			}
+		if isUninterpretable(p) {
+			uninterpretable = append(uninterpretable, p)
+			continue
 		}
+		var matched bool
+		granted, matched = r.grant(p, seen, granted)
 		if !matched {
 			unavailable = append(unavailable, p)
 		}
 	}
-	return granted, unavailable, ignored
+	return granted, unavailable, ignored, uninterpretable
+}
+
+// grant appends every not-yet-granted tool the pattern names, and reports
+// whether it named any.
+func (r *Registry) grant(pattern string, seen map[string]bool, granted []Tool) ([]Tool, bool) {
+	matched := false
+	for _, name := range r.order {
+		if !patternMatches(pattern, name) {
+			continue
+		}
+		matched = true
+		if !seen[name] {
+			seen[name] = true
+			granted = append(granted, r.tools[name])
+		}
+	}
+	return granted, matched
 }
 
 func toolDefs(tools []Tool) []ToolDef {

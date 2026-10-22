@@ -26,48 +26,32 @@ vi.mock('../../api/hooks', () => ({
 describe('thread command chips', () => {
   it('runs the command directly — never inserts it for the user to send themselves', () => {
     const onRunCommand = vi.fn()
-    render(<QuickChips canWrite onRunCommand={onRunCommand} onInsertCommand={vi.fn()} />)
+    render(<QuickChips canWrite onRunCommand={onRunCommand} />)
     screen.getByLabelText('/exit').click()
     expect(onRunCommand).toHaveBeenCalledWith('/exit')
   })
 
   it('renders as an icon, never raw "/name" text — by direct instruction, overriding the prototype', () => {
-    render(<QuickChips canWrite onRunCommand={vi.fn()} onInsertCommand={vi.fn()} />)
+    render(<QuickChips canWrite onRunCommand={vi.fn()} />)
     const exitButton = screen.getByLabelText('/exit')
     expect(exitButton).not.toHaveTextContent('/exit')
     expect(exitButton.querySelector('svg')).toBeInTheDocument()
   })
 
   it('is absent with no onRunCommand — nothing open to run a command against', () => {
-    render(<QuickChips canWrite onInsertCommand={vi.fn()} />)
+    render(<QuickChips canWrite />)
     expect(screen.queryByLabelText('/exit')).toBeNull()
   })
 })
 
-describe('choice chips', () => {
-  it('prefills the choice’s command, ready to send', () => {
-    const onInsertCommand = vi.fn()
-    render(
-      <QuickChips
-        canWrite
-        choices={[{ label: 'Roll back', command: '/exit roll back' }]}
-        onInsertCommand={onInsertCommand}
-      />,
-    )
-    screen.getByText('Roll back').click()
-    expect(onInsertCommand).toHaveBeenCalledWith('/exit roll back ')
-  })
-})
+// An offered choice chip used to be tested here — it rendered only for the
+// latest message, in the composer strip. It moved WITH its message into
+// `Timeline.tsx` (B2), so its coverage lives in `Timeline.test.tsx` now.
 
 describe('the read-only case', () => {
   it('renders nothing at all', () => {
     const { container } = render(
-      <QuickChips
-        canWrite={false}
-        choices={[{ label: 'Roll back', command: '/exit' }]}
-        onInsertCommand={vi.fn()}
-        onRunCommand={vi.fn()}
-      />,
+      <QuickChips canWrite={false} onRunCommand={vi.fn()} />,
     )
     expect(container).toBeEmptyDOMElement()
   })

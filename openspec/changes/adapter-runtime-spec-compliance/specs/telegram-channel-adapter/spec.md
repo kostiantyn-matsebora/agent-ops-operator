@@ -105,3 +105,33 @@ the thread.
 - **WHEN** a signal arrives whose payload happens to contain a tag-shaped line
 - **THEN** the card renders from the signal's fields and the payload is quoted
   verbatim, with nothing folded by the grammar
+
+### Requirement: Adapter honors Telegram's retry_after
+On a `429 Too Many Requests`, the adapter SHALL read `parameters.retry_after`
+from the Bot API response, wait that many seconds, and retry the same call. It
+SHALL NOT report the operation as failed while retries remain within budget, and
+SHALL NOT substitute its own backoff for a stated `retry_after`.
+
+The adapter's total wait for one operation SHALL be bounded well below the
+`reclaimAfterSeconds` the manager advertised for that claim. When that bound is
+reached the adapter SHALL report the operation as failed and let the manager
+re-derive it.
+
+A `429` on `createForumTopic` SHALL be retried on the same terms as one on
+`sendMessage`. Both are ordinary backpressure, not errors.
+
+#### Scenario: 429 on send is retried transparently
+- **WHEN** `sendMessage` returns `429` with `retry_after: 30`
+- **THEN** the adapter waits 30 seconds, retries, and reports the operation complete on success
+
+#### Scenario: 429 on topic creation is retried transparently
+- **WHEN** `createForumTopic` returns `429` with a stated `retry_after`
+- **THEN** the adapter waits and retries rather than reporting a failed `ensure-topic`
+
+#### Scenario: Retry budget bounded below reclaim
+- **WHEN** repeated `429` responses would push the adapter's total wait for one operation toward the claim's `reclaimAfterSeconds`
+- **THEN** the adapter stops retrying and reports failure while the claim is still valid, so the manager re-derives the operation instead of a second claimant duplicating it
+
+#### Scenario: A retried call posts exactly once
+- **WHEN** the adapter retries a `sendMessage` after a `429`
+- **THEN** exactly one message appears in the thread, because the rejected call posted nothing

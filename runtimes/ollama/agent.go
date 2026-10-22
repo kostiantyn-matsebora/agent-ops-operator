@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -36,7 +35,11 @@ const defaultMaxTurns = 60
 func (a *Agent) resolvePrompt(u WorkUnit) (string, error) {
 	prompt := u.PromptText
 	if prompt == "" && u.PromptFile != "" {
-		data, err := os.ReadFile(filepath.Join(a.Workspace, u.PromptFile))
+		p, err := safeJoin(a.Workspace, u.PromptFile)
+		if err != nil {
+			return "", fmt.Errorf("prompt file: %w", err)
+		}
+		data, err := os.ReadFile(p)
 		if err != nil {
 			return "", fmt.Errorf("prompt read: %w", err)
 		}
@@ -51,8 +54,10 @@ func (a *Agent) resolvePrompt(u WorkUnit) (string, error) {
 	return prompt, nil
 }
 
-func failed(code int32, result string) RunResult {
-	return RunResult{Status: "failed", ExitCode: code, Result: result}
+// failed reports a run that never reached the model loop at all -- no
+// process ran, so ExitCode is omitted rather than carrying a made-up code.
+func failed(result string) RunResult {
+	return RunResult{Status: "failed", Result: result}
 }
 
 // Run executes one unit end to end. It never panics on a bad unit and never
@@ -68,10 +73,10 @@ func (a *Agent) Run(ctx context.Context, u WorkUnit) RunResult {
 func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 	prompt, err := a.resolvePrompt(u)
 	if err != nil {
-		return failed(-1, err.Error())
+		return failed(err.Error())
 	}
 	if a.Model == "" {
-		return failed(1, "no model: OLLAMA_MODEL is unset and the Ollama server does not have exactly one model pulled — "+
+		return failed("no model: OLLAMA_MODEL is unset and the Ollama server does not have exactly one model pulled — " +
 			"set ollama.model to the one this route should use")
 	}
 
@@ -79,7 +84,7 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 	// half from the checkout, composed per mode — then the gate, ONCE.
 	declared := agentDeclaredTools(a.Workspace, u.Agent, a.Logf)
 	allowed := composeAllowedTools(declared, u.AllowedTools, u.ToolsMode)
-	granted, unavailable, ignored := a.Registry.Gate(allowed)
+	granted, unavailable, ignored, uninterpretable := a.Registry.Gate(allowed)
 	a.Logf("[runtime] tools agent=%s declared=%d wiring=%d mode=%s -> %s",
 		orDash(u.Agent), len(declared), len(splitList(u.AllowedTools)), orDefault(u.ToolsMode, ModeMerge), toolNames(granted))
 	for _, p := range unavailable {
@@ -88,8 +93,11 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 	for _, p := range ignored {
 		a.Logf("[runtime] allowlist entry %q: a narrowing specifier this runtime cannot honour — grants nothing", p)
 	}
+	for _, p := range uninterpretable {
+		a.Logf("[runtime] allowlist entry %q: a wildcard position this runtime's matcher cannot interpret — logged as uninterpretable, grants nothing", p)
+	}
 	if len(allowed) > 0 && !a.ModelCanCallTools {
-		return failed(1, fmt.Sprintf("this route grants tools (%s) but model %q cannot call tools — "+
+		return failed(fmt.Sprintf("this route grants tools (%s) but model %q cannot call tools — "+
 			"choose a model whose capabilities include tools, or route this Pipeline elsewhere",
 			strings.Join(allowed, ","), a.Model))
 	}
@@ -106,16 +114,20 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 			reason := fmt.Sprintf("the stored context for this conversation could not be reached — no transcript %s under %s "+
 				"(is /data/context backed by a durable volume? without one it dies with the pod)", id, a.Store.Dir)
 			a.Logf("[runtime] %s — failing rather than answering without it", reason)
-			return RunResult{Status: "failed", ExitCode: 1, Continuity: ContinuityUnavailable, ContinuityReason: reason,
+			return RunResult{Status: "failed", ExitCode: exitCode(1), Continuity: ContinuityUnavailable, ContinuityReason: reason,
 				Result: "⚠️ **This conversation cannot be continued.**\n\n" +
 					"Its stored context is no longer available, so answering now would mean answering with no memory of " +
 					"what came before — including anything already done. Start a new conversation to continue.\n\n" +
 					"Reason: " + reason}
 		default:
-			// The STORE did not answer. An outage, not a loss: fail this run
-			// without touching the handle so the next one can try again.
-			return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: id, Continuity: ContinuityContinued,
-				Result: "context store unavailable: " + err.Error()}
+			// The STORE did not answer -- an OUTAGE, never a loss: this is not
+			// the same as the handle being confirmed gone above, so it must
+			// never report `continued`, which would tell the manager a context
+			// recovery happened when none did. Fail without touching the
+			// handle so the next attempt can still try it.
+			reason := "context store unavailable: " + err.Error()
+			return RunResult{Status: "failed", ExitCode: exitCode(1), RuntimeContextID: id, Continuity: ContinuityUnavailable, ContinuityReason: reason,
+				Result: reason}
 		}
 	} else {
 		t = a.Store.New(u.Convo)
@@ -157,7 +169,7 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 		fmt.Fprintln(a.Out)
 		if err != nil {
 			save()
-			return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: t.ID, Continuity: continuity,
+			return RunResult{Status: "failed", ExitCode: exitCode(1), RuntimeContextID: t.ID, Continuity: continuity,
 				Result: "inference failed: " + err.Error()}
 		}
 		calls.turn(resp.Usage)
@@ -176,13 +188,13 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 			}
 			save()
 			if result == "" {
-				return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: t.ID, Continuity: continuity,
+				return RunResult{Status: "failed", ExitCode: exitCode(1), RuntimeContextID: t.ID, Continuity: continuity,
 					Result: "the model returned an empty answer twice"}
 			}
 			// Extracted before returning: the brief is a contract field, never
 			// a displayed section, so it must not reach Result.
 			result, brief := extractBrief(result)
-			return RunResult{Status: "succeeded", ExitCode: 0, RuntimeContextID: t.ID, Continuity: continuity, Result: result, Brief: brief}
+			return RunResult{Status: "succeeded", ExitCode: exitCode(0), RuntimeContextID: t.ID, Continuity: continuity, Result: result, Brief: brief}
 		}
 		for _, call := range resp.ToolCalls {
 			name := call.Function.Name
@@ -203,7 +215,7 @@ func (a *Agent) run(ctx context.Context, u WorkUnit, calls *callLog) RunResult {
 		}
 	}
 	save()
-	return RunResult{Status: "failed", ExitCode: 1, RuntimeContextID: t.ID, Continuity: continuity,
+	return RunResult{Status: "failed", ExitCode: exitCode(1), RuntimeContextID: t.ID, Continuity: continuity,
 		Result: fmt.Sprintf("turn limit reached: %d turns without a final answer", maxTurns)}
 }
 

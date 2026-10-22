@@ -50,6 +50,27 @@ func TestGrepPathEscapeIsRefused(t *testing.T) {
 	}
 }
 
+// Grep's walk visits a symlinked FILE as a leaf entry (not a directory), and
+// os.ReadFile happily follows it -- a target outside the workspace must be
+// refused rather than read, exactly like Read/Edit/Write's own resolve (O3).
+func TestGrepRefusesASymlinkEscapingTheWorkspace(t *testing.T) {
+	b, ws := newBuiltins(t)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("needle-outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(ws, "escape-link")); err != nil {
+		t.Fatal(err)
+	}
+	text, isErr := call(t, b, "Grep", `{"pattern":"needle-outside"}`)
+	if isErr {
+		t.Errorf("an escaping symlink must be skipped, not a tool error: %q", text)
+	}
+	if text != "no matches" {
+		t.Errorf("content reached through an escaping symlink must never be reported: %q", text)
+	}
+}
+
 // Grep must not descend into .git, and must report "no matches" honestly
 // when nothing else matches.
 func TestGrepSkipsDotGitAndReportsNoMatches(t *testing.T) {
@@ -255,6 +276,36 @@ func TestWriteFailsWhenTheDirectoryIsNotWritable(t *testing.T) {
 	defer os.Chmod(locked, 0o755)
 	if text, isErr := call(t, b, "Write", `{"path":"locked/f.txt","content":"x"}`); !isErr {
 		t.Errorf("want a write failure, got isErr=%v %q", isErr, text)
+	}
+}
+
+// boundedWriter's whole point: the BUFFER never grows past its cap no matter
+// how much is offered, even though it keeps an honest running total (O4).
+func TestBoundedWriterCapsMemoryRegardlessOfTotalWritten(t *testing.T) {
+	w := &boundedWriter{cap: 10}
+	for i := 0; i < 1000; i++ {
+		w.Write([]byte("0123456789"))
+	}
+	if w.buf.Len() != 10 {
+		t.Errorf("the buffer itself must never grow past its cap, got %d bytes", w.buf.Len())
+	}
+	if w.total != 10000 {
+		t.Errorf("total must still count every byte offered, got %d", w.total)
+	}
+}
+
+// Bash's capture must stay bounded even when OutputMax is left unset (0,
+// historically "no truncation at all") -- a hard ceiling applies regardless,
+// so a flooding command cannot grow this process's memory without limit.
+func TestBashIsBoundedEvenWithOutputMaxUnset(t *testing.T) {
+	b, _ := newBuiltins(t)
+	b.OutputMax = 0
+	text, isErr := call(t, b, "Bash", `{"command":"yes | head -c 11000000"}`)
+	if isErr {
+		t.Errorf("hitting the hard ceiling must not itself be a tool error: %q", text)
+	}
+	if !strings.Contains(text, "truncated") {
+		t.Errorf("an unconfigured OutputMax must still hit the hard memory ceiling, got a %d-byte result", len(text))
 	}
 }
 

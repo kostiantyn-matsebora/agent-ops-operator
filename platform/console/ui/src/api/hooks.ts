@@ -221,6 +221,17 @@ export function useSources() {
   return useQuery({ queryKey: ['sources'], queryFn: api.sources })
 }
 
+/**
+ * The channel's general feed — the thread-less sends the adapter parks on
+ * its `channel:<name>` pseudo-thread, surfaced so they are visible rather
+ * than silently dropped (B1, UI half). No stream delta carries this today,
+ * so it is a plain FIRST-LOAD query like `useActivityBuffer` rather than a
+ * cache a live event ever applies to.
+ */
+export function useChannelFeed() {
+  return useQuery({ queryKey: ['channelFeed'], queryFn: api.channelFeed })
+}
+
 /** The Pipelines a message can address — Ready only, exactly like `/agents`. */
 export function useVocabulary() {
   return useQuery({ queryKey: ['vocabulary'], queryFn: api.vocabulary })

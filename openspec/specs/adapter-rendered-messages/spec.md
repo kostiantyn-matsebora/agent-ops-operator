@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The manager composes MEANING; adapters compose PRESENTATION. Outbound operations
+The manager composes MEANING. Adapters compose PRESENTATION. Outbound operations
 carry typed messages and topic descriptors with markdown-valued free text, and
 every presentation decision — escaping, length, chunking, markup, thread naming —
 belongs to the adapter that knows the transport.
@@ -154,9 +154,11 @@ a second renderer.
 
 An `ensure-topic` operation SHALL carry
 `{conversation, pipeline, source, title, labels{}, kind}` rather than a rendered
-title string. The adapter SHALL derive the thread name from that descriptor
-using its own template and enforce its own naming limits, so a deployment may
-name topics after their route or source without the manager choosing a format.
+title string.
+
+The adapter SHALL derive the thread name from that descriptor, using its own
+template and enforcing its own naming limits. A deployment may then name
+topics after their route or source, without the manager choosing a format.
 
 #### Scenario: Adapter names the topic
 
@@ -178,8 +180,10 @@ SHALL NOT truncate message bodies, SHALL NOT escape for any transport, and SHALL
 NOT declare a maximum message size.
 
 The manager SHALL NOT move content between blocks either. Which part is the
-summary is a judgement the AGENT already made by choosing what goes inside
-`<details>`, and a length budget is a guess at it — one that cuts a markdown
+summary is a judgement the AGENT already made, by choosing what goes inside
+`<details>`.
+
+A length budget is only a guess at that judgement, one that can cut a markdown
 table from its header. See `structured-agent-output`.
 
 #### Scenario: Oversized body is the adapter's call
@@ -230,10 +234,12 @@ changes meaning: a body that was markdown is now markdown plus a grammar, read
 by the same component that already read the markdown.
 
 An adapter that does not implement the grammar renders the tags literally.
-That is prevented by `AgentProfile.spec.sharedOutputFormat`, which is OFF by
-default — no agent emits a tag until an install turns it on, and an install
-turns it on when its adapters understand it. The compatibility boundary is the
-PROFILE, not the wire.
+That is prevented by `AgentProfile.spec.outputFormat`, a REQUIRED field with
+no default.
+
+A profile declaring `none` never emits a tag, and an install sets `blocks`
+only once its adapters understand the grammar. The compatibility boundary is
+the PROFILE, not the wire.
 
 #### Scenario: Outdated adapter fails loudly
 

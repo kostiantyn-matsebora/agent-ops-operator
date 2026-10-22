@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Timeline } from './Timeline'
 import type { ActivityEvent, Message } from '../../api/types'
@@ -219,6 +219,46 @@ describe('a folded run can be expanded back out', () => {
     const events = [ev('c1', 'run.dispatched', 'r1', '2024-01-01T00:00:01Z')]
     render(<Timeline messages={[]} events={events} presence={false} />)
     expect(screen.queryByText(/events$/)).toBeNull()
+  })
+})
+
+describe('a message\'s choices render with it, latest interactive, older degraded (B2)', () => {
+  it('renders the latest message\'s choices as real buttons, calling onChoiceSelect', () => {
+    const onChoiceSelect = vi.fn()
+    const messages = [
+      msg('m1', 'agent', '2024-01-01T00:00:00Z', { text: 'Approve the restart?', choices: [{ command: '/approve', label: 'Approve' }] }),
+    ]
+    render(<Timeline messages={messages} events={[]} presence={false} onChoiceSelect={onChoiceSelect} />)
+    screen.getByText('Approve').click()
+    expect(onChoiceSelect).toHaveBeenCalledWith('/approve ')
+  })
+
+  it('degrades an OLDER message\'s choices to a plain, non-interactive list', () => {
+    const onChoiceSelect = vi.fn()
+    const messages = [
+      msg('m1', 'agent', '2024-01-01T00:00:00Z', { text: 'Approve the restart?', choices: [{ command: '/approve', label: 'Approve' }] }),
+      msg('m2', 'agent', '2024-01-01T00:01:00Z', { text: 'Approve the follow-up?', choices: [{ command: '/approve-2', label: 'Approve follow-up' }] }),
+    ]
+    render(<Timeline messages={messages} events={[]} presence={false} onChoiceSelect={onChoiceSelect} />)
+    // The older message's choice shows, but as plain text — no button role,
+    // and clicking it (there is nothing to click) never calls back.
+    const stale = screen.getByText('Approve')
+    expect(stale.closest('button')).toBeNull()
+    const list = screen.getByLabelText('offered choices (no longer actionable)')
+    expect(list).toContainElement(stale)
+    // The latest message's own choice is still a real, clickable button.
+    screen.getByText('Approve follow-up').click()
+    expect(onChoiceSelect).toHaveBeenCalledWith('/approve-2 ')
+    expect(onChoiceSelect).not.toHaveBeenCalledWith('/approve ')
+  })
+
+  it('never renders a choice as interactive with no onChoiceSelect wired — a read-only transcript', () => {
+    const messages = [
+      msg('m1', 'agent', '2024-01-01T00:00:00Z', { text: 'Approve the restart?', choices: [{ command: '/approve', label: 'Approve' }] }),
+    ]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    expect(screen.getByText('Approve').closest('button')).toBeNull()
+    expect(screen.getByLabelText('offered choices (no longer actionable)')).toBeInTheDocument()
   })
 })
 

@@ -538,7 +538,7 @@ func (s *Server) defaultRuntimeName(ctx context.Context) string {
 type workDone struct {
 	// Convo is the Conversation this report is for.
 	Convo string `json:"convo"`
-	// RunID is the unit's own RunID, round-tripped.
+	// RunID is the unit's own id, round-tripped.
 	RunID string `json:"runId"`
 	// Status is "succeeded" or "failed". The manager treats any other
 	// value as a failed run.
@@ -576,8 +576,8 @@ type workDone struct {
 	Result string `json:"result,omitempty"`
 	// Brief is what the runtime extracted as this conversation's one- or
 	// two-sentence description (design D-I) — a contract field, never a
-	// parsed section of Result. LATEST-WINS, the same rule as
-	// RuntimeContextID: absent leaves the stored one untouched.
+	// parsed section of `result`. LATEST-WINS, the same rule as
+	// `runtimeContextId`: absent leaves the stored one untouched.
 	Brief string `json:"brief,omitempty"`
 	// Turns is one entry per model call this run made, bounded in count and
 	// field size (workreport.go). It becomes one activity hop and nothing

@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,6 +45,33 @@ func TestEnvIntParsesFallsBackAndRejectsNonPositive(t *testing.T) {
 	t.Setenv(name, "42")
 	if got := envInt(name, 7); got != 42 {
 		t.Errorf("a valid positive value must win: got %d", got)
+	}
+}
+
+// A failed sync must fail the RUN with a reason instead of letting the loop
+// carry on against a workspace that was never actually refreshed (O9) --
+// `git clone` against a source path that does not exist fails immediately,
+// with no network involved.
+func TestRunUnitFailsTheRunWhenSyncFails(t *testing.T) {
+	repo := Repo{URL: filepath.Join(t.TempDir(), "does-not-exist-agentops-repo"), Ref: "main", Workspace: t.TempDir()}
+	agent, _ := newAgent(t, &scripted{})
+	var logged []string
+	logf := func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }
+	res := runUnit(context.Background(), repo, Builtins{}, &MCPClient{}, agent, WorkUnit{PromptText: "q"}, logf)
+	if res.Status != "failed" || !strings.Contains(res.Result, "workspace sync failed") {
+		t.Errorf("%+v", res)
+	}
+	if res.ExitCode != nil {
+		t.Errorf("no process ran -- exitCode must be omitted, got %v", *res.ExitCode)
+	}
+	found := false
+	for _, l := range logged {
+		if strings.Contains(l, "workspace sync failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the sync failure must be logged, got %v", logged)
 	}
 }
 

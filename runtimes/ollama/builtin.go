@@ -156,7 +156,24 @@ func (b Builtins) grep(ctx context.Context, raw json.RawMessage) (string, bool, 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		data, err := os.ReadFile(p)
+		// A symlink ENTRY is not a directory, so WalkDir hands it to this leaf
+		// branch rather than recursing -- and os.ReadFile below would happily
+		// follow it wherever it points. Confine it the same way resolve()
+		// confines a starting path: a target outside the workspace, or one
+		// that cannot be evaluated (broken link), is refused, never read.
+		readPath := p
+		if d.Type()&fs.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(p)
+			if err != nil || !within(root, target) {
+				return nil
+			}
+			// Read the RESOLVED path, not the symlink again: re-reading
+			// through p would re-resolve it a second time, and a link
+			// swapped between the two resolutions could point outside root
+			// on the read even though the check above saw it safely inside.
+			readPath = target
+		}
+		data, err := os.ReadFile(readPath)
 		if err != nil || bytes.IndexByte(data, 0) >= 0 {
 			return nil // unreadable or binary
 		}
@@ -295,6 +312,33 @@ func (b Builtins) write(_ context.Context, raw json.RawMessage) (string, bool, e
 	return fmt.Sprintf("wrote %d bytes to %s", len(a.Content), a.Path), false, nil
 }
 
+// maxBashCaptureBytes is a hard ceiling on what Bash ever holds in memory,
+// independent of OutputMax (which may be 0, "no truncation", or simply left
+// larger than this is safe to buffer) -- a command that floods stdout must
+// not be able to grow this process's heap without bound on its way to being
+// truncated for display.
+const maxBashCaptureBytes = 10 << 20 // 10 MiB
+
+// boundedWriter discards everything past its cap WHILE WRITING, rather than
+// collecting the full output and truncating it afterwards -- the point is
+// bounding memory DURING capture, not just the text eventually shown.
+type boundedWriter struct {
+	cap   int
+	buf   bytes.Buffer
+	total int
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	w.total += len(p)
+	if room := w.cap - w.buf.Len(); room > 0 {
+		if room > len(p) {
+			room = len(p)
+		}
+		w.buf.Write(p[:room])
+	}
+	return len(p), nil // always the full count: cmd.Run must not see a short write as an error
+}
+
 func (b Builtins) bash(ctx context.Context, raw json.RawMessage) (string, bool, error) {
 	var a struct{ Command string }
 	if err := decodeArgs(raw, &a); err != nil {
@@ -308,8 +352,18 @@ func (b Builtins) bash(ctx context.Context, raw json.RawMessage) (string, bool, 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", a.Command)
 	cmd.Dir = b.Workspace
 	cmd.WaitDelay = 2 * time.Second
-	out, err := cmd.CombinedOutput()
-	text := b.bound(string(out))
+	captureCap := b.OutputMax
+	if captureCap <= 0 || captureCap > maxBashCaptureBytes {
+		captureCap = maxBashCaptureBytes
+	}
+	bw := &boundedWriter{cap: captureCap}
+	cmd.Stdout = bw
+	cmd.Stderr = bw
+	err := cmd.Run()
+	text := bw.buf.String()
+	if bw.total > bw.buf.Len() {
+		text = fmt.Sprintf("%s\n… [truncated: %d of %d bytes shown]", text, bw.buf.Len(), bw.total)
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Sprintf("%s\n[timed out after %s]", text, b.BashTimeout), true, nil
 	}
