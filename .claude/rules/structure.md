@@ -67,8 +67,8 @@ All three are optional bundles under `chart/charts/<name>/`, off by default.
 | `signals/telegram/` | chat origination adapter, holds no credentials |
 | `signals/cron/` | reference signal adapter, 5-field cron parser |
 | `signals/alertmanager/` | webhook adapter, standard Alertmanager payload (renamed from `signal-vmalertmanager`, `register.go` keeps `VMAlertmanagerConfig`) |
-| `signals/ha/` | Home Assistant adapter, polls `system_log/list` every 15s. Fingerprint keys on LOGGER + SOURCE LOCATION |
-| `signals/k8s-events/` | cluster Events adapter, in-cluster `net/http`, no client-go — fingerprint keys on OBJECT + reason |
+| `signals/ha/` | Home Assistant adapter, polls `system_log/list` every 15s. `initiationId` keys on source+integration once dwelled, on the record's own identity before |
+| `signals/k8s-events/` | cluster Events adapter, in-cluster `net/http`, no client-go — `initiationId` keys on the workload, resolved through owner references |
 | `signals/pulse/` | Pulse webhook adapter — registers its own webhook through Pulse's API, verifies signed deliveries, `initiationId` from alert id + start time by default |
 
 ### Beside a conversation
