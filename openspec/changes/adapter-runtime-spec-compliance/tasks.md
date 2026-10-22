@@ -158,9 +158,9 @@ Reference docs:
   version moved per its own versioning rule. Moved to 1.3.0. **S2 note:**
   `sharedOutputFormat` never existed in shipped code — the field has
   always been `AgentProfile.spec.outputFormat`, which ADA-11.1 already
-  cited correctly. The stale `sharedOutputFormat` name lives only in
-  `openspec/specs/adapter-rendered-messages/spec.md:233`, a pre-existing
-  gap outside this change's scope, left for a follow-up.
+  cited correctly. The stale name in
+  `openspec/specs/adapter-rendered-messages/spec.md` is corrected in this
+  change.
 - [x] 10.2 `docs/contracts/runtime.md`: numbered conformance checklist,
   the generated schema tables under their marker, the startup-crash
   ruling, the `/work/done` definitive-rejection rows, and the version

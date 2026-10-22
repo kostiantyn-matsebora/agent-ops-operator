@@ -230,7 +230,7 @@ changes meaning: a body that was markdown is now markdown plus a grammar, read
 by the same component that already read the markdown.
 
 An adapter that does not implement the grammar renders the tags literally.
-That is prevented by `AgentProfile.spec.sharedOutputFormat`, which is OFF by
+That is prevented by `AgentProfile.spec.outputFormat`, which is OFF by
 default — no agent emits a tag until an install turns it on, and an install
 turns it on when its adapters understand it. The compatibility boundary is the
 PROFILE, not the wire.
