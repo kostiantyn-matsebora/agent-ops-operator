@@ -6,10 +6,12 @@ not the audit.
 
 ## 1. Pulse adapter fixes — backend-developer
 
-- [x] 1.1 Register `X-Agentops-Secret-Digest: sha256:<hex>` of the signing
-  secret in `webhookHeaders` and keep it in the create-or-repair comparison,
-  so a rotated secret updates the webhook in place — verify with a unit test
-  rotating the secret against a redacting fake Pulse.
+- [x] 1.1 Register `agentops_secret_digest=sha256:<hex>` of the signing
+  secret on the registered webhook URL's query, not a header (Pulse masks
+  every header value on read), and keep the URL in the create-or-repair
+  comparison, so a rotated secret updates the webhook in place — verify
+  with a unit test rotating the secret against a fake Pulse masking the
+  secret and every header value.
 - [x] 1.2 Make signature enforcement follow the secret, not registration
   state: a configured `signingSecret` verifies inbound posts even when
   `baseUrl`/`webhookUrl` are absent or invalid — verify with a

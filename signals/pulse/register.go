@@ -85,8 +85,11 @@ type registerConfig struct {
 	// send unconditionally. This exists for infra reasons HMAC does not
 	// reach — a WAF or gateway in front of this adapter's Ingress requiring
 	// its own shared-secret header, for instance. Pulse's own signing
-	// headers win on a name collision, and so does the secret digest this
-	// adapter adds when a signing secret is configured (registeredHeaders).
+	// headers win on a name collision.
+	//
+	// Pulse masks every header VALUE on read, so create-or-repair compares
+	// these by KEY only (comparable). A changed value under an unchanged key
+	// is never seen as drift and needs a manual re-registration in Pulse.
 	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty"`
 	// CorrelationStrategy selects how initiationID (payload.go) folds Pulse's
 	// alert id into this source's signals — "id" or "id+startTime". Resolved
@@ -274,13 +277,26 @@ type pulseWebhookConfig struct {
 // webhook list, mirroring signals/alertmanager's registrationName.
 func webhookName(source string) string { return "agentops-" + source }
 
-// secretDigestHeader is the registered header carrying a one-way digest of
-// the signing secret. Pulse redacts the stored signingSecret on read but
-// returns registered headers verbatim, so this header is what lets the
+// secretDigestParam is the query parameter on the registered webhook URL
+// carrying a one-way digest of the signing secret. It is what lets the
 // create-or-repair comparison see a rotated secret at all.
-const secretDigestHeader = "X-Agentops-Secret-Digest"
+//
+// It lives on the URL because the URL is the one field that both carries
+// data and round-trips unmasked. Pulse's GetWebhooks → maskedWebhookResponse
+// masks the stored signingSecret AND every registered header value as
+// "***REDACTED***" on read, so a digest header would read back as constant
+// drift. Name is the lookup key and Template is the notification body, so
+// neither can carry it. The inbound mux routes on method and path only
+// (newMux), so the parameter never changes how a delivery is served.
+//
+// Internal to this adapter, never part of the published contract.
+const secretDigestParam = "agentops_secret_digest"
 
-// secretDigest renders secretDigestHeader's value: "sha256:<hex>" of the
+// redactedHeaderValue stands in for every header value on both sides of the
+// comparison, matching what Pulse itself returns on read.
+const redactedHeaderValue = "***REDACTED***"
+
+// secretDigest renders secretDigestParam's value: "sha256:<hex>" of the
 // signing secret. One-way, and sent only to the Pulse instance that already
 // holds the secret itself.
 func secretDigest(signingSecret string) string {
@@ -292,47 +308,59 @@ func secretDigest(signingSecret string) string {
 func desiredWebhook(source, webhookURL, signingSecret string, headers map[string]string) pulseWebhookConfig {
 	return pulseWebhookConfig{
 		Name:          webhookName(source),
-		URL:           webhookURL,
+		URL:           signedWebhookURL(webhookURL, signingSecret),
 		Template:      pulseWebhookTemplate,
-		Headers:       registeredHeaders(headers, signingSecret),
+		Headers:       headers,
 		SigningSecret: signingSecret,
 		Enabled:       true,
 	}
 }
 
-// registeredHeaders composes the operator's webhookHeaders with the secret
-// digest, copying rather than mutating the parsed config map. The digest
-// wins a name collision: an operator-set value under that name would blind
-// rotation detection. No secret, no digest — so dropping the secret is
-// itself drift the comparison repairs.
-func registeredHeaders(headers map[string]string, signingSecret string) map[string]string {
+// signedWebhookURL is the URL registered with Pulse: webhookURL with
+// secretDigestParam set beside any query it already carries. No secret, no
+// parameter, so dropping the secret is itself drift the comparison repairs.
+// An unparseable URL is returned unchanged — parseRegisterConfig already
+// refused it, so this path is unreachable from a served source.
+func signedWebhookURL(webhookURL, signingSecret string) string {
 	if signingSecret == "" {
-		return headers
+		return webhookURL
 	}
-	out := make(map[string]string, len(headers)+1)
-	for k, v := range headers {
-		out[k] = v
+	u, err := url.Parse(webhookURL)
+	if err != nil {
+		return webhookURL
 	}
-	out[secretDigestHeader] = secretDigest(signingSecret)
-	return out
+	q := u.Query()
+	q.Set(secretDigestParam, secretDigest(signingSecret))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
-// comparable strips fields Pulse may not echo back on read — the signing
-// secret is sensitive and redacted — so idempotence comparison never flaps
-// on a field it can never actually observe. Headers are KEPT: they carry
-// secretDigestHeader, the field through which a rotated secret shows as
-// drift.
+// comparable reduces a webhook to what Pulse actually echoes back on read,
+// so idempotence comparison never flaps on a field it can never observe.
+//   - The signing secret is dropped: Pulse masks it.
+//   - Header values are replaced by Pulse's own mask: Pulse masks every
+//     value, keeping only the keys. A header added or removed in
+//     webhookHeaders still shows as drift.
+//   - The URL is kept verbatim: it carries secretDigestParam, the field
+//     through which a rotated secret shows as drift.
 func (c pulseWebhookConfig) comparable() pulseWebhookConfig {
 	c.ID = ""
 	c.SigningSecret = ""
+	if len(c.Headers) > 0 {
+		keys := make(map[string]string, len(c.Headers))
+		for k := range c.Headers {
+			keys[k] = redactedHeaderValue
+		}
+		c.Headers = keys
+	}
 	return c
 }
 
 // ensureWebhook creates or repairs this adapter's Generic webhook in Pulse.
-// Idempotent: a webhook already matching the desired body (sans secret,
-// but with the secret's digest header) is left alone; one that differs is
-// updated in place — matching signals/alertmanager's create-or-repair
-// posture for its own sender object.
+// Idempotent: a webhook already matching the desired body (sans secret and
+// header values, which Pulse masks, but with the secret's digest on the URL)
+// is left alone. One that differs is updated in place — matching
+// signals/alertmanager's create-or-repair posture for its own sender object.
 func (c *pulseClient) ensureWebhook(ctx context.Context, desired pulseWebhookConfig) error {
 	code, body, err := c.do(ctx, "GET", "/api/notifications/webhooks", nil)
 	if err != nil {

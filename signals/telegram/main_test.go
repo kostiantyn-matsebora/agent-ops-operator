@@ -190,7 +190,7 @@ func TestTitleTruncatesOnRuneBoundary(t *testing.T) {
 	if got := title(cyrillic); got != strings.Repeat("ж", 60)+"…" {
 		t.Fatalf("title = %q, want 60 whole runes + ellipsis", got)
 	}
-	if short := strings.Repeat("ж", 60); title(short) != short {
+	if title(strings.Repeat("ж", 60)) != strings.Repeat("ж", 60) {
 		t.Fatalf("a 60-rune title must pass through untruncated")
 	}
 }
