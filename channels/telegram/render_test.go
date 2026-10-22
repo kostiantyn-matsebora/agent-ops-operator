@@ -492,8 +492,8 @@ func TestOnlyQuoteErrorsLatchTheFeatureOff(t *testing.T) {
 //
 // A version bump would only mean something if the manager could serve the older
 // shape, which would mean the manager parsing — the thing this design removed.
-// Compatibility is `AgentProfile.spec.sharedOutputFormat`, which is off until an
-// install whose adapters understand the grammar turns it on.
+// Compatibility is `AgentProfile.spec.outputFormat`, a required field with no
+// default — a profile declares `none` until its adapters understand the grammar.
 func TestTheGrammarIsNotAWireVersion(t *testing.T) {
 	if ContractVersion != "2" {
 		t.Fatalf("contract moved to %q — parsing a body needs no new version", ContractVersion)
