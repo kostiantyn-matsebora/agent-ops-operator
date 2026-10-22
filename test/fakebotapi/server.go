@@ -243,6 +243,10 @@ func (s *Server) handleFail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method is required", http.StatusBadRequest)
 		return
 	}
+	if in.Mode != "429" && in.Mode != "5xx" {
+		http.Error(w, `mode must be "429" or "5xx"`, http.StatusBadRequest)
+		return
+	}
 	rule := failRule{Mode: in.Mode, RetryAfter: in.RetryAfter}
 	s.mu.Lock()
 	if in.Forever {

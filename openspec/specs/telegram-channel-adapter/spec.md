@@ -191,17 +191,27 @@ the corresponding forum topic through the Bot API (`closeForumTopic`) for the
 chat the Channel's config names, then completing the operation with an empty
 result.
 
-A Bot API failure SHALL be reported as the operation's error and SHALL
-NOT be retried by the adapter — the manager treats a failed `close-topic` as
-terminal.
+In-window backpressure on `closeForumTopic` SHALL be absorbed like any other
+call: a `429` carrying `retry_after`, and transient transport errors, are
+retried inside the operation's retry budget under the contract's backpressure
+rule.
+
+A definitive Bot API failure SHALL be reported as the operation's error. A
+COMPLETED operation SHALL NOT be re-attempted by the adapter — recovery is
+the manager's re-derivation, which the contract guarantees while the
+Conversation exists.
 
 #### Scenario: Forum topic is closed
 - **WHEN** the adapter receives a `close-topic` operation for thread id `9876`
 - **THEN** it calls `closeForumTopic` for that message thread and completes the operation with an empty result
 
+#### Scenario: Backpressure on a close is absorbed
+- **WHEN** `closeForumTopic` returns `429` with a stated `retry_after` inside the operation's budget
+- **THEN** the adapter waits and retries the call rather than completing the operation with an error
+
 #### Scenario: Bot API failure is reported, not retried
-- **WHEN** `closeForumTopic` returns an error
-- **THEN** the adapter completes the operation with that error and does not retry it
+- **WHEN** `closeForumTopic` fails for a reason retrying cannot fix
+- **THEN** the adapter completes the operation with that error and does not re-attempt it, and the manager re-derives the operation
 
 #### Scenario: Duplicate close is tolerated
 - **WHEN** the same `close-topic` operation id is delivered twice
@@ -492,9 +502,12 @@ region using the transport's own collapsed presentation.
 It parses the body itself. Nothing upstream has, and the tags reach it exactly as
 the agent wrote them.
 
-Chunking SHALL prefer BLOCK boundaries. Because the above-the-fold content is
-bounded by the manager, the FIRST chunk of a split message SHALL contain the
-title and the named sections — a reader who sees only one message still sees the
+Chunking SHALL prefer BLOCK boundaries. NO component bounds above-the-fold
+content, so the ADAPTER SHALL guarantee the fold order itself: above-the-fold
+content fills the leading chunks, and folded content never precedes any of it.
+
+When the title and the named sections fit one message, the FIRST chunk SHALL
+carry them all — a reader who sees only one message still sees the
 conclusion.
 
 A body with no recognized tag SHALL render exactly as today. That is the whole
@@ -512,9 +525,15 @@ the thread.
 
 #### Scenario: The conclusion leads the first chunk
 
-- **WHEN** a long answer must be split across several messages
+- **WHEN** a long answer must be split and its title and named sections fit one message
 - **THEN** the first message carries the title and the named sections, and the
   fold's content follows
+
+#### Scenario: Oversized above-the-fold content still leads
+
+- **WHEN** the title and the named sections alone exceed one message
+- **THEN** they fill consecutive leading messages in the agent's order, and no
+  folded content appears before the last of them
 
 #### Scenario: An unstructured message is unchanged
 
