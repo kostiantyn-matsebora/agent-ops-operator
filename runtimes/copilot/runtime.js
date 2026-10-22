@@ -315,7 +315,7 @@ async function attempt(c, unit, cfg, prompt, denials = []) {
   let status = 'succeeded', result = '', brief = '';
   try {
     const ev = await session.sendAndWait({ prompt }, RUN_TIMEOUT_MS);
-    const raw = (ev && ev.data && typeof ev.data.content === 'string' ? ev.data.content : state.lastText) || '';
+    const raw = (typeof ev?.data?.content === 'string' ? ev.data.content : state.lastText) || '';
     // Extracted BEFORE the 2000-char cap below: a brief written late in a
     // long answer must not be sliced away with the rest.
     const extracted = extractBrief(raw);
@@ -500,7 +500,9 @@ async function reportDone(unit, out) {
     }
     if (r.ok) return;
     if (r.status >= 400 && r.status < 500 && !TRANSIENT_4XX.has(r.status)) {
-      const text = await r.text().catch(() => '');
+      // The body is the control plane's text, not ours: strip control
+      // characters so it cannot forge a log line.
+      const text = (await r.text().catch(() => '')).replace(/[\x00-\x1f\x7f]+/g, ' ');
       console.error(`[runtime] work/done refused permanently (${r.status}): ${text} — not retrying, resuming polling`);
       return;
     }
@@ -516,6 +518,18 @@ async function reportDone(unit, out) {
 // visually beside the loop code they test.
 module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
+
+// A checkout the run cannot trust must fail the run, with a reason, never
+// proceed with whatever the workspace happened to hold from before.
+async function runUnit(unit) {
+  try {
+    await syncRepo();
+  } catch (e) {
+    console.error(`[runtime] sync: ${e.message}`);
+    return { status: 'failed', result: `repository checkout: ${e.message}` };
+  }
+  return runCopilot(unit);
+}
 
 async function runLoop() {
   console.log(`[runtime] copilot runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE} state=${SESSIONS_DIR}`);
@@ -533,16 +547,7 @@ async function runLoop() {
     const unit = await pollNextUnit();
     if (!unit) continue;
     lastWork = Date.now();
-    // A checkout the run cannot trust must fail the run, with a reason, never
-    // proceed with whatever the workspace happened to hold from before.
-    let out;
-    try {
-      await syncRepo();
-    } catch (e) {
-      console.error(`[runtime] sync: ${e.message}`);
-      out = { status: 'failed', result: `repository checkout: ${e.message}` };
-    }
-    if (!out) out = await runCopilot(unit);
+    const out = await runUnit(unit);
     lastWork = Date.now();
     await reportDone(unit, out);
   }

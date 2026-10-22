@@ -113,7 +113,7 @@ func markdownToHTML(md string) string {
 
 	out := escape(withoutFences)
 	out = codeRe.ReplaceAllStringFunc(out, func(m string) string {
-		return stash("<code>" + codeRe.FindStringSubmatch(m)[1] + "</code>")
+		return stash("<code>" + codeRe.FindStringSubmatch(m)[1] + codeClose)
 	})
 	out = boldRe.ReplaceAllString(out, "<b>$1</b>")
 	out = italicRe.ReplaceAllString(out, "$1<i>$2</i>")
@@ -475,7 +475,7 @@ func renderSignal(m Message) string {
 		for _, k := range keys {
 			parts = append(parts, escape(k)+"="+escape(m.Labels[k]))
 		}
-		b.WriteString("\n<code>" + strings.Join(parts, "  ") + "</code>")
+		b.WriteString("\n<code>" + strings.Join(parts, "  ") + codeClose)
 	}
 	if body := strings.TrimSpace(m.Body); body != "" {
 		b.WriteString("\n" + payloadBlock(body))
@@ -542,6 +542,9 @@ func splitHTML(s string) []string {
 }
 
 const quoteClose = "</blockquote>"
+
+// codeClose ends an inline code span in Telegram HTML.
+const codeClose = "</code>"
 
 // openQuote returns the opening tag still unclosed at the end of s, or "".
 //
@@ -701,7 +704,7 @@ func choiceFallbackLine(c Choice) string {
 	if label == "" {
 		label = c.Command
 	}
-	return "• " + escape(label) + ": <code>" + escape(c.Command) + "</code>"
+	return "• " + escape(label) + ": <code>" + escape(c.Command) + codeClose
 }
 
 // appendChoiceFallback folds the choices inlineKeyboard left out onto the

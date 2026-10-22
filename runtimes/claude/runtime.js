@@ -559,6 +559,21 @@ module.exports.pollNextUnit = pollNextUnit;
 module.exports.reportDone = reportDone;
 module.exports.isDefinitiveRejection = isDefinitiveRejection;
 
+// A sync failure here (a bad ref, an unreachable origin, a rejected
+// fetch/reset) must FAIL THIS RUN with that reason — proceeding to
+// runClaude anyway would run the agent against a missing or stale
+// checkout and report whatever confusion that produces, attributing
+// nothing to the real cause.
+async function runUnit(unit) {
+  try {
+    await syncRepo();
+    return await runClaude(unit);
+  } catch (e) {
+    console.error(`[runtime] sync: ${e.message}`);
+    return { status: 'failed', result: `workspace sync failed: ${e.message}` };
+  }
+}
+
 async function runLoop() {
   console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
   try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
@@ -574,19 +589,7 @@ async function runLoop() {
     const unit = await pollNextUnit();
     if (!unit) continue;
     lastWork = Date.now();
-    // A sync failure here (a bad ref, an unreachable origin, a rejected
-    // fetch/reset) must FAIL THIS RUN with that reason — proceeding to
-    // runClaude anyway would run the agent against a missing or stale
-    // checkout and report whatever confusion that produces, attributing
-    // nothing to the real cause.
-    let out;
-    try {
-      await syncRepo();
-      out = await runClaude(unit);
-    } catch (e) {
-      console.error(`[runtime] sync: ${e.message}`);
-      out = { status: 'failed', result: `workspace sync failed: ${e.message}` };
-    }
+    const out = await runUnit(unit);
     lastWork = Date.now();
     await reportDone(unit, out);
   }

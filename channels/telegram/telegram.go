@@ -158,11 +158,9 @@ func (t *Telegram) call(ctx context.Context, method string, newReq func() (*http
 		}
 		raw, status, netErr := t.do(req)
 		if netErr != nil {
-			if !withinBudget(deadline, transientBackoff) {
-				return nil, fmt.Errorf("telegram %s: %w (would exceed the claim budget)", method, netErr)
-			}
-			if !sleepCtx(ctx, transientBackoff) {
-				return nil, ctx.Err()
+			if err := pause(ctx, deadline, transientBackoff,
+				fmt.Errorf("telegram %s: %w (would exceed the claim budget)", method, netErr)); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -172,21 +170,19 @@ func (t *Telegram) call(ctx context.Context, method string, newReq func() (*http
 		// token, 400 missing method, 502 upstream dial failure), written as
 		// plain text by http.Error.
 		if decErr := json.Unmarshal(raw, &out); decErr != nil {
-			if status >= 500 {
-				// The gateway's own leg is down, not Telegram's answer to us —
-				// the same transient condition a dial error is.
-				if !withinBudget(deadline, transientBackoff) {
-					return nil, fmt.Errorf("telegram %s: gateway returned %d %s: %s (would exceed the claim budget)",
-						method, status, http.StatusText(status), strings.TrimSpace(string(raw)))
-				}
-				if !sleepCtx(ctx, transientBackoff) {
-					return nil, ctx.Err()
-				}
-				continue
+			rejection := fmt.Errorf("telegram %s: gateway returned %d %s: %s", method, status, http.StatusText(status), strings.TrimSpace(string(raw)))
+			if status < 500 {
+				// Name the status so it reads as an auth/gateway problem, not a
+				// cryptic JSON error.
+				return nil, rejection
 			}
-			// Name the status so it reads as an auth/gateway problem, not a
-			// cryptic JSON error.
-			return nil, fmt.Errorf("telegram %s: gateway returned %d %s: %s", method, status, http.StatusText(status), strings.TrimSpace(string(raw)))
+			// The gateway's own leg is down, not Telegram's answer to us —
+			// the same transient condition a dial error is.
+			if err := pause(ctx, deadline, transientBackoff,
+				fmt.Errorf("%w (would exceed the claim budget)", rejection)); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if out.OK {
 			return out.Result, nil
@@ -200,16 +196,26 @@ func (t *Telegram) call(ctx context.Context, method string, newReq func() (*http
 		if wait <= 0 {
 			return nil, fmt.Errorf("telegram %s: %s", method, out.Description)
 		}
-		if !withinBudget(deadline, wait) {
-			// Give the op back while the claim is still valid: the manager
-			// re-derives it, paced, rather than a second claimant duplicating it.
-			return nil, fmt.Errorf("telegram %s: %s (retry_after %ds would exceed the claim budget)",
-				method, out.Description, out.Parameters.RetryAfter)
-		}
-		if !sleepCtx(ctx, wait) {
-			return nil, ctx.Err()
+		// Out of budget: give the op back while the claim is still valid, so the
+		// manager re-derives it, paced, rather than a second claimant duplicating it.
+		if err := pause(ctx, deadline, wait,
+			fmt.Errorf("telegram %s: %s (retry_after %ds would exceed the claim budget)",
+				method, out.Description, out.Parameters.RetryAfter)); err != nil {
+			return nil, err
 		}
 	}
+}
+
+// pause waits d, or returns why it must not: overBudget when the claim budget
+// cannot afford the wait, the context's error when it ends first.
+func pause(ctx context.Context, deadline time.Time, d time.Duration, overBudget error) error {
+	if !withinBudget(deadline, d) {
+		return overBudget
+	}
+	if !sleepCtx(ctx, d) {
+		return ctx.Err()
+	}
+	return nil
 }
 
 // do issues one request and reads its body, reporting the status code
@@ -436,18 +442,22 @@ type tgUpdate struct {
 // inbound as-is: dispatchCallback reverses it back to the command it stands
 // for before pushing anything to the manager.
 type tgCallbackQuery struct {
-	ID   string `json:"id"`
-	From *struct {
-		ID int64 `json:"id"`
-	} `json:"from"`
-	Message *struct {
-		Chat *struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		IsTopicMessage  bool  `json:"is_topic_message"`
-		MessageThreadID int64 `json:"message_thread_id"`
-	} `json:"message"`
-	Data string `json:"data"`
+	ID      string             `json:"id"`
+	From    *tgCallbackID      `json:"from"`
+	Message *tgCallbackMessage `json:"message"`
+	Data    string             `json:"data"`
+}
+
+// tgCallbackID is a user or chat reference, of which only the id is read.
+type tgCallbackID struct {
+	ID int64 `json:"id"`
+}
+
+// tgCallbackMessage is the message a pressed button was attached to.
+type tgCallbackMessage struct {
+	Chat            *tgCallbackID `json:"chat"`
+	IsTopicMessage  bool          `json:"is_topic_message"`
+	MessageThreadID int64         `json:"message_thread_id"`
 }
 
 // SendDocument uploads text as a file with a caption, for payloads too large to

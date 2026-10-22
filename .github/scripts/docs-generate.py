@@ -991,8 +991,14 @@ def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
     open_m = re.search(rf"(?m)^type {re.escape(struct)} struct \{{\s*$", text)
     if not open_m:
         raise SystemExit(f"{path}: no `type {struct} struct {{` declaration")
+    # Braces inside a comment or a backtick tag are prose, not structure.
+    skip_re = re.compile(r"//[^\n]*|/\*.*?\*/|`[^`]*`", re.S)
     depth, i = 1, open_m.end()
     while depth and i < len(text):
+        skipped = skip_re.match(text, i)
+        if skipped:
+            i = skipped.end()
+            continue
         if text[i] == "{":
             depth += 1
         elif text[i] == "}":
