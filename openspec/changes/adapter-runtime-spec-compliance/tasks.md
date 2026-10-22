@@ -164,7 +164,9 @@ Reference docs:
 - [x] 10.2 `docs/contracts/runtime.md`: numbered conformance checklist,
   the generated schema tables under their marker, the startup-crash
   ruling, the `/work/done` definitive-rejection rows, and the version
-  moved. Moved to 1.1.0.
+  moved. Moved to 2.0.0 (BREAKING) — the maintainer's call on the review
+  thread: API-10/11/12 constrain a `/work/done` 4xx response 1.0.0 left
+  unconstrained, so a runtime conformant with 1.0.0 can stop conforming.
 - [x] 10.3 the three runtime pages' spec-version claims match the pages'
   actual conformance after the fixes.
 - [x] 10.4 `docs/CHANGELOG.md` entry for the adopter-observable behaviour
