@@ -152,11 +152,16 @@ The documented migration SHALL sequence shutdown of the previously-polling adapt
 - **THEN** the router resumes from the offset the previous adapter persisted, rather than re-reading old updates
 
 ### Requirement: Chart deploys the adapter opt-in
-The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR instead of a bespoke Deployment template. The chart SHALL contain no channel-type-specific workload templates.
+The chart SHALL ship the Telegram adapter as a `ChannelAdapter` CR instead of a
+bespoke Deployment template. The chart SHALL contain no channel-type-specific
+workload templates.
 
-The CR SHALL be gated on the Telegram bundle's `telegram.enabled` value (default **false**), the one gate the whole bundle renders under. The retired flat `telegramAdapter.enabled` value gates nothing.
+The CR SHALL be gated on the Telegram bundle's `telegram.enabled` value
+(default **false**), the one gate the whole bundle renders under. The retired
+flat `telegramAdapter.enabled` value gates nothing.
 
-The `ChannelAdapter` reconciler owns the workload, auth injection, and credential projection. The chart's remaining role is the CRD and the gated CR.
+The `ChannelAdapter` reconciler owns the workload, auth injection, and
+credential projection. The chart's remaining role is the CRD and the gated CR.
 
 #### Scenario: Disabled by default
 - **WHEN** the chart renders with default values
@@ -197,9 +202,9 @@ retried inside the operation's retry budget under the contract's backpressure
 rule.
 
 A definitive Bot API failure SHALL be reported as the operation's error. A
-COMPLETED operation SHALL NOT be re-attempted by the adapter — recovery is
-the manager's re-derivation, which the contract guarantees while the
-Conversation exists.
+COMPLETED operation SHALL NOT be re-attempted by the adapter — recovery is the
+manager's re-derivation, which the contract guarantees while the Conversation
+exists.
 
 #### Scenario: Forum topic is closed
 - **WHEN** the adapter receives a `close-topic` operation for thread id `9876`
@@ -508,8 +513,7 @@ content, so the ADAPTER SHALL guarantee the fold order itself: above-the-fold
 content fills the leading chunks, and folded content never precedes any of it.
 
 When the title and the named sections fit one message, the FIRST chunk SHALL
-carry them all — a reader who sees only one message still sees the
-conclusion.
+carry them all — a reader who sees only one message still sees the conclusion.
 
 A body with no recognized tag SHALL render exactly as today. That is the whole
 backward-compatibility story on this surface: untagged prose parses to one block
