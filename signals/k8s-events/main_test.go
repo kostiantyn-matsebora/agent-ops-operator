@@ -486,6 +486,39 @@ func TestRunDrainSweepEscalatesOnItsOwnTimer(t *testing.T) {
 	})
 }
 
+// runDrainSweep is also what keeps mute visibility alive on a lane that has
+// gone quiet (k8s-event-suppression spec: mute visibility survives a lane
+// going quiet). sweepMute's own tests drive it directly, so this pins the
+// wiring: with no event delivered at all, the timer alone reports an open
+// window on the source's Ready condition. The window carries no `times`, so
+// it is open whatever the wall clock reads and the test needs no fake clock.
+func TestRunDrainSweepReportsAMuteWindowOnItsOwnTimer(t *testing.T) {
+	rs, err := compileRules(nil, Route{
+		TimeIntervals:     []TimeInterval{{Name: "always", Location: "UTC"}},
+		MuteTimeIntervals: []MuteTimeInterval{{Name: "always"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newFakeManager()
+	a := newTestAdapter(mgr.start(t), nil, "src", &filter{rules: rs})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.runDrainSweep(ctx)
+
+	// The first sweep runs before the loop's first sleep, well inside
+	// waitFor's budget — no event is ever delivered.
+	waitFor(t, func() bool {
+		for _, st := range mgr.allStatuses() {
+			if st.Source == "src" && st.Reason == "Muted" && st.Ready && strings.Contains(st.Message, `"always"`) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 // runDrainSweep must stop once its context is cancelled, exactly like every
 // other background loop this adapter runs.
 func TestRunDrainSweepStopsOnCancel(t *testing.T) {
