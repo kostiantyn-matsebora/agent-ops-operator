@@ -999,6 +999,42 @@ def _go_struct_body(path: pathlib.Path, text: str, struct: str) -> str:
     return text[open_m.end():i - 1]
 
 
+def _go_field_row(path: pathlib.Path, struct: str, line: str, comment: list[str]) -> dict | None:
+    """One field line's `field_table()` row, or `None` when it is never on
+    the wire (untagged, or `json:"-"`)."""
+    m = GO_FIELD_RE.match(line)
+    if not m:
+        raise SystemExit(
+            f"{path}: `{struct}` has a field line this generator cannot "
+            f"parse -- scope is one field per line, a single-line struct "
+            f"tag: {line!r}"
+        )
+    name, gotype, tag = m.groups()
+    jm = re.search(r'json:"([^"]*)"', tag)
+    if not jm:
+        return None  # untagged -- never on the wire
+    tag_name, *opts = jm.group(1).split(",")
+    if tag_name == "-":
+        return None  # explicitly off the wire
+    json_name = tag_name or name  # an empty tag name keeps the Go name
+    desc = " ".join(comment)
+    for lead in (f"{name} is ", f"{name} are "):
+        if desc.startswith(lead):
+            desc = desc[len(lead):]
+            break
+    desc = one_line(first_sentence(desc)) if desc else ""
+    if desc:
+        desc = desc[0].upper() + desc[1:]
+        if not desc.endswith((".", "!", "?")):
+            desc += "."
+    return {
+        "path": json_name,
+        "type": go_type(gotype),
+        "required": "omitempty" not in opts,
+        "description": desc,
+    }
+
+
 def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
     """Every json-tagged field of one Go struct, as field_table() rows.
 
@@ -1022,39 +1058,9 @@ def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
         if stripped.startswith("//"):
             comment.append(stripped.removeprefix("//").strip())
             continue
-        m = GO_FIELD_RE.match(line)
-        if not m:
-            raise SystemExit(
-                f"{path}: `{struct}` has a field line this generator cannot "
-                f"parse -- scope is one field per line, a single-line struct "
-                f"tag: {line!r}"
-            )
-        name, gotype, tag = m.groups()
-        jm = re.search(r'json:"([^"]*)"', tag)
-        if not jm:
-            comment = []  # untagged -- never on the wire
-            continue
-        tag_name, *opts = jm.group(1).split(",")
-        if tag_name == "-":
-            comment = []  # explicitly off the wire
-            continue
-        json_name = tag_name or name  # an empty tag name keeps the Go name
-        desc = " ".join(comment)
-        for lead in (f"{name} is ", f"{name} are "):
-            if desc.startswith(lead):
-                desc = desc[len(lead):]
-                break
-        desc = one_line(first_sentence(desc)) if desc else ""
-        if desc:
-            desc = desc[0].upper() + desc[1:]
-            if not desc.endswith((".", "!", "?")):
-                desc += "."
-        rows.append({
-            "path": json_name,
-            "type": go_type(gotype),
-            "required": "omitempty" not in opts,
-            "description": desc,
-        })
+        row = _go_field_row(path, struct, line, comment)
+        if row is not None:
+            rows.append(row)
         comment = []
     return rows
 
