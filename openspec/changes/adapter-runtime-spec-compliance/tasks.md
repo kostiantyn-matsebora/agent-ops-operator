@@ -153,14 +153,12 @@ the behaviour, design.md the approach.
 Reference docs:
 
 - [x] 10.1 `docs/contracts/channel-adapter.md`: per-operation retry-budget
-  wording, the published input id shape, ADA-11.1 citing
-  `sharedOutputFormat` instead of the retired profile field (S2), and the
-  version moved per its own versioning rule. Moved to 1.3.0. **S2 note:**
-  `sharedOutputFormat` never existed in shipped code — the field has
-  always been `AgentProfile.spec.outputFormat`, which ADA-11.1 already
-  cited correctly. The stale name in
-  `openspec/specs/adapter-rendered-messages/spec.md` is corrected in this
-  change.
+  wording, the published input id shape, and the version moved per its own
+  versioning rule. Moved to 1.3.0. **S2 note:** ADA-11.1 already cited
+  `AgentProfile.spec.outputFormat` correctly and needed no change —
+  `sharedOutputFormat` never existed in shipped code. The stale name was
+  only in `openspec/specs/adapter-rendered-messages/spec.md`, corrected in
+  this change.
 - [x] 10.2 `docs/contracts/runtime.md`: numbered conformance checklist,
   the generated schema tables under their marker, the startup-crash
   ruling, the `/work/done` definitive-rejection rows, and the version
