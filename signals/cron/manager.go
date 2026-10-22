@@ -14,8 +14,8 @@ import (
 // Manager is a client for the operator's signal adapter contract (/signal/*
 // on the manager's API port, bearer-token auth). Adapters need no Kubernetes
 // access — source config, cursor state, and status conditions all go through
-// this API; normalized signals go in through /signal/inbound and the manager
-// applies grouping/cooldown/recurrence itself.
+// this API; normalized signals go in through /signal/inbound, and everything
+// past normalization is the manager's.
 type Manager struct {
 	BaseURL string
 	Token   string
@@ -43,7 +43,7 @@ type Signal struct {
 	Labels       map[string]string `json:"labels,omitempty"`
 	Title        string            `json:"title,omitempty"`
 	Payload      string            `json:"payload,omitempty"`
-	Kind         string            `json:"kind,omitempty"` // "alert" | "job"
+	Kind         string            `json:"kind,omitempty"` // lane: "alert" (absent), "job", "task" or "chat" — this adapter sends "job"
 }
 
 func (m *Manager) do(ctx context.Context, method, path string, in, out any) error {

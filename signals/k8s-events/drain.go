@@ -9,8 +9,8 @@ import (
 // Drain awareness: the fourth suppression axis. While a node is deliberately
 // being taken out of service, the events its workloads emit describe the
 // drain and not a fault — a rolling reboot cordons a node, every pod on it
-// goes NodeNotReady, and grouping by workload turns one planned reboot into
-// one conversation per DaemonSet. See proposal.md and design.md.
+// goes NodeNotReady, and keying the id by workload turns one planned reboot
+// into one conversation per DaemonSet. See proposal.md and design.md.
 //
 // This is a STATE axis, not a cause-and-effect one: inhibition needs a cause
 // EVENT and expires on a TTL, but a cordon is observable ~30s before its first

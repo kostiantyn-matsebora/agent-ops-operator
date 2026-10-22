@@ -269,7 +269,7 @@ func TestDeliverSuppressesEventsOnADrainingNode(t *testing.T) {
 
 	ev := evt("Warning", "prod", "Pod", "cilium-abc", "NodeNotReady")
 	ev.LastTimestamp = "2026-08-08T13:00:00Z"
-	a.deliver(context.Background(), []Event{ev}, false)
+	a.deliver(context.Background(), []Event{ev}, pass{})
 
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("an event on a draining node must not be emitted: %+v", got)
@@ -304,7 +304,7 @@ func TestDrainSuppressionRunsBeforeInhibitionAndNeverDoubleCounts(t *testing.T) 
 
 	cause := evt("Warning", "prod", "Pod", "cilium-abc", "NodeNotReady")
 	cause.LastTimestamp = "2026-08-08T13:00:00Z"
-	a.deliver(context.Background(), []Event{cause}, false)
+	a.deliver(context.Background(), []Event{cause}, pass{})
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("the cause event must be drain-suppressed, not emitted: %+v", got)
 	}
@@ -315,7 +315,7 @@ func TestDrainSuppressionRunsBeforeInhibitionAndNeverDoubleCounts(t *testing.T) 
 	a.cache.put(&objectInfo{Kind: "Node", Name: "node-a"})
 	target := evt("Warning", "prod", "Pod", "cilium-abc", "Unhealthy")
 	target.LastTimestamp = "2026-08-08T13:05:00Z"
-	a.deliver(context.Background(), []Event{target}, false)
+	a.deliver(context.Background(), []Event{target}, pass{})
 
 	got := mgr.signalsFor("src")
 	if len(got) != 1 || got[0].Labels["alertname"] != "Unhealthy" {
@@ -486,6 +486,39 @@ func TestRunDrainSweepEscalatesOnItsOwnTimer(t *testing.T) {
 	})
 }
 
+// runDrainSweep is also what keeps mute visibility alive on a lane that has
+// gone quiet (k8s-event-suppression spec: mute visibility survives a lane
+// going quiet). sweepMute's own tests drive it directly, so this pins the
+// wiring: with no event delivered at all, the timer alone reports an open
+// window on the source's Ready condition. The window carries no `times`, so
+// it is open whatever the wall clock reads and the test needs no fake clock.
+func TestRunDrainSweepReportsAMuteWindowOnItsOwnTimer(t *testing.T) {
+	rs, err := compileRules(nil, Route{
+		TimeIntervals:     []TimeInterval{{Name: "always", Location: "UTC"}},
+		MuteTimeIntervals: []MuteTimeInterval{{Name: "always"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newFakeManager()
+	a := newTestAdapter(mgr.start(t), nil, "src", &filter{rules: rs})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.runDrainSweep(ctx)
+
+	// The first sweep runs before the loop's first sleep, well inside
+	// waitFor's budget — no event is ever delivered.
+	waitFor(t, func() bool {
+		for _, st := range mgr.allStatuses() {
+			if st.Source == "src" && st.Reason == "Muted" && st.Ready && strings.Contains(st.Message, `"always"`) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 // runDrainSweep must stop once its context is cancelled, exactly like every
 // other background loop this adapter runs.
 func TestRunDrainSweepStopsOnCancel(t *testing.T) {
@@ -503,5 +536,69 @@ func TestRunDrainSweepStopsOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("runDrainSweep must stop once its context is cancelled")
+	}
+}
+
+// The fatal remediation must name a field the current SignalAdapter CRD
+// carries: the token mounts only for the account spec.serviceAccountName
+// references. Naming a deleted field is a remediation nobody can apply.
+func TestKubeAccessFailureNamesServiceAccountName(t *testing.T) {
+	msg := kubeAccessFailure("k8s-events", errTest("token missing"))
+	for _, want := range []string{
+		"token missing",
+		"SignalAdapter k8s-events spec.serviceAccountName",
+		"agentops-signal-k8s-events",
+		"events get/list/watch",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("remediation must contain %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "kubernetesAccess") {
+		t.Errorf("remediation names a field the CRD no longer carries:\n%s", msg)
+	}
+}
+
+type errTest string
+
+func (e errTest) Error() string { return string(e) }
+
+// A rule that can never match is configuration doing less than it says: the
+// warning compileRules already detects must reach the source's Ready report.
+func TestShadowedRuleWarningIsReportedOnReady(t *testing.T) {
+	cfg := `{"rules":[{"for":"3m"},{"matchers":["reason=\"BackOff\""],"for":"5m"}]}`
+	mgr := newFakeManager(SourceInfo{Name: "events", Config: json.RawMessage(cfg)})
+	a := newTestAdapter(mgr.start(t), nil, "unused", mustFilter(t, `{}`))
+	a.sources = map[string]*servedSource{}
+
+	a.refreshSources(context.Background())
+
+	waitFor(t, func() bool {
+		for _, st := range mgr.allStatuses() {
+			if st.Source == "events" && st.Ready && st.Reason == "AdapterReady" &&
+				strings.Contains(st.Message, "warning: rules[0] is a catch-all") &&
+				strings.Contains(st.Message, "can never match") {
+				return true
+			}
+		}
+		return false
+	})
+	if _, served := a.sources["events"]; !served {
+		t.Fatal("a shadowed rule warns — it must not stop the source being served")
+	}
+}
+
+// A well-ordered rule set adds nothing to the Ready report.
+func TestNoRuleWarningLeavesTheReadyMessagePlain(t *testing.T) {
+	cfg := `{"rules":[{"matchers":["reason=\"BackOff\""],"for":"5m"},{"for":"3m"}]}`
+	mgr := newFakeManager(SourceInfo{Name: "events", Config: json.RawMessage(cfg)})
+	a := newTestAdapter(mgr.start(t), nil, "unused", mustFilter(t, `{}`))
+	a.sources = map[string]*servedSource{}
+
+	a.refreshSources(context.Background())
+
+	waitFor(t, func() bool { return len(mgr.allStatuses()) == 1 })
+	if st := mgr.allStatuses()[0]; strings.Contains(st.Message, "warning") {
+		t.Fatalf("no warning was detected, none may be reported: %+v", st)
 	}
 }

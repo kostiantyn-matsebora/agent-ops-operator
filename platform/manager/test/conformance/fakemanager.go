@@ -14,7 +14,8 @@
 // No cluster, no network beyond loopback, no credentials. Adapters that reach a
 // third party are pointed at a local double through their configured endpoint:
 // the fake Bot API (test/fakebotapi) for Telegram, a fake API server for the
-// console and k8s-events, a fake Home Assistant websocket for signal-ha.
+// console and k8s-events, a fake Home Assistant websocket for signal-ha, a
+// fake Pulse REST API for signal-pulse's webhook registration.
 package conformance
 
 import (

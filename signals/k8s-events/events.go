@@ -136,8 +136,8 @@ func (f *filter) Scopes() []string {
 // objects for a recurring problem, pod names churn every rollout, and a
 // workload can fail for several reasons across its lifetime. Keyed on the
 // WORKLOAD alone, every failure of one workload — whichever reason, however
-// many pods and rollouts — correlates to one conversation. This id IS the
-// grouping decision; the manager only equality-matches it.
+// many pods and rollouts — correlates to one conversation. Minting this id IS
+// the correlation decision; the manager only equality-matches it.
 func normalize(source string, ev *Event, enr enrichment) Signal {
 	ns := ev.Namespace()
 	kind, name := ev.InvolvedObject.Kind, ev.InvolvedObject.Name

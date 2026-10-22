@@ -273,7 +273,7 @@ nothing**: no RBAC, no network policy and no credential follows from it.
 
 ## 7. Declare a SignalSource, and claim it
 
-<!-- generated: template kind=SignalSource name=my-source fields=config,cooldownHours comments=off -->
+<!-- generated: template kind=SignalSource name=my-source fields=config,cooldownHours,attributeFilters,logFiltered comments=off -->
 ```yaml
 apiVersion: agentops.dev/v1alpha1
 kind: SignalSource
@@ -283,12 +283,50 @@ spec:
   adapter: <adapter>
   config: {}
   cooldownHours: 6
+  attributeFilters:
+  - key: <key>
+    operator: In   # In | NotIn | Exists | DoesNotExist
+  logFiltered: false
 ```
 <!-- /generated -->
 
 `cooldownHours` is the one knob: how long a repeated `initiationId` is
 treated as a re-send rather than a re-notification. Size it to your own
 re-notification policy if the default of 6 does not fit.
+
+### Filter which signals this source admits
+
+`attributeFilters` narrows which signals route at all — the same
+`key`/`operator`/`values` shape as a Kubernetes `matchExpressions` entry,
+evaluated against the labels you normalized the signal with (step 2).
+
+```yaml
+spec:
+  attributeFilters:
+  - key: team
+    operator: In
+    values: [payments, billing]
+```
+
+A signal must satisfy every requirement to be admitted. A failing signal is
+dropped before cooldown is spent and before any pipeline sees it.
+
+This needs no adapter change. It is narrower than filtering upstream of the
+adapter. Leave `attributeFilters` empty or unset to admit everything, exactly
+as before this field existed.
+
+| Operator | Tests |
+|---|---|
+| `In` / `NotIn` | `values` against the label's value |
+| `Exists` / `DoesNotExist` | only whether the key is present — no `values` |
+
+An unknown operator is rejected when you apply the CR, not silently ignored
+at ingest.
+
+A filtered-out signal still shows up as a `signal.dropped` activity event by
+default, so an over-narrow filter is diagnosable rather than silently eating
+signals. Set `logFiltered: false` once you trust the filter, to stop
+recording drops from a source you expect to be noisy.
 
 Then list that source on a Ready Pipeline's `signalSourceRefs`. Until you do,
 `Wired=False` (`MGR-4`) and every signal you push is dropped.
@@ -318,7 +356,7 @@ signals land.
    dependency-free Go with a five-field cron parser and restart-safe cursors.
    It conforms to the [signal adapter
    specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-   2.0.0.
+   2.2.0.
 3. **Compare a different transport** —
    [`signals/alertmanager`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/alertmanager/)
    receives webhooks,

@@ -306,7 +306,7 @@ func (rs *ruleSet) Match(labels map[string]string) (compiledRule, bool) {
 // own labels plus `message` — the log record's text — as a MATCH-ONLY alias.
 //
 // The alias is never emitted. A message is free text with unbounded
-// cardinality, so a label carrying it would key a fingerprint on the exact
+// cardinality, so a label carrying it would key correlation on the exact
 // wording and open a fresh conversation for every variation. But rules must be
 // able to read it: Home Assistant records carry no `reason` field, so level and
 // logger alone cannot tell "failed to set up, will retry" apart from "invalid

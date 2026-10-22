@@ -40,6 +40,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -157,6 +158,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %q", sanitizeLogText(err.Error()))
 		return
 	}
+	a.pruneReported(infos)
 	next := map[string]sourceState{}
 	for _, info := range infos {
 		secret, strategy := a.reconcileRegistration(ctx, info)
@@ -165,6 +167,25 @@ func (a *adapter) refreshSources(ctx context.Context) {
 	a.mu.Lock()
 	a.sources = next
 	a.mu.Unlock()
+}
+
+// pruneReported drops the last-reported status of every source the manager no
+// longer serves, mirroring signals/cron's. Without it a deleted source's entry
+// outlives the object, so a recreation under the same name reaching the same
+// reason and message would match the stale entry and never get its Ready
+// condition — and the map would grow with every source ever seen.
+func (a *adapter) pruneReported(infos []SourceInfo) {
+	served := make(map[string]struct{}, len(infos))
+	for _, info := range infos {
+		served[info.Name] = struct{}{}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for name := range a.reported {
+		if _, ok := served[name]; !ok {
+			delete(a.reported, name)
+		}
+	}
 }
 
 // served reports whether a source name is currently listed by the manager,
@@ -230,7 +251,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	signingSecret, correlationStrategy, served := a.served(name)
 	if !served {
 		// a retried Pulse delivery covers the source-poll lag
-		writeJSON(w, 404, map[string]string{"error": "unknown or unserved source"})
+		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown or unserved source %q", name)})
 		return
 	}
 
@@ -276,7 +297,8 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // "alert" (firing) events produce one — "resolved" produces none, so Pulse
 // sees a 2xx and does not retry, but nothing is pushed (pulse-signal-adapter
 // spec, "Firing alerts normalize into the signal contract, resolved alerts
-// do not"). No grouping/dedup here — the manager owns that.
+// do not"). Correlation is minted here, as the initiationId; cooldown,
+// routing and recurrence are the manager's.
 func normalize(e pulseEvent, strategy string) []Signal {
 	if e.Event != "alert" {
 		return nil

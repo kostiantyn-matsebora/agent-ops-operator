@@ -45,7 +45,7 @@ func TestFirstMatchWins(t *testing.T) {
 }
 
 // `message` is match-only: rules can read the record's text, and the text never
-// becomes a label (which would key grouping on the exact wording).
+// becomes a label (which would key correlation on the exact wording).
 func TestMessageIsMatchOnly(t *testing.T) {
 	rs, err := compileRules([]Rule{
 		{Matchers: []string{`message=~".*Config entry .* will retry.*"`}, For: "10m"},

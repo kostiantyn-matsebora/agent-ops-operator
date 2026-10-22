@@ -75,7 +75,8 @@ var sensorFaultState = map[string]string{
 
 // surfaceRecord shapes one condition as a record. id is the condition's
 // identity within its surface and becomes the source-location slot, so
-// Key() — name@id — is the fingerprint's tail and the standing set's key.
+// Key() — name@id — is the zero-dwell initiationId's tail and the standing
+// set's key.
 func surfaceRecord(name, id, surface, integration, level, message string, at time.Time, extra map[string]any) logRecord {
 	return logRecord{
 		Name:        name,

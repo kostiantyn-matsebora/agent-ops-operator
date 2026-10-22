@@ -31,6 +31,9 @@ type fakeSourceServer struct {
 	mu       sync.Mutex
 	sources  []SourceInfo
 	statuses []map[string]any
+	// failStatus makes every status post answer 503 (still recorded), so a
+	// test can pin what the adapter does with a rejected report.
+	failStatus bool
 }
 
 func (f *fakeSourceServer) handler() http.Handler {
@@ -47,10 +50,21 @@ func (f *fakeSourceServer) handler() http.Handler {
 		body["name"] = r.PathValue("name")
 		f.mu.Lock()
 		f.statuses = append(f.statuses, body)
+		fail := f.failStatus
 		f.mu.Unlock()
+		if fail {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
+}
+
+func (f *fakeSourceServer) setFailStatus(fail bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failStatus = fail
 }
 
 func (f *fakeSourceServer) set(sources []SourceInfo) {
@@ -178,6 +192,69 @@ func TestRefreshSourcesRecoversAfterAFix(t *testing.T) {
 	}
 }
 
+// TestRefreshSourcesReReportsRecreatedSource pins the reported-map prune: a
+// source deleted and recreated under the same name with the identical invalid
+// config must report Ready=False again, not match the deleted object's stale
+// entry and stay silent.
+func TestRefreshSourcesReReportsRecreatedSource(t *testing.T) {
+	f := &fakeSourceServer{}
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	invalid := SourceInfo{Name: "s", Config: rawConfig(t, sourceConfig{Channel: "c"})}
+	f.set([]SourceInfo{invalid})
+
+	a := &adapter{mgr: NewManager(srv.URL, "tok"), sourceType: "telegram",
+		sources: map[string]servedSource{}, reported: map[string]string{}}
+	a.refreshSources(context.Background())
+
+	f.set(nil) // deleted
+	a.refreshSources(context.Background())
+	if len(a.reported) != 0 {
+		t.Fatalf("reported = %v, want the deleted source's entry pruned", a.reported)
+	}
+
+	f.set([]SourceInfo{invalid}) // recreated, identical config
+	a.refreshSources(context.Background())
+	statuses := f.statusesFor("s")
+	if len(statuses) != 2 {
+		t.Fatalf("statuses = %v, want the recreated source to re-report", statuses)
+	}
+	for _, s := range statuses {
+		if s["ready"] != false || s["reason"] != "InvalidConfig" {
+			t.Fatalf("statuses = %v, want two Ready=False InvalidConfig reports", statuses)
+		}
+	}
+}
+
+// TestRefreshSourcesRetriesAFailedStatusReport pins reportOnce: a status post
+// the manager rejects is not remembered as sent, so the next refresh posts it
+// again rather than leaving the source's Ready condition unset until its
+// config changes.
+func TestRefreshSourcesRetriesAFailedStatusReport(t *testing.T) {
+	f := &fakeSourceServer{failStatus: true}
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	f.set([]SourceInfo{{Name: "s", Config: rawConfig(t, sourceConfig{ChatID: "1", Channel: "c"})}})
+
+	a := &adapter{mgr: NewManager(srv.URL, "tok"), sourceType: "telegram",
+		sources: map[string]servedSource{}, reported: map[string]string{}}
+	a.refreshSources(context.Background()) // post rejected
+	if _, ok := a.reported["s"]; ok {
+		t.Fatalf("reported = %v, want a rejected post left unrecorded", a.reported)
+	}
+	if _, ok := a.sources["s"]; !ok {
+		t.Fatal("a rejected status post must not stop the valid source being served")
+	}
+
+	f.setFailStatus(false)
+	a.refreshSources(context.Background()) // retried, accepted
+	a.refreshSources(context.Background()) // accepted state unchanged, no post
+	statuses := f.statusesFor("s")
+	if len(statuses) != 2 || statuses[1]["ready"] != true || statuses[1]["reason"] != "AdapterReady" {
+		t.Fatalf("statuses = %v, want the rejected Ready post retried exactly once", statuses)
+	}
+}
+
 // TestRefreshSourcesLeavesServedSourcesUntouchedOnAFailedList: the manager
 // being briefly unreachable must not clear what is currently served -- a
 // transient outage must not drop live chat sources.
@@ -186,11 +263,16 @@ func TestRefreshSourcesLeavesServedSourcesUntouchedOnAFailedList(t *testing.T) {
 		mgr:        NewManager("http://127.0.0.1:1", "tok"),
 		sourceType: "telegram",
 		sources:    map[string]servedSource{"kept": {cfg: sourceConfig{ChatID: "1", Channel: "c"}}},
-		reported:   map[string]string{},
+		reported:   map[string]string{"kept": reportedReady},
 	}
 	a.refreshSources(context.Background())
 	if _, ok := a.sources["kept"]; !ok {
 		t.Fatal("a failed list call cleared the served set")
+	}
+	// A failed list is no evidence of deletion: pruning on it would re-post
+	// every source's status after each manager blip.
+	if a.reported["kept"] != reportedReady {
+		t.Fatalf("reported = %v, want it to survive a failed list", a.reported)
 	}
 }
 

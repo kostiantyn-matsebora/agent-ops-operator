@@ -21,6 +21,10 @@ way to act: an operator-state annotation.
 
 ![A firing Pulse alert reaches two routes through their own MCP pairs: one that only investigates, one that may also record a maintenance window or a criticality tag.]({{ '/assets/img/integrations/pulse-light.svg' | relative_url }}){: .ao-diagram}
 
+`signals/pulse` conforms to the [signal adapter
+specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
+2.2.0.
+
 ## What starts work
 
 A firing Pulse alert, posted to the bundle's own webhook. One conversation
