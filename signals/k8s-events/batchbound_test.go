@@ -23,7 +23,6 @@ import (
 // it posts are the adapter's choice. That nothing is lost and that the
 // remainder is reached in a bounded number of passes are not.
 func TestRelistBatchBoundNeverLosesATiedRun(t *testing.T) {
-	const passes = 3
 	for _, tc := range []struct {
 		name string
 		// distinct events one second apart, then a run sharing the last second
@@ -33,41 +32,51 @@ func TestRelistBatchBoundNeverLosesATiedRun(t *testing.T) {
 		{"a tied run longer than the bound", 0, 2*maxBatchPerSrc + 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mgr := newFakeManager()
-			a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
-			// the emit cap is not under test here
-			a.cap = newEmitCap(passes * (tc.distinct + tc.run))
-			base := mustTime(t, "2026-08-08T12:00:00Z")
-			a.sources["src"].cursor = base
-
-			var events []Event
-			name := func(k int) string { return fmt.Sprintf("pod-%03d", k) }
-			for k := 1; k <= tc.distinct; k++ {
-				e := evt("Warning", "prod", "Pod", name(k), "BackOff")
-				e.LastTimestamp = base.Add(time.Duration(k) * time.Second).Format(time.RFC3339)
-				events = append(events, e)
-			}
-			tied := base.Add(time.Duration(tc.distinct+1) * time.Second).Format(time.RFC3339)
-			for k := tc.distinct + 1; k <= tc.distinct+tc.run; k++ {
-				e := evt("Warning", "prod", "Pod", name(k), "BackOff")
-				e.LastTimestamp = tied
-				events = append(events, e)
-			}
-
-			for i := 0; i < passes; i++ {
-				a.deliver(context.Background(), events, pass{list: true})
-			}
-
-			seen := map[string]bool{}
-			for _, s := range mgr.signalsFor("src") {
-				seen[s.Labels["name"]] = true
-			}
-			for k := 1; k <= len(events); k++ {
-				if !seen[name(k)] {
-					t.Fatalf("%s was never emitted in %d relist passes — the bound lost it (%d of %d emitted)",
-						name(k), passes, len(seen), len(events))
-				}
-			}
+			assertTiedRunNeverLost(t, tc.distinct, tc.run)
 		})
+	}
+}
+
+// assertTiedRunNeverLost is TestRelistBatchBoundNeverLosesATiedRun's body,
+// extracted to a named top-level function — a t.Run closure does not lower
+// Sonar's go:S3776 cognitive-complexity count, which charges the enclosing
+// function instead (.claude/rules/gotchas.md).
+func assertTiedRunNeverLost(t *testing.T, distinct, run int) {
+	t.Helper()
+	const passes = 3
+	mgr := newFakeManager()
+	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
+	// the emit cap is not under test here
+	a.cap = newEmitCap(passes * (distinct + run))
+	base := mustTime(t, "2026-08-08T12:00:00Z")
+	a.sources["src"].cursor = base
+
+	var events []Event
+	name := func(k int) string { return fmt.Sprintf("pod-%03d", k) }
+	for k := 1; k <= distinct; k++ {
+		e := evt("Warning", "prod", "Pod", name(k), "BackOff")
+		e.LastTimestamp = base.Add(time.Duration(k) * time.Second).Format(time.RFC3339)
+		events = append(events, e)
+	}
+	tied := base.Add(time.Duration(distinct+1) * time.Second).Format(time.RFC3339)
+	for k := distinct + 1; k <= distinct+run; k++ {
+		e := evt("Warning", "prod", "Pod", name(k), "BackOff")
+		e.LastTimestamp = tied
+		events = append(events, e)
+	}
+
+	for i := 0; i < passes; i++ {
+		a.deliver(context.Background(), events, pass{list: true})
+	}
+
+	seen := map[string]bool{}
+	for _, s := range mgr.signalsFor("src") {
+		seen[s.Labels["name"]] = true
+	}
+	for k := 1; k <= len(events); k++ {
+		if !seen[name(k)] {
+			t.Fatalf("%s was never emitted in %d relist passes — the bound lost it (%d of %d emitted)",
+				name(k), passes, len(seen), len(events))
+		}
 	}
 }
