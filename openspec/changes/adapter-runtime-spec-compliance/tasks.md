@@ -176,13 +176,12 @@ Reference docs:
   lives — `retired-vocabulary.md` carries no per-term table to add to.)
 - [x] 10.6 `python3 .github/scripts/docs-generate.py` rerun and `--check`
   clean.
-- [ ] 10.7 console UI changed, so rerun `npm run screenshots` AND
+- [x] 10.7 console UI changed, so rerun `npm run screenshots` AND
   `npm run demo` in `platform/console/ui`. **`npm run screenshots` done**
-  (9 PNGs regenerated). **`npm run demo` NOT run** — it shells out to
-  `docker run mwader/static-ffmpeg` and no docker daemon is available in
-  this remote session. Needs a re-run wherever docker is available before
-  this is archivable. The published demo video/poster still reflect the
-  pre-change UI until then.
+  (9 PNGs regenerated). **`npm run demo` done** (run on a workstation with
+  docker, after the remote session that opened this PR had none) —
+  `docs/assets/video/console-demo-{light,dark}.mp4` and their posters
+  regenerated.
 
 Adopter site:
 
