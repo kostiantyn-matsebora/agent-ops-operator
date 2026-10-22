@@ -589,9 +589,11 @@ async function runLoop() {
     const unit = await pollNextUnit();
     if (!unit) continue;
     lastWork = Date.now();
-    const out = await runUnit(unit);
+    // Strictly serial per conversation: one inflight unit, so the await in
+    // the loop is the invariant, not an oversight.
+    const out = await runUnit(unit); // NOSONAR
     lastWork = Date.now();
-    await reportDone(unit, out);
+    await reportDone(unit, out); // NOSONAR
   }
   process.exit(0);
 }
