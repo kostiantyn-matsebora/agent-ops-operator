@@ -21,9 +21,9 @@ The comparison SHALL instead key on a non-secret one-way digest of the
 configured signing secret.
 
 The digest is registered beside the webhook, in the one field Pulse returns
-unredacted: the registered webhook URL's query string. Pulse masks every
-registered header's value on read, not only a field named "secret", so a
-header cannot carry this digest.
+unredacted: an `agentops_secret_digest` query parameter on the registered
+webhook URL. Pulse masks every registered header's value on read, not only
+a field named "secret", so a header cannot carry this digest.
 
 A digest mismatch SHALL update the webhook in place, pushing the current
 secret.
