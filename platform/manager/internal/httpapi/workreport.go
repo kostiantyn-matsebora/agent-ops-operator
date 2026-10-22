@@ -44,10 +44,10 @@ type Turn struct {
 	TokensIn *int64 `json:"tokensIn,omitempty"`
 	// TokensOut is the output tokens the call produced.
 	TokensOut *int64 `json:"tokensOut,omitempty"`
-	// CacheReadTokens is the part of TokensIn served from the provider's
+	// CacheReadTokens is the part of `tokensIn` served from the provider's
 	// prompt cache. Omitted by a vendor that reports none.
 	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
-	// CacheCreationTokens is the part of TokensIn written INTO the provider's
+	// CacheCreationTokens is the part of `tokensIn` written INTO the provider's
 	// prompt cache by this call — where a cache a later turn reads was made.
 	// Omitted by a vendor that reports none.
 	CacheCreationTokens *int64 `json:"cacheCreationTokens,omitempty"`

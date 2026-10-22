@@ -68,14 +68,14 @@ Long-polls for this conversation's next work unit.
 | `convo` | `string` | **yes** | The Conversation this unit belongs to. |
 | `threadId` | `string` |  | The bound channel's thread id, present only for a conversation bound to exactly one channel. |
 | `runtimeContextId` | `string` |  | The runtime's OWN handle for this conversation's accumulated context, echoed back from the last run. |
-| `resumeSessionId` | `string` |  | The former name of RuntimeContextID, sent alongside it for ONE release so a runtime image can be upgraded independently of the manager. |
+| `resumeSessionId` | `string` |  | The former name of `runtimeContextId`, sent alongside it for ONE release so a runtime image can be upgraded independently of the manager. |
 | `promptFile` | `string` |  | A repo-relative path to render, when the profile supplies its own prompt file. |
 | `promptText` | `string` |  | The fully rendered prompt, when the manager rendered it from a built-in template. |
-| `promptVars` | `map[string]string` |  | PromptVars carries template variables for PromptFile. |
+| `promptVars` | `map[string]string` |  | The set of template variables rendered into `promptFile`. |
 | `agent` | `string` |  | The agent definition's name, for the runtime to resolve from the checked-out repository. |
 | `systemPrompt` | `string` |  | Inline role text the runtime APPENDS to the agent's system prompt. |
 | `allowedTools` | `string` |  | The wiring's half of the tool allowlist, comma-separated. |
-| `toolsMode` | `string` |  | "merge" or "overwrite", directing how AllowedTools composes with the agent definition's own declared tools. |
+| `toolsMode` | `string` |  | "merge" or "overwrite", directing how `allowedTools` composes with the agent definition's own declared tools. |
 | `maxTurns` | `integer` |  | The profile's turn budget for this run, when set. |
 <!-- /generated -->
 
@@ -116,7 +116,7 @@ Reports a run's outcome and closes out the inflight unit.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `convo` | `string` | **yes** | The Conversation this report is for. |
-| `runId` | `string` | **yes** | The unit's own RunID, round-tripped. |
+| `runId` | `string` | **yes** | The unit's own id, round-tripped. |
 | `status` | `string` | **yes** | "succeeded" or "failed". |
 | `exitCode` | `integer` |  | The process exit code, when the runtime has one to report. |
 | `runtimeContextId` | `string` |  | The handle for the context this run leaves behind — the one to continue next time. |
@@ -124,7 +124,7 @@ Reports a run's outcome and closes out the inflight unit.
 | `continuity` | `string` |  | Continuity says what happened to the context this run was asked to continue: "continued", "new", or "unavailable" (a new one was needed because the named context could not be reached). |
 | `continuityReason` | `string` |  | Free text from the runtime explaining why a context could not be continued. |
 | `result` | `string` |  | The run's answer. |
-| `brief` | `string` |  | What the runtime extracted as this conversation's one- or two-sentence description (design D-I) — a contract field, never a parsed section of Result. |
+| `brief` | `string` |  | What the runtime extracted as this conversation's one- or two-sentence description (design D-I) — a contract field, never a parsed section of `result`. |
 | `turns` | `[]Turn` |  | One entry per model call this run made, bounded in count and field size (workreport.go). |
 | `toolCalls` | `[]ToolCall` |  | One entry per tool call this run made, bounded in count and field size (workreport.go). |
 <!-- /generated -->
@@ -140,8 +140,8 @@ accepted for one release.
 | `model` | `string` |  | The model the call went to, as the runtime names it. |
 | `tokensIn` | `integer` |  | Every input token the call consumed, cache reads included, as far as the vendor reports them. |
 | `tokensOut` | `integer` |  | The output tokens the call produced. |
-| `cacheReadTokens` | `integer` |  | The part of TokensIn served from the provider's prompt cache. |
-| `cacheCreationTokens` | `integer` |  | The part of TokensIn written INTO the provider's prompt cache by this call — where a cache a later turn reads was made. |
+| `cacheReadTokens` | `integer` |  | The part of `tokensIn` served from the provider's prompt cache. |
+| `cacheCreationTokens` | `integer` |  | The part of `tokensIn` written INTO the provider's prompt cache by this call — where a cache a later turn reads was made. |
 | `stopReason` | `string` |  | Why the model stopped: end of turn, tool use, max tokens. |
 <!-- /generated -->
 

@@ -89,9 +89,9 @@ type WorkUnit struct {
 	// Empty means "start fresh, nothing is being continued", which is also what
 	// a deployment that cannot carry context sends every time, deliberately.
 	RuntimeContextID string `json:"runtimeContextId,omitempty"`
-	// ResumeSessionID is the former name of RuntimeContextID, sent alongside it
-	// for ONE release so a runtime image can be upgraded independently of the
-	// manager. Runtimes must read RuntimeContextID.
+	// ResumeSessionID is the former name of `runtimeContextId`, sent alongside
+	// it for ONE release so a runtime image can be upgraded independently of
+	// the manager. Runtimes must read `runtimeContextId`.
 	//
 	// DEPRECATED.
 	ResumeSessionID string `json:"resumeSessionId,omitempty"`
@@ -101,7 +101,7 @@ type WorkUnit struct {
 	// PromptText is the fully rendered prompt, when the manager rendered it
 	// from a built-in template. Exactly one of PromptFile/PromptText is set.
 	PromptText string `json:"promptText,omitempty"`
-	// PromptVars carries template variables for PromptFile.
+	// PromptVars is the set of template variables rendered into `promptFile`.
 	PromptVars map[string]string `json:"promptVars,omitempty"`
 	// Agent is the agent definition's name, for the runtime to resolve from
 	// the checked-out repository.
@@ -112,7 +112,7 @@ type WorkUnit struct {
 	// AllowedTools is the wiring's half of the tool allowlist,
 	// comma-separated.
 	AllowedTools string `json:"allowedTools,omitempty"`
-	// ToolsMode is "merge" or "overwrite", directing how AllowedTools
+	// ToolsMode is "merge" or "overwrite", directing how `allowedTools`
 	// composes with the agent definition's own declared tools.
 	ToolsMode string `json:"toolsMode,omitempty"`
 	// MaxTurns is the profile's turn budget for this run, when set.
