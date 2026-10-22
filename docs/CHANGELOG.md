@@ -42,17 +42,6 @@ Pulse can reuse an alert id for what it calls a new occurrence. The new
 default, `"id+startTime"`, opens a fresh conversation for that re-fire
 instead of continuing an old one.
 
-### Upgrade
-
-To keep the previous, id-alone behavior, set `correlationStrategy: id` on
-each `SignalSource` served by `signal-pulse`. The chart value is
-`signal.defaultSource.correlationStrategy` in the `pulse` bundle.
-
-Helm never upgrades an existing CRD. Run
-`kubectl apply -f chart/crds/` before `helm upgrade` to pick up the new
-`ControlPlaneProbe` CRD, or the `/control-plane/*` surface's handlers fail
-against a kind the cluster does not have.
-
 ### Fixed
 
 - Every agent runtime (`claude`, `ollama`, `copilot`) now reports continuity
@@ -70,6 +59,17 @@ against a kind the cluster does not have.
 - A console send carrying no thread id is now visible on the channel's
   general feed, instead of completing as success with nothing to show for
   it.
+
+### Upgrade
+
+To keep the previous, id-alone behavior, set `correlationStrategy: id` on
+each `SignalSource` served by `signal-pulse`. The chart value is
+`signal.defaultSource.correlationStrategy` in the `pulse` bundle.
+
+Helm never upgrades an existing CRD. Run
+`kubectl apply -f chart/crds/` before `helm upgrade` to pick up the new
+`ControlPlaneProbe` CRD, or the `/control-plane/*` surface's handlers fail
+against a kind the cluster does not have.
 
 ## [17.0.0] — 2026-10-18
 
