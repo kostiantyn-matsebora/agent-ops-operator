@@ -122,3 +122,31 @@ func TestAHeldEventIsSelfExcludedAtRelease(t *testing.T) {
 		t.Fatalf("an agent-ops object must not emit after its hold: %+v", got)
 	}
 }
+
+// A config edit during the wait that stops covering the event's namespace
+// releases it to nothing: the source no longer asks for it.
+func TestAHeldEventOutsideAnEditedScopeIsNotEmitted(t *testing.T) {
+	a, mgr := heldAdapter(t)
+	ctx := context.Background()
+
+	a.deliver(ctx, []Event{evt("Warning", "prod", "Pod", "api-7f8d9-xk2p9", "BackOff")}, pass{})
+	a.sources["src"].filter = mustFilter(t, `{"namespaces":["staging"]}`)
+	a.releaseHeld(ctx, time.Now().Add(ownerResolveWait+time.Second))
+
+	if got := mgr.signalsFor("src"); len(got) != 0 {
+		t.Fatalf("an event the edited source no longer covers must not emit: %+v", got)
+	}
+}
+
+// Denied pod reads never catch up by waiting, so nothing is held behind them.
+func TestNothingIsHeldBehindDeniedReads(t *testing.T) {
+	a, mgr := heldAdapter(t)
+	msg := "cannot read pods: 403"
+	a.accessErr.Store(&msg)
+
+	a.deliver(context.Background(), []Event{evt("Warning", "prod", "Pod", "api-7f8d9-xk2p9", "BackOff")}, pass{})
+
+	if got := mgr.signalsFor("src"); len(got) != 1 || a.held.Len() != 0 {
+		t.Fatalf("denied reads must not delay the event by the full bound: %+v", got)
+	}
+}

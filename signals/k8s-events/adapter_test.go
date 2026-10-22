@@ -666,9 +666,9 @@ func TestStoppingAScopeReleasesItsCursorHold(t *testing.T) {
 	a := newTestAdapter(nil, nil, "src", mustFilter(t, `{"namespaces":["a"]}`))
 	a.sources["src"].holdCursor("gone", true)
 	a.watchers["gone"] = func() {}
+	a.watchers["a"] = func() {} // already running: reconcile starts nothing
 
 	a.reconcileWatchers(context.Background())
-	t.Cleanup(a.stopAllWatchers)
 
 	if a.sources["src"].cursorHeld() {
 		t.Fatal("a stopped scope's hold must be released")

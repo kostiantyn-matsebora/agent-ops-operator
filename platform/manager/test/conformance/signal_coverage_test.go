@@ -35,24 +35,7 @@ func shippedSignalModules(t *testing.T) []string {
 		t.Fatalf("signals/ is not a directory at the repository root: %v", err)
 	}
 	seen := map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && d.Name() == "node_modules" {
-			return filepath.SkipDir
-		}
-		if d.IsDir() || (d.Name() != "go.mod" && d.Name() != "Dockerfile") {
-			return nil
-		}
-		rel, err := filepath.Rel(repo, filepath.Dir(path))
-		if err != nil {
-			return err
-		}
-		seen[filepath.ToSlash(rel)] = true
-		return nil
-	})
-	if err != nil {
+	if err := filepath.WalkDir(root, collectShippingDirs(repo, seen)); err != nil {
 		t.Fatalf("walking signals/: %v", err)
 	}
 	mods := make([]string, 0, len(seen))
@@ -62,6 +45,29 @@ func shippedSignalModules(t *testing.T) []string {
 	sort.Strings(mods)
 	return mods
 }
+
+// collectShippingDirs records, repo-relative, each directory holding a go.mod
+// or a Dockerfile, skipping node_modules.
+func collectShippingDirs(repo string, seen map[string]bool) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir() && d.Name() == "node_modules":
+			return filepath.SkipDir
+		case d.IsDir() || !shipsAnImage(d.Name()):
+			return nil
+		}
+		rel, err := filepath.Rel(repo, filepath.Dir(path))
+		if err == nil {
+			seen[filepath.ToSlash(rel)] = true
+		}
+		return err
+	}
+}
+
+// shipsAnImage is components.sh's marker-file rule.
+func shipsAnImage(name string) bool { return name == "go.mod" || name == "Dockerfile" }
 
 func TestEverySignalAdapterModuleIsUnderTest(t *testing.T) {
 	mods := shippedSignalModules(t)

@@ -139,6 +139,25 @@ func TestNodeWithNoOwnerIsItsOwnWorkload(t *testing.T) {
 	}
 }
 
+// The kubelet records a Node's events in "default" with an empty
+// involvedObject namespace, so the event's namespace is not where the Node
+// lives. It must still resolve — workload AND node — or the Node's own events
+// would carry no `node` label and escape drain suppression on that node.
+func TestANodeEventRecordedInDefaultStillResolves(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "Node", Name: "node-1", Node: "node-1"})
+	a := adapterWithCache(c)
+	e := evt("Warning", "", "Node", "node-1", "NodeNotReady")
+	e.Metadata.Namespace = "default"
+	enr := a.enrich(&e)
+	if enr.Workload != "Node/node-1" || enr.Node != "node-1" {
+		t.Fatalf("a Node event in default must resolve: %+v", enr)
+	}
+	if sig := normalize("src", &e, enr); sig.InitiationID != "src@default/Node/node-1" {
+		t.Fatalf("resolving the node must not move the id: %s", sig.InitiationID)
+	}
+}
+
 // A tracked kind the cache has no entry for yields NO workload. Falling back to
 // the pod's own name would dress a per-pod key up as a workload — the
 // per-object correlation keying on the owner exists to remove.
