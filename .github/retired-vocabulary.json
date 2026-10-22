@@ -1149,6 +1149,23 @@
         "is now",
         "migration"
       ]
+    },
+    {
+      "id": "shared-output-format",
+      "pattern": "sharedOutputFormat",
+      "says": "AgentProfile.spec.outputFormat is the field's name, a required enum (blocks/none) with no default",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "gone",
+        "replaced",
+        "renamed",
+        "is now",
+        "stale"
+      ]
     }
   ]
 }
