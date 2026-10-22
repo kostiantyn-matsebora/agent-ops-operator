@@ -509,8 +509,8 @@ not required to be addressable, and the contract stays pull-only.
 
 ### Requirement: Delivery operation ids are published shapes
 
-The manager SHALL mint stable, published ids for the two `send` operations
-that deliver conversation content:
+The manager SHALL mint stable, published ids for the two deliveries
+of conversation content:
 
 | Delivery | Id shape |
 |---|---|
