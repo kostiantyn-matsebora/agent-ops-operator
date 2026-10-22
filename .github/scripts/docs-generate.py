@@ -1057,7 +1057,15 @@ def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
 
 
 def build_struct_table(file: str, struct: str) -> str:
-    rows = go_struct_fields(REPO / file, struct)
+    # `file` is REPO-relative from a real marker's `file=` attribute, but the
+    # test suite points this at an absolute fixture path outside REPO
+    # entirely -- an explicit branch, not `REPO / file`'s implicit reliance
+    # on pathlib silently discarding the left side of `/` for an absolute
+    # right side.
+    path = pathlib.Path(file)
+    if not path.is_absolute():
+        path = REPO / path
+    rows = go_struct_fields(path, struct)
     return "\n".join(field_table(rows)) + "\n"
 
 
