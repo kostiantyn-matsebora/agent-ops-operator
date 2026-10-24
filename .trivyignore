@@ -1,0 +1,15 @@
+# EXCEPTIONS TO THE IMAGE SCAN GATE. Every entry carries the reason and an
+# expiry, and an expired entry stops suppressing its finding — Trivy honours
+# `exp:` itself, and it was tested rather than read. No entry may loosen the
+# severity threshold or exempt a component; this file names findings only.
+#
+# runtime-claude: four findings inside npm's OWN bundled dependency tree
+# (/usr/local/lib/node_modules/npm/node_modules). `npm install -g npm@latest`
+# is already in the Dockerfile and the current npm still vendors these
+# versions, so nothing this repository builds can move them — the fix lands
+# when npm ships one. Re-check at expiry: rebuild, scan, and delete each line
+# the upgrade closed.
+CVE-2026-14257 exp:2026-10-31
+CVE-2026-69152 exp:2026-10-31
+CVE-2026-69192 exp:2026-10-31
+CVE-2026-73566 exp:2026-10-31

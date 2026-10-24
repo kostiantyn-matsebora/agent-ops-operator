@@ -22,7 +22,7 @@ owns its whole lane: at most ONE Pipeline claiming its own source with its own
 profile and toolsets, channels values-supplied and omitted when unset.
 
 - **OFF inside an active bundle and forced on by `global.demo.enabled` ALONE**,
-  which is why `pipelines.enabled` is nullable — an explicit `false` must
+  which is why `wiringEnabled` is nullable — an explicit `false` must
   decline the route under demo too.
 - **WHICH route is one of FOUR things `kubernetes.allowMutations` moves.** True
   renders the acting `k8s-operate` (binds `k8s-admin`), false the observing
@@ -30,6 +30,23 @@ profile and toolsets, channels values-supplied and omitted when unset.
   drove all four once and named none of them.
 - **Per-route booleans win both ways**, and both at once is ALLOWED and fans
   out.
+- **The acting route ALSO binds `agentops-websearch` unconditionally, and
+  `agentops-shell` when `allowPodExecution` is true** — both release-wide
+  built-ins, never the observing route's. A local shell in the agent's own
+  pod is narrower than the `pods/exec` grant that flag already carries, so
+  withholding it once that grant exists buys nothing. `capabilities.yaml`
+  (coordinator mode) mirrors this exactly — the two files must not drift.
+- **`pipeline-showcase.yaml` renders a THIRD, additive route under
+  `coordinator` mode alone** — the demo-only `k8s-observe-pipeline`
+  `Pipeline`, reusing the observing route's profile, toolset and privilege
+  level rather than a new one. Gated on `kubernetes.demoShowcaseActive`
+  (`global.demo.wiringShowcase`, nullable like `wiringEnabled`) AND the
+  resolved `wiringMode` being `coordinator` AND `kubernetes.wiringActive`.
+  Claims the same sources `pipelines.yaml` would — `cluster-events` plus the
+  console's — alongside the chart-rendered `Coordinator`'s own claim on them,
+  the many-to-many sharing `wiring.md` already allows. No de-duplication: a
+  demo install opens TWO conversations per cluster `Warning` event on
+  purpose.
 
 **NO substrate**: no AgentRuntime, no floor SA, no credential, no context
 volume. All of that is the parent's `global.agentops.runtimeDefaults` +
@@ -111,7 +128,15 @@ key serves both backends.
 
 The Home Assistant lane and a PRIVILEGE SPLIT:
 
-- **The log ingest lane.**
+- **The ingest lane: the log plus four health surfaces.**
+  - **Each surface is switched and tuned under
+    `logsAdapter.source.surfaces`** — one `enabled` and one knob apiece.
+  - **Config entries, repairs and sensors default ON.** The update digest
+    is OFF.
+  - **The shipped `rules` open with one rule per surface, AHEAD of the log
+    rules.**
+  - **A surface rule selects by `surface=`, never by message** — a log
+    rule's pattern must not capture a repair's text.
 - **ONE `MCPConfig`**, server key FIXED at `homeassistant`, and NO server
   workload — the house serves its own MCP endpoint.
 - **TWO risk-split `MCPToolset`s.**
@@ -124,8 +149,9 @@ intents reach no configuration, so repairing needs a shell and only the ops
 route binds one.
 
 **The OPERATOR credential gates the fixing half AND the ingest lane.**
-`subscribe_events` is admin-only, so a control token authenticates and is then
-refused the subscription, which reads like a network fault.
+`system_log/list` — the listing the lane polls — and `subscribe_events` are
+both admin-only, so a control token authenticates and is then refused, which
+reads like a network fault.
 
 - **Never enabled by demo mode.**
 - **Two default-off routes, and BOTH claim the chat sources.** Wiring is
@@ -148,8 +174,7 @@ the chat SignalSource and the router's credential source.
   render.
 - **Credentials either way:** `credentials.existingSecret` OR
   `credentials.botToken`, where the bundle creates the Secret.
-- **One Secret serves both** — the Channel sends with it, the router's source
-  polls.
+- **The bot credential Secret now serves ONE reader, not two** (chat-ops-broker-telegram-gateway) — only the router's source polls with it. The Channel sends through a separate chart-generated gateway-binding Secret (`agentops-telegram-gateway`) instead, never the bot credential.
 - **Ships NO Pipeline on purpose**, because wiring drags in a profile, a runtime
   and credentials. The sources sit unclaimed until the installer wires them, so
   NOTES.txt prints the exact Pipeline to apply.
@@ -192,7 +217,7 @@ Manager Deployment, RBAC and Service, plus the CRDs.
   built-in role — see `invariants.md`.
 - **`templates/rbac.yaml` ALWAYS renders the floor** and NEVER creates the
   account `runtimeDefaults.serviceAccountName` points at. Naming is not
-  creating; rendering the floor regardless is what keeps it nameable.
+  creating — rendering the floor regardless is what keeps it nameable.
 - **`agentops.defaultRuntimeGuard` fails the render** when nothing answers to
   `default` while a route resolves to it — parent `pipelines:` AND bundle-shipped
   routes, re-derived through each bundle's own wiring helper so the check cannot
@@ -240,3 +265,8 @@ other parent scope, and helm cannot derive a value from a value.
   every console object with ONE value.
 - **The claim rides the EXISTING route.** A second claimant makes every
   unaddressed console message ambiguous.
+- **The showcase route (`pipeline-showcase.yaml`) rides it too** — a THIRD
+  claimant under `coordinator` mode, beside the chart-rendered Coordinator
+  and whichever other route claims it. An unaddressed console message under
+  the showcase then surfaces a choice list rather than routing silently —
+  the demonstration, not a bug.

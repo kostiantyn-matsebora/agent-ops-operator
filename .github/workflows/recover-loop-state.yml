@@ -1,0 +1,103 @@
+# RECOVER `loop:running` WHEN THE ROUND THAT SET IT WAS DISCARDED BEFORE IT
+# COULD REPORT ANYTHING.
+#
+# `review-dispatch.yml`'s `gate` job stamps `loop:running` the moment a round
+# starts, and its `land` job is the only thing that ever moves the label to a
+# terminal value. That pairing assumes the run `gate` started always reaches
+# `land` -- true for a round that runs, fails, or times out. NOT true for a
+# run superseded by a newer trigger before `gate` (the workflow's first job)
+# ever started: `review-dispatch.yml`'s own `concurrency` group deliberately
+# never cancels an IN-PROGRESS run (cancelling `land` mid-push would leave a
+# fixed finding open), but a run still QUEUED when a newer one supersedes it
+# is discarded outright -- `conclusion: cancelled`, zero jobs, nothing that
+# could correct the stamp an earlier run already made.
+#
+# MEASURED LIVE ON #243, 2026-09-23: two such runs completed back to back,
+# `loop:running` stayed posted from a round that had already ended (posting
+# its own correct `capped` and then `stalled` summaries), and nothing was
+# watching for the shape that produced it.
+#
+# THIS IS DELIBERATELY A SEPARATE FILE, listening to `review-dispatch.yml`'s
+# own completion, rather than a job added there. `review-dispatch.yml`
+# reacting to its own completion inside its own concurrency group is exactly
+# the kind of self-triggering surface a subtle bug hides in; a standalone
+# listener with no shared group has none of that reasoning to get wrong.
+name: recover-loop-state
+
+run-name: >-
+  recover-loop-state after review-dispatch on #${{ github.event.workflow_run.pull_requests[0].number }}
+
+on:
+  workflow_run:
+    workflows: [review-dispatch]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  recover:
+    # ONLY THE ONE SHAPE THIS PROGRAM EXISTS FOR: a run that never started
+    # any job at all. A run that ran `gate` and beyond already reported its
+    # own terminal state through `land`, or is genuinely still in progress
+    # (a same-repo pull request only -- `pull_requests` is empty on a fork's).
+    if: >-
+      github.event.workflow_run.conclusion == 'cancelled' &&
+      github.event.workflow_run.pull_requests[0].number
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - name: Confirm the superseded run reported zero jobs
+        id: jobs
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          count=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" --jq '.jobs | length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.jobs.outputs.count == '0'
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      # THE VOCABULARY AND THE SCRIPT COME FROM THE DEFAULT BRANCH, same
+      # reason `review-dispatch.yml`'s own `land` job restores its programs
+      # from there: a pull request may not rewrite what audits it.
+      - name: When was the current loop:running label placed
+        id: placed
+        if: steps.jobs.outputs.count == '0'
+        env:
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # --slurp collects every page into ONE array before the filter runs --
+          # `--paginate` alone re-runs `--jq` once PER PAGE, so `last` picked
+          # each page's own last match rather than the timeline's, and a
+          # multi-page timeline could print one line per page.
+          # `// empty` is load-bearing: `last` on no match is `null`, and
+          # `.created_at` on `null` is the literal string "null", not empty --
+          # which would reach the next step's `!= ''` check as truthy.
+          since=$(gh api "repos/${{ github.repository }}/issues/$PR/timeline" --paginate --slurp \
+            --jq '[.[][] | select(.event == "labeled" and .label.name == "loop:running")] | last | .created_at // empty')
+          case "$since" in
+            *$'\n'*)
+              echo "::notice::timeline lookup for #$PR returned more than one line; skipping this recovery pass"
+              since=""
+              ;;
+          esac
+          echo "since=$since" >> "$GITHUB_OUTPUT"
+      - name: Recover the label, if this run's discard is what left it stale
+        if: steps.jobs.outputs.count == '0' && steps.placed.outputs.since != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          SINCE: ${{ steps.placed.outputs.since }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/recover-loop-state.py --repo "${{ github.repository }}" --pr "$PR" \
+            --since "$SINCE" --only-if-superseded \
+            --run-conclusion "${{ github.event.workflow_run.conclusion }}" \
+            --run-job-count "${{ steps.jobs.outputs.count }}"

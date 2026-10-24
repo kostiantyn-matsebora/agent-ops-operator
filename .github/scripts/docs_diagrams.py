@@ -134,13 +134,13 @@ DIAGRAMS: dict[str, dict] = {
         "arrows": ["bound from", "half, per toolsMode"],
     },
     "signal-adapter": {
-        "alt": "Your signal adapter watches your transport and posts normalised "
-               "signals to the manager, which groups them and opens a "
-               "conversation.",
+        "alt": "Your signal adapter watches your transport, mints an "
+               "initiationId, and posts it to the manager, which matches "
+               "it by equality and opens or resumes a conversation.",
         "cols": [
             [("your transport", "a queue, a webhook", "plain")],
-            [("your adapter", "normalises what it sees", "yours")],
-            [("the manager", "groups, then opens one", "subject")],
+            [("your adapter", "mints the initiationId", "yours")],
+            [("the manager", "matches it by equality", "subject")],
         ],
         "arrows": ["watches", "POST /signal/inbound"],
     },
@@ -168,6 +168,19 @@ DIAGRAMS: dict[str, dict] = {
         "arrows": ["GET /work", "runs"],
         "back": ["POST /work/done", "the answer"],
     },
+    "coordinate-agents": {
+        # `named` gives the SVG itself an accessible name (title + aria-label).
+        "named": True,
+        "alt": "A Coordinator's root conversation invokes AgentCapabilities as "
+               "members, and its agent escalates through a channel already open.",
+        "cols": [
+            [("SignalSource", "or /<coordinator>", "plain")],
+            [("Coordinator", "root agent + agents[]", "yours")],
+            [("AgentCapability", "invoked as a member", "plain"),
+             ("Channel", "escalate, root only", "subject")],
+        ],
+        "arrows": ["signalSourceRefs", ["invoke", "escalate"]],
+    },
 }
 
 # The security page's illustrations.
@@ -180,6 +193,109 @@ DIAGRAMS: dict[str, dict] = {
 # ONE ILLUSTRATION PER CLAIM THAT IS HARD TO READ IN PROSE. The Secrets boundary
 # and the context mount are the two the page cannot state in a sentence anyone
 # believes on first reading — a picture of the path is what makes them land.
+# One per integration page, and each shows the SAME three seams a Pipeline
+# wires: what starts work, the route, and what the agent reaches or answers on.
+# A reader who met the model on the landing page meets it again per vendor.
+# One per integration page. THREE COLUMNS, LIKE EVERY OTHER DIAGRAM HERE, and
+# the geometry note above says why: the site displays a drawing in a 720px
+# column with no breakout, so 950 authored is 0.76 on screen and a FOURTH
+# column drops that to 0.55 -- where a 14px label renders under 8px. These were
+# authored with four and looked exactly as small as that predicts.
+#
+# Each shows the same three beats an adopter reads the page for: what arrives,
+# what decides whether it is real, and what answers.
+INTEGRATION_DIAGRAMS: dict[str, dict] = {
+    # TWO LANES, AND THE ROUTE IS WHERE THEY MEET. That is the product's own
+    # model -- a Pipeline claims a source AND binds the tools -- so the picture
+    # states it rather than showing a single file of boxes.
+    #
+    # It also keeps the MCP server, which a three-box version dropped. The
+    # renderer pairs row to row when BOTH columns hold two boxes, so each lane
+    # gets its own arrow instead of the server hanging off the rules.
+    "kubernetes": {
+        "dir": "integrations",
+        "alt": "Two lanes meet on the route: cluster events filtered by your "
+               "suppression rules, and the MCP server's tools filtered by the "
+               "toolsets you bind.",
+        "cols": [
+            [("a cluster Event", "Warning, by default", "plain"),
+             ("the MCP server", "reads the cluster", "subject")],
+            [("your rules", "still broken?", "yours"),
+             ("your toolsets", "what it may call", "yours")],
+            [("k8s-observe", "where they meet", "subject")],
+        ],
+        "arrows": ["filtered by", "meet on"],
+    },
+    "prometheus": {
+        "dir": "integrations",
+        "alt": "Two lanes meet on the route: firing alerts your Alertmanager "
+               "sends, and the metrics the query server exposes through the "
+               "toolset you bind.",
+        "cols": [
+            [("a firing alert", "from Alertmanager", "plain"),
+             ("the query server", "reads your metrics", "subject")],
+            [("your receiver", "which alerts to send", "yours"),
+             ("your toolsets", "what it may call", "yours")],
+            [("alert-triage", "where they meet", "subject")],
+        ],
+        "arrows": ["chosen by", "meet on"],
+    },
+    "home-assistant": {
+        "dir": "integrations",
+        "alt": "A Home Assistant log record is re-checked by the rules, and "
+               "opens a conversation on one of two routes: one that uses the "
+               "house, one that repairs it.",
+        "cols": [
+            [("a log record", "from your house", "plain")],
+            [("your rules", "live at the close?", "yours")],
+            [("ha-control", "uses the house", "subject"),
+             ("ha-ops", "repairs it", "subject")],
+        ],
+        "arrows": ["watched", "only if real"],
+    },
+    # TELEGRAM IS THE ONE THAT ANSWERS, so its second lane is the reply rather
+    # than a toolset -- this bundle grants none. Both lanes run through the
+    # single poller, which is the rule the whole integration is shaped by.
+    # ONE SOURCE, TWO MCP PAIRS, TWO ROUTES -- the real wall is the pair, not
+    # the route, so the picture pairs row-to-row between them (kubernetes/
+    # prometheus's "two lanes meet on route" shape, with two route boxes
+    # instead of one -- home-assistant already proves fan-out to two boxes
+    # reads cleanly).
+    "pulse": {
+        "dir": "integrations",
+        "alt": "A firing Pulse alert is claimed by two routes, each binding "
+               "its own MCP pair: one that only investigates, one that may "
+               "also record a maintenance window or a criticality tag.",
+        "named": True,
+        "cols": [
+            [("a firing alert", "from Pulse", "plain")],
+            [("pulse-observer", "investigates only", "subject"),
+             ("pulse-operator", "may also annotate", "subject")],
+            [("observer-mcp", "reads & investigates", "subject"),
+             ("operator-mcp", "+ maintenance, tags", "subject")],
+        ],
+        "arrows": ["claimed by", "bind"],
+    },
+    "telegram": {
+        "dir": "integrations",
+        "alt": "One poller reads every update for a bot token: a message on "
+               "the group surface starts a conversation, and a message in a "
+               "topic continues the one that owns it.",
+        # ONE BOX IN THE MIDDLE, DELIBERATELY. Both kinds of message fan IN to
+        # it and it fans back OUT, which is the whole rule: a second concurrent
+        # reader of one bot token gets 409s and steals updates. Drawn as two
+        # middle boxes it would say the opposite.
+        "cols": [
+            [("on the group", "anyone can start one", "plain"),
+             ("in a topic", "the conversation there", "plain")],
+            [("one poller", "per bot token", "yours")],
+            [("a new topic", "opened to answer in", "subject"),
+             ("its next turn", "answered in place", "subject")],
+        ],
+        "arrows": ["both read by", "routed to"],
+    },
+}
+
 SECURITY_DIAGRAMS: dict[str, dict] = {
     "connect": {
         "dir": "security",
@@ -231,6 +347,50 @@ SECURITY_DIAGRAMS: dict[str, dict] = {
 }
 
 
+# One per RUNTIME page. A runtime is not an integration -- it starts no work
+# and answers nowhere -- so its three beats are its own: what hands it work,
+# what it does itself, and what it reaches for. The middle box is the one the
+# page is about, and for runtime-ollama the point of the picture is how much
+# sits in that box: the loop, the tools and the transcript are the runtime's,
+# and the model server is asked for one thing.
+RUNTIME_DIAGRAMS: dict[str, dict] = {
+    "ollama": {
+        "dir": "runtimes",
+        "alt": "The manager hands a work unit to runtime-ollama, which runs the "
+               "agent loop and the tools itself, keeps one transcript per "
+               "conversation, and asks Ollama only for the next message.",
+        "cols": [
+            [("the manager", "one unit at a time", "plain")],
+            [("runtime-ollama", "loop, tools, transcript", "yours")],
+            [("Ollama", "the next message only", "subject"),
+             ("the context", "one transcript each", "plain")],
+        ],
+        # No return line: drawn, it ran from the model server back to the
+        # manager and read as Ollama reporting the run. The report is the
+        # runtime's, and the page says so in words.
+        "arrows": ["GET /work", "asks / keeps"],
+    },
+    # For runtime-copilot the point is the opposite split: the vendor runs the
+    # loop and the tools, and what sits in the middle box is the TRANSLATION
+    # -- the route's patterns into Copilot's filters, and a permission callback
+    # every call passes through. The context store is the vendor's too.
+    "copilot": {
+        "dir": "runtimes",
+        "alt": "The manager hands a work unit to runtime-copilot, which "
+               "translates the route's tools and drives the Copilot SDK, and "
+               "Copilot runs the agent and its tools under the runtime's "
+               "permission callback.",
+        "cols": [
+            [("the manager", "one unit at a time", "plain")],
+            [("runtime-copilot", "translates and permits", "yours")],
+            [("Copilot", "the loop and the tools", "subject"),
+             ("the context", "one per conversation", "plain")],
+        ],
+        "arrows": ["GET /work", "drives / keeps"],
+    },
+}
+
+
 def _ink(kind: str, p: dict[str, str]) -> tuple[str, str, str]:
     """fill, stroke, and the accent bar down the left edge.
 
@@ -246,7 +406,9 @@ def _ink(kind: str, p: dict[str, str]) -> tuple[str, str, str]:
 
 def render(spec: dict, p: dict[str, str]) -> str:
     cols = spec["cols"]
-    for label in spec["arrows"] + spec.get("back", []):
+    labels = [x for a in spec["arrows"] + spec.get("back", [])
+              for x in (a if isinstance(a, list) else [a])]
+    for label in labels:
         if len(label) > LABEL_MAX:
             raise SystemExit(
                 f"arrow label {label!r} is {len(label)} characters, over the "
@@ -277,8 +439,12 @@ def render(spec: dict, p: dict[str, str]) -> str:
     out: list[str] = []
     out.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-        f'width="{width}" height="{height}" role="img">'
+        f'width="{width}" height="{height}" role="img"'
+        + (f' aria-label={sax.quoteattr(spec["alt"])}' if spec.get("named") else "")
+        + '>'
     )
+    if spec.get("named"):
+        out.append(f'<title>{sax.escape(spec["alt"])}</title>')
     # Its own ground: a transparent drawing on a dark page is invisible ink.
     out.append(f'<rect width="{width}" height="{height}" fill="{p["canvas"]}"/>')
     out.append(
@@ -339,6 +505,17 @@ def render(spec: dict, p: dict[str, str]) -> str:
         # diagram put `signalSourceRefs` straight through the Pipeline box the
         # moment a column had three rows in it.
         anchor_y = box_y(i, 0) + BOX_H / 2 if len(left) == 1 else box_y(i + 1, 0) + BOX_H / 2
+        if isinstance(label, list):
+            # One label per target row, for a fan-out whose arrows mean
+            # different things (invoke vs escalate).
+            for k, text in enumerate(label):
+                out.append(
+                    f'<text x="{(x1 + x2) / 2:.0f}" '
+                    f'y="{box_y(i + 1, k) + BOX_H / 2 - 12:.0f}" '
+                    f'text-anchor="middle" font-family="{MONO}" font-size="11.5" '
+                    f'fill="{p["text-subtle"]}">{sax.escape(text)}</text>'
+                )
+            continue
         out.append(
             f'<text x="{(x1 + x2) / 2:.0f}" y="{anchor_y - 12:.0f}" '
             f'text-anchor="middle" font-family="{MONO}" font-size="11.5" '

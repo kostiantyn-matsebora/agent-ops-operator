@@ -149,6 +149,50 @@ direction Helm allows, and each runtime-shipping bundle gets a line below.
 Adding a vendor bundle means adding that line — there is no way to discover it,
 and a bundle whose runtime this list missed would render a CR the guard could
 not see. */ -}}
+{{- /* THE OLLAMA BUNDLE'S VALUES AS A RUNTIME ENTRY. `endpoint`, `model`, `numCtx`
+and `keepAlive` become the env the runtime reads; `env` is laid over them.
+
+A PARENT helper, because two callers need the same answer: the bundle's own
+template, and `agentops.declaredRuntimes` — from which the `default` copy is
+rendered. When the mapping lived in the bundle's template, the copy carried the
+bundle's VALUES and no env at all: a runtime named `default` pointed at nothing.
+Call with the bundle's values. */ -}}
+{{- define "agentops.ollamaRuntimeEntry" -}}
+{{- $v := . -}}
+{{- $endpoint := $v.endpoint | required "ollama.endpoint is required when the bundle is enabled — the URL of an Ollama server you already run, e.g. http://ollama.ollama.svc:11434; this bundle deploys none" -}}
+{{- /* `model` is OPTIONAL: unset, the runtime uses the server's only pulled model
+and fails its runs naming the choices when there are several. */ -}}
+{{- $env := list
+  (dict "name" "OLLAMA_URL" "value" $endpoint)
+  (dict "name" "OLLAMA_MODEL" "value" ($v.model | default "" | toString))
+  (dict "name" "OLLAMA_NUM_CTX" "value" ($v.numCtx | default 8192 | toString))
+  (dict "name" "OLLAMA_KEEP_ALIVE" "value" ($v.keepAlive | default "10m" | toString)) -}}
+{{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
+{{- $entry := omit $v "enabled" "global" "endpoint" "model" "numCtx" "keepAlive" "env" -}}
+{{- $_ := set $entry "env" $env -}}
+{{- toYaml $entry -}}
+{{- end -}}
+
+{{- /* THE COPILOT BUNDLE'S ENTRY. `model` and `maxAiCredits` become the env the
+runtime reads, and the credential rides in `env` too — as the valueFrom
+reference the shared renderer would otherwise write from `credentialsSecret`.
+The renderer refuses an entry stating both `env` and `credentialsSecret`, and
+this vendor needs env for its model, so the bundle's own template renders the
+Secret and this helper writes the reference. Same helper for the bundle's own
+CR and for the parent's `default` copy, so both carry identical env. */ -}}
+{{- define "agentops.copilotRuntimeEntry" -}}
+{{- $v := . -}}
+{{- $env := list -}}
+{{- if $v.model }}{{ $env = append $env (dict "name" "COPILOT_MODEL" "value" ($v.model | toString)) }}{{ end -}}
+{{- if $v.maxAiCredits }}{{ $env = append $env (dict "name" "COPILOT_MAX_AI_CREDITS" "value" ($v.maxAiCredits | toString)) }}{{ end -}}
+{{- range ($v.env | default list) }}{{ $env = append $env . }}{{ end -}}
+{{- $cred := $v.credentialsSecret | default dict -}}
+{{- if $cred.name }}{{ $env = append $env (dict "name" ($cred.envName | default "COPILOT_GITHUB_TOKEN") "valueFrom" (dict "secretKeyRef" (dict "name" $cred.name "key" ($cred.key | default "githubToken")))) }}{{ end -}}
+{{- $entry := omit $v "enabled" "global" "model" "maxAiCredits" "env" "credentialsSecret" -}}
+{{- $_ := set $entry "env" $env -}}
+{{- toYaml $entry -}}
+{{- end -}}
+
 {{- define "agentops.declaredRuntimes" -}}
 {{- $root := . -}}
 {{- $out := list -}}
@@ -158,14 +202,39 @@ not see. */ -}}
 {{- /* The runtime-shipping bundles. One line each, and there is no way to
 discover them: a bundle whose runtime this list missed would render a CR the
 default-runtime guard could not see, and the manager's bootstrap env would miss
-the sidecar and proxy images that runtime asked for. */ -}}
-{{- range $key := list "claude" -}}
+the sidecar and proxy images that runtime asked for. `ollama` proved the point:
+its first render passed every test but this guard, which reported "(none)". */ -}}
+{{- range $key := list "claude" "ollama" "copilot" -}}
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
-{{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" (omit $bv "enabled" "global")))) -}}
+{{- $entry := omit $bv "enabled" "global" -}}
+{{- if eq $key "ollama" -}}{{- $entry = fromYaml (include "agentops.ollamaRuntimeEntry" $bv) -}}{{- end -}}
+{{- if eq $key "copilot" -}}{{- $entry = fromYaml (include "agentops.copilotRuntimeEntry" $bv) -}}{{- end -}}
+{{- $out = append $out (fromYaml (include "agentops.mergedRuntime" (dict "root" $root "entry" $entry))) -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml $out -}}
+{{- end -}}
+
+{{- /* WHICH RUNTIME ANSWERS TO `default`.
+
+Every runtime renders under its OWN name — `claude`, `ollama`, whatever a
+`runtimes:` entry says — and the parent renders ONE MORE CR named `default`,
+a copy of the runtime this helper picks: the one flagged `default: true`, or,
+with none flagged, the FIRST configured (top-level `runtimes:` in order, then
+the bundles in the order `agentops.declaredRuntimes` lists them). One runtime
+alone is therefore always the default. Two flagged is refused by the guard.
+
+EVERY RUNTIME IS OPTIONAL, and this is what makes it so: turning the reference
+bundle off and another on needs no rename, and the CR a route resolves to is
+still one named `default`, which is what keeps the manager out of it. Returns
+the chosen entry as YAML, or nothing when no runtime is declared. */ -}}
+{{- define "agentops.defaultRuntimeEntry" -}}
+{{- $declared := fromYamlArray (include "agentops.declaredRuntimes" .) -}}
+{{- $pick := dict -}}
+{{- range $rt := $declared -}}{{- if and $rt.default (not $pick) -}}{{- $pick = $rt -}}{{- end -}}{{- end -}}
+{{- if and (not $pick) $declared -}}{{- $pick = first $declared -}}{{- end -}}
+{{- if $pick -}}{{- toYaml $pick -}}{{- end -}}
 {{- end -}}
 
 {{- /* THE DEFAULT-RUNTIME GUARD.
@@ -193,7 +262,16 @@ something actually resolving to that name. */ -}}
 {{- range $rt := $declared -}}
 {{- $names = append $names ($rt.name | default "") -}}
 {{- end -}}
-{{- if not (has "default" $names) -}}
+{{- if $declared -}}{{- $names = append $names "default" -}}{{- end -}}
+{{- /* WHICH RUNTIME IS `default` IS DECIDED BY agentops.defaultRuntimeEntry, and the
+parent renders a CR of that name from it. So `default` is missing only when NOTHING
+is declared at all — or when the flag was set twice, which is refused first. */ -}}
+{{- $flagged := list -}}
+{{- range $rt := $declared -}}{{- if $rt.default -}}{{- $flagged = append $flagged $rt.name -}}{{- end -}}{{- end -}}
+{{- if gt (len $flagged) 1 -}}
+{{- fail (printf "%d runtimes are flagged `default: true` (%s), and only one can answer to that name. Flag one, or none — with none flagged the first configured runtime is the default." (len $flagged) (join ", " $flagged)) -}}
+{{- end -}}
+{{- if and (not (has "default" $names)) (eq (len $names) 0) -}}
 {{- $needing := list -}}
 {{- range $p := (.Values.pipelines | default list) -}}
 {{- if not $p.runtimeRef -}}
@@ -223,7 +301,8 @@ which a Helm condition cannot express — so its helpers are always loaded. */ -
 {{- range $b := list
       (dict "key" "kubernetes" "helper" "kubernetes.wiringActive" "gated" false "routes" (dict "observe" "kubernetes.observePipelineEnabled" "admin" "kubernetes.adminPipelineEnabled"))
       (dict "key" "home-assistant" "helper" "home-assistant.wiringActive" "gated" true "routes" (dict "control" "home-assistant.userProfileEnabled" "ops" "home-assistant.opsProfileEnabled"))
-      (dict "key" "prometheus" "helper" "prometheus.wiringActive" "gated" true "routes" dict) -}}
+      (dict "key" "prometheus" "helper" "prometheus.wiringActive" "gated" true "routes" dict)
+      (dict "key" "pulse" "helper" "pulse.wiringActive" "gated" true "routes" (dict "observer" "pulse.observerRouteEnabled" "operator" "pulse.operatorRouteEnabled")) -}}
 {{- $bv := index $root.Values $b.key -}}
 {{- if and $bv (or (not $b.gated) $bv.enabled) -}}
 {{- $ctx := dict "Values" (merge (deepCopy $bv) (dict "global" $root.Values.global)) "Release" $root.Release "Chart" $root.Chart -}}
@@ -244,7 +323,7 @@ which a Helm condition cannot express — so its helpers are always loaded. */ -
 {{- end -}}
 {{- end -}}
 {{- if $needing -}}
-{{- fail (printf "No AgentRuntime named \"default\" is declared in this release, and %d route(s) resolve to it: %s. A Pipeline naming no runtimeRef falls back to the runtime named `default`, so these routes would create conversations that never execute — Pending forever, with the reason in the manager's log and nowhere you look. Declare one under the top-level `runtimes:` (an entry naming only `name: default` inherits every value from global.agentops.runtimeDefaults), re-enable the bundle that shipped it, or give each route above its own `runtimeRef`. Declared runtimes: %s" (len $needing) (join ", " $needing) (ternary "(none)" (join ", " $names) (eq (len $names) 0))) -}}
+{{- fail (printf "No AgentRuntime named \"default\" is declared in this release, and %d route(s) resolve to it: %s. A Pipeline naming no runtimeRef falls back to the runtime named `default`, so these routes would create conversations that never execute — Pending forever, with the reason in the manager's log and nowhere you look. Declare one under the top-level `runtimes:` (an entry naming only its `name` inherits every value from global.agentops.runtimeDefaults), or enable a runtime bundle — the first one configured becomes `default`, or the one flagged `default: true`. Or give each route above its own `runtimeRef`. Declared runtimes: %s" (len $needing) (join ", " $needing) (ternary "(none)" (join ", " $names) (eq (len $names) 0))) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -263,7 +342,7 @@ configuration, not through this CR. */ -}}
 {{- $rt := fromYaml (include "agentops.mergedRuntime" .) -}}
 {{- $name := $rt.name | required "every entry in `runtimes:` needs a name — it is what a Pipeline's spec.runtimeRef refers to, and `default` is the one a route naming none resolves to" -}}
 {{- $cred := $rt.credentialsSecret | default dict -}}
-{{- if $cred.token }}
+{{- if and $cred.token (not $rt.defaultOf) }}
 ---
 # Created because this runtime supplied a credential token, so the agent's
 # credential is provisioned with the release instead of being a prerequisite
@@ -288,6 +367,13 @@ metadata:
   namespace: {{ $root.Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-runtime
+  {{- with $rt.defaultOf }}
+  # THE DEFAULT: a copy of the runtime named below, rendered by the parent so a
+  # route naming no runtimeRef has a CR of this name to resolve to. Which one is
+  # copied is `default: true` on that runtime, or the first configured.
+  annotations:
+    agentops.dev/default-of: {{ . | quote }}
+  {{- end }}
 spec:
   image: {{ $rt.image | required (printf "runtime %q declares no image, and global.agentops.runtimeDefaults.image is empty — a runtime with no image is a CR the API server refuses" $name) | quote }}
   # The agent's security identity — its RBAC IS its power. A REFERENCE: this
@@ -567,7 +653,11 @@ silent guard there is correct.
 {{- if and (not .explicit) (not $root.Release.IsInstall) .existingVal -}}
 {{- $ann := (.existing.metadata).annotations | default dict -}}
 {{- if ne (index $ann "helm.sh/resource-policy" | default "") "keep" -}}
-{{- fail (printf "Secret %q in namespace %q holds a chart-generated credential that this chart version no longer renders on upgrade. Helm reads helm.sh/resource-policy off the live object, so dropping it from the manifest DELETES it — and with it every session or adapter credential derived from key %q. Annotate it once, then upgrade again:\n\n  kubectl -n %s annotate secret %s helm.sh/resource-policy=keep\n\nOr take the credential under release management instead by setting %s to its current value." .name $root.Release.Namespace .key $root.Release.Namespace .name .setting) -}}
+{{- $settingLine := "" -}}
+{{- if .setting -}}
+{{- $settingLine = printf "\n\nOr take the credential under release management instead by setting %s to its current value." .setting -}}
+{{- end -}}
+{{- fail (printf "Secret %q in namespace %q holds a chart-generated credential that this chart version no longer renders on upgrade. Helm reads helm.sh/resource-policy off the live object, so dropping it from the manifest DELETES it — and with it every session or adapter credential derived from key %q. Annotate it once, then upgrade again:\n\n  kubectl -n %s annotate secret %s helm.sh/resource-policy=keep%s" .name $root.Release.Namespace .key $root.Release.Namespace .name $settingLine) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -815,4 +905,140 @@ conversation on that install answering out of the wrong volume.
 {{- if $retired -}}
 {{- fail (printf "These values moved under persistence.context and are no longer read: %s. Rewrite them there — for example persistence.enabled becomes persistence.context.enabled. If this install already holds an agentops-home claim, set persistence.context.existingClaim: agentops-home as well, which keeps the volume you have and copies nothing." (join ", " $retired)) -}}
 {{- end -}}
+{{- end -}}
+
+{{- /* THE DOMAIN AGENT SELF-CLOSE INSTRUCTION (coordinator-deployment-mode,
+task 3) — appended to every bundle profile's prompt, pipelines mode and
+coordinator mode alike, since both reference the SAME AgentProfile object.
+
+Only load-bearing where a THREAD binds the conversation: `/close` is a reply-
+path command on a bound channel's thread (invariants.md, "Closing itself is
+still /close on a thread"). A coordinator-mode MEMBER conversation binds no
+channel of its own, so the instruction is a harmless no-op there — the
+instruction says so, rather than claiming a capability that mode does not
+grant. Ending a MEMBER conversation is the reaper's and the coordinating
+agent's job (coordinator-self-heal), not this agent's own. */ -}}
+{{- define "agentops.selfCloseInstruction" -}}
+If a thread is bound to this conversation and you judge the problem it is
+about to be resolved, you may end it yourself by replying with `/close` as
+your message — the same command a person uses to end a conversation. Only do
+this once you are confident: closing drops it from any further follow-up on
+this incident. If no thread is bound here, this instruction does nothing —
+leave ending the conversation to whatever invoked you.
+{{- end -}}
+
+{{- /* THE MEMBER SCOPE INSTRUCTION — appended beside self-close, same reach
+(every bundle profile, both wiring modes, same object), same THREAD-PRESENCE
+branch selfCloseInstruction already uses, for the same reason: a
+Pipeline-addressed conversation has its own thread and a human typing into
+it, so "a reply confirms it" still holds exactly as each profile's own
+describe-and-stop text already says. A coordinator-mode MEMBER has none, so
+without the second branch the agent has no way to know a mutating action
+still needs somebody's sign-off beyond its own judgment — which is exactly
+what let it reload a healthy integration unasked (measured live,
+2026-10-03): it read "reload" as narrow and safe, nothing told it that
+narrow-and-safe is still not its call to make without a thread.
+
+findReusableMember (internal/chat/coordinate.go) is what makes "wait to be
+re-invoked" a real mechanism rather than a dead end: a live, unclosed member
+invoked again under the SAME (parent, entry) reattaches to this exact
+conversation, so the authorized follow-up arrives as an ordinary next input
+with every finding already in context — never a blank restart. */ -}}
+{{- define "agentops.memberScopeInstruction" -}}
+Your task names exactly what you may do. Asked to investigate or report,
+stay read-only — propose a fix, never perform it, even one you are certain
+is safe. Only a task that explicitly authorizes a specific change is your
+license to make it, and only that change, nothing broader it reminds you of
+along the way.
+
+If a thread is bound to this conversation, a reply there confirming it —
+"yes", "do it", "go ahead" — is that authorization. Do exactly what you
+described, once, and never ask twice.
+
+If no thread is bound, you have nobody to ask directly: describe what you
+would do and end your turn there. Whoever invoked you decides what happens
+next, and tells you so directly, as your next task, if they authorize it.
+Never read a later message as authorization unless it says so plainly.
+{{- end -}}
+
+{{- /* Appends the self-close instruction and the member-scope instruction
+above to a profile's own prompt text, never discarding any of the three.
+Call with `(dict "text" <systemPrompt value>)`. */ -}}
+{{- define "agentops.withSelfClose" -}}
+{{- $role := trim (.text | default "") -}}
+{{- $extra := trim (include "agentops.selfCloseInstruction" .) -}}
+{{- $scope := trim (include "agentops.memberScopeInstruction" .) -}}
+{{- $pieces := list -}}
+{{- with $role }}{{ $pieces = append $pieces . }}{{ end -}}
+{{- with $extra }}{{ $pieces = append $pieces . }}{{ end -}}
+{{- with $scope }}{{ $pieces = append $pieces . }}{{ end -}}
+{{ join "\n\n" $pieces }}
+{{- end -}}
+
+{{- /* THE RELEASE-WIDE WIRING POSTURE (coordinator-deployment-mode): "pipelines"
+or "coordinator", resolved from `.Values.global` alone so every subchart can
+call this exactly as it calls every other helper in this file.
+
+Unset follows demo mode — off, the posture is "pipelines" (today's behaviour,
+byte-identical); `global.demo.enabled: true` selects "coordinator" instead, so
+a turnkey install exercises the Coordinator model out of the box. Either value
+set explicitly wins outright, in both directions: `wiringMode: pipelines`
+under demo mode keeps today's single-Pipeline demo.
+
+THIS CONTROLS RENDERING ONLY. No CRD, CEL rule or admission check anywhere
+makes a Pipeline and a Coordinator mutually exclusive — see wiring-mode's own
+spec and `.claude/rules/wiring.md`. */ -}}
+{{- define "agentops.wiringMode" -}}
+{{- $g := .Values.global | default dict -}}
+{{- $m := dig "agentops" "wiringMode" "" $g -}}
+{{- if not $m -}}
+{{- if dig "demo" "enabled" false $g -}}
+{{- $m = "coordinator" -}}
+{{- else -}}
+{{- $m = "pipelines" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (has $m (list "pipelines" "coordinator")) -}}
+{{- fail (printf "global.agentops.wiringMode: %q is not a recognized value — it accepts exactly \"pipelines\" or \"coordinator\"" $m) -}}
+{{- end -}}
+{{- $m -}}
+{{- end -}}
+
+{{- /* EVERY ENABLED BUNDLE'S COORDINATOR-MODE CONTRIBUTION, gathered through
+the SAME bundle registry and context-construction `agentops.defaultRuntimeGuard`
+already uses above — re-deriving through each bundle's own
+`<bundle>.coordinatorContribution` helper is what keeps this from drifting from
+what actually rendered, exactly as that guard's own comment argues.
+
+Each bundle's helper returns the sources its own wiring would have claimed and
+the AgentCapability entries its own wiring would have rendered (coordinator
+mode's `capabilities.yaml` in that bundle), as YAML this helper decodes with
+`fromYaml` and re-aggregates. Returns YAML: `sources: [...]` (deduped bundle
+source names) and `agents: [...]` (dicts: name, capability, description) —
+decoded by `chart/templates/coordinator.yaml`. */ -}}
+{{- define "agentops.coordinatorContributions" -}}
+{{- $root := . -}}
+{{- $sources := list -}}
+{{- $agents := list -}}
+{{- range $b := list
+      (dict "key" "kubernetes" "helper" "kubernetes.coordinatorContribution" "gated" false)
+      (dict "key" "home-assistant" "helper" "home-assistant.coordinatorContribution" "gated" true)
+      (dict "key" "prometheus" "helper" "prometheus.coordinatorContribution" "gated" true)
+      (dict "key" "pulse" "helper" "pulse.coordinatorContribution" "gated" true) -}}
+{{- $bv := index $root.Values $b.key -}}
+{{- if and $bv (or (not $b.gated) $bv.enabled) -}}
+{{- $ctx := dict "Values" (merge (deepCopy $bv) (dict "global" $root.Values.global)) "Release" $root.Release "Chart" $root.Chart -}}
+{{- $contrib := fromYaml (include $b.helper $ctx) -}}
+{{- range $s := ($contrib.sources | default list) -}}
+{{- if not (has $s $sources) -}}{{- $sources = append $sources $s -}}{{- end -}}
+{{- end -}}
+{{- range $a := ($contrib.agents | default list) -}}
+{{- $agents = append $agents $a -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+sources:
+{{ toYaml $sources | indent 2 }}
+agents:
+{{ toYaml $agents | indent 2 }}
 {{- end -}}

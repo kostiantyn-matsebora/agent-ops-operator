@@ -9,12 +9,15 @@
 //	sources:  GET /signal/sources?adapter=<ADAPTER_NAME> (15s poll)
 //	push:     POST /signal/inbound     (normalized; alert lane)
 //
-// Normalization keeps built-in-path parity: firing-only, fingerprint verbatim
-// (sorted-label-hash fallback), raw labels, "🔍 alertname — namespace" title,
-// per-alert JSON payload. NO adapter-side grouping — signature grouping,
-// cooldown, window reuse, and recurrence stay manager-side from
-// SignalSource.spec.grouping (and routing requires the source's Pipeline
-// claim: unwired sources drop with Wired=False).
+// Normalization keeps built-in-path parity: firing-only, raw labels,
+// "🔍 alertname — namespace" title, per-alert JSON payload. initiationId is
+// the webhook's own groupKey verbatim (Alertmanager's group_by decision,
+// made upstream) — every firing alert of one group correlates to one
+// conversation — with a sorted-groupLabels-hash fallback for a nonstandard
+// sender that omits groupKey. The adapter correlates nothing beyond that —
+// cooldown and recurrence stay manager-side, keyed on initiationId (and
+// routing requires the source's Pipeline claim: unwired sources drop with
+// Wired=False).
 //
 // Auth is opt-in per source: a source with credentialsSecretRef advertises a
 // credentialEnvPrefix; the adapter then requires Authorization: Bearer
@@ -26,6 +29,8 @@
 // "vm-alertmanager" — hand-deployed instances set it themselves; in-cluster
 // the reconciler injects the CR name), LISTEN_ADDR (default ":8080" —
 // in-cluster the reconciler injects it from SignalAdapter.spec.port),
+// POD_NAMESPACE (downward API, always injected by the reconciler — without it
+// the adapter cannot compute its own webhook URL and registers nothing),
 // projected AGENTOPS_CRED_* vars.
 package main
 
@@ -35,6 +40,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -51,21 +57,26 @@ import (
 // amAlert is one entry of the standard Alertmanager webhook payload.
 type amAlert struct {
 	Status       string            `json:"status"`
-	Fingerprint  string            `json:"fingerprint"`
 	StartsAt     string            `json:"startsAt"`
 	Labels       map[string]string `json:"labels"`
 	Annotations  map[string]string `json:"annotations"`
 	GeneratorURL string            `json:"generatorURL"`
 }
 
+// amPayload is the standard Alertmanager webhook payload. GroupKey is
+// Alertmanager's own group_by decision — the correlation id every alert of
+// this group adopts verbatim. GroupLabels feeds the fallback for a
+// nonstandard sender that posts no GroupKey.
 type amPayload struct {
-	Alerts []amAlert `json:"alerts"`
+	GroupKey    string            `json:"groupKey"`
+	GroupLabels map[string]string `json:"groupLabels"`
+	Alerts      []amAlert         `json:"alerts"`
 }
 
 type adapter struct {
 	mgr        *Manager
 	sourceType string
-	podNS      string // downward-API namespace ("" without kubernetesAccess)
+	podNS      string // downward-API namespace ("" only when hand-deployed without it)
 	listen     string
 	kube       *kubeClient // nil = no in-cluster access
 	kubeReason string      // why kube is nil (instruction path)
@@ -83,6 +94,13 @@ func mustEnv(key string) string {
 	return v
 }
 
+// baseContext supplies the parent for main's signal-derived context. A test
+// swaps it to inject a context it can cancel directly, so it can call the
+// real main() in-process and stop it exactly as a real SIGTERM would —
+// without sending any OS signal that could also reach other tests sharing
+// this process.
+var baseContext = context.Background
+
 func main() {
 	sourceType := os.Getenv("ADAPTER_NAME")
 	if sourceType == "" {
@@ -92,7 +110,7 @@ func main() {
 	if listen == "" {
 		listen = ":8080"
 	}
-	kube, kubeReason := newInClusterClient()
+	kube, kubeReason := newInClusterClient(sourceType)
 	a := &adapter{
 		mgr:        NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
 		sourceType: sourceType,
@@ -103,7 +121,7 @@ func main() {
 		sources:    map[string]string{},
 		reported:   map[string]string{},
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	log.Printf("signal-alertmanager adapter starting (adapter=%s, listen=%s)", sourceType, listen)
 
@@ -158,10 +176,15 @@ func (a *adapter) refreshSources(ctx context.Context) {
 // the webhook is live whether or not the sender could be configured for it,
 // so registration trouble reports instructions rather than unserving.
 func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (string, string) {
-	reg := parseRegister(info.Config)
+	reg, err := parseRegister(info.Config)
+	if err != nil {
+		// a block that does not parse is never an absent one: say what failed
+		// and attempt no registration until the block is corrected
+		return reasonRegistrationManual, manualInstructions(info.Name, a.podNS, a.manualURL(info.Name), err.Error())
+	}
 	if reg == nil {
 		// no registration asked for: name the path an operator should target
-		return "AdapterReady", fmt.Sprintf("served by signal-alertmanager — POST %s", a.endpoint(info.Name))
+		return reasonAdapterReady, fmt.Sprintf("served by signal-alertmanager — POST %s", a.endpoint(info.Name))
 	}
 	// default to our own namespace: vm-operator selects VMAlertmanagerConfigs
 	// from everywhere by default, so this needs no cross-namespace grant
@@ -169,33 +192,72 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 	if ns == "" {
 		ns = a.podNS
 	}
-	url := a.endpoint(info.Name)
-	if a.kube == nil || ns == "" {
-		reason := a.kubeReason
-		if reason == "" {
-			reason = "namespace unknown (POD_NAMESPACE unset and config.register.namespace empty)"
+	if a.podNS == "" {
+		// No namespace fact means no webhook URL. A placeholder written into
+		// the sender's live config looks registered and delivers nothing, so
+		// computing no URL means registering no object.
+		cause := "own webhook URL unknown: POD_NAMESPACE is unset — fill in the adapter's namespace"
+		if a.kube == nil {
+			// both causes at once, or fixing the first only reveals the second
+			cause += "; " + a.kubeReason
 		}
-		return "RegistrationManual", manualInstructions(info.Name, ns, url, reason)
+		return reasonRegistrationManual, manualInstructions(info.Name, ns, a.manualURL(info.Name), cause)
 	}
-	ref, err := a.kube.ensureRegistration(ctx, info.Name, ns, url, reg)
+	return a.register(ctx, info.Name, ns, reg)
+}
+
+// register ensures the sender-side object for a source whose webhook URL and
+// target namespace are both known, and returns the Ready reason/message.
+func (a *adapter) register(ctx context.Context, source, ns string, reg *registerSpec) (string, string) {
+	url := a.endpoint(source)
+	if a.kube == nil {
+		return reasonRegistrationManual, manualInstructions(source, ns, url, a.kubeReason)
+	}
+	ref, err := a.kube.ensureRegistration(ctx, source, ns, url, reg)
 	if err != nil {
-		return "RegistrationManual", manualInstructions(info.Name, ns, url, err.Error())
+		cause := err.Error()
+		if errors.Is(err, errForbidden) {
+			cause += "; " + accountRemediation(a.sourceType)
+		}
+		return reasonRegistrationManual, manualInstructions(source, ns, url, cause)
 	}
-	return "AdapterReady", fmt.Sprintf(
+	return reasonAdapterReady, fmt.Sprintf(
 		"served by signal-alertmanager — POST %s; sender registered in VMAlertmanagerConfig %s", url, ref)
 }
 
+// Ready reasons this adapter reports for a source.
+const (
+	reasonAdapterReady       = "AdapterReady"
+	reasonRegistrationManual = "RegistrationManual"
+)
+
+// namespaceSlot stands in for the adapter's namespace in a URL shape the
+// operator must complete by hand.
+const namespaceSlot = "<adapter-namespace>"
+
 // manualInstructions renders the degraded message: why registration could not
-// happen, and exactly what to do instead.
+// happen, and exactly what to do instead. An unknown namespace (no
+// POD_NAMESPACE, no block namespace) is shown as the slot to fill in, so the
+// object to create is always named in full.
 func manualInstructions(source, namespace, url, cause string) string {
-	target := registrationName(source)
-	if namespace != "" {
-		target = namespace + "/" + target
+	if namespace == "" {
+		namespace = namespaceSlot
 	}
+	target := namespace + "/" + registrationName(source)
 	return fmt.Sprintf(
 		"served, but could not register the sender automatically (%s). Configure it by hand: "+
 			"create VMAlertmanagerConfig %s (or add a webhook receiver to your Alertmanager) posting to %s",
 		cause, target, url)
+}
+
+// manualURL is the URL an operator should configure by hand: the real one
+// when computable, otherwise its shape with the unknown namespace left as a
+// slot to fill in — shown in a message, never written into the sender.
+func (a *adapter) manualURL(source string) string {
+	if a.podNS == "" {
+		return webhookURL(a.sourceType, namespaceSlot, a.listen, source)
+	}
+	return a.endpoint(source)
 }
 
 // endpoint is this adapter's webhook URL for a source (in-cluster form when
@@ -279,14 +341,18 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signals := normalize(payload.Alerts)
+	signals := normalize(payload)
 	if len(signals) == 0 {
 		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "no firing alerts"})
 		return
 	}
 	res, err := a.mgr.Inbound(r.Context(), name, signals)
 	if err != nil {
-		log.Printf("inbound %s: %v", name, err)
+		// %q escapes control characters in the manager's rejection message,
+		// which can echo back webhook-sourced content (initiationId, labels)
+		// — unescaped, a crafted value could forge log lines (CWE log
+		// injection, gosecurity:S5145).
+		log.Printf("inbound %q: %q", name, err.Error())
 		writeJSON(w, 502, map[string]string{"error": "manager rejected the signals"})
 		return
 	}
@@ -294,16 +360,18 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // normalize converts firing alerts to contract signals with built-in-path
-// parity. No grouping/dedup here — the manager owns that.
-func normalize(alerts []amAlert) []Signal {
+// parity. Every signal of this webhook body shares one initiationId — the
+// group's own correlation id, resolved once per payload, never per alert.
+// No dedup/cooldown here — the manager owns that, keyed on that id.
+func normalize(payload amPayload) []Signal {
+	initiationID := payload.GroupKey
+	if initiationID == "" {
+		initiationID = groupLabelsFallbackID(payload.GroupLabels)
+	}
 	var signals []Signal
-	for _, alert := range alerts {
+	for _, alert := range payload.Alerts {
 		if alert.Status != "firing" {
 			continue
-		}
-		fp := alert.Fingerprint
-		if fp == "" {
-			fp = labelFingerprint(alert.Labels)
 		}
 		title := "🔍 " + alert.Labels["alertname"]
 		if ns := alert.Labels["namespace"]; ns != "" {
@@ -315,19 +383,19 @@ func normalize(alerts []amAlert) []Signal {
 		}
 		payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
 		signals = append(signals, Signal{
-			Fingerprint: fp,
-			Labels:      alert.Labels,
-			Title:       title,
-			Payload:     string(payloadJSON),
+			InitiationID: initiationID,
+			Labels:       alert.Labels,
+			Title:        title,
+			Payload:      string(payloadJSON),
 		})
 	}
 	return signals
 }
 
-// labelFingerprint derives a deterministic fingerprint from sorted label
-// pairs — the fallback when a sender omits Alertmanager's own fingerprint
-// (the inbound contract rejects empty fingerprints).
-func labelFingerprint(labels map[string]string) string {
+// groupLabelsFallbackID derives a deterministic id from sorted groupLabels
+// pairs — the fallback when a nonstandard sender omits Alertmanager's own
+// groupKey (the inbound contract rejects an empty initiationId).
+func groupLabelsFallbackID(labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
 		keys = append(keys, k)

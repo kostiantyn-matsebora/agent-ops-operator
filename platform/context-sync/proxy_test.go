@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -184,6 +185,37 @@ func TestPathIsIgnoresTrailingSlash(t *testing.T) {
 	}
 	if pathIs("/work/doneish", "/work/done") {
 		t.Fatal("a longer path must not match")
+	}
+}
+
+// handler()'s ErrorHandler branch: an unreachable upstream must come back as
+// a 502 through the proxy's own error handling, never a hang or a panic — the
+// runtime's long poll depends on getting a response it can retry on.
+func TestProxyReturns502WhenUpstreamUnreachable(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	} // nothing listens here now
+
+	u, err := url.Parse("http://" + addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &Proxy{Upstream: u}
+	srv := httptest.NewServer(p)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 from the proxy's own error handler", resp.StatusCode)
 	}
 }
 

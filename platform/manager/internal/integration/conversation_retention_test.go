@@ -193,8 +193,10 @@ func TestAutoDeleteRespectsTheClosedWindowAndAReopenResetsIt(t *testing.T) {
 	}
 }
 
-// The rule that makes closing mean anything: a matching signature opens a NEW
-// conversation rather than waking the one somebody tidied away.
+// The rule that makes closing mean anything: a CLOSED conversation is excluded
+// from equality routing even though its conversationId still equals the
+// incoming initiationId — the repeat opens a NEW conversation rather than
+// waking the one somebody tidied away.
 func TestAClosedConversationIsNotReused(t *testing.T) {
 	mkProfile(t, "prof-reuse")
 	mkSignalSource(t, "src-reuse", "am-reuse", "")
@@ -203,7 +205,7 @@ func TestAClosedConversationIsNotReused(t *testing.T) {
 	h := apiServer().Handler()
 
 	if rec := postSignal(t, h, testMasterToken, "src-reuse", []map[string]any{
-		{"fingerprint": "reuse-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "full"},
+		{"initiationId": "reuse-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "full"},
 	}); rec.Code != 200 {
 		t.Fatalf("first signal: %d %s", rec.Code, rec.Body.String())
 	}
@@ -212,7 +214,8 @@ func TestAClosedConversationIsNotReused(t *testing.T) {
 		t.Fatalf("first signal must open one conversation, got %d", len(first))
 	}
 
-	// Close it. A matching signature must now open a NEW conversation.
+	// Close it. The SAME id must now open a NEW conversation rather than
+	// reusing the closed one.
 	c := getConv(t, first[0].Name)
 	now := metav1.Now()
 	c.Status.Phase = agentopsv1alpha1.ConversationClosed
@@ -220,16 +223,23 @@ func TestAClosedConversationIsNotReused(t *testing.T) {
 	if err := k8sClient.Status().Update(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
+	waitForRoutingCacheToObserve(t, c, c.ResourceVersion)
 
-	// A DIFFERENT fingerprint, so the source's cooldown is not what decides.
-	if rec := postSignal(t, h, testMasterToken, "src-reuse", []map[string]any{
-		{"fingerprint": "reuse-2", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "still full"},
+	// Same initiationId as before — a fresh server stands in for "outside the
+	// source's cooldown" so the repeat isn't suppressed, and isolates this
+	// from the separate "distinct ids never merge" rule. Its cooldown map
+	// recovers from the source's durable record on first use, so that record
+	// must itself look expired too.
+	backdateCooldown(t, "src-reuse", "reuse-1")
+	h2 := apiServer().Handler()
+	if rec := postSignal(t, h2, testMasterToken, "src-reuse", []map[string]any{
+		{"initiationId": "reuse-1", "labels": map[string]string{"alertname": "DiskFull"}, "payload": "still full"},
 	}); rec.Code != 200 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
 	all := convsFromPipeline(t, "pipe-reuse")
 	if len(all) != 2 {
-		t.Fatalf("a signal matching a CLOSED conversation must open a new one, got %d", len(all))
+		t.Fatalf("a signal matching a CLOSED conversation's id must open a new one, got %d", len(all))
 	}
 	for _, cv := range all {
 		if cv.Name == first[0].Name && len(cv.Spec.Inputs) > 1 {

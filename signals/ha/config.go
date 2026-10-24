@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,140 @@ type sourceConfig struct {
 	// what is newer than the cursor. Default true: a restart that skipped the
 	// errors logged while it was down would make the lane quietly lossy.
 	Backfill *bool `json:"backfill,omitempty"`
+	// Surfaces switches and tunes the health surfaces beside the log. Kept raw
+	// so it can be decoded STRICTLY: a misspelt surface or knob here would
+	// otherwise be a silently ignored key, which for a switch means a surface
+	// somebody believes is off.
+	Surfaces json.RawMessage `json:"surfaces,omitempty"`
+}
+
+// surfacesConfig is `surfaces`: one object per surface, each with `enabled`
+// and the one knob that surface has.
+type surfacesConfig struct {
+	ConfigEntries *surfaceConfig `json:"configEntries"`
+	Repairs       *surfaceConfig `json:"repairs"`
+	Sensors       *surfaceConfig `json:"sensors"`
+	Updates       *surfaceConfig `json:"updates"`
+}
+
+// surfaceConfig is one surface's switch and knob. Each knob belongs to ONE
+// surface and is refused on any other: a `states` list under `sensors` is a
+// mistake, not a no-op.
+type surfaceConfig struct {
+	Enabled *bool `json:"enabled"`
+	// States are the config entry states that count (configEntries).
+	States []string `json:"states"`
+	// Severities are the repair severities that count (repairs).
+	Severities []string `json:"severities"`
+	// DeviceClasses are the binary_sensor device classes watched (sensors).
+	DeviceClasses []string `json:"deviceClasses"`
+}
+
+// surfacePolicy is one surface, compiled: on or off, and what counts.
+type surfacePolicy struct {
+	enabled bool
+	accept  map[string]bool
+}
+
+// surfacePolicies is every surface, compiled, with the defaults applied.
+type surfacePolicies struct {
+	configEntries surfacePolicy
+	repairs       surfacePolicy
+	sensors       surfacePolicy
+	updates       surfacePolicy
+}
+
+// defaultSurfaces: config entries, repairs and sensors on; the update digest
+// off — a list of pending packages is not an incident until somebody says
+// they want to hear about it. Warning-severity repairs are deprecation and
+// version notices, the same background hum `levels` keeps out of the log lane.
+func defaultSurfaces() surfacePolicies {
+	return surfacePolicies{
+		configEntries: surfacePolicy{enabled: true, accept: setOf("setup_retry", "setup_error", "migration_error")},
+		repairs:       surfacePolicy{enabled: true, accept: setOf("critical", "error")},
+		sensors:       surfacePolicy{enabled: true, accept: setOf("problem", "connectivity")},
+		updates:       surfacePolicy{enabled: false},
+	}
+}
+
+func setOf(values ...string) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, v := range values {
+		out[v] = true
+	}
+	return out
+}
+
+// parseSurfaces validates the `surfaces` block against the defaults.
+func parseSurfaces(raw json.RawMessage) (surfacePolicies, error) {
+	out := defaultSurfaces()
+	if len(raw) == 0 || string(raw) == "null" {
+		return out, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	var cfg surfacesConfig
+	if err := dec.Decode(&cfg); err != nil {
+		return out, fmt.Errorf("spec.config.surfaces: %w (the surfaces are configEntries, repairs, sensors, updates; "+
+			"each takes `enabled` and its own knob)", err)
+	}
+	type knob struct {
+		name   string
+		values []string
+	}
+	apply := func(name string, c *surfaceConfig, p *surfacePolicy, own string, vocab map[string]bool, knobs ...knob) error {
+		if c == nil {
+			return nil
+		}
+		if c.Enabled != nil {
+			p.enabled = *c.Enabled
+		}
+		for _, k := range knobs {
+			// nil is absent; an empty list is written and means nothing counts,
+			// which is a surface somebody meant to disable — say so.
+			if k.name != own && k.values != nil {
+				return fmt.Errorf("spec.config.surfaces.%s: `%s` is not a knob of this surface", name, k.name)
+			}
+			if k.name != own || k.values == nil {
+				continue
+			}
+			if len(k.values) == 0 {
+				return fmt.Errorf("spec.config.surfaces.%s.%s: empty — list what counts, or set `enabled: false`", name, own)
+			}
+			accept := map[string]bool{}
+			for _, v := range k.values {
+				v = strings.ToLower(strings.TrimSpace(v))
+				if !vocab[v] {
+					return fmt.Errorf("spec.config.surfaces.%s.%s: %q is not one of %s", name, own, v,
+						strings.Join(sortedKeys(vocab), ", "))
+				}
+				accept[v] = true
+			}
+			p.accept = accept
+		}
+		return nil
+	}
+	knobsOf := func(c *surfaceConfig) []knob {
+		if c == nil {
+			return nil
+		}
+		return []knob{{"states", c.States}, {"severities", c.Severities}, {"deviceClasses", c.DeviceClasses}}
+	}
+	sensorClasses := map[string]bool{}
+	for class := range sensorFaultState {
+		sensorClasses[class] = true
+	}
+	for _, step := range []error{
+		apply("configEntries", cfg.ConfigEntries, &out.configEntries, "states", configEntryStates, knobsOf(cfg.ConfigEntries)...),
+		apply("repairs", cfg.Repairs, &out.repairs, "severities", repairSeverities, knobsOf(cfg.Repairs)...),
+		apply("sensors", cfg.Sensors, &out.sensors, "deviceClasses", sensorClasses, knobsOf(cfg.Sensors)...),
+		apply("updates", cfg.Updates, &out.updates, "", nil, knobsOf(cfg.Updates)...),
+	} {
+		if step != nil {
+			return out, step
+		}
+	}
+	return out, nil
 }
 
 // validLevels are the Python logging levels Home Assistant emits.
@@ -49,6 +184,9 @@ type filter struct {
 	// rules is the compiled suppression policy. Integration include/exclude
 	// lists are translated into leading drop rules, so this is the single path.
 	rules *ruleSet
+	// surfaces is which health surfaces are read beside the log, and what
+	// counts on each.
+	surfaces surfacePolicies
 }
 
 // parseConfig validates a source's raw config into a filter.
@@ -59,8 +197,13 @@ type filter struct {
 func parseConfig(raw json.RawMessage) (*filter, error) {
 	cfg := sourceConfig{}
 	if len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, fmt.Errorf("spec.config is not valid JSON for the ha adapter: %w", err)
+		// Strict, as the surfaces block is: an unknown key here is a config
+		// error, never a window that silently never fires — the time axis
+		// (timeIntervals) is the documented case.
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&cfg); err != nil {
+			return nil, fmt.Errorf("spec.config is not valid for the ha adapter: %w", err)
 		}
 	}
 	if strings.TrimSpace(cfg.Endpoint) == "" {
@@ -82,6 +225,11 @@ func parseConfig(raw json.RawMessage) (*filter, error) {
 		return nil, fmt.Errorf("spec.config: %w", err)
 	}
 	f.rules = compiled
+	surfaces, err := parseSurfaces(cfg.Surfaces)
+	if err != nil {
+		return nil, err
+	}
+	f.surfaces = surfaces
 
 	if len(cfg.Levels) == 0 {
 		f.levels["ERROR"], f.levels["CRITICAL"] = true, true
@@ -104,6 +252,11 @@ func parseConfig(raw json.RawMessage) (*filter, error) {
 // are translated into leading drop rules by parseConfig, so selection by
 // integration has exactly one implementation.
 func (f *filter) Matches(rec *logRecord) bool {
+	// `levels` scopes LOG records. A surface condition is in scope by the
+	// surface being enabled; a rule is how one is silenced from there.
+	if rec.Surface != "" {
+		return true
+	}
 	return f.levels[strings.ToUpper(rec.Level)]
 }
 
@@ -122,8 +275,9 @@ func (f *filter) Rule(sig *Signal) (compiledRule, bool) {
 // position: homeassistant.components.<domain>.* for built-ins,
 // custom_components.<domain>.* for everything installed by hand. Anything else
 // is core, and the logger's own name IS the integration — never empty, because
-// this label is what conversations group on and an empty grouping key would
-// merge every unrelated core error into one conversation.
+// this label keys the dwell queue's entries, and so a dwelled condition's
+// initiationId, and an empty key would merge every unrelated core error into
+// one conversation.
 func integrationOf(logger string) string {
 	switch {
 	case strings.HasPrefix(logger, "homeassistant.components."):
@@ -135,6 +289,49 @@ func integrationOf(logger string) string {
 	default:
 		return logger
 	}
+}
+
+// configEntriesLogger is the core Home Assistant logger that reports
+// config-entry setup failures. Unlike every other logger this adapter reads,
+// its NAME carries no domain — homeassistant.components.<domain> and
+// custom_components.<domain> are the only prefixes integrationOf strips, and
+// this logger matches neither. The domain instead sits inside the message
+// text, which is why normalize() special-cases it below.
+const configEntriesLogger = "homeassistant.config_entries"
+
+// configEntryDomainPatterns extract the real Home Assistant domain from a
+// homeassistant.config_entries message, one per format string that logger
+// actually uses (the same shapes the shipped default rule already matches by
+// keyword). Anchored to each format string's LEADING literal structure —
+// never a bare "for (\w+)" — so free text elsewhere in a message cannot be
+// misattributed as a domain, and each capture is restricted to a valid Python
+// identifier shape (HA domains are lowercase snake_case module names). The
+// domain capture itself is bounded by a word boundary, never end-of-string:
+// anchoring on `$` would silently fail to match — falling back to the logger
+// name with nothing logged — the moment any wording HA appends after the
+// domain differs from what was observed live.
+var configEntryDomainPatterns = []*regexp.Regexp{
+	// "Error setting up entry <title> for <domain>"
+	regexp.MustCompile(`(?s)^Error setting up entry .+ for ([a-z][a-z0-9_]*)\b`),
+	// "Setup failed for '<domain>': <error>"
+	regexp.MustCompile(`(?s)^Setup failed for '([a-z][a-z0-9_]*)':`),
+	// "Config entry '<title>' for <domain> integration not ready yet: ..."
+	// "Config entry '<title>' for <domain> could not ..."
+	// "Config entry '<title>' for <domain> is not ready yet ..."
+	regexp.MustCompile(`(?s)^Config entry '.+' for ([a-z][a-z0-9_]*) (?:integration not ready yet|could not|is not ready)`),
+}
+
+// domainFromConfigEntryMessage reports the domain a config-entry setup
+// failure names, or "" when the message matches none of the recognized
+// shapes — callers fall back to the logger-derived identity in that case,
+// exactly as they did before this function existed.
+func domainFromConfigEntryMessage(text string) string {
+	for _, re := range configEntryDomainPatterns {
+		if m := re.FindStringSubmatch(text); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }
 
 func firstSegment(s string) string {
@@ -153,15 +350,31 @@ const maxTitleText = 120
 
 // normalize turns one log record into a contract signal for a source.
 //
-// The fingerprint keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
+// initiationId keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
 // deduplication key — and never on the timestamp or the occurrence count. A
 // recurring error must keep one identity, or every repeat would open a fresh
-// conversation instead of collapsing under the manager's cooldown.
+// conversation instead of recurring onto the manager's open one. This is the
+// per-record condition identity: an entry that reaches the dwell queue
+// (pending.go) and aggregates several records under one integration mints
+// its OWN, broader id there instead — the point where that same-problem
+// decision is actually made.
 func normalize(source string, rec *logRecord) Signal {
 	integration := integrationOf(rec.Name)
 	text := rec.Text()
+	if rec.Name == configEntriesLogger {
+		if domain := domainFromConfigEntryMessage(text); domain != "" {
+			integration = domain
+		}
+	}
+	surface := rec.Surface
+	if surface == "" {
+		surface = surfaceLog
+	} else if rec.Integration != "" {
+		integration = rec.Integration
+	}
 
-	payload, _ := json.MarshalIndent(map[string]any{
+	fields := map[string]any{
+		"surface":       surface,
 		"integration":   integration,
 		"logger":        rec.Name,
 		"level":         strings.ToUpper(rec.Level),
@@ -171,7 +384,11 @@ func normalize(source string, rec *logRecord) Signal {
 		"firstOccurred": timeString(epoch(rec.FirstOccurred)),
 		"lastOccurred":  timeString(rec.At()),
 		"exception":     rec.Exception,
-	}, "", "  ")
+	}
+	for k, v := range rec.Extra {
+		fields[k] = v
+	}
+	payload, _ := json.MarshalIndent(fields, "", "  ")
 
 	labels := map[string]string{
 		"alertgroup":  "ha-logs",
@@ -181,15 +398,16 @@ func normalize(source string, rec *logRecord) Signal {
 		"level":       strings.ToUpper(rec.Level),
 		"location":    rec.Location(),
 		"source":      source,
+		"surface":     surface,
 	}
 
 	return Signal{
-		Fingerprint: fmt.Sprintf("%s@%s", source, rec.Key()),
-		Labels:      labels,
-		Title:       fmt.Sprintf("%s: %s", integration, truncate(oneLine(text), maxTitleText)),
-		Payload:     string(payload),
-		Kind:        "alert",
-		MatchText:   text,
+		InitiationID: fmt.Sprintf("%s@%s", source, rec.Key()),
+		Labels:       labels,
+		Title:        fmt.Sprintf("%s: %s", integration, truncate(oneLine(text), maxTitleText)),
+		Payload:      string(payload),
+		Kind:         "alert",
+		MatchText:    text,
 	}
 }
 

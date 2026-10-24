@@ -19,6 +19,12 @@ type ConversationInputSpec struct {
 	// decide how much of it a surface shows.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
+	// Severity is the originating signal's own severity rating for this
+	// occurrence, kept per-input the same way Labels is — each recurrence
+	// keeps its own, never retroactively rewriting the provenance. Omitted
+	// wherever the originating signal carried none.
+	// +optional
+	Severity Severity `json:"severity,omitempty"`
 }
 
 // ConversationInputStatus tracks consumption.

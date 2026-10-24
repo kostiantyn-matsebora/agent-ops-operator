@@ -14,7 +14,7 @@ alertmanager:
   name: alertmanager
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-alertmanager
-    tag: 0.7.2
+    tag: 0.8.0
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.
@@ -55,8 +55,6 @@ alertmanager:
     # Secret holding this source's bearer token; empty = unauthenticated.
     # NOTES.txt prints the matching Alertmanager authorization stanza.
     credentialsSecretRef: ""
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
-    grouping: {}
 
 # Metrics access as MCP tools: the MCPConfig (the server) and the MCPToolset
 # (permission to call it). Both matter — a config without the toolset gives an
@@ -149,12 +147,31 @@ profile:
 # The bundle's OWN route — the one component that spends money and acts alone.
 # OFF by default and forced on by nothing: no turnkey mode enables this bundle,
 # so unlike kubernetes's there is no demo path to override.
+#
+# Paired with the parent's `global.agentops.wiringMode`: this says WHETHER the
+# route renders, wiringMode says AS WHAT — a `Pipeline` under `pipelines`
+# mode, an `AgentCapability` on the chart-rendered `Coordinator` under
+# `coordinator` mode.
+wiringEnabled: false
+
 pipelines:
-  enabled: false
   # Named for the job, not the channel it answers on.
   name: alert-triage
   # Display only — see kubernetes's `pipelines.observe.icon`.
   icon: aops:alert
+  # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
+  # Coordinator's own coordinating agent. It states what this agent IS and CAN
+  # DO, what it cannot, and what to hand it — so a person's question matches it
+  # as readily as an alert does. Never a trigger alone ("a firing alert"), and
+  # never a routing rule of its own. Unused under `pipelines` mode.
+  description: >-
+    A metrics investigator over the Prometheus query API. Can run PromQL
+    queries against live and historical data, read the rules and targets the
+    backend exposes, tell a spike from a trend, and say what a firing alert
+    means, how severe it is and what the likely cause is. Cannot change
+    anything — no silence, no rule edit, no action on the cluster. Hand it a
+    firing alert, or any question a metric can answer — "is the api latency
+    up", "how much memory does X use".
   # Channels to deliver to, BY NAME — the one object the bundle does not render,
   # so the key is omitted entirely when empty. Empty works: the conversation
   # dispatches immediately and the answer lands in status.runs[].result.

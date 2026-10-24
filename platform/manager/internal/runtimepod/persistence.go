@@ -68,21 +68,19 @@ func ResolveClaim(pipelineName string, vol Volume,
 // ResolvePersistence resolves BOTH volumes of one route against the release
 // defaults, returning the pair a Conversation snapshots.
 //
-// A nil Pipeline is the case where nothing originated from wiring at all, and
-// it takes the release defaults exactly as an unbound route does.
-func ResolvePersistence(pipeline *agentopsv1alpha1.Pipeline,
+// pipelineName is the ROUTE's own name, used only to derive a claim name for a
+// binding that names a PersistentVolume — never the capability's, since two
+// routes may share one capability's persistence declaration and must still
+// resolve to two different claims. An empty pipelineName and a nil persistence
+// is the case where nothing originated from wiring at all, and it takes the
+// release defaults exactly as an unbound route does.
+func ResolvePersistence(pipelineName string, persistence *agentopsv1alpha1.PipelinePersistence,
 	defaults Config) (contextClaim, workspaceClaim string) {
 
-	var name string
-	var p *agentopsv1alpha1.PipelinePersistence
-	if pipeline != nil {
-		name = pipeline.Name
-		p = pipeline.Spec.Persistence
-	}
 	var ctxBinding, wsBinding *agentopsv1alpha1.PersistenceBinding
-	if p != nil {
-		ctxBinding, wsBinding = p.Context, p.Workspace
+	if persistence != nil {
+		ctxBinding, wsBinding = persistence.Context, persistence.Workspace
 	}
-	return ResolveClaim(name, VolumeContext, ctxBinding, defaults.ContextPVC),
-		ResolveClaim(name, VolumeWorkspace, wsBinding, defaults.WorkspacePVC)
+	return ResolveClaim(pipelineName, VolumeContext, ctxBinding, defaults.ContextPVC),
+		ResolveClaim(pipelineName, VolumeWorkspace, wsBinding, defaults.WorkspacePVC)
 }

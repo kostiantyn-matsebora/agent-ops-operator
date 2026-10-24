@@ -213,10 +213,36 @@ func originalDestination(c net.Conn) (string, error) {
 	defer f.Close()
 	fd := int(f.Fd())
 
-	if a, err := origDstV4(fd); err == nil {
-		return a, nil
+	dst, err := origDstV4(fd)
+	if err != nil {
+		dst, err = origDstV6(fd)
+		if err != nil {
+			return "", err
+		}
 	}
-	return origDstV6(fd)
+	if isSelfConnection(dst, c.LocalAddr().String()) {
+		// SO_ORIGINAL_DST is not guaranteed to error on a connection nf_conntrack
+		// never rewrote — on some kernels it returns the connection's own,
+		// untouched destination instead. A caller that dials the proxy's own
+		// port directly (bypassing the iptables REDIRECT that makes every
+		// legitimately-mediated connection's original destination differ from
+		// this address) would otherwise have that self-referential address
+		// dialed right back into this same listener: Accept hands the new
+		// connection to another handle(), which resolves the same self-address
+		// and dials again, without bound, until the process runs out of OS
+		// threads. Genuinely redirected traffic never triggers this: REDIRECT
+		// preserves the real upstream in conntrack, which is never this
+		// listener's own address.
+		return "", fmt.Errorf("original destination %s is this proxy's own address, refusing to self-connect", dst)
+	}
+	return dst, nil
+}
+
+// isSelfConnection reports whether a resolved original destination is this
+// listener's own local address — the signature of the getsockopt fallback
+// above, never a legitimately redirected connection's real destination.
+func isSelfConnection(dst, local string) bool {
+	return dst == local
 }
 
 const (

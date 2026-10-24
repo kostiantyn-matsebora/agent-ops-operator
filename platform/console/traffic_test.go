@@ -85,13 +85,13 @@ func TestEveryHopLightsTheEdgeItCrossed(t *testing.T) {
 	if got["signalsources/cluster-events->pipelines/k8s-ops"] == 0 {
 		t.Fatalf("feeds edge did not light: %+v", got)
 	}
-	// 2. PATHS: a run is one hop pipeline↔runtime, but the wiring reaches the
-	//    runtime through the profile, so BOTH legs carry the run.
-	if got["pipelines/k8s-ops->agentprofiles/k8s-engineer"] == 0 {
-		t.Fatalf("answers edge did not light for the run: %+v", got)
+	// 2. The run lights the runtime edge, drawn from the Pipeline where the
+	//    hop starts, and nothing through the profile.
+	if got["pipelines/k8s-ops->agentruntimes/default"] == 0 {
+		t.Fatalf("runs-on edge did not light for the run: %+v", got)
 	}
-	if got["agentprofiles/k8s-engineer->agentruntimes/default"] == 0 {
-		t.Fatalf("uses edge did not light for the run: %+v", got)
+	if got["pipelines/k8s-ops->agentprofiles/k8s-engineer"] != 0 {
+		t.Fatalf("the run does not cross the profile: %+v", got)
 	}
 	// 3. NON-WIRING ENDPOINTS: an op names a conversation, which the wiring
 	//    graph has no node for. It is credited to that conversation's pipeline.
@@ -108,8 +108,7 @@ func TestEveryHopLightsTheEdgeItCrossed(t *testing.T) {
 		switch id {
 		case "signalsources/cluster-events->signaladapters/k8s-events",
 			"signalsources/cluster-events->pipelines/k8s-ops",
-			"pipelines/k8s-ops->agentprofiles/k8s-engineer",
-			"agentprofiles/k8s-engineer->agentruntimes/default",
+			"pipelines/k8s-ops->agentruntimes/default",
 			"pipelines/k8s-ops->channels/console",
 			"channels/console->channeladapters/console":
 		default:

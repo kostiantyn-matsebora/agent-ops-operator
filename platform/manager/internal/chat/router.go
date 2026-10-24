@@ -45,6 +45,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -88,6 +89,12 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if conv == nil {
 		return nil // no conversation in this thread — nothing to continue
 	}
+	// A conversation must never receive its own output as an input
+	// (coordination-loop): an origin channel named identically to its own
+	// target conversation is the shape a self-feeding loop takes.
+	if ch.Name == conv.Name {
+		return ErrSelfInput
+	}
 	// /close ends the conversation. Intercepted BEFORE the text becomes a reply
 	// input: handing it to the agent would both dispatch a work unit for a
 	// command and leave the conversation open.
@@ -103,7 +110,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// every bound channel, which is a decision, not something a stray "thanks"
 	// in an archived topic should trigger.
 	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		r.Ops.EnqueueMessage(ctx, ch, msg.ThreadID, Notice(
+		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, Notice(
 			"This conversation is closed, so nothing here reaches the agent. "+
 				"Reopen it from the console to continue with its history."))
 		return nil
@@ -339,22 +346,42 @@ func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alph
 // The teardown that used to ride on deletion — runtime pod, MCP ConfigMap,
 // close-topic ops, capacity — is the reconciler's, driven off the phase. Doing
 // it here as well would be a second implementation of it.
+//
+// RECURSIVELY closes every LIVE conversation this one directly caused, through
+// the SAME `cascadeCloseMembers` helper the coordinator's own MCP `close` verb
+// already uses (coordinate.go) — so `/close`, the console's bulk close (a
+// fan-out of `/close`) and the idle timer all reach a root's members exactly as
+// that verb does, with no reason required or threaded through: a plain human
+// close carries none, which `cascadeCloseMembers` already allows.
+//
+// THE CASCADE RUNS EVEN WHEN THIS CONVERSATION IS ALREADY CLOSED — only the
+// farewell and the status write are skipped then. A cascade that fails
+// partway (a transient API error on some descendant) leaves THIS conversation
+// already persisted Closed, so a retry that short-circuited on "already
+// closed" would never reach the un-cascaded members again: the root would
+// read Closed forever while a child sat open beneath it. Falling through
+// unconditionally is what `coordinate.go`'s `closeWithCascade` already does
+// for the same reason — its own self-close step no-ops the same way on an
+// already-closed conversation, and the cascade call after it is never gated
+// on that.
 func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, farewell string) error {
-	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
-		return nil // already closed: no second farewell
+	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		// A STABLE op id, so a close whose status write fails and is retried says
+		// goodbye once rather than once per attempt. The farewell still goes
+		// FIRST: a thread that simply stops is indistinguishable from a fault,
+		// so a lost farewell is worse than a suppressed duplicate.
+		r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+			r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
+		})
+		patch := client.MergeFrom(conv.DeepCopy())
+		now := metav1.Now()
+		conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+		conv.Status.ClosedAt = &now
+		if err := client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch)); err != nil {
+			return err
+		}
 	}
-	// A STABLE op id, so a close whose status write fails and is retried says
-	// goodbye once rather than once per attempt. The farewell still goes FIRST:
-	// a thread that simply stops is indistinguishable from a fault, so a lost
-	// farewell is worse than a suppressed duplicate.
-	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
-	})
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
-	conv.Status.ClosedAt = &now
-	return client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch))
+	return r.cascadeCloseMembers(ctx, conv.Name, "")
 }
 
 // ReopenConversation brings a closed conversation back to Idle.
@@ -376,6 +403,9 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.
 	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
 		return fmt.Errorf("conversation %s is not closed", conv.Name)
 	}
+	if err := r.refuseReopenBehindOpenSuccessor(ctx, conv); err != nil {
+		return err
+	}
 	if err := r.validateRefs(ctx, conv); err != nil {
 		return err
 	}
@@ -386,6 +416,38 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.
 	now := metav1.Now()
 	conv.Status.LastActivity = &now
 	return r.Client.Status().Patch(ctx, conv, patch)
+}
+
+// refuseReopenBehindOpenSuccessor is the ONE verb that could break equality
+// routing's at-most-one-open invariant (conversation-provenance: "Reopen
+// SHALL be refused while another open conversation carries the same
+// conversationId for that pipeline, with a reason naming the successor") —
+// reopening conv while a `-N` successor with the same conversationId is
+// already open would let two conversations answer for one correlation id.
+//
+// A conversation carrying no conversationId (legacy, or never
+// signal-originated) has nothing to collide on and is never refused.
+func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Spec.ConversationID == "" {
+		return nil
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := r.Client.List(ctx, &list, client.InNamespace(conv.Namespace),
+		client.MatchingFields{agentopsv1alpha1.IndexConversationID: conv.Spec.ConversationID}); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		successor := &list.Items[i]
+		if successor.Name == conv.Name || successor.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			continue
+		}
+		if !conv.SameOrigin(successor) {
+			continue
+		}
+		return fmt.Errorf("cannot reopen %s: %s already carries the same conversationId and is open",
+			conv.Name, successor.Name)
+	}
+	return nil
 }
 
 // validateRefs fails a reopen that would produce a conversation which cannot
@@ -429,20 +491,81 @@ func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.
 	})
 }
 
-// boundChannels resolves the channel set a new conversation binds to: the
-// originating Pipeline's channels, with the originating channel guaranteed
-// included (it is where the user is looking).
-func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
+// boundChannels resolves the channel set a new conversation binds to, with the
+// originating channel guaranteed included (it is where the user is looking).
+//
+// Both kinds' BoundChannelRefs is now their own `spec.channelRefs`
+// (coordinator-unconditional-channels), so an addressed Pipeline OR
+// Coordinator conversation binds its WHOLE declared channel set, plus the
+// addressing channel when that is not already one of them.
+func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
 	if origin == nil {
 		return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
 	}
-	refs := append([]agentopsv1alpha1.ObjectRef{}, origin.Spec.ChannelRefs...)
+	refs := append([]agentopsv1alpha1.ObjectRef{}, origin.BoundChannelRefs()...)
 	for _, ref := range refs {
 		if ref.Name == ch.Name {
 			return refs
 		}
 	}
 	return append(refs, agentopsv1alpha1.ObjectRef{Name: ch.Name})
+}
+
+// handleListPipelines answers `/pipelines`. They are what a message
+// addresses, and what carries the capabilities the resulting conversation
+// will have — listing profiles would name things a user cannot actually
+// address.
+func (r *Router) handleListPipelines(ctx context.Context, ch *agentopsv1alpha1.Channel) error {
+	entries := r.readyPipelines(ctx)
+	if entries == nil {
+		return fmt.Errorf("list pipelines for %s listing", ListCommand)
+	}
+	// Each entry carries its answering PROFILE, matching what a surface with
+	// input assistance offers in its typeahead. Two Pipelines on one surface
+	// is now an ordinary configuration — a source is shareable — and a bare
+	// list of names is not enough to choose between them.
+	lines := make([]string, 0, len(entries))
+	choices := make([]Choice, 0, len(entries))
+	for _, e := range entries {
+		line := "• `/" + e.Name + "`"
+		if e.Profile != "" {
+			line += " — " + e.Profile
+		}
+		lines = append(lines, line)
+		choices = append(choices, Choice{Label: e.Name, Command: "/" + e.Name})
+	}
+	sort.Strings(lines)
+	// Both thread commands are named TOGETHER, with the difference spelled
+	// out. Two commands one word apart, one of which archives a thread, are
+	// exactly the pair nobody should have to guess between.
+	msg := Notice("🤖 **Pipelines**\n" + strings.Join(lines, "\n") +
+		"\n\nUsage: `/<pipeline> <task>` — each call gets its own topic.\n" +
+		"Inside a conversation's own thread: `/exit` releases its runtime and keeps " +
+		"the conversation, `/close` ends the conversation and archives the thread.")
+	msg.Choices = choices
+	r.Ops.EnqueueMessage(ctx, ch, nil, nil, msg)
+	return nil
+}
+
+// resolveClaimant looks up an addressed name as a Pipeline, then a
+// Coordinator (design D-B): a name held by both is reported on the
+// Coordinator's own Ready, never resolved here. A plain lookup by name, no
+// claim check, no Ready check — exactly as it was before a second kind
+// existed. Returns a nil Claimant, not an error, when neither exists.
+func (r *Router) resolveClaimant(ctx context.Context, name string) (Claimant, error) {
+	var pipe agentopsv1alpha1.Pipeline
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &pipe); err == nil {
+		return pipelineClaimant{&pipe}, nil
+	} else if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	var co agentopsv1alpha1.Coordinator
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &co); err == nil {
+		return coordinatorClaimant{&co}, nil
+	} else if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // HandleCommand answers chat input that addresses a pipeline. Called from the
@@ -453,67 +576,38 @@ func (r *Router) boundChannels(origin *agentopsv1alpha1.Pipeline, ch *agentopsv1
 // It is carried because an addressed command is a MESSAGE like any other: it is
 // delivered to every surface that did not display it, and one with no sender
 // arrives there anonymous.
-func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID string) error {
+//
+// reader is the opaque per-channel key of the person who typed it, exactly as
+// the bare chat lane carries — an addressed command is equally a person
+// deliberately originating a conversation, so it is owed the same read-mark
+// treatment on the thread it opens.
+func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel, cmd addressing.Command, sender, messageID, reader string) error {
 	if isListCommand(cmd.Pipeline) {
-		// List PIPELINES: they are what a message addresses, and what carries
-		// the capabilities the resulting conversation will have. Listing
-		// profiles would name things a user cannot actually address.
-		entries := r.readyPipelines(ctx)
-		if entries == nil {
-			return fmt.Errorf("list pipelines for %s listing", ListCommand)
-		}
-		// Each entry carries its answering PROFILE, matching what a surface with
-		// input assistance offers in its typeahead. Two Pipelines on one surface
-		// is now an ordinary configuration — a source is shareable — and a bare
-		// list of names is not enough to choose between them.
-		lines := make([]string, 0, len(entries))
-		choices := make([]Choice, 0, len(entries))
-		for _, e := range entries {
-			line := "• `/" + e.Name + "`"
-			if e.Profile != "" {
-				line += " — " + e.Profile
-			}
-			lines = append(lines, line)
-			choices = append(choices, Choice{Label: e.Name, Command: "/" + e.Name})
-		}
-		sort.Strings(lines)
-		// Both thread commands are named TOGETHER, with the difference spelled
-		// out. Two commands one word apart, one of which archives a thread, are
-		// exactly the pair nobody should have to guess between.
-		msg := Notice("🤖 **Pipelines**\n" + strings.Join(lines, "\n") +
-			"\n\nUsage: `/<pipeline> <task>` — each call gets its own topic.\n" +
-			"Inside a conversation's own thread: `/exit` releases its runtime and keeps " +
-			"the conversation, `/close` ends the conversation and archives the thread.")
-		msg.Choices = choices
-		r.Ops.EnqueueMessage(ctx, ch, nil, msg)
-		return nil
+		return r.handleListPipelines(ctx, ch)
 	}
 	if cmd.Pipeline == CloseCommand {
 		// /close reaches HandleCommand only from a general surface, where there
 		// is no conversation to end. Answer with usage rather than "unknown
 		// pipeline": typing it here is an obvious mistake, not a typo.
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, Warn("⚠️ `/close` ends a conversation — send it inside that "+
 			"conversation's own thread. Nothing was closed."))
 		return nil
 	}
 	if cmd.Pipeline == ExitCommand {
 		// Same shape as /close's: there is no conversation on a general surface,
 		// so there is no runtime to release. Usage, not "unknown pipeline".
-		r.Ops.EnqueueMessage(ctx, ch, nil, Warn("⚠️ `/exit` releases a conversation's runtime — send it "+
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, Warn("⚠️ `/exit` releases a conversation's runtime — send it "+
 			"inside that conversation's own thread. Nothing was released."))
 		return nil
 	}
-	// A command addresses a PIPELINE: it originates the conversation, so it
-	// supplies the profile AND the capabilities. Addressing a profile would
-	// name something with no wiring, and therefore nothing to grant.
-	var pipe agentopsv1alpha1.Pipeline
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cmd.Pipeline}, &pipe); err != nil {
-		if apierrors.IsNotFound(err) {
-			r.Ops.EnqueueMessage(ctx, ch, nil, Warn(fmt.Sprintf(
-				"⚠️ Unknown pipeline **%s** — see `/%s`.", cmd.Pipeline, ListCommand)))
-			return nil
-		}
+	claimant, err := r.resolveClaimant(ctx, cmd.Pipeline)
+	if err != nil {
 		return err
+	}
+	if claimant == nil {
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, Warn(fmt.Sprintf(
+			"⚠️ Unknown pipeline or coordinator **%s** — see `/%s`.", cmd.Pipeline, ListCommand)))
+		return nil
 	}
 	if cmd.Rest == "" {
 		// ASK, rather than refuse. A command menu SENDS on tap, so a bare
@@ -532,29 +626,55 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 		ask := Warn(fmt.Sprintf("💬 Reply with the task for `/%s`.", cmd.Pipeline))
 		ask.ExpectsReply = true
 		ask.InReplyTo = messageID
-		r.Ops.EnqueueMessage(ctx, ch, nil, ask)
+		r.Ops.EnqueueMessage(ctx, ch, nil, nil, ask)
 		return nil
 	}
-	_, err := r.CreateTaskConversation(ctx, ch, pipe.Spec.ProfileRef.Name, cmd.Rest, sender, &pipe)
+	capability, err := dispatch.ResolveCapability(ctx, r.Reader, claimant)
+	if err != nil {
+		return fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
+	}
+	_, err = r.CreateTaskConversation(ctx, ch, cmd.Rest, sender, reader, claimant, capability)
 	return err
 }
 
 // CreateTaskConversation starts a task conversation originating on a channel,
-// bound to the origin Pipeline's channel set. The origin also snapshots its
-// tooling bindings onto the conversation — capabilities come from the wiring
-// that originated it, never from the profile.
-func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, profile, task, sender string,
-	origin *agentopsv1alpha1.Pipeline) (*agentopsv1alpha1.Conversation, error) {
-	title := "🛠 " + strings.Join(strings.Fields(task), " ")
+// bound to the origin claimant's channel set — a Pipeline's whole
+// `channelRefs`, or (design D-D) just the addressing channel for a
+// Coordinator. The origin also snapshots its tooling bindings onto the
+// conversation — capabilities come from the wiring that originated it, never
+// from the profile. capability is the origin's ALREADY RESOLVED capability
+// (see dispatch.ResolveCapability), ignored when origin is nil.
+//
+// reader is the opaque per-channel key of whoever typed the addressing
+// command, mirrored onto OriginReader exactly as the bare chat lane's does
+// (internal/httpapi/signals.go) — empty when the adapter named none.
+func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, task, sender, reader string,
+	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
+	profile := capability.ProfileName()
+	// NOT cut to Telegram's own topic-name shape — see `memberTitle`'s own
+	// comment: Telegram enforces its own 128-character topic-name cap at the
+	// adapter, and a manager-side cut of THAT shape here was one transport's
+	// limit imposed on every channel and the console's own views.
+	//
+	// Still bounded, by agentopsv1alpha1.MaxConversationTitle — a different
+	// bound for a different reason: an addressed command's task is typed by
+	// a person and stored verbatim into an etcd-permanent field otherwise.
+	title := agentopsv1alpha1.BoundConversationTitle("🛠 " + strings.Join(strings.Fields(task), " "))
 	if profile != "" {
-		title = "🤖 " + profile + ": " + strings.Join(strings.Fields(task), " ")
-	}
-	if len(title) > 60 {
-		title = title[:60]
+		title = agentopsv1alpha1.BoundConversationTitle("🤖 " + profile + ": " + strings.Join(strings.Fields(task), " "))
 	}
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = r.Namespace
-	conv.GenerateName = "task-"
+	// The word-chain and the actual Create are AllocateName's below —
+	// readable-conversation-names: an object name is a deterministic
+	// word-chain, never metadata.generateName's random suffix. The word
+	// source is the addressed pipeline name, non-empty by construction for
+	// every caller that reaches this function with an origin; a channel
+	// name covers the case the doc comment allows (origin nil).
+	nameWords := ch.Name
+	if origin != nil {
+		nameWords = origin.GetName()
+	}
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
 		ChannelRefs: r.boundChannels(origin, ch),
 		ProfileRef:  agentopsv1alpha1.ObjectRef{Name: profile},
@@ -570,13 +690,22 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 			},
 		}},
 	}
+	// The person who typed the addressing command has, by definition,
+	// already seen their own request — same rule the bare chat lane
+	// applies in internal/httpapi/signals.go, carried here because an
+	// addressed command is the OTHER origination a chat surface owns.
+	if reader != "" {
+		conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{Channel: ch.Name, Key: reader}
+	}
+	nodeKind := activity.NodePipeline
 	if origin != nil {
-		conv.Spec.Toolsets = origin.Spec.Toolsets.DeepCopy()
-		conv.Spec.MCPConfigs = origin.Spec.MCPConfigs.DeepCopy()
-		// Same helper the signal lane calls, over the same Pipeline. An
-		// addressed command grants the pipeline's wiring, and the execution
-		// identity and the storage are part of that wiring, not half of it.
-		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin, r.Runtime)
+		conv.Spec.Toolsets = capability.Toolsets.DeepCopy()
+		conv.Spec.MCPConfigs = capability.MCPConfigs.DeepCopy()
+		// Same helper the signal lane calls, over the same claimant's already
+		// resolved capability. An addressed command grants its wiring, and the
+		// execution identity and the storage are part of that wiring, not half
+		// of it.
+		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin.GetName(), capability, r.Runtime)
 		conv.Spec.RuntimeRef = snap.RuntimeRef
 		conv.Spec.ServiceAccountName = snap.ServiceAccountName
 		conv.Spec.ContextClaimName = snap.ContextClaimName
@@ -584,17 +713,38 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// Provenance, written once at creation like the bindings above it and
 		// read for the same reasons they are not: attribution and reuse
 		// scoping, never to resolve wiring. An addressed command is the one
-		// origination that names its pipeline outright, so this ref is exact
-		// rather than inferred.
-		conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.Name}
+		// origination that names its claimant outright, so this ref is exact
+		// rather than inferred. Exactly one of the two is ever set (design
+		// D-B): a Coordinator also snapshots its OWN declared channels as
+		// EscalationChannelRefs — already bound into ChannelRefs above via
+		// BoundChannelRefs (coordinator-unconditional-channels), this is kept
+		// as separate provenance of the Coordinator's own declared set.
+		if origin.ClaimantKind() == ClaimantCoordinator {
+			nodeKind = activity.NodeCoordinator
+			conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
+			conv.Spec.EscalationChannelRefs = origin.EscalationChannelRefs()
+		} else {
+			conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
+		}
 	}
-	if err := r.Client.Create(ctx, conv); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Client, r.Namespace, "task", namewords.Words(nameWords), conv); err != nil {
 		return conv, err
+	}
+	// A Coordinator-rooted conversation's own resource ceiling (design D-E) is
+	// STATUS, so it needs its own write after Create.
+	if origin != nil {
+		if budget := origin.SnapshotBudget(); budget != nil {
+			patch := client.MergeFrom(conv.DeepCopy())
+			conv.Status.Budget = budget
+			if err := r.Client.Status().Patch(ctx, conv, patch); err != nil {
+				return conv, err
+			}
+		}
 	}
 	originName, originKind := ch.Name, activity.NodeChannel
 	pipeline := ""
 	if origin != nil {
-		originName, originKind, pipeline = origin.Name, activity.NodePipeline, origin.Name
+		originName, originKind, pipeline = origin.GetName(), nodeKind, origin.GetName()
 	}
 	r.Activity.Emit(activity.Event{
 		Kind:         activity.KindConversationCreated,
@@ -635,7 +785,7 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 // than markup.
 func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversation, msg Message) {
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueMessage(ctx, ch, tid, msg)
+		r.Ops.EnqueueMessage(ctx, ch, conv, tid, msg)
 	})
 }
 
@@ -660,7 +810,7 @@ func (r *Router) FanOutRunReply(ctx context.Context, conv *agentopsv1alpha1.Conv
 		if run != nil && run.DeliveredTo(ch.Name) {
 			return
 		}
-		r.Ops.EnqueueRunReply(ctx, ch, conv.Name, runID, tid, msg)
+		r.Ops.EnqueueRunReply(ctx, ch, conv, runID, tid, msg)
 	})
 }
 

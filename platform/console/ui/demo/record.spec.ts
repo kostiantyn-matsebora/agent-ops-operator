@@ -7,7 +7,7 @@ import { extname, join, normalize } from 'node:path'
 import { promisify } from 'node:util'
 import type { AddressInfo } from 'node:net'
 import { NOW, responder, type Install } from '../screenshots/fixture'
-import { ADDRESS_PREFIX, ADDRESSED, REPLY, TASK, beats, opening } from './story'
+import { ADDRESSED, CONVERSATION, REPLY, TASK, beats, opening } from './story'
 
 // The landing page's recording, produced rather than captured.
 //
@@ -248,7 +248,12 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
   for (const beat of beats) {
     current = []
     await page.clock.setFixedTime(new Date(NOW.getTime() + beat.clock * 1000))
-    harness.advance(beat.patch)
+    // The 'reply' beat applies its OWN patch, once, after Send is clicked
+    // below — its whole point is a person typing before the server has
+    // answered. Applying it here too pushed the reply onto the transcript
+    // a second time: the frame showed it once while still mid-type and
+    // again, duplicated, after sending.
+    if (beat.act !== 'reply') harness.advance(beat.patch)
 
     if (beat.path) {
       await page.goto(`${harness.url}${beat.path}`)
@@ -257,6 +262,13 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
     // what the beat waits for is on the tab, not on the view that holds it.
     if (beat.act === 'yaml') {
       await page.getByText('YAML', { exact: true }).first().click()
+    }
+    // OPENED IN PLACE (design D-A): a click on the row, not a second
+    // navigation — the list this beat inherited from the one before it stays
+    // on screen, and the thread opens beside it through the console's own
+    // in-app route change.
+    if (beat.act === 'open') {
+      await page.getByTestId(`open-${CONVERSATION}`).click()
     }
     if (beat.ready) {
       await page.getByText(beat.ready, { exact: false }).first().waitFor({ timeout: 30_000 })
@@ -274,32 +286,36 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
     }
 
     // A PERSON STARTING WORK, through the console's own composer. Nothing here
-    // paints state: the dialog is opened by clicking the masthead's button, the
-    // typeahead is opened by typing the prefix, and the pipeline is chosen by
-    // clicking the entry the console listed. The server is told nothing until
-    // Start is pressed, exactly as it would be in an install.
+    // paints state: the dialog is opened by clicking the masthead's button, a
+    // destination is chosen from the card list the console itself rendered, and
+    // the server is told nothing until Start is pressed, exactly as it would be
+    // in an install.
+    //
+    // NewConversation.tsx stopped being a slash-prefixed typeahead in a single
+    // text field (#298, chat-shaped-conversations) and became a modal with a
+    // destination picker. ADDRESS_PREFIX now matters only to the IN-THREAD
+    // composer this beat never touches.
     if (beat.act === 'start') {
       await page.locator('[data-testid="new-conversation"]').click()
-      const box = page.getByPlaceholder(/what should the agent do/i).first()
-      await box.click()
 
-      // The PREFIX alone, held: this frame is the beat's claim — every pipeline
-      // that can be addressed, listed by the console rather than remembered by
-      // the person.
-      await box.fill(ADDRESS_PREFIX)
-      await page.locator('[data-testid="pipeline-typeahead"]').waitFor({ timeout: 30_000 })
+      // Every card the console lists, held: this frame is the beat's claim —
+      // every pipeline AND coordinator that can be addressed, listed by the
+      // console rather than remembered by the person.
+      await page.locator('[data-testid="destination-cards"]').waitFor({ timeout: 30_000 })
       await shoot(2)
 
-      await page.getByRole('menuitem').filter({ hasText: ADDRESSED }).first().click()
-      // The chosen name is the field's VALUE, not text on the page, so this
-      // waits on the value the console inserted rather than on a rendered node.
-      await expect(box).toHaveValue(new RegExp(`^${ADDRESS_PREFIX}${ADDRESSED}\\s`))
+      await page.locator(`[data-testid="destination-${ADDRESSED}"]`).click()
+      // The chosen card's own `aria-checked`, not a value typed into a field —
+      // this UI confirms a choice by selection state, never by echoing text.
+      await expect(page.locator(`[data-testid="destination-${ADDRESSED}"]`))
+        .toHaveAttribute('aria-checked', 'true')
       await shoot(1)
 
       // Typed in runs, for the same reason the reply is: this is the beat where
       // a PERSON acts, and text that appears whole reads as another server change.
+      const box = page.getByLabel('task', { exact: true })
       const chunks = TASK.match(/.{1,20}(\s|$)/g) ?? [TASK]
-      let typed = `${ADDRESS_PREFIX}${ADDRESSED} `
+      let typed = ''
       for (const chunk of chunks) {
         typed += chunk
         await box.fill(typed)
@@ -309,7 +325,7 @@ async function record(page: Page, harness: Harness, theme: string): Promise<Segm
       // The beat's own hold is taken by the common `shoot(beat.hold)` below,
       // exactly as the reply beat's is. Taking it here as well is what made
       // this beat twice its stated length.
-      await page.getByRole('button', { name: 'Start', exact: true }).click()
+      await page.locator('[data-testid="start-conversation"]').click()
       await page.getByText('is answering', { exact: false }).first().waitFor({ timeout: 30_000 })
     }
 

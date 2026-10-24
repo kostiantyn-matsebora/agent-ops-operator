@@ -1,0 +1,7 @@
+apiVersion: v2
+name: ollama
+description: >-
+  A local-model agent runtime — the operator's work contract implemented over an
+  Ollama endpoint you already run — shipped as a bundle, off by default.
+type: application
+version: 0.1.0

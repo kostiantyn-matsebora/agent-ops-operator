@@ -5,37 +5,35 @@
 Telegram serves exactly one update stream per bot token: a second concurrent
 `getUpdates` returns `409`, and passing an offset destructively confirms
 updates for every reader. Origination and continuation therefore cannot each
-poll for themselves. This capability covers the three-component split — one
-router owning the poll loop and classifying each update locally by topic
-presence, two receiving adapters that never poll — the delegation of offset
-storage, the `ChannelAdapter` port parity that lets an adapter be pushed to,
-and the chart bundle that ships it all.
+poll for themselves.
+
+This capability covers:
+
+- The three-component split: one router owning the poll loop and
+  classifying each update locally by topic presence, two receiving
+  adapters that never poll.
+- The delegation of offset storage.
+- The `ChannelAdapter` port parity that lets an adapter be pushed to.
+- The chart bundle that ships it all.
 
 ## Requirements
 
 ### Requirement: One process reads a bot token's update stream
-Exactly one component SHALL call `getUpdates` for a given bot token at any time.
-Telegram ingest SHALL be split into a router that owns the polling loop and two
-receiving adapters that never poll. The router SHALL classify each update
-locally by topic presence and forward it in-cluster: no topic id → the signal
-adapter; topic id present → the channel adapter. Classification SHALL require no
-manager round-trip.
+Exactly one component SHALL call `getUpdates` for a given bot token at any time. Telegram ingest SHALL be split into a router that owns the polling loop and two receiving adapters that never poll.
 
-The router SHALL also consume the update kind Telegram uses for a selection made
-on a message's controls, and SHALL classify it by the SAME rule, read from the
-message the control was attached to. A selection on a general-surface message is
-an origination; a selection inside a topic is a continuation. No second
-classification rule SHALL be introduced.
+The router SHALL classify each update locally by topic presence and forward it in-cluster. No topic id goes to the signal adapter. A topic id present goes to the channel adapter. Classification SHALL require no manager round-trip.
 
-A selection SHALL be acknowledged to Telegram immediately by the router. The
-acknowledgement is unconditional, carries no content, and requires no
-configuration — it is stream hygiene like the offset, and the router is the one
-component that always holds the token. Acknowledging it downstream would require
-giving a credential to a component that deliberately holds none.
+The router is also the SOLE holder of the bot credential, inbound and outbound alike (chat-ops-broker-telegram-gateway). Its `POST /telegram/call/{method}` endpoint relays every outbound Bot API call on the channel adapter's behalf. The channel adapter never holds a copy of the token to send with.
 
-The single-consumer rule SHALL be enforced STRUCTURALLY: one router workload per
-bot token, single-instance with a recreate rollout, rather than by one process
-multiplexing several tokens. A router SHALL serve exactly one token.
+The router SHALL also consume the update kind Telegram uses for a selection made on a message's controls. It SHALL classify it by the SAME rule, read from the message the control was attached to.
+
+A selection on a general-surface message is an origination. A selection inside a topic is a continuation. No second classification rule SHALL be introduced.
+
+A selection SHALL be acknowledged to Telegram immediately by the router. The acknowledgement is unconditional, carries no content, and requires no configuration. It is stream hygiene like the offset, and the router is the one component that always holds the token.
+
+Acknowledging it downstream would require giving a credential to a component that deliberately holds none.
+
+The single-consumer rule SHALL be enforced STRUCTURALLY: one router workload per bot token, single-instance with a recreate rollout, rather than by one process multiplexing several tokens. A router SHALL serve exactly one token.
 
 #### Scenario: Only the router polls
 - **WHEN** the telegram stack is running
@@ -81,12 +79,15 @@ The router SHALL forward updates verbatim and SHALL NOT read `Channel`
 configuration. Chat-id matching and approver filtering SHALL remain in the
 receiving adapters, each against its own contract listing.
 
-The router SHALL NOT read any CR, and SHALL NOT contact the manager at all. Its
-forwarding targets and bot token SHALL arrive as environment, injected by the
-chart that renders the two receiving adapters — that chart already knows both
-Service names, so fetching them back through an authenticated contract taught it
-nothing it did not render itself. The router therefore holds no adapter token
-and is outside the adapter trust domain.
+The router SHALL NOT read any CR, and SHALL NOT contact the manager at all.
+
+Its forwarding targets and bot token SHALL arrive as environment, injected
+by the chart that renders the two receiving adapters — that chart already
+knows both Service names, so fetching them back through an authenticated
+contract taught it nothing it did not render itself.
+
+The router therefore holds no adapter token and is outside the adapter
+trust domain.
 
 Missing configuration SHALL fail startup with a message naming what is absent,
 rather than leaving the process idle.
@@ -130,17 +131,20 @@ injects the listen address into the workload.
 
 ### Requirement: The chart delivers the whole stack as one bundle
 The chart SHALL package Telegram as an embedded `telegram-bundle` subchart,
-default off. Enabling it SHALL render the two RECEIVING adapters as adapter CRs.
+default off. Enabling it SHALL render the two RECEIVING adapters as adapter
+CRs.
+
 The router SHALL be rendered as a chart-owned `Deployment` — it produces no
 signals and serves no CR, so it is not an adapter and SHALL NOT have a
 `SignalAdapter` CR or any served CR of its own. It SHALL carry no
 ServiceAccount token.
 
 The bundle SHALL render the chat surface — the `Channel` and the chat
-`SignalSource` — under an explicit `surface.enabled` flag, together with the
-router, since without a bot token there is nothing to poll. The chat
-`SignalSource` SHALL take the surface's own name by default, so one name
-identifies the whole surface.
+`SignalSource` — under an explicit `surface.enabled` flag, together with
+the router, since without a bot token there is nothing to poll.
+
+The chat `SignalSource` SHALL take the surface's own name by default, so
+one name identifies the whole surface.
 
 The bot credential SHALL be expressible two ways, exactly one at a time: a
 reference to an existing Secret, or a supplied token from which the bundle
@@ -187,11 +191,13 @@ The bundle SHALL NOT render a `Pipeline`.
   RoleBinding or adapter token is created for it
 
 ### Requirement: Offset persistence is delegated downstream
-The router SHALL own the in-flight offset value but SHALL NOT own its storage:
-it SHALL obtain the offset at startup and report each confirmed offset
-downstream, where a receiving adapter persists it through the existing adapter
-state API. Because storage never moves, replacing the router workload SHALL NOT
-lose the cursor.
+The router SHALL own the in-flight offset value but SHALL NOT own its
+storage. It SHALL obtain the offset at startup and report each confirmed
+offset downstream, where a receiving adapter persists it through the
+existing adapter state API.
+
+Because storage never moves, replacing the router workload SHALL NOT lose
+the cursor.
 
 #### Scenario: Restart resumes from the persisted offset
 - **WHEN** the router restarts
@@ -200,9 +206,93 @@ lose the cursor.
 
 #### Scenario: A replayed batch is harmless
 - **WHEN** the router crashes before an offset is persisted and replays a batch
-- **THEN** signals collapse on fingerprint and the system converges
+- **THEN** each replayed update yields the same `initiationId` as its first delivery, so routing converges instead of duplicating conversations
 
 #### Scenario: Re-modelling the router keeps the cursor
 - **WHEN** the router moves from an adapter CR to a chart-owned Deployment
 - **THEN** the new workload resumes from the same persisted offset, because the
   offset lives in the channel adapter and was never the router's to hold
+
+### Requirement: The router's Bot API endpoint is configuration
+
+The router SHALL resolve the Bot API base URL from the environment
+variable `TELEGRAM_API_BASE`, defaulting to `https://api.telegram.org`
+when unset, and SHALL use it for its `getUpdates` poll loop AND for every
+call it relays for the channel adapter.
+
+The chart that owns the router's Deployment SHALL inject it alongside
+the existing forwarding targets and bot token, rendering no entry when
+unset.
+
+This value SHALL never be settable on the channel adapter
+(`telegram-channel-adapter`'s own requirement for this capability is
+REMOVED): the router is the only Bot API caller left, so it is the only
+process with a base URL to configure.
+
+An absent `TELEGRAM_API_BASE` is a normal configuration and SHALL take
+the default without comment, unlike the forwarding targets and the bot
+token, whose absence exits the process at startup.
+
+#### Scenario: Default installs are unchanged
+- **WHEN** the router runs with `TELEGRAM_API_BASE` unset
+- **THEN** it polls and relays to `https://api.telegram.org` and starts normally, since the value is optional rather than required
+
+#### Scenario: The poll loop honours the override
+- **WHEN** `TELEGRAM_API_BASE` is set to a local endpoint
+- **THEN** `getUpdates` and every relayed call are issued against that endpoint, and the router's classification and verbatim forwarding are unchanged
+
+#### Scenario: Redirecting the endpoint does not create a second consumer
+- **WHEN** the router is pointed at a local endpoint for testing
+- **THEN** there is still exactly one `getUpdates` consumer per deployment, and the single-consumer invariant is unaffected by where it points
+
+### Requirement: The router relays outbound Bot API calls for the channel adapter
+
+The router SHALL serve `POST /telegram/call/{method}`, relaying the
+request body and its `Content-Type` to the real Bot API verbatim, and
+relaying the Bot API's own response — status and body — back verbatim.
+
+This is the outbound half of the router holding the bot credential alone
+(chat-ops-broker-telegram-gateway). The channel adapter composes a Bot
+API call exactly as before. It issues the call to this endpoint instead
+of to `api.telegram.org` directly, and holds no copy of the token.
+
+The router SHALL listen for the endpoint on the port set by the chart
+value `router.callPort` (default `8080`), and the chart's NetworkPolicy
+SHALL admit the channel adapter on that port.
+
+The endpoint SHALL require the gateway token, a bearer token distinct
+from the router's inbound push to the channel adapter's `POST /updates`,
+which carries no bearer token.
+
+It is the `gatewayToken` the channel adapter sends (Requirement: Adapter
+owns its gateway binding and config parsing).
+
+The router SHALL read it from `TELEGRAM_CALL_TOKEN`. The chart projects
+that from the `gatewayToken` key of the credential Secret, generated
+once at install. An unset `TELEGRAM_CALL_TOKEN` SHALL exit the process at
+startup, naming it, the same as the forwarding targets and the bot
+token.
+
+The channel adapter's existing inbound endpoint (`POST /updates` in
+`channels/telegram/main.go`, the router's push target, unchanged by this
+change) can only inject a fabricated inbound message, which the adapter
+still filters before acting on it — network-level trust is enough there.
+
+This endpoint can SEND, with the live bot credential, any Bot API method
+at all. A caller must additionally prove it was handed the token.
+
+#### Scenario: A JSON method call is relayed
+- **WHEN** the channel adapter posts a `sendMessage`-shaped JSON body to `/telegram/call/sendMessage` with a valid bearer token
+- **THEN** the router forwards it to the real Bot API and relays the response verbatim
+
+#### Scenario: A multipart upload is relayed
+- **WHEN** the channel adapter posts a `sendDocument` multipart body
+- **THEN** the router forwards the body and its `Content-Type` unchanged, with no knowledge of the encoding
+
+#### Scenario: A Telegram-side error is relayed, not absorbed
+- **WHEN** the real Bot API answers `ok:false`, with or without `parameters.retry_after`
+- **THEN** the router relays that response verbatim, and the channel adapter's own retry logic reads it exactly as it would a direct response
+
+#### Scenario: A missing or wrong token is refused
+- **WHEN** a call to `/telegram/call/{method}` carries no bearer token, or the wrong one
+- **THEN** the router refuses it with 401 before making any call to the real Bot API

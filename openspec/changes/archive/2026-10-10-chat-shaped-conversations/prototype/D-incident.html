@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Prototype of the console conversations view. Composition reference only: behaviour is in ../specs/. Exported from the design canvas, static, opens in any browser. -->
+<title>D · Coordination: tree in the list, incident timeline in the thread</title>
+</head>
+<body>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Text:wght@400;500;700&amp;family=Red+Hat+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#eef1f2;font-family:"Red Hat Text",system-ui,sans-serif;color:#16191c}
+a{color:#0d7d76}a:hover{color:#0a615c}
+.nav a{display:block;padding:9px 16px;border-radius:6px;color:#16191c;text-decoration:none;font-size:14px}
+.nav a.on{background:#eef1f2;color:#0a615c;font-weight:500;box-shadow:inset 3px 0 0 #0d7d76}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:12px;font-size:12px;font-weight:500;white-space:nowrap}
+.filt{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:14px;border:1px solid #cfd6da;background:#fff;font-size:13px;cursor:pointer}
+.filt.on{background:#0d7d76;border-color:#0d7d76;color:#fff}
+.filt .n{font-size:11px;padding:0 6px;border-radius:9px;background:rgba(0,0,0,.08)}
+.filt.on .n{background:rgba(255,255,255,.25)}
+.row{display:grid;grid-template-columns:16px 36px 1fr;column-gap:8px;padding:9px 12px;border-bottom:1px solid #eef1f2;cursor:pointer;align-items:start}
+.row.sel{background:#d3ece9;box-shadow:inset 3px 0 0 #0d7d76}
+.row.l1{padding-left:36px;background:#fafbfb}.row.l2{padding-left:64px;background:#fafbfb}
+.row.l1 .av,.row.l2 .av{width:28px;height:28px}
+.car{font-size:11px;color:#5c656d;padding-top:10px}
+.av{width:36px;height:36px;border-radius:50%;background:#f3f5f6;border:1px solid #cfd6da;display:flex;align-items:center;justify-content:center;position:relative;color:#0a615c}
+.av.coord{color:#6b4bd6;border-color:#6b4bd6;background:#e9e3fb}.av.alert{color:#b32c3f}
+.dot{position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border-radius:50%;border:2px solid #fff;background:#9aa4ab}
+.dot.working{background:#0d7d76;animation:pulse 1.6s ease-out infinite}.dot.pending{background:#a86400}.dot.failed{background:#b32c3f}.dot.idle{background:#1f7a4d}
+.l1x,.l2x{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.t{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.unread .t{font-weight:700}
+.time{font-size:11.5px;color:#5c656d;flex:none}
+.s{font-size:12.5px;color:#5c656d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.s em{color:#0a615c}.s .e{font-family:"Red Hat Mono",monospace;font-size:11.5px;color:#6b4bd6}
+.cnt{flex:none;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#0d7d76;color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.tag{flex:none;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid #cfd6da;color:#5c656d;white-space:nowrap}
+.tag.v{border-color:#6b4bd6;color:#6b4bd6}.tag.ok{border-color:#1f7a4d;color:#1f7a4d}.tag.err{border-color:#b32c3f;color:#b32c3f}
+.msg{display:grid;grid-template-columns:36px 1fr;column-gap:12px;padding:10px 0 4px}
+.mav{width:36px;height:36px;border-radius:50%;border:1px solid #cfd6da;display:flex;align-items:center;justify-content:center;background:#fff;color:#0a615c}
+.mav.sig{color:#b32c3f}.mav.usr{color:#6b4bd6}.mav.coord{color:#6b4bd6;border-color:#6b4bd6;background:#e9e3fb}
+.mh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;gap:8px}
+.mh b{font-size:14px;color:#0a615c}.mh.sig b{color:#b32c3f}.mh.usr b,.mh.coord b{color:#6b4bd6}
+.mh time{font-size:12px;color:#5c656d}
+.body{font-size:13.5px;line-height:1.45}
+.k{font-size:11px;letter-spacing:.06em;color:#5c656d;margin:6px 0 2px;font-weight:500}
+code{font-family:"Red Hat Mono",monospace;font-size:12px;background:#f6f8f8;padding:1px 5px;border-radius:4px}
+.ev{display:flex;align-items:center;gap:8px;padding:3px 0 3px 48px;font-size:12px;color:#5c656d}
+.ev .ln{width:14px;height:1px;background:#cfd6da;flex:none}
+.ev.hot{color:#0a615c;animation:fade 3s ease-out forwards}
+.card{border:1px solid #cfd6da;border-radius:10px;padding:10px 12px;margin-top:4px;background:#fff}
+.card.member{border-left:3px solid #6b4bd6}
+.sub{margin:6px 0 0 14px;padding-left:12px;border-left:1px dashed #cfd6da;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.sub .ln2{display:flex;align-items:center;gap:8px}
+.sub .ln2 .e{font-family:"Red Hat Mono",monospace;font-size:11.5px;color:#6b4bd6}
+.divider{display:flex;align-items:center;gap:12px;margin:8px 0 0;color:#0a615c;font-size:12px;font-weight:700;letter-spacing:.04em}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:#0d7d76}
+.divider.esc{color:#6b4bd6}.divider.esc::before,.divider.esc::after{background:#6b4bd6}
+.typing{display:inline-flex;gap:4px;align-items:center;padding:8px 12px;border-radius:14px;background:#f3f5f6;border:1px solid #cfd6da}
+.typing i{width:6px;height:6px;border-radius:50%;background:#0d7d76;animation:bob 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.btn{height:36px;padding:0 18px;border-radius:18px;border:1px solid #0d7d76;background:#0d7d76;color:#fff;font:inherit;font-size:14px;font-weight:500;cursor:pointer}
+.btn.q{background:#fff;color:#0a615c}.btn.g{background:#fff;color:#16191c;border-color:#cfd6da}
+.kbd{display:inline-block;padding:1px 6px;border:1px solid #cfd6da;border-radius:4px;font-size:11px;background:#fff}
+.qc{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:12px;border:1px solid #cfd6da;background:#fff;font-size:12px;cursor:pointer;white-space:nowrap}
+.qc.mono{font-family:"Red Hat Mono",monospace}
+.crumb{display:flex;align-items:center;gap:6px;font-size:12.5px;color:#5c656d;flex-wrap:wrap}
+.crumb b{color:#16191c;font-weight:500}.crumb .e{font-family:"Red Hat Mono",monospace;font-size:11.5px;color:#6b4bd6}
+.bud{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:#5c656d}
+.bar{width:60px;height:6px;border-radius:3px;background:#eef1f2;overflow:hidden}.bar i{display:block;height:100%;background:#6b4bd6}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(13,125,118,.55)}100%{box-shadow:0 0 0 8px rgba(13,125,118,0)}}
+@keyframes bob{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-4px)}}
+@keyframes fade{0%{background:#d3ece9}100%{background:transparent}}
+</style>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #eef1f2; position: relative; overflow: hidden">
+
+  <div style="height: 56px; flex: none; background: #ffffff; border-bottom: 1px solid #cfd6da; display: flex; align-items: center; gap: 16px; padding: 0 20px">
+    <div style="display: flex; align-items: center; gap: 8px; width: 200px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0d7d76" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
+      <span style="font-weight: 700; font-size: 15px">agent-ops console</span>
+    </div>
+    <div style="margin-left: 60px; display: flex; align-items: center; gap: 6px">
+      <button class="btn">New conversation ▾</button>
+      <span style="font-size: 12px; color: #5c656d; margin-left: 6px">or ask</span>
+      <span class="qc" style="border-color: #0d7d76; color: #0a615c">k8s-observe</span>
+      <span class="qc" style="border-color: #6b4bd6; color: #6b4bd6">⛭ rollout-coordinator</span>
+      <span class="qc" style="border-color: #b32c3f; color: #b32c3f">alert-triage</span>
+    </div>
+    <div style="flex: 1"></div>
+    <span class="chip" style="background: #d3ece9; color: #0a615c"><span style="width: 8px; height: 8px; border-radius: 50%; background: #1f7a4d; display: inline-block"></span>live</span>
+    <span class="chip" style="background: #d3ece9; color: #0a615c">dana@example.com</span>
+    <button class="btn q" style="height: 32px">Sign out</button>
+  </div>
+
+  <div style="flex: 1; min-height: 0; display: flex">
+    <div class="nav" style="width: 200px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px">
+      <a href="#nav">Overview</a><a href="#nav">Queues</a><a href="#nav">Configuration</a><a href="#nav">Topology</a>
+      <a href="#nav" class="on" style="display: flex; justify-content: space-between; align-items: center">Conversations <span class="cnt">1</span></a>
+    </div>
+
+    <!-- list with tree -->
+    <div style="width: 440px; flex: none; background: #ffffff; border-right: 1px solid #cfd6da; display: flex; flex-direction: column; min-height: 0">
+      <div style="padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #cfd6da">
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <span style="font-size: 18px; font-weight: 700">Conversations</span>
+          <span style="font-size: 12.5px; color: #5c656d">grouped by incident ▾</span>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+          <span class="filt on">All <span class="n">10</span></span>
+          <span class="filt">Unread <span class="n">1</span></span>
+          <span class="filt">Working <span class="n">4</span></span>
+          <span class="filt">Mine</span>
+          <span class="filt" style="border-color: #6b4bd6; color: #6b4bd6">⛭ Incidents <span class="n">2</span></span>
+          <span class="filt">Errored <span class="n">1</span></span>
+        </div>
+      </div>
+      <div style="flex: 1; overflow: hidden">
+
+        <!-- root -->
+        <div class="row sel">
+          <span class="car">▾</span>
+          <div class="av coord"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot working"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">payments rollout is stuck</span><span class="time">1m</span></div>
+          <div class="l2x"><span class="s">rollout-coordinator · turn 2 of 6 · 3 of 4 agents · 12m left</span></div></div>
+        </div>
+        <!-- level 1: a member that coordinates -->
+        <div class="row l1">
+          <span class="car">▾</span>
+          <div class="av coord" style="border-style: dashed"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot working"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">k8s-diagnoser <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">diagnose</span></span><span class="time">48s</span></div>
+          <div class="l2x"><span class="s"><em>working</em> · turn 1 of 4 · 2 of 3 agents · 9m left</span></div></div>
+        </div>
+        <!-- level 2 -->
+        <div class="row l2">
+          <span class="car"></span>
+          <div class="av"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path></svg><span class="dot idle"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">log-reader <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">logs</span></span><span class="time">12s</span></div>
+          <div class="l2x"><span class="s">brief: 3 pods return 503 on /healthz since 09:31</span><span class="tag ok">done</span></div></div>
+        </div>
+        <div class="row l2">
+          <span class="car"></span>
+          <div class="av"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 4 4-7 5 5"></path></svg><span class="dot working"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">metrics-reader <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">metrics</span></span><span class="time">31s</span></div>
+          <div class="l2x"><span class="s"><em>working</em> · run 1</span></div></div>
+        </div>
+        <!-- level 1 leaf -->
+        <div class="row l1">
+          <span class="car"></span>
+          <div class="av"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span class="dot idle"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">change-finder <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">recent-changes</span></span><span class="time">52s</span></div>
+          <div class="l2x"><span class="s">brief: image tag bumped at 09:31, config unchanged</span><span class="tag ok">done</span></div></div>
+        </div>
+
+        <!-- plain conversation -->
+        <div class="row unread">
+          <span class="car"></span>
+          <div class="av"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot working"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">checkout-api is restarting</span><span class="time">2m</span></div>
+          <div class="l2x"><span class="s"><em>working</em> · oncall: Does the same setting affect…</span><span class="cnt">1</span></div></div>
+        </div>
+
+        <!-- root, autosolved -->
+        <div class="row">
+          <span class="car">▾</span>
+          <div class="av coord" style="opacity: .7"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg><span class="dot"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t" style="color: #5c656d">node-3 memory pressure</span><span class="time">41m</span></div>
+          <div class="l2x"><span class="s">closed · <em style="color: #1f7a4d">resolved</em>: evicted 2 pods, pressure cleared · 2 agents</span><span class="tag" title="closed without escalation">nobody notified</span></div></div>
+        </div>
+        <div class="row l1">
+          <span class="car"></span>
+          <div class="av" style="color: #9aa4ab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><span class="dot"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t" style="color: #5c656d">node-inspector <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">inspect</span></span><span class="time">43m</span></div>
+          <div class="l2x"><span class="s">brief: two pods over their request on node-3, both evictable</span><span class="tag">closed</span></div></div>
+        </div>
+        <div class="row l1">
+          <span class="car"></span>
+          <div class="av" style="color: #9aa4ab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path></svg><span class="dot"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t" style="color: #5c656d">pod-evictor <span class="s" style="display: inline">as</span> <span class="s e" style="display: inline">evict</span></span><span class="time">42m</span></div>
+          <div class="l2x"><span class="s">brief: evicted both, pressure cleared in 40s</span><span class="tag">closed</span></div></div>
+        </div>
+        <div class="row">
+          <span class="car"></span>
+          <div class="av alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg><span class="dot failed"></span></div>
+          <div style="min-width: 0"><div class="l1x"><span class="t">TLS certificate for api.example.com expires in 6 days</span><span class="time">18m</span></div>
+          <div class="l2x"><span class="s">signal: renewal order failed twice</span><span class="tag err">run failed</span></div></div>
+        </div>
+        <div style="padding: 10px 14px; font-size: 12px; color: #5c656d; border-top: 1px solid #eef1f2">Members have no console thread, so a member is never unread on its own. Its result lands on the root as an input and is counted there.</div>
+      </div>
+    </div>
+
+    <!-- incident view -->
+    <div style="flex: 1; min-width: 0; background: #ffffff; display: flex; flex-direction: column; position: relative">
+      <div style="padding: 12px 24px 10px; border-bottom: 1px solid #cfd6da; display: flex; flex-direction: column; gap: 6px">
+        <div class="crumb"><span style="color: #6b4bd6">⛭ Incident</span><span>›</span><b>payments rollout is stuck</b><span style="color: #9aa4ab">·</span><span>the same chain on a member reads</span><b>payments rollout is stuck</b><span>›</span><span class="e">diagnose</span><span>›</span><span class="e">logs</span></div>
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span style="font-size: 18px; font-weight: 700; flex: 1">payments rollout is stuck</span>
+          <span class="chip" style="background: #d3ece9; color: #0a615c"><span class="dot working" style="position: static; border: 0; width: 8px; height: 8px"></span>working · turn 2</span>
+          <span class="bud" title="budget snapshotted on the root">turns <span class="bar"><i style="width: 33%"></i></span> 2/6 · agents <span class="bar"><i style="width: 75%"></i></span> 3/4 · 12m left</span>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">Tree</button>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">Graph</button>
+          <button class="btn g" style="height: 28px; padding: 0 10px; font-size: 12px">⋯</button>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+          <span class="chip" style="background: #fbe3e3; color: #b32c3f">cluster-events</span>
+          <span class="chip" style="background: #e9e3fb; color: #6b4bd6">rollout-coordinator</span>
+          <span class="chip" style="background: #f3f5f6; color: #5c656d">escalated 09:41 → ops-chat, console</span>
+          <span class="chip" style="background: #f3f5f6; color: #5c656d">4 members · 2 levels</span>
+        </div>
+      </div>
+
+      <div style="flex: 1; min-height: 0; overflow: hidden; padding: 0 24px; display: flex; flex-direction: column; justify-content: flex-end">
+        <div class="msg">
+          <div class="mav sig"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg></div>
+          <div><div class="mh sig"><b>signal</b><time>09:38:24</time></div><div class="body">Deployment payments/api has 0 of 3 replicas available for 6 minutes after rollout started.</div></div>
+        </div>
+        <div class="msg">
+          <div class="mav coord"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg></div>
+          <div><div class="mh coord"><b>rollout-coordinator</b><time>09:38:40 · turn 1</time></div><div class="body">Two questions in parallel: why the new pods are not ready, and what changed in this rollout.</div>
+            <div class="sub">
+              <div class="ln2"><span style="color: #6b4bd6">↳</span> invoked <b>k8s-diagnoser</b> as <span class="e">diagnose</span> · <a href="#m">open</a></div>
+              <div class="ln2"><span style="color: #6b4bd6">↳</span> invoked <b>change-finder</b> as <span class="e">recent-changes</span> · <a href="#m">open</a></div>
+            </div></div>
+        </div>
+        <div class="msg">
+          <div class="mav" style="color: #6b4bd6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div>
+          <div><div class="mh"><b style="color: #6b4bd6">change-finder <span class="e" style="font-family: 'Red Hat Mono', monospace; font-size: 11.5px; font-weight: 400">recent-changes</span></b><time>09:39:32 · done in 52s · <a href="#t">transcript</a></time></div>
+            <div class="card member"><div class="body"><b>Image tag bumped at 09:31, config unchanged.</b> payments/api went 2.14.0 → 2.15.0 in one commit. No ConfigMap, Secret or HPA change in the window.</div></div></div>
+        </div>
+        <div class="msg">
+          <div class="mav coord" style="border-style: dashed"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg></div>
+          <div><div class="mh coord"><b>k8s-diagnoser <span style="font-family: 'Red Hat Mono', monospace; font-size: 11.5px; font-weight: 400">diagnose</span></b><time style="color: #0a615c">working · 48s · 1 of 2 members done</time></div>
+            <div class="card member" style="border-left-color: #a996f5">
+              <div class="body" style="color: #5c656d">A member that coordinates: its own members nest one level in, collapsed by default.</div>
+              <div class="sub">
+                <div class="ln2"><span style="color: #6b4bd6">↳</span> <b>log-reader</b> <span class="e">logs</span> · done 12s · <span>3 pods return 503 on /healthz since 09:31</span></div>
+                <div class="ln2"><span style="color: #6b4bd6">↳</span> <b>metrics-reader</b> <span class="e">metrics</span> · <span class="typing" style="padding: 3px 8px"><i></i><i></i><i></i></span></div>
+              </div>
+            </div></div>
+        </div>
+        <div class="divider esc">Escalated to ops-chat and console · 09:41:02 · turn 2</div>
+        <div class="msg">
+          <div class="mav coord"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5"></path></svg></div>
+          <div><div class="mh coord"><b>rollout-coordinator</b><time>09:41:02 · synthesised first message</time></div><div class="body"><b>Needs a person.</b> New pods fail readiness on /healthz after the 2.15.0 image bump and nothing else changed. Roll back, or fix forward? Metrics still being read.</div></div>
+        </div>
+        <div class="divider">New messages</div>
+        <div class="msg">
+          <div class="mav usr"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg></div>
+          <div><div class="mh usr"><b>ops-chat/oncall</b><time>09:41:40</time></div><div class="body">Roll it back. Open a follow-up on the healthz change.</div></div>
+        </div>
+        <div style="height: 10px"></div>
+      </div>
+
+      <div style="padding: 10px 24px 14px; border-top: 1px solid #cfd6da; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; gap: 6px; align-items: center">
+          <span class="qc mono">/close</span><span class="qc">Roll back</span><span class="qc">Fix forward</span><span class="qc">Wait for metrics</span>
+          <span style="flex: 1"></span><span style="font-size: 12px; color: #5c656d">escalated 09:41 · replies reach ops-chat too</span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: flex-end">
+          <textarea placeholder="Reply to rollout-coordinator…" style="flex: 1; height: 56px; resize: none; border: 1px solid #cfd6da; border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px"></textarea>
+          <button class="btn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -191,6 +191,62 @@ func TestEscalateAfterObjectsDefaults(t *testing.T) {
 	}
 }
 
+// A malformed matcher in either half of an inhibit rule must be reported by
+// NAME, distinguishing sourceMatchers from targetMatchers — parseMatchers'
+// error is wrapped separately for each in compileRules and neither wrap was
+// exercised before (the existing "half an inhibit rule" case only reaches the
+// later "both required" check with two matchers that already parse fine).
+func TestInhibitRuleMatcherSyntaxErrorsAreLocated(t *testing.T) {
+	if _, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
+		SourceMatchers: []string{"not a matcher"},
+		TargetMatchers: []string{`reason="X"`},
+	}}}); err == nil || !strings.Contains(err.Error(), "sourceMatchers") {
+		t.Fatalf("a bad sourceMatchers entry must be named as such, got %v", err)
+	}
+	if _, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
+		SourceMatchers: []string{`reason="X"`},
+		TargetMatchers: []string{"not a matcher"},
+	}}}); err == nil || !strings.Contains(err.Error(), "targetMatchers") {
+		t.Fatalf("a bad targetMatchers entry must be named as such, got %v", err)
+	}
+}
+
+// Alertmanager accepts an unquoted, bare value — unquote's fallthrough path,
+// never exercised because every other matcher test quotes its values.
+func TestBareUnquotedMatcherValueIsAccepted(t *testing.T) {
+	m, err := parseMatcher(`reason=BackOff`)
+	if err != nil {
+		t.Fatalf("a bare value must be accepted: %v", err)
+	}
+	if !m.matches(labelsFor("BackOff", nil)) {
+		t.Fatal("a bare-value matcher must match like a quoted one")
+	}
+}
+
+// The shipped tier-3 node-condition rule is scoped to kind="Node" (chart
+// 5.9.0's Evicted drop kept it at kind-agnostic reason=~"..." for years,
+// which is exactly what fired one NodeNotReady per DaemonSet on every
+// rolling reboot). A pod-level NodeNotReady must fall through to the
+// catch-all instead — this is what lets a self-healing reboot go unreported.
+func TestPodLevelNodeNotReadyFallsToTheCatchAll(t *testing.T) {
+	rs, err := compileRules([]Rule{
+		{Matchers: []string{`reason=~"NodeNotReady|NodeHasDiskPressure|NodeHasMemoryPressure|NodeHasPIDPressure"`, `kind="Node"`}, For: "0"},
+		{Matchers: nil, For: "3m"},
+	}, Route{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := rs.Match(labelsFor("NodeNotReady", map[string]string{"kind": "Node"}))
+	if r.dwell != 0 {
+		t.Fatalf("a Node-kind NodeNotReady must still fire immediately: dwell=%v", r.dwell)
+	}
+	r, _ = rs.Match(labelsFor("NodeNotReady", nil)) // labelsFor defaults kind to "Pod"
+	if r.dwell != 3*time.Minute {
+		t.Fatalf("a pod-level NodeNotReady must reach the catch-all's dwell, got dwell=%v", r.dwell)
+	}
+}
+
 func TestInhibitRulesCompile(t *testing.T) {
 	rs, err := compileRules(nil, Route{InhibitRules: []InhibitRule{{
 		SourceMatchers: []string{`reason="NodeNotReady"`},

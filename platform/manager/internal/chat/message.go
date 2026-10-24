@@ -132,6 +132,11 @@ type Message struct {
 	// Labels are the signal's grouping labels, structured so each surface
 	// decides how much of them to show.
 	Labels map[string]string `json:"labels,omitempty"`
+	// Severity is the originating input's own severity rating
+	// (signal-severity) — one of critical/error/warning/info — OMITTED
+	// wherever that input carried none, the same posture as Labels. An
+	// adapter with no use for it renders the rest of the card unchanged.
+	Severity agentopsv1alpha1.Severity `json:"severity,omitempty"`
 
 	// InputRef names the ConversationInput holding the full payload, so an
 	// adapter can cite where the event lives for anyone with cluster access.
@@ -139,6 +144,19 @@ type Message struct {
 	// the SignalSource, and two fields a letter apart meaning different objects
 	// is the kind of naming that produces one bug per adapter.
 	InputRef string `json:"inputRef,omitempty"`
+
+	// OriginKind is this signal's underlying v1alpha1.OriginKind
+	// ("signal" | "channel" | "member") — never required reading, purely
+	// ADDITIVE. An adapter with no use for it renders the card exactly as it
+	// always has: Source still carries the SignalSource name, or — for an
+	// OriginMember input, a member's result bubbling to its parent
+	// (coordination-loop) — the MEMBER's name instead, which this field is
+	// what lets a reader tell apart from an ordinary signal source. It exists
+	// because the console builds a SECOND, richer view of exactly that
+	// exchange (the invoke card, straight from the member's own conversation)
+	// and needs to skip presenting this generic card for the same content a
+	// second time; every other adapter has no such view and is unaffected.
+	OriginKind agentopsv1alpha1.OriginKind `json:"originKind,omitempty"`
 
 	// ---- any kind ----
 
@@ -236,11 +254,18 @@ type TopicDescriptor struct {
 // A SIGNAL IS NOT PROSE. Its structured fields ARE the message and an adapter
 // renders a CARD from them — the block grammar never applies to it, and its
 // payload is a machine document or a person's typed words either way.
-func SignalMessage(pipeline, source, title, inputRef string, labels map[string]string, body string) Message {
+func SignalMessage(pipeline, source, title, inputRef string, labels map[string]string,
+	body string, originKind agentopsv1alpha1.OriginKind) Message {
 	return Message{
 		Kind: MsgSignal, Pipeline: pipeline, Source: source, Title: title,
-		Labels: labels, InputRef: inputRef, Body: body,
+		Labels: labels, InputRef: inputRef, Body: body, OriginKind: originKind,
 	}
+}
+
+// WithSeverity returns the message carrying the signal's declared severity.
+func (m Message) WithSeverity(severity agentopsv1alpha1.Severity) Message {
+	m.Severity = severity
+	return m
 }
 
 // AnswerMessage builds agent output with its run outcome.

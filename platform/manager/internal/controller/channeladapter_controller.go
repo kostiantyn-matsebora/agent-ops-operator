@@ -26,6 +26,8 @@ func AdapterDeploymentName(adapterName string) string {
 	return "agentops-adapter-" + adapterName
 }
 
+const channelAdapterLabelKey = "agentops.dev/adapter"
+
 // ChannelAdapterReconciler owns channel-adapter workloads: one Deployment
 // (+ zero-RBAC ServiceAccount) per ChannelAdapter, with the contract URL, a
 // derived per-adapter token, and every served Channel's projected credentials.
@@ -45,21 +47,46 @@ type ChannelAdapterReconciler struct {
 	FloorServiceAccount string
 }
 
-// Reconcile renders the adapter workload for one ChannelAdapter.
+// Reconcile renders the adapter workload for one ChannelAdapter. Each step
+// below is a single named call — the "why" behind any one of them lives on
+// that step's own function, not here.
 func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
 	var adapter agentopsv1alpha1.ChannelAdapter
 	if err := r.Get(ctx, req.NamespacedName, &adapter); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// served channels + credential projection (collisions reported, first wins)
-	var channels agentopsv1alpha1.ChannelList
-	if err := r.List(ctx, &channels, client.InNamespace(adapter.Namespace)); err != nil {
+	served, envFrom, collisions, err := r.projectServedChannelCredentials(ctx, &adapter)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
-	served := 0
+	// Looked up every reconcile, never cached: absence must remove the second
+	// identity, not leave a token behind in a pod nobody re-rendered.
+	signalIdentity, err := r.servedSignalAdapter(ctx, &adapter)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	env := r.buildAdapterEnv(&adapter, signalIdentity)
+	labels := buildAdapterLabels(&adapter)
+
+	deploy, err := r.reconcileWorkload(ctx, &adapter, labels, env, envFrom)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, r.patchStatus(ctx, &adapter, served, collisions, deploy)
+}
+
+// projectServedChannelCredentials counts the Channels served by this adapter
+// (spec.adapter naming it) and projects their credentials into env-from
+// sources, collisions reported but never blocking (first channel wins).
+func (r *ChannelAdapterReconciler) projectServedChannelCredentials(ctx context.Context,
+	adapter *agentopsv1alpha1.ChannelAdapter) (served int, envFrom []corev1.EnvFromSource, collisions []string, err error) {
+
+	var channels agentopsv1alpha1.ChannelList
+	if err := r.List(ctx, &channels, client.InNamespace(adapter.Namespace)); err != nil {
+		return 0, nil, nil, err
+	}
 	var creds []credentialItem
 	for i := range channels.Items {
 		ch := &channels.Items[i]
@@ -71,8 +98,21 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			creds = append(creds, credentialItem{Name: ch.Name, SecretName: ch.Spec.CredentialsSecretRef.Name})
 		}
 	}
-	envFrom, collisions := projectCredentials(creds)
+	envFrom, collisions = projectCredentials(creds)
+	return served, envFrom, collisions, nil
+}
 
+// buildAdapterEnv assembles the workload's env vars from already-resolved
+// inputs — the contract endpoint, the derived per-adapter token, the second
+// SignalAdapter identity (empty when none serves through this workload), and
+// LISTEN_ADDR when a port is declared. Pure: no client calls, so it needs no
+// context and is unit-testable on its own.
+//
+// The two tokens (channel, signal) use distinct derivation contexts, and each
+// surface validates only against its own CRD list, so the identities stay
+// separate — a channel token is still a stranger to /signal/*, and vice
+// versa.
+func (r *ChannelAdapterReconciler) buildAdapterEnv(adapter *agentopsv1alpha1.ChannelAdapter, signalIdentity string) []corev1.EnvVar {
 	env := []corev1.EnvVar{
 		{Name: "MANAGER_URL", Value: r.ManagerURL},
 		{Name: "ADAPTER_NAME", Value: adapter.Name},
@@ -80,17 +120,7 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if r.MasterToken != "" {
 		env = append(env, corev1.EnvVar{Name: "ADAPTER_TOKEN", Value: chat.DeriveAdapterToken(r.MasterToken, adapter.Name)})
 	}
-	// A SignalAdapter may declare itself served by THIS workload, which gives
-	// this pod a second identity: one env var is the whole mechanism. The two
-	// tokens use distinct derivation contexts and each surface validates only
-	// against its own CRD list, so the identities stay separate — a channel
-	// token is still a stranger to /signal/*, and vice versa.
-	//
-	// Absence removes it: clearing servedBy must take the capability away, not
-	// leave a token behind in a pod nobody re-rendered.
-	if signalIdentity, err := r.servedSignalAdapter(ctx, &adapter); err != nil {
-		return ctrl.Result{}, err
-	} else if signalIdentity != "" && r.MasterToken != "" {
+	if signalIdentity != "" && r.MasterToken != "" {
 		env = append(env,
 			corev1.EnvVar{Name: "SIGNAL_ADAPTER_NAME", Value: signalIdentity},
 			corev1.EnvVar{Name: "SIGNAL_ADAPTER_TOKEN", Value: chat.DeriveSignalAdapterToken(r.MasterToken, signalIdentity)})
@@ -98,16 +128,30 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if adapter.Spec.Port != nil {
 		env = append(env, corev1.EnvVar{Name: "LISTEN_ADDR", Value: fmt.Sprintf(":%d", *adapter.Spec.Port)})
 	}
+	return env
+}
 
-	labels := map[string]string{
-		"app.kubernetes.io/name": "agentops-adapter",
-		"agentops.dev/adapter":   adapter.Name,
+// buildAdapterLabels returns the label set shared by the Deployment, its pod
+// template and the Service — one definition so all three stay in lock-step.
+func buildAdapterLabels(adapter *agentopsv1alpha1.ChannelAdapter) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":     "agentops-adapter",
+		"app.kubernetes.io/instance": adapter.Name,
+		channelAdapterLabelKey:       adapter.Name,
 	}
+}
+
+// reconcileWorkload ensures the Deployment and, when ported, the Service the
+// adapter CR owns. Returns the Deployment so the caller can read its
+// availability for the Ready condition.
+func (r *ChannelAdapterReconciler) reconcileWorkload(ctx context.Context, adapter *agentopsv1alpha1.ChannelAdapter,
+	labels map[string]string, env []corev1.EnvVar, envFrom []corev1.EnvFromSource) (*appsv1.Deployment, error) {
+
 	deploy, err := ensureAdapterWorkload(ctx, r.Client, r.Scheme, adapterWorkload{
-		Owner:       &adapter,
+		Owner:       adapter,
 		Name:        AdapterDeploymentName(adapter.Name),
 		Labels:      labels,
-		SelectorKey: "agentops.dev/adapter",
+		SelectorKey: channelAdapterLabelKey,
 		Image:       adapter.Spec.Image,
 		Env:         env,
 		EnvFrom:     envFrom,
@@ -117,39 +161,62 @@ func (r *ChannelAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		ServiceAccount: resolveAdapterServiceAccount(adapter.Spec.ServiceAccountName, r.FloorServiceAccount),
 	})
 	if err != nil {
-		return ctrl.Result{}, err
+		return nil, err
 	}
 	if err := ensureAdapterService(ctx, r.Client, r.Scheme, adapterService{
-		Owner:       &adapter,
+		Owner:       adapter,
 		Name:        AdapterDeploymentName(adapter.Name),
 		Labels:      labels,
-		SelectorKey: "agentops.dev/adapter",
+		SelectorKey: channelAdapterLabelKey,
 		Port:        adapter.Spec.Port,
 	}); err != nil {
-		return ctrl.Result{}, err
+		return nil, err
 	}
+	return deploy, nil
+}
 
-	// status. The declared schema is compile-checked here, where it was
-	// authored — a broken one is reported but never blocks the workload.
+// patchStatus compiles the declared schema, sets the Deployed and Ready
+// conditions and persists the status subresource. The schema is
+// compile-checked here, where it was authored — a broken one is reported but
+// never blocks the workload.
+func (r *ChannelAdapterReconciler) patchStatus(ctx context.Context,
+	adapter *agentopsv1alpha1.ChannelAdapter, served int, collisions []string, deploy *appsv1.Deployment) error {
+
 	_, schemaCond := compileDeclaredSchema(adapter.Spec.ConfigSchema)
 	patch := client.MergeFrom(adapter.DeepCopy())
 	applySchemaCondition(&adapter.Status.Conditions, schemaCond)
 	adapter.Status.ServedChannels = int32(served)
-	deployed := metav1.Condition{Type: ConditionDeployed, Status: metav1.ConditionTrue, Reason: "WorkloadRendered"}
+
 	if len(collisions) > 0 {
-		deployed.Reason = "CredentialCollision"
-		deployed.Message = "credential env prefixes collide after sanitization (first channel wins): " + strings.Join(collisions, "; ")
-		logger.Info("credential projection collision", "adapter", adapter.Name, "collisions", collisions)
+		log.FromContext(ctx).Info("credential projection collision", "adapter", adapter.Name, "collisions", collisions)
 	}
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, deployed)
-	ready := metav1.Condition{Type: ConditionReady, Status: metav1.ConditionFalse, Reason: "WorkloadUnavailable"}
+	apimeta.SetStatusCondition(&adapter.Status.Conditions, buildDeployedCondition(collisions))
+	apimeta.SetStatusCondition(&adapter.Status.Conditions, buildReadyCondition(deploy, served))
+	return r.Status().Patch(ctx, adapter, patch)
+}
+
+// buildDeployedCondition reports the workload as rendered, downgrading only
+// the message — never the status — when credential projection collided; a
+// collision is reported, not blocking (first channel wins).
+func buildDeployedCondition(collisions []string) metav1.Condition {
+	cond := metav1.Condition{Type: ConditionDeployed, Status: metav1.ConditionTrue, Reason: "WorkloadRendered"}
+	if len(collisions) > 0 {
+		cond.Reason = "CredentialCollision"
+		cond.Message = "credential env prefixes collide after sanitization (first channel wins): " + strings.Join(collisions, "; ")
+	}
+	return cond
+}
+
+// buildReadyCondition reports Ready once the Deployment has at least one
+// available replica.
+func buildReadyCondition(deploy *appsv1.Deployment, served int) metav1.Condition {
+	cond := metav1.Condition{Type: ConditionReady, Status: metav1.ConditionFalse, Reason: "WorkloadUnavailable"}
 	if deploy.Status.AvailableReplicas > 0 {
-		ready.Status = metav1.ConditionTrue
-		ready.Reason = "WorkloadAvailable"
-		ready.Message = fmt.Sprintf("serving %d channel(s)", served)
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = "WorkloadAvailable"
+		cond.Message = fmt.Sprintf("serving %d channel(s)", served)
 	}
-	apimeta.SetStatusCondition(&adapter.Status.Conditions, ready)
-	return ctrl.Result{}, r.Status().Patch(ctx, &adapter, patch)
+	return cond
 }
 
 // servedSignalAdapter finds the SignalAdapter (if any) that names this

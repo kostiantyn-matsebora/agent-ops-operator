@@ -1,0 +1,100 @@
+## MODIFIED Requirements
+
+### Requirement: Outbound operations other than delete-conversation are derivable from CR state
+Every outbound channel operation except `delete-conversation` SHALL be re-derivable from
+Kubernetes state after a manager restart. A run whose result is recorded in
+`Conversation.status` but not yet delivered to a bound thread SHALL be
+re-enqueued by reconciliation.
+
+The in-memory operation queue SHALL remain the hot path. The record of what
+is currently claimed, and of what is owed, SHALL be the Conversation's own
+`status`, not the in-memory queue.
+
+Re-derivation SHALL NOT depend on a restart. The manager's completed-operation
+window exists to suppress duplicates, and SHALL therefore record operations
+that **succeeded**, never operations that were merely **attempted**.
+
+When a derivable operation completes with an error, the manager SHALL
+release that operation's dedup entry. The next reconciliation then
+re-derives it.
+
+An operation whose failure leaves its id in the window is
+indistinguishable from one that was delivered. That would convert a
+transient transport error into permanent, unrecoverable loss of a reply
+the CR still records as owed.
+
+`delete-conversation` SHALL keep its terminal semantics: it is not regenerated,
+because the object that would carry the obligation is being deleted. It is the
+only exemption.
+
+`close-topic` SHALL NOT be exempt. It once was, because closing a
+conversation used to delete it. The object now survives its close, and
+`status.threadsArchived[]` records which threads are done — so an
+unarchived bound thread is an archive still owed, and is re-derivable like
+any other operation.
+
+A reply that remains undelivered to a bound thread after its operation failed
+SHALL be observable on the Conversation rather than only in manager logs, as
+`status.threads[].undeliveredReply`: the run id whose reply is still owed to
+that thread, cleared when delivery succeeds.
+
+#### Scenario: Reply survives a restart between completion and delivery
+- **WHEN** the manager restarts after `POST /work/done` recorded a run result but before any adapter claimed the resulting `send` op
+- **THEN** reconciliation re-enqueues the reply and the bound threads receive it exactly as if no restart had happened
+
+#### Scenario: Delivered replies are not re-posted
+- **WHEN** the manager restarts after a run's reply was delivered to every bound thread
+- **THEN** no `send` op is regenerated for that run and no thread receives a duplicate
+
+#### Scenario: Partial delivery completes rather than repeats
+- **WHEN** a run's reply reached one of two bound threads before a restart
+- **THEN** only the undelivered thread receives a `send` op after recovery
+
+#### Scenario: Upgrading does not re-post history
+- **WHEN** the manager is upgraded to a version that tracks delivery and first observes conversations whose runs completed before it started
+- **THEN** those runs are recorded as delivered without enqueueing any `send`, and no bound thread receives an old answer again
+
+#### Scenario: Failed reply is re-derived without a restart
+- **WHEN** an adapter reports a `send` op for a run reply as failed and the manager keeps running
+- **THEN** the operation's dedup entry is released and the next reconciliation re-enqueues the same stable op id, so the reply reaches the thread without operator intervention
+
+#### Scenario: Failed opening card is re-derived without a restart
+- **WHEN** an adapter reports a conversation's input `signal` card op as failed
+- **THEN** the card is re-derived on the next reconciliation, because a card is derivable from the conversation's inputs and carries no CR-side delivery marker of its own
+
+#### Scenario: Rate-limited burst leaves no thread permanently empty
+- **WHEN** a transport rejects a batch of `ensure-topic` and `send` operations with a retryable error and later accepts them
+- **THEN** every created thread eventually carries both its opening card and its run replies, and no conversation is left with a thread that has a recorded result but no posted message
+
+#### Scenario: Failed close-topic is re-derived like any other operation
+- **WHEN** a `close-topic` op completes with an error and its conversation still exists
+- **THEN** the dedup entry is released and reconciliation re-derives the op, because the thread is still owed an archive
+
+#### Scenario: Failed delete-conversation is still not regenerated
+- **WHEN** a `delete-conversation` op completes with an error while the conversation's finalizer is releasing
+- **THEN** the op is not re-derived and the finalizer releases regardless, because the object that would carry the obligation is gone
+
+#### Scenario: An owed reply is visible on the object
+- **WHEN** a run's reply has failed delivery to a bound thread and has not yet succeeded
+- **THEN** the Conversation reports the undelivered thread in `status.threads[].undeliveredReply`, so an empty chat thread can be diagnosed without reading manager logs
+
+#### Scenario: A claim held only in a dead process's memory is not the record of anything
+- **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
+- **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op
+
+### Requirement: A restart-resilience matrix is documented and maintained
+The documentation SHALL carry a matrix naming every component, the state it
+holds, that state's declared home, and what a restart of that component costs.
+Adding state to a component SHALL require adding its row.
+
+The matrix SHALL name `status.threads[].claim` and
+`status.threads[].undeliveredReply`: Kubernetes-API state, surviving every
+restart, with a claim held by a former leader cleared on recovery.
+
+#### Scenario: Guarantee is checkable
+- **WHEN** an operator asks what restarting a given component loses
+- **THEN** the answer is read from the documented matrix rather than inferred from code
+
+#### Scenario: Claim and owed-reply state have rows
+- **WHEN** an operator asks what a manager restart does to a claimed op or an undelivered reply
+- **THEN** the matrix names both as Conversation status, surviving the restart

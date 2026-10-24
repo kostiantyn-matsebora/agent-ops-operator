@@ -1,0 +1,939 @@
+#!/usr/bin/env bash
+# The step that holds `contents: write` for a dispatch, and runs no model.
+#
+# WHAT IS ASSERTED IS THE ORDER AND THE REFUSALS. A reply naming a commit that
+# was not yet pushed is a claim; a thread resolved for a patch that did not
+# land is a thread resolved on nothing. The git half is REAL — a throwaway
+# repository with a bare origin — because `git apply` and `git push` are the
+# behaviour under test. Only `gh` is stubbed.
+. "$(dirname "$0")/lib.sh"
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+S="$ROOT/.github/scripts/land-dispatch.py"
+
+tmp=$(mktemp -d)
+export GH_CALLS="$tmp/calls" GH_FIXTURE="$tmp/threads.json" ORIGIN="$tmp/origin.git"
+
+# A `gh` that, on every thread reply, records what origin's branch pointed at
+# AT THAT MOMENT. That is how "push before reply" becomes observable.
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "$*" "$(git -C "$ORIGIN" rev-parse --short "$BRANCH" 2>/dev/null || echo none)" >> "$GH_CALLS" ;;
+  *) printf '%s\n' "$*" >> "$GH_CALLS" ;;
+esac
+case "$*" in
+  "api graphql"*) cat "$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin/gh"; export PATH="$tmp/bin:$PATH"
+export BRANCH="change/thing"
+
+# The resolver's view of the threads: both are the review's and open.
+cat > "$GH_FIXTURE" <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{
+  "pageInfo":{"hasNextPage":false,"endCursor":null},
+  "nodes":[
+    {"id":"PRRT_a","isResolved":false,"isOutdated":false,"path":"a.go",
+     "comments":{"nodes":[{"author":{"login":"claude","__typename":"Bot"}}]}},
+    {"id":"PRRT_b","isResolved":false,"isOutdated":false,"path":"b.go",
+     "comments":{"nodes":[{"author":{"login":"claude","__typename":"Bot"}}]}},
+    {"id":"PRRT_human","isResolved":false,"isOutdated":false,"path":"c.go",
+     "comments":{"nodes":[{"author":{"login":"a-maintainer","__typename":"User"}}]}}
+  ]}}}}}
+JSON
+
+# A repository with a bare origin, a branch, and two files with a finding each.
+fresh_repo() {
+  rm -rf "$ORIGIN" "$tmp/work"
+  git init -q --bare "$ORIGIN"
+  git init -q -b master "$tmp/work"
+  git -C "$tmp/work" config user.email t@example.com
+  git -C "$tmp/work" config user.name T
+  printf 'package a\n\nfunc A() {}\n' > "$tmp/work/a.go"
+  printf 'package b\n\nfunc B() {}\n' > "$tmp/work/b.go"
+  git -C "$tmp/work" add . && git -C "$tmp/work" commit -qm seed
+  git -C "$tmp/work" checkout -q -b "$BRANCH"
+  git -C "$tmp/work" remote add origin "$ORIGIN"
+  git -C "$tmp/work" push -q origin master "$BRANCH"
+}
+
+# A patch that fixes a.go only.
+fresh_repo
+printf 'package a\n\nfunc A() int { return 1 }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" diff > "$tmp/fix.patch"
+git -C "$tmp/work" checkout -q -- a.go
+
+cat > "$tmp/work.json" <<'JSON'
+[{"threadId":"PRRT_a","commentId":11,"path":"a.go","line":3,"finding":"A returns nothing.","acceptedBy":"a-maintainer","reply":"fix it"},
+ {"threadId":"PRRT_b","commentId":22,"path":"b.go","line":3,"finding":"B is unused.","acceptedBy":"a-maintainer","reply":"fix it"}]
+JSON
+printf '{"fixed":["PRRT_a"],"unfixed":[{"threadId":"PRRT_b","reason":"B is exported and used by the tests"}]}' > "$tmp/report.json"
+
+land() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
+         (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
+            --work-list "$tmp/work.json" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report.json}" \
+            ${DROPPED:+--dropped "$DROPPED"} --dispatched-by a-maintainer 2>&1); }
+
+out=$(land); rc=$?
+
+it "applies the patch and pushes one commit to the branch"
+assert_status 0 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+
+it "names the findings in the commit"
+msg=$(git -C "$ORIGIN" log -1 --format=%B "$BRANCH")
+assert_contains "$msg" "fix(review): address 1 accepted review finding"
+assert_contains "$msg" "a.go:3 — A returns nothing."
+
+it "replies in the fixed thread naming the commit"
+sha=$(git -C "$ORIGIN" rev-parse --short "$BRANCH")
+assert_contains "$(cat "$GH_CALLS")" "comments/11/replies -f body=Fixed in $sha"
+
+# THE ORDERING. At the moment of the reply, origin already held the commit.
+it "replies only AFTER the push landed"
+assert_contains "$(grep 'comments/11/replies' "$GH_CALLS")" "@origin=$sha"
+
+it "answers the unfixed thread with the reason, and leaves it open"
+assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=Not addressed by the dispatch (B is exported and used by the tests). Left open."
+
+it "says on the pull request that a token push starts no CI"
+assert_contains "$(cat "$GH_CALLS")" "pr comment 7 --repo o/r --body Dispatch by @a-maintainer: $sha addresses 1 accepted finding, 1 item left open."
+assert_contains "$(cat "$GH_CALLS")" "CI and the review have NOT run on it"
+
+it "hands only the fixed thread to the resolver"
+assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
+
+it "resolves after replying, through resolve-review-threads.py"
+assert_contains "$out" "resolved PRRT_a"
+assert_equals "1" "$(grep -c resolveReviewThread "$GH_CALLS")"
+reply_line=$(grep -n 'comments/11/replies' "$GH_CALLS" | cut -d: -f1)
+resolve_line=$(grep -n resolveReviewThread "$GH_CALLS" | cut -d: -f1)
+[ "$reply_line" -lt "$resolve_line" ] && pass || fail "resolve ran before the reply"
+
+# A REPORTED FIX THE PATCH DOES NOT CONTAIN is a claim, and the file is the
+# check: the model said b.go was fixed, and nothing in the patch touches b.go.
+it "does not trust a fix the patch does not contain: it is UNADDRESSED, a failed fix and not a dispute"
+fresh_repo
+printf '{"fixed":["PRRT_a","PRRT_b"],"unfixed":[]}' > "$tmp/report2.json"
+out=$(REPORT="$tmp/report2.json" land)
+assert_contains "$out" "unaddressed PRRT_b (b.go): reported fixed, but the patch does not touch \`b.go\`"
+assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
+
+it "drops a reported thread the work list does not carry"
+fresh_repo
+printf '{"fixed":["PRRT_a","PRRT_human"],"unfixed":[]}' > "$tmp/report3.json"
+out=$(REPORT="$tmp/report3.json" land)
+assert_contains "$out" "DROPPED  PRRT_human"
+assert_not_contains "$(cat "$GH_CALLS")" "PRRT_human"
+
+# A STALE PATCH RESOLVES NOTHING. The branch moved: a.go changed under the fix.
+it "refuses a patch that no longer applies, pushes nothing, resolves nothing, and says so"
+fresh_repo
+printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(land); rc=$?
+assert_status 1 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "pr comment 7 --repo o/r --body Dispatch by @a-maintainer: the patch no longer applies"
+assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+
+it "with an empty patch and nothing fixed, commits nothing and says every finding is still open"
+fresh_repo
+: > "$tmp/empty.patch"
+printf '{"fixed":[],"unfixed":[{"threadId":"PRRT_a","reason":"could not"}]}' > "$tmp/report4.json"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report4.json" land); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "nothing landed. Every accepted finding is still open"
+assert_contains "$(cat "$GH_CALLS")" "\`b.go\`: not addressed by the fixing step"
+
+it "with nothing accepted, writes nothing and says so"
+fresh_repo
+printf '[]' > "$tmp/none.json"
+out=$(cd "$tmp/work" && : > "$GH_CALLS" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
+        --work-list "$tmp/none.json" --patch "$tmp/fix.patch" --report "$tmp/report.json" 2>&1); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "no finding is accepted, so nothing was written"
+
+it "refuses, loudly, when an input is absent rather than empty"
+out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
+        --work-list "$tmp/work.json" --patch "$tmp/missing.patch" --report "$tmp/report.json" 2>&1); rc=$?
+assert_status 1 "$rc"
+assert_contains "$out" "ABSENT"
+
+# THE RESOLVER'S REFUSAL HOLDS THROUGH THIS PATH TOO: hand it a thread a person
+# authored and it refuses, whatever this program believed.
+it "cannot resolve a person's thread even when the work list claims it"
+fresh_repo
+printf 'package b\n\nfunc B() int { return 2 }\n' > "$tmp/work/b.go"
+printf 'package c\n' > "$tmp/work/c.go"
+git -C "$tmp/work" add c.go; git -C "$tmp/work" diff --cached > "$tmp/c.patch"; git -C "$tmp/work" reset -q; rm "$tmp/work/c.go"; git -C "$tmp/work" checkout -q -- b.go
+cat > "$tmp/work5.json" <<'JSON'
+[{"threadId":"PRRT_human","commentId":33,"path":"c.go","line":1,"finding":"a person's remark","acceptedBy":"x","reply":"fix it"}]
+JSON
+printf '{"fixed":["PRRT_human"],"unfixed":[]}' > "$tmp/report5.json"
+out=$(cd "$tmp/work" && : > "$GH_CALLS" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
+        --work-list "$tmp/work5.json" --patch "$tmp/c.patch" --report "$tmp/report5.json" 2>&1)
+assert_contains "$out" "REFUSED  PRRT_human: authored by 'a-maintainer', not the review"
+assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
+
+# --mode all: THE LABELLED PULL REQUEST. Fix or dispute, a dispute is a marked
+# reply that stays open, analysis issues are on the list, rounds are counted
+# from the pull request, every ending is ONE summary naming the approver, and
+# a landed round dispatches CI and the review.
+export GH_COMMENTS="$tmp/comments.json"
+printf '[]' > "$GH_COMMENTS"
+cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+# One call per LINE, a multi-line body flattened, so a test can read a whole
+# comment with one grep.
+call="${*//$'\n'/ }"
+case "$*" in
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "$call" "$(git -C "$ORIGIN" rev-parse --short "$BRANCH" 2>/dev/null || echo none)" >> "$GH_CALLS" ;;
+  *) printf '%s\n' "$call" >> "$GH_CALLS" ;;
+esac
+case "$*" in
+  "api graphql"*) cat "$GH_FIXTURE" ;;
+  "api repos/"*"/issues/"*"/comments --paginate") cat "$GH_COMMENTS" ;;
+  "workflow run"*) [ -z "${GH_DISPATCH_FAILS:-}" ] || { echo "HTTP 422" >&2; exit 1; } ;;
+esac
+exit 0
+STUB
+cat > "$tmp/sonar.json" <<'JSON'
+{"consulted":true,"stale":[],"projects":[],"issues":[]}
+JSON
+cat > "$tmp/work-all.json" <<'JSON'
+[{"id":"PRRT_a","source":"review","threadId":"PRRT_a","commentId":11,"path":"a.go","line":3,"finding":"A returns nothing.","acceptedBy":"an-approver","reply":""},
+ {"id":"PRRT_b","source":"review","threadId":"PRRT_b","commentId":22,"path":"b.go","line":3,"finding":"B is unused.","acceptedBy":"an-approver","reply":""},
+ {"id":"sonar:AZ1","source":"sonar","key":"AZ1","rule":"go:S1234","severity":"MAJOR","path":"b.go","line":1,"message":"Remove the unused function."}]
+JSON
+printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""},{"id":"PRRT_b","action":"disputed","reason":"B is exported and used by the tests"},{"id":"sonar:AZ1","action":"disputed","reason":"the function is the package API"}]}' > "$tmp/report-all.json"
+
+# THREAD_CHECK_EXIT: 0 = no thread open (the ordinary case in this file's
+# fixtures), 1 = a thread opened since collect ran (live-checked at the
+# clean ending, never trusted from the snapshot).
+cat > "$tmp/thread-check.py" <<'PY'
+import os, sys
+sys.exit(int(os.environ.get("THREAD_CHECK_EXIT", "0")))
+PY
+land_all() { : > "$GH_CALLS"; rm -f "$tmp/work/.resolve-threads"
+             (cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" \
+                --work-list "${WORK:-$tmp/work-all.json}" --patch "${PATCH:-$tmp/fix.patch}" --report "${REPORT:-$tmp/report-all.json}" \
+                --dispatched-by github-actions --mode all --approver an-approver --since 2026-08-29T10:00:00Z \
+                --max-rounds "${MAX_ROUNDS:-3}" --sonar "$tmp/sonar.json" --checks "${CHECKS:-$tmp/checks-none.json}" \
+                --state-script "$ROOT/.github/scripts/conveyor-state.py" \
+                --thread-check-script "$tmp/thread-check.py" ${DROPPED:+--dropped "$DROPPED"} \
+                ${STARTS---push-starts-workflows} ${REPORT_MISSING:+--report-missing} ${FIX_FAILED:+--fix-failed} ${FIX_TIMED_OUT:+--fix-timed-out} 2>&1); }
+loop_label() { grep -oE 'issue edit 7 --repo o/r --add-label loop:[a-z]+' "$GH_CALLS" | sed 's/.*loop://' | tr '\n' ' ' | sed 's/ $//'; }
+printf '{"consulted":true,"checks":[],"items":[]}' > "$tmp/checks-none.json"
+
+fresh_repo
+out=$(land_all); rc=$?
+sha=$(git -C "$ORIGIN" rev-parse --short "$BRANCH")
+
+it "labelled: fixes what the patch fixes and pushes one commit naming the round"
+assert_status 0 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "fix(review): address 1 review finding (conveyor round 1)"
+
+it "labelled: a disputed thread gets a MARKED reply naming the approver, and is not resolved"
+assert_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- conveyor:disputed -->"
+assert_contains "$(cat "$GH_CALLS")" "Disputed by the fixing step: B is exported and used by the tests"
+assert_contains "$(cat "$GH_CALLS")" "Left open for @an-approver"
+assert_equals "PRRT_a" "$(cat "$tmp/work/.resolve-threads")"
+
+it "labelled: disputed analysis issues go in ONE pull request comment under the marker, naming the key, and nothing touches the service"
+assert_equals "1" "$(grep -c 'The fixing step disputes 1 analysis issue' "$GH_CALLS")"
+assert_contains "$(grep 'disputes 1 analysis issue' "$GH_CALLS")" "<!-- conveyor:disputed -->"
+assert_contains "$(cat "$GH_CALLS")" "\`AZ1\` (go:S1234, \`b.go:1\`): the function is the package API"
+assert_not_contains "$(cat "$GH_CALLS")" "sonarcloud"
+
+it "labelled: the landing comment carries the round marker, and dispatches nothing — the push itself is what starts CI and the review"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_contains "$out" "the push starts CI and the review, and the review's completion starts the next round"
+
+it "labelled: a round that goes on posts NO summary — the summary is the ending's"
+assert_not_contains "$(cat "$GH_CALLS")" "<!-- conveyor:summary -->"
+assert_not_contains "$(cat "$GH_CALLS")" "Push again"
+
+# THE SECOND WALL. answering.md and writing.md bind everything posted to a
+# person, and a prompt is followed until the model is tired -- so an
+# over-length "reason" is replaced, never trusted or truncated mid-sentence.
+it "labelled: an over-length dispute reason (over 40 words) is REPLACED with a short notice, never posted verbatim"
+fresh_repo
+long_reason=$(python3 -c "print(' '.join(['word'] * 60))")
+printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"%s"},{"id":"PRRT_b","action":"disputed","reason":"short and fine"},{"id":"sonar:AZ1","action":"disputed","reason":"also fine"}]}' "$long_reason" > "$tmp/report-long.json"
+out=$(REPORT="$tmp/report-long.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "$long_reason"
+assert_contains "$(cat "$GH_CALLS")" "own reason ran to 60 words"
+assert_contains "$(cat "$GH_CALLS")" "short and fine"
+
+# ENDING: the cap. Two rounds already on the pull request since the label.
+it "labelled: counts rounds from its own marked comments since the label, and at the cap posts ONE summary mentioning the approver instead of re-triggering"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 9 -->\\nfrom before the label","created_at":"2026-08-28T12:00:00Z"}]' > "$GH_COMMENTS"
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 3 -->"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+summary_line=$(grep '<!-- conveyor:summary -->' "$GH_CALLS")
+assert_contains "$summary_line" "round cap reached** — @an-approver"
+assert_contains "$summary_line" "Rounds used: 3 of 3"
+assert_contains "$summary_line" "Disputed (2)"
+assert_contains "$summary_line" "conveyor:keep-going"
+assert_equals "capped" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
+
+# `gh api --paginate` (no `--jq`) concatenates each page's own JSON array back
+# to back, so the wire shape genuinely is `[...][...]` -- and a comment BODY
+# containing that exact substring must not be mistaken for a page boundary.
+it "counts rounds correctly when a page boundary lands inside a comment whose own body contains ][ "
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nsomeone quoted ][ in their reply","created_at":"2026-08-29T11:00:00Z"}][{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"}]' > "$GH_COMMENTS"
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 3 -->"
+printf '[]' > "$GH_COMMENTS"
+
+# CONSUMED, THE MOMENT A ROUND RUNS UNDER IT. `conveyor:keep-going` is on the
+# pull request already (the fixture `gh pr view --json labels` names it); a
+# round running under it REMOVES it, never re-adds or re-checks it later.
+# CONSUMED ONLY WHEN IT TAKES EFFECT. Three rounds already ran (the same
+# fixture the cap test above uses), so this round is number 4 of a max-rounds-3
+# loop -- exactly the round `conveyor:keep-going` exists to unblock -- and
+# extends the cap to 6 (another FULL SET, not one extra round).
+it "labelled: conveyor:keep-going past the cap is REMOVED, extends the cap to another full set, and posts the grant marker"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
+mkdir -p "$tmp/bin2"
+cat > "$tmp/bin2/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin2/gh"
+out=$(PATH="$tmp/bin2:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+assert_contains "$out" "extends the cap to 6"
+# THE ROUND THE EXTENDED CAP UNBLOCKS ACTUALLY LANDS ITS FIX, not just the
+# cap bookkeeping around it.
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 4 -->"
+printf '[]' > "$GH_COMMENTS"
+
+# A FAILED LABEL-REMOVAL MUST NOT ABORT A ROUND THAT OTHERWISE LANDS. The fix
+# this round produces is real work already pushed by the time this runs.
+it "labelled: past the cap, a FAILED --remove-label does not crash the round or post the grant comment"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
+mkdir -p "$tmp/bin4"
+cat > "$tmp/bin4/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "pr edit "*"--remove-label conveyor:keep-going")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "transient failure" >&2; exit 1 ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin4/gh"
+out=$(PATH="$tmp/bin4:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+# THE ROUND ITSELF STILL LANDS, even though removing the label it consumed
+# failed -- the same "real work already pushed" assertion the extended-cap
+# test above makes for its own round.
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+printf '[]' > "$GH_COMMENTS"
+
+# THE SAME ARGUMENT, ONE STEP LATER: the label removal SUCCEEDS but posting
+# the grant marker comment fails. An uncaught exception here used to
+# propagate past the thread replies and the landing summary this method
+# runs in the middle of, losing the whole round's report even though the
+# fix was already pushed.
+it "labelled: past the cap, a FAILED grant-marker comment does not crash the round or lose the summary"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
+mkdir -p "$tmp/bin4b"
+cat > "$tmp/bin4b/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "pr comment "*"conveyor:grant"*)
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "transient failure" >&2; exit 1 ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin4b/gh"
+out=$(PATH="$tmp/bin4b:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+# THE ROUND ITSELF STILL LANDS AND STILL REPORTS -- the label was removed,
+# the cap still advanced for this process, and the round-landing comment
+# still posts despite the grant marker's own comment call failing.
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "<!-- conveyor:round 4 -->"
+printf '[]' > "$GH_COMMENTS"
+
+# AN ORDINARY ROUND (below the cap) MUST NOT CONSUME THE LABEL, even when it
+# is present -- the bug this whole rewrite exists to fix: consuming it on
+# round 1 would spend the grant on a round that needed no extension.
+# A NO-OP ROUND MUST NOT SPEND THE GRANT. `Round.__init__` runs before ANY
+# outcome is known -- consuming keep-going there would spend it on a round
+# that pushed nothing, leaving the loop stuck at the old cap with the
+# standing instruction already gone. The grant is consumed only after a
+# commit actually lands.
+it "labelled: past the cap, a round that lands NOTHING (stale patch) does not consume conveyor:keep-going"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"},{"body":"<!-- conveyor:round 3 -->\\nround three","created_at":"2026-08-29T13:00:00Z"}]' > "$GH_COMMENTS"
+mkdir -p "$tmp/bin5"
+cat > "$tmp/bin5/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin5/gh"
+# a stale patch: the branch moved so the fixture patch no longer applies.
+printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(PATH="$tmp/bin5:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "pr edit 7 --repo o/r --remove-label conveyor:keep-going"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+# at the bound a stale patch does not start the next round either: the cap holds
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_equals "capped" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
+
+it "labelled: conveyor:keep-going present but NOT past the cap is left untouched"
+fresh_repo
+mkdir -p "$tmp/bin3"
+cat > "$tmp/bin3/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  "pr view "*"--json labels"*) printf '%s\n' "\$*" >> "\$GH_CALLS"; echo "conveyor:keep-going" ;;
+  "issue comments"*|"api repos/"*"/issues/"*"/comments --paginate")
+    printf '%s\n' "\$*" >> "\$GH_CALLS"; cat "\${GH_COMMENTS:-/dev/null}" 2>/dev/null || echo '[]' ;;
+  "api repos/"*"/replies"*)
+    printf '%s @origin=%s\n' "\$*" "\$(git -C "\$ORIGIN" rev-parse --short "\$BRANCH" 2>/dev/null || echo none)" >> "\$GH_CALLS" ;;
+  *) printf '%s\n' "\$*" >> "\$GH_CALLS" ;;
+esac
+case "\$*" in
+  "api graphql"*) cat "\$GH_FIXTURE" ;;
+esac
+exit 0
+STUB
+chmod +x "$tmp/bin3/gh"
+out=$(PATH="$tmp/bin3:$PATH" land_all); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "--remove-label conveyor:keep-going"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:grant"
+
+# ENDING: disputes only.
+it "labelled: with everything disputed, commits nothing, posts the disputes, and ONE summary saying so"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"A is fine"},{"id":"PRRT_b","action":"disputed","reason":"so is B"},{"id":"sonar:AZ1","action":"disputed","reason":"API"}]}' > "$tmp/report-disp.json"
+: > "$tmp/empty.patch"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-disp.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_equals "2" "$(grep -c 'replies -f body=<!-- conveyor:disputed -->' "$GH_CALLS")"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "disputes only** — @an-approver"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_not_contains "$(cat "$GH_CALLS")" "resolveReviewThread"
+# A ROUND THAT RAN A MODEL COUNTS, disputed or not: its marker rides on the summary
+# because no landing comment carries it, so the gate's count of the bound sees it.
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
+
+# ENDING: clean.
+it "labelled: with nothing to do, posts ONE summary saying the pull request is clean"
+fresh_repo
+printf '[]' > "$tmp/none.json"
+out=$(WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "clean** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+
+it "labelled: a clean ending marks the loop mergeable -- the gate said running when the round started"
+assert_equals "mergeable" "$(loop_label)"
+
+it "labelled: a clean ending, but a thread opened since collect ran, does NOT mark mergeable"
+fresh_repo
+out=$(THREAD_CHECK_EXIT=1 WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "a review thread opened since collect ran"
+assert_not_contains "$(loop_label)" "mergeable"
+# WAITING, never left `running` and never `stalled`: a thread is a person's question (#259), and
+# refresh-loop-state.py skips a label that says a round is in progress.
+assert_equals "waiting" "$(loop_label)"
+
+it "labelled: a clean round while a check an earlier round DISPUTED awaits the person is waiting, and says the head is red"
+fresh_repo
+printf '{"consulted":true,"checks":[{"job":"operator","conclusion":"failure","status":"completed"}],"items":[],"awaiting":[{"id":"check:operator","job":"operator","reason":"disputed by an earlier round, awaiting the person"}]}' > "$tmp/checks-awaiting.json"
+out=$(CHECKS="$tmp/checks-awaiting.json" WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "waiting" "$(loop_label)"
+assert_not_contains "$(loop_label)" "mergeable"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED: 1 failed check (\`operator\`) was disputed by an earlier round and waits for your answer."
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "0 required checks failed"
+# no model ran: a clean round spends nothing
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+
+it "labelled: a clean round on a green head says so and marks mergeable"
+fresh_repo
+out=$(WORK="$tmp/none.json" land_all); rc=$?
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is GREEN: every required check passed"
+assert_equals "mergeable" "$(loop_label)"
+
+it "labelled: a clean ending, but the thread check CRASHES (not exit 1), withholds mergeable with an accurate reason -- never claims a thread opened it never saw"
+fresh_repo
+out=$(THREAD_CHECK_EXIT=2 WORK="$tmp/none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "review-not-clean.py could not be read (exit 2)"
+assert_not_contains "$out" "a review thread opened since collect ran"
+assert_not_contains "$(loop_label)" "mergeable"
+
+it "labelled: says when the analysis was not consulted"
+printf '{"consulted":false,"stale":["manager"],"projects":[],"issues":[]}' > "$tmp/sonar.json"
+out=$(WORK="$tmp/none.json" land_all)
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The analysis service was NOT consulted this round"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "(stale for manager)"
+printf '{"consulted":true,"stale":[],"projects":[],"issues":[]}' > "$tmp/sonar.json"
+
+# ENDING: stale patch.
+it "labelled: a stale patch lands nothing, resolves nothing, posts ONE summary and starts the next round itself"
+fresh_repo
+printf 'package a\n\n// moved\nfunc A() string { return "" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved" && git -C "$tmp/work" push -q origin "$BRANCH"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "stale patch** — @an-approver"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+# NOTHING LANDED AND EVERY ITEM IS STILL ELIGIBLE, so no push will start the next round: this one does (#259)
+assert_equals "1" "$(grep -c '^workflow run review-dispatch.yml --repo o/r -f pr=7 -f mode=all' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Round 2 starts now over what is still eligible"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
+# the loop label is the gate's to move when that round starts: this round says continue, never stalled
+assert_not_contains "$(loop_label)" "stalled"
+
+it "labelled: when the next round cannot be started, the ending says so and the loop is stalled -- the machine stopped"
+fresh_repo
+printf 'package a\n\n// moved again\nfunc A() string { return "x" }\n' > "$tmp/work/a.go"
+git -C "$tmp/work" commit -qam "moved again" && git -C "$tmp/work" push -q origin "$BRANCH"
+out=$(GH_DISPATCH_FAILS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "could not start the next round** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "HTTP 422"
+assert_equals "stalled" "$(loop_label | awk '{print $NF}')"
+
+# SILENCE AND REFUSAL ARE DIFFERENT FACTS. An item a REAL report simply never
+# names is UNADDRESSED -- worded as such, never folded into "disputed" (which
+# reads as the fixing step having looked at it and declined), and it carries
+# no dispute-marked reply: nobody looked, so there is nothing to leave a
+# marked reply about, and it stays eligible for the next round.
+it "labelled: an item a real report omits is UNADDRESSED, never disputed and never dropped"
+fresh_repo
+# THE FIXTURE work-all.json CARRIES THREE ITEMS (PRRT_a, PRRT_b, sonar:AZ1);
+# naming only PRRT_a fixed leaves the other two unaddressed.
+printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""}]}' > "$tmp/report-partial.json"
+# max-rounds 1: this round is terminal, so its ending posts the itemised
+# summary rather than only the round-landing comment.
+out=$(REPORT="$tmp/report-partial.json" MAX_ROUNDS=1 land_all)
+assert_contains "$out" "unaddressed PRRT_b (b.go): not named in the fixing step's report"
+assert_contains "$out" "unaddressed sonar:AZ1 (b.go): not named in the fixing step's report"
+assert_not_contains "$out" "disputed PRRT_b"
+assert_not_contains "$(cat "$GH_CALLS")" "comments/22/replies -f body=<!-- conveyor:disputed -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (2)"
+
+# A MIXED ROUND -- SOME DISPUTED, SOME UNADDRESSED, NOTHING FIXED -- IS ITS
+# OWN ENDING, not "nothing addressed": that label would contradict the very
+# Disputed and Unaddressed sections the same summary comment lists.
+it "labelled: a round with SOME disputed and SOME unaddressed, nothing fixed, is its own ending"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"disputed","reason":"A is fine"}]}' > "$tmp/report-mixed.json"
+out=$(REPORT="$tmp/report-mixed.json" MAX_ROUNDS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "disputed and unaddressed** — @an-approver"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "nothing addressed** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed (1)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (2)"
+
+# A ROUND WHOSE FIXING STEP PRODUCED NO REPORT AT ALL ends as its OWN outcome,
+# disputing nothing -- the case observed on this change's own proposal: three
+# findings came back "disputed... not addressed" when no model had spoken.
+it "labelled: no report at all ends the round as its own outcome, disputing nothing"
+fresh_repo
+out=$(REPORT_MISSING=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report** — @an-approver"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
+assert_equals "stalled" "$(loop_label)"
+# a model ran and wrote nothing: it spent the round
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
+
+# ENDING: the fixing JOB failed -- no model ran. Measured on #220: the action
+# refused a bot-dispatched run, `land` was skipped, and the pull request showed
+# nothing for three days. Its own ending, distinct from `no report`.
+it "labelled: a failed fixing job ends the round as 'fixing step failed', disputing nothing, counting no round, and stalls the loop label"
+fresh_repo
+: > "$tmp/empty.patch"
+printf '{"items":[]}' > "$tmp/empty-report.json"
+out=$(FIX_FAILED=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step failed** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no model looked at any item"
+# a job that FAILED never started a model, so it spent nothing and leaves no marker
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 0 of 3"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:round"
+assert_equals "stalled" "$(loop_label)"
+
+# ENDING: the fixing JOB hit its `timeout-minutes` bound -- GitHub reports
+# this as `cancelled`, never `failure`, so it needs its own flag rather than
+# reusing --fix-failed and mislabelling a hang as a crash. Measured on #243:
+# the model step sat in_progress for 15+ hours with no bound at all.
+it "labelled: a timed-out fixing job ends the round as 'fixing step timed out', disputing nothing, COUNTING the round, and stalls the loop label"
+fresh_repo
+: > "$tmp/empty.patch"
+printf '{"items":[]}' > "$tmp/empty-report.json"
+out=$(FIX_TIMED_OUT=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "0" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "fixing step timed out** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "ran past its time limit"
+# MEASURED ON #248: three thirty-minute rounds, each "0 of 5", the cap never came. A model
+# ran for the whole bound, so the round is counted and its marker rides on the summary.
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 1 of 3"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "starts round 2"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Disputed ("
+assert_equals "stalled" "$(loop_label)"
+
+it "labelled: a timed-out round that reaches the bound ends the loop as capped, naming keep-going"
+fresh_repo
+printf '[{"body":"<!-- conveyor:round 1 -->\\nround one","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:round 2 -->\\nround two","created_at":"2026-08-29T12:00:00Z"}]' > "$GH_COMMENTS"
+out=$(FIX_TIMED_OUT=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 3 -->"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Rounds used: 3 of 3"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "reaches the bound of 3"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "conveyor:keep-going"
+assert_equals "capped" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
+
+it "labelled: a loop that only times out is bounded: rounds 1 and 2 stall it, round 3 (the bound) caps it"
+for n in 1 2 3; do
+  fresh_repo
+  python3 - "$n" > "$GH_COMMENTS" <<'PY'
+import json, sys
+n = int(sys.argv[1]) - 1
+print(json.dumps([{"body": f"<!-- conveyor:round {i} -->", "created_at": "2026-08-29T11:00:00Z"} for i in range(1, n + 1)]))
+PY
+  out=$(FIX_TIMED_OUT=1 PATCH="$tmp/empty.patch" REPORT="$tmp/empty-report.json" land_all)
+  want=$([ "$n" -ge 3 ] && echo capped || echo stalled)
+  assert_equals "$want" "$(loop_label)"
+done
+printf '[]' > "$GH_COMMENTS"
+
+it "labelled: the fixing job failing is not 'no report' -- the two endings are told apart"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "no report**"
+
+# THE LOOP LABEL FOLLOWS THE ENDING: disputes -> stalled, the cap -> capped, a
+# round that goes on sets nothing here (the gate set `running` when it started).
+it "labelled: every ending moves the loop label -- disputes only is WAITING, a person is owed an answer"
+fresh_repo
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-disp.json" land_all); rc=$?
+assert_equals "waiting" "$(loop_label)"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The loop waits for your answer"
+
+# A ROUND THAT FIXED NOTHING WHILE ITEMS ARE STILL ELIGIBLE IS NOT AN ENDING OF THE LOOP.
+# It counts, its summary names the items, and it starts the next round itself (#259).
+it "labelled: nothing addressed, items eligible: the round counts, posts its summary, and starts the next round"
+fresh_repo
+printf '{"items":[]}' > "$tmp/report-none.json"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-none.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "nothing addressed** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (3)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "<!-- conveyor:round 1 -->"
+assert_equals "1" "$(grep -c '^workflow run review-dispatch.yml' "$GH_CALLS")"
+assert_not_contains "$(loop_label)" "stalled"
+assert_not_contains "$(loop_label)" "waiting"
+
+it "labelled: a claimed fix the patch does not evidence is UNADDRESSED: no dispute marker, and the round retries"
+fresh_repo
+printf '{"items":[{"id":"PRRT_a","action":"fixed","reason":""},{"id":"PRRT_b","action":"fixed","reason":""},{"id":"sonar:AZ1","action":"fixed","reason":""}]}' > "$tmp/report-claims.json"
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-claims.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "unaddressed PRRT_a (a.go): reported fixed, but the patch does not touch"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:disputed"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Unaddressed (3)"
+assert_equals "1" "$(grep -c '^workflow run review-dispatch.yml' "$GH_CALLS")"
+
+it "labelled: at the bound, nothing addressed ends the loop capped and starts nothing"
+fresh_repo
+out=$(PATCH="$tmp/empty.patch" REPORT="$tmp/report-none.json" MAX_ROUNDS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$(cat "$GH_CALLS")" "workflow run"
+assert_equals "capped" "$(loop_label)"
+
+it "labelled: a round that lands and goes on leaves the loop label to the gate"
+fresh_repo
+out=$(land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "" "$(loop_label)"
+
+it "labelled: a missing state script is a notice, never a failed round"
+fresh_repo
+out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work-list "$tmp/work-all.json" \
+        --patch "$tmp/empty.patch" --report "$tmp/report-disp.json" --dispatched-by github-actions --mode all \
+        --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
+        --checks "$tmp/checks-none.json" --state-script "$tmp/not-there.py" --push-starts-workflows 2>&1); rc=$?
+assert_status 0 "$rc"
+assert_contains "$out" "::notice::loop event \`end:waiting\` not recorded"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+
+# MEASURED LIVE ON #233. `land`'s job restores conveyor-state.py to a FLAT
+# temp directory ($RUNNER_TEMP), never beside review-triage.json the way it
+# sits in the real checkout -- so conveyor-state.py's own default vocabulary
+# path (one directory above ITS OWN location) resolved to nowhere, every
+# time set_loop() called it without --vocabulary. The failure is silent by
+# that script's own design ("never fails the round"), so `land`'s summary,
+# its exit code and every other assertion in this file read as correct
+# while the loop label simply never moved. This test reproduces the REAL
+# runtime shape -- a copied script with NO review-triage.json anywhere
+# near it -- rather than the real repository checkout every other test
+# here uses, which is exactly why the bug shipped invisibly.
+it "labelled: the state script is called with --vocabulary explicitly, so a COPIED script (the real runtime shape) still finds the label names"
+fresh_repo
+mkdir -p "$tmp/restored"
+cp "$ROOT/.github/scripts/conveyor-state.py" "$ROOT/.github/scripts/conveyor.py" "$tmp/restored/"
+out=$(cd "$tmp/work" && python3 "$S" --repo o/r --pr 7 --branch "$BRANCH" --work-list "$tmp/work-all.json" \
+        --patch "$tmp/empty.patch" --report "$tmp/report-disp.json" --dispatched-by github-actions --mode all \
+        --approver an-approver --since 2026-08-29T10:00:00Z --max-rounds 3 --sonar "$tmp/sonar.json" \
+        --checks "$tmp/checks-none.json" --state-script "$tmp/restored/conveyor-state.py" \
+        --vocabulary "$ROOT/.github/review-triage.json" --push-starts-workflows 2>&1); rc=$?
+assert_status 0 "$rc"
+assert_not_contains "$out" "not recorded"
+assert_equals "waiting" "$(loop_label)"
+
+# THE TOKEN PUSHED IT. Without the push credential the workflow does not pass
+# --push-starts-workflows, and a landed round cannot be followed by another.
+it "labelled: without the push credential, lands the round and ends the loop with ONE summary naming the missing secret"
+fresh_repo
+out=$(STARTS="" land_all); rc=$?
+assert_status 1 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count master.."$BRANCH")"
+assert_equals "1" "$(grep -c '<!-- conveyor:summary -->' "$GH_CALLS")"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "could not start the next round** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "AUTOFIX_DEPLOY_KEY"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Push again"
+
+it "never dispatches ci: a dispatched run's checks never reach the merge box, so the only workflow it may start is the next round"
+assert_equals "1" "$(grep -c '"workflow", "run"' "$S")"
+assert_equals "1" "$(grep -c '"workflow", "run", self.args.next_round_workflow' "$S")"
+assert_not_contains "$(cat "$S")" 'run", "ci.yml'
+
+it "contains no model invocation of its own"
+assert_not_contains "$(cat "$S")" "claude"
+
+# ---------------------------------------------------------------------------
+# A RED REQUIRED CHECK IS THE THIRD KIND OF WORK ITEM, and it is accounted for
+# differently from the other two: it has NO THREAD, so a fixed one gets no reply
+# (the check's next run is its verdict) and a disputed one is a pull request
+# comment, as an analysis issue is.
+
+cat > "$tmp/work-check.json" <<'JSON'
+[{"id":"check:operator","source":"check","kind":"check","job":"operator","run_url":"https://github.com/o/r/actions/runs/555","path":".github/workflows/ci.yml","line":null,"tail":"FAIL TestThing"}]
+JSON
+printf '{"consulted":true,"checks":[{"job":"operator","conclusion":"failure"}],"items":[{"id":"check:operator"}]}' > "$tmp/checks-one.json"
+
+it "a fixed check is committed and counted by its JOB, with no reply anywhere"
+fresh_repo
+printf '{"items":[{"id":"check:operator","action":"fixed","reason":""}]}' > "$tmp/report-check.json"
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check.json" CHECKS="$tmp/checks-one.json" land_all); rc=$?
+assert_status 0 "$rc"
+# THE PATCH TOUCHES a.go, NOT ci.yml — and that is the point. A check's fix is
+# wherever the failure is, so its evidence is a non-empty patch; asking the
+# patch to touch the workflow file the item NAMES would dispute every genuine
+# fix. A fixed check gets no reply: there is no thread, and the check's next
+# run on the landed commit is its verdict.
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "1 failed check"
+assert_not_contains "$(cat "$GH_CALLS")" "/replies"
+
+it "a check claimed fixed by an EMPTY patch is disputed, not believed"
+fresh_repo
+: > "$tmp/empty.patch"
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check.json" CHECKS="$tmp/checks-one.json" PATCH="$tmp/empty.patch" land_all)
+assert_contains "$out" "reported fixed, but the patch is empty"
+
+# A RED CHECK THE FIXER COULD NOT EXPLAIN IS RE-RUN EVERY ROUND THE BUDGET
+# ALLOWS, BEFORE ANYONE IS ASKED. On #259 the red was a check step deleted from
+# ci.yml since the head last ran: a fresh run was the verdict. On #269 the red
+# was an external service failing for hours, and the old once-per-label gate
+# spent its one re-run on round 1 and froze round 2 on a dispute a person had
+# to notice — the intervention the conveyor exists to remove. So the round CAP
+# bounds the retry: each disputing round pushes an EMPTY commit and posts the
+# refresh marker, and the dispute is posted only by the budget's LAST round.
+it "a dispute of a red check pushes an empty commit, posts the refresh marker, disputes nothing, and the round goes on"
+fresh_repo
+printf '{"items":[{"id":"check:operator","action":"disputed","reason":"the runner could not reach the registry"}]}' > "$tmp/report-check-d.json"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all); rc=$?
+assert_status 0 "$rc"
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count "$before".."$BRANCH")"
+assert_equals "" "$(git -C "$ORIGIN" diff --stat "$before" "$BRANCH")"
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "re-run the checks (conveyor round 1)"
+assert_equals "1" "$(grep -c '<!-- conveyor:refreshed -->' "$GH_CALLS")"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:disputed"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "checks re-run** — @an-approver"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Re-run (1)"
+assert_equals "running" "$(loop_label)"
+
+it "without the push credential the check is disputed at once: no re-run can be pushed"
+fresh_repo
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(STARTS="" WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_contains "$(cat "$GH_CALLS")" "disputes 1 failed check"
+
+it "red AGAIN with budget left, the check is re-run AGAIN — a second refresh, not a dispute"
+fresh_repo
+printf '[{"body":"<!-- conveyor:summary --> <!-- conveyor:round 1 --> checks re-run","created_at":"2026-08-29T11:00:00Z"}]' > "$GH_COMMENTS"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
+assert_equals "1" "$(git -C "$ORIGIN" rev-list --count "$before".."$BRANCH")"
+assert_contains "$(git -C "$ORIGIN" log -1 --format=%s "$BRANCH")" "re-run the checks (conveyor round 2)"
+assert_equals "1" "$(grep -c '<!-- conveyor:refreshed -->' "$GH_CALLS")"
+assert_not_contains "$(cat "$GH_CALLS")" "conveyor:disputed"
+assert_equals "running" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
+
+it "red at the LAST round of the budget, a disputed check is ONE pull request comment under the marker, the code is untouched, and the loop is capped"
+fresh_repo
+printf '[{"body":"<!-- conveyor:summary --> <!-- conveyor:round 1 -->","created_at":"2026-08-29T11:00:00Z"},{"body":"<!-- conveyor:summary --> <!-- conveyor:round 2 -->","created_at":"2026-08-29T11:30:00Z"}]' > "$GH_COMMENTS"
+before=$(git -C "$ORIGIN" rev-parse "$BRANCH")
+out=$(WORK="$tmp/work-check.json" REPORT="$tmp/report-check-d.json" CHECKS="$tmp/checks-one.json" land_all)
+assert_equals "$before" "$(git -C "$ORIGIN" rev-parse "$BRANCH")"
+assert_equals "1" "$(grep -c '<!-- conveyor:disputed -->' "$GH_CALLS")"
+assert_contains "$(cat "$GH_CALLS")" "disputes 1 failed check"
+assert_contains "$(cat "$GH_CALLS")" "the runner could not reach the registry"
+assert_equals "capped" "$(loop_label)"
+printf '[]' > "$GH_COMMENTS"
+
+# THE SUMMARY IS AN ENDING'S, never a round that goes on — so the check
+# paragraph is asserted where one actually exists: the disputes-only ending
+# just above, and the clean ending below.
+it "an ending's summary names the check by its job and says how many failed"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "the \`operator\` check"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is RED: 1 required check failed on the head commit"
+
+it "with no check concluded the summary says the head is not yet judged, never that it is green"
+fresh_repo
+printf '{"consulted":false,"checks":[],"items":[]}' > "$tmp/checks-absent.json"
+out=$(WORK="$tmp/none.json" CHECKS="$tmp/checks-absent.json" land_all)
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is NOT YET JUDGED"
+assert_not_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "The head is GREEN"
+
+# ---------------------------------------------------------------------------
+# WHAT THE FIXER LEFT BEHIND AND DID NOT DECLARE IS NAMED, NEVER SILENT.
+# dispatch-patch.py deletes an undeclared new file before the cut and records
+# it; the lander says so where a person reads the round, because a fix the
+# report forgot to declare looks exactly like scratch (#243: six rounds of
+# `.tmp_*` helpers at the root, then a review finding on them, then a dispute).
+
+it "a dropped list names the files that did not land, in the landing comment and the ending's summary"
+fresh_repo
+printf '{"dropped":[".tmp_getenv.py",".worklist_reader.sh"]}' > "$tmp/dropped.json"
+out=$(DROPPED="$tmp/dropped.json" MAX_ROUNDS=1 land_all); rc=$?
+assert_status 0 "$rc"
+assert_contains "$(grep 'conveyor:round' "$GH_CALLS")" "Not landed: \`.tmp_getenv.py\`, \`.worklist_reader.sh\` — created by the fixing step but not declared in its report"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "Not landed (2)"
+assert_contains "$(grep 'conveyor:summary' "$GH_CALLS")" "- \`.worklist_reader.sh\`"
+assert_not_contains "$(cat "$tmp/fix.patch")" ".tmp_getenv.py"
+
+it "the unlabelled landing comment names them too"
+fresh_repo
+out=$(DROPPED="$tmp/dropped.json" land)
+assert_contains "$(cat "$GH_CALLS")" "Not landed: \`.tmp_getenv.py\`"
+
+it "an absent or empty dropped list adds nothing"
+fresh_repo
+out=$(DROPPED="$tmp/no-such-dropped.json" land)
+assert_not_contains "$(cat "$GH_CALLS")" "Not landed"
+fresh_repo
+printf '{"dropped":[]}' > "$tmp/dropped-empty.json"
+out=$(DROPPED="$tmp/dropped-empty.json" land)
+assert_not_contains "$(cat "$GH_CALLS")" "Not landed"
+
+rm -rf "$tmp"
+
+summary

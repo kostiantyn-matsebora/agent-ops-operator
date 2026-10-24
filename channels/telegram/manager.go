@@ -114,11 +114,19 @@ type TopicDescriptor struct {
 
 // Op mirrors the manager's outbound operation shape.
 type Op struct {
-	ID           string  `json:"id"`
-	Channel      string  `json:"channel"`
-	Conversation string  `json:"conversation,omitempty"`
-	Kind         string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
-	ThreadID     *string `json:"threadId,omitempty"`
+	ID           string `json:"id"`
+	Channel      string `json:"channel"`
+	Conversation string `json:"conversation,omitempty"`
+	// ConversationID is the conversation's manager-issued correlation id,
+	// carried beside Conversation. OPAQUE to this adapter — never parsed,
+	// never derived, never minted here (channel-adapter.md ADA-14). This
+	// adapter's own thread mapping stays exactly what it already was: the
+	// transport's ThreadID on one side, this id on the other, with nothing
+	// else keying it. Absent on an op for a conversation created before the
+	// field existed.
+	ConversationID string  `json:"conversationId,omitempty"`
+	Kind           string  `json:"kind"` // "ensure-topic" | "send" | "close-topic" | "delete-conversation"
+	ThreadID       *string `json:"threadId,omitempty"`
 
 	Topic   *TopicDescriptor `json:"topic,omitempty"`   // ensure-topic
 	Message *Message         `json:"message,omitempty"` // send, delete-conversation
@@ -208,6 +216,24 @@ func (m *Manager) NextOp(ctx context.Context, channelType string, waitSeconds in
 		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
 			url.QueryEscape(channelType), ContractVersion, waitSeconds), nil, &op)
 	rev := hdr.Get(VocabularyRevisionHeader)
+	// durable-chat-ops-broker: 503 means the replica that answered is not the
+	// current leader and cannot safely claim an op on this adapter's behalf —
+	// never a failure to surface or back off from, and distinguished from an
+	// ordinary 204 ONLY so the caller can retry at once rather than pacing
+	// itself as it would after a genuine error.
+	//
+	// "Retry at once" only reaches a different replica if the retry actually
+	// dials one: a Kubernetes Service picks a backend per TCP CONNECTION, not
+	// per request, so an HTTP/1.1 keep-alive connection that happened to land
+	// on a non-leader stays pinned to it — every subsequent poll on that same
+	// connection gets the same non-leader's 503, forever, with no error ever
+	// surfacing (see platform/console's identical fix, where this was
+	// measured live). Closing the idle connection here is what makes the NEXT
+	// poll dial fresh and gives it a new chance to land on the leader.
+	if code == http.StatusServiceUnavailable {
+		m.HTTP.CloseIdleConnections()
+		return nil, rev, nil
+	}
 	if err != nil {
 		return nil, rev, err
 	}

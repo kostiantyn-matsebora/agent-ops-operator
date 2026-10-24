@@ -2,10 +2,21 @@
 # path. The sidebar include renders this and nothing else, so publishing a page
 # is one line here — not a second navigation written by hand.
 #
-# Only site deliverables belong in this list. The reference pages under docs/
-# are built by the branch deploy but are not treated by this change, so they
-# have no entry until the change that publishes them adds one. An entry
-# pointing at a page that does not exist is a defect, not a placeholder.
+# Only site deliverables belong in this list. The remaining reference pages
+# under docs/ are built by the branch deploy but carry no front matter, so they
+# have no entry until the change that publishes them adds one — which is what
+# the Integrations group is: four pages that were reference material until they
+# were rewritten for an adopter. An entry pointing at a page that does not
+# exist is a defect, not a placeholder.
+#
+# Specifications is the same promotion applied to the per-extension-point
+# contracts: AgentRuntime, ChannelAdapter and SignalAdapter all now carry
+# the same versioned-spec standard, each rewritten from narrative reference
+# material in its own change.
+#
+# THERE IS NO INDEX PAGE, and the group is the index. A page listing four
+# entries the sidebar already lists is a second navigation written by hand,
+# which is the thing this file exists to stop.
 groups:
   - title: Start here
     entries:
@@ -21,6 +32,24 @@ groups:
         url: /security/
       - title: Installation
         url: /installation/
+  - title: Integrations
+    entries:
+      - title: Kubernetes
+        url: /integrations/kubernetes/
+      - title: Prometheus
+        url: /integrations/prometheus/
+      - title: Home Assistant
+        url: /integrations/home-assistant/
+      - title: Pulse
+        url: /integrations/pulse/
+      - title: Telegram
+        url: /integrations/telegram/
+  - title: Runtimes
+    entries:
+      - title: Ollama
+        url: /runtimes/ollama/
+      - title: GitHub Copilot
+        url: /runtimes/copilot/
   - title: Guides
     entries:
       - title: "Put an agent to work"
@@ -37,3 +66,13 @@ groups:
         url: /guides/channel-adapter/
       - title: "Run agents on your own backend"
         url: /guides/agent-runtime/
+      - title: "Coordinate agents"
+        url: /guides/coordinate-agents/
+  - title: Specifications
+    entries:
+      - title: AgentRuntime
+        url: /contracts/runtime/
+      - title: ChannelAdapter
+        url: /contracts/channel-adapter/
+      - title: SignalAdapter
+        url: /contracts/signal-adapter/

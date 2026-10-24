@@ -5,8 +5,15 @@ command tabs, the components it may name, the table rules and the pre-flight
 lint. What is here is the directory around those pages.
 
 **Reference pages** — `concepts.md` (CRDs plus capability resolution),
-`contracts.md` (work and adapter contracts plus HTTP API), and one page per
-bundle subchart.
+`contracts.md` (the manager-owned surfaces: aops MCP server, activity,
+introspection, metrics, HTTP API), and one page per bundle subchart.
+
+**`contracts/runtime.md`, `contracts/channel-adapter.md` and
+`contracts/signal-adapter.md` are published, not reference pages** — each
+carries front matter, its own permalink (`/contracts/runtime/`,
+`/contracts/channel-adapter/`, `/contracts/signal-adapter/`), and a
+"Specifications" nav entry (`_data/nav.yml`). Same promotion as the
+Integrations group's four pages.
 
 **The published site's Jekyll source** — `_config.yml`, `_layouts/`,
 `_includes/`, `_data/nav.yml`, `assets/` (css, js, vendored Red Hat fonts, the
@@ -56,8 +63,10 @@ interchangeable.**
 | `readme-flow.py` | `assets/img/readme-flow-{light,dark}.svg` | the README column |
 | `threat-model.py` | `assets/img/security/threat-model-{light,dark}.svg` | the security page's trust boundaries |
 
-- **The GUIDE diagrams are not here.** They are specs in
-  `.github/scripts/docs_diagrams.py`, rendered by `docs-generate.py`, and CI
+- **The GUIDE, INTEGRATION, RUNTIME and SECURITY diagrams are not here.** They
+  are specs in `.github/scripts/docs_diagrams.py` (`DIAGRAMS`,
+  `INTEGRATION_DIAGRAMS`, `RUNTIME_DIAGRAMS`, `SECURITY_DIAGRAMS`, each with
+  its `dir`), rendered by `docs-generate.py`, and CI
   fails on a stale one. The security page's four smaller illustrations are in
   that same dict, told apart by a `dir` key — a guide entry states none and
   lands in `assets/img/guides/`.
@@ -89,8 +98,26 @@ TWO drawio pages, and only one is exported:
 **There WAS a third**, `landing`, compressed to 950px for the landing page's own
 strip, and it is deleted along with its two exports.
 
-- **The landing page carries a PRESENTATION now** — the same argument built one
-  beat at a time, in real text, scaled to whatever width it is given.
+- **The landing page carries a DRAWING now** — the same argument built one beat
+  at a time, in real text, scaled to whatever width it is given.
+  - **IT IS ONE FIGURE, AND THE FIGURE IS THE CONTROL.** It had a transport —
+    play button, beat counter, ten scrub dots, progress bar, and a box showing
+    each beat's manifest lines, in two bordered boxes under the picture. That
+    was MORE MACHINERY THAN THE THING IT EXPLAINED. Clicking the drawing pauses
+    it, and nothing else sits below it.
+  - **A REDUCED-MOTION READER GETS THE SAME FIGURE, STILL FROM THE START**,
+    with a `· press to play` caption cue and a matching `aria-label` as the
+    only sign it can be pressed. It never gets a second control and never a
+    second copy of the beats reinserted below it — the reduced-motion branch
+    used to reinsert that list, back when a rail's play button sat beside it
+    as the still's only control. Once the rail was deleted, the reinsertion
+    became a duplicate account of the whole model sitting under a picture
+    that already showed it, with nothing marking either as clickable.
+  - **The caption is IN the drawing**, in a lane reserved to the right of it,
+    vertically tracking whatever the beat lights. Placing it beside the anchor
+    was tried over ten candidate positions and collided on nearly every beat —
+    six boxes, a chip row and seven connectors leave no clear space. Reserving
+    the room is the fix a cost function cannot be, and it costs picture width.
 - **The still had a ceiling the presentation does not.** 950 because the content
   column is 720 and there is no breakout, so making it fit meant REMOVING
   ELEMENTS rather than shrinking type, and every attempt to add detail had to
@@ -101,8 +128,27 @@ strip, and it is deleted along with its two exports.
 ### The site shell
 
 **Astro Starlight's geometry**, read off that site's own stylesheet and verified
-against it live: BOTH rails 18.75rem, text 45rem FIXED, and the leftover SPLIT
-EVENLY between the left gutter and the right container.
+against it live: BOTH rails 18.75rem, and the leftover SPLIT EVENLY between the
+left gutter and the right container.
+
+**THE TEXT COLUMN IS NOT FIXED, AND "45rem FIXED" IS THE CORRECTION.** Starlight
+sizes it from WHICH RAILS THE PAGE CARRIES, and we had only the first rung:
+
+| Page has | Column | Sits |
+|---|---|---|
+| sidebar + on-this-page rail | 45rem | flush against the rail |
+| sidebar, NO rail | **58rem** | CENTRED in what the navigation leaves |
+| no sidebar at all | 67.5rem | centred |
+
+- **A page declining the rail kept the narrow measure AND lost the track that
+  justified it** — a 720px column pinned to the navigation with 380px of nothing
+  to its right, measured at 1440. That was the landing page, and it is the whole
+  of why it read as a reference page with a lot on it.
+- **`--ao-measure-wide` is the second rung**, and `index.md` reaches it by
+  declaring `toc: false` — declining the rail IS the decision to widen.
+- **The 58rem rung is the REFERENCE SITE'S OWN OVERRIDE**, not Starlight core:
+  `html[data-has-sidebar]:not([data-has-toc])` in its `@layer components`. Core
+  ships the first and third rows only.
 
 The rail keeps its width at that container's left, so its half is empty space
 PAST the rail, never a fatter rail.

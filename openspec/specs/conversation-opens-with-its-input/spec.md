@@ -7,9 +7,9 @@ came from, and every input is delivered to every bound channel EXCEPT the
 surface that displayed it — in parallel with dispatch, once per input and
 channel, so the human sees what happened even if the agent never answers.
 ## Requirements
-### Requirement: Inputs record where they came from; the pipeline is inferred
+### Requirement: Inputs record where they came from and the pipeline is inferred
 
-Every input SHALL record its own origin as `{kind: signal|channel, name}` —
+Every input SHALL record its own origin as `{kind: signal|channel|member, name}` —
 materialized state, snapshotted like `profileRef` and `channelRefs` and never set
 by hand. It SHALL replace the job-only `jobName` field, so the originating source
 is recorded for every input kind rather than for jobs alone. It SHALL be optional
@@ -18,9 +18,11 @@ so inputs created before this change remain valid.
 **The originating Pipeline IS recorded**, on `Conversation.spec.pipelineRef` —
 this requirement once said no such field should exist, and `pipeline-model` now
 owns the rule that replaced it: the ref is PROVENANCE, written once at creation
-and never read to resolve wiring. It exists because sources are SHAREABLE, so two
-Pipelines fanning out from one source open conversations with the same signature
-and without it the second's next signal lands on the first's conversation under
+and never read to resolve wiring.
+
+It exists because sources are SHAREABLE: two Pipelines fanning out from one
+source open conversations adopting the same `initiationId`, and without the ref
+the second Pipeline's next signal would land on the first's conversation under
 the wrong profile.
 
 A message SHALL name the pipeline by READING that ref. For a conversation
@@ -147,3 +149,16 @@ re-enqueues deduplicate.
 
 - **WHEN** a conversation is bound to two channels
 - **THEN** each receives the input in its own thread, rendered by its own adapter
+
+### Requirement: A member result is an input with a member origin
+
+A result the manager appends to a root SHALL be an input whose origin has
+`kind: member` and a `name` of the member conversation, carrying the
+Coordinator entry's name in `origin.entry` beside it, so the record shows what was asked and
+what each member answered. It SHALL be delivered to the root's bound channels
+per the ordinary per-destination rule — which is every channel, since no
+surface displayed it.
+
+#### Scenario: A person on an escalated thread sees member results
+- **WHEN** a root is escalated and a member later reports
+- **THEN** the escalated thread receives the result attributed to the member entry

@@ -44,7 +44,7 @@ func allDayMutedFilter(t *testing.T, matchers ...string) *filter {
 }
 
 func sigWith(reason string) Signal {
-	return Signal{Fingerprint: "fp-" + reason, Labels: map[string]string{"reason": reason}}
+	return Signal{InitiationID: "id-" + reason, Labels: map[string]string{"reason": reason}}
 }
 
 func TestTransientNoiseInsideTheWindowIsDropped(t *testing.T) {
@@ -127,34 +127,107 @@ func TestMutingDoesNotConsumeTheEmitCap(t *testing.T) {
 // outside and only one of them means the cluster is healthy.
 func TestAnActiveMuteIsReportedAndItsCostSummarised(t *testing.T) {
 	f := newFakeManager(SourceInfo{Name: "events"})
-	a := newTestAdapter(f.start(t), nil, "events", mutedFilter(t))
+	filt := mutedFilter(t)
+	a := newTestAdapter(f.start(t), nil, "events", filt)
+	ctx := context.Background()
 
-	a.reportMute(context.Background(), "events", 3, "nightly")
+	a.reportMute(ctx, "events", 3, "nightly")
 	// Ready stays TRUE: the source is obeying its configuration, and marking it
 	// unhealthy for that would train an operator to ignore the condition.
-	waitFor(t, func() bool {
-		for _, st := range f.allStatuses() {
-			if st.Reason == "Muted" {
-				return st.Ready && strings.Contains(st.Message, "nightly")
-			}
-		}
-		return false
-	})
+	if st, ok := lastStatus(f, "Muted"); !ok || !st.Ready ||
+		!strings.Contains(st.Message, "nightly") || !strings.Contains(st.Message, "3 event(s)") {
+		t.Fatalf("the open window must be reported with its interval and count: %+v", st)
+	}
 
-	// More muting in the same window does not re-report; the count accumulates.
-	a.reportMute(context.Background(), "events", 5, "nightly")
+	// More muting in the same window does not re-report per batch...
+	a.reportMute(ctx, "events", 5, "nightly")
+	if n := countReason(f, "Muted"); n != 1 {
+		t.Fatalf("a batch must not re-report an open window: %d Muted reports", n)
+	}
+	// ...the sweep carries the running count, on the window's own clock.
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:12"))
+	if st, _ := lastStatus(f, "Muted"); !strings.Contains(st.Message, "8 event(s) muted so far") {
+		t.Fatalf("the active report must carry the running count: %+v", st)
+	}
 
-	// The window closes: report what it cost.
-	a.reportMute(context.Background(), "events", 0, "")
-	// Closing the window reports what it cost — 3 + 5, accumulated.
-	waitFor(t, func() bool {
-		for _, st := range f.allStatuses() {
-			if st.Reason == "MuteEnded" {
-				return strings.Contains(st.Message, "8 event(s)")
-			}
-		}
-		return false
-	})
+	// A batch with nothing muted closes nothing — the window is still open.
+	a.reportMute(ctx, "events", 0, "")
+	if _, ok := lastStatus(f, "MuteEnded"); ok {
+		t.Fatal("a batch with nothing muted must not close an open window")
+	}
+
+	// The window's interval ends: the sweep reports what it cost.
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:25"))
+	if st, ok := lastStatus(f, "MuteEnded"); !ok || !strings.Contains(st.Message, "8 event(s)") {
+		t.Fatalf("the close must report the accumulated count: %+v", st)
+	}
 }
 
+// A lane that goes quiet after being muted still has its window closed: the
+// sweep timer fires MuteEnded with the final count, no next batch required.
+func TestAMutedLaneThatGoesQuietStillReportsItsClose(t *testing.T) {
+	f := newFakeManager(SourceInfo{Name: "events"})
+	filt := mutedFilter(t)
+	a := newTestAdapter(f.start(t), nil, "events", filt)
+	ctx := context.Background()
 
+	a.reportMute(ctx, "events", 4, "nightly") // the last batch this lane ever sends
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:10"))
+	if _, ok := lastStatus(f, "MuteEnded"); ok {
+		t.Fatal("an open window must not be closed early")
+	}
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:21"))
+	st, ok := lastStatus(f, "MuteEnded")
+	if !ok || !st.Ready || !strings.Contains(st.Message, `"nightly"`) || !strings.Contains(st.Message, "4 event(s)") {
+		t.Fatalf("the sweep must close a quiet lane's window with its final count: %+v", f.allStatuses())
+	}
+	// Closed once: a later sweep reports nothing more.
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:30"))
+	if n := countReason(f, "MuteEnded"); n != 1 {
+		t.Fatalf("a closed window must be reported closed exactly once: %d", n)
+	}
+}
+
+// A window over a lane that produces no events at all still reports itself
+// while open, and its close with a count of zero.
+func TestAQuietLaneReportsItsWindowAndAZeroCountClose(t *testing.T) {
+	f := newFakeManager(SourceInfo{Name: "events"})
+	filt := mutedFilter(t)
+	a := newTestAdapter(f.start(t), nil, "events", filt)
+	ctx := context.Background()
+
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 03:59"))
+	if len(f.allStatuses()) != 0 {
+		t.Fatalf("no window is open yet: %+v", f.allStatuses())
+	}
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:01"))
+	if st, ok := lastStatus(f, "Muted"); !ok || !strings.Contains(st.Message, "0 event(s) muted so far") {
+		t.Fatalf("an open window over a quiet lane must report itself: %+v", f.allStatuses())
+	}
+	a.sweepMute(ctx, "events", filt.rules, at(t, "UTC", "2026-08-11 04:20"))
+	if st, ok := lastStatus(f, "MuteEnded"); !ok || !strings.Contains(st.Message, "0 event(s)") {
+		t.Fatalf("the close must report a zero count: %+v", f.allStatuses())
+	}
+}
+
+// lastStatus returns the most recent report carrying a reason.
+func lastStatus(f *fakeManager, reason string) (reportedStatus, bool) {
+	all := f.allStatuses()
+	for i := len(all) - 1; i >= 0; i-- {
+		if all[i].Reason == reason {
+			return all[i], true
+		}
+	}
+	return reportedStatus{}, false
+}
+
+// countReason counts the reports carrying a reason.
+func countReason(f *fakeManager, reason string) int {
+	n := 0
+	for _, st := range f.allStatuses() {
+		if st.Reason == reason {
+			n++
+		}
+	}
+	return n
+}

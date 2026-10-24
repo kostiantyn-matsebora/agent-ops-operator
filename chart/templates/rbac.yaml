@@ -54,15 +54,19 @@ metadata:
   name: {{ .Values.serviceAccounts.manager }}
   namespace: {{ .Release.Namespace }}
 rules:
+  # ControlPlaneProbe carries no status subresource (nothing to resolve), so
+  # it sits in this full-CRUD group rather than growing a status entry below
+  # — unlike mcptoolsets it IS manager-owned and manager-written, the
+  # /control-plane/* surface's own CRUD handlers are its only caller.
   - apiGroups: ["agentops.dev"]
-    resources: ["conversations", "conversationinputs", "agentprofiles", "mcpconfigs", "channels", "signalsources", "agentruntimes", "channeladapters", "signaladapters", "pipelines"]
+    resources: ["conversations", "conversationinputs", "agentprofiles", "mcpconfigs", "channels", "signalsources", "agentruntimes", "channeladapters", "signaladapters", "pipelines", "agentcapabilities", "coordinators", "controlplaneprobes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # MCPToolset is read-only to the manager: no status to write, nothing owned.
   - apiGroups: ["agentops.dev"]
     resources: ["mcptoolsets"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["agentops.dev"]
-    resources: ["conversations/status", "conversationinputs/status", "agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status"]
+    resources: ["conversations/status", "conversationinputs/status", "agentprofiles/status", "mcpconfigs/status", "channels/status", "signalsources/status", "agentruntimes/status", "channeladapters/status", "signaladapters/status", "pipelines/status", "agentcapabilities/status", "coordinators/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["pods"]

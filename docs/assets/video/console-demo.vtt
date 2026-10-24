@@ -10,7 +10,7 @@ A signal arrives — alert, schedule, message, event — and a conversation open
 
 3
 00:00:09.000 --> 00:00:13.500
-The thread it opened, and the agent already working
+Opened in place — the thread sits beside the list, not on a second page
 
 4
 00:00:14.000 --> 00:00:22.500
@@ -25,17 +25,21 @@ You reply in the thread, and the conversation carries on
 Or you start it yourself, addressing the pipeline that answers
 
 7
-00:00:42.200 --> 00:00:46.700
-What is waiting, and what is stuck — every stalled row names its cause
+00:00:42.200 --> 00:00:47.700
+Or a Coordinator composes several agents, and decides what to invoke next
 
 8
-00:00:47.200 --> 00:00:52.700
-The wiring behind it: where the signal entered, who claimed it, where the answer went
+00:00:48.200 --> 00:00:52.700
+What is waiting, and what is stuck — every stalled row names its cause
 
 9
-00:00:53.200 --> 00:00:57.700
-Every part of it is a Kubernetes resource — one API, one RBAC model
+00:00:53.200 --> 00:00:58.700
+The wiring behind it: where the signal entered, who claimed it, where the answer went
 
 10
-00:00:58.200 --> 00:01:04.200
+00:00:59.200 --> 00:01:03.700
+Every part of it is a Kubernetes resource — one API, one RBAC model
+
+11
+00:01:04.200 --> 00:01:10.200
 The conversation itself is an object — kubectl, GitOps and RBAC already work

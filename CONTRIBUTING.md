@@ -18,6 +18,36 @@ and a security problem goes to [SECURITY.md](SECURITY.md), never to an issue.
   trying to do before what you want built: the second is often not the cheapest
   answer to the first.
 
+**A maintainer may hand an issue straight to a session.** An issue labelled
+`conveyor:implement` (one station) or `conveyor:run` (the standing instruction
+that carries the change through every later station), by somebody with write
+access, starts one cloud session. The label is refused from anyone without
+write access.
+
+That session proposes a change from what you wrote, implements it on its own
+branch and opens a pull request.
+
+The issue gains exactly two automated comments: one linking that session, and
+the pointer the promotion leaves as it does for any promoted issue.
+
+That pull request opens UNLABELLED — the session holds no write access of its
+own, so it places nothing.
+
+Where `conveyor:run` authorised it, a workflow reads the issue again once the
+pull request opens and carries that instruction forward as `conveyor:fix`, so
+the review's findings are fixed without a reply in each thread. After a person
+merges, the same instruction is carried forward as `conveyor:archive`, and a
+second session archives the change and opens the archive pull request.
+
+**Where the line is** is on the issue and the pull request, as labels that
+grant nothing: `station:<implement|fix|merge|archive|done>` on the issue, and
+`loop:<running|waiting|stalled|capped|mergeable>` on the pull request.
+
+What it does not change is who decides. The proposal, the pull request and
+the review are read by a person, a dispute waits for one, and a person
+merges. Nobody has to use it: an issue nobody labels is picked up the ordinary
+way.
+
 **Please open one before a large pull request.** This project has strong
 opinions about its model — what a `Pipeline` is allowed to carry, where wiring
 lives, what the manager may never read — and several of them were arrived at by
@@ -58,6 +88,11 @@ git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
 cd ../agent-ops-worktrees/<name>
 ```
 
+**A remote session's clone is the other shape of that working copy.** A change
+worked in a cloud session checks out `change/<name>` in the session's own clone
+and adds no worktree beside it: the clone is already its own HEAD, files and
+index, which is the whole of what the worktree rule asks for.
+
 - **The worktree lives OUTSIDE the repository, and that is forced.** The release
   inventory is derived by searching the tree for module manifests and container
   recipes, so a second copy beneath the root reports twice as many components and
@@ -81,6 +116,29 @@ piece of work its own HEAD and its own files.
 
 `.claude/rules/worktree-delivery.md` is the full rule.
 
+### The roles that implement it
+
+Five role agents live in `.claude/agents/` — `api-architect`,
+`backend-developer`, `deployment-engineer`, `frontend-developer`,
+`testing-specialist` — each owning a lane of the tree and carrying its own
+review bar.
+
+- **A change's tasks file names the fulfilling agent per implementation
+  section**, and the apply workflow dispatches each named section to its
+  role. The session stays the sole integrator: it verifies, ticks and
+  commits.
+- **Before the pull request opens, each section's diff is cross-reviewed by
+  another role**, one round — findings are fixed or recorded, never dropped.
+- **Contract-shaped artifacts** — delta specs touching a CRD field, an
+  adapter contract or an HTTP endpoint — are drafted by `api-architect` at
+  propose and update.
+- **The automated review reads with the same bars**: a component's file
+  readers hold the routed role's review criteria beside the routed rules,
+  taken from the base branch.
+
+None of this changes what a human contributor writes by hand. A tasks file
+section without a named agent is simply worked directly.
+
 ### The issue that tracks it
 
 Each change has **one** GitHub issue, opened when it is proposed and closed when
@@ -92,7 +150,9 @@ directory and the pull request; the rationale, design, specs and tasks live in
 
 **If you filed an issue that becomes a change, your issue becomes the tracking
 issue.** It is not closed in favour of one we wrote — your thread is where the
-conversation already is.
+conversation already is. An issue handed to a session by the `conveyor:implement`
+or `conveyor:run` label is promoted in exactly the same way, by the same
+script.
 
 ## Documentation is part of the change, not a follow-up
 
@@ -187,8 +247,211 @@ helm lint chart/
 helm template agent-ops chart/ --set global.demo.enabled=true
 ```
 
-CI runs all of it on every pull request, plus `kubeconform` over each rendered
-chart permutation and the two guards over the published tree, below.
+Two tiers sit above that, behind build tags so the plain `go test ./...` never
+starts a cluster ([the tier model](docs/testing.md)):
+
+```sh
+cd platform/manager
+# contract conformance — every adapter's built binary against a fake manager
+go test -tags conformance -count=1 -v ./test/conformance/
+# the system pack — k3s under k3d, needs docker, k3d, kubectl and helm
+go test -tags system -count=1 -timeout 45m -v ./test/system/
+```
+
+On every pull request CI runs the module, operator, UI and chart checks above,
+plus `kubeconform` over each rendered chart permutation and the two guards
+over the published tree, below.
+
+Of the two tiers, a pull request meets CONFORMANCE only — no pull request
+provisions a cluster. The cluster smoke gates a release, on the tagged commit
+before anything is published, and runs on demand on any branch
+(`system-smoke.yml`). The `full` tier — the real agent runtime with a real
+credential — runs nightly when master moved and on dispatch (`system-full.yml`),
+and gates nothing.
+
+`platform/manager/` and `runtimes/ollama/` need Go 1.25. The others declare
+1.23 and build under either. Every image is built with `golang:1.27`, because
+the toolchain that builds a binary is the standard library it ships.
+
+### The image scan
+
+Every image CI builds is scanned with Trivy in the same
+job — `.github/actions/trivy-scan`, called from the `images` matrix — and the
+findings land in the repository's **Security → Code scanning** tab under
+`trivy-<component>`.
+
+**What fails your pull request:** a CRITICAL or HIGH finding **with a fixed
+version available**. The job log names the package, the installed version and
+the version that fixes it, so the fix is nearly always a bump — a base image, a
+Go dependency, an npm package.
+
+**A finding on a Debian package whose fix the base already ships needs no
+bump at all.** The apt layer of every image that runs `apt-get` is rebuilt
+once a day — the workflows pass the date as the `APT_REFRESH` build argument,
+and the layer's `apt-get upgrade` picks the fix up. A scan that names a fixed
+version Debian has published means the layer was cached before it existed:
+the next day's build resolves it, and a change to that `RUN` line forces it
+today. An `apt-get upgrade` in a cached layer runs nothing, which is what the
+argument exists for.
+
+**What does not:** a finding with no fix released (`ignore-unfixed`). An
+unfixable upstream CVE is information, not a task, and a gate that cannot be
+made green is one somebody switches off. Severity below HIGH is not gated.
+
+**A fixable finding you cannot act on now** is excepted in `.trivyignore`, one
+CVE per line, with the reason and an expiry: `CVE-2026-12345 exp:2026-10-31`.
+An expired entry stops suppressing its finding — Trivy honours the date itself.
+Never loosen the severity threshold or exempt a component; that changes what
+is checked everywhere in order to permit one thing.
+
+**A pull request from a fork** runs the gate and skips the upload: its token
+cannot write security events, and the gate is the half that protects the merge.
+
+**The published images are re-scanned weekly** by `image-scan.yml`, against a
+newer database and with nothing changed here. It reports under
+`trivy-published-<component>`, then fails on the same fixable CRITICAL/HIGH
+the pull-request gate fails on, so the README's published-images badge goes
+red. The fix is a re-release of the image it names — a component tag, three
+per push at most.
+
+### Code analysis
+
+Every component a pull request touches — and every component a push to
+`master` touches, which is what sets each project's baseline — is analysed by
+SonarCloud under its own project, named for the image it publishes
+(`agentops-<component>`). The
+analysis is the LAST STEP of the job that built and tested the component —
+`operator`, `modules (<path>)`, `node-runtimes (<runtime>)` — through
+`.github/actions/sonar-scan`, so it reads the coverage profile from where the
+tests left it and no suite runs twice. The dashboards are the organisation's
+page on [sonarcloud.io](https://sonarcloud.io/), one project per component.
+
+**One project is not a component: `agentops-scripts`**, the workflow's own
+scripts under `.github/scripts/`. The `scripts` job runs their suite
+(`.github/tests/run.sh`), collects Python coverage in every process the
+suite spawns, and analyses them the same way — named explicitly at that one
+call, because `components.sh` lists what publishes an image and the scripts
+publish none. It runs when the scripts, their tests or the hooks they
+exercise change, and on every path that rebuilds everything.
+
+**IT IS THE ONE PROJECT NOT ASSIGNED TO THE `agentops` GATE.** Tooling, never
+a delivered artifact — no image, no chart, nothing `components.sh` or a
+release tag names — assigned instead to `agentops-unenforced`: created empty
+by `sonar-provision.sh --gate` and kept that way, never synced with
+conditions the way `agentops` is. The scan still runs and still posts real
+findings to the pull request; none of them can block a merge. Every other
+project stays on `agentops`.
+
+**What fails your pull request:** the scanner not running or not submitting,
+AND the quality gate's verdict on the submitted analysis. The scan step waits
+on the gate (`sonar.qualitygate.wait`) and fails the component's job on
+`ERROR`, which reports through `ci-green` like every gate. It was measured
+before it was required — the first change that submitted analyses deferred
+the gate until the counts were known — and it is required now because it is
+the termination signal of the automatic fixing loop (below, *Pull requests*):
+a loop that ended while the gate was red would end with the merge blocked by
+the one check it never read. The verdict is also SonarCloud's own check on the
+pull request, per component, for reading; nothing in branch protection names
+that check, so a hand run of `ci.yml` (`gh workflow run ci.yml -f pr=<n>`)
+carries the same gate.
+
+**WHICH GATE — TODAY, THE BUILT-IN ONE.** Every project is judged by the
+organisation's default gate, whose conditions are all on NEW code.
+`sonar-provision.sh --gate` is what replaces it with `agentops`: those same
+new-code conditions, copied verbatim from the built-in gate, plus one this
+repository adds — **the component's OVERALL line coverage at or above 80%**.
+Written as a script rather than clicked in a dashboard, so what every
+component is judged by is one `git show` away.
+
+**IT HAS NOT BEEN RUN, AND THAT IS THE POINT OF THE FLAG.** Since the verdict
+fails the component's job, a coverage condition added before a component
+reaches the threshold does not turn its dashboard red — it holds every pull
+request that touches it, and NO component is over 80% today — the thirteen
+measured locally run 28.7% to 78.1%, and the two Node runtimes report only
+the files their suites loaded, so their real figure is not known here. So turning it on is an act somebody takes when the tree is ready,
+never a side effect of provisioning a project — which is also why CI, which
+calls this script itself for a missing project, cannot turn it on. A gate on
+new code alone let a component sit at 27% and one at 79% pass identically,
+which is why the number the tree is asked to reach has to become a condition
+something evaluates; making it evaluate before anything meets it is a
+different thing from measuring.
+
+**THE GATE ALSO HOLDS EVERY COMPONENT'S EXISTING BACKLOG TO AT LEAST A B,
+NOT ONLY WHAT A PULL REQUEST TOUCHES.** A new-code condition judges only what
+a diff adds, so a component could sit at an E reliability rating forever with
+nothing ever asking. `sonar-provision.sh --gate` adds three more conditions,
+provisioned the same idempotent way as coverage: the component's OVERALL
+reliability rating, security rating and maintainability rating each at least
+B (`reliability_rating`, `security_rating` and `sqale_rating` — maintainability
+keeps its historical SQALE key — each `GT 2` on the 1–5, A–E scale). Every
+Blocker and High severity finding open in a project's code — by the Clean
+Code impact severity scale this organisation reads issues under, not the
+retired five-level one — keeps its rating below B, so reaching B means fixing
+those, never relaxing the threshold.
+
+**`test/system/**` AND `test/conformance/**` ARE EXCLUDED FROM COVERAGE, NOT FROM
+ANALYSIS** (`sonar.coverage.exclusions` in `.github/actions/sonar-scan`). Both
+are build-tag gated (`system`, `conformance`), so the plain `go test ./...` that
+produces `coverage.out` never runs them — a diff touching `cluster.go`,
+`install.go`, `wiring.go` or `runner.go` there has no coverage data at all,
+which the new-code condition reads as uncovered regardless of what the
+conformance suite or a live k3d cluster actually exercises. Bugs,
+vulnerabilities and smells in these files are still scored exactly as
+elsewhere; only the coverage metric is exempted.
+
+**A pull request from a fork is analysed by nothing**, shown as a SKIPPED job:
+the scanner's token is withheld from fork workflows, so there is nothing you
+could do about it and nothing you should.
+
+**Coverage locally**, with the flags CI uses, is in `.claude/rules/build-test.md`.
+
+**A NEW COMPONENT'S PROJECT IS CREATED BY ITS FIRST RUN, INSIDE THE MONOREPO
+BINDING.** The analysis step looks the project up before it scans and, when
+it is absent, provisions it through the script below with the job's own
+token — deliberately, rather than letting the scanner do it: the scanner
+would create one on the spot bound to no repository, which decorates no pull
+request while looking exactly like a project somebody set up. The same
+script provisions everything at once when run by hand:
+
+```sh
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh            # all
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh <name>...  # some
+SONAR_TOKEN=<token> SONAR_ORG=<organisation key> .github/scripts/sonar-provision.sh --gate     # and the gate
+```
+
+It derives every component's key and name from `components.sh`, appends the
+`scripts` unit, and is idempotent; a name that is neither is refused rather
+than provisioned.
+
+**IT DOES NOT TOUCH THE QUALITY GATE UNLESS ASKED** — that is `--gate`, and
+the separation is why CI can call this script itself for a missing project
+without deciding what the whole organisation is judged by. Provisioning the
+gate needs a second permission, *Administer Quality Gates*, and fails on a
+403 naming it. The script posts the monorepo wizard's own request; if
+SonarCloud changes it, the wizard's *Import JSON* takes the same `projects`
+array.
+
+**Reading the analysis from an agent session**, project-scoped in `.mcp.json`:
+SonarCloud's own native, hosted MCP endpoint (`https://api.sonarcloud.io/mcp`)
+— no local process, no Docker container, nothing to keep updated. Auth rides
+as an ordinary HTTP header, filled from the same `SONAR_TOKEN` the scripts
+above read. Set the host env var once and every session picks it up, at the
+moment ITS OWN Claude Code process starts — a var exported after that, or in
+a shell that never launched it, reaches nothing, and the fix is relaunching
+from a shell that has it, not restarting the app in place. The config
+carries no literal token or organisation key, per the publication guard
+below.
+
+**THERE IS NO READ-ONLY FLAG HERE, AND THAT IS NOT THE SAME AS "NOTHING TO
+SET."** The retired Docker `sonarqube-mcp-server` enforced
+`SONARQUBE_READ_ONLY=true`; the hosted endpoint exposes no equivalent this
+session could find, and its tool set is NOT read-only — it carries
+`change_sonar_issue_status` and `change_security_hotspot_status`, both used
+directly earlier in this very change (accepting `S6350` on `runtime-claude`
+and a hash-algorithm finding on `signal-ha`). Whatever `SONAR_TOKEN` this
+config resolves to therefore has WRITE reach over every project it can see —
+scope it accordingly, the same way any other write-capable credential in
+this repository is treated.
 
 ## Commit messages
 
@@ -269,13 +532,17 @@ The template asks three things, and they are the review:
 3. **Whether the documentation the change made untrue was updated in the same
    commit.** See above; this is not a follow-up.
 
+**A DRAFT RUNS NOTHING.** CI and the review both wait until the pull request
+is marked ready; a hand run (`gh workflow run ci.yml -f pr=<n>`) is the way to
+get CI on a draft on purpose.
+
 **CI RUNS WHAT YOUR DIFF TOUCHED, AND `ci-green` IS THE REQUIRED CHECK.** The
 jobs are derived from the tree, not listed: a change under one component builds
 and tests that component alone, and a paragraph in a markdown file runs neither
-the operator's envtest suite nor any image build. Three paths deliberately
-rebuild everything — `.github/docker/`, `.github/components.sh` and
-`.github/workflows/ci.yml` — because each of them can change how anything else
-is built.
+the operator's envtest suite nor any image build. Four paths deliberately
+rebuild everything — `.github/docker/`, `.github/components.sh`,
+`.github/workflows/ci.yml` and `.github/actions/` — because each of them can
+change how anything else is built or scanned.
 
 **A path-filtered job that did not run reports NO status**, so a required check
 naming one would block every pull request that did not touch it forever.
@@ -289,23 +556,149 @@ and it fails if any job that DID run failed.
 | `publication` | the tree names a private deployment |
 | `retired-vocabulary` | it asserts a name this project stopped using |
 | `openspec` | a published specification is invalid, or a change your diff touched is |
-| `docs-task` | a change your diff touched does not end in a finished documentation section |
+| `docs-task` | a change your diff FINISHES does not end in unit tests, system tests and documentation — three sections, in that order, every task ticked |
+| `scripts` | the workflow's own scripts fail their suite, or their analysis could not be submitted or fails its quality gate — see *Code analysis* |
 | `pr-title` | the title would not read as a commit subject |
+| `images (<component>)` | the image does not build, or its scan finds a CRITICAL or HIGH vulnerability **with a fix available** — see *The image scan* under Build and test |
+| `conformance` | an adapter's built binary does not speak the adapter contracts to a fake manager |
+| `operator`, `modules (<path>)`, `node-runtimes (<runtime>)`, `scripts` — the analysis step | the SonarCloud analysis could not be submitted, or its quality gate is `ERROR`; see *Code analysis* under Build and test |
 
-The last two judge only what your pull request TOUCHED. A dozen changes are open
+`openspec` and `docs-task` judge only what your pull request TOUCHED. A dozen changes are open
 at any time and an unfinished one is unfinished correctly, so a gate judging all
 of them would fail every pull request for work it was not about.
 
-**Claude reviews the pull request** on open and on every push, commenting on
-specific lines and leaving one summary. It reads this project's own rules, so it
-raises a contradiction with a recorded invariant or a retired term as well as
-ordinary defects — and **it does not repeat a finding it has already made**, so
-what appears after a push is what is new. It resolves its own threads once you
-fix them, and it never touches anybody else's.
+**Claude reviews the pull request** on open and on every push —
+`claude-review.yml`, four jobs: a program builds the queue of changed
+components — deciding, per path, whether it is READ this run or CARRIED from
+an earlier one (below) — one job per component with a read path reads it,
+one job consolidates and posts, and one that runs no model resolves threads.
+The same review runs by hand against any pull request, `gh workflow run
+claude-review.yml -f number=<pr>`, `-f dry_run=true` stops after the readings
+(the run's artifacts) without posting, and `-f full=true` ignores the
+coverage record and reads every changed path from the base. It comments on
+specific lines and leaves one summary. **It builds each component before
+reading it** — the same recipe CI uses — and a component that does not build
+is not read at all: no model runs, the summary names it `unbuilt` with the
+build's own tail, distinct from `unreviewed` (the job itself failed) or
+`unread` (a file's own reader returned nothing). It reads **per component, in
+parallel** — one runner per component with something to read — and within a
+component **per file, blind**: one process per changed file, holding no
+thread and no previous finding, so every read is an independent sample;
+several files run at once from the job's shell, each holding that file, and
+the rule files routed to its component's paths as a system prefix identical
+for every file of the job — paid once, served from cache after. No context
+in the review inherits the rule files, and what every context holds is
+printed at the top of its job log. A file carrying an unresolved thread gets
+a second, primed process judging just that thread — `fixed`, `standing`,
+`gone` or `detached` — and the coordinator is where "not made again" lives
+now: a blind finding matching an open thread is folded in, one matching a
+dismissed thread is dropped, one matching a thread judged `fixed` is posted,
+because the fix did not hold. **A file is read until independent reads add
+nothing, then CARRIED** — not re-read, its standing threads left as they
+are — from a record the review keeps on the pull request itself, a hidden
+line on its own summary; a rebase, a rule-file change, or `-f full=true`
+resets the record and reads everything again. The summary's third line says
+how many of the pull request's changed files were read this run, how many
+were carried quiet, and how many sit in unbuilt components. Then **across
+files and components** — carried ones included: every identifier, field,
+path or env var the change added, removed or renamed is followed to its
+consumers — inside the change from what each file's reading declares and
+references, outside it (and outside every carried file) by searching the
+repository — because this repository's modules import nothing from one
+another and a contract change breaks at runtime in a component the diff
+never names. The summary states that reach. It reads this project's own
+rules, so it raises a contradiction with a recorded invariant or a retired term
+as well as ordinary defects. It resolves its own threads
+once you fix them, and it never touches anybody else's. A pull request cannot
+rewrite the review that judges it: the roles, the queue's builder and the
+prompt scripts are restored from the default branch before they run, the thread resolver runs from its checkout, and a pull request editing
+`claude-review.yml` itself is not reviewed until it merges.
 
 **A pull request from a fork gets no review**, shown as a SKIPPED check rather
 than a failing one: repository secrets are withheld from fork workflows by
 design, so there is nothing you could do about it and nothing you should.
+
+**A finding is acted on from the thread.** Reply `fix it` under a finding you
+accept, then comment `/fix-accepted` on the pull request: one run fixes
+everything accepted in one commit, answers each fixed thread with the sha and
+resolves it, and leaves everything nobody accepted open — which, since branch
+protection requires every conversation resolved, keeps the merge blocked until
+a person deals with it. The accept phrases are in `.github/review-triage.json`,
+matched mechanically; dispatching needs write access; and the step that writes
+the fix cannot push, only the model-free step after it can. The full rule,
+including what the landed commit still needs from you, is
+`.claude/rules/worktree-delivery.md`.
+
+**Or approve the whole pull request for fixing, once.** The `conveyor:fix`
+label is change-level consent. Every open review finding, every open
+SonarCloud issue AND every failed required check on the head is on the work
+list.
+
+Each one is FIXED or DISPUTED. A dispute is a reply that stays open and
+mentions you.
+
+The label is placed by someone with write access, directly or CARRIED forward
+by a workflow relaying a `conveyor:run` instruction still standing on the
+issue it opened from — never by a session. Anyone else's is removed with a
+comment.
+
+An item the fixing step's report never names is UNADDRESSED rather than
+disputed, because silence is not a decision. A round whose fixing step wrote
+no report at all ends as its own outcome, disputing nothing.
+
+A failed check is reproduced with the job's own command before it is fixed.
+A failure the tree does not explain gets one fresh run first, an empty commit
+the loop pushes, and is disputed only if it is red again.
+
+A fixed check gets no reply, because its next run is the verdict.
+
+A fix the report claims but the patch does not evidence is UNADDRESSED too,
+never a dispute: a failed fix is not a statement about the finding.
+
+The landed commit is pushed through a write deploy key, so CI and the review
+run on it. The next round starts once BOTH have concluded on the new head, up
+to a bound of 5 (`.github/review-triage.json`, `max_rounds`).
+
+A round that landed nothing while items are still eligible starts the next
+round itself.
+
+Every ending is one summary comment, saying whether the head is red or green.
+At the cap, `conveyor:keep-going` grants another set of rounds and is
+consumed the moment one runs under it.
+
+**A red pull request is the loop's to fix.** Every failed required check on
+the head is on the work list, and no check reads the loop's own conversation.
+
+Two labels say why a loop is not running:
+
+| Label | Means | You |
+|---|---|---|
+| `loop:waiting` | every item left is a dispute, or a thread is open | answer the dispute in its thread, or resolve the thread to dismiss it |
+| `loop:stalled` | the machine stopped: no report, the fixer failed or timed out, the next round could not start | read the summary, then push or re-place the label |
+
+Your comment on a waiting pull request starts the next round, in your own
+words, if you can push here. A resolved thread fires no event, so `conveyor-sweep.yml` re-reads
+waiting pull requests every fifteen minutes and starts the round for you.
+
+An open thread blocks the merge through branch protection alone, evaluated
+live.
+
+The loop never marks anything in SonarCloud, and it cannot merge. Removing the
+label stops it at the next round. An unanswered dispute holds `/opsx:archive`.
+
+**One label runs the whole line.** `conveyor:run` on an issue is the standing
+instruction: implement, drive the pull request to `conveyor:fix`-mergeable,
+and — on an issue already bound to an openspec change — archive it once
+merged. The archive is a session too, started by the carried
+`conveyor:archive`; its pull request closes the issue, and you merge it.
+
+An issue with no such binding runs the PLAIN lane instead. It is implemented
+straight from what you wrote, ending at the merge with nothing archived.
+Which lane applies is read from the binding, never judged from how the issue
+is worded.
+
+`docs/diagrams/conveyor-lifecycle.mmd` draws this line end to end, with the
+implementation view beside it in `conveyor-lifecycle-implementation.mmd`.
 
 **Releases are the maintainer's, and they are chart-shaped.** A component tag
 (`<component>-v<semver>`) publishes one image and creates no GitHub Release; a

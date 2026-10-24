@@ -102,13 +102,13 @@ because "one flag, a working install" is the whole promise, and an install that
 answers nothing until you hand-write a CR does not keep it.
 
 `null` means that rule; an explicit boolean is absolute in both directions, so
-`pipelines.enabled: false` is the opt-out even under demo mode. That is why this
+`wiringEnabled: false` is the opt-out even under demo mode. That is why this
 value is nullable and `enabled` on the other components is not — theirs never
 have to disagree with demo mode. */ -}}
 {{- define "kubernetes.wiringActive" -}}
 {{- if include "kubernetes.active" . -}}
-{{- if kindIs "bool" .Values.pipelines.enabled -}}
-{{- if .Values.pipelines.enabled }}true{{ end -}}
+{{- if kindIs "bool" .Values.wiringEnabled -}}
+{{- if .Values.wiringEnabled }}true{{ end -}}
 {{- else if dig "demo" "enabled" false (.Values.global | default dict) -}}
 true
 {{- end -}}
@@ -211,4 +211,58 @@ and naming is not creating. */ -}}
 {{- $rbac := $cfg.rbac | default dict -}}
 {{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{- /* Whether demo mode asked for the showcase Pipeline (demo-dual-wiring-showcase).
+Returns "true" or "". Mirrors `kubernetes.wiringActive`'s exact nullable
+pattern, but demo-only: nothing renders without `demo.enabled`; under it an
+explicit `wiringShowcase` wins in both directions and unset follows demo.
+
+Answers ONLY "did demo ask for the showcase" — never "does the showcase make
+sense right now". `pipeline-showcase.yaml` ANDs this with
+`agentops.wiringMode` resolving `coordinator`, so an explicit
+`wiringMode: pipelines` under demo never renders the showcase even though this
+helper alone would say true. */ -}}
+{{- define "kubernetes.demoShowcaseActive" -}}
+{{- $g := .Values.global | default dict -}}
+{{- if dig "demo" "enabled" false $g -}}
+{{- if kindIs "bool" (dig "demo" "wiringShowcase" "" $g) -}}
+{{- if dig "demo" "wiringShowcase" false $g }}true{{ end -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): the sources
+this bundle's wiring would claim and the AgentCapability entries it would list
+in a Coordinator's `agents[]`, mirroring EXACTLY the gating `pipelines.yaml`
+and `capabilities.yaml` use — this is the single place that decides it, read by
+both the capability template (which route renders) and the parent chart's
+Coordinator aggregator (`agentops.coordinatorContributions`), so the two
+cannot drift apart.
+
+Called from the parent as
+`include "kubernetes.coordinatorContribution" (dict "Values" (merge (deepCopy .Values.kubernetes) (dict "global" .Values.global)) "Release" .Release "Chart" .Chart)`
+— the exact context-construction `agentops.defaultRuntimeGuard` already uses.
+Returns YAML `sources: [...]` / `agents: [...]` (name, capability,
+description), decoded with `fromYaml`. */ -}}
+{{- define "kubernetes.coordinatorContribution" -}}
+{{- $sources := list -}}
+{{- $agents := list -}}
+{{- if and (include "kubernetes.wiringActive" .) .Values.profile.enabled -}}
+{{- $p := .Values.pipelines -}}
+{{- $ea := .Values.eventsAdapter -}}
+{{- if and $ea.enabled $ea.source.create -}}{{- $sources = append $sources $ea.source.name -}}{{- end -}}
+{{- if include "kubernetes.observePipelineEnabled" . -}}
+{{- $agents = append $agents (dict "name" $p.observe.name "capability" $p.observe.name "description" $p.observe.description) -}}
+{{- end -}}
+{{- if include "kubernetes.adminPipelineEnabled" . -}}
+{{- $agents = append $agents (dict "name" $p.admin.name "capability" $p.admin.name "description" $p.admin.description) -}}
+{{- end -}}
+{{- end -}}
+sources:
+{{ toYaml $sources | indent 2 }}
+agents:
+{{ toYaml $agents | indent 2 }}
 {{- end -}}

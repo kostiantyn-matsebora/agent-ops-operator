@@ -167,6 +167,16 @@ func TestScanSupportsEveryPatternShape(t *testing.T) {
 	}
 }
 
+// Bytes() totals a manifest's entry sizes — used only for reporting, and
+// never exercised by any Scan-based test since Scan's own fixtures never
+// checked it.
+func TestManifestBytesTotalsEntrySizes(t *testing.T) {
+	m := Manifest{Entries: []entry{{Path: "a", Size: 3}, {Path: "b", Size: 7}}}
+	if got := m.Bytes(); got != 10 {
+		t.Fatalf("Bytes() = %d, want 10", got)
+	}
+}
+
 // Two includes that overlap must not double-count: the manifest is a set.
 func TestScanDeduplicatesOverlappingIncludes(t *testing.T) {
 	root := t.TempDir()

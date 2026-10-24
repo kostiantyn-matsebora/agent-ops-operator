@@ -1,8 +1,8 @@
 import type {
-  VocabularyResponse, ChartResponse, CloseRequest, CloseResponse,
+  VocabularyResponse, ChannelFeed, ChartResponse, CloseRequest, CloseResponse,
   DeleteResponse, ConversationDetail, ConversationGraph,
   ConversationPage, Detail, Finding, KindInfo, InventoryRow, MarkReadRequest,
-  MarkReadResponse, Overview, Queues, Session, SourcesResponse, TopologyResponse,
+  MarkReadResponse, Overview, ActivityResponse, Queues, Session, SourcesResponse, TopologyResponse,
 } from './types'
 
 /** Raised for a non-2xx response, carrying the server's own explanation. */
@@ -51,6 +51,9 @@ export const api = {
   topology: (windowSeconds: number) =>
     request<TopologyResponse>(`/api/topology?windowSeconds=${windowSeconds}`),
 
+  // Everything the console holds, oldest first: what a replay can reach.
+  activity: (limit = 5000) => request<ActivityResponse>(`/api/activity?limit=${limit}`),
+
   conversations: (params: URLSearchParams) =>
     request<ConversationPage>(`/api/conversations?${params.toString()}`),
   conversation: (name: string) => request<ConversationDetail>(`/api/conversations/${name}`),
@@ -58,6 +61,9 @@ export const api = {
     request<ConversationGraph>(`/api/conversations/${name}/graph`),
 
   sources: () => request<SourcesResponse>('/api/sources'),
+  // The channel's general feed — thread-less sends, mirroring Telegram's
+  // general topic (B1, UI half).
+  channelFeed: () => request<ChannelFeed>('/api/channel/feed'),
   vocabulary: () => request<VocabularyResponse>('/api/vocabulary'),
   start: (task: string, source?: string) =>
     request<{ source: string; note: string }>('/api/conversations', {
@@ -76,6 +82,13 @@ export const api = {
   // browser cannot report having seen activity it never rendered.
   markRead: (req: MarkReadRequest) =>
     request<MarkReadResponse>('/api/conversations/read', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  // Same shape as markRead — a reader-scoped REWIND rather than an advance
+  // (design D-E). The server refuses it with no reader resolved.
+  markUnread: (req: MarkReadRequest) =>
+    request<MarkReadResponse>('/api/conversations/unread', {
       method: 'POST',
       body: JSON.stringify(req),
     }),

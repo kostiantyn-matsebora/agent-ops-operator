@@ -17,8 +17,13 @@ binding, and rendering both would open two conversations per event with one of
 them able to mutate the cluster. Both together is allowed, deliberately (sources
 are shareable, and there is no conflict guard to reinstate), but it is asked for
 explicitly.
+
+UNDER `global.agentops.wiringMode: coordinator` THIS FILE RENDERS NOTHING —
+`capabilities.yaml` renders the SAME two routes as standalone AgentCapability
+objects instead, and the chart-rendered Coordinator claims this bundle's source
+and lists them in its own `agents[]` (see `kubernetes.coordinatorContribution`).
 */ -}}
-{{- if and (include "kubernetes.wiringActive" .) .Values.profile.enabled }}
+{{- if and (eq (include "agentops.wiringMode" .) "pipelines") (include "kubernetes.wiringActive" .) .Values.profile.enabled }}
 {{- $p := .Values.pipelines }}
 {{- $g := .Values.global | default dict }}
 {{- $ea := .Values.eventsAdapter }}
@@ -55,6 +60,19 @@ question was asked in. Values-named channels still win a place beside it. */ -}}
 {{- if and $mcp.enabled (include "kubernetes.mcpAdminEnabled" .) }}
 {{- $writeTools = append $writeTools $mcp.toolsets.admin.name }}
 {{- end }}
+{{- /* The admin route is already trusted to act on the cluster; web search is
+the one built-in bucket scoped to it alone, never to the read-only route. */ -}}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $writeTools = append $writeTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
+{{- end }}
+{{- /* A local shell inside the agent's own already-running pod is narrower
+than allowPodExecution's own grant (pods/exec into ANY pod, which is how it
+already exposes every cluster Secret), so once an install has accepted that,
+withholding Bash on the one route trusted to act buys nothing. The read-only
+route never gets it, whatever this flag is. */ -}}
+{{- if and (dig "builtinToolsets" "enabled" false $g) (dig "agentops" "runtimeDefaults" "allowPodExecution" false $g) }}
+{{- $writeTools = append $writeTools (dig "builtinToolsets" "shell" "name" "agentops-shell" $g) }}
+{{- end }}
 {{- $routes := list }}
 {{- if include "kubernetes.observePipelineEnabled" . }}
 {{- $routes = append $routes (dict "name" $p.observe.name "icon" ($p.observe.icon | default "")
@@ -77,6 +95,7 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   {{- with .icon }}
   # Display only: how this route is recognised in a chat command menu or the

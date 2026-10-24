@@ -168,10 +168,18 @@ func (a *API) findings() []Finding {
 	return out
 }
 
+// claimedSources names every source SOME Pipeline OR Coordinator claims —
+// both kinds may (wiring.md: sources are shareable), so a source only a
+// Coordinator claims must not read as unclaimed here.
 func (a *API) claimedSources() map[string]bool {
 	claimed := map[string]bool{}
 	for _, p := range a.cache.List("pipelines") {
 		for _, ref := range decodeSpec[pipelineSpec](p.Spec).SignalSourceRefs {
+			claimed[ref.Name] = true
+		}
+	}
+	for _, co := range a.cache.List("coordinators") {
+		for _, ref := range decodeSpec[coordinatorSpec](co.Spec).SignalSourceRefs {
 			claimed[ref.Name] = true
 		}
 	}
@@ -227,6 +235,62 @@ func (a *API) inboundRefs(kind, name string) []InboundRef {
 					}
 				}
 			}
+		case "agentcapabilities":
+			if spec.CapabilityRef != nil && spec.CapabilityRef.Name == name {
+				add("pipelines", p.Metadata.Name, "capabilityRef")
+			}
+		}
+	}
+	for _, co := range a.cache.List("coordinators") {
+		spec := decodeSpec[coordinatorSpec](co.Spec)
+		switch kind {
+		case "agentprofiles":
+			if spec.AgentRef == nil && spec.ProfileRef.Name == name {
+				add("coordinators", co.Metadata.Name, "profileRef")
+			}
+		case "signalsources":
+			for _, ref := range spec.SignalSourceRefs {
+				if ref.Name == name {
+					add("coordinators", co.Metadata.Name, "signalSourceRefs")
+				}
+			}
+		case "channels":
+			for _, ref := range spec.ChannelRefs {
+				if ref.Name == name {
+					add("coordinators", co.Metadata.Name, "channelRefs")
+				}
+			}
+		case "mcptoolsets":
+			if spec.AgentRef == nil && spec.Toolsets != nil {
+				for _, ref := range spec.Toolsets.Refs {
+					if ref.Name == name {
+						add("coordinators", co.Metadata.Name, "toolsets.refs")
+					}
+				}
+			}
+		case "mcpconfigs":
+			if spec.AgentRef == nil && spec.MCPConfigs != nil {
+				for _, ref := range spec.MCPConfigs.Refs {
+					if ref.Name == name {
+						add("coordinators", co.Metadata.Name, "mcpConfigs.refs")
+					}
+				}
+			}
+		case "agentcapabilities":
+			if spec.AgentRef != nil && spec.AgentRef.Name == name {
+				add("coordinators", co.Metadata.Name, "capabilityRef")
+			}
+			for _, entry := range spec.Agents {
+				if entry.CapabilityRef != nil && entry.CapabilityRef.Name == name {
+					add("coordinators", co.Metadata.Name, "agents["+entry.Name+"].capabilityRef")
+				}
+			}
+		case "coordinators":
+			for _, entry := range spec.Agents {
+				if entry.CoordinatorRef != nil && entry.CoordinatorRef.Name == name {
+					add("coordinators", co.Metadata.Name, "agents["+entry.Name+"].coordinatorRef")
+				}
+			}
 		}
 	}
 	switch kind {
@@ -258,6 +322,11 @@ func (a *API) inboundRefs(kind, name string) []InboundRef {
 				add("agentprofiles", prof.Metadata.Name, "runtimeRef")
 			}
 		}
+		for _, capObj := range a.cache.List("agentcapabilities") {
+			if ref := decodeSpec[agentCapabilitySpec](capObj.Spec).RuntimeRef; ref != nil && ref.Name == name {
+				add("agentcapabilities", capObj.Metadata.Name, "runtimeRef")
+			}
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Kind != out[j].Kind {
@@ -287,6 +356,9 @@ func (a *API) handleKinds(w http.ResponseWriter, r *http.Request) {
 // InventoryRow is one CR in a per-kind listing.
 type InventoryRow struct {
 	Name string `json:"name"`
+	// Icon is a Pipeline's declared icon reference, verbatim, so a list draws
+	// it beside the name as every other mention of the Pipeline does.
+	Icon string `json:"icon,omitempty"`
 	// UID/Created/Labels/Annotations come along because a list is where an
 	// operator scans, and leaving them out sends them to kubectl for facts the
 	// watch cache already holds.
@@ -336,7 +408,7 @@ func (a *API) handleInventory(w http.ResponseWriter, r *http.Request) {
 func inventoryRow(o *Object, findings int) InventoryRow {
 	h, _, _ := health(o)
 	return InventoryRow{
-		Name: o.Metadata.Name, UID: o.Metadata.UID,
+		Name: o.Metadata.Name, Icon: iconOf(o), UID: o.Metadata.UID,
 		Created: o.Metadata.CreationTimestamp,
 		Labels:  o.Metadata.Labels, Annotations: o.Metadata.Annotations,
 		Health: h, Conditions: o.Conditions(), Summary: summaryLine(o),
@@ -355,6 +427,15 @@ func (a *API) InventoryRowFor(kind string, o *Object) InventoryRow {
 	return inventoryRow(o, n)
 }
 
+// iconOf is the declared icon reference of an object that carries one — a
+// Pipeline's `spec.icon` — and empty for every other kind.
+func iconOf(o *Object) string {
+	if o.Kind == "pipelines" {
+		return decodeSpec[pipelineSpec](o.Spec).Icon
+	}
+	return ""
+}
+
 // kindColumns is the per-kind column set. Purpose-built on purpose: a Pipeline
 // row shows profile/sources/channels; a Channel row shows adapter and served
 // state.
@@ -363,9 +444,13 @@ func kindColumns(o *Object) map[string]string {
 	switch o.Kind {
 	case "pipelines":
 		spec := decodeSpec[pipelineSpec](o.Spec)
-		cols["profile"] = spec.ProfileRef.Name
 		cols["sources"] = joinRefs(spec.SignalSourceRefs)
 		cols["channels"] = joinRefs(spec.ChannelRefs)
+		if spec.CapabilityRef != nil {
+			cols["capability"] = spec.CapabilityRef.Name
+			break
+		}
+		cols["profile"] = spec.ProfileRef.Name
 		if spec.Toolsets != nil {
 			cols["toolsets"] = joinRefs(spec.Toolsets.Refs)
 			cols["toolsMode"] = spec.Toolsets.Mode
@@ -427,6 +512,38 @@ func kindColumns(o *Object) map[string]string {
 		v := conversationView(o)
 		cols["phase"] = v.Status.Phase
 		cols["profile"] = v.Spec.ProfileRef.Name
+		if v.Spec.CoordinatorRef != nil {
+			cols["coordinator"] = v.Spec.CoordinatorRef.Name
+		}
+		if v.Spec.CausedBy != nil {
+			cols["causedBy"] = v.Spec.CausedBy.Parent
+		}
+	case "agentcapabilities":
+		spec := decodeSpec[agentCapabilitySpec](o.Spec)
+		cols["profile"] = spec.ProfileRef.Name
+		if spec.RuntimeRef != nil {
+			cols["runtime"] = spec.RuntimeRef.Name
+		}
+		if spec.Toolsets != nil {
+			cols["toolsets"] = joinRefs(spec.Toolsets.Refs)
+		}
+		if spec.MCPConfigs != nil {
+			cols["mcpConfigs"] = joinRefs(spec.MCPConfigs.Refs)
+		}
+	case "coordinators":
+		spec := decodeSpec[coordinatorSpec](o.Spec)
+		cols["sources"] = joinRefs(spec.SignalSourceRefs)
+		cols["escalatesTo"] = joinRefs(spec.ChannelRefs)
+		if spec.AgentRef != nil {
+			cols["capability"] = spec.AgentRef.Name
+		} else {
+			cols["profile"] = spec.ProfileRef.Name
+		}
+		names := make([]string, 0, len(spec.Agents))
+		for _, a := range spec.Agents {
+			names = append(names, a.Name)
+		}
+		cols["agents"] = strings.Join(names, ", ")
 	}
 	for k, v := range cols {
 		if v == "" {
@@ -540,15 +657,7 @@ func objectYAML(o *Object) string {
 func summaryLine(o *Object) string {
 	switch o.Kind {
 	case "pipelines":
-		spec := decodeSpec[pipelineSpec](o.Spec)
-		parts := []string{"profile " + spec.ProfileRef.Name}
-		if n := len(spec.SignalSourceRefs); n > 0 {
-			parts = append(parts, plural(n, "source"))
-		}
-		if n := len(spec.ChannelRefs); n > 0 {
-			parts = append(parts, plural(n, "channel"))
-		}
-		return strings.Join(parts, ", ")
+		return pipelineSummary(decodeSpec[pipelineSpec](o.Spec))
 	case "channels", "signalsources":
 		if adapter := decodeSpec[servedSpec](o.Spec).Adapter; adapter != "" {
 			return "adapter " + adapter
@@ -560,11 +669,36 @@ func summaryLine(o *Object) string {
 		}
 	case "conversations":
 		v := conversationView(o)
+		if v.Spec.CausedBy != nil {
+			return "member of " + v.Spec.CausedBy.Parent
+		}
 		if v.Status.Phase != "" {
 			return strings.ToLower(v.Status.Phase)
 		}
+	case "agentcapabilities":
+		spec := decodeSpec[agentCapabilitySpec](o.Spec)
+		if spec.ProfileRef.Name != "" {
+			return "profile " + spec.ProfileRef.Name
+		}
+	case "coordinators":
+		spec := decodeSpec[coordinatorSpec](o.Spec)
+		return plural(len(spec.Agents), "agent")
 	}
 	return ""
+}
+
+func pipelineSummary(spec pipelineSpec) string {
+	parts := []string{"profile " + spec.ProfileRef.Name}
+	if spec.CapabilityRef != nil {
+		parts = []string{"capability " + spec.CapabilityRef.Name}
+	}
+	if n := len(spec.SignalSourceRefs); n > 0 {
+		parts = append(parts, plural(n, "source"))
+	}
+	if n := len(spec.ChannelRefs); n > 0 {
+		parts = append(parts, plural(n, "channel"))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func knownKind(kind string) bool {

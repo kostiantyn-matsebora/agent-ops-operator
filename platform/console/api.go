@@ -170,6 +170,12 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/charts/{chart}", a.auth(a.handleHistory))
 	mux.HandleFunc("GET /api/sources", a.auth(a.handleOriginationSources))
 	mux.HandleFunc("GET /api/vocabulary", a.auth(a.handleVocabulary))
+	// The channel's GENERAL feed: thread-less sends the manager fanned out
+	// with no conversation behind them (an /agents reply, say), which the
+	// adapter already parks on a pseudo-thread rather than dropping. See
+	// design decision "Thread-less console sends surface as the channel's
+	// general feed".
+	mux.HandleFunc("GET /api/channel/feed", a.auth(a.handleChannelFeed))
 
 	mux.HandleFunc("GET /api/conversations", a.auth(a.handleConversations))
 	mux.HandleFunc("GET /api/conversations/{name}", a.auth(a.handleConversation))
@@ -190,6 +196,11 @@ func (a *API) Handler(ui http.Handler) http.Handler {
 	// an unread badge earns its keep, and one that could show a backlog but
 	// never clear it would be broken in the way the badge exists to fix.
 	mux.HandleFunc("POST /api/conversations/read", a.auth(a.handleMarkRead))
+	// Mark unread is the reverse rewind (design D-E) — authenticated and
+	// attributed on the same grounds as mark read, and NOT write-gated for
+	// the identical reason: a watermark instructs no agent and starts no
+	// work, whichever direction it moves.
+	mux.HandleFunc("POST /api/conversations/unread", a.auth(a.handleMarkUnread))
 	mux.HandleFunc("POST /api/conversations/{name}/messages", a.write("send-message", a.handleSend))
 	mux.HandleFunc("POST /api/conversations/{name}/reopen", a.write("reopen", a.handleReopen))
 
@@ -387,9 +398,10 @@ func (a *API) deltaEventFor(d Delta, reader string) deltaEvent {
 	return ev
 }
 
-// handleStream multiplexes THREE sources onto one SSE connection: CR watch
-// deltas, activity events, and transcript appends. One connection per browser,
-// not three — and the BFF holds one upstream activity connection for all of them.
+// handleStream multiplexes FOUR sources onto one SSE connection: CR watch
+// deltas, activity events, transcript appends, and a vocabulary-changed
+// signal. One connection per browser, not four — and the BFF holds one
+// upstream activity connection for all of them.
 //
 // EVERY EVENT CARRIES ITS CONTENT. A CR delta brings the changed object in the
 // shapes the snapshots serve, an activity event and a transcript append travel
@@ -415,6 +427,8 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	defer cancelMessages()
 	events, cancelEvents := a.activity.Subscribe()
 	defer cancelEvents()
+	vocabChanged, cancelVocab := a.adapter.SubscribeVocabulary()
+	defer cancelVocab()
 
 	send := func(event string, payload any) bool {
 		b, err := json.Marshal(payload)
@@ -468,6 +482,17 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !send("message", m) {
+				return
+			}
+		case _, ok := <-vocabChanged:
+			if !ok {
+				return
+			}
+			// NO PAYLOAD — SNAPSHOTS ARE AUTHORITATIVE. The event says only that
+			// the manager's vocabulary moved; the browser re-fetches
+			// GET /api/vocabulary rather than this connection carrying a second
+			// copy of the listing.
+			if !send("vocabulary", map[string]any{"reason": "revision changed"}) {
 				return
 			}
 		case <-queueTick.C:

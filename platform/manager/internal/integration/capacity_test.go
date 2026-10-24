@@ -254,8 +254,9 @@ func TestPodDeletionWakesOldestPending(t *testing.T) {
 }
 
 // TestBacklogBoundRefusesCreation: an unbounded Pending queue would reproduce
-// the original complaint one level down. Window reuse is NOT gated by it — the
-// bound stops new objects, not new inputs.
+// the original complaint one level down. Equality routing is NOT gated by it —
+// the bound stops new objects, not new inputs (conversation-capacity:
+// "Grouping still reuses a pending conversation").
 func TestBacklogBoundRefusesCreation(t *testing.T) {
 	clearRuntimePods(t)
 	mkProfile(t, "prof-backlog")
@@ -267,7 +268,7 @@ func TestBacklogBoundRefusesCreation(t *testing.T) {
 
 	// first signal opens a conversation and the reconciler parks it Pending
 	if rec := postSignal(t, srv.Handler(), testMasterToken, "src-backlog", []map[string]any{{
-		"fingerprint": "fp-b1", "labels": map[string]string{"alertname": "One"}, "payload": "one",
+		"initiationId": "fp-b1", "labels": map[string]string{"alertname": "One"}, "payload": "one",
 	}}); rec.Code != 200 {
 		t.Fatalf("first signal: %d %s", rec.Code, rec.Body.String())
 	}
@@ -281,9 +282,9 @@ func TestBacklogBoundRefusesCreation(t *testing.T) {
 	// bound and not about what earlier tests happened to leave behind
 	srv.MaxQueuedConversations = pendingCount(t)
 
-	// backlog is full: a signal with a NEW signature is refused with a reason
+	// backlog is full: a signal with a NEW initiationId is refused with a reason
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-backlog", []map[string]any{{
-		"fingerprint": "fp-b2", "labels": map[string]string{"alertname": "Two"}, "payload": "two",
+		"initiationId": "fp-b2", "labels": map[string]string{"alertname": "Two"}, "payload": "two",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
@@ -301,9 +302,16 @@ func TestBacklogBoundRefusesCreation(t *testing.T) {
 		t.Fatalf("a refused signal created a conversation: %d exist", n)
 	}
 
-	// but window reuse still lands on the existing pending conversation
-	if rec := postSignal(t, srv.Handler(), testMasterToken, "src-backlog", []map[string]any{{
-		"fingerprint": "fp-b3", "labels": map[string]string{"alertname": "One"}, "payload": "one again",
+	// but a repeat of "fp-b1" — the SAME initiationId the pending conversation
+	// already carries as its conversationId — still lands on it as an append,
+	// which the bound never gates. A fresh server stands in for "outside the
+	// source's cooldown" without waiting out its real window.
+	latest := getConv(t, first)
+	waitForRoutingCacheToObserve(t, latest, latest.ResourceVersion)
+	backdateCooldown(t, "src-backlog", "fp-b1")
+	h2 := apiServer().Handler()
+	if rec := postSignal(t, h2, testMasterToken, "src-backlog", []map[string]any{{
+		"initiationId": "fp-b1", "labels": map[string]string{"alertname": "One"}, "payload": "one again",
 	}}); rec.Code != 200 {
 		t.Fatalf("reuse signal: %d %s", rec.Code, rec.Body.String())
 	}
@@ -312,7 +320,7 @@ func TestBacklogBoundRefusesCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(conv.Spec.Inputs) != 2 {
-		t.Fatalf("window reuse must keep appending to a pending conversation: %d inputs", len(conv.Spec.Inputs))
+		t.Fatalf("equality routing must keep appending to a pending conversation: %d inputs", len(conv.Spec.Inputs))
 	}
 }
 
@@ -360,20 +368,7 @@ func TestDeletionTellsThreadsThenReleases(t *testing.T) {
 	reconcileWith(t, rc, "close-1")
 
 	for _, tc := range []struct{ adapter, thread string }{{"tg-close-a", "9876"}, {"tg-close-b", "T-42"}} {
-		op := findOp(t, srv, tc.adapter, chat.OpDeleteConversation, "close-1")
-		if op == nil {
-			t.Fatalf("%s: no delete-conversation op reached the adapter", tc.adapter)
-		}
-		if op.ThreadID == nil || *op.ThreadID != tc.thread {
-			t.Fatalf("%s: delete-conversation op %+v", tc.adapter, op)
-		}
-		if op.Message == nil {
-			t.Fatalf("%s: it must carry the notice the thread is owed", tc.adapter)
-		}
-		// and NOT close-topic: one lifecycle event, one operation
-		if stale := findOp(t, srv, tc.adapter, chat.OpCloseTopic, "close-1"); stale != nil {
-			t.Fatalf("%s: deletion must not also send close-topic", tc.adapter)
-		}
+		assertDeleteConversationOpReached(t, srv, tc.adapter, tc.thread)
 	}
 
 	// nobody completes them; the grace expires and deletion proceeds anyway
@@ -384,6 +379,26 @@ func TestDeletionTellsThreadsThenReleases(t *testing.T) {
 	}
 	if podExists(t, "close-1") {
 		t.Fatal("closing must release the runtime pod (and with it the capacity slot)")
+	}
+}
+
+// assertDeleteConversationOpReached: the named adapter got a
+// delete-conversation op for the bound thread, carrying the owed notice, and
+// NOT close-topic too — one lifecycle event, one operation.
+func assertDeleteConversationOpReached(t *testing.T, srv *httpapi.Server, adapter, thread string) {
+	t.Helper()
+	op := findOp(t, srv, adapter, chat.OpDeleteConversation, "close-1")
+	if op == nil {
+		t.Fatalf("%s: no delete-conversation op reached the adapter", adapter)
+	}
+	if op.ThreadID == nil || *op.ThreadID != thread {
+		t.Fatalf("%s: delete-conversation op %+v", adapter, op)
+	}
+	if op.Message == nil {
+		t.Fatalf("%s: it must carry the notice the thread is owed", adapter)
+	}
+	if findOp(t, srv, adapter, chat.OpCloseTopic, "close-1") != nil {
+		t.Fatalf("%s: deletion must not also send close-topic", adapter)
 	}
 }
 

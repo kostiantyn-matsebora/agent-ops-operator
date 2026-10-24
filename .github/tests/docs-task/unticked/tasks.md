@@ -4,7 +4,15 @@
 
 - [x] 1.1 Do the thing
 
-## 2. Documentation
+## 2. Unit tests
 
-- [x] 2.1 The reference docs
-- [ ] 2.2 The adopter site
+- [x] 2.1 Cover the thing
+
+## 3. System tests
+
+- [x] 3.1 Not applicable: nothing here is decided by a cluster
+
+## 4. Documentation
+
+- [x] 4.1 The reference docs
+- [ ] 4.2 The adopter site

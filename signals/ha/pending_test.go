@@ -12,7 +12,7 @@ type emitted struct {
 }
 
 // queueFixture wires a pending queue to a scripted verdict and a recorder.
-func queueFixture(v func(recordRef) verdict) (*pendingQueue, *[]emitted, *time.Time) {
+func queueFixture(v func(recordRef, time.Time) verdict) (*pendingQueue, *[]emitted, *time.Time) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	var got []emitted
 	q := newPendingQueue(v, func(source string, sigs []Signal) {
@@ -24,8 +24,8 @@ func queueFixture(v func(recordRef) verdict) (*pendingQueue, *[]emitted, *time.T
 
 func haSignal(integration, location, level string) Signal {
 	return Signal{
-		Fingerprint: "ha-logs@" + integration + "@" + location,
-		Title:       integration + ": something failed",
+		InitiationID: "ha-logs@" + integration + "@" + location,
+		Title:        integration + ": something failed",
 		Labels: map[string]string{
 			"integration": integration,
 			"logger":      "homeassistant.components." + integration,
@@ -38,7 +38,7 @@ func haSignal(integration, location, level string) Signal {
 // The dwell exists to turn a point-in-time fact into a state claim. Still
 // broken at the end of the window -> emit, with the burst attached.
 func TestDwellEmitsWhenStillUnhealthy(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictUnhealthy })
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
 	q.Add("ha-logs", haSignal("zwave_js", "climate.py:412", "ERROR"), compiledRule{dwell: 5 * time.Minute, escalate: 3}, 1)
 
 	q.Flush(now.Add(time.Minute))
@@ -58,7 +58,7 @@ func TestDwellEmitsWhenStillUnhealthy(t *testing.T) {
 // Recovered during the window -> the incident erased itself, which is the whole
 // reason a dwell re-checks instead of merely waiting.
 func TestDwellDropsWhenRecovered(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictHealthy })
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictHealthy })
 	q.Add("ha-logs", haSignal("hue", "light.py:88", "ERROR"), compiledRule{dwell: time.Minute, escalate: 3}, 1)
 	q.Flush(now.Add(2 * time.Minute))
 	if len(*got) != 0 {
@@ -67,22 +67,99 @@ func TestDwellDropsWhenRecovered(t *testing.T) {
 }
 
 // No health predicate is the common case for core loggers. Then RECURRENCE is
-// what the log itself can prove.
-func TestUnknownFallsBackToRecurrence(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictUnknown })
-	rule := compiledRule{dwell: 2 * time.Minute, escalate: 3}
-	q.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
-	q.Flush(now.Add(3 * time.Minute))
-	if len(*got) != 0 {
-		t.Fatal("a one-off record with no predicate and no recurrence must not emit")
+// what the log itself can prove — and only recurrence that was still going as
+// the window closed. A one-off never emits, PROVIDED the log was read through
+// the close. When it could not be read at all, the same one-off fails open:
+// an unreadable Home Assistant is itself an incident, never quiet churn.
+func TestUnknownWithNoRecurrenceIsDropped(t *testing.T) {
+	cases := []struct {
+		name     string
+		verdict  verdict
+		wantEmit bool
+	}{
+		{"log read, no predicate", verdictUnknown, false},
+		{"log unreadable at the close", verdictUnreadable, true},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q, got, now := queueFixture(func(recordRef, time.Time) verdict { return tc.verdict })
+			rule := compiledRule{dwell: 2 * time.Minute, escalate: 3}
+			q.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
+			q.Flush(now.Add(3 * time.Minute))
+			if emitted := len(*got) == 1; emitted != tc.wantEmit {
+				t.Fatalf("emitted = %v (%+v), want %v", emitted, *got, tc.wantEmit)
+			}
+		})
+	}
+}
 
-	q2, got2, now2 := queueFixture(func(recordRef) verdict { return verdictUnknown })
-	q2.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 1)
-	q2.Add("ha-logs", haSignal("homeassistant.core", "core.py:1", "ERROR"), rule, 2)
-	q2.Flush(now2.Add(3 * time.Minute))
-	if len(*got2) != 1 {
-		t.Fatalf("a recurring record with no predicate must emit, got %+v", *got2)
+// No other member's verdict swallows the fail-open emit: an entry whose one
+// member recovered and whose other cannot be read still emits.
+func TestUnreadableIsNotSwallowedByARecoveredMember(t *testing.T) {
+	q, got, now := queueFixture(func(ref recordRef, _ time.Time) verdict {
+		if ref.location == "a.py:1" {
+			return verdictHealthy
+		}
+		return verdictUnreadable
+	})
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), rule, 1)
+	q.Add("ha-logs", haSignal("hue", "b.py:2", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+	if len(*got) != 1 {
+		t.Fatalf("an unreadable member must emit whatever its siblings say, got %+v", *got)
+	}
+}
+
+// A network blip that logged the same error for thirty seconds and then
+// stopped HAS recurred, and is exactly the transient the dwell exists to drop.
+func TestUnknownThatWentQuietBeforeTheCloseIsDropped(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnknown })
+	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+	base := *now
+	for i := 0; i < 6; i++ {
+		at := base.Add(time.Duration(i) * 6 * time.Second) // six records over thirty seconds
+		q.now = func() time.Time { return at }
+		q.Add("ha-logs", haSignal("async_upnp_client.ssdp", "ssdp.py:1", "ERROR"), rule, i+1)
+	}
+	q.Flush(base.Add(3 * time.Minute))
+	if len(*got) != 0 {
+		t.Fatalf("a burst that went quiet before the closing minute must be dropped, got %+v", *got)
+	}
+}
+
+// An integration still logging as the window closes is reported once, and the
+// evidence names when its last record arrived.
+func TestUnknownStillRecurringAtTheCloseIsEmitted(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnknown })
+	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+	base := *now
+	for i, at := range []time.Duration{0, 30 * time.Second, 90 * time.Second, 150 * time.Second, 170 * time.Second} {
+		at := at
+		q.now = func() time.Time { return base.Add(at) }
+		q.Add("ha-logs", haSignal("async_upnp_client.ssdp", "ssdp.py:1", "ERROR"), rule, i+1)
+	}
+	q.Flush(base.Add(3 * time.Minute))
+	if len(*got) != 1 {
+		t.Fatalf("a record still recurring at the close must emit, got %+v", *got)
+	}
+	if p := (*got)[0].sigs[0].Payload; !strings.Contains(p, "last seen 10s before the window closed") {
+		t.Fatalf("evidence must name the gap to the last arrival:\n%s", p)
+	}
+}
+
+// The health predicate is asked about the CLOSING part of the window, and that
+// part follows the window actually waited: a third, floored at thirty seconds.
+func TestHealthIsAskedSinceTheClosingWindow(t *testing.T) {
+	var asked time.Time
+	q, _, now := queueFixture(func(_ recordRef, since time.Time) verdict { asked = since; return verdictUnhealthy })
+	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), compiledRule{dwell: 3 * time.Minute, escalate: 99}, 1)
+	q.Flush(now.Add(3 * time.Minute))
+	if want := now.Add(2 * time.Minute); !asked.Equal(want) {
+		t.Fatalf("since = %s, want %s (the last third of a 3m window)", asked, want)
+	}
+	if got := closingWindow(time.Minute); got != 30*time.Second {
+		t.Fatalf("closingWindow(1m) = %s, want the 30s floor", got)
 	}
 }
 
@@ -90,7 +167,7 @@ func TestUnknownFallsBackToRecurrence(t *testing.T) {
 // also makes several code paths fail at once, and only duration separates the
 // two.
 func TestEscalationShortensButKeepsAFloor(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictUnhealthy })
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
 	rule := compiledRule{dwell: 20 * time.Minute, escalate: 3}
 	for _, loc := range []string{"a.py:1", "b.py:2", "c.py:3"} {
 		q.Add("ha-logs", haSignal("zwave_js", loc, "ERROR"), rule, 1)
@@ -109,7 +186,7 @@ func TestEscalationShortensButKeepsAFloor(t *testing.T) {
 }
 
 func TestEscalationFloorIsOneMinute(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictUnhealthy })
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
 	rule := compiledRule{dwell: 2 * time.Minute, escalate: 2}
 	q.Add("ha-logs", haSignal("mqtt", "a.py:1", "ERROR"), rule, 1)
 	q.Add("ha-logs", haSignal("mqtt", "b.py:2", "ERROR"), rule, 1)
@@ -123,9 +200,56 @@ func TestEscalationFloorIsOneMinute(t *testing.T) {
 	}
 }
 
+// TestInitiationIDIsTheEntryNotTheSample pins the correlation id the entry
+// emits: the source+integration the dwell queue already groups by, not
+// whichever member happened to be the last one added — which member is
+// "last" is an implementation accident, and basing the id on it would split
+// one recurring integration's history across conversations depending on
+// which code path logged last.
+func TestInitiationIDIsTheEntryNotTheSample(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+	rule := compiledRule{dwell: time.Minute, escalate: 3}
+	// b.py:2 is added last, so e.sample's own InitiationID (from normalize)
+	// would be "ha-logs@zwave_js@b.py:2" if left unmodified.
+	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+	q.Add("ha-logs", haSignal("zwave_js", "b.py:2", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+	if len(*got) != 1 {
+		t.Fatalf("expected one emit, got %+v", *got)
+	}
+	if got := (*got)[0].sigs[0].InitiationID; got != "ha-logs@zwave_js" {
+		t.Fatalf("initiationId = %q, want the entry's source@integration", got)
+	}
+}
+
+// TestInitiationIDRecursAcrossDwellCycles pins the "Recovery and recurrence"
+// scenario: the same integration misbehaving again in a LATER, separate dwell
+// cycle (a fresh pendingEntry, the earlier one already flushed) must carry
+// the same initiationId so the manager appends it to the still-open
+// conversation instead of opening a new one.
+func TestInitiationIDRecursAcrossDwellCycles(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+
+	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+	q.Flush(now.Add(2 * time.Minute))
+
+	q.now = func() time.Time { return now.Add(10 * time.Minute) } // past the refractory window
+	q.Add("ha-logs", haSignal("zwave_js", "c.py:3", "ERROR"), rule, 1)
+	q.Flush(now.Add(12 * time.Minute))
+
+	if len(*got) != 2 {
+		t.Fatalf("expected two separate emits across the two dwell cycles, got %+v", *got)
+	}
+	first, second := (*got)[0].sigs[0].InitiationID, (*got)[1].sigs[0].InitiationID
+	if first != second || first != "ha-logs@zwave_js" {
+		t.Fatalf("a recurring integration must repeat its initiationId: %q vs %q", first, second)
+	}
+}
+
 // A persistent problem must not re-report at the tick rate.
 func TestRefractoryQuietsARepeatingProblem(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictUnhealthy })
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
 	rule := compiledRule{dwell: 5 * time.Second, escalate: 3}
 	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
 	q.Flush(now.Add(10 * time.Second))
@@ -140,10 +264,78 @@ func TestRefractoryQuietsARepeatingProblem(t *testing.T) {
 	}
 }
 
+// The refractory window's declared bound (ha-signal-adapter spec, "The dwell
+// queue declares a post-emit refractory window"): the emitting rule's own
+// dwell, floored at one minute, measured from the emit. Each row repeats the
+// condition at a point only one reading of that bound gets right — past a
+// short dwell but inside the floor, past the floor but inside a long dwell,
+// and just past each. A repeat past the window posts again under the SAME
+// initiationId, which is what lets the manager append it as a recurrence.
+func TestRefractoryWindowIsTheDwellFlooredAtAMinute(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		dwell     time.Duration
+		afterEmit time.Duration
+		wantPost  bool
+	}{
+		{"short dwell, past the dwell, inside the floor", 5 * time.Second, 30 * time.Second, false},
+		{"short dwell, past the floor", 5 * time.Second, time.Minute + time.Second, true},
+		{"long dwell, past the floor, inside the dwell", 5 * time.Minute, 2 * time.Minute, false},
+		{"long dwell, past the dwell", 5 * time.Minute, 5*time.Minute + time.Second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+			rule := compiledRule{dwell: tc.dwell, escalate: 99}
+			q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+			emittedAt := now.Add(tc.dwell)
+			q.Flush(emittedAt)
+			if len(*got) != 1 {
+				t.Fatalf("expected the first emit, got %+v", *got)
+			}
+
+			repeatAt := emittedAt.Add(tc.afterEmit)
+			q.now = func() time.Time { return repeatAt }
+			q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 2)
+			q.Flush(repeatAt.Add(tc.dwell))
+
+			if posted := len(*got) == 2; posted != tc.wantPost {
+				t.Fatalf("re-posted = %v (%d emits), want %v", posted, len(*got), tc.wantPost)
+			}
+			if tc.wantPost {
+				if first, second := (*got)[0].sigs[0].InitiationID, (*got)[1].sigs[0].InitiationID; first != second {
+					t.Fatalf("a repeat past the window must carry the same initiationId: %q then %q", first, second)
+				}
+			}
+		})
+	}
+}
+
+// The window is per id: inside one condition's refractory window, a DIFFERENT
+// condition still emits. The allowance quiets re-posts of the same id and
+// never collapses distinct ones.
+func TestRefractoryNeverCollapsesDistinctIDs(t *testing.T) {
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
+	rule := compiledRule{dwell: time.Minute, escalate: 99}
+	q.Add("ha-logs", haSignal("zwave_js", "a.py:1", "ERROR"), rule, 1)
+	emittedAt := now.Add(time.Minute)
+	q.Flush(emittedAt)
+
+	q.now = func() time.Time { return emittedAt.Add(10 * time.Second) }
+	q.Add("ha-logs", haSignal("hue", "light.py:88", "ERROR"), rule, 1)
+	q.Flush(emittedAt.Add(2 * time.Minute))
+
+	if len(*got) != 2 {
+		t.Fatalf("a distinct condition inside another's window must emit, got %d emits", len(*got))
+	}
+	if id := (*got)[1].sigs[0].InitiationID; id != "ha-logs@hue" {
+		t.Fatalf("second emit initiationId = %q, want ha-logs@hue", id)
+	}
+}
+
 // A stricter rule arriving second must not be delayed by a lax one that
 // happened to arrive first.
 func TestDeadlineShortensNeverExtends(t *testing.T) {
-	q, got, now := queueFixture(func(recordRef) verdict { return verdictUnhealthy })
+	q, got, now := queueFixture(func(recordRef, time.Time) verdict { return verdictUnhealthy })
 	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), compiledRule{dwell: 30 * time.Minute, escalate: 3}, 1)
 	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), compiledRule{dwell: time.Minute, escalate: 3}, 2)
 	q.Flush(now.Add(2 * time.Minute))
@@ -156,7 +348,7 @@ func TestDeadlineShortensNeverExtends(t *testing.T) {
 // opening count must not be overwritten by later sightings.
 func TestCountAtOpenIsKept(t *testing.T) {
 	var seen recordRef
-	q, _, now := queueFixture(func(r recordRef) verdict { seen = r; return verdictUnhealthy })
+	q, _, now := queueFixture(func(r recordRef, _ time.Time) verdict { seen = r; return verdictUnhealthy })
 	rule := compiledRule{dwell: time.Minute, escalate: 3}
 	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), rule, 4)
 	q.Add("ha-logs", haSignal("hue", "a.py:1", "ERROR"), rule, 9)
@@ -170,7 +362,7 @@ func TestCountAtOpenIsKept(t *testing.T) {
 }
 
 func TestHasEntries(t *testing.T) {
-	q, _, now := queueFixture(func(recordRef) verdict { return verdictHealthy })
+	q, _, now := queueFixture(func(recordRef, time.Time) verdict { return verdictHealthy })
 	if q.HasEntries() {
 		t.Fatal("a fresh queue holds nothing")
 	}

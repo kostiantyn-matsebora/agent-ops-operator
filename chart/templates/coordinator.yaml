@@ -1,0 +1,309 @@
+{{- /*
+THE CHART-RENDERED Coordinator (coordinator-deployment-mode) — rendered
+exactly once, ONLY under `global.agentops.wiringMode: coordinator`.
+
+This is the parent chart's half of "the parent owns wiring that spans
+bundles" (see `.claude/rules/gotchas.md`'s bundle-qualification table, and the
+same argument `chart/templates/pipelines.yaml` makes for an install-declared
+Pipeline): a subchart sees only itself, so claiming every enabled bundle's
+source and listing every enabled bundle's AgentCapability in one Coordinator's
+`agents[]` can only happen here, read through `agentops.coordinatorContributions`
+— which re-derives from each bundle's OWN helper, so this cannot drift from
+what each bundle actually rendered in `capabilities.yaml`.
+
+`reaper.yaml` renders the reaper's own AgentProfile, AgentCapability, and its
+scheduled `signals/cron` claim — THIS file folds the reaper in as one more
+`agents[]` entry and one more `signalSourceRefs` claim (coordinator-self-heal,
+design D-E), never a reaper-specific field on the Coordinator object itself.
+Both halves are gated on `reaper.enabled` (default false): the fold-in below
+and the self-heal paragraph in the coordinating agent's own prompt.
+*/ -}}
+{{- if eq (include "agentops.wiringMode" .) "coordinator" }}
+{{- $c := .Values.coordinator }}
+{{- $r := .Values.reaper }}
+{{- $g := .Values.global | default dict }}
+{{- $contrib := include "agentops.coordinatorContributions" . | fromYaml }}
+{{- $sources := $contrib.sources | default list }}
+{{- $agents := $contrib.agents | default list }}
+{{- /* OVERRIDE POINT (coordinator-agents-override): sits above the reaper
+fold-in, so `coordinator.agents`, when set, REPLACES the contributions-derived
+roster outright — never merged with it — before the reaper's own append runs
+against whichever roster (derived or overridden) is now current. Each entry
+is validated against the CRD's own "exactly one of" rule at render time,
+mirroring `coordinator-model`'s CEL, so a malformed override fails `helm
+template` with the entry's name rather than shipping a manifest the API
+server would then reject. */ -}}
+{{- range $c.agents }}
+{{- if and .capability .coordinator }}
+{{- fail (printf "coordinator.agents[%s]: carries both capability and coordinator — exactly one is required" .name) }}
+{{- end }}
+{{- if not (or .capability .coordinator) }}
+{{- fail (printf "coordinator.agents[%s]: carries neither capability nor coordinator — exactly one is required" .name) }}
+{{- end }}
+{{- end }}
+{{- if $c.agents }}
+{{- $agents = $c.agents }}
+{{- end }}
+{{- /* The reaper is an ORDINARY agents[] entry (coordinator-self-heal) — same
+shape as every bundle's, never a reaper-specific field here. Its description
+is deliberately an INSTRUCTION ("invoke this ONLY in response to...") rather
+than a job label, because — unlike a domain entry a signal's content decides —
+this one is chosen by RECOGNIZING a specific trigger, named again below in the
+coordinating agent's own prompt so the instruction is not the description's to
+carry alone.
+
+IT IS THE ONE TRIGGER-SHAPED DESCRIPTION. Every domain entry's description
+(each bundle's `pipelines.<route>.description`) states the agent's PURPOSE and
+REACH — what it is, what it can do, what it cannot, what to hand it — so that a
+person's instruction matches it as readily as a signal does. A description
+that names only the moment to invoke ("once the cause is known") matches no
+instruction, and the coordinating agent then reports it has nothing. Never a
+cadence word here either — `reaper.schedule` is the one place that changes. */ -}}
+{{- if $r.enabled }}
+{{- $agents = append $agents (dict "name" $r.name "capability" $r.name "description" (printf "Runs this Coordinator's self-heal sweep: lists its own open roots, re-checks each one through the agent that originally handled it, and closes the ones that have healed. Invoke this ONLY in response to the self-heal signal from source %q — never for an ordinary task." $r.source.name)) }}
+{{- $sources = append $sources $r.source.name }}
+{{- end }}
+{{- /* THE CONSOLE CLAIM, at the layer that can actually make it (gotchas.md's
+"DEMO MODE'S CONSOLE WIRING DOES NOT CARRY OVER TO COORDINATOR MODE" gap).
+Under pipelines mode a bundle route claims it; an AgentCapability carries no
+subscription at all, so nothing claimed it here — until now. Gated on
+console.enabled alone, the flag `console.yaml` renders the object by,
+never on demo mode or any bundle. Dedup against a bundle's own
+chatSources contribution (home-assistant's, say), which may already have
+added it. */ -}}
+{{- /* The names come from the console's OWN values, never from the
+`global.agentops.console` duplicate: that copy is checked only under demo mode
+(console.yaml), so trusting it here could claim an object this release does
+not render. */ -}}
+{{- $channels := $c.channels | default list }}
+{{- if .Values.console.enabled }}
+{{- $cs := .Values.console.signalSourceName | default .Values.console.name }}
+{{- $cc := .Values.console.channelName | default .Values.console.name }}
+{{- if not (has $cs $sources) }}{{ $sources = append $sources $cs }}{{ end }}
+{{- if not (has $cc $channels) }}{{ $channels = append $channels $cc }}{{ end }}
+{{- end }}
+{{- /* Every ref below is emitted only when the object it names is rendered —
+same rule every bundle's own wiring component follows. */ -}}
+{{- $toolsets := list }}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $toolsets = append $toolsets (dig "builtinToolsets" "coordinate" "name" "agentops-coordinate" $g) }}
+{{- end }}
+{{- /* coordination.yaml renders UNCONDITIONALLY under coordinator mode (see
+its own comment) — this capability's one reason to exist is reaching it, so
+the ref is never conditional here. */ -}}
+{{- $mcpConfigs := list .Values.coordination.name }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: {{ $c.profileName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-coordinator
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  maxTurns: {{ $c.maxTurns }}
+  # Behaviour only — no repository, no capabilities. The role below is an
+  # ORCHESTRATOR's, not a dispatcher's: it analyses what arrived, delegates to
+  # the agents by their described purpose, reads results and iterates. It names
+  # no domain entry — bundles vary per install, and the agent reads them from
+  # `list_agents`. GENERATED: the self-heal paragraph is built from the SAME
+  # aggregation that fills this Coordinator's own `agents[]`, so the reaper's
+  # name always matches what the agent is told to invoke for the self-heal
+  # signal (design D-E, task 2.5). Never a cadence word here — `reaper.schedule`
+  # is the one place that changes.
+  #
+  # It used to read "your only job is reading what started the conversation
+  # and routing it" and "pick the one whose description matches what arrived".
+  # That is a lookup, and a lookup with no hit returns nothing: asked directly
+  # to restart a pod, the agent answered that it had no tools, while an acting
+  # entry sat in `agents[]`.
+  #
+  # It also used to say "you hold no domain tool yourself", which the agent
+  # could see was false — the runtime hands it a shell and generic utilities —
+  # and a prompt contradicting the observed toolbox gets discounted wholesale.
+  # Measured live: a conversation that had delegated correctly drifted, inside
+  # the SAME conversation, into inventorying its own toolbox and answering
+  # "this can't be answered live" from it. Hence the mandatory first call, the
+  # re-scoping of the generic tools instead of denying them, the verdict rule
+  # (own lack of access is never evidence), and the loop-never-expires line.
+  systemPrompt: |
+    {{- with $c.systemPromptPrefix }}
+{{ . | trim | indent 4 }}{{ "\n" }}
+{{- end }}
+    You are the coordinating agent for this install — an orchestrator, not a
+    specialist. A conversation of yours opens when a signal arrives on a
+    source you claim, or when a person addresses you by name with a question
+    or an instruction. You produce no domain evidence yourself: every fact
+    you report comes from what arrived or from an invoked agent's report.
+
+    YOUR TOOLS ARE THE AGENTS, AND THE FIRST TOOL CALL OF EVERY CONVERSATION
+    IS `list_agents` — before any command, any file, any view of what is
+    possible. What this install can do is that roster's fact, never your
+    toolbox's. Each entry describes what the agent is, what it can do, what
+    it cannot, and what to hand it. Anything a listed agent can do, you can
+    have done by invoking it. If `list_agents` is not among your tools,
+    your coordination path is broken — report exactly that, never that the
+    install has no agents.
+
+    Your runtime may also hand you generic utilities — a shell, scheduling,
+    web access. They are housekeeping around delegation, never the way to
+    evidence. Finding that they reach no domain system is expected and
+    proves nothing: reaching systems is what the roster is for. So
+    never answer that you have no tools or cannot act — noticing a missing
+    tool, credential or checkout IS the signal to invoke the agent whose
+    description covers what you lack.
+
+    Work every input in three steps:
+
+    1. Analyse. Read what arrived and state what would settle it: a
+       question to answer, a cause to find, an action to take, or a
+       sequence — find the cause first, then act on it.
+    2. Delegate. Choose from `list_agents` the agent whose purpose covers
+       each step, and `invoke` it with a specific task in plain words: the
+       object, its namespace or location, what to do or find out, and what
+       to report back. A matter that needs two agents is two invokes, in
+       the order the result of one informs the next.
+    3. Decide. Each result reaches you later as an ordinary input. Read
+       it, then answer the person from it, invoke the next agent, or
+       `escalate` to a person when the matter needs one.
+
+    This loop never expires. A follow-up twenty inputs in is delegated
+    exactly as the first input was — when deciding who answers it, re-read
+    the roster, never your own recent attempts.
+
+    Authorisation follows from WHO asked for an action:
+
+    - A person's direct instruction to act — "restart the sonarr pod",
+      "scale the api to three" — IS the authorisation. Hand it to the
+      acting agent as the task it is. Do not ask the person to confirm what
+      they just told you to do, and do not reroute an instruction to an
+      observing agent — only a question goes there.
+    - A change YOU conclude is worth making — from an investigation you
+      ran, or from a signal nobody asked about — is proposed, not made.
+      State it in your own words and wait. Only after a person says yes do
+      you write the acting task, and it then says exactly what was approved
+      and nothing more.
+
+    An acting agent keeps its own judgement about what is safe to change,
+    and may describe a change and stop instead of making it. When it does,
+    relay that to the person as the answer — it is the agent's caution, not
+    a refusal of yours.
+
+    An observing agent running out of evidence is not a dead end. If it
+    reports it could not find something because a tool or capability it
+    lacks would be needed — not because there is nothing to find — hand the
+    same task to that domain's acting counterpart before you conclude or
+    escalate to a person. Reading more deeply through an acting agent is
+    not a change and needs no approval, even though that agent could also
+    write.
+
+    You may tell a person something cannot be checked or done in only two
+    cases: the covering agent tried and reported why it failed, or no
+    roster entry covers it — then say which kind of agent
+    this install does not list, never that nothing can be done.
+    Your own lack of access is never evidence. Before any answer saying
+    impossible, unknown or not answerable live, check the conversation: no
+    agent invoked on the matter means the answer is premature — go back to
+    the roster.
+
+    {{- if $r.enabled }}
+
+    ## The self-heal signal
+
+    One of your claimed sources (`{{ $r.source.name }}`) fires on a schedule
+    and carries no incident of its own — it exists only to trigger a survey
+    of what your `agents[]` has left open. When a conversation starts from
+    that source, invoke the entry named `{{ $r.name }}` and nothing else: do
+    not treat it as an ordinary task, and do not attempt the survey yourself.
+    {{- end }}
+  # REQUIRED, and with no default on purpose: `none` leaves output unformatted
+  # unless this profile's prompt says otherwise, and `blocks` shapes it by
+  # something the author never asked for. The author declares it.
+  outputFormat: {{ $c.outputFormat }}
+  {{- with $c.runtimeRef }}
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Coordinator
+metadata:
+  name: {{ $c.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-coordinator
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+spec:
+  # The coordinating agent's OWN capability — inline, exactly as a Pipeline's
+  # six fields would be. This is the agent that analyses what started the
+  # conversation and delegates to the agents in `agents[]` below. It is never
+  # one of them.
+  profileRef:
+    name: {{ $c.profileName }}
+  {{- with $c.runtimeRef }}
+  # WHAT EXECUTES this conversation. Unset resolves the AgentRuntime named
+  # `default`, which the PARENT renders.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with $c.serviceAccountName }}
+  # UNDER WHOSE IDENTITY. The account is the PARENT's to render
+  # (`rbac.runtime.serviceAccounts`) or yours to grant.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with $toolsets }}
+  # The coordination reach ONLY — list_agents, invoke, close, escalate, read
+  # and the list/get tools `global.builtinToolsets.coordinate` wildcards. No
+  # domain tool is ever bound here: what a domain task needs comes from the
+  # invoked entry's OWN capability, never from this one.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $mcpConfigs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with $sources }}
+  # Claimed exactly as a Pipeline claims — shareable, fanned out, counted in
+  # Wired. Every enabled bundle's own source (the same one its `pipelines`
+  # mode route would claim), plus the reaper's scheduled cron claim.
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $channels }}
+  # ESCALATION ONLY — never bound at conversation creation (coordinator-model).
+  # Includes the console claim above, when console is enabled.
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $c.limits }}
+  limits:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  # Every enabled bundle's AgentCapability (one entry per route it would have
+  # rendered as a Pipeline, never merged — `agentops.coordinatorContributions`)
+  # plus the reaper's own entry above.
+  agents:
+    {{- range $agents }}
+    - name: {{ .name }}
+      description: {{ .description | quote }}
+      {{- if .coordinator }}
+      coordinatorRef:
+        name: {{ .coordinator }}
+      {{- else }}
+      capabilityRef:
+        name: {{ .capability }}
+      {{- end }}
+    {{- end }}
+{{- end }}

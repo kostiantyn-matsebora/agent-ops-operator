@@ -31,7 +31,7 @@ func buildMediated(t *testing.T, cfg Config, med *agentopsv1alpha1.EgressMediati
 	t.Helper()
 	return Build(conversation("c1"), &agentopsv1alpha1.AgentProfile{},
 		mcpcompile.Result{Endpoints: endpoints}, "mcp-cm",
-		Resolved{Config: cfg, EgressMediation: med})
+		Resolved{Config: cfg, EgressMediation: med}, "master-key")
 }
 
 // Task 1.3 — the absent case is not "roughly the same pod", it is the same pod.
@@ -218,7 +218,7 @@ func TestMediationComposesWithContextSync(t *testing.T) {
 	cfg := medCfg()
 	cfg.ContextSyncImage = "context-sync:1"
 	pod := Build(conversation("c1"), &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm",
-		Resolved{Config: cfg, ContextSync: syncSpec(), EgressMediation: &agentopsv1alpha1.EgressMediation{}})
+		Resolved{Config: cfg, ContextSync: syncSpec(), EgressMediation: &agentopsv1alpha1.EgressMediation{}}, "master-key")
 
 	if pod.Spec.InitContainers[0].Name != egressInitContainer {
 		t.Fatal("the redirect must still be installed before the sidecar starts")

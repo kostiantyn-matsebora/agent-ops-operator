@@ -27,6 +27,13 @@ Implement tasks from an OpenSpec change.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
+1.5 **Work in the change's own working copy — THIS REPOSITORY'S STEP**
+
+   The change is implemented on `change/<name>`, from its own git worktree — or,
+   in a remote session, the session's clone with `change/<name>` checked out in
+   place, never a worktree added beside it
+   (`.claude/rules/worktree-delivery.md`, `.claude/rules/remote-session.md`).
+
 2. **Check status to understand the schema**
    ```bash
    openspec status --change "<name>" --json
@@ -83,6 +90,43 @@ Implement tasks from an OpenSpec change.
    - Error or blocker encountered → report and wait for guidance
    - User interrupts
 
+6.5 **Dispatch each named section to its role agent — THIS REPOSITORY'S STEP**
+
+   The tasks file names a role agent in each implementation section's heading
+   (`## <n>. <title> — <agent>`, the rule `openspec/config.yaml` injects).
+   The five roles live in `.claude/agents/`: `api-architect`,
+   `backend-developer`, `deployment-engineer`, `frontend-developer`,
+   `testing-specialist`.
+
+   - **One Agent dispatch per named section**, handing it the section's
+     tasks, the change name and the working copy's path. The agent edits in
+     its lane and never commits.
+   - **This session is the sole integrator.** Read the report, verify the
+     work with the section's own gates, tick the tasks, commit on
+     `change/<name>`.
+   - **A section naming no agent is worked directly**, exactly as step 6
+     says. Tasks files predating the convention have no named sections and
+     stay valid.
+   - **Dispatch per SECTION, never per task.** Each dispatch pays the full
+     inherited-rules context (`.claude/rules/gotchas.md`), so the section is
+     the unit that keeps the cost at a handful of dispatches.
+
+6.6 **Cross-role review before the pull request — THIS REPOSITORY'S STEP**
+
+   After the implementation sections are complete and before the pull
+   request opens, one round:
+
+   - **Each section's diff is reviewed by a role other than the one that
+     wrote it.** Picked by lane: `api-architect` for a diff touching its
+     lane that it did not write, otherwise `testing-specialist` for
+     sections it did not write, otherwise `backend-developer`. The writer
+     is excluded at every step of that chain.
+   - **Every finding is fixed on the branch, or recorded in the change with
+     the reason it stands.** None is silently dropped.
+   - **One round, bounded.** The CI review and its human triage remain the
+     authority — this pass catches what a role's bar sees before CI spends
+     a matrix on it.
+
 7. **On completion or pause, show status**
 
    Display:
@@ -90,6 +134,45 @@ Implement tasks from an OpenSpec change.
    - Overall progress: "N/M tasks complete"
    - If all done: suggest archive
    - If paused: explain why and wait for guidance
+
+8. **Once the pull request exists, ASK whether it is approved for automatic fixing — THIS REPOSITORY'S STEP**
+
+   The review posts findings as threads and SonarCloud reports issues; a pull
+   request carrying the `conveyor:fix` label has both fixed or disputed by CI,
+   round after round, with no per-thread `fix it` and no hand push
+   (`.claude/rules/worktree-delivery.md`, "The review found something").
+
+   - **The label is the OWNER'S decision about the change, given ONCE.** Ask,
+     in so many words: "Is this change approved for automatic fixing — if so,
+     place `conveyor:fix` on the pull request yourself." Never offer to place
+     it, never place it by default, never infer approval from a green run or
+     from the owner's silence.
+   - **THE WORD MAY ALREADY HAVE BEEN GIVEN, ON THE ISSUE.** A change started by
+     `conveyor:run` on its issue, placed by someone with write access, carries
+     that person's approval already: a WORKFLOW places `conveyor:fix` on the
+     pull request once it opens, recording whose instruction it carried
+     (`.claude/rules/remote-session.md`). Do not ask again, and do not place it
+     yourself in this case either.
+   - **NEITHER THE ASSISTANT NOR ANY SESSION MAY EVER RUN THIS COMMAND —
+     ON THIS ISSUE OR THIS PULL REQUEST, IN ANY MODE, ON ANY WORD.** A session
+     acts as an application with no write access of its own. A label it
+     places on its own work is refused and removed by the gate that checks
+     who labelled (#201, measured live). A program may CARRY a grant forward
+     or CONSUME one. It may never MINT one — and running this command on the
+     owner's behalf, even when asked, is minting it.
+   - **On the owner's explicit word, TELL THE OWNER THE COMMAND — do not run
+     it.** Only the owner's own `gh` session, under their own credentials,
+     may execute it:
+
+     ```bash
+     gh pr edit <n> --add-label conveyor:fix
+     ```
+
+   - **Without that word**, leave the pull request unlabelled; it is triaged
+     per thread as before.
+   - **A dispute the loop posts is a decision owed to the owner.** It arrives
+     as a thread reply (or a pull request comment, for an analysis issue)
+     mentioning them; `/opsx:archive` is refused until each is answered.
 
 **Output During Implementation**
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -29,7 +30,12 @@ const (
 	verdictGone      verdict = iota // the condition's subject no longer exists
 	verdictHealthy                  // it exists and recovered
 	verdictUnhealthy                // it exists and is still broken
-	verdictUnknown                  // we cannot say
+	verdictUnknown                  // it was observed, but no predicate says whether it is broken
+	// verdictUnreadable: the adapter's own view is unreadable — no snapshot,
+	// none taken within the window's closing part, or the latest read failed —
+	// so the close was not observed. Distinct from verdictUnknown: recurrence
+	// can only be judged from a log that was actually read.
+	verdictUnreadable
 )
 
 // pendingEntry is one integration's accumulating evidence.
@@ -46,11 +52,16 @@ type pendingEntry struct {
 	// delayed because a lax one happened to arrive first.
 	deadline time.Time
 	rule     compiledRule
-	// recurred records whether any record arrived after the first. It is the
-	// whole basis of verification rung 2, where no health predicate exists.
-	recurred bool
+	// lastSeen is when the most recent record arrived. It is the whole basis
+	// of verification rung 2, where no health predicate exists: not WHETHER
+	// the record recurred, but whether it was still recurring as the window
+	// closed. A network blip that logs for thirty seconds and stops has
+	// recurred, and is the transient the dwell exists to drop.
+	lastSeen time.Time
 	// sample is the most recent signal, used as the emitted signal's base so
-	// labels, fingerprint and title stay exactly as normalize built them.
+	// labels and title stay exactly as normalize built them. Its
+	// InitiationID is overridden at decide() time with the entry's own
+	// stable id — see initiationID().
 	sample Signal
 }
 
@@ -83,6 +94,37 @@ const minEscalationDwell = time.Minute
 // 10m rule reports a real outage in 2m30s and still outlasts a restart.
 const escalationDivisor = 4
 
+// closingWindowDivisor and minClosingWindow define the CLOSING part of a dwell
+// — the tail of the window a record must still be arriving in for the re-check
+// to believe it. A third of the window actually waited, floored at thirty
+// seconds, derived rather than configured. signals/k8s-events/pending.go
+// carries the same two numbers, and they are changed together.
+const closingWindowDivisor = 3
+const minClosingWindow = 30 * time.Second
+
+// closingWindow is how long before `now` the closing part of the window began.
+func closingWindow(waited time.Duration) time.Duration {
+	w := waited / closingWindowDivisor
+	if w < minClosingWindow {
+		w = minClosingWindow
+	}
+	return w
+}
+
+// closingSince is the instant the closing part of this entry's window began —
+// the `since` the health predicate is asked about.
+func (e *pendingEntry) closingSince(now time.Time) time.Time {
+	return now.Add(-closingWindow(now.Sub(e.firstSeen)))
+}
+
+// stillRecurring is rung 2: was the record still arriving as the window closed?
+func (e *pendingEntry) stillRecurring(now time.Time) bool {
+	if e.lastSeen.Equal(e.firstSeen) {
+		return false // never recurred at all
+	}
+	return !e.lastSeen.Before(e.closingSince(now))
+}
+
 type pendingQueue struct {
 	mu      sync.Mutex
 	entries map[string]*pendingEntry // key: source + "\x00" + integration
@@ -92,14 +134,17 @@ type pendingQueue struct {
 	// fresh one that escalation makes due at once.
 	emitted map[string]time.Time
 
-	// health answers the verification ladder.
-	health func(recordRef) verdict
+	// health answers the verification ladder: is this record's subject still
+	// broken, counting only what happened SINCE the given instant? The
+	// instant is the start of the window's closing part, so a log count that
+	// rose early in the window and then stopped rising is not "still broken".
+	health func(ref recordRef, since time.Time) verdict
 	// emit posts a batch for one source.
 	emit func(source string, sigs []Signal)
 	now  func() time.Time
 }
 
-func newPendingQueue(health func(recordRef) verdict, emit func(string, []Signal)) *pendingQueue {
+func newPendingQueue(health func(recordRef, time.Time) verdict, emit func(string, []Signal)) *pendingQueue {
 	return &pendingQueue{
 		entries: map[string]*pendingEntry{},
 		emitted: map[string]time.Time{},
@@ -124,8 +169,7 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule, count i
 
 	// Refractory: this integration was reported recently, so there is nothing
 	// to add by reporting it again. The manager already collapses repeats
-	// (fingerprint cooldown, signature window reuse) — re-posting only spends
-	// round trips.
+	// (initiationId cooldown) — re-posting only spends round trips.
 	if last, ok := q.emitted[key]; ok {
 		quiet := rule.dwell
 		if quiet < minRefractory {
@@ -145,12 +189,13 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule, count i
 			members:     map[string]recordRef{},
 			levelCounts: map[string]int{},
 			firstSeen:   now,
+			lastSeen:    now,
 			deadline:    now.Add(rule.dwell),
 			rule:        rule,
 		}
 		q.entries[key] = e
 	} else {
-		e.recurred = true
+		e.lastSeen = now
 		if d := now.Add(rule.dwell); d.Before(e.deadline) {
 			e.deadline = d
 		}
@@ -240,31 +285,43 @@ func (q *pendingQueue) Flush(now time.Time) {
 // decide runs the verification ladder over an entry's members.
 //
 //	rung 1  the integration has a health predicate  -> is it still broken?
-//	rung 2  no predicate, but we can read the log   -> did the record RECUR?
-//	rung 3  we cannot say at all                    -> EMIT (fail open)
+//	rung 2  no predicate, but we can read the log   -> was it STILL RECURRING at the close?
+//	rung 3  the log itself is unreadable            -> EMIT (fail open)
 //
 // An entry survives if ANY member is still unhealthy: an integration with one
-// broken code path is a broken integration.
+// broken code path is a broken integration. Rung 3 is unconditional — an
+// unreadable Home Assistant is itself an incident, never quiet churn, so no
+// other member's verdict and no recurrence test may swallow it.
 func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
-	anyUnhealthy, anyUnknown := false, false
+	anyUnhealthy, anyUnknown, anyUnreadable := false, false, false
+	since := e.closingSince(now)
 	for _, ref := range e.members {
-		switch q.health(ref) {
+		switch q.health(ref, since) {
 		case verdictUnhealthy:
 			anyUnhealthy = true
 		case verdictUnknown:
 			anyUnknown = true
+		case verdictUnreadable:
+			anyUnreadable = true
 		case verdictGone, verdictHealthy:
 			// this member resolved itself — the retry-and-succeed case
 		}
 	}
 
 	switch {
+	case anyUnreadable:
+		// rung 3: the close was not observed — fail open
+		log.Printf("dwell: %s emitted unverified — its state could not be read at the close (fail open)", e.integration)
 	case anyUnhealthy:
 		// rung 1: confirmed still broken
-	case anyUnknown && e.recurred:
-		// rung 2: no predicate, but it kept happening — still live
-	case anyUnknown && !e.recurred:
-		// rung 2: no predicate and it went quiet — it stopped
+	case anyUnknown && e.stillRecurring(now):
+		// rung 2: no predicate, but it was still happening at the close — live
+	case anyUnknown:
+		// rung 2: no predicate and it went quiet before the close — it stopped.
+		// Logged because this drop looks exactly like the live case until the
+		// timeline is on the record.
+		log.Printf("dwell: %s dropped as quiet — last record %s before the window closed (waited %s)",
+			e.integration, now.Sub(e.lastSeen).Round(time.Second), now.Sub(e.firstSeen).Round(time.Second))
 		return Signal{}, false
 	default:
 		// every member recovered: churn
@@ -276,7 +333,23 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	if len(e.members) > 1 {
 		sig.Title = fmt.Sprintf("%s (%d places)", sig.Title, len(e.members))
 	}
+	// The entry's own key — source + integration — IS the condition identity
+	// this queue already decides "same problem" by (it is what the
+	// refractory window and the entries map key on). A member's own
+	// per-record id (normalize's source@logger@location) only identifies
+	// which record happened to be the latest sample, which would drift
+	// across dwell cycles whenever breadth makes a different member last —
+	// splitting one recurring integration's history across conversations,
+	// the exact failure this correlation id exists to prevent.
+	sig.InitiationID = e.initiationID()
 	return sig, true
+}
+
+// initiationID is this entry's stable correlation id across every dwell
+// cycle it recurs through: source-scoped, so two SignalSources watching two
+// Home Assistant instances never collide on a common integration name.
+func (e *pendingEntry) initiationID() string {
+	return e.source + "@" + e.integration
 }
 
 // evidence renders the accumulated burst. This is why dwell is a feature rather
@@ -308,6 +381,7 @@ func (e *pendingEntry) evidence(now time.Time) string {
 	fmt.Fprintf(&b, "\n  places (%d): %s\n", len(places), strings.Join(places, ", "))
 	fmt.Fprintf(&b, "  first seen %s, still true at %s\n",
 		e.firstSeen.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  last seen %s before the window closed\n", now.Sub(e.lastSeen).Round(time.Second))
 	if len(e.sample.Payload) > 0 {
 		fmt.Fprintf(&b, "\nmost recent record:\n%s\n", e.sample.Payload)
 	}
@@ -321,4 +395,17 @@ func (q *pendingQueue) HasEntries() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.entries) > 0
+}
+
+// HasEntriesFor reports whether ONE source has something pending — what
+// decides a read issued on that source's session alone.
+func (q *pendingQueue) HasEntriesFor(source string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, e := range q.entries {
+		if e.source == source {
+			return true
+		}
+	}
+	return false
 }

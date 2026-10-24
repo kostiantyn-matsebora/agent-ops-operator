@@ -78,3 +78,29 @@ func TestNodeUnschedulable(t *testing.T) {
 		})
 	}
 }
+
+// signal-k8s-events copies this exact set into its own drain.go, rather than
+// importing it — modules here are standard-library only. Pinned literally on
+// BOTH sides (see signals/k8s-events/drain_test.go's TestConditionTaintSet) so
+// a key added to one without the other fails a test instead of drifting: the
+// adapter would otherwise suppress — or fail to suppress — a taint the manager
+// disagrees is a mere condition.
+func TestConditionTaintSetMirroredBySignalK8sEvents(t *testing.T) {
+	want := map[string]bool{
+		"node.kubernetes.io/not-ready":           true,
+		"node.kubernetes.io/unreachable":         true,
+		"node.kubernetes.io/memory-pressure":     true,
+		"node.kubernetes.io/disk-pressure":       true,
+		"node.kubernetes.io/pid-pressure":        true,
+		"node.kubernetes.io/network-unavailable": true,
+		"node.kubernetes.io/out-of-service":      true,
+	}
+	if len(conditionTaints) != len(want) {
+		t.Fatalf("condition taint set changed size: got %d want %d (%v)", len(conditionTaints), len(want), conditionTaints)
+	}
+	for k := range want {
+		if !conditionTaints[k] {
+			t.Errorf("condition taint set is missing %q", k)
+		}
+	}
+}

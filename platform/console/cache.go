@@ -24,6 +24,7 @@ import (
 type apiSource interface {
 	List(ctx context.Context, kind string) ([]*Object, string, error)
 	Watch(ctx context.Context, kind, resourceVersion string, fn func(eventType string, obj *Object)) error
+	Get(ctx context.Context, kind, name string) (*Object, error)
 }
 
 // Delta is one change to publish to subscribers.
@@ -211,6 +212,25 @@ func (c *Cache) Get(kind, name string) *Object {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.store[kind][name]
+}
+
+// GetOrFetch returns one object, falling back to a direct API read when the
+// watch cache has not (yet) seen it — a watch lags behind a reconciler that
+// just created the object, and a caller needing a definitive answer (deriving
+// a thread id from a conversation's UID, say) cannot wait for the next list.
+//
+// The fetched object is applied to the store like any watch event, so the
+// cache converges on it rather than re-fetching on every subsequent call.
+func (c *Cache) GetOrFetch(ctx context.Context, kind, name string) (*Object, error) {
+	if obj := c.Get(kind, name); obj != nil {
+		return obj, nil
+	}
+	obj, err := c.src.Get(ctx, kind, name)
+	if err != nil {
+		return nil, err
+	}
+	c.apply("ADDED", obj)
+	return obj, nil
 }
 
 // Synced reports whether a kind has completed its initial list.

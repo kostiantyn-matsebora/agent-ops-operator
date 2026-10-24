@@ -76,10 +76,23 @@ type signalResponse struct {
 	Reason        string `json:"reason,omitempty"`
 }
 
-// Start emits one chat signal. It returns the manager's drop reason when the
-// source is not claimed, rather than an error: nothing failed — the system is
-// telling the operator what is missing.
-func (o *Originator) Start(ctx context.Context, channel, sender, reader, task string) (reason string, err error) {
+// FreshInitiationID mints a new, unique initiationId for a brand-new task: the
+// request is its own aggregation unit, by construction — the contract's
+// "minted" case. A continuation into a conversation the console already
+// displays is the "propagated" case instead: the caller passes that
+// conversation's own conversationId to Start verbatim, never one of these.
+func FreshInitiationID() string {
+	return "console-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// Start emits one chat signal carrying initiationID verbatim — minted fresh
+// by the caller for a new task, or a conversation's own stamped conversationId
+// for a continuation. Start never mints or derives one itself: which case
+// applies is the caller's decision, not something to infer from the
+// arguments. It returns the manager's drop reason when the source is not
+// claimed, rather than an error: nothing failed — the system is telling the
+// operator what is missing.
+func (o *Originator) Start(ctx context.Context, channel, sender, reader, task, initiationID string) (reason string, err error) {
 	if o == nil {
 		return "", fmt.Errorf("this console holds no signal identity: declare a SignalAdapter with " +
 			"servedBy pointing at this ChannelAdapter, and set SIGNAL_SOURCE_NAME")
@@ -88,16 +101,12 @@ func (o *Originator) Start(ctx context.Context, channel, sender, reader, task st
 		return "", fmt.Errorf("no console Channel is served, so a reply would have nowhere to go")
 	}
 	var out signalResponse
-	// The fingerprint must be unique per message: cooldown is OFF for chat by
-	// default, but a repeated fingerprint would still be deduped, and a person
-	// asking the same thing twice means it twice.
-	fingerprint := "console-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	_, err = o.mgr.do(ctx, "POST", "/signal/inbound", map[string]any{
 		"source": o.source,
 		"signals": []map[string]any{{
-			"fingerprint": fingerprint,
-			"kind":        "chat",
-			"payload":     task,
+			"initiationId": initiationID,
+			"kind":         "chat",
+			"payload":      task,
 			// Opaque, and only so the manager can mark it read for the person
 			// who asked. Empty when this console has no salt projected.
 			"reader": reader,

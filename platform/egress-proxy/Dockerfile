@@ -20,7 +20,7 @@
 # which refuses a tag already in the registry and asserts the pushed manifest's
 # architectures against the declaration in .github/components.sh. The command above
 # builds locally; it does not publish.
-FROM --platform=$BUILDPLATFORM golang:1.23 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod ./
@@ -29,7 +29,13 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source=https://github.com/kostiantyn-matsebora/agent-ops-operator
-RUN apt-get update -qq && \
+# The same daily rebuild the runtimes carry (their Dockerfiles state why):
+# the base's own packages get security fixes too, and a cached layer applies
+# none of them.
+ARG APT_REFRESH=unset
+RUN echo "apt refresh: ${APT_REFRESH}" && \
+    apt-get update -qq && \
+    apt-get upgrade -y -qq && \
     apt-get install -y -qq --no-install-recommends iptables && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/egress-proxy /egress-proxy

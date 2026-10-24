@@ -1,0 +1,134 @@
+{{- /*
+Wiring component: the bundle's OWN routes — one per profile.
+
+Bundles normally ship no Pipeline. This one may because it owns its whole
+lane: the source, both profiles and both MCP pairs are rendered here, so the
+only foreign name a route needs is a channel, values-supplied and omitted
+when unset. It DEFAULTS OFF, and that default is the load-bearing part —
+enabling this bundle for its parts must never silently acquire routes beside
+the ones the install declared.
+
+BOTH routes claim the SAME shared alert source. Wiring is many-to-many — a
+source is claimed by as many Pipelines as an install wants — so two agents
+watching one source is the ordinary shape, not a conflict: sources are
+shareable with no tiebreak.
+
+UNDER `global.agentops.wiringMode: coordinator` THIS FILE RENDERS NOTHING —
+`capabilities.yaml` renders the same two routes as standalone
+AgentCapability objects instead, claimed by the chart-rendered Coordinator
+(`pulse.coordinatorContribution`).
+*/ -}}
+{{- if and (eq (include "agentops.wiringMode" .) "pipelines") (include "pulse.wiringActive" .) }}
+{{- $p := .Values.pipelines }}
+{{- $sig := .Values.signal }}
+{{- $mcp := .Values.mcp }}
+{{- /* Every ref below is emitted only when the object it names is rendered: a
+ref to a toolset nobody created is how an allowlist rots into fiction. */ -}}
+{{- $sources := list }}
+{{- if and $sig.enabled $sig.defaultSource.enabled }}{{ $sources = append $sources $sig.defaultSource.name }}{{ end }}
+
+{{- $observerTools := list }}
+{{- $observerConfigs := list }}
+{{- if include "pulse.observerMcpEnabled" . }}
+{{- $observerTools = append $observerTools $mcp.observer.toolset.name }}
+{{- $observerConfigs = append $observerConfigs $mcp.observer.name }}
+{{- end }}
+
+{{- $operatorTools := list }}
+{{- $operatorConfigs := list }}
+{{- if include "pulse.operatorMcpEnabled" . }}
+{{- $operatorTools = append $operatorTools $mcp.operator.toolset.name }}
+{{- $operatorConfigs = append $operatorConfigs $mcp.operator.name }}
+{{- end }}
+
+{{- $routes := list }}
+{{- if include "pulse.observerRouteEnabled" . }}
+{{- $routes = append $routes (dict
+      "name" $p.observer.name
+      "icon" ($p.observer.icon | default "")
+      "runtimeRef" ($p.observer.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "pulse.routeAccount" (dict "ctx" $ "cfg" $p.observer "p" $p))
+      "profile" .Values.profiles.observer.name
+      "sources" $sources
+      "tools" $observerTools
+      "configs" $observerConfigs) }}
+{{- end }}
+{{- if include "pulse.operatorRouteEnabled" . }}
+{{- $routes = append $routes (dict
+      "name" $p.operator.name
+      "icon" ($p.operator.icon | default "")
+      "runtimeRef" ($p.operator.runtimeRef | default $p.runtimeRef | default "")
+      "serviceAccountName" (include "pulse.routeAccount" (dict "ctx" $ "cfg" $p.operator "p" $p))
+      "profile" .Values.profiles.operator.name
+      "sources" $sources
+      "tools" $operatorTools
+      "configs" $operatorConfigs) }}
+{{- end }}
+{{- range $routes }}
+---
+apiVersion: agentops.dev/v1alpha1
+kind: Pipeline
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: agentops-pulse
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
+spec:
+  {{- with .icon }}
+  # Display only: how this route is recognised in a chat command menu or the
+  # console's typeahead. Nothing routes on it.
+  icon: {{ . | quote }}
+  {{- end }}
+  profileRef:
+    name: {{ .profile }}
+  {{- with .runtimeRef }}
+  # WHAT EXECUTES this route. Unset resolves the AgentRuntime named
+  # `default`, which the PARENT renders — no bundle renders a runtime, an
+  # identity or a credential, and naming one here creates nothing.
+  runtimeRef:
+    name: {{ . }}
+  {{- end }}
+  {{- with .serviceAccountName }}
+  # UNDER WHOSE IDENTITY, overriding the runtime's own.
+  #
+  # The account is the PARENT's to render (`rbac.runtime.serviceAccounts`) or
+  # yours to grant. Left unset, this bundle renders its own route account.
+  serviceAccountName: {{ . }}
+  {{- end }}
+  {{- with .sources }}
+  # Wiring is pipeline-only: without a claim a source reports Wired=False and
+  # DROPS every alert.
+  signalSourceRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with $p.channels }}
+  # A class of object this bundle does not render, so each is named from
+  # values and the key is absent when nobody named one. With no channel the
+  # conversation dispatches immediately and its answer lands in
+  # status.runs[].result.
+  channelRefs:
+    {{- range . }}
+    - name: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with .tools }}
+  # Declared, not inherited: profiles carry no capabilities and nothing
+  # supplies a default, so this stanza IS the agent's allowlist.
+  toolsets:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+  {{- with .configs }}
+  mcpConfigs:
+    refs:
+      {{- range . }}
+      - name: {{ . }}
+      {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

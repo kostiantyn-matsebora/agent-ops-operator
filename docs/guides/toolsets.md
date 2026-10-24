@@ -110,13 +110,14 @@ spec:
 ```
 <!-- /generated -->
 
-The chart ships three built-in toolsets, split by risk:
+The chart ships four built-in toolsets, split by risk:
 
 | Toolset | Tools |
 |---|---|
 | `agentops-observe` | `Read` `Grep` `Glob` |
 | `agentops-shell` | `Bash` |
 | `agentops-edit` | `Edit` `Write` |
+| `agentops-websearch` | `WebSearch` |
 
 ## Bind them to the Pipeline
 
@@ -127,8 +128,6 @@ kind: Pipeline
 metadata:
   name: my-route
 spec:
-  profileRef:
-    name: <name>
   toolsets:
     refs:
     - name: <name>
@@ -178,6 +177,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: "home-assistant-0.2.1"
 spec:
   tools:
     - mcp__homeassistant__GetLiveContext
@@ -186,6 +186,11 @@ spec:
     - mcp__homeassistant__HassGetCurrentDate
     - mcp__homeassistant__HassGetCurrentTime
     - mcp__homeassistant__todo_get_items
+    - mcp__homeassistant__homeassistant__GetLiveContext
+    - mcp__homeassistant__intent__HassGetState
+    - mcp__homeassistant__weather__HassGetWeather
+    - mcp__homeassistant__llm__GetDateTime
+    - mcp__homeassistant__todo__get_items
 ```
 <!-- /generated -->
 
@@ -201,6 +206,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: "home-assistant-0.2.1"
 spec:
   tools:
     - mcp__homeassistant__HassTurnOn
@@ -216,6 +222,19 @@ spec:
     - mcp__homeassistant__HassBroadcast
     - mcp__homeassistant__HassCancelAllTimers
     - mcp__homeassistant__HassListAddItem
+    - mcp__homeassistant__intent__HassTurnOn
+    - mcp__homeassistant__intent__HassTurnOff
+    - mcp__homeassistant__light__HassLightSet
+    - mcp__homeassistant__intent__HassSetPosition
+    - mcp__homeassistant__climate__HassClimateSetTemperature
+    - mcp__homeassistant__media_player__HassMediaPause
+    - mcp__homeassistant__media_player__HassMediaUnpause
+    - mcp__homeassistant__media_player__HassMediaNext
+    - mcp__homeassistant__vacuum__HassVacuumStart
+    - mcp__homeassistant__vacuum__HassVacuumReturnToBase
+    - mcp__homeassistant__assist_satellite__HassBroadcast
+    - mcp__homeassistant__intent__HassCancelAllTimers
+    - mcp__homeassistant__todo__HassListAddItem
 ```
 <!-- /generated -->
 
@@ -231,6 +250,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: "home-assistant-0.2.1"
 spec:
   servers:
     homeassistant:
@@ -257,6 +277,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: "home-assistant-0.2.1"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -288,6 +309,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: "home-assistant-0.2.1"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -305,6 +327,7 @@ spec:
       - name: agentops-observe
       - name: ha-observability
       - name: ha-actions
+      - name: agentops-websearch
       - name: agentops-shell
   mcpConfigs:
     refs:

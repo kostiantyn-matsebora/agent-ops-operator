@@ -1,0 +1,316 @@
+# A LABEL ON AN ISSUE STARTS A REMOTE SESSION THAT IMPLEMENTS IT, AND THE
+# STANDING INSTRUCTION IT MAY CARRY IS RELAYED AT THE TWO LATER TRANSITIONS.
+#
+# WHY THIS WORKFLOW EXISTS AT ALL, WHEN A ROUTINE COULD SUBSCRIBE TO EVENTS
+# ITSELF: a routine's GitHub triggers are `pull_request` and `release`. There is
+# no `issues` event, so a label cannot reach a routine directly — and the hop
+# through an Actions run is what buys the two things a direct trigger could not:
+#
+#   the gate    anyone with TRIAGE may label an issue, and triage is not write.
+#               A routine's filters read labels, never who placed them. Here the
+#               labeller is read off the event and checked against the
+#               collaborators API — the same gate `review-dispatch.yml` uses,
+#               because a label event carries no `author_association`.
+#
+#   the record  the fire returns a session url, posted once on the issue. A
+#               routine's own trigger leaves nothing on the issue at all.
+#
+# THREE JOBS, ONE STANDING INSTRUCTION READ THREE TIMES:
+#
+#   fire     `issues: labeled` on `conveyor:run` or `conveyor:implement` — starts
+#            the session, which opens its pull request UNLABELLED.
+#   open     `workflow_run` after `ci` completes on a `pull_request` event —
+#            reads the pull request's `Refs #<n>` and carries `conveyor:run`
+#            forward as `conveyor:fix` on THIS pull request, via carry.py.
+#   archive  `workflow_run` after `ci` completes on a `push` to the default
+#            branch — reads the merged pull request's SAME `Refs #<n>` and
+#            carries `conveyor:run` forward as `conveyor:archive` on the ISSUE
+#            (the pull request is closed by now, and a label there drives
+#            nothing). A no-op on the plain lane, and on an archive pull
+#            request (which carries `Closes`, never `Refs`).
+#
+# `open`/`archive` READ `workflow_run`, NEVER `pull_request`, DIRECTLY —
+# MEASURED, NOT ASSUMED. `pull_request`-triggered runs carry a `GITHUB_TOKEN`
+# with NO write access in this repository AT ALL, confirmed live: the token's
+# own `.permissions` (`repos/<owner>/<repo>`, queried from inside such a run)
+# came back `{admin: false, maintain: false, push: false, triage: false,
+# pull: false}` — every one of `default_workflow_permissions: write`, the
+# job's own `permissions: issues: write`, and every fork-PR-workflow toggle
+# left it exactly there. `workflow_run` sidesteps this because it is not the
+# `pull_request` event itself; the token it carries is the ordinary
+# repository-scoped one `review-dispatch.yml`'s own `workflow_run` jobs
+# already rely on, which is also why THAT file uses the identical trigger for
+# an unrelated reason (the trusted-checkout problem) — two problems, one fix.
+# `ci` is the anchor because it already runs on every `pull_request: opened`
+# and every `push` to the default branch, so its completion is a reliable
+# "a pull request now exists" / "a merge just landed" signal without a
+# dedicated workflow of this file's own.
+#
+# A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE. IT MAY NEVER MINT ONE.
+# `carry.py` re-reads the issue's CURRENT labels and re-checks the
+# placer's write access every time it is called — it never trusts that a
+# label exists because a workflow called it before, and it is also what
+# makes `ci` running MORE THAN ONCE per pull request (opened, then every
+# `synchronize`) harmless: the marker comment it posts on first carry
+# dedupes every later invocation.
+#
+# NEVER `pull_request_target`, here or anywhere in this repository: it runs with
+# the base repository's secrets against a head a stranger controls. Every job
+# here runs on an ordinary event of THIS repository, gated on who sent it, and
+# a fork's pull request is refused before anything is read.
+#
+# THE ENDPOINT IS NOT IN THE TREE. `ROUTINE_FIRE_URL` is a repository variable
+# (its path carries the routine's id) and `ROUTINE_FIRE_TOKEN` a secret. Without
+# both the program says so on the issue rather than failing silently.
+#
+# A MANUAL `archive` DISPATCH IS THE RECOVERY PATH FOR A MERGE THE ARCHIVE JOB
+# NEVER SAW. The job only ever inspects the commit of the `push` it reacted
+# to, so a change merged BEFORE this file could carry the label (#220, #226 —
+# #51 and #222 stuck at `station:archive` and `station:merge`) has no later
+# `push` to re-trigger it: master has since moved on, and the job never looks
+# at history. `workflow_dispatch` with a `pr` input lets a person re-run the
+# same carry logic against that PR NUMBER directly, instead of resolving one
+# from a commit sha — same script, same re-checked grant, same no-op on
+# anything that is not a same-repo `change/*` `Refs #<n>` pull request.
+name: remote-implement
+
+run-name: >-
+  ${{ github.event_name == 'issues' && format('remote-implement for #{0}', github.event.issue.number)
+      || github.event_name == 'workflow_dispatch' && format('remote-implement archive replay for #{0}', inputs.pr)
+      || format('remote-implement carry after {0}', github.event.workflow_run.display_title) }}
+
+on:
+  issues:
+    types: [labeled]
+  # THE TRUSTED TOKEN, NOT THE PULL REQUEST'S OWN. See the header comment —
+  # `pull_request` directly grants no write access in this repository at all,
+  # measured live; `workflow_run` is the ordinary repository-scoped token
+  # `review-dispatch.yml`'s own `workflow_run` jobs already carry.
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  # RECOVERY ONLY -- see the header comment. Never a routine trigger: nothing
+  # here subscribes a routine to this event, and the archive job below is the
+  # only one that reads `inputs.pr`.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Merged pull request number to replay the archive carry for (e.g. a merge that predates this recovery path)"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  fire:
+    # The vocabulary file is the authority and the program reads it; this
+    # expression is the prefilter, and it is the one place the labels' names
+    # are repeated — an expression cannot read a file. It must AGREE with
+    # `implement_label` / `run_label` in .github/review-triage.json.
+    if: >-
+      github.event_name == 'issues' &&
+      (github.event.label.name == 'conveyor:implement' || github.event.label.name == 'conveyor:run' || github.event.label.name == 'conveyor:archive')
+    runs-on: ubuntu-latest
+    permissions:
+      # To read the vocabulary file and the program: the checkout below needs
+      # it, and a default that happens to grant it is not a declaration.
+      contents: read
+      # To comment on the issue, and to remove the label from somebody who may
+      # not push. Nothing beyond these two.
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Who labelled this, and start the session
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+        run: python3 .github/scripts/remote-implement.py
+
+  # THE OPEN TRANSITION: a session's own pull request just appeared, carrying
+  # no label. If the issue it references still carries `conveyor:run` from a
+  # writer, carry it forward as the fix-station label on THIS pull request.
+  #
+  # Fires on `ci` completing FOR a `pull_request` event -- `ci` runs on every
+  # `opened` AND every `synchronize`, so this job runs more than once per pull
+  # request. Harmless: carry.py's marker comment dedupes every carry
+  # after the first, and re-adding an already-present label is a no-op.
+  #
+  # CONCLUSION IS 'success' OR 'failure', NEVER 'success' ALONE -- THAT WAS THE
+  # BUG. `ci-green`'s `needs:` includes `review-clean` (a job in this same
+  # `ci.yml` run that polls `claude-review.yml`'s own conclusion for the sha),
+  # so `ci-green` failing makes the WHOLE `ci` run's conclusion `failure`
+  # whenever the review posted findings -- exactly the pull request that most
+  # needs `conveyor:fix` carried onto it. Gating this job on `success` alone
+  # meant it never ran for that case: the carry that starts the fixing loop
+  # waited on the very green state the fixing loop exists to produce (#51).
+  # `review-dispatch.yml`'s own header already treats a red `ci-green` as a
+  # work item ("a `ci` run completing with `failure` starts a round"), so
+  # accepting `failure` here only lets the carry happen -- carry.py
+  # still re-checks the writer's `conveyor:run` and the `change/*` branch
+  # guard before anything lands, and the loop itself still reproduces or
+  # disputes each failing check rather than blindly patching.
+  open:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    # PULL-REQUESTS: write -- MEASURED, NOT ASSUMED. `gh issue edit <pr>
+    # --add-label` accepts a pull request's number (the REST shape is
+    # shared), but the GRAPHQL MUTATION IT USES REQUIRES pull-requests:
+    # write on the pull request TARGET -- `issues: write` alone 403s
+    # (`addLabelsToLabelable`), confirmed live. Read is what resolving WHICH
+    # pull request a workflow_run concerns needs (`commits/<sha>/pulls`);
+    # write is what LABELLING it needs. ISSUES: write stays for the marker
+    # comment carry.py posts, through `gh issue comment`.
+    #
+    # ACTIONS: write IS FOR THE RE-DISPATCH BELOW, AND NOTHING ELSE. Adding a
+    # label through the API, under a workflow token, fires no `pull_request:
+    # labeled` webhook -- the platform suppresses events from actions it
+    # triggered itself, the same suppression already documented for a
+    # workflow-token push never starting a new `pull_request` run. So a
+    # carried `conveyor:fix` would sit on the pull request unactioned until
+    # SOME later event (a push, a comment) happened to re-enter
+    # `review-dispatch.yml`'s gate -- silently, with no round starting, which
+    # reads as the automation simply not working. `workflow_dispatch` is
+    # already one of that gate's valid triggers, so firing it explicitly here
+    # closes the gap at the moment the grant is actually carried.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      # THE TRUSTED COPY, NOT THE PULL REQUEST'S. See the header comment --
+      # this ALSO buys the trusted checkout, exactly as review-dispatch.yml's
+      # own workflow_run jobs already rely on it for. Even on a same-repo,
+      # non-fork pull request, `carry.py` deciding what a grant means
+      # must run the version this repository's own default branch ships.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - id: carry
+        name: Carry the standing instruction onto the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          # A workflow_run payload carries no pull_request.body directly, so the pull
+          # request is resolved from the run's head sha. carry.py takes it from there:
+          # it gathers the facts, asks the state machine (`conveyor.py`) what the
+          # instruction stands for on THIS pull request, and acts on the answer.
+          #
+          # A FAILED LOOKUP AND A GENUINELY EMPTY ONE ARE DIFFERENT FACTS --
+          # `gh api`'s own exit status is checked BEFORE `| head -1` can turn either
+          # shape into the same empty string, so a transient API failure is never
+          # read as the ordinary "no pull request" case.
+          if ! api_out=$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
+            --jq '.[] | select(.state == "open") | .number'); then
+            echo "::error::could not look up pull requests for ${HEAD_SHA:0:7}; not the ordinary no-pull-request case"
+            exit 1
+          fi
+          pr=$(printf '%s\n' "$api_out" | head -1)
+          if [ -z "$pr" ]; then
+            echo "no open pull request for ${HEAD_SHA:0:7}; nothing to carry"
+            exit 0
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$pr" --station fix \
+            --ci-conclusion "$CI_CONCLUSION"
+      # THE ROUND STARTS FROM THE CARRY'S OWN ANSWER, never from scraping its text: carry.py
+      # says `dispatch_round=true` only when the review had ALREADY completed for the head,
+      # because otherwise the review's own completion starts the round and dispatching here
+      # too made two rounds of one push, both spending the budget.
+      - name: Start a round
+        if: steps.carry.outputs.dispatch_round == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run review-dispatch.yml --repo "$GITHUB_REPOSITORY" -f "pr=${{ steps.carry.outputs.pr }}" -f mode=all
+
+  archive:
+    # `ci`'s own `push:` trigger is already scoped to `branches: [master]`,
+    # so a `push`-event workflow_run for it is a push to the default branch
+    # BY CONSTRUCTION today -- this check is what keeps that true if the
+    # default branch is ever renamed without ci.yml's trigger following it,
+    # rather than the archive job silently going quiet on a mismatch.
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # ISSUES: write TO CARRY -- carry.py --station archive labels and
+    # comments the ISSUE alone through gh issue edit / gh issue comment.
+    # PULL-REQUESTS: read TO FIND -- resolving the merged pull request from
+    # the pushed commit uses the search API, which needs the same scope as
+    # the open job's commit lookup.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      # THE TRUSTED COPY, NOT THE MERGED COMMIT'S -- same reasoning as the
+      # open job above.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - id: carry
+        name: Carry the standing instruction to the archive station
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DISPATCH_PR:-}" ]; then
+            pr="$DISPATCH_PR"
+          else
+            # The pull request that MERGED to produce this push, found by its sha.
+            if ! pr=$(gh api --method GET search/issues \
+              -f "q=repo:$GITHUB_REPOSITORY is:pr is:merged $HEAD_SHA" \
+              --jq '.items[0].number'); then
+              echo "::error::could not search for a merged pull request on $HEAD_SHA; not the ordinary no-pull-request case"
+              exit 1
+            fi
+            if [ -z "$pr" ] || [ "$pr" = "null" ]; then
+              echo "no merged pull request found for $HEAD_SHA; nothing to carry"
+              exit 0
+            fi
+          fi
+          # carry.py asks the machine: a FINISHED change reaches the archive station; an
+          # UNFINISHED one restarts implement instead, when nothing is open from its branch
+          # (a phase merged, the next has not started -- #53, measured across two phases).
+          python3 .github/scripts/carry.py --repo "$GITHUB_REPOSITORY" --pr "$pr" --station archive
+      # Placing a label through this job's own token fires no `issues: labeled` webhook, so the
+      # session is started HERE, from the carry's own answer (`fire_issue` + `fire_label`), with
+      # the same payload shape a real event carries. remote-implement.py re-checks the grant
+      # exactly as it does for any bot-carried label, so this is the same program reading the
+      # same facts. THE LABEL IS THE CARRY'S OWN OUTPUT, never restated: archive for a finished
+      # change, implement for a restart.
+      - name: Start the next session (archive, or implement restarted for the next phase)
+        if: steps.carry.outputs.fire_issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          ISSUE: ${{ steps.carry.outputs.fire_issue }}
+          LABEL: ${{ steps.carry.outputs.fire_label }}
+        run: |
+          set -euo pipefail
+          # `"restart":true` ONLY WHEN THE LABEL IS implement_label: carry.py's
+          # `restart` action is the only source of this payload shape, and it
+          # is what lets `fire` restart a station that already fired once --
+          # never set for the ordinary archive-session start below it.
+          RESTART=false
+          IMPLEMENT_LABEL=$(python3 -c 'import json;print(json.load(open(".github/review-triage.json"))["implement_label"])')
+          if [ "$LABEL" = "$IMPLEMENT_LABEL" ]; then RESTART=true; fi
+          payload=$(mktemp)
+          printf '{"label":{"name":"%s"},"issue":{"number":%s},"sender":{"login":"github-actions[bot]"},"restart":%s}' \
+            "$LABEL" "$ISSUE" "$RESTART" > "$payload"
+          python3 .github/scripts/remote-implement.py --event "$payload" --repo "$GITHUB_REPOSITORY"

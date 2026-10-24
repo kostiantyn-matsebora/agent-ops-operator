@@ -1,0 +1,22 @@
+stateDiagram-v2
+    direction LR
+    [*] --> station_none
+    note left of station_none
+        conveyor.propose  --  subject: issue
+    end note
+    classDef stationState fill:#e8d5b5,stroke:#8a6d3b,color:#4a3b1f
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
+    state "station:none" as station_none
+    state "station:proposing" as station_proposing
+    state "station:proposed" as station_proposed
+    state "station:ready" as station_ready
+    station_none --> station_proposing : proposal_pr_opened
+    station_proposing --> station_proposed : loop_entered_mergeable [proposal_pr_is_mergeable]
+    station_proposed --> station_ready : proposal_pr_merged
+    station_ready --> [*]
+    class station_none, station_proposing, station_proposed, station_ready stationState
+    state station_proposing {
+        [*] --> station_proposing__loop
+        state "loop" as station_proposing__loop
+    }
+    class station_proposing__loop loopState

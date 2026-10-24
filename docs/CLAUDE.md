@@ -13,41 +13,129 @@ path. Plugins are limited to the set Pages enables by default.
 
 | Page | Owns |
 |---|---|
-| `index.md` | the name, one sentence, the claim chips, the tab strip (the presentation, the recording, the manifest), `Why agent-ops?` and its areas table, paths onward |
+| `index.md` | the name, the essence sentence, two actions, the tab strip (the drawing, the recording, the manifest), `What agent-ops is` and `What it gives you` as tile sets, the console strip, paths onward |
 | `introduction.md` | the model — two sections, concepts and guides, no reference detail |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
-| `installation.md` | the REAL install, and the PARENT chart's values |
+| `installation.md` | the REAL install: the commands, the first route, and the storage access mode — one decision, two keys (`accessModes`, `storageClassName`). **No exhaustive values** |
+| `configuration.md` | every value the chart takes — a REFERENCE page read on GitHub, not a site page |
+| `integrations/<system>.md` | one integration each: what starts work, what it may reach, where it answers, what turning it on costs |
+| `runtimes/<vendor>.md` | one runtime each: what it EXECUTES, what it NEEDS from you, where its context lives, what turning it on costs |
 | `guides/*.md` | one adoption tier each, in learning order — hand-written prose around GENERATED resource blocks |
 
+- **THE LINE BETWEEN THE TWO IS IRREVERSIBILITY, not importance.** A setting
+  belongs on `installation.md` only when a later `helm upgrade` cannot undo it —
+  which is the storage access mode alone. A PVC's `accessModes` and
+  `storageClassName` are both part of its immutable `spec`, so getting either
+  wrong means deleting the claim, not upgrading past it.
+  - **Two earlier "irreversible" settings were WRONG, not merely importance
+    calls, and are gone rather than reworded.** CRD ownership named a decision
+    that does not exist — Helm never deletes CRDs from a chart's `crds/`
+    directory, and the keep annotation is on the PVC, not a CRD. The model
+    credential has no default to get wrong. There is nothing to undo, only a
+    different Secret to create.
+  - **`allowPodExecution` READS like an install decision and is not one.** It
+    defaults to `false`, so an install cannot come up over-privileged, and
+    granting it later is an upgrade like any other.
+  - **The page was 775 lines and is 204.** It documented every value
+    exhaustively, which the rule two paragraphs down already forbade — a reader
+    deciding whether to try this scrolled a reference manual first.
 - **`console-guide.md` is published at `/console/`.** `console.md` is the
   untouched reference and keeps its own URL.
   - **What the console is FOR goes to the guide.** What it IS goes to the
     reference.
+- **THERE IS NO INTEGRATION INDEX PAGE, AND THE NAV GROUP IS THE INDEX.** A
+  page listing what `_data/nav.yml` already lists is a second navigation written
+  by hand, edited in step with the first forever.
+  - **A name with no page of its own leads to whatever owns it** — the console to
+    the console guide, cron and bring-your-own to `guides/signal-adapter.md`,
+    any MCP server to `guides/toolsets.md`.
+- **AN INTEGRATION PAGE IS NAMED FOR THE SYSTEM, NEVER FOR THE SUBCHART.**
+  `integrations/home-assistant.md`, not `ha.md`. Packaging is renamed when its
+  scope is understood better — `vm-bundle` → `prometheus-bundle` → `prometheus`
+  — and a reader's bookmark should survive that.
+  - **The four answer the same four questions in the same order**, which is the
+    `Pipeline`'s own: what starts work, what it may reach, where it answers,
+    what it costs to turn on.
+  - **"Where it answers" is OMITTED where the system carries no answers**, never
+    left present and empty. Telegram is the only one that has it.
+  - **NO EXHAUSTIVE VALUES TABLE, AND NO RENDERS TABLE.** An integration page
+    is a page an adopter meets first, not a reference page — it names the
+    handful of values with no sane default, states the one real decision in
+    prose, and points everything else at the chart's own `values.yaml`.
+    `kubernetes`/`prometheus`/`home-assistant`/`pulse` all carried both once
+    and were cut to the same shape `installation.md` was (775 lines to 204).
+    The `renders` marker stays for `cr-reference.md`, `guides/` and
+    `runtimes/<vendor>.md` — pages that ARE reference pages.
+  - **A RUNTIME IS NOT AN INTEGRATION.** A runtime is what EXECUTES an agent,
+    not a seam a Pipeline wires, and three of the four questions would be
+    blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
+    Runtimes nav group, answering its own four: what it executes, what it
+    needs, where its context lives, what it costs. `runtimes/ollama.md` is the
+    first, `runtimes/copilot.md` the second. `docs/claude.md` stays a reference page until a change moves it.
+  - **The `renders` marker applies to a runtime bundle too.** It has no
+    sub-components, so the whole of it is the generator's "Always" row.
+  - **A page states no exhaustive values.** `helm show values` is the list, and
+    a hand-copied inventory rots.
 - **Every product asset is build output**, never a hand capture, and every one
   is rendered from ONE curated fixture that names no real cluster.
   - **The screenshots** — `npm run screenshots` in `console/ui`, published to
     `assets/img/console/`, shown on the CONSOLE page.
   - **The landing recording and its poster** — `npm run demo` in the same
     place, published to `assets/video/`, shown on the LANDING page.
-- **The six views are toured in ONE place**, the Console page. The landing page
+- **The five views are toured in ONE place**, the Console page. The landing page
   shows the recording instead — a still cannot show work arriving and being
   answered.
 - **The recording carries no text of its own.** No caption, no title card. What
   each beat shows is the page's words, beside it.
-- **Every other `docs/*.md` is a reference page, not a site page.** They carry no
-  front matter, so Jekyll copies them verbatim. Do not add front matter, headings
+- **`CHANGELOG.md` AND `testing.md` ARE REFERENCE PAGES, NOT SITE PAGES**, and
+  both were published once. Neither is adopter-facing: the changelog is a
+  technical record of chart versions, and testing is CONTRIBUTOR material —
+  what a change's `tasks.md` must declare, what gates a pull request, how to
+  run each tier. `installation.md` links the changelog on the forge, exactly as
+  `index.md` links `concepts.md` and `contracts.md`.
+  - **The sidebar was the only way to either of them.** Nothing on the site
+    linked `testing.md` at all, and a nav group is not a reason for a page to
+    exist.
+  - **A file with no front matter is copied VERBATIM, so its Liquid stops
+    being evaluated.** The changelog's four archive links were
+    `{% raw %}{{ '/changelog/…' | relative_url }}{% endraw %}` and became
+    ordinary relative paths in the same edit — left alone they would have
+    rendered as literal braces.
+- **Every other `docs/*.md` is a reference page, not a site page.** They carry
+  no front matter, so Jekyll copies them verbatim. Do not add front matter, headings
   or navigation entries to them — publishing one is its own change.
+  - **`contracts/runtime.md`, `contracts/channel-adapter.md` and
+    `contracts/signal-adapter.md` all took that change.** Each is a
+    per-extension-point contract rewritten to a versioned spec, so each
+    carries front matter and a "Specifications" nav entry — see
+    `.claude/site.md`.
 - **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
   field of every kind, written by `.github/scripts/docs-generate.py` from
   `chart/crds/`. Never edit it, and never give it a nav entry.
   - **The `yaml` blocks in `guides/` come from the same run** — the resource
     templates from the CRDs, the worked examples from `helm template`.
+  - **What a BUNDLE RENDERS comes from the same run** —
+    `<!-- generated: renders bundle=<subchart> -->` fills a table with a row per
+    component, attributed by rendering the chart with that component off and on
+    and diffing the objects. The bundle is named by its SUBCHART DIRECTORY.
+  - **A STRUCT'S JSON SHAPE comes from the same run** —
+    `<!-- generated: struct-table file=<path> struct=<name> -->` fills a
+    Field/Type/Required/Description table from one Go struct's json-tagged
+    fields and doc comments. `contracts/runtime.md` carries one of these
+    per wire shape it documents — work unit, completion report, and each
+    nested telemetry struct. Scope is deliberately narrow — a single-line
+    `Name Type` + json tag, no embedding — so `--check` fails loudly on a
+    shape it cannot read rather than silently skipping a field.
   - **A page declares what it wants in an HTML comment**
     (`<!-- generated: … -->`) and the generator fills the block beneath it. CI
     regenerates everything and FAILS on a difference, which is the only thing
     that stops a committed generated file rotting.
+  - **The generator owns what is rendered. The page owns what it means.** A
+    generated table states objects. Which one is conditional, which account
+    carries which grant, and why a component exists at all are the prose around
+    the block — write them there, or the next regeneration deletes them.
 
 **Adding a page is the markdown file plus ONE line in `_data/nav.yml`**, and the
 page DECLARES its own `permalink`. No permalink style is configured, and the
@@ -106,6 +194,18 @@ Everything here is written to be SCANNED. The markdown is the structure.
   to be read twice, it is wrong.
 - **NO SEMICOLONS.** A `;` is a full stop that lost its nerve — the tell of a
   sentence that should have been two. Forbidden whatever the grammar allows.
+  - **THE SEMICOLON IS THE SYMPTOM, AND THE FULL STOP IS NOT THE CURE.**
+    Swapping one for the other keeps the two crammed thoughts and just makes
+    them choppier. Ask which structure the sentence wanted — usually a list or
+    a table — and write that.
+  - **ONE THOUGHT PER SENTENCE, NOT ONE CLAUSE.** Pulling a single thought in
+    half reads as badly as cramming two together: "removes the workloads. It
+    leaves the CRDs" hides the contrast that "removes the workloads but leaves
+    the CRDs" states. A sentence carrying one idea in three clauses is finished
+    as it is.
+  - **The tell of overcorrecting is a verbless fragment** — "Two volumes.",
+    "It is below." Both were shipped on `installation.md` by applying the rule
+    above mechanically, and both had to be written again.
 - **Small paragraphs.** Past about three lines it stops being read.
 - **Emphasise the load-bearing phrase**, not the sentence around it. Everything
   bold means nothing bold.
@@ -162,11 +262,12 @@ style, no script in a page.
 | `{: .ao-callout}` | a blockquote that EMPHASISES. The plain one is an ASIDE in `--ao-text-subtle`, so rendering a load-bearing claim in it puts a footnote where the weight belongs |
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
-| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the presentation |
+| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the drawing `{: .ao-presentation}` builds |
 | `{: .ao-demo}` | on a LINK whose target is a recording and whose content is the poster image, it becomes a player. With no script it stays the poster, linking to the file |
 | `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
-| `{: .ao-claims}` | a list becomes the claim chips under the page's opening sentence. A claim may carry a mark the PAGE names |
-| `{: .ao-presentation}` | an ORDERED list becomes the presentation: one item per beat, the item's text its caption, a fenced block under it the manifest stanza that beat is about. The THEME supplies the drawing, the timing and the controls, and it names no integration mark. With no script it stays the beats in order, each with its own lines. Under `prefers-reduced-motion` it is the composed drawing plus that same list, and it KEEPS the play button — the preference means do not move things at the reader, not never let them ask, so removing the control is the edit to not make again |
+| `{: .ao-actions}` | a list of LINKS becomes the hero's actions, under the page's opening sentence. Two at most — what a convinced reader does next, and what a nearly-convinced one does. The first is solid, the second quiet |
+| `{: .ao-claims}` | a list becomes claim chips under the page's opening sentence. A claim may carry a mark the PAGE names. **THE LANDING PAGE USES NONE** — six of them bracketed the drawing and were what a reader met before the product |
+| `{: .ao-presentation}` | an ORDERED list becomes the drawing: one item per beat, the item's text its caption. The THEME supplies the drawing, the timing and the caption's lane, and it names no integration mark. **THE FIGURE IS THE CONTROL** — clicking it pauses, and there is no transport: the play button, beat counter, ten scrub dots, progress bar and per-beat manifest box are DELETED, having been more machinery than the drawing they explained. The caption sits in a reserved lane inside the stage, tracking whatever the beat lights. **A REDUCED-MOTION READER GETS THE SAME FIGURE, PAUSED FROM THE START**, with a `· press to play` caption cue and a matching `aria-label` as the only sign it can be pressed — never a second control, and never the beat list duplicated below it. With no script it stays the beats in order, each with its own lines |
 | `{: .ao-areas}` | a two-column table of areas of use, the left column a name and its mark, the right what happens there. Below the measure the two columns become two lines |
 | `{: .ao-console-strip}` | a blockquote becomes the full-width strip under that table — a mark, one lead line, one paragraph and a list of tags |
 | `next:` in front matter | the what-next card (eyebrow / title / body / url) at the foot of the on-this-page rail. A page declaring none gets no card |
@@ -284,10 +385,14 @@ with its Chromium in `~/.cache/ms-playwright`. Drive it from a script and assert
   server, rebuild, start it again.
 
 ## Authoring rules (binding)
-Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
-Structure over prose:
-Steps → numbered list.
-Choices / mappings → table.
-"X means Y" → **X.** Y on its own line.
-Multi-rule bullet → parent + sub-bullets, one rule per line.
-Prose paragraph stating > 2 rules → restructure.
+
+The shape rules, stated once and quoted, never paraphrased — see
+`.claude/rules/writing.md`:
+
+    Concise + LLM-optimized. Cut filler, marketing tone, preambles. Every sentence earns its tokens.
+    Structure over prose:
+    Steps → numbered list.
+    Choices / mappings → table.
+    "X means Y" → **X.** Y on its own line.
+    Multi-rule bullet → parent + sub-bullets, one rule per line.
+    Prose paragraph stating > 2 rules → restructure.

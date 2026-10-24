@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -94,6 +95,7 @@ func (s *Server) handleContextReport(w http.ResponseWriter, r *http.Request) {
 		LatencyMs:    rep.DurationMs,
 		Code:         contextCodes[rep.Reason],
 		Detail:       contextDetail(rep),
+		Data:         contextData(rep),
 	})
 
 	// ONLY a checkpoint that actually transferred data updates the CR. A skip
@@ -121,6 +123,19 @@ func contextDetail(rep contextReport) string {
 		"bytes": rep.Bytes, "files": rep.Files, "quiesced": rep.Quiesced,
 	})
 	return string(b)
+}
+
+// contextData carries the same facts as the detail, structured. The detail
+// stays as it was for the readers that parse it.
+func contextData(rep contextReport) map[string]string {
+	if rep.Error != "" {
+		return nil
+	}
+	return map[string]string{
+		"bytes":    strconv.FormatInt(rep.Bytes, 10),
+		"files":    strconv.Itoa(rep.Files),
+		"quiesced": strconv.FormatBool(rep.Quiesced),
+	}
 }
 
 // recordCheckpoint stamps the durable half onto the Conversation.

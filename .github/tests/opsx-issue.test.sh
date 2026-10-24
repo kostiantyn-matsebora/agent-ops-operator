@@ -93,8 +93,12 @@ assert_not_contains "$(cat "$GH_CALLS")" "issue create"
 it "reads the binding back"
 assert_equals "101" "$(S number demo-change)"
 
+# THE BODY IS THE PROJECT'S TO REWRITE ONLY WHERE THE PROJECT WROTE IT. The
+# fixture here is a body carrying the pointer's own sentence, which is what a
+# script-opened issue holds.
+printf '{"body":"demo\\n\\nThe change directory is the source of truth — the why"}' > "$tmp/ours.json"
 it "advances the phase, removing the labels it is leaving"
-: > "$GH_CALLS"; S phase demo-change review >/dev/null
+: > "$GH_CALLS"; GH_FIXTURE="$tmp/ours.json" S phase demo-change review >/dev/null
 calls=$(cat "$GH_CALLS")
 assert_contains "$calls" "--add-label opsx:review"
 
@@ -103,6 +107,9 @@ assert_contains "$calls" "--remove-label opsx:proposed"
 
 it "comments once per transition, not per task"
 assert_equals "1" "$(printf '%s\n' "$calls" | grep -c 'issue comment')"
+
+it "regenerates the body of an issue it opened itself"
+assert_contains "$calls" "issue edit 101 --body"
 
 it "refuses a phase that is not one of the four"
 S phase demo-change halfway >/dev/null 2>&1
@@ -122,6 +129,20 @@ assert_not_contains "$(cat "$GH_CALLS")" "issue create"
 
 it "binds the promoted issue's number"
 assert_equals "77" "$(cat "$repo/openspec/changes/promoted-change/.github-issue")"
+
+# THE FIRST PROMOTED ISSUE TAKEN THROUGH `phase archived` LOST ITS REPORTER'S
+# WORDS: the body was regenerated unconditionally, and on a promoted issue the
+# body is theirs. Verified live on a probe issue before this test existed. The
+# fixture is a body with no pointer sentence in it — a stranger's report.
+printf '{"body":"A thing I noticed, in my own words."}' > "$tmp/theirs.json"
+it "advances a promoted issue without touching the reporter's body"
+: > "$GH_CALLS"; GH_FIXTURE="$tmp/theirs.json" S phase promoted-change applying >/dev/null
+calls=$(cat "$GH_CALLS")
+assert_not_contains "$calls" "issue edit 77 --body"
+
+it "and refreshes the pointer as a comment instead"
+assert_contains "$calls" "$(printf '%s' "issue comment 77 --body")"
+assert_equals "2" "$(printf '%s\n' "$calls" | grep -c 'issue comment 77')"
 
 it "refuses a change that does not exist"
 S open no-such-change >/dev/null 2>&1

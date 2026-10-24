@@ -9,15 +9,27 @@
 //	config:   {"endpoint":"https://ha.example.org","levels":["ERROR"],"rules":[...]}
 //	credential: AGENTOPS_CRED_<SOURCE>_token, projected by the reconciler
 //	cursor:   state key "last-record" via /signal/state (restart-safe)
-//	emitting: POST /signal/inbound, kind=alert, fingerprint "<source>@<logger>@<file:line>"
+//	emitting: POST /signal/inbound, kind=alert, initiationId "<source>@<logger>@<file:line>"
+//	          for a zero-dwell rule, "<source>@<integration>" for a dwelled one
 //
-// The adapter normalizes and nothing more: no dedup, no grouping, no cooldown
-// beyond its restart cursor. Repetition collapses manager-side, which is why
-// the fingerprint keys on the LOGGER and SOURCE LOCATION — Home Assistant's own
-// deduplication key — rather than on the occurrence.
+// The adapter mints each signal's initiationId and applies no cooldown. What
+// it keeps is its restart cursor and, per record, the timestamp of the last
+// occurrence it considered — so one occurrence is considered once whichever
+// of the two arrival paths brings it. Cooldown and routing are manager-side,
+// keyed on that id, which is why it keys on the LOGGER and SOURCE LOCATION —
+// Home Assistant's own deduplication key — or on the integration a dwell
+// coalesces under, and never on the occurrence.
 //
 // Run single-instance (the reconciler's singleton default): two sessions would
 // double-post every record.
+//
+// The log is one of five surfaces the instance reports on. Beside it, on the
+// same source and through the same rules: config entry state and the issue
+// registry (read on the fifteen-second sweep), and fault sensors and pending
+// updates (read from the house's states once a minute). Each condition is
+// shaped as a record by surfaces.go and labelled `surface=`; a per-surface
+// standing set feeds it to consider once on appearance. Every surface is
+// switchable under spec.config.surfaces, and one that is off is never read.
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default
 // "home-assistant"), EMIT_PER_MINUTE.
@@ -46,6 +58,26 @@ const (
 	// `for: 30s` rule is not meaningfully delayed, coarse enough to cost
 	// nothing when the queue is empty.
 	dwellTick = 5 * time.Second
+	// pollEvery is how often a connected source's log listing is read and
+	// what is newer than the cursor is considered. THE LISTING IS THE SOURCE
+	// OF RECORDS, not the event: Home Assistant fires `system_log_event`
+	// only under `system_log: fire_event: true`, off by default, and an
+	// adapter that waited for it saw the log once per reconnect and nothing
+	// in between. A constant rather than a knob: fifty small objects every
+	// fifteen seconds cost nothing measurable on either side, a `for: 0`
+	// rule gains at most this much latency, and every dwelled rule is
+	// measured in minutes.
+	pollEvery = 15 * time.Second
+	// statesEvery is the cadence of the states read — the whole house, several
+	// hundred kilobytes on a modest install — that feeds the sensor and update
+	// surfaces. A minute, not the poll interval: every rule that ships for
+	// those surfaces dwells for minutes, and reading the house four times a
+	// minute against a Raspberry Pi buys nothing anyone can observe.
+	statesEvery = time.Minute
+	// registryEveryReads is how many states reads pass between re-reads of
+	// the entity registry, which maps an entity to its integration and changes
+	// about as often as somebody adds a device.
+	registryEveryReads = 5
 	// cursorStaleSkew is how far the persisted cursor may sit ahead of the
 	// newest record Home Assistant still holds before it is treated as no
 	// longer valid upstream. Small clock differences are normal; a cursor
@@ -90,6 +122,35 @@ type servedSource struct {
 	key string
 	// snapshot is the verification ladder's view of this instance.
 	snapshot *healthSnapshot
+	// unreadable is set when the latest log read failed or the session that
+	// carries reads ended, and cleared by the next successful read. A snapshot
+	// inside the closing part says the log was read THEN — this says whether
+	// it still can be, which is what "unreadable at the close" asks.
+	unreadable bool
+	// standing is, per surface, the set of condition keys currently standing
+	// — the dedup for STATES, as seen is for occurrences. A condition is fed to
+	// consider when it enters the set and forgotten when it leaves, so its
+	// next appearance is a new report. Memory only: a restart re-reports what
+	// stands, and the manager's cooldown absorbs that.
+	standing map[string]map[string]bool
+	// pendingUpdates is the update digest's current set of entity ids; the
+	// digest is re-fed when the set grows.
+	pendingUpdates map[string]bool
+	// registry maps entity id to the integration that owns it, for the
+	// sensor surface's `integration` label.
+	registry map[string]string
+	// statesReads counts states reads, pacing the registry re-read.
+	statesReads int
+	// seen is the latest occurrence timestamp considered per record key —
+	// the dedup between the two arrival paths. The cursor cannot be it: a
+	// cursor is one instant for the whole source, so a second record logged
+	// at the same instant as the one that advanced it would be dropped, and
+	// an event racing a sweep over the same occurrence would be considered
+	// twice. Per record, the same occurrence is one timestamp, and is
+	// considered once whichever path brings it — which is why the sweep
+	// skips only what is strictly OLDER than the cursor and lets a record AT
+	// it through to this check. Pruned to the listing on every sweep.
+	seen map[string]time.Time
 }
 
 type adapter struct {
@@ -113,9 +174,30 @@ type adapter struct {
 	mu       sync.Mutex
 	sources  map[string]*servedSource
 	reported map[string]string // last reported status per source (avoid spam)
+	// postFailing marks sources whose last post to the manager failed, so the
+	// failure is reported once and its recovery once.
+	postFailing sync.Map
 	// sessions holds the live Home Assistant session per source, for the
 	// health snapshot refresh.
 	sessions map[string]*haSession
+	// poll overrides pollEvery; zero means the constant. Tests shorten it.
+	poll time.Duration
+	// states overrides statesEvery the same way.
+	states time.Duration
+}
+
+func (a *adapter) statesInterval() time.Duration {
+	if a.states > 0 {
+		return a.states
+	}
+	return statesEvery
+}
+
+func (a *adapter) pollInterval() time.Duration {
+	if a.poll > 0 {
+		return a.poll
+	}
+	return pollEvery
 }
 
 func mustEnv(key string) string {
@@ -183,12 +265,18 @@ func (a *adapter) refreshSources(ctx context.Context) {
 			continue
 		}
 
-		src := &servedSource{filter: f, token: token, key: f.endpoint + "\x00" + token}
+		src := &servedSource{filter: f, token: token, key: f.endpoint + "\x00" + token, seen: map[string]time.Time{}}
 		if prev, ok := a.sources[info.Name]; ok {
 			// Config edits must not replay history, and must not reconnect
 			// unless they changed where or as whom we connect.
 			src.cursor = prev.cursor
 			src.snapshot = prev.snapshot
+			src.unreadable = prev.unreadable
+			src.seen = prev.seen
+			src.standing = prev.standing
+			src.pendingUpdates = prev.pendingUpdates
+			src.registry = prev.registry
+			src.statesReads = prev.statesReads
 			if prev.key == src.key {
 				src.cancel = prev.cancel
 			} else {
@@ -303,23 +391,41 @@ func (a *adapter) runSession(ctx context.Context, source string) {
 			continue
 		}
 		a.report(ctx, source, "ok", true, "AdapterReady", "connected to "+endpoint)
+		go a.runPoller(ctx, source, sess)
+		go a.runStatesLoop(ctx, source, sess)
 
-		select {
-		case <-ctx.Done():
-			sess.Close()
+		if !a.awaitSessionEnd(ctx, source, sess) {
 			return
-		case <-sess.Done():
-			a.mu.Lock()
-			delete(a.sessions, source)
-			a.mu.Unlock()
-			if ctx.Err() == nil {
-				err := sess.Err()
-				log.Printf("%s: session ended: %v — reconnecting", source, err)
-				a.report(ctx, source, "closed", false, "Disconnected",
-					fmt.Sprintf("the Home Assistant connection ended (%v); reconnecting", err))
-				sleepCtx(ctx, connectBackoff)
-			}
 		}
+	}
+}
+
+// awaitSessionEnd blocks until the context is cancelled or the session ends.
+// Returns false when the caller should stop (shutdown); true when it should
+// reconnect — having marked the source unreadable and reported the
+// disconnect first.
+func (a *adapter) awaitSessionEnd(ctx context.Context, source string, sess *haSession) bool {
+	select {
+	case <-ctx.Done():
+		sess.Close()
+		return false
+	case <-sess.Done():
+		a.mu.Lock()
+		delete(a.sessions, source)
+		// No session, no reads: the log stays unreadable until a
+		// reconnected session's first read succeeds.
+		if src, ok := a.sources[source]; ok {
+			src.unreadable = true
+		}
+		a.mu.Unlock()
+		if ctx.Err() == nil {
+			err := sess.Err()
+			log.Printf("%s: session ended: %v — reconnecting", source, err)
+			a.report(ctx, source, "closed", false, "Disconnected",
+				fmt.Sprintf("the Home Assistant connection ended (%v); reconnecting", err))
+			sleepCtx(ctx, connectBackoff)
+		}
+		return true
 	}
 }
 
@@ -341,36 +447,94 @@ func (a *adapter) startSession(ctx context.Context, source string, sess *haSessi
 	a.mu.Lock()
 	a.sessions[source] = sess
 	a.mu.Unlock()
-	a.refreshSnapshot(ctx, source, sess)
-	a.backfill(ctx, source, sess)
+	// The first sweep is the backfill. Declining it (`backfill: false`) means
+	// "do not report what was logged while I was down", so the cursor is
+	// moved past the listing instead — polling goes on from there.
+	src := a.source(source)
+	a.sweep(ctx, source, sess, src != nil && src.filter.backfill)
 	return nil
 }
 
-// backfill reports what was logged while this adapter was down.
+// runPoller reads the listing on every tick for as long as the session lives.
+// It is the ordinary path a record takes; the event subscription is the fast
+// path an instance with `fire_event` on gets, and the cursor deduplicates the
+// two. A failed read is logged by the sweep and retried on the next tick; it
+// never ends the session — the ping loop owns that judgement.
+func (a *adapter) runPoller(ctx context.Context, source string, sess *haSession) {
+	t := time.NewTicker(a.pollInterval())
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sess.Done():
+			return
+		case <-t.C:
+			a.sweep(ctx, source, sess, true)
+		}
+	}
+}
+
+// sweep reads the log listing once and does two things with it: stores it as
+// the source's health snapshot, and — when consider is set — feeds every record
+// newer than the cursor through the rule path. Home Assistant's listing is a
+// deduplicated map keyed exactly as a record's initiationId is, whose entry's timestamp
+// and count advance on every recurrence, so a recurring record shows up here as
+// a newer one: that is what the dwell's "still recurring at the close" rung is
+// fed by on an install that fires no events.
 //
 // It is also where a stale cursor is recovered: a position minutes AHEAD of
 // everything Home Assistant still holds names a record that is gone (the log
 // was cleared, or this cursor was written against another instance), and
 // keeping it would silence the source forever. Re-read instead of stalling.
-func (a *adapter) backfill(ctx context.Context, source string, sess *haSession) {
+//
+// With consider unset the cursor is moved past the listing and nothing is
+// reported — the connect-time sweep of a source that declined the backfill.
+func (a *adapter) sweep(ctx context.Context, source string, sess *haSession, consider bool) {
 	src := a.source(source)
-	if src == nil || !src.filter.backfill {
+	if src == nil {
 		return
 	}
-	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
-	defer cancel()
-	records, err := sess.SystemLog(cctx)
+	lst, err := a.readListing(ctx, source, sess)
 	if err != nil {
-		log.Printf("%s: backfill: %v", source, err)
+		log.Printf("%s: reading system_log: %v", source, err)
 		return
 	}
+	records := lst.records
+	// The two sweep-cadence surfaces ride on this read, whatever `consider`
+	// says: a surface condition is a state, and declining the log backfill
+	// says nothing about states.
+	defer a.observeSweepSurfaces(ctx, source, sess, lst)
 	newest := time.Time{}
 	for i := range records {
 		if at := records[i].At(); at.After(newest) {
 			newest = at
 		}
 	}
+	if !consider {
+		// Everything listed counts as seen: the cursor moves past it, and the
+		// records AT the new cursor are remembered so the strict gate does
+		// not hand them to consider on the next sweep.
+		a.mu.Lock()
+		if src, ok := a.sources[source]; ok {
+			for i := range records {
+				if at := records[i].At(); !at.IsZero() {
+					src.seen[records[i].Key()] = at
+				}
+			}
+		}
+		a.mu.Unlock()
+		if !newest.IsZero() {
+			a.setCursor(source, newest)
+			a.persistCursor(ctx, source, newest)
+		}
+		return
+	}
+	// The cursor is written under a.mu by advance and setCursor, from the
+	// event path as well as this one; read it the same way.
+	a.mu.Lock()
 	cursor := src.cursor
+	a.mu.Unlock()
 	if len(records) > 0 && !cursor.IsZero() && newest.Add(cursorStaleSkew).Before(cursor) {
 		log.Printf("%s: persisted cursor %s is ahead of everything Home Assistant still holds (newest %s) — "+
 			"re-reading the whole log", source, cursor.Format(time.RFC3339), newest.Format(time.RFC3339))
@@ -379,10 +543,187 @@ func (a *adapter) backfill(ctx context.Context, source string, sess *haSession) 
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].At().Before(records[j].At()) })
 	for i := range records {
-		if at := records[i].At(); !at.IsZero() && !cursor.IsZero() && !at.After(cursor) {
+		// STRICTLY older than the cursor is skipped. A record AT the cursor
+		// reaches consider, where the per-record timestamp memory tells the
+		// occurrence that advanced the cursor from a second record logged in
+		// the same instant — the cursor alone cannot. After a restart that
+		// memory is empty, so the one record at the persisted cursor is
+		// considered again; the manager's cooldown absorbs that.
+		if at := records[i].At(); !at.IsZero() && !cursor.IsZero() && at.Before(cursor) {
 			continue
 		}
 		a.consider(ctx, source, &records[i])
+	}
+	a.pruneSeen(source, records)
+}
+
+// observeSweepSurfaces feeds the config-entry and repair surfaces from the
+// sweep: the entries the listing read already fetched, and the issue registry
+// — one more small command, issued only while that surface is on.
+func (a *adapter) observeSweepSurfaces(ctx context.Context, source string, sess *haSession, lst listing) {
+	src := a.source(source)
+	if src == nil {
+		return
+	}
+	now := time.Now()
+	if p := src.filter.surfaces.configEntries; p.enabled && lst.entriesRead {
+		a.reconcile(ctx, source, surfaceConfigEntry, configEntryRecords(lst.entries, p.accept, now))
+	}
+	if p := src.filter.surfaces.repairs; p.enabled {
+		cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
+		issues, err := sess.Repairs(cctx)
+		cancel()
+		if err != nil {
+			log.Printf("%s: reading repairs: %v", source, err)
+		} else {
+			a.reconcile(ctx, source, surfaceRepair, repairRecords(issues, p.accept, now))
+		}
+	}
+}
+
+// runStatesLoop reads the house on its own cadence for the sensor and update
+// surfaces, for as long as the session lives. Nothing is read while both are
+// off.
+func (a *adapter) runStatesLoop(ctx context.Context, source string, sess *haSession) {
+	a.sweepStates(ctx, source, sess)
+	t := time.NewTicker(a.statesInterval())
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sess.Done():
+			return
+		case <-t.C:
+			a.sweepStates(ctx, source, sess)
+		}
+	}
+}
+
+// sweepStates is one states read, and the registry read it paces.
+func (a *adapter) sweepStates(ctx context.Context, source string, sess *haSession) {
+	src := a.source(source)
+	if src == nil {
+		return
+	}
+	sp := src.filter.surfaces
+	if !sp.sensors.enabled && !sp.updates.enabled {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
+	states, err := sess.States(cctx)
+	cancel()
+	if err != nil {
+		log.Printf("%s: reading states: %v", source, err)
+		return
+	}
+	now := time.Now()
+	if sp.sensors.enabled {
+		a.mu.Lock()
+		reads := src.statesReads
+		src.statesReads++
+		registry := src.registry
+		a.mu.Unlock()
+		if registry == nil || reads%registryEveryReads == 0 {
+			// Its own budget: the registry is the same size as the states
+			// read that preceded it, and must not inherit what that spent.
+			rctx, rcancel := context.WithTimeout(ctx, haCommandTimeout)
+			entries, err := sess.EntityRegistry(rctx)
+			rcancel()
+			if err != nil {
+				log.Printf("%s: reading the entity registry: %v", source, err)
+			} else {
+				registry = make(map[string]string, len(entries))
+				for _, e := range entries {
+					registry[e.EntityID] = e.Platform
+				}
+				a.mu.Lock()
+				src.registry = registry
+				a.mu.Unlock()
+			}
+		}
+		a.reconcile(ctx, source, surfaceSensor, sensorRecords(states, registry, sp.sensors.accept, now))
+	}
+	if sp.updates.enabled {
+		pending := pendingUpdates(states)
+		next := make(map[string]bool, len(pending))
+		grew := false
+		a.mu.Lock()
+		for _, u := range pending {
+			next[u.EntityID] = true
+			if !src.pendingUpdates[u.EntityID] {
+				grew = true
+			}
+		}
+		src.pendingUpdates = next
+		// The digest stands while anything is pending, so a rule that dwells
+		// it is answered by the ladder like any other surface condition.
+		if src.standing == nil {
+			src.standing = map[string]map[string]bool{}
+		}
+		rec := updateDigest(pending, now)
+		if len(pending) > 0 {
+			src.standing[surfaceUpdate] = map[string]bool{rec.Key(): true}
+		} else {
+			src.standing[surfaceUpdate] = map[string]bool{}
+		}
+		a.mu.Unlock()
+		if grew {
+			a.consider(ctx, source, &rec)
+		}
+	}
+}
+
+// reconcile replaces one surface's standing set with what a read found,
+// feeding the conditions that just appeared through consider. A condition
+// still standing is not fed again; one that left is forgotten, so its next
+// appearance is a new report.
+func (a *adapter) reconcile(ctx context.Context, source, surface string, current map[string]logRecord) {
+	a.mu.Lock()
+	src, ok := a.sources[source]
+	if !ok {
+		a.mu.Unlock()
+		return
+	}
+	if src.standing == nil {
+		src.standing = map[string]map[string]bool{}
+	}
+	prev := src.standing[surface]
+	next := make(map[string]bool, len(current))
+	var fresh []logRecord
+	for key, rec := range current {
+		next[key] = true
+		if !prev[key] {
+			fresh = append(fresh, rec)
+		}
+	}
+	src.standing[surface] = next
+	a.mu.Unlock()
+	sort.Slice(fresh, func(i, j int) bool { return fresh[i].Key() < fresh[j].Key() })
+	for i := range fresh {
+		a.consider(ctx, source, &fresh[i])
+	}
+}
+
+// pruneSeen forgets the dedup timestamps of records Home Assistant no longer
+// lists AND that are strictly older than the cursor — the gate skips those
+// anyway. A record delivered by event before the listing shows it is not yet
+// listed but sits AT the cursor, and forgetting it here is exactly what would
+// let the next sweep consider it a second time. Keeping every key ever seen
+// would only grow; this keeps the listing plus the cursor's instant.
+func (a *adapter) pruneSeen(source string, records []logRecord) {
+	listed := make(map[string]bool, len(records))
+	for i := range records {
+		listed[records[i].Key()] = true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if src, ok := a.sources[source]; ok {
+		for key, at := range src.seen {
+			if !listed[key] && at.Before(src.cursor) {
+				delete(src.seen, key)
+			}
+		}
 	}
 }
 
@@ -413,6 +754,18 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 		a.mu.Unlock()
 		return
 	}
+	// One occurrence, one consideration, whichever path brought it: a record
+	// whose timestamp has not moved since it was last considered is the same
+	// occurrence again — the poll re-listing what an event delivered, or an
+	// event for what a sweep just fed in. A record with no timestamp cannot
+	// be told apart from its last occurrence, so it is never deduplicated.
+	if at := rec.At(); !at.IsZero() {
+		if last, dup := src.seen[rec.Key()]; dup && !at.After(last) {
+			a.mu.Unlock()
+			return
+		}
+		src.seen[rec.Key()] = at
+	}
 	f := src.filter
 	a.mu.Unlock()
 
@@ -421,8 +774,16 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	}
 	sig := normalize(source, rec)
 	rule, hasRule := f.Rule(&sig)
+	// The cursor is the LOG's read position. A surface record carries the
+	// time it was first seen, and moving the cursor to that would skip log
+	// records HA lists a moment later with an earlier timestamp.
+	advance := func() {
+		if rec.Surface == "" {
+			a.advance(ctx, source, rec.At())
+		}
+	}
 	if hasRule && rule.drop {
-		a.advance(ctx, source, rec.At())
+		advance()
 		return
 	}
 
@@ -430,7 +791,7 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	// cause must not even occupy a window.
 	a.inhibit.Observe(source, f.rules, &sig)
 	if a.inhibit.Inhibited(source, f.rules, &sig) {
-		a.advance(ctx, source, rec.At())
+		advance()
 		return
 	}
 
@@ -440,17 +801,17 @@ func (a *adapter) consider(ctx context.Context, source string, rec *logRecord) {
 	// back instead would replay the whole window on every restart.
 	if hasRule && rule.dwell > 0 {
 		a.pending.Add(source, sig, rule, rec.Count)
-		a.advance(ctx, source, rec.At())
+		advance()
 		return
 	}
 	if a.post(ctx, source, []Signal{sig}) {
-		a.advance(ctx, source, rec.At())
+		advance()
 	}
 }
 
 // advance moves and persists a source's cursor.
 //
-// Post-then-persist: a crash between the two re-posts the same fingerprints,
+// Post-then-persist: a crash between the two re-posts the same initiationIds,
 // which the manager's cooldown absorbs. Losing a record would be the worse
 // failure, so the ordering is deliberate.
 func (a *adapter) advance(ctx context.Context, source string, at time.Time) {
@@ -465,6 +826,10 @@ func (a *adapter) advance(ctx context.Context, source string, at time.Time) {
 	}
 	src.cursor = at
 	a.mu.Unlock()
+	a.persistCursor(ctx, source, at)
+}
+
+func (a *adapter) persistCursor(ctx context.Context, source string, at time.Time) {
 	if err := a.mgr.PutState(ctx, source, cursorKey, at.UTC().Format(time.RFC3339)); err != nil && ctx.Err() == nil {
 		log.Printf("persisting cursor for %s: %v", source, err)
 	}
@@ -494,29 +859,76 @@ func (a *adapter) connectionFor(source string) (endpoint, token string, ok bool)
 	return src.filter.endpoint, src.token, true
 }
 
-// post sends a batch through the emit cap and reports clipping. It is the
+// post sends signals through the emit cap and reports clipping. It is the
 // single exit from this adapter: both the immediate path and the dwell queue go
 // through it, so the cap cannot be bypassed by one of them.
+//
+// More than maxBatchPerSrc signals — a dwell flush deciding many integrations
+// at once — go out as several batches, never cut to the first: a signal past
+// the batch size would otherwise vanish with nothing reporting it, where the
+// cap reports every signal it clips. It reports true only if every batch was
+// handed over.
 func (a *adapter) post(ctx context.Context, source string, sigs []Signal) bool {
 	if len(sigs) == 0 {
 		return false
 	}
-	if len(sigs) > maxBatchPerSrc {
-		sigs = sigs[:maxBatchPerSrc]
+	posted := true
+	for len(sigs) > 0 {
+		n := min(len(sigs), maxBatchPerSrc)
+		posted = a.postBatch(ctx, source, sigs[:n]) && posted
+		sigs = sigs[n:]
 	}
+	return posted
+}
+
+// postBatch sends one batch of at most maxBatchPerSrc signals — the size the
+// payload clamp's per-signal share is computed for.
+func (a *adapter) postBatch(ctx context.Context, source string, sigs []Signal) bool {
 	allowed, clipped := a.cap.Allow(source, sigs)
-	a.reportClipping(ctx, source, clipped)
 	if len(allowed) == 0 {
+		a.reportClipping(ctx, source, clipped)
 		return false
 	}
+	allowed = clampBatch(allowed)
 	if err := a.mgr.Inbound(ctx, source, allowed); err != nil {
 		if ctx.Err() == nil {
 			log.Printf("posting %d signals for %s: %v", len(allowed), source, err)
+			// The clip first, the lost post LAST: both write the same Ready
+			// condition, and the one that stands must be the graver fact.
+			a.reportClipping(ctx, source, clipped)
+			a.reportPostFailure(ctx, source, err)
 		}
 		return false
 	}
+	// Recovery FIRST, the clip AFTER: a window still clipping re-asserts
+	// EmitCapReached on top of the recovered condition rather than under it.
+	a.reportPostRecovered(ctx, source)
+	a.reportClipping(ctx, source, clipped)
 	log.Printf("posted %d log signal(s) for %s", len(allowed), source)
 	return true
+}
+
+// reportPostFailure surfaces a rejected or unreachable manager on the source's
+// Ready condition. A signal this adapter could not hand over is otherwise a
+// silent drop behind a process that looks healthy — the one outcome the
+// contract forbids — and the emission is not replayable: the event stream
+// has moved on. So the loss is REPORTED, once per outage, where an operator
+// reads conditions; the next successful post clears it.
+func (a *adapter) reportPostFailure(ctx context.Context, source string, err error) {
+	if _, failing := a.postFailing.LoadOrStore(source, true); failing {
+		return
+	}
+	msg := "signals could not be handed to the manager and were lost: " + err.Error()
+	// Synchronous, so the failure and its recovery are ordered as they happened.
+	_ = a.mgr.ReportStatus(ctx, source, false, "PostFailed", msg)
+}
+
+// reportPostRecovered clears a reported post failure on the first success.
+func (a *adapter) reportPostRecovered(ctx context.Context, source string) {
+	if _, failing := a.postFailing.LoadAndDelete(source); !failing {
+		return
+	}
+	_ = a.mgr.ReportStatus(ctx, source, true, "AdapterReady", "posting to the manager again")
 }
 
 // reportClipping surfaces a clipped window on the source's condition. Silent
@@ -533,7 +945,8 @@ func (a *adapter) reportClipping(ctx context.Context, source string, clipped int
 	msg := fmt.Sprintf("emit cap reached: %d signal(s) clipped in the last minute — "+
 		"something is logging far faster than an agent can act on it", clipped)
 	log.Printf("%s: %s", source, msg)
-	go func() { _ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg) }()
+	// Synchronous: post() orders this AFTER a recovery report on purpose.
+	_ = a.mgr.ReportStatus(ctx, source, false, "EmitCapReached", msg)
 }
 
 // runDwellFlusher refreshes each source's health view and decides pending
@@ -564,18 +977,36 @@ func (a *adapter) refreshSnapshots(ctx context.Context) {
 	}
 }
 
-// refreshSnapshot reads the current log listing and config-entry states.
-//
-// A failed read leaves the previous snapshot in place rather than clearing it:
-// the ladder's answer for "cannot say" already exists, and clearing would turn
-// a momentary hiccup into a verdict.
+// refreshSnapshot re-reads the health view for one source, for the dwell
+// flusher. The records it read are not considered here — that is the sweep's
+// job on its own cadence — so a pending entry is verified against a listing at
+// most one dwell tick old without the poll interval having to match it.
 func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSession) {
+	if _, err := a.readListing(ctx, source, sess); err != nil {
+		log.Printf("%s: reading system_log for verification: %v", source, err)
+	}
+}
+
+// readListing reads the current log listing and config-entry states, stores
+// them as the source's health snapshot, and returns the records for the caller
+// to consider. ONE read serves both jobs: a snapshot older than the record
+// just considered could not see the recurrence that was just fed in.
+//
+// A failed read leaves the previous snapshot in place rather than clearing it,
+// and marks the source unreadable instead: the snapshot still records what
+// was last observed, the mark says the log cannot be observed now, and the
+// ladder's rung 3 reads both.
+func (a *adapter) readListing(ctx context.Context, source string, sess *haSession) (listing, error) {
 	cctx, cancel := context.WithTimeout(ctx, haCommandTimeout)
 	defer cancel()
 	records, err := sess.SystemLog(cctx)
 	if err != nil {
-		log.Printf("%s: reading system_log for verification: %v", source, err)
-		return
+		a.mu.Lock()
+		if src, ok := a.sources[source]; ok {
+			src.unreadable = true
+		}
+		a.mu.Unlock()
+		return listing{}, err
 	}
 	snap := &healthSnapshot{
 		records: make(map[string]logRecord, len(records)),
@@ -585,40 +1016,113 @@ func (a *adapter) refreshSnapshot(ctx context.Context, source string, sess *haSe
 	for _, r := range records {
 		snap.records[r.Key()] = r
 	}
-	// config_entries/get is an ADMIN command. A read-only token simply gets no
-	// predicate, which is rung 2 — not an error worth reporting on the source.
-	if entries, err := sess.ConfigEntries(cctx); err == nil {
-		for _, e := range entries {
-			snap.entries[e.Domain] = append(snap.entries[e.Domain], e.State)
+	out := listing{records: records}
+	// config_entries/get serves two readers: the config-entry surface, and
+	// the dwell ladder's first rung for LOG records. With the surface off it
+	// is issued only while a dwell is pending — an install with nothing
+	// pending and the surface off issues it never. An ADMIN command: a
+	// read-only token simply gets no predicate, which is rung 2 — not an
+	// error worth reporting on the source.
+	wantEntries := a.pending.HasEntriesFor(source)
+	if src := a.source(source); src != nil && src.filter.surfaces.configEntries.enabled {
+		wantEntries = true
+	}
+	if wantEntries {
+		// Its own budget: it must not inherit what the listing read spent.
+		ectx, ecancel := context.WithTimeout(ctx, haCommandTimeout)
+		entries, err := sess.ConfigEntries(ectx)
+		ecancel()
+		if err == nil {
+			out.entries, out.entriesRead = entries, true
+			for _, e := range entries {
+				snap.entries[e.Domain] = append(snap.entries[e.Domain], e.State)
+			}
 		}
 	}
 	a.mu.Lock()
 	if src, ok := a.sources[source]; ok {
 		src.snapshot = snap
+		src.unreadable = false
 	}
 	a.mu.Unlock()
+	return out, nil
+}
+
+// listing is one read of the log listing and the config entries beside it.
+// entriesRead is false when the entries command failed — a non-admin token —
+// so the config-entry surface does not mistake "could not read" for "all
+// loaded".
+type listing struct {
+	records     []logRecord
+	entries     []configEntry
+	entriesRead bool
 }
 
 // health is the adapter's verification ladder over one source's snapshot.
 //
 //	rung 1  the integration has config entries -> is any of them still failing?
-//	rung 2  no predicate -> has the record occurred AGAIN since the window opened?
-//	rung 3  no snapshot at all -> cannot say
+//	rung 2  no predicate -> was the record STILL occurring as the window closed?
+//	rung 3  the log is unreadable at the close -> verdictUnreadable
+//
+// Rung 3 is checked FIRST and is distinct from rung 2's "no predicate": rung 2
+// judges recurrence from a log that was read through the close, rung 3 has no
+// such read to judge from. The log is unreadable when any of these holds:
+//
+//   - no snapshot was ever taken
+//   - the snapshot is stale: taken before the window's closing part began. The
+//     flusher refreshes every dwellTick while anything is pending, so a healthy
+//     session always lands one inside that part
+//   - the latest read failed, or the session ended (servedSource.unreadable).
+//     A snapshot inside the closing part proves the log was read then, not
+//     that it still can be — without this, an instance lost late in a long
+//     window would be judged quiet for up to a third of the dwell
+//
+// A source no longer served is none of these. It was withdrawn, not lost, so
+// its conditions are gone: the adapter posts nothing for a source it does not
+// serve.
 //
 // Only integrations with config entries carry a predicate. Core loggers (and
 // YAML-configured integrations, which have no entries) fall to rung 2
 // deliberately: recurrence is what the log itself can prove, and inventing a
-// health check for the rest would mean guessing.
-func (a *adapter) health(ref recordRef) verdict {
+// health check for the rest would mean guessing. Recurrence early in the window
+// that then stopped is a blip that healed, not a problem still live — which is
+// what `since` is for.
+//
+// `since` is the start of the window's closing part. A count that rose during
+// the window is the log saying it kept happening — but a count that rose in the
+// first thirty seconds and never again is a blip that healed, and the record's
+// own timestamp (its latest occurrence) is what tells the two apart.
+func (a *adapter) health(ref recordRef, since time.Time) verdict {
 	a.mu.Lock()
 	src, ok := a.sources[ref.source]
-	var snap *healthSnapshot
-	if ok {
-		snap = src.snapshot
+	if !ok {
+		a.mu.Unlock()
+		return verdictGone
+	}
+	snap, unreadable := src.snapshot, src.unreadable
+	standing, isSurface, surfaceRead := false, false, false
+	if surface := surfaceOfName(ref.logger); surface != "" {
+		isSurface = true
+		set, read := src.standing[surface]
+		surfaceRead = read
+		standing = set[ref.logger+"@"+ref.location]
 	}
 	a.mu.Unlock()
-	if snap == nil {
-		return verdictUnknown
+	// A surface condition's own truth is whether it still stands on the
+	// latest read of its surface: an entry still failing, an issue still
+	// filed, a sensor still faulting. Cleared before the close is churn. A
+	// surface never read cannot say, and that is rung 3 — emit, fail open.
+	if isSurface {
+		switch {
+		case !surfaceRead:
+			return verdictUnreadable
+		case standing:
+			return verdictUnhealthy
+		}
+		return verdictHealthy
+	}
+	if snap == nil || snap.at.Before(since) || unreadable {
+		return verdictUnreadable
 	}
 
 	states, hasPredicate := snap.entries[ref.integration]
@@ -630,10 +1134,11 @@ func (a *adapter) health(ref recordRef) verdict {
 
 	rec, present := snap.records[ref.logger+"@"+ref.location]
 	switch {
-	case present && rec.Count > ref.countAtOpen:
-		// It kept happening while we waited. That is the strongest evidence the
-		// log can give, and it outranks a loaded config entry: an integration
-		// can be up and failing at the same time.
+	case present && rec.Count > ref.countAtOpen && !rec.At().Before(since):
+		// It was still happening as the window closed. That is the strongest
+		// evidence the log can give, and it outranks a loaded config entry: an
+		// integration can be up and failing at the same time. A count that rose
+		// only BEFORE `since` falls through: it recurred, and then it stopped.
 		return verdictUnhealthy
 	case present && hasPredicate:
 		// Every entry loaded and no new occurrences: it recovered.

@@ -1,0 +1,65 @@
+## MODIFIED Requirements
+
+### Requirement: The watermark only moves forward and never past the present
+A reported watermark at or before the value already stored SHALL be treated as a
+no-op: it SHALL NOT be written, SHALL NOT be an error, and SHALL be reported as
+skipped.
+
+Where a reader is named, "already stored" SHALL mean that READER's watermark, so
+one reader's report SHALL NOT be skipped because another reader is further
+ahead.
+
+A reported watermark ahead of the manager's own clock SHALL be clamped to the
+manager's current time.
+
+A report MAY instead ask for a REWIND:
+
+- it SHALL name a reader and a time
+- it SHALL set that reader's own entry to the time, even where it is earlier than the stored one
+- it SHALL never move the channel-wide mark
+- naming no reader, it SHALL be refused
+- the clamp SHALL still apply
+
+#### Scenario: A stale client cannot un-read a thread
+- **WHEN** one client reports a thread read up to T2 and a second client with a stale view then reports the same thread read up to an earlier T1
+- **THEN** the stored watermark remains T2 and the second report is skipped
+
+#### Scenario: A skewed clock cannot mark the future read
+- **WHEN** a client reports a watermark hours ahead of the manager's clock
+- **THEN** the stored watermark is the manager's current time, and activity arriving after it is still unread
+
+#### Scenario: Re-reporting an unchanged watermark writes nothing
+- **WHEN** a thread whose watermark already covers its latest activity is reported read again
+- **THEN** no status patch is issued and the report is skipped
+
+#### Scenario: A reader rewinds their own mark
+- **WHEN** a reader whose entry is at T2 asks for a rewind to T1
+- **THEN** that reader's entry is T1, the channel-wide mark is unchanged, and every other reader's entry is unchanged
+
+#### Scenario: A rewind with no reader is refused
+- **WHEN** a rewind names no reader
+- **THEN** it is refused and nothing is written
+
+## ADDED Requirements
+
+### Requirement: Read watermarks are opaque RFC3339Nano strings
+`status.threads[].readAt` and `status.threads[].readers[].readAt` SHALL be strings in RFC3339Nano form, under the same JSON field names.
+
+The type changed from a timestamp because the Kubernetes API serializes timestamps at second granularity. A rewind watermark then lost its sub-second part, and a message after it counted as unread forever.
+
+NO MIGRATION IS NEEDED. Both the old and new CRD schema declare `readAt`
+as `type: string` at the wire level — the old one added `format:
+date-time`, a hint dropped rather than enforced.
+
+A value an older manager stored is already exactly the RFC3339 string
+this one expects, parsed by the same `ParseWatermark`, which accepts a
+string with or without a fractional component. A pre-upgrade watermark
+simply stays at second granularity until the next report advances it.
+
+#### Scenario: A watermark keeps sub-second precision
+- **WHEN** a reader reports or rewinds to a time with a sub-second component
+- **THEN** the stored value round-trips through the API server with that component intact
+
+#### Scenario: A stored second-granularity watermark survives the upgrade
+- **WHEN** a Conversation written before this change holds `readAt: "2026-08-13T11:04:00Z"`
+- **THEN** it parses as the same instant, and the next report or rewind compares against it as usual

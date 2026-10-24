@@ -206,6 +206,63 @@ func TestDeleteReclaimsAClosedConversation(t *testing.T) {
 	}
 }
 
+// mkCascadeConv builds a conversation for the delete-cascade test: a root
+// with no parent, or a member/grandchild naming one via causedBy — the same
+// label the cascade filters on, and the same field it confirms against.
+func mkCascadeConv(t *testing.T, name, parent string) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Name, conv.Namespace = name, ns
+	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: "verb-profile"}
+	if parent != "" {
+		conv.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: "worker"}
+		conv.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	} else {
+		conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "verb-ch-cascade"}}
+	}
+	if err := k8sClient.Create(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
+	conv.Status.ClosedAt = &now
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	return conv
+}
+
+// Deleting a root cascades to every conversation reachable from it by
+// causedBy, AT ANY DEPTH — mirroring the close cascade, so a coordination's
+// members are never left orphaned, unreachable and occupying the API after
+// their root is gone. Two members, one itself a root with its own member.
+func TestDeleteCascadesToDescendantsAtAnyDepth(t *testing.T) {
+	srv := apiServer()
+	mkChannel(t, "verb-ch-cascade", "tg")
+
+	root := mkCascadeConv(t, "cascade-root", "")
+	mkCascadeConv(t, "cascade-member-a", root.Name)
+	memberB := mkCascadeConv(t, "cascade-member-b", root.Name)
+	mkCascadeConv(t, "cascade-grandchild", memberB.Name)
+
+	rec := adapterReq(srv, "POST", "/channel/conversations/cascade-root/delete",
+		map[string]string{"channel": "verb-ch-cascade"}, "test-adapter-token")
+	if rec.Code != 202 {
+		t.Fatalf("delete of the root: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for _, name := range []string{"cascade-root", "cascade-member-a", "cascade-member-b", "cascade-grandchild"} {
+		var got agentopsv1alpha1.Conversation
+		err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &got)
+		// Either gone, or held by its OWN finalizer with a deletion stamp —
+		// the same "either" TestDeleteReclaimsAClosedConversation already
+		// allows for the root, extended here to every descendant.
+		if err == nil && got.DeletionTimestamp.IsZero() {
+			t.Fatalf("%s must be deleted along with its root", name)
+		}
+	}
+}
+
 // Deletion tells every bound thread that the conversation is gone — whether or
 // not it was closed first. A closed conversation's threads were told it could
 // be reopened; deletion makes that false, and correcting it is the point.
@@ -253,5 +310,155 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 	// and NOT close-topic: one lifecycle event, one operation
 	if again := ops.Claim("tg"); again != nil {
 		t.Fatalf("deletion must send exactly one operation per thread, also got %q", again.Kind)
+	}
+}
+
+// A thread whose topic was never created (ensure-topic never succeeded,
+// ThreadID stays "") must not get a close-topic op — there is nothing to
+// close, and every adapter rejects an empty thread id. Enqueueing it anyway
+// retries forever and logs an error on every reconcile pass.
+func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
+	ops := testOps()
+	r := &controller.ConversationReconciler{
+		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
+	}
+	mkChannel(t, "no-topic-ch", "tg")
+	conv := mkVerbConv(t, "no-topic-conv", []string{"no-topic-ch"}, agentopsv1alpha1.ConversationClosed)
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "no-topic-ch", ThreadID: ""}}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "no-topic-conv"}}
+
+	// Two passes: a single pass proves nothing was enqueued once, a second
+	// proves it is not a one-shot skip that still archives silently.
+	for i := 0; i < 2; i++ {
+		if _, err := r.Reconcile(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if op := ops.Claim("tg"); op != nil {
+		t.Fatalf("a thread with no topic yet must get no close-topic op, got %q", op.Kind)
+	}
+	if got := getConv(t, "no-topic-conv"); got.Status.ThreadArchived("no-topic-ch") {
+		t.Fatal("a thread with no topic yet must not be recorded as archived")
+	}
+}
+
+// Once ensure-topic finally succeeds and the thread gets a real thread id,
+// the next reconcile pass must enqueue close-topic for it normally — the
+// skip above is a re-evaluated condition, not a permanent exclusion.
+func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
+	ops := testOps()
+	r := &controller.ConversationReconciler{
+		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
+	}
+	mkChannel(t, "late-topic-ch", "tg")
+	conv := mkVerbConv(t, "late-topic-conv", []string{"late-topic-ch"}, agentopsv1alpha1.ConversationClosed)
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "late-topic-ch", ThreadID: ""}}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "late-topic-conv"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if op := ops.Claim("tg"); op != nil {
+		t.Fatalf("still no topic: no op expected yet, got %q", op.Kind)
+	}
+
+	// ensure-topic succeeds later: the thread id arrives.
+	conv = getConv(t, "late-topic-conv")
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "late-topic-ch", ThreadID: "99"}}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+
+	op := ops.Claim("tg")
+	if op == nil {
+		t.Fatal("a thread that just got a real topic must have close-topic enqueued")
+	}
+	if op.Kind != chat.OpCloseTopic {
+		t.Fatalf("expected close-topic, got %q", op.Kind)
+	}
+	if op.ThreadID == nil || *op.ThreadID != "99" {
+		t.Fatalf("it must carry the thread id: %+v", op.ThreadID)
+	}
+}
+
+// mkCorrelatedConv creates a conversation carrying a conversationId and a
+// pipelineRef directly — the two fields reopen's at-most-one-open check
+// (design: "Reopen keeps the at-most-one-open invariant") reads — without
+// going through the signal-ingest path, which is pinned separately in
+// correlation_test.go. No channel is bound: validateRefs only walks
+// ChannelRefs, so leaving it empty keeps these fixtures about reopen's own
+// successor check rather than about topic binding.
+func mkCorrelatedConv(t *testing.T, name, profile, pipeline, conversationID string, phase agentopsv1alpha1.ConversationPhase) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	conv := &agentopsv1alpha1.Conversation{}
+	conv.Name, conv.Namespace = name, ns
+	conv.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
+	conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: pipeline}
+	conv.Spec.ConversationID = conversationID
+	if err := k8sClient.Create(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	conv.Status.Phase = phase
+	if phase == agentopsv1alpha1.ConversationClosed {
+		now := metav1.Now()
+		conv.Status.ClosedAt = &now
+	}
+	if err := k8sClient.Status().Update(context.Background(), conv); err != nil {
+		t.Fatal(err)
+	}
+	return conv
+}
+
+// Reopen's at-most-one-open invariant: a closed conversation MUST NOT reopen
+// while another OPEN conversation already carries the same conversationId
+// for the same pipeline — design.md's "Reopen keeps the at-most-one-open
+// invariant", which the proposal's reopen-tiebreak decision states as a
+// SHALL. Without this refusal, two conversations would answer for one
+// correlation id — the bug this whole change exists to kill, in mirror
+// image on the reopen path rather than on ingest.
+func TestReopenRefusedWhileOpenSuccessorSharesConversationID(t *testing.T) {
+	mkProfile(t, "profile-reopen-guard")
+	closed := mkCorrelatedConv(t, "reopen-guard-closed", "profile-reopen-guard", "pipe-reopen-guard", "reopen-guard-1", agentopsv1alpha1.ConversationClosed)
+	successor := mkCorrelatedConv(t, "reopen-guard-open", "profile-reopen-guard", "pipe-reopen-guard", "reopen-guard-1", agentopsv1alpha1.ConversationIdle)
+	waitForRoutingCacheToObserve(t, successor, successor.ResourceVersion)
+
+	srv := apiServer()
+	err := srv.Router.ReopenConversation(context.Background(), getConv(t, closed.Name))
+	if err == nil {
+		t.Fatal("reopen must be refused while an open successor shares the conversationId")
+	}
+	if !strings.Contains(err.Error(), successor.Name) {
+		t.Errorf("the refusal must NAME the successor, got: %v", err)
+	}
+	if getConv(t, closed.Name).Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Error("a refused reopen must not partially reopen")
+	}
+}
+
+// The mirror of the refusal above: once no OPEN conversation carries the
+// same conversationId for the same pipeline, reopen proceeds exactly as it
+// always did — the successor check adds a refusal, never a NEW permission
+// requirement.
+func TestReopenPermittedOnceNoOpenSuccessorSharesConversationID(t *testing.T) {
+	mkProfile(t, "profile-reopen-free")
+	closed := mkCorrelatedConv(t, "reopen-free-closed", "profile-reopen-free", "pipe-reopen-free", "reopen-free-1", agentopsv1alpha1.ConversationClosed)
+
+	srv := apiServer()
+	if err := srv.Router.ReopenConversation(context.Background(), getConv(t, closed.Name)); err != nil {
+		t.Fatalf("reopen with no open successor must be permitted, got: %v", err)
+	}
+	if got := getConv(t, closed.Name).Status.Phase; got != agentopsv1alpha1.ConversationIdle {
+		t.Errorf("reopen must restore Idle, got %q", got)
 	}
 }

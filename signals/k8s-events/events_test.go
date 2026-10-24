@@ -54,6 +54,16 @@ func TestParseConfigRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// A rule compilation failure inside spec.config.rules/route must be wrapped
+// and reported as a config problem — parseConfig's own error path around
+// compileRules, distinct from compileRules' own validation tests.
+func TestParseConfigWrapsARuleCompilationFailure(t *testing.T) {
+	_, err := parseConfig(json.RawMessage(`{"rules":[{"for":"not-a-duration"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "spec.config:") {
+		t.Fatalf("expected a wrapped spec.config error, got %v", err)
+	}
+}
+
 func TestFilterSeverityAndNamespace(t *testing.T) {
 	f := mustFilter(t, `{"severities":["Warning"],"namespaces":["prod"]}`)
 	warnProd := evt("Warning", "prod", "Pod", "api-1", "BackOff")
@@ -133,10 +143,12 @@ func TestEmptyConfigHasNoDwell(t *testing.T) {
 	}
 }
 
-// Kubernetes recreates Event objects for a recurring problem. If the
-// fingerprint tracked the Event object, every repeat of one crash loop would
-// open a new conversation — the exact spam this design avoids.
-func TestFingerprintSurvivesEventRecreation(t *testing.T) {
+// Kubernetes recreates Event objects for a recurring problem, and an
+// unresolved object (no owner reference, no workload known) is its own
+// workload. If the initiationId tracked the Event object, every repeat of
+// one crash loop would open a new conversation — the exact spam this design
+// avoids.
+func TestInitiationIDSurvivesEventRecreation(t *testing.T) {
 	first := evt("Warning", "prod", "Pod", "api-1", "BackOff")
 	first.Metadata.Name, first.Metadata.UID = "api-1.17a", "uid-1"
 	first.LastTimestamp, first.Count = "2026-08-08T10:00:00Z", 3
@@ -147,19 +159,50 @@ func TestFingerprintSurvivesEventRecreation(t *testing.T) {
 	second.LastTimestamp, second.Count = "2026-08-08T18:30:00Z", 1
 
 	a, b := normalize("k8s-events", &first, enrichment{}), normalize("k8s-events", &second, enrichment{})
-	if a.Fingerprint != b.Fingerprint {
-		t.Fatalf("fingerprint must key on object+reason:\n%s\n%s", a.Fingerprint, b.Fingerprint)
+	if a.InitiationID != b.InitiationID {
+		t.Fatalf("initiationId must key on the workload:\n%s\n%s", a.InitiationID, b.InitiationID)
 	}
-	if a.Fingerprint != "k8s-events@prod/Pod/api-1/BackOff" {
-		t.Fatalf("fingerprint shape: %s", a.Fingerprint)
+	if a.InitiationID != "k8s-events@prod/Pod/api-1" {
+		t.Fatalf("initiationId shape: %s", a.InitiationID)
 	}
 
-	// a different object, or a different reason, is a different problem
+	// a different object is a different problem
 	other := evt("Warning", "prod", "Pod", "api-2", "BackOff")
+	if normalize("k8s-events", &other, enrichment{}).InitiationID == a.InitiationID {
+		t.Fatal("a distinct object must produce a distinct initiationId")
+	}
+
+	// a different reason on the SAME object is the SAME workload failing —
+	// no longer a distinct id, because the id no longer carries the reason.
 	reason := evt("Warning", "prod", "Pod", "api-1", "FailedMount")
-	if normalize("k8s-events", &other, enrichment{}).Fingerprint == a.Fingerprint ||
-		normalize("k8s-events", &reason, enrichment{}).Fingerprint == a.Fingerprint {
-		t.Fatal("distinct object or reason must produce a distinct fingerprint")
+	if normalize("k8s-events", &reason, enrichment{}).InitiationID != a.InitiationID {
+		t.Fatal("a different reason on one workload must correlate to the same conversation")
+	}
+}
+
+// TestInitiationIDIsWorkloadKeyedAcrossPodChurnAndReasons pins the motivating
+// scenario: pods of one Deployment failing for different reasons, across
+// pod-name churn and rollouts, all correlate to one conversation, while a
+// genuinely distinct workload in the same namespace never merges with it.
+func TestInitiationIDIsWorkloadKeyedAcrossPodChurnAndReasons(t *testing.T) {
+	owned := enrichment{Workload: "Deployment/api"}
+
+	gen1 := evt("Warning", "prod", "Pod", "api-7f8d9-abcde", "CrashLoopBackOff")
+	gen2 := evt("Warning", "prod", "Pod", "api-9c1a2-xyz12", "FailedMount") // next rollout, different pod, different reason
+
+	a := normalize("k8s-events", &gen1, owned)
+	b := normalize("k8s-events", &gen2, owned)
+	if a.InitiationID != b.InitiationID {
+		t.Fatalf("one workload across pod churn and rollouts must share one id:\n%s\n%s", a.InitiationID, b.InitiationID)
+	}
+	if a.InitiationID != "k8s-events@prod/Deployment/api" {
+		t.Fatalf("initiationId shape: %s", a.InitiationID)
+	}
+
+	other := evt("Warning", "prod", "Pod", "worker-5d4c-qqq", "BackOff")
+	unrelated := normalize("k8s-events", &other, enrichment{Workload: "Deployment/worker"})
+	if unrelated.InitiationID == a.InitiationID {
+		t.Fatal("a distinct workload in the same namespace must never merge")
 	}
 }
 
@@ -194,7 +237,7 @@ func TestNormalizeLabelsAndPayload(t *testing.T) {
 }
 
 // Cluster-scoped objects carry no involvedObject namespace; the event's own
-// namespace is the fallback so the fingerprint never contains an empty segment.
+// namespace is the fallback so the initiationId never contains an empty segment.
 func TestNamespaceFallsBackToEventNamespace(t *testing.T) {
 	var e Event
 	e.Type, e.Reason = "Warning", "NodeNotReady"

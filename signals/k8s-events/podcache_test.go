@@ -225,6 +225,142 @@ func TestUnsyncedCacheAnswersNothing(t *testing.T) {
 	}
 }
 
+// markSynced is the tests' shorthand for "every tracked kind has listed
+// cluster-wide" — the state a fully warmed cache is in.
+func (c *objectCache) markSynced() {
+	for _, kind := range []string{"Pod", "ReplicaSet", "Node"} {
+		c.markListed(kind, "")
+	}
+}
+
+// A list answers only for the kind and scope it covered. One flag for the
+// whole cache once let the small node list landing first make every pod read
+// as gone while the pod list had not landed — dropping dwelled pods as healed
+// during the adapter's own outage instead of failing open.
+func TestAListAnswersOnlyForItsOwnKindAndScope(t *testing.T) {
+	c := newObjectCache()
+	if _, known := c.Get("prod", "Pod", "api-1"); known {
+		t.Fatal("a brand-new cache must not claim to know anything")
+	}
+
+	c.markListed("Node", "")
+	if _, known := c.Get("prod", "Pod", "api-1"); known {
+		t.Fatal("a landed node list must not make an unlisted pod read as gone")
+	}
+
+	c.markListed("Pod", "prod")
+	if oi, known := c.Get("prod", "Pod", "api-1"); !known || oi != nil {
+		t.Fatalf("a pod absent from its namespace's landed list is gone: %+v, %v", oi, known)
+	}
+	if _, known := c.Get("staging", "Pod", "api-1"); known {
+		t.Fatal("a namespaced list must not answer for another namespace")
+	}
+	if _, known := c.Get("prod", "ReplicaSet", "api"); known {
+		t.Fatal("a pod list must not answer for replicasets")
+	}
+
+	c.markListed("Pod", "")
+	if _, known := c.Get("staging", "Pod", "api-1"); !known {
+		t.Fatal("a cluster-wide list answers for every namespace")
+	}
+}
+
+// A Node is cluster-scoped: it is found whatever namespace the caller passes —
+// a Node event's own namespace ("default"), or a referring pod's.
+func TestANodeIsFoundFromAnyNamespace(t *testing.T) {
+	c := newObjectCache()
+	c.markListed("Node", "")
+	c.put(&objectInfo{Kind: "Node", Name: "node-1"})
+	for _, ns := range []string{"", "default", "kube-system"} {
+		if oi, known := c.Get(ns, "Node", "node-1"); !known || oi == nil {
+			t.Fatalf("namespace %q: the node must be found: %+v, %v", ns, oi, known)
+		}
+	}
+}
+
+// A static pod's mirror is controlled by its Node. The chain ends there —
+// whether or not nodes are listed — so its event is never held for an owner
+// lookup that cannot change the answer.
+func TestAMirrorPodOwnedByItsNodeIsSettled(t *testing.T) {
+	c := newObjectCache()
+	c.markListed("Pod", "") // nodes never listed: a namespaced install
+	putPod(t, c, podJSON("kube-system", "etcd-node-1", "node-1", nil,
+		&ownerRef{Kind: "Node", Name: "node-1", Controller: boolPtr(true)}, true, "Running"))
+	if !c.Settled("kube-system", "Pod", "etcd-node-1") {
+		t.Fatal("a Node owner ends the chain — the mirror pod is settled")
+	}
+	if kind, name, ok := c.Workload("kube-system", "Pod", "etcd-node-1"); !ok || kind+"/"+name != "Node/node-1" {
+		t.Fatalf("the mirror pod's workload is its node: %s/%s %v", kind, name, ok)
+	}
+}
+
+// OwnedByAgentOps implements self-exclusion mechanism 2 directly on the real
+// cache — the "unknown", "absent", "labelled", "no owner" and multi-hop
+// branches, none of which the selfexclude tests reach because they go through
+// a stub objectLookup instead.
+func TestOwnedByAgentOpsUnknownWhenTheCacheHasNotSynced(t *testing.T) {
+	c := newObjectCache()
+	if owned, known := c.OwnedByAgentOps("prod", "Pod", "api-1"); owned || known {
+		t.Fatalf("an unsynced cache must not claim to know anything: owned=%v known=%v", owned, known)
+	}
+}
+
+func TestOwnedByAgentOpsSyncedAndAbsentIsKnownAndUnowned(t *testing.T) {
+	c := syncedCache()
+	owned, known := c.OwnedByAgentOps("prod", "Pod", "ghost")
+	if owned || !known {
+		t.Fatalf("a synced, absent object must be a definite 'not owned': owned=%v known=%v", owned, known)
+	}
+}
+
+func TestOwnedByAgentOpsLabelledObjectIsOwnedDirectly(t *testing.T) {
+	c := syncedCache()
+	putPod(t, c, podJSON("agentops", "console-abc", "node-a",
+		map[string]string{"app.kubernetes.io/name": "agentops-runtime"}, nil, true, "Running"))
+	owned, known := c.OwnedByAgentOps("agentops", "Pod", "console-abc")
+	if !owned || !known {
+		t.Fatalf("a labelled object must be owned: owned=%v known=%v", owned, known)
+	}
+}
+
+// No owner reference and no label: the loop never runs, and the object is a
+// definite "not ours".
+func TestOwnedByAgentOpsUnownedObjectWithNoOwnerIsNotOwned(t *testing.T) {
+	c := syncedCache()
+	putPod(t, c, podJSON("prod", "debug-shell", "node-a", nil, nil, true, "Running"))
+	owned, known := c.OwnedByAgentOps("prod", "Pod", "debug-shell")
+	if owned || !known {
+		t.Fatalf("a bare, unlabelled pod must not be owned: owned=%v known=%v", owned, known)
+	}
+}
+
+// The owner chain is walked past one hop: a pod owned by a replicaset that
+// carries no agent-ops label of its own, but whose OWNER is unknown to the
+// cache, must stop rather than loop or panic.
+func TestOwnedByAgentOpsStopsWhenTheChainLeavesTheCache(t *testing.T) {
+	c := syncedCache()
+	putPod(t, c, podJSON("prod", "api-1", "node-a", nil,
+		&ownerRef{Kind: "ReplicaSet", Name: "api-rs"}, true, "Running"))
+	// api-rs itself is never put into the cache.
+	owned, known := c.OwnedByAgentOps("prod", "Pod", "api-1")
+	if owned || !known {
+		t.Fatalf("a chain leaving the cache must resolve to 'not owned', known: owned=%v known=%v", owned, known)
+	}
+}
+
+// The label may be found a hop up the chain rather than on the object itself.
+func TestOwnedByAgentOpsFindsALabelOneHopUp(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "ReplicaSet", Namespace: "agentops", Name: "adapter-rs",
+		Labels: map[string]string{"agentops.dev/adapter": "console"}})
+	putPod(t, c, podJSON("agentops", "adapter-pod", "node-a", nil,
+		&ownerRef{Kind: "ReplicaSet", Name: "adapter-rs"}, true, "Running"))
+	owned, known := c.OwnedByAgentOps("agentops", "Pod", "adapter-pod")
+	if !owned || !known {
+		t.Fatalf("a label one hop up the owner chain must still mark the pod owned: owned=%v known=%v", owned, known)
+	}
+}
+
 // waitForMsg is waitFor with a failure message naming what was expected.
 func waitForMsg(t *testing.T, cond func() bool, msg string) {
 	t.Helper()

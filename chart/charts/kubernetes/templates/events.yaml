@@ -17,6 +17,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $ea.image.repository (toString $ea.image.tag) | quote }}
   # This adapter's DATA SOURCE is the Kubernetes API, so it mounts its own SA
@@ -31,6 +32,11 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  externals:
+    - name: Kubernetes API
+      kind: kubernetes
   # Interface metadata: makes `kubectl get signaladapter` answer "what goes in
   # spec.config?" without reading adapter source.
   configSchema:
@@ -186,6 +192,29 @@ spec:
                     principal hazard of the feature.
                   items:
                     type: string
+          drainingNodes:
+            type: string
+            description: >-
+              The node-STATE suppression axis: "suppress" (default) silences
+              every event on a node this cluster is deliberately draining
+              (cordoned, or maintenance-tainted) for as long as the drain
+              lasts; "report" disables it, evaluating those events exactly as
+              the other axes would. Needs the ClusterRole's nodes grant —
+              absent that, this is a no-op and every source says so once.
+            enum: ["suppress", "report"]
+          drainingNodeMatchers:
+            type: array
+            description: >-
+              Narrows what a draining node suppresses. Absent = every event on
+              that node's objects, for as long as it drains.
+            items:
+              type: string
+          drainingNodeBound:
+            type: string
+            description: >-
+              How long a drain may suppress before it is reported once (a
+              Node-kind signal, reason NodeDrainExceeded) and released — a
+              forgotten cordon must not go silent forever. Default 1h.
 {{- if $ea.rbac.create }}
 {{- /* THE ADAPTER'S IDENTITY, RENDERED BESIDE THE GRANT IT CARRIES.
 
@@ -221,6 +250,12 @@ rules:
     verbs: ["list", "watch"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
+    verbs: ["list", "watch"]
+  # Drain awareness (route.drainingNodes): nodes are CLUSTER-scoped, so this
+  # exists only here — a namespaced install has no equivalent grant, and the
+  # adapter degrades to drain awareness off rather than 403ing a source.
+  - apiGroups: [""]
+    resources: ["nodes"]
     verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -280,14 +315,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-kubernetes
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # a REFERENCE to the SignalAdapter CR above — its implementation defines the
   # schema of the config below
   adapter: {{ $ea.name }}
-  {{- with $src.grouping }}
-  grouping:
-{{ toYaml . | indent 4 }}
-  {{- end }}
+  cooldownHours: {{ $src.cooldownHours }}
   {{- /* Built as a map so an all-empty config omits the key entirely: emitting
   a bare `config:` would set spec.config to null rather than leave it unset. */}}
   {{- $cfg := dict }}

@@ -32,11 +32,13 @@ what it left behind, but it is never a reason to resolve on its own.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import pathlib
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import review_threads  # noqa: E402  -- gh_graphql and normalise_login: shared with the other thread readers
 
 THREADS_QUERY = """
 query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
@@ -64,32 +66,8 @@ mutation($id:ID!) {
 """
 
 
-def gh_graphql(query: str, **variables) -> dict:
-    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
-    for key, value in variables.items():
-        flag = "-F" if isinstance(value, int) else "-f"
-        cmd += [flag, f"{key}={value}"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-    payload = json.loads(out)
-    if "errors" in payload:
-        raise RuntimeError(payload["errors"])
-    return payload["data"]
-
-
-def normalise_login(login: str) -> str:
-    """One spelling for a bot, whichever API produced it.
-
-    REST reports `claude[bot]`; GraphQL reports `claude` and marks the account
-    `__typename: Bot`. The allowlist is written the REST way, because that is
-    how a person reads a login on GitHub — so both sides are normalised here
-    rather than one of them being rewritten to match the other.
-
-    THIS IS WHY NOTHING WAS EVER RESOLVED. The comparison was
-    `claude` (GraphQL) against `claude[bot]` (config), so the review refused its
-    own threads on every run — reported honestly by the diagnostic above it, and
-    invisible until a review actually had a finding to close.
-    """
-    return login.strip().lower().removesuffix("[bot]")
+gh_graphql = review_threads.gh_graphql
+normalise_login = review_threads.normalise_login
 
 
 def fetch_threads(owner: str, repo: str, number: int) -> dict[str, dict]:

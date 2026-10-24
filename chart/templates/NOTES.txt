@@ -5,7 +5,7 @@ Ask an agent:  a task is an ordinary signal — post it to a SignalSource a Read
                Pipeline claims (there is no endpoint that names a Pipeline):
   TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ .Values.adapterAuth.existingSecret | default .Values.adapterAuth.secretName }} -o jsonpath='{.data.token}' | base64 -d)
   curl -s -X POST http://agentops-manager.{{ .Release.Namespace }}.svc:{{ .Values.service.apiPort }}/signal/inbound -H "Authorization: Bearer $TOKEN" \
-    -d '{"source":"<signalsource>","signals":[{"fingerprint":"ask-1","kind":"task","payload":"..."}]}'
+    -d '{"source":"<signalsource>","signals":[{"initiationId":"ask-1","kind":"task","payload":"..."}]}'
 
 Remember: wiring lives ONLY on Pipelines — a SignalSource without a Ready
 Pipeline claim drops its signals (Wired=False). Capabilities are wiring too:
@@ -23,16 +23,17 @@ which profiles have no Pipeline granting them anything:
     kubectl -n {{ .Release.Namespace }} get pipeline -o jsonpath="{range .items[?(@.spec.profileRef.name=='$n')]}{.metadata.name} {end}" | grep -q . \
       || echo "no Pipeline grants capabilities to profile/$n"
   done
+{{- $contextAccessModes := include "agentops.accessModes" (dict "volume" .Values.persistence.context "root" $) | fromYamlArray }}
 {{- if .Values.persistence.context.enabled }}
 
 A conversation's accumulated context persists by default: claim {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }} backs
-/data/home, so conversational history survives a runtime pod restart.
+/data/context, so conversational history survives a runtime pod restart.
 
 If runtime pods never start, check the claim FIRST — a Pending PVC produces no
 error anywhere else, just conversations that queue forever:
   kubectl -n {{ .Release.Namespace }} get pvc {{ .Values.persistence.context.existingClaim | default .Values.persistence.context.name }}
 Pending with "no persistent volumes available" or "storageclass not found"
-means this cluster has no default StorageClass or no {{ join "/" .Values.persistence.context.accessModes }} provisioner.
+means this cluster has no default StorageClass or no {{ join "/" $contextAccessModes }} provisioner.
 Either name one (persistence.context.storageClassName) or turn storage off:
   helm upgrade ... --set persistence.context.enabled=false
 A claim naming a PRE-CREATED volume that stays Pending is a different fault with
@@ -40,9 +41,9 @@ the same symptom: it also needs persistence.context.storageClassName="-", or the
 cluster's default class is injected and a second volume is provisioned instead.
 See below for what turning it off costs.
 {{- end }}
-{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" .Values.persistence.context.accessModes)) (not (dig "agentops" "runtimeDefaults" "nodeSelector" dict (.Values.global | default dict))) }}
+{{- if and .Values.persistence.context.enabled (not (has "ReadWriteMany" $contextAccessModes)) (not (dig "agentops" "runtimeDefaults" "nodeSelector" dict (.Values.global | default dict))) }}
 
-HEADS UP — this claim can be attached by ONE node ({{ join "/" .Values.persistence.context.accessModes }}), but runtime pods
+HEADS UP — this claim can be attached by ONE node ({{ join "/" $contextAccessModes }}), but runtime pods
 are not pinned. It works until a second conversation schedules on another node,
 then that pod fails to attach the volume (Multi-Attach) — at the moment of
 concurrency, far from the storage setting that caused it.
@@ -211,6 +212,14 @@ Pipelines:
     -p '[{"op":"add","path":"/spec/channelRefs/-","value":{"name":"{{ $ch }}"}}]'
 Existing conversations keep their current bindings; new ones get a console thread.
 {{- end }}
+{{- if .Values.coordination.enabled }}
+
+The aops MCP server is deployed (agentops-mcp-aops). It grants nothing by
+itself: a Coordinator's own capability must bind toolset {{ .Values.global.builtinToolsets.coordinate.name }}
+and MCPConfig {{ .Values.coordination.name }} before its conversation can invoke, close, escalate
+or read anything — the same two-CR pattern every MCP toolset in this release
+uses. See docs/concepts.md for the Coordinator CRD.
+{{- end }}
 {{- $pb := index .Values "prometheus" }}
 {{- if and $pb $pb.enabled }}
 {{- /* Subchart context so the bundle's own helpers decide what this reports —
@@ -282,7 +291,7 @@ Prometheus bundle — this release WIRED it, so it answers on its own:
 Every admitted alert now opens a conversation and spends LLM credits.
 {{- end }}
 Decline it without giving up the rest of the bundle:
-  --set prometheus.pipelines.enabled=false
+  --set prometheus.wiringEnabled=false
 {{- if not $pb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
@@ -296,14 +305,14 @@ That is allowed — signal sources are shareable — and it means each admitted
 alert opens a conversation PER claiming Pipeline, under each one's own profile
 and capabilities. Two conversations, two bills.
 If you meant only your own route:
-  --set prometheus.pipelines.enabled=false
+  --set prometheus.wiringEnabled=false
 {{- end }}
 {{- else if and $pwired (not $pAlsoClaim) }}
 
 ONE STEP LEFT — nothing answers alerts yet. SignalSource {{ $psrc }} drops every
 alert (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set prometheus.pipelines.enabled=true
+  --set prometheus.wiringEnabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
@@ -403,7 +412,7 @@ Kubernetes bundle — this release WIRED it, so it answers on its own:
 Every admitted Warning event now opens a conversation and spends LLM credits.
 {{- end }}
 Decline it without giving up the rest of the bundle:
-  --set kubernetes.pipelines.enabled=false
+  --set kubernetes.wiringEnabled=false
 {{- if not $kb.pipelines.channels }}
 No channel is bound, so answers are not posted anywhere — read them with:
   kubectl -n {{ .Release.Namespace }} get conversations -o jsonpath='{.items[*].status.runs[*].result}'
@@ -417,16 +426,25 @@ That is allowed — signal sources are shareable — and it means each admitted
 event opens a conversation PER claiming Pipeline, under each one's own profile
 and capabilities. Two conversations, two bills, and both agents act.
 If you meant only your own route:
-  --set kubernetes.pipelines.enabled=false
+  --set kubernetes.wiringEnabled=false
 {{- end }}
 {{- else if and $wired (not $alsoClaim) }}
 
 ONE STEP LEFT — nothing answers cluster events yet. SignalSource {{ $src }} drops
 every event (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set kubernetes.pipelines.enabled=true
+  --set kubernetes.wiringEnabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
+{{- end }}
+{{- if and (eq (include "agentops.wiringMode" .) "coordinator") (include "kubernetes.demoShowcaseActive" $kbCtx) (include "kubernetes.wiringActive" $kbCtx) $kb.profile.enabled }}
+
+Demo showcase — Pipeline {{ $kb.pipelines.demoShowcase.name }}{{ if $wired }} ALSO claims SignalSource {{ $src }}{{ end }} alongside the
+chart-rendered Coordinator, reusing the k8s-observe route's own profile and
+read-only toolset.{{ if $wired }} Every admitted Warning event now opens TWO
+conversations, one per claimant, side by side.{{ end }}
+Decline it without giving up the Coordinator:
+  --set global.demo.wiringShowcase=false
 {{- end }}
 {{- end }}
 {{- $hb := index .Values "home-assistant" }}
@@ -460,7 +478,7 @@ the one you want:
   /{{ $hb.pipelines.ops.name }} <what is broken>          — fix it
 {{- end }}
 Decline the routes without giving up the rest of the bundle:
-  --set home-assistant.pipelines.enabled=false
+  --set home-assistant.wiringEnabled=false
 {{- if not $hb.pipelines.chatSources }}
 No chat source is claimed, so neither agent is offered on a surface — they are
 still reachable by name. Claim one with
@@ -477,14 +495,48 @@ Bind one with home-assistant.pipelines.channels={<channel>}.
 ONE STEP LEFT — nothing answers the house yet. SignalSource {{ $hsrc }} drops every
 record (Wired=False) until a Pipeline claims it. Either let the bundle wire
 itself:
-  --set home-assistant.pipelines.enabled=true
+  --set home-assistant.wiringEnabled=true
 or declare the route yourself under the parent chart's `pipelines:` — which is
 what you want when one agent should answer this source AND a chat surface.
 {{- end }}
 {{- end }}
+{{- $pub := index .Values "pulse" }}
+{{- if and $pub $pub.enabled }}
+{{- $pubIng := $pub.signal.ingress }}
+{{- $pubTls := $pubIng.tls }}
+{{- $pubHasTLS := false }}
+{{- if kindIs "slice" $pubTls }}{{ if $pubTls }}{{ $pubHasTLS = true }}{{ end }}
+{{- else if $pubTls }}{{ if or $pubTls.secretName $pubTls.clusterIssuer $pubTls.existing }}{{ $pubHasTLS = true }}{{ end }}{{ end }}
+{{- if and $pub.signal.enabled $pubIng.enabled (not $pubHasTLS) }}
+
+ACTION NEEDED — the pulse webhook endpoint is exposed over plain HTTP. The
+alert payload, and any header named in signal.defaultSource.webhookHeaders,
+cross the network in CLEAR TEXT. Terminate TLS:
+  --set pulse.signal.ingress.tls.secretName=<secret>
+or let cert-manager issue one:
+  --set pulse.signal.ingress.tls.clusterIssuer=<issuer>
+(Ignore this if TLS already terminates upstream at a load balancer or a
+service mesh — the chart cannot see what sits in front of it.)
+{{- end }}
+{{- if and $pub.signal.defaultSource.enabled $pub.signal.defaultSource.baseUrl (hasPrefix "http://" $pub.signal.defaultSource.baseUrl) }}
+
+ACTION NEEDED — signal.defaultSource.baseUrl is plain HTTP. Every
+registration call sends your Pulse API token as a bearer header on this
+connection, in CLEAR TEXT — unlike the HMAC-signed inbound webhook, a
+stolen bearer token can simply be replayed by whoever captured it. Use an
+https:// URL unless this traffic never leaves a trusted network.
+{{- end }}
+{{- if and $pub.mcpServer.enabled (hasPrefix "http://" $pub.mcpServer.backend) }}
+
+ACTION NEEDED — mcp-pulse's backend is plain HTTP. Every tool call forwards
+the CALLING agent's own Pulse API token to it, in CLEAR TEXT on this
+connection. Use an https:// URL unless this traffic never leaves a trusted
+network.
+{{- end }}
+{{- end }}
 
 {{- $np := (.Values.global.agentops).networkPolicy | default dict }}
-{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) }}
+{{- $mcpDeployed := or (and (index .Values "kubernetes") (index .Values "kubernetes" "enabled")) (and (index .Values "home-assistant") (index .Values "home-assistant" "enabled")) (and (index .Values "pulse") (index .Values "pulse" "enabled") (index .Values "pulse" "mcpServer" "enabled")) }}
 {{- if $np.enabled }}
 
 ────────────────────────────────────────────────────────────────────────────
@@ -671,7 +723,7 @@ To give ONE route more, declare an account STATING WHAT IT MAY DO, and name it:
 
   pipelines:
     - name: <route>
-      serviceAccountName: agentops-runtime-workloads
+      serviceAccountName: agentops-runtime-acting   # the account just declared
 
 There is no mode to name. A word like `full` is a grant nobody reviewed, and
 agentops.runtimeReadRules / runtimeWriteRules in the chart are the rules to copy

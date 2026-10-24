@@ -16,8 +16,13 @@ by as many Pipelines as an install wants — so a surface serving both agents is
 the ordinary shape, and it is what puts both in the list an unaddressed message
 is answered with. The ops route additionally claims the log source, which is the
 only asymmetry between them.
+
+UNDER `global.agentops.wiringMode: coordinator` THIS FILE RENDERS NOTHING —
+`capabilities.yaml` renders the same two routes as standalone AgentCapability
+objects instead, claimed by the chart-rendered Coordinator
+(`home-assistant.coordinatorContribution`).
 */ -}}
-{{- if include "home-assistant.wiringActive" . }}
+{{- if and (eq (include "agentops.wiringMode" .) "pipelines") (include "home-assistant.wiringActive" .) }}
 {{- $p := .Values.pipelines }}
 {{- $g := .Values.global | default dict }}
 {{- $la := .Values.logsAdapter }}
@@ -48,6 +53,11 @@ house through a server the toolset split was never meant to bound. */ -}}
 {{- if include "home-assistant.adminMcpEnabled" . }}
 {{- $opsOnlyTools = append $opsOnlyTools .Values.adminMcp.toolset.name }}
 {{- $opsOnlyConfigs = append $opsOnlyConfigs .Values.adminMcp.name }}
+{{- end }}
+{{- /* ha-ops is already trusted to repair the house; web search is the one
+built-in bucket scoped to it alone, never to the everyday control route. */ -}}
+{{- if dig "builtinToolsets" "enabled" false $g }}
+{{- $opsOnlyTools = append $opsOnlyTools (dig "builtinToolsets" "websearch" "name" "agentops-websearch" $g) }}
 {{- end }}
 {{- /* The SHELL toolset opens the REST path, and it is per route: configuration
 is what the ops agent fixes and no Assist intent reaches configuration, while the
@@ -99,6 +109,7 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-home-assistant
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   {{- with .icon }}
   # Display only: how this route is recognised in a chat command menu or the

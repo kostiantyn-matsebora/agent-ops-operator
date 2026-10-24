@@ -268,3 +268,28 @@ func TestBulkCloseSkipsAConversationBeingDeleted(t *testing.T) {
 		t.Fatal("no second /close may be posted")
 	}
 }
+
+// 3.9: a thread bound but not yet established (ensure-topic queued, no
+// threadId yet) must read as not joined, exactly like a conversation with no
+// console thread at all — never posted downstream with an empty threadId,
+// which the manager's /channel/inbound refuses outright. Measured live: this
+// window turned a bulk close into a bare "closing failed" instead of the
+// ordinary "not joined" skip.
+func TestBulkCloseSkipsAThreadNotYetEstablished(t *testing.T) {
+	pending := obj("conversations", "pending", "1",
+		`{"profileRef":{"name":"ops"},"channelRefs":[{"name":"console"}]}`,
+		`{"threads":[{"channel":"console","threadId":""}]}`)
+	api, f, _, _ := apiWithOptions(t, "tok", true, pending)
+	h := api.Handler(http.NotFoundHandler())
+
+	_, out := postClose(t, h, `{"names":["pending"]}`)
+	if out.Skipped != 1 || out.Closed != 0 || out.Failed != 0 {
+		t.Fatalf("a not-yet-established thread must be skipped, not failed: %+v", out)
+	}
+	if reason := outcomes(out.Results)["pending"].Reason; reason != notJoinedReason {
+		t.Fatalf("the skip must read as not joined, got %q", reason)
+	}
+	if len(f.inbounds()) != 0 {
+		t.Fatal("nothing may be posted for a thread with no id yet")
+	}
+}

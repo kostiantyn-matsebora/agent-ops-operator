@@ -95,7 +95,9 @@ Archive a completed change in the experimental workflow.
    ```
 
    **THE SCRIPT, NEVER RAW `gh issue edit`.** Besides the label and the comment
-   it REGENERATES THE BODY, and this is the transition where that matters most:
+   it REGENERATES THE POINTER — the body on an issue it opened, its own comment
+   on a PROMOTED one, never a reporter's words — and this is the transition
+   where that matters most:
    the change directory has just moved into `openspec/changes/archive/`, so
    every link written before now points at a path that no longer exists. It also
    resolves the binding from the ARCHIVED location, which raw `gh` cannot do

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -27,13 +26,23 @@ const MaxReadBatch = 50
 const readPatchAttempts = 3
 
 type readEntry struct {
-	ThreadID string       `json:"threadId"`
-	ReadAt   *metav1.Time `json:"readAt"`
+	ThreadID string `json:"threadId"`
+	// ReadAt is an opaque RFC3339(-Nano) timestamp string, never a metav1.Time
+	// — see ThreadBinding.ReadAt's comment for why that distinction is load
+	// bearing here.
+	ReadAt *string `json:"readAt"`
 	// Reader is OPTIONAL and OPAQUE: the adapter's own key for whoever read the
 	// thread. Absent means the CHANNEL-WIDE mark, which is the only thing a
 	// transport with no reader identity can report — and is exactly the
 	// behaviour every adapter had before this field existed.
 	Reader string `json:"reader,omitempty"`
+	// Rewind asks for "mark unread" instead of the ordinary monotonic
+	// advance: the named reader's OWN entry is set to ReadAt even where that
+	// is earlier than what is stored. It never touches the channel-wide
+	// mark, and naming no reader is refused — there would be no per-reader
+	// entry to rewind, and rewinding the channel-wide mark would un-read a
+	// thread for every OTHER reader too.
+	Rewind bool `json:"rewind,omitempty"`
 }
 
 type readOutcome struct {
@@ -53,7 +62,8 @@ const (
 // request positions it answers.
 type readTarget struct {
 	reader  string
-	at      metav1.Time
+	at      time.Time
+	rewind  bool
 	results []int
 }
 
@@ -104,7 +114,7 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	now := metav1.NewTime(time.Now())
+	now := time.Now()
 
 	var list agentopsv1alpha1.ConversationList
 	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace)); err != nil {
@@ -126,9 +136,26 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 	order := []string{}
 	for i, e := range in.Reads {
 		results[i] = readOutcome{ThreadID: e.ThreadID, Reader: e.Reader}
-		if e.ThreadID == "" || e.ReadAt == nil || e.ReadAt.IsZero() {
+		if e.ThreadID == "" || e.ReadAt == nil || *e.ReadAt == "" {
 			results[i].Outcome = readFailed
 			results[i].Reason = "each read needs a threadId and a readAt"
+			continue
+		}
+		// Full precision matters here: this is the message's own timestamp,
+		// and it is compared later against the stored watermark at the same
+		// precision it is reported at — see ThreadBinding.ReadAt.
+		at, err := time.Parse(time.RFC3339Nano, *e.ReadAt)
+		if err != nil {
+			results[i].Outcome = readFailed
+			results[i].Reason = "readAt must be an RFC3339 timestamp"
+			continue
+		}
+		if e.Rewind && e.Reader == "" {
+			// The only watermark a rewind could move with no reader named is
+			// the channel-wide one, and a rewind is never allowed to move
+			// that — it would un-read the thread for every OTHER reader too.
+			results[i].Outcome = readFailed
+			results[i].Reason = "a rewind must name a reader"
 			continue
 		}
 		name, ok := byThread[e.ThreadID]
@@ -137,8 +164,7 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 			results[i].Reason = fmt.Sprintf("no conversation on channel %q holds thread %q", ch.Name, e.ThreadID)
 			continue
 		}
-		at := *e.ReadAt
-		if at.Time.After(now.Time) {
+		if at.After(now) {
 			at = now
 		}
 		if _, seen := groups[name]; !seen {
@@ -152,10 +178,11 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if target == nil {
-			target = &readTarget{reader: e.Reader, at: at}
+			target = &readTarget{reader: e.Reader, at: at, rewind: e.Rewind}
 			groups[name] = append(groups[name], target)
-		} else if at.Time.After(target.at.Time) {
+		} else if at.After(target.at) {
 			target.at = at
+			target.rewind = target.rewind || e.Rewind
 		}
 		target.results = append(target.results, i)
 	}
@@ -214,13 +241,23 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 		advanced := false
 		pending := map[*readTarget]bool{}
 		for _, target := range targets {
-			// A reader with no entry inherits the channel-wide mark, so a report
-			// that would not pass THAT is not an advance for them either.
-			if cur := t.Watermark(target.reader); cur != nil && !target.at.Time.After(cur.Time) {
-				for _, i := range target.results {
-					results[i].Outcome, results[i].Reason = readSkipped, "the watermark would not advance"
+			// A REWIND is exempt from the monotonic check by design — "mark
+			// unread" exists precisely to set a reader's own entry EARLIER
+			// than what is stored. It still names a reader (refused above
+			// otherwise), so it can never reach the channel-wide mark.
+			//
+			// A reader with no entry inherits the channel-wide mark, so an
+			// ORDINARY report that would not pass THAT is not an advance for
+			// them either.
+			if !target.rewind {
+				if cur := t.Watermark(target.reader); cur != nil {
+					if curTime, ok := agentopsv1alpha1.ParseWatermark(*cur); ok && !target.at.After(curTime) {
+						for _, i := range target.results {
+							results[i].Outcome, results[i].Reason = readSkipped, "the watermark would not advance"
+						}
+						continue
+					}
 				}
-				continue
 			}
 			setWatermark(t, target.reader, target.at)
 			pending[target] = true
@@ -256,18 +293,22 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 // A reader report NEVER advances the channel-wide mark: that is the whole point
 // of the overlay — one person reading must not clear the badge for colleagues
 // who have not.
-func setWatermark(t *agentopsv1alpha1.ThreadBinding, reader string, at metav1.Time) {
+func setWatermark(t *agentopsv1alpha1.ThreadBinding, reader string, at time.Time) {
+	// Full nanosecond precision, preserved as an opaque string rather than run
+	// through metav1.Time — see ThreadBinding.ReadAt's comment for why that
+	// distinction is the whole fix here.
+	formatted := at.UTC().Format(time.RFC3339Nano)
 	if reader == "" {
-		t.ReadAt = at.DeepCopy()
+		t.ReadAt = &formatted
 		return
 	}
 	for i := range t.Readers {
 		if t.Readers[i].Key == reader {
-			t.Readers[i].ReadAt = at.DeepCopy()
+			t.Readers[i].ReadAt = &formatted
 			return
 		}
 	}
-	t.Readers = append(t.Readers, agentopsv1alpha1.ReaderMark{Key: reader, ReadAt: at.DeepCopy()})
+	t.Readers = append(t.Readers, agentopsv1alpha1.ReaderMark{Key: reader, ReadAt: &formatted})
 	evictReaders(t, reader)
 }
 
@@ -299,5 +340,13 @@ func readerBefore(a, b agentopsv1alpha1.ReaderMark) bool {
 	if b.ReadAt == nil {
 		return false
 	}
-	return a.ReadAt.Time.Before(b.ReadAt.Time)
+	at, aok := agentopsv1alpha1.ParseWatermark(*a.ReadAt)
+	bt, bok := agentopsv1alpha1.ParseWatermark(*b.ReadAt)
+	if !aok {
+		return true
+	}
+	if !bok {
+		return false
+	}
+	return at.Before(bt)
 }

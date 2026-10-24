@@ -22,7 +22,7 @@ func stubBotAPI(t *testing.T, script ...string) (*httptest.Server, *[]string) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		body := script[len(script)-1]
 		if n < len(script) {
 			body = script[n]
@@ -39,7 +39,7 @@ const rateLimited = `{"ok":false,"error_code":429,"description":"Too Many Reques
 
 func TestRetryAfterIsHonouredThenSucceeds(t *testing.T) {
 	srv, calls := stubBotAPI(t, rateLimited, `{"ok":true,"result":{"message_id":7}}`)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	start := time.Now()
 	if err := tg.Send(context.Background(), "-100", nil, "hello"); err != nil {
@@ -63,7 +63,7 @@ func TestRetryAfterIsHonouredThenSucceeds(t *testing.T) {
 
 func TestSustainedRateLimitFailsInsideTheBudget(t *testing.T) {
 	srv, calls := stubBotAPI(t, rateLimited)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	// a 4-second budget against a 1s retry_after: it gives up rather than
 	// running past the claim window
@@ -88,7 +88,7 @@ func TestSustainedRateLimitFailsInsideTheBudget(t *testing.T) {
 // 2026-08-13 rejections.
 func TestCreateTopicHonoursRetryAfter(t *testing.T) {
 	srv, calls := stubBotAPI(t, rateLimited, `{"ok":true,"result":{"message_thread_id":4242}}`)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	id, err := tg.CreateTopic(context.Background(), "-100", "PodCrashLooping")
 	if err != nil {
@@ -106,13 +106,146 @@ func TestCreateTopicHonoursRetryAfter(t *testing.T) {
 // and let the manager re-derive.
 func TestNonRateLimitErrorIsNotRetried(t *testing.T) {
 	srv, calls := stubBotAPI(t, `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`)
-	tg := &Telegram{Token: "bot-token", HTTP: routeTo(srv.URL)}
+	tg := NewTelegram(srv.URL, "gw-token")
 
 	if err := tg.Send(context.Background(), "-100", nil, "hello"); err == nil {
 		t.Fatal("a 400 must be reported")
 	}
 	if len(*calls) != 1 {
 		t.Fatalf("a terminal error must not be retried, got %d calls", len(*calls))
+	}
+}
+
+// ---- A1/A2/A9: one budget, shared across every call an operation makes -----
+
+const rateLimited2s = `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 2","parameters":{"retry_after":2}}`
+
+// THE PROPERTY A2 PINS: the budget is minted ONCE per operation and every
+// call the operation goes on to make spends from the SAME remaining time — a
+// per-call budget (the bug) would let a second call retry on its own fresh
+// allowance and the operation as a whole would run well past what the manager
+// actually left it.
+func TestRetryBudgetIsSharedAcrossEveryCallInTheOperation(t *testing.T) {
+	srv, calls := stubBotAPI(t, rateLimited2s, `{"ok":true,"result":{"message_id":1}}`, rateLimited2s)
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	ctx := WithRetryBudget(context.Background(), 3*time.Second)
+	start := time.Now()
+
+	// First call (a chunk send, say): one 429 then success — spends ~2s of
+	// the operation's 3s budget.
+	if err := tg.Send(ctx, "-100", nil, "chunk one"); err != nil {
+		t.Fatalf("first chunk must succeed: %v", err)
+	}
+	// Second call, the SAME operation's context: a fresh 429 needs another
+	// 2s, which the shared budget no longer has (~1s left) — it must fail
+	// without sleeping again.
+	err := tg.Send(ctx, "-100", nil, "chunk two")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("the second call must fail once the shared operation budget is spent")
+	}
+	if !strings.Contains(err.Error(), "claim budget") {
+		t.Fatalf("want the budget named as the reason, got %v", err)
+	}
+	if elapsed >= 3*time.Second {
+		t.Fatalf("the operation ran %v, at or past its 3s shared budget — "+
+			"the budget was not shared across its calls", elapsed)
+	}
+	if len(*calls) != 3 {
+		t.Fatalf("want exactly 3 Bot API calls (429, 200, 429-and-stop), got %d: %v", len(*calls), *calls)
+	}
+}
+
+// A dial error or a timeout posted nothing, so retrying it is exactly as safe
+// as retrying a 429 — and it must happen, or a transient blip fails an
+// operation that a second's wait would have ridden out (A1).
+func TestDroppedConnectionIsRetriedWithinTheBudget(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			// A dropped connection, no response at all — what a dial failure or
+			// a timeout looks like to the client making the call.
+			hj := w.(http.Hijacker)
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer srv.Close()
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	if err := tg.Send(context.Background(), "-100", nil, "hi"); err != nil {
+		t.Fatalf("a dropped connection must be retried, not reported: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("want one retry after the dropped connection, got %d calls", n)
+	}
+}
+
+// A bare 5xx — the gateway's own leg to Telegram down, or Telegram's own
+// internal error — is the same transient condition a dial error is, and rides
+// the same clock rather than failing the operation outright (A1).
+func TestBareGatewayFiveHundredIsRetriedWithinTheBudget(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		if n == 1 {
+			http.Error(w, "upstream dial failed", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer srv.Close()
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	if err := tg.Send(context.Background(), "-100", nil, "hi"); err != nil {
+		t.Fatalf("a bare 502 must be retried, not reported: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("want one retry after the 502, got %d calls", n)
+	}
+}
+
+// A sustained transient failure still gives up inside the operation's budget —
+// the same bound a sustained 429 is held to.
+func TestSustainedTransientFailureFailsInsideTheBudget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream dial failed", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	ctx := WithRetryBudget(context.Background(), 3*time.Second)
+	start := time.Now()
+	err := tg.Send(ctx, "-100", nil, "hi")
+	if err == nil {
+		t.Fatal("a sustained 502 must be reported as a failure once the budget is spent")
+	}
+	if !strings.Contains(err.Error(), "claim budget") {
+		t.Fatalf("want the budget named as the reason, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("gave up after %v — the budget must bound the wait", elapsed)
+	}
+}
+
+// close-topic rides the SAME retry rule as any other call (A9): a 429 against
+// it is absorbed exactly like one against sendMessage.
+func TestCloseTopicHonoursRetryAfter(t *testing.T) {
+	srv, calls := stubBotAPI(t, rateLimited, `{"ok":true,"result":{}}`)
+	tg := NewTelegram(srv.URL, "gw-token")
+
+	if err := tg.CloseTopic(context.Background(), "-100", 9876); err != nil {
+		t.Fatalf("closeForumTopic must ride out a 429: %v", err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("want one retry, got %v", *calls)
 	}
 }
 

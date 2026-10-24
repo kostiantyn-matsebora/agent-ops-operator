@@ -102,6 +102,44 @@ spec:
                   - key
                   type: object
                 type: array
+              externals:
+                description: |-
+                  Externals names the systems outside the install this implementation
+                  faces. Interface metadata like CredentialKeys: the manager reads no
+                  config to verify it and grants nothing from it. An adapter declaring
+                  none is drawn with no external, which is a normal answer.
+                items:
+                  description: |-
+                    ExternalRef names one system outside the install that an adapter
+                    implementation faces. It is METADATA ONLY, beside configSchema and
+                    credentialKeys: the manager reads no config to verify it and grants nothing
+                    from it — no RBAC, no network policy, no credential follows from declaring
+                    one. The console draws it verbatim as a node beside the adapter.
+                  properties:
+                    kind:
+                      description: |-
+                        Kind is how the adapter meets it: `sender` pushes to the adapter,
+                        `api` is called by the adapter, `kubernetes` is the cluster's own API.
+                      enum:
+                      - sender
+                      - api
+                      - kubernetes
+                      type: string
+                    name:
+                      description: |-
+                        Name is the system as a reader knows it: "Alertmanager",
+                        "Telegram Bot API", "Kubernetes API".
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               image:
                 description: |-
                   Image implementing the signal adapter contract. Required UNLESS servedBy

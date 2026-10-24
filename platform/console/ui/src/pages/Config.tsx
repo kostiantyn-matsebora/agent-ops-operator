@@ -7,9 +7,11 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { Empty, ErrorState, Loading } from '../components/States'
-import { useDetail, useInventory, useKinds } from '../api/hooks'
+import { useDetail, useInventory, useKinds, usePipelineIcon } from '../api/hooks'
 import { PlainText } from '../components/Text'
 import { Crumbs } from '../components/Crumbs'
+import { Icon } from '../components/Icon'
+import { PipelineName } from '../components/PipelineName'
 import { Yaml } from '../components/Yaml'
 import { ConditionChips, HealthChip, KeyValueChips, MetadataCard, age } from '../components/Metadata'
 import { styleFor } from '../graph/shapes'
@@ -65,12 +67,12 @@ export function ConfigPage() {
 function KindGlyph({ kind, size = 18 }: { kind: string; size?: number }) {
   const s = styleFor(kind)
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flex: '0 0 auto' }}>
+    <svg width={size} height={size} viewBox="-12 -12 24 24" aria-hidden="true" style={{ flex: '0 0 auto' }}>
       <path
         d={s.glyph}
         fill="none"
         stroke="var(--pf-t--global--icon--color--subtle, #6a6e73)"
-        strokeWidth={1.8}
+        strokeWidth={1.4}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -85,7 +87,14 @@ function KindGlyph({ kind, size = 18 }: { kind: string; size?: number }) {
 function columnsFor(kind: string): string[] {
   switch (kind) {
     case 'pipelines':
-      return ['profile', 'sources', 'channels', 'toolsets', 'toolsMode', 'mcpConfigs']
+      // A Pipeline using capabilityRef carries no profile/toolsets/mcpConfigs
+      // columns — see kindColumns in configapi.go — so those cells render "—"
+      // for it, and `capability` fills in instead.
+      return ['profile', 'capability', 'sources', 'channels', 'toolsets', 'toolsMode', 'mcpConfigs']
+    case 'coordinators':
+      return ['sources', 'escalatesTo', 'capability', 'profile', 'agents']
+    case 'agentcapabilities':
+      return ['profile', 'runtime', 'toolsets', 'mcpConfigs']
     case 'channels':
       return ['adapter', 'served']
     case 'signalsources':
@@ -102,7 +111,7 @@ function columnsFor(kind: string): string[] {
     case 'mcpconfigs':
       return ['servers']
     case 'conversations':
-      return ['phase', 'profile']
+      return ['phase', 'profile', 'coordinator', 'causedBy']
     default:
       return []
   }
@@ -110,7 +119,7 @@ function columnsFor(kind: string): string[] {
 
 /** Columns whose values are lists worth rendering as chips rather than prose. */
 const CHIP_COLUMNS = new Set([
-  'sources', 'channels', 'toolsets', 'mcpConfigs', 'tools', 'servers',
+  'sources', 'channels', 'toolsets', 'mcpConfigs', 'tools', 'servers', 'escalatesTo', 'agents',
 ])
 const STATUS_COLUMNS = new Set(['served', 'wired'])
 
@@ -185,7 +194,7 @@ export function ConfigKindPage() {
                     <Tr key={row.name}>
                       <Td dataLabel="Name">
                         <Link to={`/config/${kind}/${row.name}`}>
-                          <PlainText>{row.name}</PlainText>
+                          {row.icon ? <PipelineName name={row.name} icon={row.icon} /> : <PlainText>{row.name}</PlainText>}
                         </Link>
                         {row.findings > 0 && (
                           <Tooltip content="the console's own cross-reference checks flagged this">
@@ -226,8 +235,12 @@ export function ConfigDetailPage() {
   const { kind = '', name = '' } = useParams()
   const { data, isLoading, error } = useDetail(kind, name)
   const [tab, setTab] = useState<string | number>(0)
+  const iconFor = usePipelineIcon()
   if (isLoading) return <Loading />
   if (error || !data) return <ErrorState title="Not found">{String(error)}</ErrorState>
+  // The object's own declaration, read off its spec: a Pipeline that is not
+  // Ready is absent from the vocabulary and still has its icon here.
+  const declaredIcon = kind === 'pipelines' ? (data.object.spec as { icon?: string } | undefined)?.icon : undefined
 
   return (
     <>
@@ -235,7 +248,7 @@ export function ConfigDetailPage() {
         items={[
           { label: 'Configuration', to: '/config' },
           { label: kind, to: `/config/${kind}` },
-          { label: name },
+          { label: name, icon: declaredIcon },
         ]}
       />
       <PageSection>
@@ -244,6 +257,7 @@ export function ConfigDetailPage() {
             <Title headingLevel="h1">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
                 <KindGlyph kind={kind} size={24} />
+                {declaredIcon && <Icon icon={declaredIcon} />}
                 <PlainText>{name}</PlainText>
                 <HealthChip health={data.health} />
               </span>
@@ -351,7 +365,7 @@ export function ConfigDetailPage() {
                             {(data.usedBy ?? []).map((r) => (
                               <Label key={`${r.kind}/${r.name}/${r.field}`} isCompact>
                                 <Link to={`/config/${r.kind}/${r.name}`}>
-                                  {r.kind}/{r.name}
+                                  {r.kind}/{r.kind === 'pipelines' ? <PipelineName name={r.name} icon={iconFor(r.name)} /> : r.name}
                                 </Link>{' '}
                                 ({r.field})
                               </Label>

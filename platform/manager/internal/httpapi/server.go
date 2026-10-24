@@ -36,9 +36,12 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,10 +52,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	controlplane "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/control-plane"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
@@ -63,6 +68,8 @@ import (
 // StateAnnotationPrefix namespaces adapter cursor state kept as Channel
 // annotations (e.g. agentops.dev/adapter-state-offset).
 const StateAnnotationPrefix = "agentops.dev/adapter-state-"
+
+const errInvalidJSON = "invalid JSON"
 
 // Server carries dependencies for the HTTP surface.
 type Server struct {
@@ -83,6 +90,14 @@ type Server struct {
 	Ops          *chat.OpQueue
 	Router       *chat.Router
 	AdapterToken string
+
+	// ControlPlaneToken guards /control-plane/* (internal/control-plane). A
+	// single flat shared secret, its OWN env var (CONTROL_PLANE_TOKEN) —
+	// deliberately isolated from AdapterToken and the coordinator token, so
+	// a caller holding one can never reach the other's surface. Empty
+	// disables the surface (503), the same unconfigured-is-unauthorized
+	// rule AdapterToken follows.
+	ControlPlaneToken string
 
 	// Activity is the per-hop telemetry log served by /activity*. A nil log is
 	// inert, so every emission site can call it unguarded.
@@ -111,6 +126,14 @@ type Server struct {
 	// disagreeing about that would surface as a bug report far from either.
 	// Nil is usable: one is built lazily so a zero-valued Server works.
 	StorageBreaker *storagebreaker.Breaker
+
+	// ReplicaIdentity is this process's own identity, the same string the
+	// reconciler's claims carry (durable-chat-ops-broker). Compared against
+	// the leader-election Lease's holder to decide whether THIS replica may
+	// safely claim a channel op on /channel/ops. Empty disables the check
+	// (tests, and any Server built with no leader election behind it at
+	// all), so a zero-valued Server keeps answering as it always has.
+	ReplicaIdentity string
 
 	breakerOnce sync.Once
 }
@@ -159,7 +182,46 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /activity", s.anyAdapterAuth(s.handleActivityReport))
 	mux.HandleFunc("GET /status", s.anyAdapterAuth(s.handleStatus))
 	mux.HandleFunc("GET /pipelines/{name}/resolved", s.anyAdapterAuth(s.handlePipelineResolved))
-	return mux
+	s.RegisterCoordinateRoutes(mux)
+	// /control-plane/*: its own package, its own dedicated token — see
+	// internal/control-plane's doc comment for why this is not folded into
+	// adapterAuth/the coordinator token.
+	controlplane.RegisterRoutes(mux, s.ControlPlaneToken, s.Client, s.Reader, s.Namespace)
+	return s.leaderProxyMiddleware(mux)
+}
+
+// leaderProxyMiddleware is the ONE place every route becomes a dumb proxy on
+// a non-leader (hardcode-manager-replicas, generalized from the single
+// /channel/ops exception chat-ops-broker-telegram-gateway shipped first).
+//
+// Every endpoint here ultimately reads or writes the Kubernetes API, which is
+// consistent regardless of which replica answers — so in principle any
+// replica could serve any of them correctly. In practice, repeatedly fixing
+// ONE more endpoint at a time (first /channel/ops, then /activity*) was
+// exactly the whack-a-mole this exists to stop: a replica this request
+// happens to land on is an implementation detail no caller should have to
+// route around, and the next endpoint nobody thought to check is the one
+// that breaks next.
+//
+// /healthz is the one exemption — it answers liveness/readiness for THIS
+// pod, and proxying it would report on a different pod's health entirely.
+//
+// A handler reached despite this (the proxy attempt failed, or none applied)
+// falls through to its OWN local behavior unchanged — for `/channel/ops`
+// that is still the leader-only refusal `durable-chat-ops-broker` requires;
+// for everything else it is ordinary, replica-safe handling that needed no
+// leader at all.
+func (s *Server) leaderProxyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || s.isLeader(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.proxyToLeader(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // anyAdapterAuth accepts the master token or ANY derived adapter token, channel
@@ -450,14 +512,14 @@ func (s *Server) runtimeName(ctx context.Context, conv *agentopsv1alpha1.Convers
 	return s.defaultRuntimeName(ctx)
 }
 
-// pipelineRuntimeName answers what a PIPELINE would run on, for the resolved
+// pipelineRuntimeName answers what a capability would run on, for the resolved
 // endpoint the console reads before any conversation exists. Same chain, minus
 // the snapshot there is nothing to snapshot from yet.
-func (s *Server) pipelineRuntimeName(ctx context.Context, p *agentopsv1alpha1.Pipeline,
+func (s *Server) pipelineRuntimeName(ctx context.Context, capability agentopsv1alpha1.AgentCapabilitySpec,
 	profile *agentopsv1alpha1.AgentProfile) string {
 
-	if p != nil && p.Spec.RuntimeRef != nil && p.Spec.RuntimeRef.Name != "" {
-		return p.Spec.RuntimeRef.Name
+	if capability.RuntimeRef != nil && capability.RuntimeRef.Name != "" {
+		return capability.RuntimeRef.Name
 	}
 	if profile != nil && profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
 		return profile.Spec.RuntimeRef.Name // DEPRECATED, one release
@@ -474,9 +536,15 @@ func (s *Server) defaultRuntimeName(ctx context.Context) string {
 }
 
 type workDone struct {
-	Convo    string `json:"convo"`
-	RunID    string `json:"runId"`
-	Status   string `json:"status"`
+	// Convo is the Conversation this report is for.
+	Convo string `json:"convo"`
+	// RunID is the unit's own id, round-tripped.
+	RunID string `json:"runId"`
+	// Status is "succeeded" or "failed". The manager treats any other
+	// value as a failed run.
+	Status string `json:"status"`
+	// ExitCode is the process exit code, when the runtime has one to
+	// report.
 	ExitCode *int32 `json:"exitCode,omitempty"`
 	// RuntimeContextID is the handle for the context this run leaves behind —
 	// the one to continue next time. Runtimes may report it on a FAILED run too:
@@ -489,10 +557,10 @@ type workDone struct {
 	// continue: "continued", "new", or "unavailable" (a new one was needed
 	// because the named context could not be reached).
 	//
-	// The manager cannot infer this. It sends a handle and receives a handle;
-	// when they differ it has no way to tell an agent that branched deliberately
-	// from one that was forced to start over. The runtime knows, because it is
-	// the component that tried.
+	// The manager cannot infer this. It sends a handle and receives a
+	// handle, and when they differ it has no way to tell an agent that
+	// branched deliberately from one that was forced to start over. The
+	// runtime knows, because it is the component that tried.
 	//
 	// ABSENT MEANS NO CLAIM: a runtime that does not implement it keeps today's
 	// behaviour, because an addition to the contract must not make an existing
@@ -503,7 +571,22 @@ type workDone struct {
 	// where any given runtime keeps its context, so any explanation it invented
 	// would be confident and sometimes wrong.
 	ContinuityReason string `json:"continuityReason,omitempty"`
-	Result           string `json:"result,omitempty"`
+	// Result is the run's answer. Truncated to 2000 bytes by the manager,
+	// never refused for length.
+	Result string `json:"result,omitempty"`
+	// Brief is what the runtime extracted as this conversation's one- or
+	// two-sentence description (design D-I) — a contract field, never a
+	// parsed section of `result`. LATEST-WINS, the same rule as
+	// `runtimeContextId`: absent leaves the stored one untouched.
+	Brief string `json:"brief,omitempty"`
+	// Turns is one entry per model call this run made, bounded in count and
+	// field size (workreport.go). It becomes one activity hop and nothing
+	// else — telemetry, never written to the Conversation.
+	Turns []Turn `json:"turns,omitempty"`
+	// ToolCalls is one entry per tool call this run made, bounded in count
+	// and field size (workreport.go). It becomes one activity hop and
+	// nothing else — telemetry, never written to the Conversation.
+	ToolCalls []ToolCall `json:"toolCalls,omitempty"`
 }
 
 // Continuity report values. Runtime-agnostic by construction: they describe what
@@ -522,7 +605,11 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var d workDone
 	if err := json.Unmarshal(body, &d); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
+		return
+	}
+	if err := validateReport(&d); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
 	ctx := r.Context()
@@ -551,8 +638,17 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// allowed to prune the queue entry — a crash between the two would otherwise
 	// lose what a person said, permanently and silently.
 	var recorded []agentopsv1alpha1.RecordedInput
+	// Carried out of Inflight before it is cleared below — the only place this
+	// run's true start time is ever recorded. A coordinator's member is
+	// created mid-run, as soon as `invoke` is called, well before the run
+	// that invoked it finishes and writes its own RunStatus entry; the
+	// console anchors the member's transcript position to this run's window
+	// (item #15 QA) and needs a real StartedAt to do it, not the run's own
+	// finish time standing in for both ends.
+	var startedAt *metav1.Time
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
 		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
+		startedAt = &conv.Status.Inflight.DispatchedAt
 		if !hold {
 			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
 			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
@@ -577,6 +673,16 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	if reported != "" {
 		conv.SetContextID(reported)
+	}
+	// LATEST-WINS, same rule as the context handle: the agent restates what the
+	// conversation is about having read the whole context, so a report omitting
+	// it leaves the stored one untouched rather than blanking it.
+	if d.Brief != "" {
+		brief := d.Brief
+		if len(brief) > agentopsv1alpha1.MaxBrief {
+			brief = brief[:agentopsv1alpha1.MaxBrief]
+		}
+		conv.Status.Brief = brief
 	}
 	// Context continuity, recorded where anyone can see it. This is the one
 	// failure that leaves a conversation looking entirely healthy — same phase,
@@ -618,7 +724,8 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		result = result[:2000]
 	}
 	conv.Status.Runs = append(conv.Status.Runs, agentopsv1alpha1.RunStatus{
-		RunID: d.RunID, Status: d.Status, ExitCode: d.ExitCode, Result: result, FinishedAt: &now,
+		RunID: d.RunID, Status: d.Status, ExitCode: d.ExitCode, Result: result,
+		StartedAt: startedAt, FinishedAt: &now,
 		// This manager owes the reply to every bound thread. Recorded on the run
 		// itself so the obligation survives the process that took it on.
 		DeliveryTracked: true,
@@ -630,17 +737,40 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if len(conv.Status.Runs) > 10 {
 		conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-10:]
 	}
+	// Turns count on the conversation WHOSE OWN status this is, when ITS OWN
+	// run is recorded — never when a member's result arrives as an input, so N
+	// members finishing at once is one turn (design D-C, D-E). Absent Budget
+	// means this conversation is not itself a Coordinator's root: nothing to
+	// count.
+	var maxTurnsExceeded bool
+	if conv.Status.Budget != nil {
+		conv.Status.Budget.Turns++
+		b := conv.Status.Budget
+		maxTurnsExceeded = b.MaxTurns > 0 && b.Turns >= b.MaxTurns
+	}
+	desiredPhase := agentopsv1alpha1.ConversationIdle
 	if len(dispatch.PendingInputs(&conv)) > 0 {
-		conv.Status.Phase = agentopsv1alpha1.ConversationQueued
-	} else {
-		conv.Status.Phase = agentopsv1alpha1.ConversationIdle
+		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
 	conv.Status.LastActivity = &now
 	if err := s.Client.Status().Patch(ctx, &conv, patch); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	// Phase moves in its OWN optimistic-locked patch, never folded into the
+	// one above: a run that was still in flight when /close landed reports
+	// its completion here, and this write must not un-close the conversation
+	// when that belated report lands — Closed is sticky until an explicit
+	// reopen. Folded in, an unconditioned merge patch landing after close's
+	// own patch silently reverted phase to Idle/Queued while leaving
+	// ClosedAt stamped — measured live on the chart-v14.0.0 release smoke
+	// (TestConsoleLifecycle/close_then_delete).
+	if err := s.setPhaseUnlessClosed(ctx, d.Convo, desiredPhase); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	pipeline := s.pipelineName(ctx, &conv)
+	s.emitRunCalls(ctx, &conv, pipeline, d.RunID, &d)
 	runEvent := activity.Event{
 		Kind:     activity.KindRunCompleted,
 		From:     activity.Node(activity.NodeRuntime, s.runtimeName(ctx, &conv)),
@@ -670,7 +800,68 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 			s.Router.FanOutRunReply(ctx, &conv, d.RunID, chat.RunReplyMessage(run))
 		}
 	}
+	// A member's result becomes an input on its PARENT, one hop
+	// (coordination-loop) — the FAST PATH; a conversation with no causedBy has
+	// nothing to route. The reconciler backstop re-derives a missed append from
+	// `causedBy ∧ !RoutedToParent`.
+	if conv.Spec.CausedBy != nil && s.Router != nil {
+		dedup := "member:" + conv.Name + ":" + d.RunID
+		if err := s.Router.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name, dedup, result); err != nil {
+			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
+				"conversation", conv.Name, "parent", conv.Spec.CausedBy.Parent, "error", err.Error())
+		} else if run := runByID(&conv, d.RunID); run != nil {
+			markPatch := client.MergeFrom(conv.DeepCopy())
+			run.RoutedToParent = true
+			if err := s.Client.Status().Patch(ctx, &conv, markPatch); err != nil {
+				log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
+					"conversation", conv.Name, "runId", d.RunID, "error", err.Error())
+			}
+		}
+	}
+	// Budget edges are evaluated PER COORDINATOR LEVEL (design D-E): only a
+	// conversation that is itself a Coordinator's root carries a Budget, and
+	// only ITS OWN maxTurns bounds ITS OWN turns.
+	if maxTurnsExceeded && s.Router != nil {
+		digest := fmt.Sprintf("budget-exceeded: maxTurns (%d) reached", conv.Status.Budget.MaxTurns)
+		if err := s.Router.CloseBudgetExceeded(ctx, &conv, digest); err != nil {
+			log.FromContext(ctx).Info("closing conversation on maxTurns",
+				"conversation", conv.Name, "error", err.Error())
+		}
+	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// setPhaseUnlessClosed moves a conversation to Queued or Idle after a run
+// completes, UNLESS a concurrent /close already moved it to Closed — Closed
+// is sticky until an explicit reopen, so a work report that was merely slow
+// to arrive must never resurrect the phase close already retired.
+//
+// Optimistic-locked and retried on conflict, deliberately separate from the
+// rest of handleWorkDone's status write: that write carries no sticky
+// invariant (a late result is still worth recording, closed or not), so it
+// stays a plain, unconditioned patch. Phase is the one field here that must
+// be re-decided against the LATEST state rather than the state this request
+// started with.
+func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired agentopsv1alpha1.ConversationPhase) error {
+	for range 5 {
+		var conv agentopsv1alpha1.Conversation
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if conv.Status.Phase == agentopsv1alpha1.ConversationClosed || conv.Status.Phase == desired {
+			return nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		conv.Status.Phase = desired
+		err := s.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return fmt.Errorf("conflict setting phase on %q", name)
 }
 
 // recordInputs renders the queued inputs a run consumed as the record kept on
@@ -864,8 +1055,36 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	//
 	// Computed ONCE per request, before the wait: it is a read of the informer
 	// cache, and recomputing it every second of a 30-second poll would buy
-	// nothing an adapter can act on any sooner.
+	// nothing an adapter can act on any sooner. Set before the leader check
+	// below too — the revision rides EVERY poll response, a rejected one
+	// included, since the manager cannot dial an otherwise-idle adapter any
+	// other way.
 	s.setVocabularyRevision(r.Context(), w)
+
+	// durable-chat-ops-broker: a claim is written only by the current leader
+	// (the Conversation reconciler, leader-gated by construction), so a
+	// non-leader has no safe way to answer this poll from its own state —
+	// its in-memory OpQueue was never populated for ops this process did not
+	// claim.
+	//
+	// A non-leader is a DUMB PROXY to whoever the Lease says is leader, not a
+	// second decision-maker: it does no claiming, no deriving, it just
+	// forwards the request and relays the response byte for byte. The leader
+	// keeps being the ONLY process that ever touches OpQueue or writes a
+	// claim — this changes who answers the HTTP request, not who does the
+	// work.
+	//
+	// Falls back to the 503-and-retry a conforming adapter already tolerates
+	// only when the leader is unknown or unreachable from here (a handoff in
+	// progress, a network blip) — never by silently serving from this
+	// replica's own, unpopulated state. The proxy ATTEMPT itself now happens
+	// one layer up, in leaderProxyMiddleware, uniformly for every route —
+	// reaching this check at all already means that attempt failed.
+	if !s.isLeader(r.Context()) {
+		w.Header().Set("Retry-After", "0")
+		writeJSON(w, 503, map[string]string{"error": "this replica is not the current leader, and the leader could not be reached"})
+		return
+	}
 
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	for {
@@ -885,6 +1104,39 @@ func (s *Server) handleChannelOps(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// proxyToLeader reverse-proxies the request to whichever pod the Lease says
+// is leader, reporting whether it managed to. A failed proxy (leader
+// unknown, dial refused, a handoff mid-flight) is reported false so the
+// caller falls back to the ordinary 503-and-retry — never serves a half
+// answer from this replica's own state.
+func (s *Server) proxyToLeader(w http.ResponseWriter, r *http.Request) bool {
+	target := s.leaderProxyTarget(r.Context())
+	if target == "" {
+		return false
+	}
+	u := &url.URL{Scheme: "http", Host: target}
+	proxied := false
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(u)
+			pr.Out.Host = u.Host
+		},
+		ErrorHandler: func(_ http.ResponseWriter, req *http.Request, err error) {
+			log.FromContext(req.Context()).Info("leader proxy failed, falling back", "target", target, "error", err.Error())
+			// No response written: the caller falls back to 503-and-retry on a false
+			// return, so nothing more needs writing here. Writing a second
+			// response on top of one ReverseProxy may have started would
+			// panic on a non-empty body already flushed.
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			proxied = true
+			return nil
+		},
+	}
+	proxy.ServeHTTP(w, r)
+	return proxied
+}
+
 func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var res chat.OpResult
@@ -892,7 +1144,7 @@ func (s *Server) handleChannelOpDone(w http.ResponseWriter, r *http.Request) {
 	// success, and how any op says "done, nothing to report".
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &res); err != nil {
-			writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+			writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 			return
 		}
 	}
@@ -979,6 +1231,11 @@ func (s *Server) handleConversationReopen(w http.ResponseWriter, r *http.Request
 // close-then-delete verb would let one call do the irreversible thing to a
 // conversation that was still working, with the confirmation naming only the
 // delete. Refusing makes the destructive step something ordered twice.
+//
+// Deleting now cascades to every conversation reachable from it by
+// causedBy, mirroring the close cascade (conversation-close): a
+// coordination's members must never be left orphaned, unreachable and
+// occupying the API after their root is gone.
 func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request) {
 	conv, ok := s.reachConversation(w, r)
 	if !ok {
@@ -990,11 +1247,46 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 				"which are the only durable copy of what the agent answered", conv.Name, phaseOrOpen(conv))})
 		return
 	}
+	if err := s.cascadeDeleteMembers(r.Context(), conv.Name); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	if err := s.Client.Delete(r.Context(), conv); err != nil && !apierrors.IsNotFound(err) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, 202, map[string]bool{"ok": true})
+}
+
+// cascadeDeleteMembers recursively deletes every conversation reachable from
+// parentName by causedBy, BEFORE parentName itself is deleted — the same
+// label the close cascade filters on (`chat.cascadeCloseMembers`), confirmed
+// against causedBy.parent rather than trusted: the label is a HINT, the
+// field is the FACT.
+//
+// Every descendant this reaches is already Closed by the time its ancestor
+// is, because the close cascade closes a whole subtree before any of it can
+// be deleted — so there is no "not yet closed" case to refuse here, and
+// NotFound is tolerated: some other path may already have deleted it.
+func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) error {
+	var list agentopsv1alpha1.ConversationList
+	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
+		client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parentName}); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		member := &list.Items[i]
+		if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != parentName {
+			continue // the label is a hint; the field is the fact
+		}
+		if err := s.cascadeDeleteMembers(ctx, member.Name); err != nil {
+			return err
+		}
+		if err := s.Client.Delete(ctx, member); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func phaseOrOpen(conv *agentopsv1alpha1.Conversation) string {
@@ -1028,6 +1320,10 @@ func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Router.HandleMessage(ctx, &ch, chat.InboundMessage{ThreadID: in.ThreadID, Text: in.Text, Sender: in.Sender}); err != nil {
+		if errors.Is(err, chat.ErrSelfInput) {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1106,7 +1402,7 @@ func (s *Server) handleStatePut(w http.ResponseWriter, r *http.Request) {
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 		return
 	}
 	patch := client.MergeFrom(ch.DeepCopy())
@@ -1133,7 +1429,7 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message,omitempty"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		writeJSON(w, 400, map[string]string{"error": errInvalidJSON})
 		return
 	}
 	cond := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "AdapterReady"}

@@ -28,8 +28,8 @@ import (
 // applying them.
 
 const (
-	saDir       = "/var/run/secrets/kubernetes.io/serviceaccount"
-	tokenMaxAge = 5 * time.Minute
+	defaultSADir = "/var/run/secrets/kubernetes.io/serviceaccount"
+	tokenMaxAge  = 5 * time.Minute
 
 	// APIGroup is the only group the console ever reads.
 	APIGroup   = "agentops.dev"
@@ -41,11 +41,13 @@ const (
 // this list and InstallKinds is ever requested, which is what makes the chart's
 // read-only Role a complete description of the console's reach.
 var Kinds = []string{
+	"agentcapabilities",
 	"agentprofiles",
 	"agentruntimes",
 	"channels",
 	"channeladapters",
 	"conversations",
+	"coordinators",
 	"mcpconfigs",
 	"mcptoolsets",
 	"pipelines",
@@ -55,13 +57,15 @@ var Kinds = []string{
 
 // InstallKinds are the workload resources that carry INSTALL FACTS — image
 // references and digests, readiness, restart counts, pod phase and failure
-// reasons. None of it exists in any CR, so an operations console that cannot
-// read them cannot see a CrashLoopBackOff.
+// reasons, and the cluster node a pod runs on. None of it exists in any CR, so
+// an operations console that cannot read them cannot see a CrashLoopBackOff,
+// and its topology cannot draw a component the repository builds.
 //
 // This is a deliberate widening past agentops.dev, and it stays read-only and
-// namespaced: `get/list/watch` on these two, granted by the chart against the
-// console's own ServiceAccount.
+// namespaced: `get/list/watch` on these three, granted by the chart against
+// the console's own ServiceAccount.
 var InstallKinds = []string{
+	"cronjobs",
 	"deployments",
 	"pods",
 }
@@ -70,24 +74,28 @@ var InstallKinds = []string{
 // an agentops.dev custom resource — the console's own group is the default
 // precisely because it is nearly everything the console reads.
 var groupVersion = map[string]struct{ Group, Version string }{
+	"cronjobs":    {"batch", "v1"},
 	"deployments": {"apps", "v1"},
 	"pods":        {"", "v1"}, // core group: /api/v1, no /apis prefix
 }
 
 // Singular renders a plural resource name for display.
 var Singular = map[string]string{
-	"agentprofiles":   "AgentProfile",
-	"agentruntimes":   "AgentRuntime",
-	"channels":        "Channel",
-	"channeladapters": "ChannelAdapter",
-	"conversations":   "Conversation",
-	"mcpconfigs":      "MCPConfig",
-	"mcptoolsets":     "MCPToolset",
-	"pipelines":       "Pipeline",
-	"signaladapters":  "SignalAdapter",
-	"signalsources":   "SignalSource",
-	"deployments":     "Deployment",
-	"pods":            "Pod",
+	"agentcapabilities": "AgentCapability",
+	"agentprofiles":     "AgentProfile",
+	"agentruntimes":     "AgentRuntime",
+	"channels":          "Channel",
+	"channeladapters":   "ChannelAdapter",
+	"conversations":     "Conversation",
+	"coordinators":      "Coordinator",
+	"mcpconfigs":        "MCPConfig",
+	"mcptoolsets":       "MCPToolset",
+	"pipelines":         "Pipeline",
+	"signaladapters":    "SignalAdapter",
+	"signalsources":     "SignalSource",
+	"cronjobs":          "CronJob",
+	"deployments":       "Deployment",
+	"pods":              "Pod",
 }
 
 // AgentOpsKind reports whether a plural is one of ours — the console's own
@@ -114,26 +122,37 @@ type Kube struct {
 	tokenLoaded time.Time
 }
 
+// saDir is where the kubelet mounts the ServiceAccount — the default path in
+// every real pod. KUBERNETES_SERVICEACCOUNT_DIR overrides it so the built
+// binary can be driven black-box against a fake API server by the contract
+// conformance suite; nothing in a chart sets it.
+func saDir() string {
+	if d := os.Getenv("KUBERNETES_SERVICEACCOUNT_DIR"); d != "" {
+		return d
+	}
+	return defaultSADir
+}
+
 // NewInClusterKube builds a client from the pod's ServiceAccount mount and the
-// API server address the kubelet injects. Requires ChannelAdapter
-// spec.kubernetesAccess — without it there is no token to read.
+// API server address the kubelet injects. The token is the account the
+// ChannelAdapter names (`spec.serviceAccountName`), or the release floor.
 func NewInClusterKube(namespace string) (*Kube, error) {
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if host == "" || port == "" {
 		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST/PORT unset")
 	}
-	caPEM, err := os.ReadFile(saDir + "/ca.crt")
+	caPEM, err := os.ReadFile(saDir() + "/ca.crt")
 	if err != nil {
 		return nil, fmt.Errorf("reading API server CA: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("API server CA at %s/ca.crt is not valid PEM", saDir)
+		return nil, fmt.Errorf("API server CA at %s/ca.crt is not valid PEM", saDir())
 	}
 	k := &Kube{
 		BaseURL:   "https://" + net.JoinHostPort(host, port),
 		Namespace: namespace,
-		TokenPath: saDir + "/token",
+		TokenPath: saDir() + "/token",
 		HTTP: &http.Client{
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
 		},
@@ -302,6 +321,25 @@ func (k *Kube) resourcePath(kind string) string {
 		prefix = "/api/" + gv.Version
 	}
 	return prefix + "/namespaces/" + url.PathEscape(k.Namespace) + "/" + url.PathEscape(kind)
+}
+
+// Get fetches one object by name directly from the API server, bypassing the
+// watch cache entirely. Not a list-and-filter: a single-item GET, for a
+// caller that needs a definitive answer for an object the watch has not (or
+// no longer) delivered — a 404 here means the object really is absent now,
+// not merely unseen.
+func (k *Kube) Get(ctx context.Context, kind, name string) (*Object, error) {
+	resp, err := k.get(ctx, k.resourcePath(kind)+"/"+url.PathEscape(name), 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var obj Object
+	if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {
+		return nil, fmt.Errorf("decoding %s %s: %w", kind, name, err)
+	}
+	obj.Kind = kind
+	return &obj, nil
 }
 
 // List returns every object of a kind in the console's namespace plus the

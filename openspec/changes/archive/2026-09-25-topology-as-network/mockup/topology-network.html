@@ -1,0 +1,1569 @@
+<title>Topology as a network</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700&family=Red+Hat+Text:wght@400;500&family=Red+Hat+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ao-brand: #0d7d76; --ao-brand-strong: #0a615c; --ao-brand-soft: #d3ece9;
+    --ao-accent: #6b4bd6; --ao-accent-soft: #e9e3fb;
+    --ao-success: #1f7a4d; --ao-warning: #a86400; --ao-danger: #b32c3f; --ao-neutral: #6a7178;
+    --ao-surface: #ffffff; --ao-surface-alt: #f3f5f6; --ao-canvas: #eef1f2;
+    --ao-border: #cfd6da; --ao-border-strong: #9aa4ab;
+    --ao-text: #16191c; --ao-text-subtle: #5c656d;
+    --ao-edge-idle: #b6c0c6; --ao-lane-fill: #ffffff; --ao-lane-border: #d5dcdf;
+    --ao-code-bg: #f6f8f8;
+    --ao-shadow: 0 1px 2px rgba(22,25,28,.08), 0 6px 18px rgba(22,25,28,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ao-brand: #43c9bd; --ao-brand-strong: #7fded5; --ao-brand-soft: #123b39;
+      --ao-accent: #a996f5; --ao-accent-soft: #2a2350;
+      --ao-success: #55c98a; --ao-warning: #e0a63c; --ao-danger: #f2708a; --ao-neutral: #9aa4ab;
+      --ao-surface: #1b1f22; --ao-surface-alt: #23282c; --ao-canvas: #14171a;
+      --ao-border: #3a4247; --ao-border-strong: #5c666d;
+      --ao-text: #e8ecee; --ao-text-subtle: #a5b0b7;
+      --ao-edge-idle: #4a545b; --ao-lane-fill: #1f2427; --ao-lane-border: #363f44;
+      --ao-code-bg: #14181b;
+      --ao-shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ao-brand: #43c9bd; --ao-brand-strong: #7fded5; --ao-brand-soft: #123b39;
+    --ao-accent: #a996f5; --ao-accent-soft: #2a2350;
+    --ao-success: #55c98a; --ao-warning: #e0a63c; --ao-danger: #f2708a; --ao-neutral: #9aa4ab;
+    --ao-surface: #1b1f22; --ao-surface-alt: #23282c; --ao-canvas: #14171a;
+    --ao-border: #3a4247; --ao-border-strong: #5c666d;
+    --ao-text: #e8ecee; --ao-text-subtle: #a5b0b7;
+    --ao-edge-idle: #4a545b; --ao-lane-fill: #1f2427; --ao-lane-border: #363f44;
+    --ao-code-bg: #14181b;
+    --ao-shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--ao-canvas); color: var(--ao-text);
+    font-family: "Red Hat Text", "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.45;
+  }
+  .page { max-width: 1440px; margin: 0 auto; padding-block: 18px 40px; padding-inline: 16px; display: grid; gap: 14px; }
+  h1, h2, h3 { font-family: "Red Hat Display", "Segoe UI", system-ui, sans-serif; margin: 0; text-wrap: balance; }
+  h1 { font-size: 22px; font-weight: 700; }
+  h2 { font-size: 15px; font-weight: 700; }
+  h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ao-text-subtle); }
+  p { margin: 0; }
+  code, .mono { font-family: "Red Hat Mono", ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 12.5px; }
+  code { background: var(--ao-code-bg); border: 1px solid var(--ao-border); border-radius: 4px; padding: 0 4px; }
+  a { color: var(--ao-brand); }
+
+  .masthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px; }
+  .masthead .tag { font-size: 12px; color: var(--ao-text-subtle); }
+  .masthead .lede { flex-basis: 100%; max-width: 68ch; color: var(--ao-text-subtle); }
+
+  /* ---- toolbar (Kiali's graph toolbar, in the console's vocabulary) ---- */
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
+    background: var(--ao-surface); border: 1px solid var(--ao-border); border-radius: 8px; padding: 10px 12px;
+  }
+  .toolbar .sep { width: 1px; height: 24px; background: var(--ao-border); }
+  .field { display: inline-flex; align-items: center; gap: 6px; }
+  .field label { font-size: 12px; color: var(--ao-text-subtle); white-space: nowrap; }
+  select, input[type="text"], button {
+    font: inherit; color: var(--ao-text); background: var(--ao-surface); border: 1px solid var(--ao-border-strong);
+    border-radius: 6px; padding: 5px 9px; min-height: 32px;
+  }
+  select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--ao-brand); outline-offset: 1px; }
+  input[type="text"] { min-width: 150px; font-family: "Red Hat Mono", ui-monospace, monospace; font-size: 12.5px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--ao-brand); border-color: var(--ao-brand); color: #fff; font-weight: 500; }
+  button.quiet { border-color: transparent; background: transparent; color: var(--ao-brand); padding-inline: 6px; }
+  button.on { background: var(--ao-brand-soft); border-color: var(--ao-brand); color: var(--ao-brand-strong); }
+  button.sm { min-height: 26px; padding: 2px 8px; font-size: 12px; }
+  .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--ao-border); background: var(--ao-surface-alt); white-space: nowrap; }
+  .chip.ok { border-color: var(--ao-success); color: var(--ao-success); }
+  .chip.bad { border-color: var(--ao-danger); color: var(--ao-danger); }
+  .chip.warn { border-color: var(--ao-warning); color: var(--ao-warning); }
+  .chip.brand { border-color: var(--ao-brand); color: var(--ao-brand-strong); background: var(--ao-brand-soft); }
+  .chip.accent { border-color: var(--ao-accent); color: var(--ao-accent); background: var(--ao-accent-soft); }
+  .chip button { min-height: 0; padding: 0 2px; border: 0; background: none; color: inherit; font-size: 13px; line-height: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ao-success); display: inline-block; }
+  .dot.live { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+
+  /* ---- the popover menus (Kiali's "Display" dropdown) ---- */
+  .menu { position: relative; }
+  .menu .pop {
+    position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 250px;
+    background: var(--ao-surface); border: 1px solid var(--ao-border); border-radius: 8px; box-shadow: var(--ao-shadow);
+    padding: 10px 12px; display: grid; gap: 8px;
+  }
+  .pop h3 { margin-top: 4px; }
+  .pop label.row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .pop .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
+
+  /* ---- workspace ---- */
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+  @media (max-width: 960px) { .workspace { grid-template-columns: minmax(0, 1fr); } }
+  .canvas {
+    position: relative; background: var(--ao-surface); border: 1px solid var(--ao-border); border-radius: 8px;
+    height: 640px; overflow: hidden;
+  }
+  @media (max-width: 600px) { .canvas { height: 480px; } }
+  .canvas svg { width: 100%; height: 100%; display: block; touch-action: none; }
+  .canvas .zoom { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 4px; }
+  .canvas .zoom button { min-height: 28px; padding: 2px 8px; font-size: 12px; }
+  .canvas .scope { position: absolute; left: 10px; top: 10px; }
+  .canvas .legend {
+    position: absolute; left: 10px; bottom: 10px; background: var(--ao-surface); border: 1px solid var(--ao-border);
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; display: grid; gap: 4px; box-shadow: var(--ao-shadow);
+  }
+  .legend .row { display: flex; align-items: center; gap: 8px; }
+  .legend svg { width: 22px; height: 18px; }
+
+  /* ---- side panel ---- */
+  .panel { background: var(--ao-surface); border: 1px solid var(--ao-border); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; min-height: 240px; }
+  .panel .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ao-text-subtle); }
+  .panel .name { font-family: "Red Hat Display", system-ui, sans-serif; font-weight: 700; font-size: 18px; word-break: break-word; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+  .kv dt { color: var(--ao-text-subtle); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  table.t th, table.t td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--ao-border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.t th { color: var(--ao-text-subtle); font-weight: 500; font-size: 11.5px; }
+  table.t td.num, table.t th.num { text-align: right; }
+  .scrollx { overflow-x: auto; }
+  .empty { color: var(--ao-text-subtle); font-size: 13px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* ---- replay bars ---- */
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+    background: var(--ao-surface); border: 1px solid var(--ao-brand); border-radius: 8px; padding: 10px 12px;
+  }
+  .bar .title { font-family: "Red Hat Display", system-ui, sans-serif; font-weight: 700; color: var(--ao-brand-strong); }
+  .bar input[type="range"] { flex: 1 1 220px; min-width: 160px; accent-color: var(--ao-brand); }
+  .bar .time { font-variant-numeric: tabular-nums; min-width: 12ch; }
+  .speed button.on { font-weight: 500; }
+
+  .hops { display: grid; gap: 0; max-height: 240px; overflow: auto; border: 1px solid var(--ao-border); border-radius: 6px; }
+  .hop { display: grid; grid-template-columns: 7ch 1fr auto; gap: 8px; padding: 5px 8px; font-size: 12.5px; border-bottom: 1px solid var(--ao-border); align-items: center; }
+  .hop:last-child { border-bottom: 0; }
+  .hop .at { font-variant-numeric: tabular-nums; color: var(--ao-text-subtle); }
+  .hop .k { font-family: "Red Hat Mono", ui-monospace, monospace; font-size: 12px; }
+  .hop .ft { color: var(--ao-text-subtle); font-size: 12px; }
+  .hop.now { background: var(--ao-brand-soft); }
+  .hop.done .k { color: var(--ao-text-subtle); }
+  .hop .err { color: var(--ao-danger); font-weight: 500; }
+  .hop[role=button] { cursor: pointer; } .hop[role=button]:hover { background: var(--ao-surface-alt); }
+  .pre { white-space: pre-wrap; word-break: break-word; font-family: "Red Hat Mono", ui-monospace, monospace; font-size: 12px; }
+  .kv dd .pre { display: block; }
+
+  /* ---- notes ---- */
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .note { background: var(--ao-surface); border: 1px solid var(--ao-border); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; font-size: 13px; }
+  .note ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+  .note b { font-weight: 500; }
+
+  /* ---- svg ---- */
+  .lane-box { fill: var(--ao-lane-fill); stroke: var(--ao-lane-border); stroke-dasharray: 5 4; }
+  .lane-title { font-family: "Red Hat Display", system-ui, sans-serif; font-weight: 700; font-size: 13.5px; fill: var(--ao-text); }
+  .lane-hint { font-size: 10.5px; fill: var(--ao-text-subtle); }
+  .edge { fill: none; stroke-width: 2; }
+  .edge.idle { stroke: var(--ao-edge-idle); }
+  .edge.ok { stroke: var(--ao-success); }
+  .edge.error { stroke: var(--ao-danger); stroke-width: 2.2; }
+  .edge.unconfirmed { stroke: var(--ao-warning); stroke-dasharray: 6 4; }
+  .edge.dashed { stroke-dasharray: 3 4; }
+  .edge.dim { opacity: .18; }
+  .edge.hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
+  .edge.selected { stroke: var(--ao-brand); stroke-width: 3; }
+  .elabel { font-size: 13px; fill: var(--ao-text-subtle); paint-order: stroke; stroke: var(--ao-surface); stroke-width: 3px; pointer-events: none; }
+  .node { cursor: pointer; }
+  .node .shape { fill: var(--ao-surface); stroke-width: 1.3; }
+  .node.h-ok .shape { stroke: var(--ao-success); }
+  .node.h-bad .shape { stroke: var(--ao-danger); stroke-width: 2.6; }
+  .node.h-unknown .shape { stroke: var(--ao-warning); }
+  .node.h-none .shape { stroke: var(--ao-border-strong); }
+  .node.selected .shape { stroke: var(--ao-brand); stroke-width: 3.2; }
+  .node .glyph { fill: none; stroke: var(--ao-text-subtle); stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
+  .node .ring { fill: none; stroke: var(--ao-brand); stroke-width: 2; stroke-dasharray: 6 5; opacity: .9; transform-origin: 0 0; animation: spin 2.4s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .node .ring { animation: none; } }
+  .node.found .halo { fill: none; stroke: var(--ao-accent); stroke-width: 3; stroke-dasharray: 3 3; }
+  .node .caption { font-size: 11.5px; fill: var(--ao-text-subtle); text-anchor: middle; paint-order: stroke; stroke: var(--ao-surface); stroke-width: 3px; letter-spacing: .02em; }
+  .node .label { font-size: 15px; fill: var(--ao-text); text-anchor: middle; paint-order: stroke; stroke: var(--ao-surface); stroke-width: 3px; }
+  .node.dim { opacity: .18; }
+  .node .badge { fill: var(--ao-brand); } .node .badge-t { font-size: 11px; fill: #fff; text-anchor: middle; font-weight: 700; }
+  .particle.ok { fill: var(--ao-brand); }
+  .particle.pop { fill: none !important; stroke: var(--ao-brand); stroke-width: 2; }
+  .particle.pop.error { stroke: var(--ao-danger); }
+  .particle.error { fill: var(--ao-danger); }
+  .particle.unconfirmed { fill: none; stroke: var(--ao-warning); stroke-width: 2; }
+  .particle { pointer-events: none; }
+  .particle.pulse { filter: drop-shadow(0 0 3px var(--ao-brand)); pointer-events: all; cursor: pointer; }
+</style>
+
+<div class="page">
+  <div class="masthead">
+    <h1>Topology as a network</h1>
+    <span class="tag">mockup · agent-ops console · Kiali's graph idioms over agent-ops' own vocabulary</span>
+    <p class="lede">The same install the console draws in lanes today, drawn as a network: layers you fold in or out, boxes you can switch off, traffic that moves, and a replay of any past window or of one conversation. Everything below is synthetic and runs in the page.</p>
+  </div>
+
+  <div class="toolbar" id="toolbar">
+    <div class="menu">
+      <button id="pipesBtn" aria-expanded="false" aria-controls="pipesPop">Pipelines: all ▾</button>
+      <div class="pop" id="pipesPop" hidden>
+        <h3>Routes to show</h3>
+        <div id="pipeToggles" style="display:grid;gap:4px"></div>
+        <p class="empty">Kiali's namespace selector. A route is the pipeline and everything it reaches. What no selected route reaches is hidden and counted.</p>
+        <button class="quiet sm" id="pipesAll">Select all</button>
+      </div>
+    </div>
+    <div class="field"><label for="viewSel">View</label>
+      <select id="viewSel"><option value="wiring" selected>Model</option><option value="components">Components</option><option value="instances">Infrastructure</option></select>
+    </div>
+    <div class="field" id="detailField"><label for="view">Detail</label>
+      <select id="view">
+        <option value="routes">Routes only</option>
+        <option value="wiring">Wiring</option>
+        <option value="execution">Wiring + execution</option>
+        <option value="capabilities" selected>+ capabilities</option>
+        <option value="work">+ work</option>
+      </select>
+    </div>
+    <div class="field" id="boxField"><label for="box">Box by</label>
+      <select id="box"><option value="bundle" selected>Bundle</option><option value="route">Route</option><option value="none">None</option></select>
+    </div>
+    <div class="field"><label for="layoutSel">Layout</label>
+      <select id="layoutSel"><option value="concentric">Concentric</option><option value="cola">Cola</option><option value="dagre">Dagre</option></select>
+    </div>
+    <div class="menu">
+      <button id="displayBtn" aria-expanded="false" aria-controls="displayPop">Display ▾</button>
+      <div class="pop" id="displayPop" hidden>
+        <h3>Show</h3>
+        <label class="row"><input type="checkbox" id="optAnimate" checked> Traffic animation</label>
+        <label class="row"><input type="checkbox" id="optIdleEdges" checked> Idle edges</label>
+        <label class="row"><input type="checkbox" id="optIdleNodes" checked> Idle elements</label>
+        <label class="row"><input type="checkbox" id="optBadges" checked> Badges (unread, active)</label>
+        <div class="field"><label for="optLabels">Edge labels</label>
+          <select id="optLabels"><option value="none" selected>None</option><option value="rate">Rate</option><option value="latency">Latency (p50)</option></select>
+        </div>
+        <h3 id="classesTitle">Element classes</h3>
+        <div class="cols" id="classToggles"></div>
+        <button class="quiet sm" id="resetDisplay">Reset display</button>
+      </div>
+    </div>
+    <div class="field"><input type="text" id="find" placeholder="Find… e.g. name~k8s" aria-label="find expression"></div>
+    <div class="field"><input type="text" id="hide" placeholder="Hide… e.g. idle" aria-label="hide expression"></div>
+    <div class="sep"></div>
+    <div class="field"><label for="window">Window</label>
+      <select id="window"><option value="60">Last 1m</option><option value="300" selected>Last 5m</option><option value="600">Last 10m</option><option value="1800">Last 30m</option></select>
+    </div>
+    <button id="liveBtn" class="on"><span class="dot live"></span>&nbsp;Live</button>
+    <button id="replayBtn">Replay</button>
+    <div class="sep"></div>
+    <div class="chips" id="health"></div>
+  </div>
+
+  <div class="bar" id="replayBar" hidden>
+    <span class="title">Replay</span>
+    <div class="field"><label for="rInterval">Interval</label>
+      <select id="rInterval"><option value="60">Last 1 minute</option><option value="300" selected>Last 5 minutes</option><option value="600">Last 10 minutes</option><option value="1800">Last 30 minutes</option></select>
+    </div>
+    <span class="time mono" id="rStart"></span>
+    <button id="rPlay" class="sm">▶ Play</button>
+    <input type="range" id="rSlider" min="0" max="30" value="0" step="1" aria-label="replay frame">
+    <span class="time mono" id="rTime"></span>
+    <div class="speed field"><label>Speed</label>
+      <button class="sm" data-speed="5000">slow</button><button class="sm on" data-speed="3000">medium</button><button class="sm" data-speed="1000">fast</button>
+    </div>
+    <button id="rClose" class="quiet sm" aria-label="close replay">✕ Close</button>
+  </div>
+
+  <div class="bar" id="convBar" hidden>
+    <span class="title">Replay conversation</span>
+    <span class="mono" id="cName"></span>
+    <button id="cPlay" class="sm">▶ Play</button>
+    <button id="cStep" class="sm">Step ›</button>
+    <input type="range" id="cSlider" min="0" max="0" value="0" step="1" aria-label="conversation hop">
+    <span class="time mono" id="cTime"></span>
+    <span class="chip" id="cPace">compressed · real gaps shown as +s</span>
+    <button id="cClose" class="quiet sm" aria-label="leave conversation replay">✕ Back to live</button>
+  </div>
+
+  <div class="workspace">
+    <div class="canvas" id="canvas">
+      <svg id="svg" role="img" aria-label="topology graph">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ao-border-strong)"></path>
+          </marker>
+        </defs>
+        <g id="root">
+          <g id="boxes"></g>
+          <g id="edges"></g>
+          <g id="labels"></g>
+          <g id="nodes"></g>
+          <g id="particles"></g>
+        </g>
+      </svg>
+      <div class="scope chips" id="scopeChips"></div>
+      <div class="legend" id="legend" hidden></div>
+      <div class="zoom">
+        <button id="zoomIn" aria-label="zoom in">+</button><button id="zoomOut" aria-label="zoom out">−</button>
+        <button id="fit" aria-label="fit">Fit</button><button id="legendBtn" aria-label="legend">Legend</button>
+      </div>
+    </div>
+    <aside class="panel" id="panel" aria-live="polite"></aside>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h2>What is Kiali's, and what it becomes here</h2>
+      <ul>
+        <li><b>Graph type</b> (service, app, workload) becomes <b>View</b>, one per layer of the architecture. <b>Model</b> is the domain model as declared: the CRs and what references what. <b>Components</b> is one node per component the repository builds, adapters, gateway, manager, runtime images, the two sidecars, housekeeping, plus the systems outside: the model, the MCP servers, the repository, Alertmanager, Home Assistant, the Telegram API, the Kubernetes API. A runtime image running in three pods is one node with a count of three. No owner boxes. <b>Infrastructure</b> is what runs: every pod, and the systems outside the cluster. Nothing from the model is a node there. The pipeline and conversation a pod serves are attributes in its panel, and the only box is the cluster node it runs on. A conversation pod is one icon until you expand it into its agent container and two sidecars.</li>
+        <li><b>Detail</b> folds the Model view, and only that one: <b>Routes only</b> is one node per pipeline with its profile, runtime and capabilities inside it, Kiali's service graph. Each further level unfolds more of the model.</li>
+        <li><b>Namespace selector</b> becomes <b>Pipelines</b>: a route is a pipeline and everything it reaches, and the graph shows the selected routes only.</li>
+        <li><b>Box by namespace / app</b> becomes <b>Box by bundle / route</b> on the model: ownership, never kind. Shared substrate stays unboxed, like a shared service. No rule positions a box.</li>
+        <li><b>Layouts</b> are Kiali's three. <b>Concentric</b> draws a hub as a hub, the manager at the centre and rings by distance. <b>Cola</b> is WebCola, the constraint layout behind Kiali's option of that name, groups kept together. <b>Dagre</b> ranks, for the model read as a flow. Each view remembers its own.</li>
+        <li><b>Traffic animation</b>: dots move in the direction the event travelled, red diamonds are errors, hollow rings are sent-but-unconfirmed. Speed follows the edge's rate.</li>
+        <li><b>Find / Hide</b>: the same two expression boxes, over agent-ops facts: <code>kind=pipeline</code>, <code>name~k8s</code>, <code>lane=ingest</code>, <code>!healthy</code>, <code>idle</code>, <code>rate&gt;1</code>, joined with <code>and</code>.</li>
+        <li><b>Replay</b>: Kiali's toolbar exactly, in 10-second frames over 1 to 30 minutes, slow / medium / fast.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h2>What Kiali does not have</h2>
+      <ul>
+        <li><b>What crossed.</b> Click a pulse or a hop row in live, replay or conversation replay: the signal's title and labels, the input text, the work unit's tools and context handle, the run's result, the op's message and the adapter's report.</li>
+        <li><b>The conversation's own machinery is on the graph.</b> In Instances and Components a pod is a box of three containers. The manager's work reaches the agent through context-sync, every model and tool call leaves through the egress proxy, and the context claim is written by context-sync alone. A restore is the sidecar handing the agent its context, a checkpoint is a pulse on the sidecar, each carrying its generation, file count and bytes. The volumes are shared substrate and are not drawn.</li>
+        <li><b>The harness and the model are on the graph.</b> A runtime runs a harness, the harness calls an LLM and its MCP servers, and every turn and tool call is a hop with tokens, stop reason and duration. The manager never sees these today. They are the runtime's own report and the egress proxy's per-host counts, which is where a real implementation would take them from.</li>
+        <li><b>Replay one conversation.</b> A request in a mesh is gone once its span is sampled away. A conversation here is a Kubernetes object with every run recorded, so its hops can be walked one by one with their real gaps.</li>
+        <li><b>Honesty counters.</b> Hiding a class or scoping to a route never hides a failure silently. The health chips count every element, hidden or not.</li>
+        <li><b>Scope to route</b> replaces Kiali's double-click "node graph": upstream plus downstream, never turning around through a shared hub.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h2>Try</h2>
+      <ul>
+        <li>Switch <b>View</b> to <b>Components</b>, then <b>Infrastructure</b>. Click the same pulse in each. Back on Model, set Detail to <b>Routes only</b>.</li>
+        <li>Switch <b>Detail</b> to <b>+ work</b>, click a conversation, press <b>Replay conversation</b>.</li>
+        <li>Switch <b>Box by</b> between bundle, route and none. Open <b>Pipelines</b> and keep one. Double-click a channel and step the depth in the scope chip.</li>
+        <li>Type <code>!healthy</code> into Find, or <code>idle</code> into Hide.</li>
+        <li>Press <b>Replay</b>, pick a speed, drag the slider. The window's rates and dots follow the frame.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/webcola@3.4.0/WebCola/cola.min.js"></script>
+<script>
+(() => {
+'use strict';
+// ------------------------------------------------------------------ model
+const LANES = [
+  { id: 'ingest', title: 'Ingest', hint: 'where signals enter', rank: 0 },
+  { id: 'wiring', title: 'Wiring', hint: 'what claims them', rank: 1 },
+  { id: 'execution', title: 'Execution', hint: 'who answers, and on what', rank: 2 },
+  { id: 'capability', title: 'Capabilities', hint: 'what the route may reach', rank: 2.4 },
+  { id: 'delivery', title: 'Delivery', hint: 'where answers go', rank: 3 },
+  { id: 'work', title: 'Work', hint: 'conversations and their pods', rank: 1.6 },
+  { id: 'model', title: 'Model', hint: 'the harness and the LLM behind it', rank: 2.8 },
+];
+const LANE = Object.fromEntries(LANES.map(l => [l.id, l]));
+const KINDS = {
+  signaladapters: { label: 'Signal adapter', lane: 'ingest', shape: 'plaque' },
+  signalsources: { label: 'Signal source', lane: 'ingest', shape: 'hexagon' },
+  pipelines: { label: 'Pipeline', lane: 'wiring', shape: 'rect' },
+  agentprofiles: { label: 'Profile', lane: 'execution', shape: 'circle' },
+  agentruntimes: { label: 'Runtime', lane: 'execution', shape: 'stadium' },
+  mcptoolsets: { label: 'Toolset', lane: 'capability', shape: 'diamond' },
+  mcpconfigs: { label: 'MCP config', lane: 'capability', shape: 'diamond2' },
+  channels: { label: 'Channel', lane: 'delivery', shape: 'cylinder' },
+  channeladapters: { label: 'Channel adapter', lane: 'delivery', shape: 'plaque' },
+  conversations: { label: 'Conversation', lane: 'work', shape: 'note' },
+  pods: { label: 'Pod', lane: 'work', shape: 'box' },
+  manager: { label: 'Manager', lane: 'wiring', shape: 'hub' },
+  harnesses: { label: 'Runtime image', lane: 'model', shape: 'stadium' },
+  llms: { label: 'LLM', lane: 'model', shape: 'cloud' },
+  mcpservers: { label: 'MCP server', lane: 'capability', shape: 'server' },
+  containers: { label: 'Container', lane: 'work', shape: 'chip' },
+  sidecars: { label: 'Sidecar', lane: 'work', shape: 'chip' },
+  gateways: { label: 'Gateway', lane: 'ingest', shape: 'plaque' },
+  jobs: { label: 'CronJob', lane: 'work', shape: 'box' },
+  externals: { label: 'External system', lane: 'model', shape: 'cloud' },
+  repos: { label: 'Repository', lane: 'capability', shape: 'circle' },
+};
+const VIEWS = {
+  routes: ['signaladapters', 'signalsources', 'pipelines', 'channels', 'channeladapters'],
+  wiring: ['signalsources', 'pipelines', 'channels'],
+  execution: ['signaladapters', 'signalsources', 'pipelines', 'agentprofiles', 'agentruntimes', 'channels', 'channeladapters'],
+  capabilities: ['signaladapters', 'signalsources', 'pipelines', 'agentprofiles', 'agentruntimes', 'mcptoolsets', 'mcpconfigs', 'channels', 'channeladapters'],
+  work: ['signaladapters', 'signalsources', 'pipelines', 'agentprofiles', 'agentruntimes', 'mcptoolsets', 'mcpconfigs', 'channels', 'channeladapters', 'conversations'],
+};
+
+const N = (kind, name, health = 'ok', extra = {}) => ({ id: `${kind}/${name}`, kind, name, health, ...extra });
+const nodes = [
+  N('signaladapters', 'alertmanager'), N('signaladapters', 'cron'), N('signaladapters', 'k8s-events'), N('signaladapters', 'ha'),
+  N('signalsources', 'prometheus-alerts'), N('signalsources', 'cluster-events'), N('signalsources', 'console'),
+  N('signalsources', 'nightly'), N('signalsources', 'bench-sensors', 'bad', { reason: 'Wired=False', message: 'no Ready Pipeline lists this source', detached: true }),
+  N('pipelines', 'alert-triage'), N('pipelines', 'k8s-observe'), N('pipelines', 'nightly-report'),
+  N('agentprofiles', 'alert-investigator', 'none'), N('agentprofiles', 'k8s-engineer', 'none'), N('agentprofiles', 'release-scribe', 'none'),
+  N('agentruntimes', 'default', 'none', { image: 'agentops-runtime-claude:0.9.3', harness: 'claude-code 2.1.239', vendor: 'Anthropic API · claude-sonnet-5' }), N('agentruntimes', 'sandbox', 'none', { image: 'agentops-runtime-ollama:0.4.1', harness: 'ollama harness 0.4.1', vendor: 'ollama.ollama.svc · qwen3:14b' }),
+  N('harnesses', 'runtime-claude', 'none', { version: '2.1.239', image: 'agentops-runtime-claude:0.9.3', harness: 'claude-code' }), N('harnesses', 'runtime-ollama', 'none', { version: '0.4.1', image: 'agentops-runtime-ollama:0.4.1', harness: 'ollama harness (Go)' }),
+  N('llms', 'anthropic', 'none', { endpoint: 'api.anthropic.com', model: 'claude-sonnet-5' }), N('llms', 'ollama', 'none', { endpoint: 'ollama.ollama.svc:11434', model: 'qwen3:14b' }),
+  N('mcpservers', 'kubernetes-mcp', 'ok', { endpoint: 'kubernetes-mcp.agent-ops.svc:8080' }), N('mcpservers', 'prometheus-mcp', 'ok', { endpoint: 'prometheus-mcp.agent-ops.svc:8080' }),
+  N('mcptoolsets', 'agentops-observe'), N('mcptoolsets', 'agentops-shell'), N('mcpconfigs', 'kubernetes'), N('mcpconfigs', 'prometheus'),
+  N('channels', 'console'), N('channels', 'ops-chat'),
+  N('channeladapters', 'console'), N('channeladapters', 'telegram'),
+  N('conversations', 'prometheus-alerts-a1', 'ok', { pipeline: 'alert-triage', phase: 'Idle', unread: 1 }),
+  N('conversations', 'cluster-events-b7', 'ok', { pipeline: 'k8s-observe', phase: 'Working', unread: 2 }),
+  N('conversations', 'console-c3', 'ok', { pipeline: 'k8s-observe', phase: 'Idle' }),
+  N('conversations', 'nightly-d2', 'ok', { pipeline: 'nightly-report', phase: 'Idle' }),
+  N('pods', 'agentops-conv-cluster-events-b7', 'ok', { conversation: 'cluster-events-b7', node: 'node-a' }),
+  N('pods', 'agentops-conv-prometheus-alerts-a1', 'ok', { conversation: 'prometheus-alerts-a1', node: 'node-b' }),
+  N('pods', 'agentops-conv-console-c3', 'ok', { conversation: 'console-c3', node: 'node-a' }),
+  N('pods', 'agentops-conv-nightly-d2', 'unknown', { conversation: 'nightly-d2', node: 'node-b', reason: 'Pending', message: 'ContainerCreating' }),
+  N('repos', 'agents.git', 'none', { url: 'https://git.example.com/ops/agents.git', ref: 'main' }),
+  ...['prometheus-alerts-a1', 'cluster-events-b7', 'console-c3', 'nightly-d2'].flatMap(c => [
+    N('containers', 'agent', 'ok', { pod: `agentops-conv-${c}`, role: 'agent', image: c === 'nightly-d2' ? 'agentops-runtime-ollama:0.4.1' : 'agentops-runtime-claude:0.9.3', id: `containers/agentops-conv-${c}/agent` }),
+    N('containers', 'context-sync', 'ok', { pod: `agentops-conv-${c}`, role: 'context-sync', image: 'agentops-context-sync:0.3.0', id: `containers/agentops-conv-${c}/context-sync` }),
+    N('containers', 'egress-proxy', 'ok', { pod: `agentops-conv-${c}`, role: 'egress-proxy', image: 'agentops-egress-proxy:0.2.1', id: `containers/agentops-conv-${c}/egress-proxy` }),
+  ]),
+  N('pods', 'agentops-manager-7c9d', 'ok', { of: 'manager/manager', node: 'node-a', leader: true }),
+  N('pods', 'agentops-gateway-telegram-e21f', 'ok', { of: 'gateways/gateway-telegram', node: 'node-b' }),
+  N('pods', 'agentops-housekeeping-29473120-x8k2', 'ok', { of: 'jobs/housekeeping', node: 'node-b', phase: 'Succeeded' }),
+  N('pods', 'agentops-signal-alertmanager-6b7d', 'ok', { of: 'signaladapters/alertmanager', node: 'node-a' }), N('pods', 'agentops-signal-cron-9c21', 'ok', { of: 'signaladapters/cron', node: 'node-b' }),
+  N('pods', 'agentops-signal-k8s-events-2f0a', 'ok', { of: 'signaladapters/k8s-events', node: 'node-a' }), N('pods', 'agentops-signal-ha-77e1', 'ok', { of: 'signaladapters/ha', node: 'node-b' }),
+  N('pods', 'agentops-adapter-console-4d1c', 'ok', { of: 'channeladapters/console', node: 'node-a' }), N('pods', 'agentops-adapter-telegram-b3e9', 'ok', { of: 'channeladapters/telegram', node: 'node-b' }),
+  N('pods', 'kubernetes-mcp-5a8f', 'ok', { of: 'mcpservers/kubernetes-mcp', node: 'node-a' }), N('pods', 'prometheus-mcp-c04e', 'ok', { of: 'mcpservers/prometheus-mcp', node: 'node-b' }),
+];
+const byId = new Map(nodes.map(n => [n.id, n]));
+const E = (from, to, kind, extra = {}) => ({ id: `${from}->${to}`, from, to, kind, ...extra });
+const edges = [
+  E('signaladapters/alertmanager', 'signalsources/prometheus-alerts', 'served-by'),
+  E('signaladapters/k8s-events', 'signalsources/cluster-events', 'served-by'),
+  E('signaladapters/cron', 'signalsources/nightly', 'served-by'),
+  E('signaladapters/ha', 'signalsources/bench-sensors', 'served-by'),
+  E('channeladapters/console', 'signalsources/console', 'served-by', { dashed: true }),
+  E('signalsources/prometheus-alerts', 'pipelines/alert-triage', 'feeds'),
+  E('signalsources/cluster-events', 'pipelines/k8s-observe', 'feeds'),
+  E('signalsources/console', 'pipelines/k8s-observe', 'feeds'),
+  E('signalsources/nightly', 'pipelines/nightly-report', 'feeds'),
+  E('pipelines/alert-triage', 'agentprofiles/alert-investigator', 'answers'),
+  E('pipelines/k8s-observe', 'agentprofiles/k8s-engineer', 'answers'),
+  E('pipelines/nightly-report', 'agentprofiles/release-scribe', 'answers'),
+  E('pipelines/alert-triage', 'agentruntimes/default', 'runs-on'),
+  E('pipelines/k8s-observe', 'agentruntimes/default', 'runs-on'),
+  E('pipelines/nightly-report', 'agentruntimes/sandbox', 'runs-on'),
+  E('agentruntimes/default', 'harnesses/runtime-claude', 'runs'),
+  E('agentruntimes/sandbox', 'harnesses/runtime-ollama', 'runs'),
+  E('harnesses/runtime-claude', 'llms/anthropic', 'calls'),
+  E('harnesses/runtime-ollama', 'llms/ollama', 'calls'),
+  E('mcpconfigs/kubernetes', 'mcpservers/kubernetes-mcp', 'points-at', { dashed: true }),
+  E('mcpconfigs/prometheus', 'mcpservers/prometheus-mcp', 'points-at', { dashed: true }),
+  E('pipelines/alert-triage', 'mcptoolsets/agentops-observe', 'uses', { dashed: true }),
+  E('pipelines/k8s-observe', 'mcptoolsets/agentops-observe', 'uses', { dashed: true }),
+  E('pipelines/k8s-observe', 'mcptoolsets/agentops-shell', 'uses', { dashed: true }),
+  E('pipelines/nightly-report', 'mcptoolsets/agentops-observe', 'uses', { dashed: true }),
+  E('pipelines/alert-triage', 'mcpconfigs/prometheus', 'uses', { dashed: true }),
+  E('pipelines/k8s-observe', 'mcpconfigs/kubernetes', 'uses', { dashed: true }),
+  E('pipelines/alert-triage', 'channels/console', 'posts'),
+  E('pipelines/alert-triage', 'channels/ops-chat', 'posts'),
+  E('pipelines/k8s-observe', 'channels/console', 'posts'),
+  E('pipelines/k8s-observe', 'channels/ops-chat', 'posts'),
+  E('pipelines/nightly-report', 'channels/console', 'posts'),
+  E('channels/console', 'channeladapters/console', 'served-by'),
+  E('channels/ops-chat', 'channeladapters/telegram', 'served-by'),
+  E('pipelines/alert-triage', 'conversations/prometheus-alerts-a1', 'opens', { dashed: true }),
+  E('pipelines/k8s-observe', 'conversations/cluster-events-b7', 'opens', { dashed: true }),
+  E('pipelines/k8s-observe', 'conversations/console-c3', 'opens', { dashed: true }),
+  E('pipelines/nightly-report', 'conversations/nightly-d2', 'opens', { dashed: true }),
+  E('conversations/cluster-events-b7', 'pods/agentops-conv-cluster-events-b7', 'runs-in', { dashed: true }),
+  E('conversations/prometheus-alerts-a1', 'pods/agentops-conv-prometheus-alerts-a1', 'runs-in', { dashed: true }),
+  E('conversations/console-c3', 'pods/agentops-conv-console-c3', 'runs-in', { dashed: true }),
+  E('conversations/nightly-d2', 'pods/agentops-conv-nightly-d2', 'runs-in', { dashed: true }),
+  E('agentprofiles/alert-investigator', 'repos/agents.git', 'checks-out', { dashed: true }), E('agentprofiles/k8s-engineer', 'repos/agents.git', 'checks-out', { dashed: true }), E('agentprofiles/release-scribe', 'repos/agents.git', 'checks-out', { dashed: true }),
+  E('signaladapters/alertmanager', 'pods/agentops-signal-alertmanager-6b7d', 'owns', { dashed: true }), E('signaladapters/cron', 'pods/agentops-signal-cron-9c21', 'owns', { dashed: true }),
+  E('signaladapters/k8s-events', 'pods/agentops-signal-k8s-events-2f0a', 'owns', { dashed: true }), E('signaladapters/ha', 'pods/agentops-signal-ha-77e1', 'owns', { dashed: true }),
+  E('channeladapters/console', 'pods/agentops-adapter-console-4d1c', 'owns', { dashed: true }), E('channeladapters/telegram', 'pods/agentops-adapter-telegram-b3e9', 'owns', { dashed: true }),
+  E('mcpservers/kubernetes-mcp', 'pods/kubernetes-mcp-5a8f', 'owns', { dashed: true }), E('mcpservers/prometheus-mcp', 'pods/prometheus-mcp-c04e', 'owns', { dashed: true }),
+];
+const edgeById = new Map(edges.map(e => [e.id, e]));
+const pairIndex = new Map();
+for (const e of edges) { pairIndex.set(`${e.from}|${e.to}`, e); pairIndex.set(`${e.to}|${e.from}`, e); }
+
+// ------------------------------------------------------------------ synthetic activity log
+// One flow = one signal answered on one pipeline. Hops name the SAME vocabulary the
+// manager's activity log uses, and each is mapped onto drawn edges the way the
+// console's applyTraffic does (a pipeline<->runtime hop lights profile legs).
+const ROUTES = {
+  'alert-triage': { harness: 'harnesses/runtime-claude', llm: 'llms/anthropic', model: 'claude-sonnet-5', mcp: ['mcpservers/prometheus-mcp'], tools: ['mcp__prometheus__query', 'mcp__prometheus__series', 'Read', 'Grep'], adapter: 'signaladapters/alertmanager', source: 'signalsources/prometheus-alerts', profile: 'agentprofiles/alert-investigator', runtime: 'agentruntimes/default', channels: ['channels/console', 'channels/ops-chat'], convs: ['conversations/prometheus-alerts-a1'], period: 55, run: [25, 70] },
+  'k8s-observe': { harness: 'harnesses/runtime-claude', llm: 'llms/anthropic', model: 'claude-sonnet-5', mcp: ['mcpservers/kubernetes-mcp'], tools: ['mcp__kubernetes__pods_list', 'mcp__kubernetes__pods_log', 'mcp__kubernetes__events_list', 'Bash(kubectl get:*)', 'Read'], adapter: 'signaladapters/k8s-events', source: 'signalsources/cluster-events', profile: 'agentprofiles/k8s-engineer', runtime: 'agentruntimes/default', channels: ['channels/console', 'channels/ops-chat'], convs: ['conversations/cluster-events-b7', 'conversations/console-c3'], period: 28, run: [15, 45] },
+  'nightly-report': { harness: 'harnesses/runtime-ollama', llm: 'llms/ollama', model: 'qwen3:14b', mcp: [], tools: ['Read', 'Grep', 'Bash(git log:*)'], adapter: 'signaladapters/cron', source: 'signalsources/nightly', profile: 'agentprofiles/release-scribe', runtime: 'agentruntimes/sandbox', channels: ['channels/console'], convs: ['conversations/nightly-d2'], period: 170, run: [40, 120] },
+};
+const CADAPTER = { 'channels/console': 'channeladapters/console', 'channels/ops-chat': 'channeladapters/telegram' };
+const fmt = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+let seed = 7;
+const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const between = (a, b) => a + (b - a) * rnd();
+const log = []; // {ts, kind, path:[[from,to],...], status, conversation, pipeline, latencyMs, code}
+let flowSeq = 0;
+const TITLES = {
+  'alert-triage': [['alert', 'KubePodCrashLooping', { alertname: 'KubePodCrashLooping', namespace: 'payments', severity: 'warning' }], ['alert', 'HighErrorRate', { alertname: 'HighErrorRate', service: 'api-gateway', severity: 'critical' }], ['alert', 'TargetDown', { alertname: 'TargetDown', job: 'node-exporter', severity: 'warning' }]],
+  'k8s-observe': [['job', 'BackOff: checkout-7f9c restarting', { reason: 'BackOff', namespace: 'shop', workload: 'checkout' }], ['chat', '/k8s-observe why is checkout restarting?', { channel: 'console', sender: 'dana' }], ['job', 'FailedScheduling: 0/6 nodes available', { reason: 'FailedScheduling', namespace: 'batch', workload: 'reindex' }]],
+  'nightly-report': [['job', 'nightly release notes', { schedule: '0 6 * * *' }]],
+};
+const RESULTS = {
+  'alert-triage': '<title>Payments pod crash-looping on a missing secret</title>\nThe `payments-api` pod fails at start: `SECRET_DB_URL` is unset since the rotation at 04:12…',
+  'k8s-observe': '<title>checkout restarts on OOM</title>\nContainer `checkout` is killed at 512Mi every ~40s. Limit is below its steady-state RSS (610Mi)…',
+  'nightly-report': '<title>Release notes, 2026-09-23</title>\n14 merged pull requests, 2 breaking…',
+};
+function flow(pipeline, t0) {
+  const r = ROUTES[pipeline];
+  const conv = r.convs[flowSeq++ % r.convs.length];
+  const runId = `run-${flowSeq.toString(36)}`;
+  const H = (dt, kind, path, extra = {}) => log.push({ ts: t0 + dt * 1000, kind, path, status: 'ok', conversation: conv, pipeline, runId, ...extra });
+  const [sigKind, title, labels] = TITLES[pipeline][flowSeq % TITLES[pipeline].length];
+  const fp = `${sigKind === 'chat' ? 'tg' : sigKind}-${(t0 / 1000 | 0).toString(36)}`;
+  const start = pipeline === 'nightly-report' ? between(20, 40) : between(0.4, 4); // pod start or warm resume
+  const run = between(r.run[0], r.run[1]);
+  const fail = rnd() < 0.12;
+  const ctx = `ctx-${conv.split('/')[1].slice(-2)}-${(flowSeq % 7) + 3}`;
+  H(0, 'signal.received', [[r.adapter, r.source]], { latencyMs: Math.round(between(8, 40)), data: { fingerprint: fp, kind: sigKind, title, labels, payload: sigKind === 'alert' ? `firing since ${fmt(t0 - 300000)}` : title } });
+  H(0.12, 'signal.claimed', [[r.source, `pipelines/${pipeline}`]], { data: { fingerprint: fp, pipeline, signature: sigKind === 'chat' ? fp : Object.values(labels).slice(0, 2).join('/'), conversation: conv.split('/')[1], reuse: flowSeq % 3 !== 0 } });
+  H(0.3, 'input.queued', [[`pipelines/${pipeline}`, conv]], { inputId: `in-${runId}`, data: { inputId: `in-${runId}`, origin: sigKind === 'chat' ? 'channel/console' : `source/${r.source.split('/')[1]}`, text: sigKind === 'chat' ? title : `[${sigKind}] ${title} — ${Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(' ')}` } });
+  if (start > 10) H(0.5 + start - 0.4, 'context.restored', [[r.runtime, conv]], { latencyMs: Math.round(between(800, 3000)), data: { generation: `gen-${(flowSeq % 9) + 12}`, files: Math.round(between(40, 900)), bytes: `${between(3, 60).toFixed(1)} MiB`, code: 'start' } });
+  H(0.5, 'runtime.starting', [[conv, r.runtime]], { latencyMs: Math.round(start * 1000), data: { pod: `agentops-conv-${conv.split('/')[1]}`, image: r.runtime === 'agentruntimes/sandbox' ? 'agentops-runtime-claude:0.9.2' : 'agentops-runtime-claude:0.9.3', reason: start > 10 ? 'new pod (scheduling, pull, boot)' : 'warm pod, resumed' } });
+  H(0.5 + start, 'run.dispatched', [[`pipelines/${pipeline}`, r.runtime]], { data: { runId, jobKind: 'task', profile: r.profile.split('/')[1], agent: r.profile.split('/')[1], allowedTools: pipeline === 'k8s-observe' ? ['Read', 'Grep', 'Bash(kubectl get:*)', 'mcp__kubernetes__*'] : ['Read', 'Grep', 'mcp__prometheus__query'], mcpServers: pipeline === 'k8s-observe' ? ['kubernetes'] : pipeline === 'alert-triage' ? ['prometheus'] : [], runtimeContextId: ctx, inputs: 1 } });
+  // Inside the run: the harness talks to the model and to its MCP servers. The
+  // manager never sees these hops today. They are the runtime's own report
+  // (turns and usage) and the egress proxy's connection counts per host.
+  { let t = 0.5 + start + 0.3; let turn = 0; let inTok = 0, outTok = 0; const turns = 2 + Math.floor(rnd() * 4);
+    for (let k = 0; k < turns && t < 0.5 + start + run - 1; k++) {
+      const lat = between(1.5, run / turns); turn++;
+      const it = Math.round(between(4, 30)) * 1000, ot = Math.round(between(200, 2500)); inTok += it; outTok += ot;
+      const last = k === turns - 1;
+      H(t, 'model.call', [[r.harness, r.llm]], { latencyMs: Math.round(lat * 1000), data: { model: r.model, turn, inputTokens: it, outputTokens: ot, cacheRead: Math.round(it * 0.7), stopReason: last ? 'end_turn' : 'tool_use', tool: last ? undefined : r.tools[k % r.tools.length] } });
+      t += lat;
+      if (!last) { const tool = r.tools[k % r.tools.length]; const server = tool.startsWith('mcp__') ? r.mcp.find(m => m.includes(tool.split('__')[1])) : null;
+        const tl = between(0.1, 2); if (server) H(t, 'tool.call', [[r.harness, server]], { latencyMs: Math.round(tl * 1000), data: { tool, server: server.split('/')[1], durationMs: Math.round(tl * 1000), resultBytes: Math.round(between(400, 40000)), via: 'egress-proxy' } });
+        else H(t, 'tool.call', [[r.harness, null]], { latencyMs: Math.round(tl * 1000), data: { tool, builtin: true, durationMs: Math.round(tl * 1000), gate: 'allowed by the pipeline\'s toolsets' } });
+        t += tl; }
+    }
+    ROUTES[pipeline].lastUsage = { inTok, outTok, turns }; }
+  H(0.5 + start + run, 'run.completed', [[r.runtime, `pipelines/${pipeline}`]], { latencyMs: Math.round(run * 1000), status: fail ? 'error' : 'ok', code: fail ? 'exit 1' : undefined, data: { runId, exitCode: fail ? 1 : 0, durationMs: Math.round(run * 1000), runtimeContextId: ctx, usage: ROUTES[pipeline].lastUsage, result: fail ? 'runtime exited before reporting: context volume unreachable (EIO)' : RESULTS[pipeline] } });
+  { const changed = rnd() < 0.8; H(0.5 + start + run + 0.25, changed ? 'context.checkpoint' : 'context.skipped', [[conv, r.runtime]], { latencyMs: changed ? Math.round(between(200, 1500)) : 40, data: changed ? { code: 'work-done', generation: `gen-${(flowSeq % 9) + 13}`, changedFiles: Math.round(between(1, 40)), bytesCopied: `${between(0.1, 6).toFixed(1)} MiB`, hardlinked: Math.round(between(30, 880)), quiesced: true } : { code: 'work-done', changedFiles: 0, note: 'nothing changed, no bytes written' } }); }
+  r.channels.forEach((c, i) => {
+    const opId = `send:${conv.split('/')[1]}:${c.split('/')[1]}:${runId}`;
+    H(0.7 + start + run + i * 0.05, 'channel.op.enqueued', [[conv, c]], { opId, data: { opId, type: fail ? 'notice' : 'answer', threadId: c === 'channels/console' ? `console:${conv.split('/')[1]}` : `tg:-100…:${(flowSeq * 7) % 900 + 100}`, body: fail ? 'The run failed before answering. See status.runs[] for the exit.' : RESULTS[pipeline].split('\n')[0] } });
+    const slow = c === 'channels/ops-chat' && rnd() < 0.15;
+    H(1.4 + start + run + i * 0.05 + (slow ? 4 : 0), 'channel.op.completed', [[c, CADAPTER[c]]], { opId, latencyMs: Math.round((slow ? 4700 : between(300, 900))), status: slow ? 'error' : 'ok', code: slow ? '429 Too Many Requests' : undefined, data: slow ? { opId, outcome: 'retry', error: '429 Too Many Requests', retryAfter: '5s' } : { opId, outcome: 'delivered', messageId: c === 'channels/console' ? `m-${runId}` : String(4200 + flowSeq), adapter: CADAPTER[c].split('/')[1] } });
+  });
+}
+function dropped(t0) {
+  const fp = `ha-${(t0 / 1000 | 0).toString(36)}`;
+  log.push({ ts: t0, kind: 'signal.received', path: [['signaladapters/ha', 'signalsources/bench-sensors']], status: 'ok', latencyMs: 12, data: { fingerprint: fp, kind: 'alert', title: 'sensor.bench_temp unavailable', labels: { logger: 'homeassistant.components.mqtt', domain: 'mqtt' } } });
+  log.push({ ts: t0 + 60, kind: 'signal.dropped', path: [['signalsources/bench-sensors', null]], status: 'error', code: 'unclaimed', data: { fingerprint: fp, code: 'unclaimed', reason: 'no Ready Pipeline lists signalsources/bench-sensors (Wired=False)' } });
+}
+const NOW0 = Date.now();
+const HISTORY = 32 * 60 * 1000;
+let horizon = NOW0 - HISTORY; // how far the generator has scheduled
+const nextAt = {}; for (const p in ROUTES) nextAt[p] = horizon + between(0, ROUTES[p].period) * 1000; nextAt.drop = horizon + 5000;
+function extend(until) {
+  while (horizon < until) {
+    horizon += 1000;
+    for (const p in ROUTES) if (nextAt[p] <= horizon) { flow(p, nextAt[p]); nextAt[p] += between(0.6, 1.5) * ROUTES[p].period * 1000; }
+    if (nextAt.drop <= horizon) { dropped(nextAt.drop); nextAt.drop += between(30, 60) * 1000; }
+  }
+  log.sort((a, b) => a.ts - b.ts);
+}
+extend(NOW0 + 20000);
+
+// Rates over a window: credits every drawn edge the hop crossed, either direction.
+function windowStats(tEnd, windowMs) {
+  const stats = new Map();
+  const tStart = tEnd - windowMs;
+  for (const ev of log) {
+    if (ev.ts < tStart || ev.ts > tEnd) continue;
+    for (const [a, b] of viewPath(ev)) {
+      if (!b) continue;
+      const e = VG.pair.get(`${a}|${b}`); if (!e) continue;
+      let s = stats.get(e.id); if (!s) { s = { events: 0, errors: 0, unconfirmed: false, lat: [], last: 0 }; stats.set(e.id, s); }
+      s.events++; if (ev.status === 'error') s.errors++; if (ev.unconfirmed) s.unconfirmed = true;
+      if (ev.latencyMs) s.lat.push(ev.latencyMs); if (ev.ts > s.last) s.last = ev.ts;
+    }
+  }
+  for (const s of stats.values()) {
+    s.ratePerMin = s.events / (windowMs / 60000);
+    s.lat.sort((a, b) => a - b); s.p50 = s.lat.length ? s.lat[Math.floor(s.lat.length / 2)] : 0; s.max = s.lat.length ? s.lat[s.lat.length - 1] : 0;
+  }
+  return stats;
+}
+function nodeStats(tEnd, windowMs) {
+  const m = new Map(); const tStart = tEnd - windowMs;
+  for (const ev of log) { if (ev.ts < tStart || ev.ts > tEnd) continue; for (const [a, b] of ev.path) { for (const id of [a, b]) if (id) { const v = VG.map(id, ev); m.set(v, (m.get(v) || 0) + 1); } } }
+  return m;
+}
+
+// ------------------------------------------------------------------ state
+const $ = (id) => document.getElementById(id);
+const state = {
+  view: 'capabilities', viewMode: 'wiring', box: 'bundle', boxBy: { wiring: 'bundle', instances: 'none' }, layoutBy: { wiring: 'cola', components: 'concentric', instances: 'cola' },
+  hiddenBy: { wiring: new Set(Object.keys(KINDS).filter(k => !VIEWS.capabilities.includes(k))), components: new Set(), instances: new Set() },
+  animate: true, idleEdges: true, idleNodes: true, badges: true, labels: 'none',
+  find: '', hide: '', windowSec: 300,
+  mode: 'live', // live | replay | conversation
+  selected: null, selectedEdge: null, selectedHop: null, scope: null, depth: 'all', feed: [],
+  expanded: new Set(),
+  pipelines: new Set(['alert-triage', 'k8s-observe', 'nightly-report']),
+  replay: { interval: 300, frame: 0, playing: false, speed: 3000, start: 0, frames: 30, timer: null },
+  conv: { name: null, events: [], i: -1, playing: false, timer: null },
+  stats: new Map(), nstats: new Map(), tNow: Date.now(),
+};
+// EACH VIEW HAS ITS OWN CLASSES, and remembers its own hiding. The Display
+// menu lists the classes the current view can draw, nothing else, and the one
+// class a view cannot do without is listed but cannot be unticked.
+const VIEW_CLASSES = {
+  wiring: ['signaladapters', 'signalsources', 'pipelines', 'agentprofiles', 'agentruntimes', 'mcptoolsets', 'mcpconfigs', 'channels', 'channeladapters', 'conversations'],
+  components: ['signaladapters', 'manager', 'channeladapters', 'gateways', 'harnesses', 'sidecars', 'jobs', 'llms', 'mcpservers', 'repos', 'externals'],
+  instances: ['pods', 'containers', 'llms', 'repos', 'externals'],
+};
+const MANAGER_POD = 'pods/agentops-manager-7c9d';
+const SPINE = { wiring: 'pipelines', components: 'manager', instances: 'pods' };
+const isSpine = (n) => state.viewMode === 'instances' ? n.id === MANAGER_POD : n.kind === SPINE[state.viewMode];
+const applyView = (v) => { state.view = v; state.hiddenBy.wiring = new Set(Object.keys(KINDS).filter(k => !VIEWS[v].includes(k))); };
+const hiddenNow = () => state.hiddenBy[state.viewMode];
+const plural = (label) => /[^aeiou]y$/.test(label) ? label.slice(0, -1) + 'ies' : label + 's';
+
+// ------------------------------------------------------------------ expressions (Find / Hide)
+function compile(expr) {
+  const terms = expr.trim().toLowerCase().split(/\s+and\s+/).filter(Boolean);
+  if (!terms.length) return null;
+  const preds = terms.map(t => {
+    let m;
+    if (t === '!healthy' || t === 'unhealthy') return n => n.health === 'bad';
+    if (t === 'healthy') return n => n.health === 'ok';
+    if (t === 'idle') return n => !(state.nstats.get(n.id) > 0);
+    if (t === 'detached') return n => !!n.detached;
+    if ((m = t.match(/^kind\s*=\s*([a-z-]+)$/))) return n => n.kind === m[1] || n.kind === m[1] + 's' || KINDS[n.kind].label.toLowerCase().replace(' ', '-') === m[1];
+    if ((m = t.match(/^lane\s*=\s*([a-z]+)$/))) return n => KINDS[n.kind].lane === m[1];
+    if ((m = t.match(/^name\s*~\s*(\S+)$/))) return n => n.name.includes(m[1]);
+    if ((m = t.match(/^name\s*=\s*(\S+)$/))) return n => n.name === m[1];
+    if ((m = t.match(/^rate\s*([<>])\s*([\d.]+)$/))) return n => { const r = (state.nstats.get(n.id) || 0) / (state.windowSec / 60); return m[1] === '>' ? r > +m[2] : r < +m[2]; };
+    return () => false;
+  });
+  return n => preds.every(p => p(n));
+}
+
+// ------------------------------------------------------------------ visible graph + scope
+// THREE VIEWS OF ONE FEED, Kiali's graph types. A view maps every base node
+// (and every hop's endpoints) onto its own nodes: the wiring view is the CRs,
+// the routes view folds a pipeline's profile, runtime, capabilities and
+// conversations into the pipeline, and the components view is the processes
+// that actually talk: adapters, the manager, runtime pods. The hop feed and
+// the payload panel are identical in all three. Only the node identity changes.
+const FOLDED = ['agentprofiles', 'agentruntimes', 'mcptoolsets', 'mcpconfigs', 'conversations'];
+const MANAGER = 'manager/manager';
+function viewGraph() {
+  let vn, ve, map;
+  const mode = modeOf();
+  if (mode === 'routes') {
+    const owner = new Map();
+    for (const e of edges) if (e.from.startsWith('pipelines/') && FOLDED.some(k => e.to.startsWith(k + '/'))) owner.set(e.to, e.from);
+    map = (id, ev) => { if (!id) return id; const k = id.split('/')[0]; if (!VIEWS.routes.includes(k)) return ev && ev.pipeline ? `pipelines/${ev.pipeline}` : (owner.get(id) || id); return id; };
+    vn = nodes.filter(n => VIEWS.routes.includes(n.kind));
+    const ids = new Set(vn.map(n => n.id));
+    ve = edges.filter(e => ids.has(e.from) && ids.has(e.to));
+  } else if (mode === 'instances') {
+    // INFRASTRUCTURE: every pod that runs, and the systems outside the cluster.
+    // Nothing from the model is a node here. The pipeline and the conversation
+    // a pod serves are attributes in its panel, and the only grouping is the
+    // cluster node it runs on. A conversation pod is ONE icon until expanded.
+    const CTX = null, WS = null, REPO = 'repos/agents.git', K8S = 'externals/kubernetes-api';
+    const podOf = (conv) => `pods/agentops-conv-${conv.split('/')[1]}`;
+    const C = (conv, role) => `containers/agentops-conv-${conv.split('/')[1]}/${role}`;
+    const wl = new Map(); for (const n of nodes) if (n.kind === 'pods' && n.of) wl.set(n.of, n.id);
+    const isOpen = (conv) => state.expanded.has(conv.split('/')[1]);
+    const convOfPod = new Map(nodes.filter(n => n.kind === 'pods' && n.conversation).map(n => [n.id, nodes.find(c => c.kind === 'conversations' && c.name === n.conversation)]));
+    map = (id, ev) => { if (!id) return id; const k = id.split('/')[0];
+      if (k === 'llms' || k === 'repos' || k === 'externals' || k === 'containers' || k === 'pods') return id;
+      if (wl.has(id)) return wl.get(id);
+      if ((k === 'agentruntimes' || k === 'harnesses' || k === 'conversations') && ev && ev.conversation) return isOpen(ev.conversation) ? C(ev.conversation, 'agent') : podOf(ev.conversation);
+      return MANAGER_POD; };
+    var expand = (ev) => {
+      if (!ev.conversation) return null;
+      if (isOpen(ev.conversation)) { const x = podHops(ev, MANAGER_POD, C, wl, CTX); if (x || ev.kind !== 'runtime.starting') return x; }
+      const P = podOf(ev.conversation);
+      switch (ev.kind) {
+        case 'runtime.starting': return [[MANAGER_POD, K8S]];
+        case 'run.dispatched': return [[MANAGER_POD, P]];
+        case 'run.completed': return [[P, MANAGER_POD]];
+        case 'model.call': return [[P, ev.path[0][1]]];
+        case 'tool.call': return ev.path[0][1] ? [[P, wl.get(ev.path[0][1]) || ev.path[0][1]]] : [[P, null]];
+        case 'context.restored': case 'context.checkpoint': case 'context.skipped': case 'context.failed': return [[P, null]];
+      } return null; };
+    const ext = (name, label) => ({ id: `externals/${name}`, kind: 'externals', name: label, health: 'ok' });
+    const convs = nodes.filter(n => n.kind === 'conversations');
+    vn = [...nodes.filter(n => n.kind === 'pods' && n.of),
+      ...convs.flatMap(c => isOpen(c.id) ? nodes.filter(n => n.kind === 'containers' && n.pod === `agentops-conv-${c.name}`) : [nodes.find(n => n.id === podOf(c.id))].filter(Boolean).map(n => ({ ...n, collapsed: true }))),
+      ...nodes.filter(n => n.kind === 'llms' || n.kind === 'repos'),
+      ext('alertmanager-server', 'Alertmanager'), ext('home-assistant', 'Home Assistant'), ext('telegram-api', 'Telegram Bot API'), ext('kubernetes-api', 'Kubernetes API')];
+    const P = (of) => wl.get(of);
+    ve = [
+      E('externals/alertmanager-server', P('signaladapters/alertmanager'), 'webhook'),
+      E(P('signaladapters/ha'), 'externals/home-assistant', 'websocket'),
+      E(P('signaladapters/k8s-events'), K8S, 'watch'),
+      ...nodes.filter(n => n.kind === 'signaladapters').map(n => E(P(n.id), MANAGER_POD, 'signal/inbound')),
+      E(MANAGER_POD, K8S, 'reconcile'),
+      E(P('channeladapters/console'), K8S, 'list/watch', { dashed: true }),
+      E(P('jobs/housekeeping'), K8S, 'list', { dashed: true }),
+      ...nodes.filter(n => n.kind === 'channeladapters').map(n => E(MANAGER_POD, P(n.id), 'channel/ops')),
+      E(P('gateways/gateway-telegram'), 'externals/telegram-api', 'getUpdates'),
+      E(P('gateways/gateway-telegram'), P('channeladapters/telegram'), 'updates'),
+      E(P('channeladapters/telegram'), 'externals/telegram-api', 'sendMessage'),
+    ];
+    for (const c of convs) { const r = ROUTES[c.pipeline]; if (!r) continue;
+      if (isOpen(c.id)) { ve.push(E(MANAGER_POD, C(c.id, 'context-sync'), 'work')); ve.push(...podEdges(c.id, r, C, wl, CTX, WS, REPO)); }
+      else { const pd = podOf(c.id); ve.push(E(MANAGER_POD, pd, 'work'), E(pd, r.llm, 'model'), E(pd, REPO, 'git', { dashed: true })); for (const m of r.mcp) ve.push(E(pd, wl.get(m) || m, 'tool', { dashed: true })); } }
+  } else if (mode === 'components') {
+    // ONE NODE PER COMPONENT: the directories that build a container, plus the
+    // systems outside. A runtime image running in several pods is a count on
+    // the node, not several nodes. Pods are infrastructure and live there.
+    const CTX = 'sidecars/context-sync', EGR = 'sidecars/egress-proxy', REPO = 'repos/agents.git', K8S = 'externals/kubernetes-api';
+    const convOfPod = (n) => nodes.find(c => c.kind === 'conversations' && c.name === n.conversation);
+    const podsOf = (harness) => nodes.filter(n => n.kind === 'pods' && n.conversation && (ROUTES[(convOfPod(n) || {}).pipeline] || {}).harness === harness).length;
+    const harnessOfRuntime = new Map(); for (const e of edges) if (e.kind === 'runs') harnessOfRuntime.set(e.from, e.to);
+    const comp = (kind, name, extra = {}) => ({ id: `${kind}/${name}`, kind, name, health: 'ok', ...extra });
+    const podCount = nodes.filter(n => n.kind === 'pods' && n.conversation).length;
+    vn = [
+      ...nodes.filter(n => n.kind === 'signaladapters'),
+      comp('gateways', 'gateway-telegram', { note: 'the only getUpdates consumer; classifies each update and forwards it verbatim' }),
+      { id: MANAGER, kind: 'manager', name: 'agentops-manager', health: 'ok', leader: true },
+      ...nodes.filter(n => n.kind === 'channeladapters'),
+      ...nodes.filter(n => n.kind === 'harnesses').map(n => ({ ...n, health: 'ok', count: podsOf(n.id) })),
+      comp('sidecars', 'context-sync', { count: podCount, note: 'proxies CONTROL_URL, restores before the first /work, checkpoints to the durable volume' }),
+      comp('sidecars', 'egress-proxy', { count: podCount, note: 'the wall: every MCP connection mediated, everything else copied through' }),
+      comp('jobs', 'housekeeping', { note: 'reclaims workspaces and transcripts no Conversation backs' }),
+      ...nodes.filter(n => n.kind === 'llms' || n.kind === 'mcpservers' || n.kind === 'repos'),
+      comp('externals', 'alertmanager-server', { name: 'Alertmanager' }), comp('externals', 'home-assistant', { name: 'Home Assistant' }),
+      comp('externals', 'telegram-api', { name: 'Telegram Bot API' }), comp('externals', 'kubernetes-api', { name: 'Kubernetes API' }),
+    ];
+    ve = [
+      E('externals/alertmanager-server', 'signaladapters/alertmanager', 'webhook'),
+      E('signaladapters/ha', 'externals/home-assistant', 'websocket'),
+      E('signaladapters/k8s-events', K8S, 'watch'),
+      ...nodes.filter(n => n.kind === 'signaladapters').map(n => E(n.id, MANAGER, 'signal/inbound')),
+      E(MANAGER, K8S, 'reconcile'),
+      E('channeladapters/console', K8S, 'list/watch', { dashed: true }),
+      E('jobs/housekeeping', K8S, 'list', { dashed: true }),
+      ...nodes.filter(n => n.kind === 'channeladapters').map(n => E(MANAGER, n.id, 'channel/ops')),
+      E('gateways/gateway-telegram', 'externals/telegram-api', 'getUpdates'),
+      E('gateways/gateway-telegram', 'channeladapters/telegram', 'updates'),
+      E('channeladapters/telegram', 'externals/telegram-api', 'sendMessage'),
+      E(CTX, MANAGER, '/work'),
+      ...nodes.filter(n => n.kind === 'harnesses').flatMap(h => [E(h.id, CTX, 'CONTROL_URL'), E(h.id, EGR, 'redirected'), E(h.id, REPO, 'git', { dashed: true })]),
+      ...edges.filter(e => e.kind === 'calls' && e.from.startsWith('harnesses/')).map(e => E(EGR, e.to, 'model')),
+      ...nodes.filter(n => n.kind === 'mcpservers').map(n => E(EGR, n.id, 'tool', { dashed: true })),
+    ];
+    const H = (ev) => { const r = ev.pipeline && ROUTES[ev.pipeline]; return r ? r.harness : undefined; };
+    map = (id, ev) => { if (!id) return id; const k = id.split('/')[0];
+      if (['signaladapters', 'channeladapters', 'harnesses', 'llms', 'mcpservers', 'repos', 'externals', 'gateways', 'sidecars', 'jobs', 'pods'].includes(k)) return id;
+      if (k === 'agentruntimes') return H(ev) || harnessOfRuntime.get(id) || id;
+      return MANAGER; };
+    var expand = (ev) => { const h = H(ev); if (!h) return null;
+      switch (ev.kind) {
+        case 'runtime.starting': return [[MANAGER, K8S]];
+        case 'run.dispatched': return [[MANAGER, CTX], [CTX, h]];
+        case 'run.completed': return [[h, CTX], [CTX, MANAGER]];
+        case 'model.call': return [[h, EGR], [EGR, ev.path[0][1]]];
+        case 'tool.call': return ev.path[0][1] ? [[h, EGR], [EGR, ev.path[0][1]]] : [[h, null]];
+        case 'context.restored': return [[CTX, h]];
+        case 'context.checkpoint': case 'context.skipped': case 'context.failed': return [[CTX, null]];
+      } return null; };
+  } else {
+    // THE MODEL: the declared objects and nothing else. A runtime's image, its
+    // harness and its vendor are facts in its panel, not nodes.
+    map = (id) => id;
+    vn = nodes.filter(n => VIEW_CLASSES.wiring.includes(n.kind));
+    const ids = new Set(vn.map(n => n.id));
+    ve = edges.filter(e => ids.has(e.from) && ids.has(e.to));
+    const cfgOf = new Map(); for (const e of edges) if (e.kind === 'points-at') cfgOf.set(e.to, e.from);
+    var expand = (ev) => {
+      if (ev.kind === 'tool.call' && ev.path[0][1] && ev.pipeline && cfgOf.has(ev.path[0][1])) return [[`pipelines/${ev.pipeline}`, cfgOf.get(ev.path[0][1])]];
+      if ((ev.kind === 'model.call' || ev.kind.startsWith('context.')) && ev.pipeline) return [[ROUTES[ev.pipeline].runtime, null]];
+      return null; };
+  }
+  const pair = new Map(); for (const e of ve) { pair.set(`${e.from}|${e.to}`, e); pair.set(`${e.to}|${e.from}`, e); }
+  return { nodes: vn, edges: ve, map, expand: typeof expand === 'function' ? expand : null, byId: new Map(vn.map(n => [n.id, n])), edgeById: new Map(ve.map(e => [e.id, e])), pair };
+}
+// The edges inside and out of one conversation pod, and how a hop maps onto them.
+function podEdges(conv, r, C, target, CTX, WS, REPO) {
+  const A = C(conv, 'agent'), S = C(conv, 'context-sync'), X = C(conv, 'egress-proxy');
+  const out = [E(S, A, 'control'), E(A, X, 'redirected'), E(X, r.llm, 'model'), E(A, REPO, 'git', { dashed: true })];
+  for (const m of r.mcp) out.push(E(X, target.get(m) || m, 'tool', { dashed: true }));
+  return out;
+}
+function podHops(ev, managerSide, C, wl, CTX) {
+  if (!ev.conversation) return null;
+  const A = C(ev.conversation, 'agent'), S = C(ev.conversation, 'context-sync'), X = C(ev.conversation, 'egress-proxy');
+  switch (ev.kind) {
+    case 'runtime.starting': return [[managerSide, S]];
+    case 'run.dispatched': return [[managerSide, S], [S, A]];
+    case 'run.completed': return [[A, S], [S, managerSide]];
+    case 'model.call': return [[A, X], [X, ev.path[0][1]]];
+    case 'tool.call': return ev.path[0][1] ? [[A, X], [X, wl.get(ev.path[0][1]) || ev.path[0][1]]] : [[A, null]];
+    case 'context.restored': return [[S, A]];
+    case 'context.checkpoint': case 'context.skipped': case 'context.failed': return [[S, null]];
+  }
+  return null;
+}
+function modeOf() { return state.viewMode === 'wiring' && state.view === 'routes' ? 'routes' : state.viewMode; }
+let VG = null;
+// A hop's path in the current view: mapped endpoints, internal legs dropped.
+function viewPath(ev) {
+  const out = [];
+  if (VG.expand) { const x = VG.expand(ev); if (x) return x; } for (const [a, b] of ev.path) { const A = VG.map(a, ev), B = b ? VG.map(b, ev) : null; if (A && B && A !== B) out.push([A, B]); else if (A && !B) out.push([A, null]); }
+  return out;
+}
+// Runs in flight at tNow: the node that is "working", per view.
+function workingNodes(t) {
+  const last = new Map();
+  for (const ev of log) { if (ev.ts > t || !ev.conversation) continue; if (ev.kind === 'run.dispatched') last.set(ev.conversation, ev); else if (ev.kind === 'run.completed') last.delete(ev.conversation); }
+  const out = new Set();
+  for (const ev of last.values()) { for (const id of [ev.conversation, `pipelines/${ev.pipeline}`, ev.path[0][1]]) { const m = VG.map(id, ev); if (m && m !== MANAGER && m !== MANAGER_POD) out.add(m); } }
+  return out;
+}
+
+// Oriented reachability: down and up walked SEPARATELY, so a shared hub never
+// joins two routes that have nothing to do with each other (the console's own
+// scope rule). Returns hop distance per node.
+function reach(fromId, es) {
+  const down = new Map(), up = new Map();
+  const push = (m, a, b) => { (m.get(a) || m.set(a, []).get(a)).push(b); };
+  // A channel adapter that ALSO serves a chat source is two roles on one
+  // object. Walking through it would join every route that posts to that
+  // channel to the route that reads that source, which is exactly the shortcut
+  // the oriented walk exists to forbid.
+  for (const e of es) { if (e.kind === 'served-by' && e.from.startsWith('channeladapters/') && e.to.startsWith('signalsources/')) continue; push(down, e.from, e.to); push(up, e.to, e.from); }
+  const walk = (adj) => { const seen = new Map([[fromId, 0]]); let f = [fromId]; while (f.length) { const nx = []; for (const id of f) for (const t of adj.get(id) || []) if (!seen.has(t)) { seen.set(t, seen.get(id) + 1); nx.push(t); } f = nx; } return seen; };
+  const hop = walk(down); for (const [id, d] of walk(up)) if (!hop.has(id) || d < hop.get(id)) hop.set(id, d);
+  return hop;
+}
+const ALL_PIPELINES = nodes.filter(n => n.kind === 'pipelines').map(n => n.name);
+function visible() {
+  const hidePred = compile(state.hide);
+  const stats = state.stats;
+  VG = viewGraph();
+  // A view owns its classes: the components view is adapters, manager and pods
+  // whatever the detail preset says, and the manager is never hideable.
+  const hid = hiddenNow();
+  let vs = VG.nodes.filter(n => (isSpine(n) || !hid.has(n.kind)) && !(hidePred && hidePred(n)));
+  // Route selection first: it is the widest cut, and it works over the WHOLE
+  // wiring, so hiding a class never disconnects a route from its pipeline.
+  if (state.pipelines.size < ALL_PIPELINES.length) {
+    const keep = new Set();
+    for (const p of state.pipelines) for (const id of reach(`pipelines/${p}`, edges).keys()) keep.add(VG.map(id, { pipeline: p }));
+    if (state.viewMode === 'components' || state.viewMode === 'instances') for (const p of state.pipelines) for (const c of ROUTES[p].convs) { keep.add(c); keep.add(`pods/agentops-conv-${c.split('/')[1]}`); }
+    if (state.viewMode === 'instances') for (const n of VG.nodes) if (n.kind === 'pods' && n.of && keep.has(n.of)) keep.add(n.id);
+    for (const n of VG.nodes) if (n.kind === 'containers' && keep.has(`conversations/${n.pod.replace('agentops-conv-', '')}`)) keep.add(n.id);
+    for (const n of VG.nodes) if (n.kind === 'repos') keep.add(n.id);
+    vs = vs.filter(n => keep.has(n.id) || n.id === MANAGER);
+  }
+  let ids = new Set(vs.map(n => n.id));
+  let es = VG.edges.filter(e => ids.has(e.from) && ids.has(e.to));
+  if (!state.idleEdges) es = es.filter(e => stats.has(e.id) || e.kind === 'opens' || e.kind === 'runs-in');
+  if (!state.idleNodes) { const touched = new Set(es.flatMap(e => [e.from, e.to])); vs = vs.filter(n => touched.has(n.id) || n.health === 'bad'); ids = new Set(vs.map(n => n.id)); es = es.filter(e => ids.has(e.from) && ids.has(e.to)); }
+  let maxDepth = 0;
+  if (state.scope && ids.has(state.scope)) {
+    const hop = reach(state.scope, es);
+    maxDepth = Math.max(0, ...hop.values());
+    vs = vs.filter(n => hop.has(n.id) && (state.depth === 'all' || hop.get(n.id) <= state.depth)); ids = new Set(vs.map(n => n.id)); es = es.filter(e => ids.has(e.from) && ids.has(e.to));
+  }
+  const hiddenAll = VG.nodes.filter(n => !ids.has(n.id));
+  return { nodes: vs, edges: es, maxDepth, hiddenCount: hiddenAll.length, hiddenFailing: hiddenAll.filter(n => n.health === 'bad').length, hiddenClasses: [...new Set(hiddenAll.filter(n => n.health === 'bad').map(n => KINDS[n.kind].label))] };
+}
+
+// ------------------------------------------------------------------ rendering
+const svg = d3.select('#svg'), root = d3.select('#root');
+const gBoxes = d3.select('#boxes'), gEdges = d3.select('#edges'), gLabels = d3.select('#labels'), gNodes = d3.select('#nodes'), gParticles = d3.select('#particles');
+const zoom = d3.zoom().scaleExtent([0.35, 3]).on('zoom', (ev) => root.attr('transform', ev.transform));
+svg.call(zoom).on('dblclick.zoom', null);
+svg.on('click', () => { state.selected = null; state.selectedEdge = null; state.selectedHop = null; paint(); renderPanel(); });
+
+const pos = new Map(); // node centres, read by particles and the panel
+let sim = null, current = { nodes: [], edges: [], boxes: [] };
+const edgePathEl = new Map(); // edge id -> the drawn <path>, for getPointAtLength
+function size() { const r = $('canvas').getBoundingClientRect(); return { w: r.width, h: r.height }; }
+
+// What a pod runs decides its glyph and its caption: a pod is a pod, but each
+// one here has a purpose, and the purpose is what the eye should find.
+function podRole(d) { if (d.kind !== 'pods') return undefined; if (d.of) return d.of.split('/')[0]; if (d.conversation) return 'harnesses'; return undefined; }
+function podCaption(d) { const r = podRole(d); if (!r) return ''; if (r === 'harnesses') { const c = nodes.find(x => x.kind === 'conversations' && x.name === d.conversation); return c ? `agent · ${c.pipeline}` : 'agent'; } return KINDS[r] ? KINDS[r].label.toLowerCase() : r; }
+function shapePath(shape) {
+  switch (shape) {
+    case 'hexagon': return 'M-18 0 L-9 -15 L9 -15 L18 0 L9 15 L-9 15 Z';
+    case 'plaque': return 'M-18 -12 h36 v24 h-36 z M-18 -6 h-3 M-18 6 h-3';
+    case 'rect': return 'M-22 -13 h44 a3 3 0 0 1 3 3 v20 a3 3 0 0 1 -3 3 h-44 a3 3 0 0 1 -3 -3 v-20 a3 3 0 0 1 3 -3 z';
+    case 'chip': return 'M-17 -11 h34 v22 h-34 z';
+    case 'disk': return 'M-14 -9 a14 4 0 0 0 28 0 a14 4 0 0 0 -28 0 v18 a14 4 0 0 0 28 0 v-18 M-14 0 a14 4 0 0 0 28 0';
+    case 'cloud': return 'M-14 6 a7 7 0 0 1 1 -14 a10 10 0 0 1 19 -2 a8 8 0 0 1 8 16 z';
+    case 'server': return 'M-17 -14 h34 v10 h-34 z M-17 4 h34 v10 h-34 z';
+    case 'hub': return 'M-26 -17 h52 a4 4 0 0 1 4 4 v26 a4 4 0 0 1 -4 4 h-52 a4 4 0 0 1 -4 -4 v-26 a4 4 0 0 1 4 -4 z';
+    case 'circle': return 'M-15 0 a15 15 0 1 0 30 0 a15 15 0 1 0 -30 0';
+    case 'stadium': return 'M-12 -12 h24 a12 12 0 0 1 0 24 h-24 a12 12 0 0 1 0 -24 z';
+    case 'diamond': return 'M0 -17 L17 0 L0 17 L-17 0 Z';
+    case 'diamond2': return 'M0 -17 L17 0 L0 17 L-17 0 Z M-8 0 h16';
+    case 'cylinder': return 'M-16 -10 a16 5 0 0 0 32 0 a16 5 0 0 0 -32 0 v20 a16 5 0 0 0 32 0 v-20';
+    case 'note': return 'M-13 -15 h18 l8 8 v22 h-26 z M5 -15 v8 h8';
+    case 'box': return 'M0 -15 l13 7 v16 l-13 7 -13 -7 v-16 z M0 -1 l13 -7 M0 -1 l-13 -7 M0 -1 v16';
+  }
+}
+const GLYPH = {
+  signalsources: 'M2 -7 L-4 1 h4 l-1 6 6 -8 h-4 z', signaladapters: 'M-4 -6 v4 M4 -6 v4 M-6 -2 h12 v2 a6 6 0 0 1 -12 0 z M0 6 v3',
+  pipelines: 'M-8 -4 h5 a3 3 0 0 1 3 3 v2 a3 3 0 0 0 3 3 h5 M6 2 l2 2 -2 2', agentprofiles: 'M0 -6 a3 3 0 1 1 0 6 a3 3 0 0 1 0 -6 M-6 7 a6 6 0 0 1 12 0 z',
+  agentruntimes: 'M-5 -5 h10 v10 h-10 z M-2 -2 h4 v4 h-4 z', mcptoolsets: 'M5 -5 a3 3 0 0 1 -4 4 l-5 5 -1 -1 5 -5 a3 3 0 0 1 4 -4 z',
+  mcpconfigs: 'M-6 -5 h12 v4 h-12 z M-6 1 h12 v4 h-12 z', channels: 'M-6 -5 h12 v8 h-6 l-3 3 v-3 h-3 z', channeladapters: 'M-4 -6 v4 M4 -6 v4 M-6 -2 h12 v2 a6 6 0 0 1 -12 0 z M0 6 v3',
+  conversations: 'M-5 -2 h10 M-5 2 h6', pods: 'M-4 -4 h8 v8 h-8 z',
+  manager: 'M-7 -5 h14 v10 h-14 z M-7 -1 h14 M-3 3 h.01 M0 3 h.01',
+  harnesses: 'M-6 -6 h12 v12 h-12 z M-2 -2 h4 v4 h-4 z M0 -9 v3 M0 6 v3 M-9 0 h3 M6 0 h3',
+  llms: 'M0 -5 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z',
+  mcpservers: 'M-6 -7 h12 M-6 -3 h12 M-6 3 h12 M-6 7 h12',
+  containers: 'M-6 -4 h12 M-6 0 h12 M-6 4 h12',
+  sidecars: 'M-6 -4 h12 M-6 0 h12 M-6 4 h12',
+  gateways: 'M-7 0 h14 M3 -4 l4 4 -4 4 M-3 -4 l-4 4 4 4',
+  jobs: 'M0 -6 a6 6 0 1 0 0.01 0 M0 -3 v3 l2 2',
+  externals: 'M0 -6.5 a6.5 6.5 0 1 0 0.01 0 M-6.5 0 h13 M0 -6.5 c-3.4 3.2 -3.4 9.8 0 13 M0 -6.5 c3.4 3.2 3.4 9.8 0 13',
+  repos: 'M-3 -6 a2 2 0 1 0 0.01 0 M-3 6 a2 2 0 1 0 0.01 0 M5 -2 a2 2 0 1 0 0.01 0 M-3 -4 v8 M-3 0 c0 -3 8 0 8 -2',
+};
+const R = 38; // node radius for edge trimming
+const line = d3.line().x(p => p.x).y(p => p.y).curve(d3.curveBasis);
+
+// NO RULE POSITIONS A GROUP. That is the Kiali property this page had been
+// missing through three versions: its boxes are OWNERSHIP (namespace, app),
+// and where a box lands is decided by its members' edges, never by a lane
+// order somebody typed. So: boxes by owner, dagre over the real edges with the
+// boxes as compound nodes, and the picture falls where the traffic puts it.
+//
+// The owner here is the BUNDLE that installs an object — the chart's
+// allocation view, readable off the Helm labels in a real install — or the
+// ROUTE, one box per pipeline holding what only that pipeline reaches. Shared
+// substrate (a runtime two routes use, a channel every route posts to) stays
+// unboxed, exactly as a shared service does in a mesh.
+const BUNDLE_OF = (() => {
+  const m = new Map();
+  const put = (bundle, ids) => ids.forEach(id => m.set(id, bundle));
+  put('prometheus', ['signaladapters/alertmanager', 'signalsources/prometheus-alerts', 'pipelines/alert-triage', 'agentprofiles/alert-investigator', 'mcpconfigs/prometheus', 'mcpservers/prometheus-mcp', 'conversations/prometheus-alerts-a1', 'pods/agentops-conv-prometheus-alerts-a1']);
+  put('kubernetes', ['signaladapters/k8s-events', 'signalsources/cluster-events', 'pipelines/k8s-observe', 'agentprofiles/k8s-engineer', 'mcpconfigs/kubernetes', 'mcpservers/kubernetes-mcp', 'conversations/cluster-events-b7', 'pods/agentops-conv-cluster-events-b7', 'conversations/console-c3', 'pods/agentops-conv-console-c3']);
+  put('release', ['signaladapters/cron', 'signalsources/nightly', 'pipelines/nightly-report', 'agentprofiles/release-scribe', 'conversations/nightly-d2', 'pods/agentops-conv-nightly-d2']);
+  put('ollama', ['agentruntimes/sandbox', 'harnesses/runtime-ollama', 'llms/ollama']);
+  put('telegram', ['channeladapters/telegram', 'channels/ops-chat']);
+  put('console', ['channeladapters/console', 'channels/console', 'signalsources/console']);
+  put('home-assistant', ['signaladapters/ha', 'signalsources/bench-sensors']);
+  put('claude', ['agentruntimes/default', 'harnesses/runtime-claude', 'llms/anthropic']);
+  put('agentops', ['mcptoolsets/agentops-observe', 'mcptoolsets/agentops-shell', MANAGER, 'jobs/housekeeping']);
+  m.set('gateways/gateway-telegram', 'telegram');
+  for (const n of nodes) if (n.kind === 'containers') m.set(n.id, m.get(`conversations/${n.pod.replace('agentops-conv-', '')}`));
+  for (const n of nodes) if (n.kind === 'pods' && n.of && !m.has(n.id)) m.set(n.id, m.get(n.of));
+  return (id) => m.get(id);
+})();
+// Route ownership is computed, not typed: a node belongs to a pipeline's box
+// when exactly one pipeline reaches it along the wiring.
+const ROUTE_OF = (() => {
+  const count = new Map();
+  for (const p of ALL_PIPELINES) for (const id of reach(`pipelines/${p}`, edges).keys()) { const c = count.get(id) || []; c.push(p); count.set(id, c); }
+  return (id) => { if (id === MANAGER) return undefined; const c = count.get(id); return c && c.length === 1 ? c[0] : undefined; };
+})();
+const DECLARER = (() => { const m = new Map();
+  for (const n of nodes) { if (n.kind === 'conversations') m.set(n.id, `Pipeline ${n.pipeline}`); if (n.kind === 'pods' && n.of) m.set(n.id, `${KINDS[n.of.split('/')[0]].label} ${n.of.split('/')[1]}`); if (n.kind === 'pods' && n.conversation) { const c = nodes.find(x => x.kind === 'conversations' && x.name === n.conversation); const r = c && ROUTES[c.pipeline]; if (r) m.set(n.id, `Runtime ${r.runtime.split('/')[1]}`); } }
+  return (id) => m.get(id); })();
+const CONTAINER_POD = (id) => id.startsWith('containers/') ? `Pod ${id.split('/')[1]}` : undefined;
+const POD_RUNTIME = (podName) => { const c = nodes.find(x => x.kind === 'conversations' && podName === `agentops-conv-${x.name}`); const r = c && ROUTES[c.pipeline]; return r ? `Runtime ${r.runtime.split('/')[1]}` : undefined; };
+const POD_CONV = (podName) => `conversations/${podName.replace('agentops-conv-', '')}`;
+const NODE_OF = (id) => { const n = nodes.find(x => x.id === id) || (id.startsWith('containers/') ? nodes.find(x => x.kind === 'pods' && x.name === id.split('/')[1]) : null); return n && n.node ? `Node ${n.node}` : undefined; };
+function parentOf(groupId) {
+  if (!groupId.startsWith('Pod ')) return undefined;
+  const podName = groupId.slice(4);
+  if (state.viewMode === 'instances') return state.box === 'node' ? NODE_OF(`pods/${podName}`) : undefined;
+  if (state.viewMode === 'components') return undefined;
+  if (state.box === 'bundle') return BUNDLE_OF(POD_CONV(podName));
+  if (state.box === 'route') return ROUTE_OF(POD_CONV(podName));
+  return undefined;
+}
+function ownerOf(id) {
+  const podBox = CONTAINER_POD(id); if (podBox) return podBox;
+  if (state.viewMode === 'components') return undefined;
+  if (state.viewMode === 'instances') return state.box === 'node' ? NODE_OF(id) : undefined;
+  if (state.box === 'none') return undefined;
+  if (state.viewMode === 'components' && id.startsWith('pods/')) { const conv = `conversations/${id.replace('pods/agentops-conv-', '')}`; return state.box === 'bundle' ? BUNDLE_OF(conv) : ROUTE_OF(conv); }
+  return state.box === 'bundle' ? BUNDLE_OF(id) : ROUTE_OF(id);
+}
+function groupsOf(vn) {
+  const g = new Map(); const parents = new Map();
+  for (const n of vn) { let o = ownerOf(n.id); if (!o) continue; (g.get(o) || g.set(o, []).get(o)).push(n);
+    // a nested box: its parent holds it, and so transitively its members
+    let par = parentOf(o); while (par) { parents.set(o, par); if (!g.has(par)) g.set(par, []); o = par; par = parentOf(o); } }
+  const titled = (id) => id.includes(' ') && /^(Pod|Node|Runtime|Pipeline|Signal adapter|Channel adapter|MCP server) /.test(id) ? { title: id.split(' ').slice(1).join(' ').replace(/^agentops-conv-/, ''), hint: id.split(' ')[0].toLowerCase() } : { title: id, hint: state.box === 'bundle' ? 'bundle' : 'route' };
+  return [...g].map(([id, members]) => ({ id: `box:${id}`, ...titled(id), members, parent: parents.get(id) ? `box:${parents.get(id)}` : undefined }));
+}
+function memberBoxes(groups) {
+  const byId = new Map(groups.map(g => [g.id, g]));
+  const all = (grp) => { let m = [...grp.members]; for (const g of groups) if (g.parent === grp.id) m = m.concat(all(g)); return m; };
+  return groups.map(grp => { const m = all(grp); if (!m.length) return null; const x0 = d3.min(m, n => n.x) - 50, x1 = d3.max(m, n => n.x) + 50, y0 = d3.min(m, n => n.y) - 66, y1 = d3.max(m, n => n.y) + 60; return { ...grp, x0, y0, w: x1 - x0, h: y1 - y0 }; }).filter(Boolean);
+}
+// THREE LAYOUTS, KIALI'S. Concentric draws a hub as a hub: the spine node at
+// the centre, rings by distance. Cola is WebCola, the constraint layout behind
+// Kiali's option of that name, groups kept together. Dagre ranks, and is kept
+// for the reader who wants the model as a flow.
+function runLayout(v) {
+  const which = state.layoutBy[state.viewMode] || 'cola';
+  if (which === 'dagre') return runDagre(v);
+  if (which === 'concentric') return runConcentric(v);
+  return runCola(v);
+}
+function runConcentric(v) {
+  const adj = new Map(); const push = (a, b) => (adj.get(a) || adj.set(a, new Set()).get(a)).add(b);
+  for (const e of v.edges) { push(e.from, e.to); push(e.to, e.from); }
+  const spine = SPINE[state.viewMode];
+  let hub = v.nodes.find(n => n.id === MANAGER || n.id === MANAGER_POD) || v.nodes.find(n => n.kind === spine);
+  if (!hub) hub = [...v.nodes].sort((a, b) => (adj.get(b.id)?.size || 0) - (adj.get(a.id)?.size || 0))[0];
+  if (!hub) return { boxes: [] };
+  const hop = new Map([[hub.id, 0]]); let f = [hub.id];
+  while (f.length) { const nx = []; for (const id of f) for (const t of adj.get(id) || []) if (!hop.has(t)) { hop.set(t, hop.get(id) + 1); nx.push(t); } f = nx; }
+  const far = Math.max(1, ...hop.values());
+  for (const n of v.nodes) if (!hop.has(n.id)) hop.set(n.id, far + 1);
+  const rings = new Map(); for (const n of v.nodes) (rings.get(hop.get(n.id)) || rings.set(hop.get(n.id), []).get(hop.get(n.id))).push(n);
+  const angle = new Map([[hub.id, 0]]); hub.x = 0; hub.y = 0;
+  let radius = 0;
+  for (const k of [...rings.keys()].sort((a, b) => a - b)) { if (k === 0) continue; const ring = rings.get(k);
+    // each node sits near the angle of its inner neighbours, so spokes stay straight
+    const want = (n) => { const inner = [...(adj.get(n.id) || [])].filter(id => hop.get(id) === k - 1 && angle.has(id)); if (!inner.length) return Math.PI; const a = inner.map(id => angle.get(id)); return Math.atan2(a.reduce((t, x) => t + Math.sin(x), 0), a.reduce((t, x) => t + Math.cos(x), 0)); };
+    const w = new Map(ring.map(n => [n.id, want(n)]));
+    ring.sort((a, b) => w.get(a.id) - w.get(b.id) || a.name.localeCompare(b.name));
+    radius += Math.max(210, ring.length * 176 / (2 * Math.PI) + 60);
+    // each node at the angle it wants, then neighbours pushed apart until the
+    // arc between them holds a node: spokes stay straight, nothing overlaps
+    const gap = Math.min(2 * Math.PI / ring.length, 168 / radius);
+    const a = ring.map(n => w.get(n.id));
+    for (let pass = 0; pass < 6; pass++) { for (let i = 1; i < a.length; i++) if (a[i] - a[i - 1] < gap) { const mid = (a[i] + a[i - 1]) / 2; a[i - 1] = mid - gap / 2; a[i] = mid + gap / 2; } if (a.length > 1 && a[0] + 2 * Math.PI - a[a.length - 1] < gap) { const over = gap - (a[0] + 2 * Math.PI - a[a.length - 1]); a[0] += over / 2; a[a.length - 1] -= over / 2; } }
+    ring.forEach((n, i) => { angle.set(n.id, a[i]); n.x = Math.cos(a[i]) * radius; n.y = Math.sin(a[i]) * radius; }); }
+  compact(v, groupsOf(v.nodes));
+  fillCanvas(v.nodes);
+  for (const e of v.edges) e.points = null;
+  return { boxes: memberBoxes(groupsOf(v.nodes)) };
+}
+// A picture squarer than the canvas is fitted by height and leaves the sides
+// empty. The slack axis is stretched, bounded, so the width is used: the
+// topology is unchanged, only the aspect. Kiali leaves this to the user's zoom.
+function fillCanvas(ns) {
+  const cw = $('canvas').clientWidth || 1400, ch = Math.max(600, window.innerHeight - 160);
+  const x0 = d3.min(ns, n => n.x), x1 = d3.max(ns, n => n.x), y0 = d3.min(ns, n => n.y), y1 = d3.max(ns, n => n.y);
+  const pw = (x1 - x0) + 180, ph = (y1 - y0) + 140;
+  const want = cw / ch, have = pw / ph;
+  let sx = 1, sy = 1;
+  if (have < want) sx = Math.min(1.45, want / have); else sy = Math.min(1.45, have / want);
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  for (const n of ns) { n.x = cx + (n.x - cx) * sx; n.y = cy + (n.y - cy) * sy; pos.set(n.id, { x: n.x, y: n.y }); }
+}
+// COMPACTION, IN TWO STAGES. First every node is pulled toward the centre
+// under collision, held to its group, until the density inside each group is
+// even. Then each group is ONE RIGID RECTANGLE, ungrouped nodes are small
+// rectangles, and the rectangles are packed under a gravity shaped to the
+// canvas. Circles pack with holes between them; rectangles do not, and the
+// holes were the empty half of the picture.
+function compact(v, groups) {
+  const ns = v.nodes; if (ns.length < 2) return;
+  const cw = $('canvas').clientWidth || 1400, ch = Math.max(600, window.innerHeight - 160);
+  const cx = d3.mean(ns, n => n.x), cy = d3.mean(ns, n => n.y);
+  const owner = new Map(); for (const g of groups) for (const m of g.members) owner.set(m.id, g.id);
+  const radius = (n) => Math.max(66, Math.min(n.name.length, 20) * 4.4 + 30);
+  const byId = new Map(ns.map(n => [n.id, n]));
+  const links = v.edges.filter(e => byId.has(e.from) && byId.has(e.to)).map(e => ({ source: byId.get(e.from), target: byId.get(e.to) }));
+  // stage one: members settle inside their groups
+  const cluster = (alpha) => { const c = new Map(); for (const n of ns) { const o = owner.get(n.id); if (!o) continue; const a = c.get(o) || { x: 0, y: 0, k: 0 }; a.x += n.x; a.y += n.y; a.k++; c.set(o, a); }
+    for (const n of ns) { const o = owner.get(n.id); const a = o && c.get(o); if (!a || a.k < 2) continue; n.vx += (a.x / a.k - n.x) * alpha * 0.6; n.vy += (a.y / a.k - n.y) * alpha * 0.6; } };
+  const sim = d3.forceSimulation(ns)
+    .force('link', d3.forceLink(links).distance(140).strength(0.2))
+    .force('collide', d3.forceCollide(radius).strength(1).iterations(3))
+    .force('x', d3.forceX(cx).strength(0.08)).force('y', d3.forceY(cy).strength(0.08))
+    .force('cluster', cluster)
+    .alpha(1).alphaDecay(0.025).stop();
+  for (let i = 0; i < 220; i++) sim.tick();
+  for (const n of ns) { delete n.vx; delete n.vy; }
+  // stage two: rigid rectangles
+  const top = groups.filter(g => !g.parent);
+  const inGroup = (g) => { let m = [...g.members]; for (const c of groups) if (c.parent === g.id) m = m.concat(c.members); return m; };
+  const bodies = [];
+  for (const g of top) { const m = inGroup(g); if (!m.length) continue; const x0 = d3.min(m, n => n.x) - 54, x1 = d3.max(m, n => n.x) + 54, y0 = d3.min(m, n => n.y) - 70, y1 = d3.max(m, n => n.y) + 64; bodies.push({ members: m, x: (x0 + x1) / 2, y: (y0 + y1) / 2, hw: (x1 - x0) / 2, hh: (y1 - y0) / 2, vx: 0, vy: 0 }); }
+  const grouped = new Set(bodies.flatMap(b => b.members.map(m => m.id)));
+  for (const n of ns) if (!grouped.has(n.id)) bodies.push({ members: [n], x: n.x, y: n.y, hw: radius(n) * 0.9, hh: radius(n) * 0.78, vx: 0, vy: 0 });
+  const bodyOf = new Map(); bodies.forEach((b, i) => b.members.forEach(m => bodyOf.set(m.id, i)));
+  const blinks = new Map();
+  for (const e of links) { const a = bodyOf.get(e.source.id), b = bodyOf.get(e.target.id); if (a === undefined || b === undefined || a === b) continue; const k = a < b ? `${a}|${b}` : `${b}|${a}`; blinks.set(k, (blinks.get(k) || 0) + 1); }
+  const gx = 0.045 * Math.min(1, ch / cw), gy = 0.045 * Math.min(1, cw / ch), margin = 22;
+  for (let it = 0; it < 420; it++) {
+    const damp = it < 300 ? 0.82 : 0.6;
+    for (const b of bodies) { b.vx += (cx - b.x) * gx; b.vy += (cy - b.y) * gy; }
+    for (const [k, w] of blinks) { const [i, j] = k.split('|').map(Number); const a = bodies[i], b = bodies[j]; const f = 0.004 * Math.min(w, 3); a.vx += (b.x - a.x) * f; a.vy += (b.y - a.y) * f; b.vx += (a.x - b.x) * f; b.vy += (a.y - b.y) * f; }
+    for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) { const a = bodies[i], b = bodies[j];
+      const ox = (a.hw + b.hw + margin) - Math.abs(a.x - b.x), oy = (a.hh + b.hh + margin) - Math.abs(a.y - b.y);
+      if (ox <= 0 || oy <= 0) continue;
+      const wa = b.hw * b.hh / (a.hw * a.hh + b.hw * b.hh), wb = 1 - wa; // the smaller body moves more
+      if (ox < oy) { const d = Math.sign(a.x - b.x) || 1; a.vx += d * ox * wa * 0.5; b.vx -= d * ox * wb * 0.5; } else { const d = Math.sign(a.y - b.y) || 1; a.vy += d * oy * wa * 0.5; b.vy -= d * oy * wb * 0.5; } }
+    for (const b of bodies) { b.x += b.vx; b.y += b.vy; b.vx *= damp; b.vy *= damp; }
+  }
+  // final: no gravity, positions moved directly until nothing intersects
+  for (let pass = 0; pass < 300; pass++) { let moved = false;
+    for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) { const a = bodies[i], b = bodies[j];
+      const ox = (a.hw + b.hw + margin) - Math.abs(a.x - b.x), oy = (a.hh + b.hh + margin) - Math.abs(a.y - b.y);
+      if (ox <= 0 || oy <= 0) continue; moved = true;
+      const wa = b.hw * b.hh / (a.hw * a.hh + b.hw * b.hh), wb = 1 - wa;
+      if (ox < oy) { const d = Math.sign(a.x - b.x) || 1; a.x += d * (ox + 1) * wa; b.x -= d * (ox + 1) * wb; } else { const d = Math.sign(a.y - b.y) || 1; a.y += d * (oy + 1) * wa; b.y -= d * (oy + 1) * wb; } }
+    if (!moved) break; }
+  for (const b of bodies) { const mx = d3.mean(b.members, m => m.x), my = d3.mean(b.members, m => m.y); const ox = b.hw > 0 && b.members.length > 1 ? b.x - (d3.min(b.members, m => m.x) + d3.max(b.members, m => m.x)) / 2 : b.x - mx, oy = b.members.length > 1 ? b.y - (d3.min(b.members, m => m.y) + d3.max(b.members, m => m.y)) / 2 : b.y - my; for (const m of b.members) { m.x += ox; m.y += oy; } }
+  for (const n of ns) pos.set(n.id, { x: n.x, y: n.y });
+}
+function runCola(v) {
+  const idx = new Map(v.nodes.map((n, i) => [n.id, i]));
+  const cn = v.nodes.map(n => ({ id: n.id, width: Math.max(104, Math.min(n.name.length, 20) * 8.2 + 30), height: 118 }));
+  const cl = v.edges.filter(e => idx.has(e.from) && idx.has(e.to)).map(e => ({ source: idx.get(e.from), target: idx.get(e.to) }));
+  const groups = groupsOf(v.nodes);
+  const cg = groups.map(g => ({ leaves: g.members.map(m => idx.get(m.id)), groups: [], padding: 24 }));
+  const gi = new Map(groups.map((g, i) => [g.id, i]));
+  for (const g of groups) if (g.parent && gi.has(g.parent)) cg[gi.get(g.parent)].groups.push(gi.get(g.id));
+  // handleDisconnected packs components AFTER the group bounds are computed,
+  // which moves a disconnected bundle out of its own box. Off, and the boxes
+  // are drawn from where the members ended up.
+  const layout = new cola.Layout().nodes(cn).links(cl).groups(cg).avoidOverlaps(true).handleDisconnected(false)
+    .linkDistance(136).size([$('canvas').clientWidth || 1400, Math.max(600, window.innerHeight - 160)]);
+  layout.start(60, 40, 90, 0, false);
+  for (const n of v.nodes) { const c = cn[idx.get(n.id)]; n.x = c.x; n.y = c.y; }
+  compact(v, groups);
+  fillCanvas(v.nodes);
+  for (const e of v.edges) e.points = null;
+  return { boxes: memberBoxes(groups) };
+}
+function runDagre(v) {
+  const cw = $('canvas').clientWidth || 1000, ch = Math.max(600, window.innerHeight - 160);
+  const score = (lay) => { const ns = v.nodes, bs = lay.boxes; const x0 = Math.min(d3.min(ns, n => n.x) - 50, ...bs.map(b => b.x0)), x1 = Math.max(d3.max(ns, n => n.x) + 50, ...bs.map(b => b.x0 + b.w)); const y0 = Math.min(d3.min(ns, n => n.y) - 46, ...bs.map(b => b.y0)), y1 = Math.max(d3.max(ns, n => n.y) + 72, ...bs.map(b => b.y0 + b.h)); return Math.min(cw / (x1 - x0), ch / (y1 - y0)); };
+  const tb = runLayoutDir(v, 'tb'); const kTB = score(tb);
+  const lr = runLayoutDir(v, 'lr'); const kLR = score(lr);
+  current.orientation = kLR > kTB * 1.05 ? 'lr' : 'tb';
+  return current.orientation === 'lr' ? lr : runLayoutDir(v, 'tb');
+}
+function build() {
+  const v = visible();
+  const lay = runLayout(v);
+  current = { nodes: v.nodes, edges: v.edges, boxes: lay.boxes, meta: v };
+  join();
+  place();
+  paint();
+  if (!fitted) { sizeCanvasToPicture(); fit(); fitted = true; }
+}
+// THE CANVAS TAKES THE PICTURE'S ASPECT. A fixed-height canvas is fitted by
+// whichever dimension binds, and the other dimension is air; a canvas shaped
+// like the picture is fitted by width, and width is what makes the marks big.
+function sizeCanvasToPicture() {
+  const ns = current.nodes; if (!ns.length) return;
+  const bs = current.boxes || [];
+  const x0 = Math.min(d3.min(ns, n => n.x) - 90, ...bs.map(b => b.x0)), x1 = Math.max(d3.max(ns, n => n.x) + 90, ...bs.map(b => b.x0 + b.w));
+  const y0 = Math.min(d3.min(ns, n => n.y) - 46, ...bs.map(b => b.y0)), y1 = Math.max(d3.max(ns, n => n.y) + 52, ...bs.map(b => b.y0 + b.h));
+  const cw = $('canvas').clientWidth || 1000;
+  const h = Math.min(Math.max(520, cw * ((y1 - y0 + 40) / (x1 - x0)) + 60), Math.max(600, window.innerHeight - 160));
+  $('canvas').style.height = `${Math.round(h)}px`;
+}
+let fitted = false;
+function fit() {
+  const ns = current.nodes; if (!ns.length) return;
+  const { w, h } = size();
+  const bs = current.boxes || [];
+  const x0 = Math.min(d3.min(ns, n => n.x) - 96, ...bs.map(b => b.x0 - 6)), x1 = Math.max(d3.max(ns, n => n.x) + 96, ...bs.map(b => b.x0 + b.w + 6));
+  const y0 = Math.min(d3.min(ns, n => n.y) - 54, ...bs.map(b => b.y0 - 6)), y1 = Math.max(d3.max(ns, n => n.y) + 80, ...bs.map(b => b.y0 + b.h + 26));
+  const k = Math.min(2.2, 0.98 / Math.max((x1 - x0) / w, (y1 - y0) / h));
+  svg.transition().duration(350).call(zoom.transform, d3.zoomIdentity.translate(w / 2 - k * (x0 + x1) / 2, h / 2 - k * (y0 + y1) / 2).scale(k));
+}
+
+function join() {
+  const drag = d3.drag()
+    .on('drag', (ev, d) => { d.x = ev.x; d.y = ev.y; pos.set(d.id, { x: d.x, y: d.y }); straighten(d.id); current.boxes = memberBoxes(groupsOf(current.nodes)); place(); });
+
+  gEdges.selectAll('g.e').data(current.edges, d => d.id).join(enter => {
+    const g = enter.append('g').attr('class', 'e');
+    g.append('path').attr('class', 'edge vis').attr('marker-end', 'url(#arrow)');
+    g.append('path').attr('class', 'edge hit').on('click', (ev, d) => { ev.stopPropagation(); state.selectedEdge = d.id; state.selected = null; paint(); renderPanel(); });
+    return g;
+  }).each(function (d) { edgePathEl.set(d.id, d3.select(this).select('path.vis').node()); });
+  gLabels.selectAll('text.elabel').data(current.edges, d => d.id).join('text').attr('class', 'elabel').attr('text-anchor', 'middle');
+
+  gNodes.selectAll('g.node').data(current.nodes, d => d.id).join(enter => {
+    const g = enter.append('g').attr('class', 'node').call(drag)
+      .on('click', (ev, d) => { ev.stopPropagation(); state.selected = d.id; state.selectedEdge = null; paint(); renderPanel(); })
+      .on('dblclick', (ev, d) => { ev.stopPropagation(); if (d.collapsed) return togglePod(d.name.replace('agentops-conv-', '')); setScope(d.id); });
+    g.append('circle').attr('class', 'halo').attr('r', 46).attr('fill', 'none');
+    g.append('circle').attr('class', 'ring').attr('r', 47);
+    const mark = g.append('g').attr('class', 'mark').attr('transform', 'scale(1.95)');
+    mark.append('path').attr('class', 'shape').attr('d', d => shapePath(KINDS[d.kind].shape));
+    mark.append('path').attr('class', 'glyph').attr('d', d => GLYPH[podRole(d)] || GLYPH[d.kind]);
+    g.append('text').attr('class', 'label').attr('y', 54).text(d => d.name.length > 22 ? d.name.slice(0, 21) + '…' : d.name);
+    g.append('text').attr('class', 'caption').attr('y', 70).text(d => podCaption(d));
+    const b = g.append('g').attr('class', 'bd').attr('transform', 'translate(32,-32)');
+    b.append('circle').attr('class', 'badge').attr('r', 11); b.append('text').attr('class', 'badge-t').attr('y', 4);
+    g.append('title').text(d => `${KINDS[d.kind].label} ${d.name}`);
+    return g;
+  });
+  gNodes.selectAll('g.node').call(drag);
+}
+
+function straighten(id) { for (const e of current.edges) if (e.from === id || e.to === id) e.points = null; }
+const routed = d3.line().x(p => p.x).y(p => p.y).curve(d3.curveBasis);
+function edgePath(e) {
+  const A = pos.get(e.from), B = pos.get(e.to); if (!A || !B) return '';
+  if (e.points && e.points.length > 1) {
+    // Dagre ends a path at the node's LAYOUT box, which is wider than the
+    // drawn mark to hold the label. The endpoints are pulled in to the mark.
+    const pts = e.points.slice();
+    const towards = (from, to, d) => { const dx = to.x - from.x, dy = to.y - from.y, L = Math.hypot(dx, dy) || 1; return { x: from.x + dx / L * d, y: from.y + dy / L * d }; };
+    pts[0] = towards(A, pts.length > 2 ? pts[1] : B, R - 2);
+    pts[pts.length - 1] = towards(B, pts.length > 2 ? pts[pts.length - 2] : A, R + 4);
+    return routed(pts);
+  }
+  // unrouted: a gentle arc bowed to the right of travel, so two opposite
+  // edges between one pair never lie on one line
+  const t = trimmed(A, B); const mx = (t.x1 + t.x2) / 2, my = (t.y1 + t.y2) / 2; const dx = t.x2 - t.x1, dy = t.y2 - t.y1, L = Math.hypot(dx, dy) || 1; const k = Math.min(30, L * 0.12);
+  return `M${t.x1} ${t.y1} Q${mx - dy / L * k} ${my + dx / L * k} ${t.x2} ${t.y2}`;
+}
+function trimmed(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+  return { x1: a.x + ux * R, y1: a.y + uy * R, x2: b.x - ux * (R + 4), y2: b.y - uy * (R + 4) };
+}
+function place() {
+  gNodes.selectAll('g.node').attr('transform', d => `translate(${d.x},${d.y})`);
+  gEdges.selectAll('g.e').each(function (d) { d3.select(this).selectAll('path').attr('d', edgePath(d)); });
+  gLabels.selectAll('text.elabel').each(function (d) { if (d.points && d.lx != null) { d3.select(this).attr('x', d.lx).attr('y', d.ly + 4); return; } const el = edgePathEl.get(d.id); if (!el) return; const L = el.getTotalLength(); const q = el.getPointAtLength(L * 0.5); d3.select(this).attr('x', q.x).attr('y', q.y - 5); });
+  drawBoxes();
+}
+function drawBoxes() {
+  const sel = gBoxes.selectAll('g.lb').data([...current.boxes].sort((a, b) => b.w * b.h - a.w * a.h), d => d.id).join(enter => { const g = enter.append('g').attr('class', 'lb'); g.append('rect').attr('class', 'lane-box').attr('rx', 10); g.append('text').attr('class', 'lane-title'); g.append('text').attr('class', 'lane-hint'); return g; })
+    .on('click', (ev, d) => { if (d.id.startsWith('box:Pod ')) { ev.stopPropagation(); togglePod(d.id.replace('box:Pod agentops-conv-', '')); } });
+  sel.order();
+  sel.select('rect').attr('x', d => d.x0).attr('y', d => d.y0).attr('width', d => d.w).attr('height', d => d.h);
+  sel.select('.lane-title').attr('x', d => d.x0 + 8).attr('y', d => d.y0 + 16).text(d => { const max = Math.max(6, Math.floor((d.w - 14) / 7.4)); return d.title.length > max ? d.title.slice(0, max - 1) + '…' : d.title; });
+  sel.select('.lane-hint').attr('x', d => d.x0 + 8).attr('y', d => d.y0 + 27).text(d => d.id.startsWith('box:Pod ') ? 'pod · click to collapse' : d.hint);
+  sel.select('rect').style('cursor', d => d.id.startsWith('box:Pod ') ? 'pointer' : null);
+}
+
+function tone(e) {
+  const s = state.stats.get(e.id);
+  if (!s) return 'idle'; if (s.errors) return 'error'; if (s.unconfirmed) return 'unconfirmed'; return 'ok';
+}
+function labelFor(e) {
+  const s = state.stats.get(e.id); if (!s || state.labels === 'none') return '';
+  if (state.labels === 'rate') return s.ratePerMin >= 1 ? `${s.ratePerMin.toFixed(1)}/min` : `${(s.ratePerMin * 60).toFixed(0)}/h`;
+  return s.p50 ? (s.p50 >= 1000 ? `${(s.p50 / 1000).toFixed(1)}s` : `${s.p50}ms`) : '';
+}
+function paint() {
+  const findPred = compile(state.find);
+  const working = workingNodes(state.tNow);
+  gNodes.selectAll('g.node').select('circle.ring').style('display', d => working.has(d.id) ? null : 'none');
+  const convRoute = state.mode === 'conversation' ? routeOf(state.conv.name) : null;
+  gNodes.selectAll('g.node')
+    .attr('class', d => `node h-${d.health}${state.selected === d.id ? ' selected' : ''}${findPred && findPred(d) ? ' found' : ''}${convRoute && !convRoute.nodes.has(d.id) ? ' dim' : ''}`)
+    .select('g.bd').style('display', d => state.badges && badge(d) ? null : 'none').select('text').text(d => badge(d));
+  gNodes.selectAll('g.node').select('g.bd').select('circle').attr('fill', d => d.collapsed ? 'var(--ao-neutral)' : d.kind === 'conversations' ? 'var(--ao-accent)' : 'var(--ao-brand)');
+  gEdges.selectAll('g.e').select('path.vis')
+    .attr('class', d => `edge vis ${tone(d)}${d.dashed ? ' dashed' : ''}${state.selectedEdge === d.id ? ' selected' : ''}${convRoute && !convRoute.edges.has(d.id) ? ' dim' : ''}`);
+  gLabels.selectAll('text.elabel').text(d => labelFor(d)).style('display', d => convRoute && !convRoute.edges.has(d.id) ? 'none' : null);
+  renderChips();
+}
+function badge(d) {
+  if (d.count) return `×${d.count}`;
+  if (d.collapsed) return '+';
+  if (d.kind === 'conversations') return d.unread ? String(d.unread) : '';
+  const c = state.nstats.get(d.id) || 0;
+  if (['pipelines', 'agentprofiles', 'channels', 'agentruntimes'].includes(d.kind)) { const active = new Set(log.filter(ev => ev.ts > state.tNow - 120000 && ev.ts <= state.tNow && ev.pipeline && ev.kind === 'run.dispatched').map(ev => ev.pipeline)); if (d.kind === 'pipelines') return active.has(d.name) ? '●' : ''; }
+  return c > 40 ? '' : '';
+}
+function routeOf(convName) {
+  const ev = state.conv.events; const ns = new Set([VG.map(`conversations/${convName}`, ev[0])]), es = new Set();
+  for (const e of ev) for (const [a, b] of viewPath(e)) { if (a) ns.add(a); if (b) ns.add(b); const d = VG.pair.get(`${a}|${b}`); if (d) es.add(d.id); }
+  for (const e of VG.edges) if (e.kind === 'opens' && e.to === `conversations/${convName}`) es.add(e.id);
+  return { nodes: ns, edges: es };
+}
+function togglePod(conv) { if (state.expanded.has(conv)) state.expanded.delete(conv); else state.expanded.add(conv); state.selected = null; fitted = false; build(); renderPanel(); }
+function setScope(id) { state.scope = state.scope === id ? null : id; state.depth = 'all'; fitted = false; build(); renderPanel(); }
+
+// ------------------------------------------------------------------ particles (traffic animation)
+// TWO KINDS OF DOT, as in Kiali. The steady stream is DENSITY: each edge emits
+// continuously at an interval set by its rate in the window, errors as red
+// diamonds in the edge's own error proportion. A recorded hop is a PULSE on
+// top of it: larger, in the direction the hop actually travelled.
+const particles = []; // {edge, dir, t0, dur, cls, pulse}
+const nextEmit = new Map();
+function emitByRate(now) {
+  if (!state.animate || state.mode === 'conversation') return;
+  for (const e of current.edges) {
+    const s = state.stats.get(e.id); if (!s || !s.ratePerMin) { nextEmit.delete(e.id); continue; }
+    const interval = Math.min(3500, Math.max(220, 5000 / s.ratePerMin));
+    const at = nextEmit.get(e.id) ?? now + rnd() * interval;
+    if (now >= at) {
+      const err = rnd() < s.errors / s.events;
+      particles.push({ edge: e.id, dir: 1, t0: now, dur: 1600, cls: err ? 'error' : s.unconfirmed ? 'unconfirmed' : 'ok' });
+      nextEmit.set(e.id, now + interval);
+    }
+  }
+}
+function spawn(ev, dur = 1100, when = performance.now()) {
+  if (!state.animate) return;
+  const vp = viewPath(ev);
+  const segs = vp.filter(([a, b]) => b && VG.pair.get(`${a}|${b}`) && pos.has(a) && pos.has(b));
+  if (!segs.length) { const at = vp[0] && vp[0][0]; if (at && !vp[0][1] && pos.has(at)) particles.push({ pop: at, t0: when, dur: 1200, cls: ev.status === 'error' ? 'error' : 'ok', ev, pulse: true }); return; }
+  segs.forEach(([a, b], i) => { const e = VG.pair.get(`${a}|${b}`); particles.push({ edge: e.id, dir: e.from === a ? 1 : -1, t0: when + i * dur, dur, cls: ev.status === 'error' ? 'error' : ev.unconfirmed ? 'unconfirmed' : 'ok', pulse: true, ev }); });
+}
+function drawParticles(now) {
+  for (let i = particles.length - 1; i >= 0; i--) if (now - particles[i].t0 > particles[i].dur) particles.splice(i, 1);
+  const sel = gParticles.selectAll('path.particle').data(particles);
+  sel.join(enter => enter.append('path').on('click', (evt, p) => { if (!p.ev) return; evt.stopPropagation(); state.selectedHop = p.ev; state.selected = null; state.selectedEdge = null; renderPanel(); }))
+    .attr('class', p => `particle ${p.cls}${p.pulse ? ' pulse' : ''}${p.pop ? ' pop' : ''}`).attr('d', p => {
+    const t = Math.min(1, Math.max(0, (now - p.t0) / p.dur));
+    if (p.pop) { const n = pos.get(p.pop); const r = 6 + t * 16; if (p.cls === 'error') return `M${n.x} ${n.y - r} L${n.x + r} ${n.y} L${n.x} ${n.y + r} L${n.x - r} ${n.y} Z`; return `M${n.x - r} ${n.y} a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 ${-2 * r} 0`; }
+    const el = edgePathEl.get(p.edge); if (!el || !el.isConnected) return '';
+    const L = el.getTotalLength(); if (!L) return '';
+    const q = el.getPointAtLength((p.dir === 1 ? t : 1 - t) * L); const x = q.x, y = q.y;
+    const r = p.pulse ? 7 : 4.2;
+    if (p.cls === 'error') return `M${x} ${y - r - 1} L${x + r + 1} ${y} L${x} ${y + r + 1} L${x - r - 1} ${y} Z`;
+    return `M${x - r} ${y} a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 ${-2 * r} 0`;
+  }).style('opacity', p => p.pop ? 1 - (now - p.t0) / p.dur : p.t0 > now ? 0 : 1);
+}
+
+// ------------------------------------------------------------------ modes
+let lastLive = NOW0, consumedTo = NOW0, lastStats = 0;
+function loop(now) {
+  if (state.mode === 'live') {
+    const t = Date.now(); state.tNow = t;
+    extend(t + 20000);
+    let fresh = false;
+    for (const ev of log) { if (ev.ts > consumedTo && ev.ts <= t) { spawn(ev, ev.kind === 'run.completed' || ev.kind === 'run.dispatched' ? 1100 : 800); state.feed.push(ev); fresh = true; } }
+    if (state.feed.length > 60) state.feed.splice(0, state.feed.length - 60);
+    consumedTo = t;
+    if (fresh && !state.selected && !state.selectedEdge && !state.selectedHop) renderPanel();
+    if (t - lastStats > 2000) { lastStats = t; refreshStats(); paint(); if (state.selected || state.selectedEdge) renderPanel(); }
+  }
+  emitByRate(now);
+  drawParticles(now);
+  requestAnimationFrame(loop);
+}
+function refreshStats() { if (!VG) VG = viewGraph(); state.stats = windowStats(state.tNow, state.windowSec * 1000); state.nstats = nodeStats(state.tNow, state.windowSec * 1000); renderHealth(); }
+
+// replay (Kiali's: interval, frames of 10 s, a slider, play/pause, three speeds)
+const FRAME_MS = 10000;
+function openReplay() {
+  leaveConversation(true);
+  state.mode = 'replay'; $('liveBtn').classList.remove('on'); $('replayBtn').classList.add('on'); $('replayBar').hidden = false;
+  const r = state.replay; r.interval = +$('rInterval').value; r.start = Date.now() - r.interval * 1000; r.frames = Math.round(r.interval * 1000 / FRAME_MS); r.frame = 0;
+  $('rSlider').max = r.frames; $('rSlider').value = 0; $('rStart').textContent = `from ${fmt(r.start)}`;
+  setFrame(0);
+}
+function setFrame(f, animateFrame = true) {
+  const r = state.replay; r.frame = Math.max(0, Math.min(r.frames, f)); $('rSlider').value = r.frame;
+  const t = r.start + r.frame * FRAME_MS; state.tNow = t;
+  $('rTime').textContent = `${fmt(t)} [${r.frame}/${r.frames}]`;
+  state.stats = windowStats(t, Math.min(state.windowSec, 60) * 1000); state.nstats = nodeStats(t, state.windowSec * 1000);
+  particles.length = 0;
+  state.feed = log.filter(ev => ev.ts > t - 60000 && ev.ts <= t);
+  nextEmit.clear();
+  if (animateFrame) { const base = performance.now(); for (const ev of log) if (ev.ts > t - FRAME_MS && ev.ts <= t) spawn(ev, Math.max(600, r.speed * 0.5), base + ((ev.ts - (t - FRAME_MS)) / FRAME_MS) * r.speed * 0.3); }
+  paint(); if (state.selected || state.selectedEdge) renderPanel();
+}
+function playReplay(on) {
+  const r = state.replay; r.playing = on; $('rPlay').textContent = on ? '❚❚ Pause' : '▶ Play';
+  clearInterval(r.timer); r.timer = null;
+  if (on) { if (r.frame >= r.frames) setFrame(0); r.timer = setInterval(() => { if (r.frame >= r.frames) return playReplay(false); setFrame(r.frame + 1); }, r.speed); }
+}
+function closeReplay() { playReplay(false); state.selectedHop = null; state.feed = log.filter(ev => ev.ts <= Date.now()).slice(-40); state.mode = 'live'; $('replayBar').hidden = true; $('replayBtn').classList.remove('on'); $('liveBtn').classList.add('on'); consumedTo = Date.now(); particles.length = 0; state.tNow = Date.now(); refreshStats(); paint(); renderPanel(); }
+
+// replay one conversation
+function openConversation(name) {
+  if (state.mode === 'replay') closeReplay();
+  const evs = log.filter(e => e.conversation === `conversations/${name}` && e.ts <= Date.now());
+  // the LAST complete flow: from its final signal.received onward
+  let start = 0; for (let i = evs.length - 1; i >= 0; i--) if (evs[i].kind === 'signal.received') { start = i; break; }
+  const c = state.conv; c.name = name; c.events = evs.slice(start); c.i = -1; c.playing = false;
+  state.mode = 'conversation'; $('liveBtn').classList.remove('on'); $('convBar').hidden = false; $('cName').textContent = name;
+  $('cSlider').max = Math.max(0, c.events.length - 1); $('cSlider').value = 0;
+  state.stats = new Map(); state.nstats = new Map(); particles.length = 0;
+  paint(); renderPanel(); stepConversation(0);
+}
+function stepConversation(i) {
+  const c = state.conv; if (!c.events.length) return; c.i = Math.max(0, Math.min(c.events.length - 1, i)); $('cSlider').value = c.i;
+  const ev = c.events[c.i]; const t0 = c.events[0].ts;
+  $('cTime').textContent = `+${((ev.ts - t0) / 1000).toFixed(1)}s · ${ev.kind}`;
+  particles.length = 0; spawn(ev, 1100);
+  state.stats = new Map(); for (let k = 0; k <= c.i; k++) for (const [a, b] of viewPath(c.events[k])) { const e = b && VG.pair.get(`${a}|${b}`); if (e) { const s = state.stats.get(e.id) || { events: 0, errors: 0, lat: [], p50: 0, ratePerMin: 0 }; s.events++; if (c.events[k].status === 'error') s.errors++; if (c.events[k].latencyMs) { s.p50 = c.events[k].latencyMs; } state.stats.set(e.id, s); } }
+  paint(); renderPanel();
+}
+function playConversation(on) {
+  const c = state.conv; c.playing = on; $('cPlay').textContent = on ? '❚❚ Pause' : '▶ Play'; clearTimeout(c.timer);
+  if (!on) return;
+  if (c.i >= c.events.length - 1) c.i = -1;
+  const next = () => { if (!c.playing) return; if (c.i >= c.events.length - 1) return playConversation(false); stepConversation(c.i + 1);
+    const gap = c.i < c.events.length - 1 ? c.events[c.i + 1].ts - c.events[c.i].ts : 0;
+    c.timer = setTimeout(next, 900 + Math.min(2200, Math.log10(1 + gap / 1000) * 1200)); }; // compressed: long gaps read as long, not as forever
+  next();
+}
+function leaveConversation(silent) { const c = state.conv; playConversation(false); if (state.mode !== 'conversation') return; state.mode = 'live'; $('convBar').hidden = true; $('liveBtn').classList.add('on'); consumedTo = Date.now(); particles.length = 0; state.tNow = Date.now(); refreshStats(); paint(); if (!silent) renderPanel(); }
+
+// ------------------------------------------------------------------ side panel + chips
+function renderHealth() {
+  const c = { ok: 0, bad: 0, unknown: 0 }; for (const n of nodes) if (c[n.health] !== undefined) c[n.health]++;
+  $('health').innerHTML = `<span class="chip ok">${c.ok} ok</span><span class="chip bad">${c.bad} failing</span><span class="chip warn">${c.unknown} unknown</span>`;
+}
+function renderChips() {
+  const m = current.meta || {}; const parts = [];
+  if (state.scope && VG.byId.has(state.scope)) {
+    const md = Math.min(3, (current.meta?.maxDepth ?? 0));
+    const levels = md >= 1 ? [...Array(Math.max(0, md - 0)).keys()].map(i => i + 1).concat('all') : [];
+    parts.push(`<span class="chip brand">Scoped to ${esc(VG.byId.get(state.scope).name)}${levels.length ? ` · depth ${levels.map(l => `<button data-depth="${l}" class="${String(state.depth) === String(l) ? 'on' : ''}" style="${String(state.depth) === String(l) ? 'text-decoration:underline;font-weight:700' : ''}">${l === 'all' ? 'all' : l}</button>`).join(' ')}` : ''} <button id="unscope" aria-label="clear scope">✕</button></span>`);
+  }
+  if (state.pipelines.size < ALL_PIPELINES.length) parts.push(`<span class="chip brand">routes: ${[...state.pipelines].map(esc).join(', ') || 'none'}</span>`);
+  if (state.layoutBy[state.viewMode] === 'dagre' && current.orientation) parts.push(`<span class="chip">${current.orientation === 'lr' ? 'left to right' : 'top down'} fits larger</span>`);
+  if (m.hiddenCount) parts.push(`<span class="chip ${m.hiddenFailing ? 'bad' : ''}">${m.hiddenCount} hidden${m.hiddenFailing ? ` · ${m.hiddenFailing} failing (${m.hiddenClasses.join(', ')})` : ''}</span>`);
+  if (state.mode === 'replay') parts.push(`<span class="chip brand">replay · ${fmt(state.tNow)}</span>`);
+  if (state.mode === 'conversation') parts.push(`<span class="chip accent">conversation · ${esc(state.conv.name)}</span>`);
+  $('scopeChips').innerHTML = parts.join('');
+  const u = $('unscope'); if (u) u.onclick = () => setScope(state.scope);
+  $('scopeChips').querySelectorAll('[data-depth]').forEach(b => b.onclick = () => { state.depth = b.dataset.depth === 'all' ? 'all' : +b.dataset.depth; fitted = false; build(); });
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+const hopRow = (e, ref) => `<div class="hop ${e.status === 'error' ? 'bad' : ''}" data-hop="${ref}" role="button" tabindex="0"><span class="at">${fmt(e.ts)}</span><span><span class="k">${esc(e.kind)}</span>${e.status === 'error' ? ` <span class="err">error</span>` : ''}<br><span class="ft">${e.path.map(([x, y]) => `${short(x)} → ${y ? short(y) : '∅'}`).join(' · ')}${e.data ? ` · ${esc(summary(e))}` : ''}</span></span><span class="at">${e.latencyMs ? (e.latencyMs / 1000).toFixed(1) + 's' : ''}</span></div>`;
+function summary(e) { const d = e.data; if (!d) return ''; if (e.kind === 'model.call') return `${d.model} · turn ${d.turn} · ${(d.inputTokens / 1000).toFixed(0)}k in / ${d.outputTokens} out · ${d.stopReason}`; if (e.kind === 'tool.call') return `${d.tool}${d.builtin ? ' (built-in)' : ''}`; if (e.kind.startsWith('context.')) return d.generation ? `${d.generation} · ${d.changedFiles ?? d.files} files · ${d.bytesCopied ?? d.bytes}` : d.note || ''; return d.title || d.text || d.result || d.body || d.reason || d.outcome || d.pod || d.runId || ''; }
+function bindHops(p, list) { p.querySelectorAll('[data-hop]').forEach(h => { const open = () => { state.selectedHop = list[+h.dataset.hop]; renderPanel(); spawn(state.selectedHop, 1100); }; h.onclick = open; h.onkeydown = (ev) => { if (ev.key === 'Enter') open(); }; }); }
+function renderHopPanel(p, e) {
+  const d = e.data || {};
+  const rows = Object.entries(d).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${Array.isArray(v) ? v.map(x => `<code>${esc(x)}</code>`).join(' ') : typeof v === 'object' ? Object.entries(v).map(([a, b]) => `<code>${esc(a)}=${esc(b)}</code>`).join(' ') : `<span class="pre">${esc(String(v))}</span>`}</dd>`).join('');
+  p.innerHTML = `<div><div class="kind">hop · ${fmt(e.ts)}</div><div class="name mono" style="font-size:15px">${esc(e.kind)}</div></div>
+    <dl class="kv"><dt>Path</dt><dd>${e.path.map(([x, y]) => `${short(x)} → ${y ? short(y) : '∅'}`).join(' · ')}</dd><dt>Status</dt><dd>${e.status === 'error' ? `<span class="chip bad">error${e.code ? ' · ' + esc(e.code) : ''}</span>` : '<span class="chip ok">ok</span>'}</dd>
+    ${e.latencyMs ? `<dt>Latency</dt><dd>${(e.latencyMs / 1000).toFixed(2)}s</dd>` : ''}${e.conversation ? `<dt>Conversation</dt><dd>${esc(short(e.conversation))}</dd>` : ''}${e.runId ? `<dt>Run</dt><dd>${esc(e.runId)}</dd>` : ''}</dl>
+    <h3>What crossed</h3><dl class="kv">${rows || '<dd class="empty">nothing recorded</dd>'}</dl>
+    <p class="empty">The manager's event carries the ids. The content is joined from the conversation's own status, which the console already streams.</p>
+    <div class="actions"><button class="sm" id="hopBack">← Back</button><button class="sm" id="hopShow">Show on graph</button>${e.conversation ? `<button class="sm primary" id="hopConv">Replay conversation</button>` : ''}</div>`;
+  $('hopBack').onclick = () => { state.selectedHop = null; renderPanel(); };
+  $('hopShow').onclick = () => spawn(e, 1100);
+  const hc = $('hopConv'); if (hc) hc.onclick = () => openConversation(short(e.conversation));
+}
+function renderPanel() {
+  const p = $('panel');
+  if (state.selectedHop) return renderHopPanel(p, state.selectedHop);
+  if (state.mode === 'conversation') return renderConvPanel(p);
+  if (state.selectedEdge) return renderEdgePanel(p, VG.edgeById.get(state.selectedEdge));
+  if (!state.selected) {
+    const feed = state.feed.slice(-14).reverse();
+    const recent = [...new Set(log.filter(e => e.ts <= state.tNow && e.ts > state.tNow - state.windowSec * 1000 && e.conversation).map(e => e.conversation))].slice(-6).reverse();
+    p.innerHTML = `<h3>${state.mode === 'replay' ? 'Hops in this frame\'s minute' : 'Hops, live'}</h3>${feed.length ? `<div class="hops">${feed.map((e, i) => hopRow(e, i)).join('')}</div><p class="empty">Click a row, or a pulse on the graph, to see what crossed.</p>` : '<p class="empty">quiet</p>'}
+      <h3>Conversations in window</h3>${recent.length ? `<div class="actions">${recent.map(c => `<button class="sm" data-conv="${esc(c.split('/')[1])}">${esc(c.split('/')[1])}</button>`).join('')}</div><p class="empty">Any of these can be replayed hop by hop, whatever the graph currently shows.</p>` : '<p class="empty">none</p>'}`;
+    p.querySelectorAll('[data-conv]').forEach(b => b.onclick = () => openConversation(b.dataset.conv));
+    bindHops(p, feed);
+    return;
+  }
+  const n = VG.byId.get(state.selected); if (!n) { state.selected = null; return renderPanel(); } const k = KINDS[n.kind];
+  const ins = VG.edges.filter(e => e.to === n.id), outs = VG.edges.filter(e => e.from === n.id);
+  const row = (e, other) => { const s = state.stats.get(e.id); const o = VG.byId.get(other); return `<tr><td>${esc(o.name)}</td><td class="num">${s ? s.ratePerMin.toFixed(1) : '0.0'}</td><td class="num">${s ? s.errors : 0}</td><td class="num">${s && s.p50 ? (s.p50 >= 1000 ? (s.p50 / 1000).toFixed(1) + 's' : s.p50 + 'ms') : '—'}</td></tr>`; };
+  const table = (title, list, pick) => `<h3>${title}</h3>${list.length ? `<div class="scrollx"><table class="t"><thead><tr><th>element</th><th class="num">/min</th><th class="num">err</th><th class="num">p50</th></tr></thead><tbody>${list.map(e => row(e, pick(e))).join('')}</tbody></table></div>` : '<p class="empty">none</p>'}`;
+  p.innerHTML = `<div><div class="kind">${k.label}</div><div class="name">${esc(n.name)}</div></div>
+    <dl class="kv"><dt>Health</dt><dd><span class="chip ${n.health === 'ok' ? 'ok' : n.health === 'bad' ? 'bad' : n.health === 'unknown' ? 'warn' : ''}">${n.health === 'none' ? 'reports none' : n.health}</span>${n.reason ? ` <span class="mono">${esc(n.reason)}</span>` : ''}</dd>
+    ${n.message ? `<dt>Message</dt><dd>${esc(n.message)}</dd>` : ''}<dt>Lane</dt><dd>${LANE[k.lane].title}</dd>${n.pipeline ? `<dt>Pipeline</dt><dd>${esc(n.pipeline)}</dd><dt>Phase</dt><dd>${esc(n.phase)}</dd>` : ''}
+    <dt>Events</dt><dd>${state.nstats.get(n.id) || 0} in window</dd>${modeOf() === 'routes' && n.kind === 'pipelines' ? `<dt>Folds in</dt><dd>${esc(ROUTES[n.name] ? [ROUTES[n.name].profile, ROUTES[n.name].runtime, ...ROUTES[n.name].convs].map(short).join(', ') : '')}</dd>` : ''}${n.leader ? '<dt>Role</dt><dd>leader, serving /work and /channel/*</dd>' : ''}${n.node ? `<dt>Cluster node</dt><dd>${esc(n.node)}</dd>` : ''}${n.kind === 'pods' && n.conversation ? `<dt>Pipeline</dt><dd>${esc((nodes.find(c => c.kind === 'conversations' && c.name === n.conversation) || {}).pipeline || '')}</dd>` : ''}${n.pod ? `<dt>Pod</dt><dd>${esc(n.pod)}</dd><dt>Role</dt><dd>${n.role === 'agent' ? 'the harness, polling /work through context-sync' : n.role === 'context-sync' ? 'proxies CONTROL_URL, restores before the first /work, checkpoints to the context claim' : 'the wall: MCP mediated, everything else copied through'}</dd>` : ''}${n.url ? `<dt>URL</dt><dd class="mono">${esc(n.url)} @ ${esc(n.ref)}</dd>` : ''}${n.of ? `<dt>Declared by</dt><dd>${KINDS[n.of.split('/')[0]].label} ${esc(n.of.split('/')[1])}</dd>` : ''}${n.conversation ? `<dt>Conversation</dt><dd>${esc(n.conversation)}</dd>` : ''}${n.harness ? `<dt>Harness</dt><dd>${esc(n.harness)}</dd>` : ''}${n.vendor ? `<dt>Model</dt><dd class="mono">${esc(n.vendor)}</dd>` : ''}${n.note ? `<dt>Does</dt><dd>${esc(n.note)}</dd>` : ''}${n.count ? `<dt>Instances</dt><dd>${n.count} running</dd>` : ''}${n.endpoint ? `<dt>Endpoint</dt><dd class="mono">${esc(n.endpoint)}</dd>` : ''}${n.model ? `<dt>Model</dt><dd class="mono">${esc(n.model)}</dd>` : ''}${n.version ? `<dt>Version</dt><dd class="mono">${esc(n.version)} · ${esc(n.image)}</dd>` : ''}${n.kind === 'llms' ? (() => { let i = 0, o = 0, c = 0; for (const ev of log) if (ev.kind === 'model.call' && ev.ts <= state.tNow && ev.ts > state.tNow - state.windowSec * 1000 && ev.path[0][1] === n.id) { i += ev.data.inputTokens; o += ev.data.outputTokens; c++; } return `<dt>In window</dt><dd>${c} calls · ${(i / 1000).toFixed(0)}k in · ${(o / 1000).toFixed(1)}k out</dd>`; })() : ''}</dl>
+    <div class="actions"><button class="sm" id="scopeBtn">${state.scope === n.id ? 'Clear scope' : 'Scope to route'}</button>${n.kind === 'conversations' ? `<button class="sm primary" id="replayConv">Replay conversation</button>` : ''}${n.kind === 'pods' && n.conversation ? `<button class="sm" id="togglePod">${state.expanded.has(n.conversation) ? 'Collapse pod' : 'Expand pod'}</button>` : ''}${n.kind === 'containers' ? `<button class="sm" id="collapsePod">Collapse pod</button>` : ''}${!isSpine(n) ? `<button class="sm quiet" id="hideKind">Hide ${plural(k.label).toLowerCase()}</button>` : ''}</div>
+    ${table('Inbound', ins, e => e.from)}${table('Outbound', outs, e => e.to)}`;
+  $('scopeBtn').onclick = () => setScope(n.id);
+  const hk = $('hideKind'); if (hk) hk.onclick = () => { hiddenNow().add(n.kind); state.selected = null; syncClassToggles(); fitted = false; build(); renderPanel(); };
+  const rc = $('replayConv'); if (rc) rc.onclick = () => openConversation(n.name);
+  const tp = $('togglePod'); if (tp) tp.onclick = () => togglePod(n.conversation);
+  const cp = $('collapsePod'); if (cp) cp.onclick = () => togglePod(n.pod.replace('agentops-conv-', ''));
+}
+function renderEdgePanel(p, e) {
+  const s = state.stats.get(e.id); const a = VG.byId.get(e.from), b = VG.byId.get(e.to);
+  const hist = log.filter(h => h.ts <= state.tNow && h.ts > state.tNow - state.windowSec * 1000 && viewPath(h).some(([x, y]) => y && VG.pair.get(`${x}|${y}`) === e)).slice(-8).reverse();
+  p.innerHTML = `<div><div class="kind">edge · ${esc(e.kind)}</div><div class="name">${esc(a.name)} → ${esc(b.name)}</div></div>
+    <dl class="kv"><dt>From</dt><dd>${KINDS[a.kind].label} ${esc(a.name)}</dd><dt>To</dt><dd>${KINDS[b.kind].label} ${esc(b.name)}</dd>
+    <dt>Tone</dt><dd>${tone(e)}</dd><dt>Rate</dt><dd>${s ? s.ratePerMin.toFixed(2) + '/min' : 'idle'}</dd><dt>Events</dt><dd>${s ? s.events : 0}</dd><dt>Errors</dt><dd>${s ? s.errors : 0}</dd>
+    <dt>p50 / max</dt><dd>${s && s.p50 ? `${s.p50}ms / ${s.max}ms` : '—'}</dd><dt>Last</dt><dd>${s && s.last ? fmt(s.last) : '—'}</dd></dl>
+    <h3>Recent hops on this edge</h3>${hist.length ? `<div class="hops">${hist.map((h, i) => hopRow(h, i)).join('')}</div>` : '<p class="empty">none in window</p>'}
+    <p class="empty">Traffic is credited to the drawn edge in either direction, as the console does today. Pulses show the direction each hop actually travelled.</p>`;
+  bindHops(p, hist);
+}
+function renderConvPanel(p) {
+  const c = state.conv; const t0 = c.events.length ? c.events[0].ts : 0;
+  p.innerHTML = `<div><div class="kind">Conversation · replay</div><div class="name">${esc(c.name)}</div></div>
+    <p class="empty">Every hop the manager recorded for the latest run, in order. The graph dims everything off this conversation's route.</p>
+    <div class="hops" id="hops">${c.events.map((e, i) => `<div class="hop ${i === c.i ? 'now' : i < c.i ? 'done' : ''}" data-i="${i}"><span class="at">+${((e.ts - t0) / 1000).toFixed(1)}s</span><span><span class="k">${esc(e.kind)}</span>${e.status === 'error' ? ` <span class="err">error${e.code ? ' · ' + esc(e.code) : ''}</span>` : ''}<br><span class="ft">${e.path.map(([x, y]) => `${short(x)} → ${y ? short(y) : '∅'}`).join(' · ')}</span></span><span class="at">${e.latencyMs ? (e.latencyMs / 1000).toFixed(1) + 's' : ''}</span></div>`).join('')}</div>`;
+  p.querySelectorAll('.hop').forEach(h => { h.onclick = () => { playConversation(false); stepConversation(+h.dataset.i); }; h.ondblclick = () => { state.selectedHop = c.events[+h.dataset.i]; renderPanel(); }; });
+  const cur = c.events[c.i]; if (cur && cur.data) { const d = document.createElement('div'); d.innerHTML = `<h3>This hop carried</h3><dl class="kv">${Object.entries(cur.data).slice(0, 5).map(([k, v]) => `<dt>${esc(k)}</dt><dd><span class="pre">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span></dd>`).join('')}</dl><p class="empty">Double-click a hop for everything it carried.</p>`; p.appendChild(d); }
+  const now = p.querySelector('.hop.now'); if (now) now.scrollIntoView({ block: 'nearest' });
+}
+const short = (id) => id ? id.split('/')[1] : '';
+
+// ------------------------------------------------------------------ controls
+$('view').onchange = (e) => { applyView(e.target.value); syncClassToggles(); fitted = false; build(); };
+const BOX_OPTIONS = { wiring: [['bundle', 'Bundle'], ['route', 'Route'], ['none', 'None']], instances: [['none', 'None'], ['node', 'Cluster node']] };
+function syncControls() { $('detailField').hidden = state.viewMode !== 'wiring'; $('boxField').hidden = state.viewMode === 'components'; $('layoutSel').value = state.layoutBy[state.viewMode];
+  const opts = BOX_OPTIONS[state.viewMode] || []; $('box').innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join(''); if (!opts.some(([v]) => v === state.boxBy[state.viewMode])) state.boxBy[state.viewMode] = opts[0] ? opts[0][0] : 'none'; $('box').value = state.boxBy[state.viewMode]; state.box = state.boxBy[state.viewMode]; }
+$('viewSel').onchange = (e) => { state.viewMode = e.target.value; syncClassToggles(); syncControls(); state.scope = null; state.selected = null; state.selectedEdge = null; fitted = false; build(); refreshStats(); paint(); renderPanel(); };
+$('box').onchange = (e) => { state.box = e.target.value; state.boxBy[state.viewMode] = state.box; fitted = false; build(); };
+$('layoutSel').onchange = (e) => { state.layoutBy[state.viewMode] = e.target.value; fitted = false; build(); };
+$('displayBtn').onclick = (e) => { e.stopPropagation(); const pop = $('displayPop'); pop.hidden = !pop.hidden; $('displayBtn').setAttribute('aria-expanded', String(!pop.hidden)); };
+$('displayPop').onclick = (e) => e.stopPropagation();
+$('pipesBtn').onclick = (e) => { e.stopPropagation(); const pop = $('pipesPop'); pop.hidden = !pop.hidden; $('pipesBtn').setAttribute('aria-expanded', String(!pop.hidden)); $('displayPop').hidden = true; };
+$('pipesPop').onclick = (e) => e.stopPropagation();
+function syncPipes() {
+  $('pipeToggles').innerHTML = ALL_PIPELINES.map(p => `<label class="row"><input type="checkbox" data-pipe="${p}" ${state.pipelines.has(p) ? 'checked' : ''}> ${p}</label>`).join('');
+  $('pipeToggles').querySelectorAll('input').forEach(i => i.onchange = () => { if (i.checked) state.pipelines.add(i.dataset.pipe); else state.pipelines.delete(i.dataset.pipe); $('pipesBtn').textContent = `Pipelines: ${state.pipelines.size === ALL_PIPELINES.length ? 'all' : state.pipelines.size} ▾`; fitted = false; build(); renderPanel(); });
+}
+$('pipesAll').onclick = () => { state.pipelines = new Set(ALL_PIPELINES); syncPipes(); $('pipesBtn').textContent = 'Pipelines: all ▾'; fitted = false; build(); };
+document.addEventListener('click', () => { $('displayPop').hidden = true; $('displayBtn').setAttribute('aria-expanded', 'false'); $('pipesPop').hidden = true; $('pipesBtn').setAttribute('aria-expanded', 'false'); });
+$('optAnimate').onchange = (e) => { state.animate = e.target.checked; particles.length = 0; };
+$('optIdleEdges').onchange = (e) => { state.idleEdges = e.target.checked; build(); };
+$('optIdleNodes').onchange = (e) => { state.idleNodes = e.target.checked; build(); };
+$('optBadges').onchange = (e) => { state.badges = e.target.checked; paint(); };
+$('optLabels').onchange = (e) => { state.labels = e.target.value; build(); };
+$('resetDisplay').onclick = () => { state.hiddenBy.components = new Set(); state.hiddenBy.instances = new Set(); state.pipelines = new Set(ALL_PIPELINES); syncPipes(); $('pipesBtn').textContent = 'Pipelines: all ▾'; state.scope = null; applyView('capabilities'); $('view').value = 'capabilities'; state.animate = state.idleEdges = state.idleNodes = state.badges = true; state.labels = 'none'; state.find = state.hide = ''; $('find').value = $('hide').value = ''; ['optAnimate', 'optIdleEdges', 'optIdleNodes', 'optBadges'].forEach(i => $(i).checked = true); $('optLabels').value = 'none'; syncClassToggles(); fitted = false; build(); };
+function syncClassToggles() {
+  const box = $('classToggles');
+  $('classesTitle').textContent = `Classes in the ${$('viewSel').selectedOptions[0].textContent} view`;
+  const hid = hiddenNow(), spine = SPINE[state.viewMode];
+  box.innerHTML = VIEW_CLASSES[state.viewMode].map(k => `<label class="row"><input type="checkbox" data-kind="${k}" ${hid.has(k) && k !== spine ? '' : 'checked'} ${k === spine && state.viewMode !== 'instances' ? 'disabled' : ''}> ${plural(KINDS[k].label)}${k === 'pods' && state.viewMode === 'instances' ? ' (the manager stays)' : ''}</label>`).join('');
+  box.querySelectorAll('input').forEach(i => i.onchange = () => { if (i.checked) hiddenNow().delete(i.dataset.kind); else hiddenNow().add(i.dataset.kind); fitted = false; build(); });
+}
+$('find').oninput = (e) => { state.find = e.target.value; paint(); };
+$('hide').onchange = (e) => { state.hide = e.target.value; fitted = false; build(); };
+$('hide').onkeydown = (e) => { if (e.key === 'Enter') { state.hide = e.target.value; fitted = false; build(); } };
+$('window').onchange = (e) => { state.windowSec = +e.target.value; refreshStats(); paint(); };
+$('liveBtn').onclick = () => { if (state.mode === 'replay') closeReplay(); else if (state.mode === 'conversation') leaveConversation(); };
+$('replayBtn').onclick = () => { if (state.mode === 'replay') closeReplay(); else openReplay(); };
+$('rInterval').onchange = () => openReplay();
+$('rSlider').oninput = (e) => { playReplay(false); setFrame(+e.target.value); };
+$('rPlay').onclick = () => playReplay(!state.replay.playing);
+$('rClose').onclick = closeReplay;
+document.querySelectorAll('.speed button').forEach(b => b.onclick = () => { document.querySelectorAll('.speed button').forEach(x => x.classList.remove('on')); b.classList.add('on'); state.replay.speed = +b.dataset.speed; if (state.replay.playing) { playReplay(false); playReplay(true); } });
+$('cPlay').onclick = () => playConversation(!state.conv.playing);
+$('cStep').onclick = () => { playConversation(false); stepConversation(state.conv.i + 1); };
+$('cSlider').oninput = (e) => { playConversation(false); stepConversation(+e.target.value); };
+$('cClose').onclick = () => leaveConversation();
+$('zoomIn').onclick = () => svg.transition().duration(200).call(zoom.scaleBy, 1.3);
+$('zoomOut').onclick = () => svg.transition().duration(200).call(zoom.scaleBy, 1 / 1.3);
+$('fit').onclick = fit;
+$('legendBtn').onclick = () => { const l = $('legend'); l.hidden = !l.hidden; };
+$('legend').innerHTML = Object.entries(KINDS).map(([k, v]) => `<div class="row"><svg viewBox="-24 -20 48 40"><path d="${shapePath(v.shape)}" fill="var(--ao-surface)" stroke="var(--ao-border-strong)" stroke-width="2"></path></svg>${v.label}</div>`).join('')
+  + `<div class="row"><svg viewBox="-24 -20 48 40"><circle r="4" cx="-8" fill="var(--ao-brand)"></circle><path d="M8 -5 l5 5 -5 5 -5 -5 z" fill="var(--ao-danger)"></path></svg>hop · error · pulses are recorded hops</div>`
+  + `<div class="row"><svg viewBox="-24 -20 48 40"><line x1="-18" y1="0" x2="18" y2="0" stroke="var(--ao-success)" stroke-width="2"></line></svg>traffic in window</div>`
+  + `<div class="row"><svg viewBox="-24 -20 48 40"><line x1="-18" y1="0" x2="18" y2="0" stroke="var(--ao-edge-idle)" stroke-width="2"></line></svg>wired, idle</div>`
+  + `<div class="row"><svg viewBox="-24 -20 48 40"><circle r="14" fill="none" stroke="var(--ao-brand)" stroke-width="2" stroke-dasharray="5 4"></circle></svg>a run in flight</div>`;
+
+let resizeT; window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { fitted = false; build(); }, 150); });
+
+// ------------------------------------------------------------------ boot
+state.feed = log.filter(ev => ev.ts <= NOW0).slice(-30);
+syncClassToggles(); syncPipes(); syncControls(); refreshStats(); build(); renderPanel(); requestAnimationFrame(loop);
+})();
+</script>

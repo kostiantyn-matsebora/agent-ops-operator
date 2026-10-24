@@ -8,6 +8,7 @@ import { Empty, ErrorState, Loading } from '../components/States'
 import { Crumbs } from '../components/Crumbs'
 import { useQueues } from '../api/hooks'
 import { PlainText } from '../components/Text'
+import { PipelineName } from '../components/PipelineName'
 import type { StuckReason } from '../api/types'
 
 // The view that separates "queued" from "stalled".
@@ -112,7 +113,7 @@ export function QueuesPage() {
                               {row.pipeline && (
                                 <div>
                                   <small>
-                                    <PlainText>{row.pipeline}</PlainText>
+                                    <PipelineName name={row.pipeline} />
                                   </small>
                                 </div>
                               )}

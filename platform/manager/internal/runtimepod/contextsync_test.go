@@ -83,6 +83,14 @@ func TestNoContextSyncBuildsTodaysPod(t *testing.T) {
 func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 	pod := buildResolved("c1", Resolved{Config: syncCfg(), ContextSync: syncSpec()})
 
+	assertLiveAndDurableContextVolumesExist(t, pod)
+	assertAgentContainerNeverMountsDurableVolume(t, pod)
+	assertAgentAndSidecarAgreeOnLiveContextPath(t, pod)
+	assertSidecarMountsDurableVolumePerConversation(t, pod, "c1")
+}
+
+func assertLiveAndDurableContextVolumesExist(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
 	ctx := volume(pod, "context")
 	if ctx == nil || ctx.EmptyDir == nil {
 		t.Fatal("the agent's live context must be pod-local in sidecar mode")
@@ -94,22 +102,30 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 	if ctxVol == nil || ctxVol.PersistentVolumeClaim == nil {
 		t.Fatal("the durable claim must be present as its own volume")
 	}
+}
 
-	// THE isolation property: the agent container must not mount the claim.
+// assertAgentContainerNeverMountsDurableVolume: THE isolation property.
+func assertAgentContainerNeverMountsDurableVolume(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
 	w := container(pod, "worker")
 	for _, m := range w.VolumeMounts {
 		if m.Name == "context-store" {
 			t.Fatal("the agent container must NOT mount the durable volume")
 		}
 	}
-	// The LIVE context is at the same path in both modes, and it is the path
-	// the volume is named for. The sidecar's own live mount has to agree with
-	// the agent's, or it checkpoints an empty tree and reports success.
+}
+
+// assertAgentAndSidecarAgreeOnLiveContextPath: the LIVE context is at the
+// same path in both modes, and it is the path the volume is named for. The
+// sidecar's own live mount has to agree with the agent's, or it checkpoints
+// an empty tree and reports success.
+func assertAgentAndSidecarAgreeOnLiveContextPath(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
 	if m := mount(pod, "context"); m == nil || m.MountPath != "/data/context" {
 		t.Fatalf("agent live context mount = %+v, want /data/context", m)
 	}
 	agentHome := ""
-	for _, e := range w.Env {
+	for _, e := range container(pod, "worker").Env {
 		if e.Name == "HOME" {
 			agentHome = e.Value
 		}
@@ -118,7 +134,10 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 		t.Fatalf("HOME = %q, want /data/context — the agent and the sidecar must agree on the "+
 			"live path, or the sidecar checkpoints an empty tree and reports success", agentHome)
 	}
+}
 
+func assertSidecarMountsDurableVolumePerConversation(t *testing.T, pod *corev1.Pod, convName string) {
+	t.Helper()
 	sc := container(pod, "context-sync")
 	if sc == nil {
 		t.Fatal("no sidecar container was built")
@@ -133,7 +152,7 @@ func TestContextSyncIsolatesTheAgentFromTheVolume(t *testing.T) {
 		t.Fatal("the sidecar must mount the durable volume")
 	}
 	// Per conversation, or two concurrent pods erase each other's context.
-	if store.SubPath != "c1" {
+	if store.SubPath != convName {
 		t.Fatalf("store subPath = %q, want the conversation name", store.SubPath)
 	}
 }
@@ -401,21 +420,26 @@ func TestNoDurableVolumeMeansNoPersistentContextClaim(t *testing.T) {
 			ContextStorage: agentopsv1alpha1.ContextOnVolume, ContextSync: syncSpec()}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.resolved.ContinuityPossible() {
-				t.Fatal("precondition: with no context volume continuity is not possible")
-			}
-			pod := buildResolved("c1", tc.resolved)
-			for _, v := range pod.Spec.Volumes {
-				if v.Name != "context" && v.Name != "context-store" {
-					continue
-				}
-				if v.PersistentVolumeClaim != nil {
-					t.Fatalf("volume %q references claim %q while no context volume is "+
-						"configured; the manager has already told this conversation its "+
-						"context is not promised", v.Name, v.PersistentVolumeClaim.ClaimName)
-				}
-			}
+			assertNoContextVolumeReferencesAClaim(t, tc.resolved)
 		})
+	}
+}
+
+func assertNoContextVolumeReferencesAClaim(t *testing.T, resolved Resolved) {
+	t.Helper()
+	if resolved.ContinuityPossible() {
+		t.Fatal("precondition: with no context volume continuity is not possible")
+	}
+	pod := buildResolved("c1", resolved)
+	for _, v := range pod.Spec.Volumes {
+		if v.Name != "context" && v.Name != "context-store" {
+			continue
+		}
+		if v.PersistentVolumeClaim != nil {
+			t.Fatalf("volume %q references claim %q while no context volume is "+
+				"configured; the manager has already told this conversation its "+
+				"context is not promised", v.Name, v.PersistentVolumeClaim.ClaimName)
+		}
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -242,8 +243,19 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 	}
 
 	srv := apiServer()
+	conv := matAssertSignalConversationMaterializesTooling(t, ctx, srv)
+	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
+
+	taskConv := matAssertTaskConversationInheritsClaimingPipelineTooling(t, ctx, srv)
+	t.Cleanup(func() { cleanupConversation(t, taskConv.Name) })
+
+	matAssertMalformedOrUnknownSourceRejected(t, srv)
+}
+
+func matAssertSignalConversationMaterializesTooling(t *testing.T, ctx context.Context, srv *httpapi.Server) *agentopsv1alpha1.Conversation {
+	t.Helper()
 	rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
-		"fingerprint": "mat-1", "labels": map[string]string{"alertname": "MatAlert"}, "payload": "boom",
+		"initiationId": "mat-1", "labels": map[string]string{"alertname": "MatAlert"}, "payload": "boom",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())
@@ -259,24 +271,28 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 	if conv == nil {
 		t.Fatal("signal conversation not created")
 	}
-	t.Cleanup(func() { cleanupConversation(t, conv.Name) })
-
 	if conv.Spec.Toolsets == nil || len(conv.Spec.Toolsets.Refs) != 1 || conv.Spec.Toolsets.Refs[0].Name != "mat-ts" {
 		t.Fatalf("toolsets binding not materialized: %+v", conv.Spec.Toolsets)
 	}
 	if conv.Spec.MCPConfigs == nil || len(conv.Spec.MCPConfigs.Refs) != 1 || conv.Spec.MCPConfigs.Refs[0].Name != "mat-cfg" {
 		t.Fatalf("mcpConfigs binding not materialized: %+v", conv.Spec.MCPConfigs)
 	}
+	return conv
+}
 
-	// A posted task reaches the SAME Pipeline and gets its whole wiring —
-	// profile, channels, and capabilities. It names the SOURCE, never the
-	// pipeline: which agent answers is declared by the claim, not chosen here.
-	rec = postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
-		"fingerprint": "mat-task-1", "kind": "task", "payload": "addressed",
+// matAssertTaskConversationInheritsClaimingPipelineTooling: a posted task
+// reaches the SAME Pipeline and gets its whole wiring — profile, channels,
+// and capabilities. It names the SOURCE, never the pipeline: which agent
+// answers is declared by the claim, not chosen here.
+func matAssertTaskConversationInheritsClaimingPipelineTooling(t *testing.T, ctx context.Context, srv *httpapi.Server) *agentopsv1alpha1.Conversation {
+	t.Helper()
+	rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
+		"initiationId": "mat-task-1", "kind": "task", "payload": "addressed",
 	}})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":1`) {
 		t.Fatalf("task signal: %d %s", rec.Code, rec.Body.String())
 	}
+	var list agentopsv1alpha1.ConversationList
 	var taskConv *agentopsv1alpha1.Conversation
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	for i := range list.Items {
@@ -288,23 +304,27 @@ func TestPipelineBindingsMaterializeOnConversations(t *testing.T) {
 	if taskConv == nil {
 		t.Fatal("task conversation not created")
 	}
-	t.Cleanup(func() { cleanupConversation(t, taskConv.Name) })
 	if taskConv.Spec.Toolsets == nil || taskConv.Spec.Toolsets.Refs[0].Name != "mat-ts" {
 		t.Fatalf("the claiming pipeline's toolsets must carry: %+v", taskConv.Spec.Toolsets)
 	}
 	if taskConv.Spec.MCPConfigs == nil || taskConv.Spec.MCPConfigs.Refs[0].Name != "mat-cfg" {
 		t.Fatalf("the claiming pipeline's mcpConfigs must carry: %+v", taskConv.Spec.MCPConfigs)
 	}
+	return taskConv
+}
 
-	// a malformed signal, or one naming a source nobody serves, is refused
-	// rather than producing a conversation nobody wired
+// matAssertMalformedOrUnknownSourceRejected: a malformed signal, or one
+// naming a source nobody serves, is refused rather than producing a
+// conversation nobody wired.
+func matAssertMalformedOrUnknownSourceRejected(t *testing.T, srv *httpapi.Server) {
+	t.Helper()
 	if rec := postSignal(t, srv.Handler(), testMasterToken, "mat-src", []map[string]any{{
-		"kind": "task", "payload": "no fingerprint",
+		"kind": "task", "payload": "no initiationId",
 	}}); rec.Code != 400 {
-		t.Fatalf("a signal with no fingerprint must be refused: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("a signal with no initiationId must be refused: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := postSignal(t, srv.Handler(), testMasterToken, "nope", []map[string]any{{
-		"fingerprint": "mat-task-x", "kind": "task", "payload": "x",
+		"initiationId": "mat-task-x", "kind": "task", "payload": "x",
 	}}); rec.Code != 404 {
 		t.Fatalf("an unknown source must 404: %d", rec.Code)
 	}
@@ -344,7 +364,7 @@ func TestToolsModeRoundTripsFromPipelineToWorkUnit(t *testing.T) {
 	}
 
 	rec := postSignal(t, apiServer().Handler(), testMasterToken, "mode-src", []map[string]any{{
-		"fingerprint": "mode-1", "labels": map[string]string{"alertname": "ModeAlert"}, "payload": "boom",
+		"initiationId": "mode-1", "labels": map[string]string{"alertname": "ModeAlert"}, "payload": "boom",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body.String())

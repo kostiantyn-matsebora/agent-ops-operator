@@ -1,0 +1,263 @@
+version: 1
+
+# Labels are the IMPLEMENTATION of the workflow abstraction, never part of it.
+# workflows.desired.yaml states events, guards and states in the abstract --
+# this file states which real label string each one uses, what actually
+# causes it (its invocation mechanism), which workflow(s) own it, and how it
+# propagates between an issue and its related pull request(s). Nothing here
+# changes what a workflow means. It only says how that meaning is carried as
+# a real GitHub label.
+
+prefixes:
+
+  conveyor:
+    kind: trigger
+    native_subject: issue
+    propagation: bidirectional
+    set_manually_on: [issue, pull_request]
+
+  station:
+    kind: state
+    native_subject: issue
+    propagation: bidirectional
+    set_manually_on: [issue]
+
+  loop:
+    kind: trigger
+    native_subject: pull_request
+    propagation: none
+    set_manually_on: [pull_request]
+
+  round:
+    kind: state
+    native_subject: pull_request
+    propagation: none
+    set_manually_on: [pull_request]
+
+  scan:
+    kind: state
+    native_subject: pull_request
+    propagation: none
+    set_manually_on: []
+
+# Every trigger in workflows.desired.yaml, its real label where one exists,
+# the mechanism that actually fires it, and every workflow that declares a
+# transition on it.
+#
+# invocation:
+#   label_placed        a real GitHub label placement is the whole fact
+#   webhook             a real GitHub event other than a label placement
+#   derived             a fact the engine reads/re-checks, no single webhook
+#   sub_workflow_entry  an invoked sub-workflow reaching one of its own
+#                       named states, observed by the invoking workflow
+
+triggers:
+
+  conveyor:implement:
+    label: "conveyor:implement"
+    invocation: label_placed
+    prefix: conveyor
+    workflows: [conveyor.implement]
+
+  conveyor:finalize:
+    label: "conveyor:finalize"
+    invocation: label_placed
+    prefix: conveyor
+    workflows: [conveyor.finalize]
+
+  loop:fix:
+    label: "loop:fix"
+    invocation: label_placed
+    prefix: loop
+    workflows: [conveyor.fix, loop]
+
+  loop:restart:
+    label: "loop:restart"
+    invocation: label_placed
+    prefix: loop
+    workflows: [loop]
+
+  proposal_pr_opened:
+    label: null
+    invocation: webhook
+    workflows: [conveyor.propose]
+
+  proposal_pr_merged:
+    label: null
+    invocation: webhook
+    workflows: [conveyor.propose]
+
+  checks_completed:
+    label: null
+    invocation: webhook
+    workflows: [conveyor.implement]
+
+  prs_are_created:
+    label: null
+    invocation: derived
+    workflows: [conveyor.implement]
+
+  all_prs_merged:
+    label: null
+    invocation: derived
+    workflows: [conveyor.implement, conveyor.fix, conveyor.finalize]
+
+  hotfix_started:
+    label: null
+    invocation: derived
+    workflows: [conveyor.fix]
+
+  round_finished:
+    label: null
+    invocation: derived
+    workflows: [loop]
+
+  loop_entered_mergeable:
+    label: null
+    invocation: sub_workflow_entry
+    workflows: [conveyor.propose, conveyor.fix]
+
+  implement_entered_done:
+    label: null
+    invocation: sub_workflow_entry
+    workflows: [conveyor.run]
+
+  implement_entered_implemented_with_issues:
+    label: null
+    invocation: sub_workflow_entry
+    workflows: [conveyor.run]
+
+  implement_entered_merge_failed:
+    label: null
+    invocation: sub_workflow_entry
+    workflows: [conveyor.run]
+
+  fix_entered_done:
+    label: null
+    invocation: sub_workflow_entry
+    workflows: [conveyor.run]
+
+  finalize_entered_finalized:
+    label: null
+    invocation: sub_workflow_entry
+    workflows: [conveyor.run]
+
+  review:pr_pushed:
+    label: null
+    invocation: webhook
+    workflows: [review]
+
+  review:run_completed:
+    label: null
+    invocation: derived
+    workflows: [review]
+
+# Every state in workflows.desired.yaml. Each state's id already IS its real
+# label (see workflows.desired.yaml) -- this entry names which workflow owns
+# it and which prefix's propagation rule applies.
+
+states:
+
+  station:none:
+    workflows: [conveyor.propose]
+    prefix: station
+
+  station:proposing:
+    workflows: [conveyor.propose]
+    prefix: station
+
+  station:proposed:
+    workflows: [conveyor.propose]
+    prefix: station
+
+  station:ready:
+    workflows: [conveyor.propose, conveyor.implement, conveyor.run]
+    prefix: station
+
+  station:implementing:
+    workflows: [conveyor.implement]
+    prefix: station
+
+  station:implemented:
+    workflows: [conveyor.implement]
+    prefix: station
+
+  station:implemented_with_issues:
+    workflows: [conveyor.implement, conveyor.fix, conveyor.run]
+    prefix: station
+
+  station:ready_to_merge:
+    workflows: [conveyor.implement]
+    prefix: station
+
+  station:done:
+    workflows: [conveyor.implement, conveyor.fix, conveyor.finalize, conveyor.run]
+    prefix: station
+
+  station:merge_failed:
+    workflows: [conveyor.implement, conveyor.fix, conveyor.run]
+    prefix: station
+
+  station:fixing:
+    workflows: [conveyor.fix]
+    prefix: station
+
+  station:hotfix_created:
+    workflows: [conveyor.fix]
+    prefix: station
+
+  station:mergeable:
+    workflows: [conveyor.fix]
+    prefix: station
+
+  station:finalizing:
+    workflows: [conveyor.finalize]
+    prefix: station
+
+  station:finalized:
+    workflows: [conveyor.finalize, conveyor.run]
+    prefix: station
+
+  round:started:
+    workflows: [loop]
+    prefix: round
+
+  round:fixing:
+    workflows: [loop]
+    prefix: round
+
+  round:mergeable:
+    workflows: [loop]
+    prefix: round
+
+  round:fixing_failed:
+    workflows: [loop]
+    prefix: round
+
+  round:restarted:
+    workflows: [loop]
+    prefix: round
+
+  scan:none:
+    workflows: [review]
+    prefix: scan
+
+  scan:running:
+    workflows: [review]
+    prefix: scan
+
+  scan:clean:
+    workflows: [review]
+    prefix: scan
+
+  scan:found_issues:
+    workflows: [review]
+    prefix: scan
+
+  scan:skipped:
+    workflows: [review]
+    prefix: scan
+
+  scan:failed:
+    workflows: [review]
+    prefix: scan

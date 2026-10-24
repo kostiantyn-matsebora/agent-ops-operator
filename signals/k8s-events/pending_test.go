@@ -209,6 +209,33 @@ func TestSlowStartDoesNotFalselyEscalate(t *testing.T) {
 	}
 }
 
+// A rule whose dwell is itself shorter than minEscalationDwell must not let
+// escalation extend the wait: the floor is clamped back down to the rule's
+// own dwell rather than overriding it. Neither the floor branch nor the
+// clamp-back-down branch of dueAt was reachable by the existing tests, which
+// all use dwells long enough that escalation's own division stays above the
+// floor.
+func TestEscalationDwellIsFlooredThenClampedBackToTheRule(t *testing.T) {
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	q, got := testQueue(t, fakeHealth{"api-a": verdictUnhealthy, "api-b": verdictUnhealthy}, base)
+	// dwell/escalationDivisor(4) = 7.5s, well under minEscalationDwell(1m) —
+	// the floor applies, and then must be clamped back down since 1m now
+	// exceeds this rule's own 30s dwell.
+	rule := compiledRule{dwell: 30 * time.Second, escalate: 2}
+
+	for _, n := range []string{"api-a", "api-b"} {
+		q.Add("src", sigFor("prod", "Deployment/api", "Pod", n, "Unhealthy"), rule)
+	}
+	q.Flush(base.Add(29 * time.Second))
+	if len(*got) != 0 {
+		t.Fatalf("must not fire before its own (clamped) dwell: %+v", *got)
+	}
+	q.Flush(base.Add(30 * time.Second))
+	if len(*got) != 1 {
+		t.Fatalf("must fire once its own dwell elapses: %+v", *got)
+	}
+}
+
 func TestBelowEscalationThresholdStillWaits(t *testing.T) {
 	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	q, got := testQueue(t, fakeHealth{"api-a": verdictUnhealthy, "api-b": verdictUnhealthy}, base)
@@ -239,19 +266,89 @@ func TestUninspectableKindThatWentQuietIsDropped(t *testing.T) {
 	}
 }
 
-// The same kind, still complaining: it recurred, so it is still happening.
-func TestUninspectableKindThatRecurredIsEmitted(t *testing.T) {
+// The same kind, still complaining right up to the deadline: it was still
+// recurring as the window closed, so it is still happening.
+func TestUninspectableKindStillRecurringAtTheCloseIsEmitted(t *testing.T) {
 	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	q, got := testQueue(t, fakeHealth{}, base)
 	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
 
-	sig := sigFor("prod", "HorizontalPodAutoscaler/api", "HorizontalPodAutoscaler", "api", "FailedGetResourceMetric")
-	q.Add("src", sig, rule)
-	q.Add("src", sig, rule) // recurrence
-	q.Flush(base.Add(4 * time.Minute))
+	sig := sigFor("prod", "Volume/n8n", "Volume", "n8n", "FailedSnapshotPurge")
+	for _, at := range []time.Duration{0, 20 * time.Second, 60 * time.Second, 150 * time.Second, 170 * time.Second} {
+		q.now = func() time.Time { return base.Add(at) }
+		q.Add("src", sig, rule)
+	}
+	q.Flush(base.Add(3 * time.Minute))
 
 	if len(*got) != 1 {
-		t.Fatalf("a recurring warning on an uninspectable kind must be emitted: %+v", *got)
+		t.Fatalf("a warning still recurring at the close must be emitted: %+v", *got)
+	}
+	payload := (*got)[0].sigs[0].Payload
+	if !strings.Contains(payload, "last seen 10s before the window closed") {
+		t.Fatalf("evidence must name the gap to the last arrival:\n%s", payload)
+	}
+}
+
+// A burst that retried for forty seconds and then healed HAS recurred — and is
+// exactly the transient rung 2 exists to drop. Longhorn's snapshot purge
+// retries every few seconds while it is failing, so "did it recur" was true
+// for every blip that healed in under a minute, and each one opened a
+// conversation whose whole answer was "self-resolved".
+func TestUninspectableKindThatHealedBeforeTheCloseIsDropped(t *testing.T) {
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	q, got := testQueue(t, fakeHealth{}, base)
+	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+
+	sig := sigFor("prod", "Volume/n8n", "Volume", "n8n", "FailedSnapshotPurge")
+	for i := 0; i < 6; i++ {
+		at := time.Duration(i) * 8 * time.Second // six events over forty seconds
+		q.now = func() time.Time { return base.Add(at) }
+		q.Add("src", sig, rule)
+	}
+	q.Flush(base.Add(3 * time.Minute))
+
+	if len(*got) != 0 {
+		t.Fatalf("a burst that went quiet before the closing minute must be dropped: %+v", *got)
+	}
+}
+
+// The closing window follows the window actually waited, floored at 30s: a
+// dwell shortened to one minute believes an event from its last thirty
+// seconds and not from its first.
+func TestClosingWindowFollowsAShortenedDwell(t *testing.T) {
+	if got := closingWindow(3 * time.Minute); got != time.Minute {
+		t.Fatalf("closingWindow(3m) = %s, want 1m", got)
+	}
+	if got := closingWindow(time.Minute); got != 30*time.Second {
+		t.Fatalf("closingWindow(1m) = %s, want the 30s floor", got)
+	}
+	if got := closingWindow(10 * time.Minute); got != 200*time.Second {
+		t.Fatalf("closingWindow(10m) = %s, want 3m20s", got)
+	}
+
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	q, got := testQueue(t, fakeHealth{}, base)
+	lax := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+	strict := compiledRule{dwell: time.Minute, escalate: 99}
+	sig := sigFor("prod", "Volume/n8n", "Volume", "n8n", "FailedSnapshotPurge")
+
+	q.Add("src", sig, lax)
+	q.now = func() time.Time { return base.Add(20 * time.Second) }
+	q.Add("src", sig, strict) // shortens the deadline to 1m20s
+	q.Flush(base.Add(80 * time.Second))
+	if len(*got) != 0 {
+		t.Fatalf("last event 60s before a 1m20s close is outside the 30s floor, must drop: %+v", *got)
+	}
+
+	q2, got2 := testQueue(t, fakeHealth{}, base)
+	q2.Add("src", sig, lax)
+	q2.now = func() time.Time { return base.Add(20 * time.Second) }
+	q2.Add("src", sig, strict)
+	q2.now = func() time.Time { return base.Add(65 * time.Second) }
+	q2.Add("src", sig, strict)
+	q2.Flush(base.Add(80 * time.Second))
+	if len(*got2) != 1 {
+		t.Fatalf("last event 15s before the close is inside the 30s floor, must emit: %+v", *got2)
 	}
 }
 
@@ -286,15 +383,45 @@ func TestPodHealthPredicate(t *testing.T) {
 }
 
 // A kind with no predicate must report unknown, so rung 2 decides rather than
-// rung 1 guessing.
+// rung 1 guessing. (Node used to be this example; it is now TRACKED, for
+// drain awareness — health() still refuses it a predicate explicitly, see
+// TestTrackedNonPodKindStillHasNoHealthPredicate.)
 func TestNonPodKindHasNoHealthPredicate(t *testing.T) {
 	a := adapterWithCache(syncedCache())
+	if got := a.health(objectRef{ns: "prod", kind: "Job", name: "backup-27"}); got != verdictUnknown {
+		t.Fatalf("a Job must be unknown to the predicate, got %d", got)
+	}
+}
+
+// A Node is tracked now (drain.go), but tracked is not the same as having a
+// health predicate: only Pod does. Present in the cache, a Node must still
+// come back unknown rather than being read through the Pod-shaped switch
+// below it — a Node's zero-value Ready/Phase fields would otherwise read as
+// "unhealthy" by accident.
+func TestTrackedNonPodKindStillHasNoHealthPredicate(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "Node", Name: "node-1"})
+	a := adapterWithCache(c)
 	if got := a.health(objectRef{ns: "", kind: "Node", name: "node-1"}); got != verdictUnknown {
 		t.Fatalf("a Node must be unknown to the predicate, got %d", got)
 	}
 }
 
 // ---- emit cap ------------------------------------------------------------------
+
+// A non-positive configured limit (unset EMIT_PER_MINUTE, or a bad value from
+// envInt's own fallback) must not disable the cap — it must fall back to the
+// default rather than becoming a limit of zero or negative that clips
+// everything.
+func TestNewEmitCapFallsBackOnANonPositiveLimit(t *testing.T) {
+	for _, limit := range []int{0, -5} {
+		c := newEmitCap(limit)
+		allowed, clipped := c.Allow("src", make([]Signal, 3))
+		if len(allowed) != 3 || clipped != 0 {
+			t.Fatalf("limit=%d: expected the default cap to apply, got allowed=%d clipped=%d", limit, len(allowed), clipped)
+		}
+	}
+}
 
 func TestEmitCapPassesNormalVolume(t *testing.T) {
 	c := newEmitCap(10)
@@ -379,6 +506,25 @@ func TestPodOnHealthyNodeIsNotInhibited(t *testing.T) {
 	victim.Labels["node"] = "node-b"
 	if in.Inhibited("src", rs, &victim) {
 		t.Fatal("a pod on a different, healthy node must not be inhibited")
+	}
+}
+
+// A signal whose reason is not named by ANY inhibit rule's targetMatchers must
+// never be inhibited, however active a cause is — Inhibited's loop must
+// actually fall through the "target does not match" branch rather than
+// stopping at the first rule.
+func TestReasonNotNamedByAnyTargetIsNeverInhibited(t *testing.T) {
+	rs := inhibitRuleSet(t)
+	in := newInhibitor()
+
+	cause := sigFor("", "Node/node-a", "Node", "node-a", "NodeNotReady")
+	cause.Labels["node"] = "node-a"
+	in.Observe("src", rs, &cause)
+
+	unrelated := sigFor("prod", "Deployment/api", "Pod", "api-1", "OOMKilling")
+	unrelated.Labels["node"] = "node-a"
+	if in.Inhibited("src", rs, &unrelated) {
+		t.Fatal("a reason no inhibit rule targets must never be inhibited")
 	}
 }
 
@@ -509,5 +655,106 @@ func TestDroppedEntryStartsNoRefractoryWindow(t *testing.T) {
 
 	if len(*got) != 1 {
 		t.Fatalf("a drop must not suppress the next real problem, got %d", len(*got))
+	}
+}
+
+// ---- verification ladder rung 3: the adapter's own view ------------------------
+
+// An unsynced cache cannot say anything about a pod — absence there is not
+// "gone" — so the pod's verdict is unreadable, not a guess.
+func TestUnsyncedCacheMakesAPodUnreadable(t *testing.T) {
+	a := adapterWithCache(newObjectCache())
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("unsynced cache: got verdict %d want unreadable", got)
+	}
+	a.cache = nil
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("no cache at all: got verdict %d want unreadable", got)
+	}
+}
+
+// A cache whose node list landed but whose pod list has not — the node list is
+// small and lands first, and a pod list may keep failing short of a 403 — is
+// still unreadable for a pod. Reading that absence as "gone" would drop the
+// entry as healed during the adapter's own outage.
+func TestAPartlyListedCacheMakesAPodUnreadableNotGone(t *testing.T) {
+	c := newObjectCache()
+	c.markListed("Node", "")
+	c.markListed("ReplicaSet", "prod")
+	a := adapterWithCache(c)
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("no pod list landed: got verdict %d want unreadable", got)
+	}
+	c.markListed("Pod", "prod")
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictGone {
+		t.Fatalf("absent from a landed pod list: got verdict %d want gone", got)
+	}
+}
+
+// Denied pod reads leave a cache that looks synced (the node watcher listed)
+// but could never have held the pod. Reading that absence as "gone" would turn
+// a missing grant into a clean bill of health.
+func TestDeniedReadsMakeAPodUnreadableNotGone(t *testing.T) {
+	a := adapterWithCache(syncedCache())
+	msg := "cannot read pods: 403"
+	a.accessErr.Store(&msg)
+	if got := a.health(objectRef{ns: "prod", kind: "Pod", name: "api-1"}); got != verdictUnreadable {
+		t.Fatalf("denied reads: got verdict %d want unreadable", got)
+	}
+}
+
+// Rung 3 emits unconditionally: one event, never recurring, still emits when
+// the adapter could not read its own state at the close.
+func TestUnreadableOwnStateFailsOpen(t *testing.T) {
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	a := adapterWithCache(newObjectCache()) // never synced
+	var got []captured
+	q := newPendingQueue(a.health, func(source string, sigs []Signal) {
+		got = append(got, captured{source, sigs})
+	})
+	q.now = func() time.Time { return base }
+
+	q.Add("src", sigFor("prod", "Deployment/api", "Pod", "api-7f-x", "Unhealthy"), ruleWithDwell(3*time.Minute))
+	q.Flush(base.Add(4 * time.Minute))
+
+	if len(got) != 1 {
+		t.Fatalf("the adapter's own outage must never read as healthy — expected a fail-open emit: %+v", got)
+	}
+	if p := got[0].sigs[0].Payload; !strings.Contains(p, "failing open") {
+		t.Fatalf("the evidence must say the emit was unverified:\n%s", p)
+	}
+}
+
+// A tracked kind with no predicate, absent from a SYNCED cache, stays on rung
+// 2: absence is not evidence either way, so recurrence alone decides — a
+// one-off is dropped, a burst still arriving at the close is emitted.
+func TestTrackedKindAbsentFromASyncedCacheStaysRecurrenceGated(t *testing.T) {
+	a := adapterWithCache(syncedCache())
+	ref := objectRef{ns: "", kind: "Node", name: "node-gone"}
+	if got := a.health(ref); got != verdictUnknown {
+		t.Fatalf("absent tracked predicate-less kind: got verdict %d want unknown (rung 2)", got)
+	}
+
+	base := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	rule := compiledRule{dwell: 3 * time.Minute, escalate: 99}
+	sig := sigFor("", "Node/node-gone", "Node", "node-gone", "NodeNotReady")
+
+	run := func(arrivals ...time.Duration) int {
+		var got []captured
+		q := newPendingQueue(a.health, func(source string, sigs []Signal) {
+			got = append(got, captured{source, sigs})
+		})
+		for _, at := range arrivals {
+			q.now = func() time.Time { return base.Add(at) }
+			q.Add("src", sig, rule)
+		}
+		q.Flush(base.Add(3 * time.Minute))
+		return len(got)
+	}
+	if n := run(0); n != 0 {
+		t.Fatalf("a one-off on an absent tracked kind must be dropped, not failed open: %d emits", n)
+	}
+	if n := run(0, 60*time.Second, 170*time.Second); n != 1 {
+		t.Fatalf("a burst still arriving at the close must be emitted: %d emits", n)
 	}
 }

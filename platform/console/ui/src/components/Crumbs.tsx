@@ -1,5 +1,6 @@
 import { Breadcrumb, BreadcrumbItem, PageBreadcrumb } from '@patternfly/react-core'
 import { Link } from 'react-router-dom'
+import { Icon } from './Icon'
 import { PlainText } from './Text'
 
 // Breadcrumbs.
@@ -14,6 +15,8 @@ import { PlainText } from './Text'
 export interface Crumb {
   label: string
   to?: string
+  /** A declared icon beside the label — a Pipeline's, on its own page. */
+  icon?: string
 }
 
 export function Crumbs({ items }: { items: Crumb[] }) {
@@ -26,10 +29,12 @@ export function Crumbs({ items }: { items: Crumb[] }) {
             <BreadcrumbItem key={`${c.label}-${i}`} isActive={last}>
               {c.to && !last ? (
                 <Link to={c.to}>
-                  <PlainText>{c.label}</PlainText>
+                  {c.icon && <Icon icon={c.icon} />} <PlainText>{c.label}</PlainText>
                 </Link>
               ) : (
-                <PlainText>{c.label}</PlainText>
+                <>
+                  {c.icon && <Icon icon={c.icon} />} <PlainText>{c.label}</PlainText>
+                </>
               )}
             </BreadcrumbItem>
           )

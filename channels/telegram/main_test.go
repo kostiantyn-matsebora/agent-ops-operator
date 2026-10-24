@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -40,7 +40,7 @@ func testAdapter(t *testing.T, channels map[string]channelConfig) (*adapter, *[]
 		clients:  map[string]*Telegram{},
 	}
 	for name, cfg := range channels {
-		a.channels[name] = servedChannel{cfg: cfg, token: "bot-token"}
+		a.channels[name] = servedChannel{cfg: cfg}
 	}
 	return a, &got
 }
@@ -102,15 +102,21 @@ func TestNoApproversMeansAnyone(t *testing.T) {
 // TestTopicMessageCarriesItsThreadID: the thread id is what makes this a
 // CONTINUATION — /channel/inbound now rejects a message without one.
 func TestTopicMessageCarriesItsThreadID(t *testing.T) {
-	a, got := testAdapter(t, map[string]channelConfig{"telegram-ops": {ChatID: "-1001"}})
-	a.dispatch(context.Background(), mustUpdate(t,
-		`{"update_id":1,"message":{"text":"more","chat":{"id":-1001},"from":{"id":1},"is_topic_message":true,"message_thread_id":4242}}`))
+	// The CANONICAL captured topic update, shared with the system pack: the
+	// fake Bot API replays exactly this and the router forwards it verbatim.
+	// Test-only relative read, no go.mod entry.
+	raw, err := os.ReadFile("../../test/fixtures/telegram-update-topic.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, got := testAdapter(t, map[string]channelConfig{"telegram-ops": {ChatID: "-1001234567890"}})
+	a.dispatch(context.Background(), mustUpdate(t, string(raw)))
 	if len(*got) != 1 {
 		t.Fatal("topic message should be delivered")
 	}
 	in := (*got)[0]
-	if in.ThreadID == nil || *in.ThreadID != "4242" {
-		t.Fatalf("threadId = %v, want 4242", in.ThreadID)
+	if in.ThreadID == nil || *in.ThreadID != "42" {
+		t.Fatalf("threadId = %v, want 42", in.ThreadID)
 	}
 	if in.Channel != "telegram-ops" {
 		t.Fatalf("channel = %q", in.Channel)
@@ -139,7 +145,6 @@ func TestOffsetRoundTripsThroughTheStateAPI(t *testing.T) {
 		mgr:      NewManager(srv.URL, "test-token"),
 		channels: map[string]servedChannel{"telegram-ops": {cfg: channelConfig{ChatID: "-1001"}}},
 		reported: map[string]string{},
-		clients:  map[string]*Telegram{},
 	}
 	h := a.handler()
 
@@ -190,6 +195,49 @@ func TestAlreadyClosedTopicIsNotAFailure(t *testing.T) {
 	}
 }
 
+// TestThreadNotFoundIsNotAFailureForDelete pins the OTHER shape a redelivered
+// op gets: DeleteTopic's second call finds nothing left to delete at all,
+// since the first call already removed it — unlike CloseTopic, whose archived
+// topic still EXISTS (A10, A11).
+func TestThreadNotFoundIsNotAFailureForDelete(t *testing.T) {
+	if !threadNotFound(errors.New("telegram deleteForumTopic: Bad Request: message thread not found")) {
+		t.Fatal("a redelivered delete must tolerate the topic already being gone")
+	}
+	if threadNotFound(errors.New("telegram deleteForumTopic: Forbidden: bot is not a member")) {
+		t.Fatal("an unrelated failure must still be reported")
+	}
+}
+
+// TestCompletedCloseTopicIsNeverReplayed pins A9's second half: a COMPLETED
+// operation is answered again from memory on redelivery and never touches the
+// Bot API a second time — riding the retry rule is for calls an operation is
+// still MAKING, not for one the adapter already finished.
+func TestCompletedCloseTopicIsNeverReplayed(t *testing.T) {
+	var calls []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer tg.Close()
+
+	tid := "42"
+	op := Op{ID: "close-1", Channel: "tg", Kind: "close-topic", ThreadID: &tid}
+	a := &adapter{
+		mgr: opAndFailingComplete(t, op), pace: newPacer(), completed: newCompletedOps(16),
+		channels: map[string]servedChannel{"tg": {
+			cfg: channelConfig{ChatID: "-100"}, gatewayURL: tg.URL, gatewayToken: "gw-token",
+		}},
+		reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	a.completed.add("close-1", "") // already completed once
+
+	a.pollOnce(context.Background())
+
+	if len(calls) != 0 {
+		t.Fatalf("a completed close-topic must not touch the Bot API again, got %v", calls)
+	}
+}
+
 // delete-conversation: un-archive → post → re-archive.
 //
 // Every step is forced by the transport. A CLOSED forum topic refuses
@@ -200,13 +248,13 @@ func TestAlreadyClosedTopicIsNotAFailure(t *testing.T) {
 func TestDeleteConversationReopensPostsAndClosesAgain(t *testing.T) {
 	var calls []string
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"message_thread_id":42}}`))
 	}))
 	defer tg.Close()
 
 	a, _ := testAdapter(t, map[string]channelConfig{"tg": {ChatID: "-100"}})
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+	a.clients["|"] = NewTelegram(tg.URL, "gw-token")
 
 	tid := "42"
 	msg := Message{Kind: MsgNotice, Body: "This conversation has been deleted."}
@@ -238,7 +286,7 @@ func TestDeleteConversationReopensPostsAndClosesAgain(t *testing.T) {
 // A thread id is required: without one there is nothing to mark.
 func TestDeleteConversationWithoutAThreadIsReported(t *testing.T) {
 	a, _ := testAdapter(t, map[string]channelConfig{"tg": {ChatID: "-100"}})
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: http.DefaultClient}
+	a.clients["|"] = NewTelegram("http://unused", "gw-token")
 	if _, opErr := a.execute(context.Background(), &Op{
 		Kind: "delete-conversation", Channel: "tg", Conversation: "conv-1",
 	}); opErr == "" {
@@ -246,26 +294,12 @@ func TestDeleteConversationWithoutAThreadIsReported(t *testing.T) {
 	}
 }
 
-// routeTo sends every Bot API call to a stub server. The client builds the
-// api.telegram.org URL itself, so the interception is at the transport.
-func routeTo(base string) *http.Client {
-	u, _ := url.Parse(base)
-	return &http.Client{Transport: rewrite{host: u.Host, scheme: u.Scheme}}
-}
-
-type rewrite struct{ host, scheme string }
-
-func (r rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.URL.Host, req.URL.Scheme = r.host, r.scheme
-	return http.DefaultTransport.RoundTrip(req)
-}
-
 // The opt-in: this surface would rather lose the thread than accumulate one
 // archived topic per conversation forever.
 func TestDeleteConversationDeletesTheTopicWhenOptedIn(t *testing.T) {
 	var calls []string
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	}))
 	defer tg.Close()
@@ -273,7 +307,7 @@ func TestDeleteConversationDeletesTheTopicWhenOptedIn(t *testing.T) {
 	a, _ := testAdapter(t, map[string]channelConfig{
 		"tg": {ChatID: "-100", DeleteTopicOnConversationDelete: true},
 	})
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+	a.clients["|"] = NewTelegram(tg.URL, "gw-token")
 
 	tid := "42"
 	msg := Message{Kind: MsgNotice, Body: "gone"}
@@ -301,7 +335,7 @@ func TestDeleteConversationDeletesTheTopicWhenOptedIn(t *testing.T) {
 func TestDeleteTopicFailureIsReportedNotSoftened(t *testing.T) {
 	var calls []string
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		_, _ = w.Write([]byte(`{"ok":false,"description":"Bad Request: not enough rights to delete the topic"}`))
 	}))
 	defer tg.Close()
@@ -309,7 +343,7 @@ func TestDeleteTopicFailureIsReportedNotSoftened(t *testing.T) {
 	a, _ := testAdapter(t, map[string]channelConfig{
 		"tg": {ChatID: "-100", DeleteTopicOnConversationDelete: true},
 	})
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+	a.clients["|"] = NewTelegram(tg.URL, "gw-token")
 
 	tid := "42"
 	_, opErr := a.execute(context.Background(), &Op{
@@ -331,7 +365,7 @@ func TestDeleteTopicFailureIsReportedNotSoftened(t *testing.T) {
 func TestEachSurfaceFollowsItsOwnConfig(t *testing.T) {
 	var calls []string
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
 	}))
 	defer tg.Close()
@@ -340,7 +374,7 @@ func TestEachSurfaceFollowsItsOwnConfig(t *testing.T) {
 		"keeps":   {ChatID: "-100"},
 		"deletes": {ChatID: "-101", DeleteTopicOnConversationDelete: true},
 	})
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+	a.clients["|"] = NewTelegram(tg.URL, "gw-token")
 
 	tid := "42"
 	msg := Message{Kind: MsgNotice, Body: "gone"}
@@ -377,8 +411,9 @@ func TestServedChannelConfigIsRefreshed(t *testing.T) {
 	defer srv.Close()
 
 	a := &adapter{
-		mgr: NewManager(srv.URL, "t"), channelType: "telegram", fallbackToken: "bot-token",
-		channels: map[string]servedChannel{}, reported: map[string]string{}, clients: map[string]*Telegram{},
+		mgr: NewManager(srv.URL, "t"), channelType: "telegram",
+		fallbackGatewayURL: "http://gateway.test", fallbackGatewayToken: "gw-token",
+		channels: map[string]servedChannel{}, reported: map[string]string{},
 	}
 	a.refreshChannels(context.Background())
 	if sc, _ := a.channel("tg"); sc.cfg.DeleteTopicOnConversationDelete {
@@ -401,7 +436,7 @@ func TestDeletingTheTopicLeavesATraceOnTheGeneralSurface(t *testing.T) {
 	var calls []string
 	var bodies []string
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/botbot-token/"))
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
 		b, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, string(b))
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
@@ -411,7 +446,7 @@ func TestDeletingTheTopicLeavesATraceOnTheGeneralSurface(t *testing.T) {
 	a, _ := testAdapter(t, map[string]channelConfig{
 		"tg": {ChatID: "-100", DeleteTopicOnConversationDelete: true},
 	})
-	a.clients["bot-token"] = &Telegram{Token: "bot-token", HTTP: routeTo(tg.URL)}
+	a.clients["|"] = NewTelegram(tg.URL, "gw-token")
 
 	tid := "42"
 	if _, opErr := a.execute(context.Background(), &Op{

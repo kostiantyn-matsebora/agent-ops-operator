@@ -14,8 +14,8 @@ import (
 // Manager is a client for the operator's signal adapter contract (/signal/*
 // on the manager's API port, bearer-token auth): source config, cursor state,
 // and status conditions all go through this API; normalized signals go in
-// through /signal/inbound and the manager applies grouping/cooldown/recurrence
-// itself.
+// through /signal/inbound and the manager applies cooldown and recurrence
+// itself, keyed on the initiationId this adapter mints.
 //
 // This adapter holds NO Kubernetes client at all: its data source is Home
 // Assistant (ha.go), reached over that instance's own API with a credential the
@@ -44,20 +44,20 @@ type SourceInfo struct {
 
 // Signal is the contract's normalized signal shape.
 type Signal struct {
-	Fingerprint string            `json:"fingerprint"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	Payload     string            `json:"payload,omitempty"`
-	Kind        string            `json:"kind,omitempty"` // "alert" | "job"
+	InitiationID string            `json:"initiationId"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	Payload      string            `json:"payload,omitempty"`
+	Kind         string            `json:"kind,omitempty"` // "alert" | "job"
 
 	// MatchText is the log record's text, carried for RULE MATCHING and never
 	// serialized (`json:"-"`, so it cannot reach the manager by accident).
 	//
 	// It is not a label on purpose: a message is free text with unbounded
-	// cardinality, and a label carrying it would key signature grouping on the
-	// exact wording — a fresh conversation per variation of one recurring
-	// error. Rules still need it, because Home Assistant records carry no
-	// `reason` field and level plus logger cannot separate "will retry" from
+	// cardinality, and a label carrying it would key correlation on the exact
+	// wording — a fresh conversation per variation of one recurring error.
+	// Rules still need it, because Home Assistant records carry no `reason`
+	// field and level plus logger cannot separate "will retry" from
 	// "credentials rejected".
 	MatchText string `json:"-"`
 }

@@ -3,3 +3,6 @@ dist/
 test-results/
 playwright-report/
 *.tsbuildinfo
+coverage/
+e2e-live/.auth/
+e2e-live/.generated/

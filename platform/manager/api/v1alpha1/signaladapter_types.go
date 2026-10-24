@@ -88,6 +88,14 @@ type SignalAdapterSpec struct {
 	// no Secrets, so it can never verify these.
 	// +optional
 	CredentialKeys []CredentialKeyDoc `json:"credentialKeys,omitempty"`
+	// Externals names the systems outside the install this implementation
+	// faces. Interface metadata like CredentialKeys: the manager reads no
+	// config to verify it and grants nothing from it. An adapter declaring
+	// none is drawn with no external, which is a normal answer.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Externals []ExternalRef `json:"externals,omitempty"`
 }
 
 // SignalAdapterStatus reports workload and serving state.

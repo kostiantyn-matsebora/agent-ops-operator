@@ -59,7 +59,14 @@ eventsAdapter:
     # 0.3.0 adds the time axis (route.timeIntervals / route.muteTimeIntervals);
     # an earlier image ignores those keys, which looks like a window that never
     # fires.
-    tag: 0.4.2
+    # 0.4.5 adds the node-STATE axis (route.drainingNodes / drainingNodeMatchers
+    # / drainingNodeBound) — it REQUIRES the nodes grant below (cluster-wide
+    # installs only) to do anything; an earlier image ignores those keys
+    # entirely and a namespaced install always ran this way.
+    # 0.5.0 mints initiationId from the owning workload's identity instead of
+    # sending a fingerprint for the manager to group — an earlier image still
+    # posts the retired field and the manager rejects it 4xx.
+    tag: 0.5.0
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
@@ -101,7 +108,10 @@ eventsAdapter:
     # `for` holds a matched event, then RE-CHECKS the involved object before
     # emitting: gone (the terminating pod of a rollout) or recovered (the new
     # pod became Ready) means drop; still unhealthy means emit once, with the
-    # whole burst's evidence attached.
+    # whole burst's evidence attached. A kind with no health predicate (only
+    # Pod has one) is believed only if the event was STILL RECURRING as the
+    # window closed — its last third, floored at 30s. A burst that retried for
+    # forty seconds and healed has recurred, and is dropped as churn.
     #
     # Two properties make this set safe to trust, and both are pinned by test:
     #   * the LAST rule is a catch-all with a dwell, never a drop — so a reason
@@ -146,8 +156,21 @@ eventsAdapter:
         for: "0"
 
       # 3 ── node-level: one event, many workloads affected ────────────────
+      # kind="Node" is load-bearing, not decorative. NodeHasDiskPressure and
+      # NodeHasMemoryPressure are genuinely reported once, against the Node
+      # object itself, by the kubelet — that is what lets dropping Evicted
+      # above stay safe. NodeNotReady is NOT: the node lifecycle controller
+      # stamps it on every POD scheduled on the affected node, so without the
+      # kind qualifier one node blip fired once per DaemonSet, at `for: 0`,
+      # with no chance to notice the node came back in the next few seconds.
+      # A pod-level NodeNotReady now falls through to the catch-all below,
+      # which already re-checks the POD's own health before emitting — the
+      # same machinery that drops a rollout's transient Unhealthy — so a
+      # kured-style rolling reboot that recovers within the catch-all's dwell
+      # is reported never, and one that does not is reported once it recurs.
       - matchers:
           - reason=~"NodeNotReady|NodeHasDiskPressure|NodeHasMemoryPressure|NodeHasPIDPressure"
+          - kind="Node"
         for: "0"
 
       # 4 ── flappy by nature: long dwell, but escalate on breadth ─────────
@@ -179,16 +202,25 @@ eventsAdapter:
       - matchers: []
         for: 3m
 
-    # The Alertmanager half: inhibition and the TIME axis. Empty by default —
-    # both halves below are opt-in, and both are shown as worked examples.
+    # The Alertmanager half: inhibition and the TIME axis, plus the node-STATE
+    # axis below. inhibitRules and the time axis are empty by default — both
+    # are opt-in, and both are shown as worked examples. The node-state axis
+    # is different: it is ON by default (route.drainingNodes defaults to
+    # "suppress" even when this whole block is empty), because it needs no
+    # source-specific tuning to be safe — see below.
     #
     #   route:
     #     # Inhibition — suppress the CONSEQUENCES of a cause that is already
-    #     # reported. The canonical use: a draining node makes its pods noisy.
+    #     # reported. NOT the tool for a draining node: that is a STATE, not a
+    #     # cause EVENT, and the two arrive too close together in time for a
+    #     # "cause first" rule to reliably win the race (see drainingNodes
+    #     # below, which exists because this was tried and measured to fail).
+    #     # Inhibition still suits an unrelated cause/consequence pair, e.g. a
+    #     # PVC failure inhibiting the pods that depend on it:
     #     inhibitRules:
-    #       - sourceMatchers: ['reason="NodeNotReady"']
-    #         targetMatchers: ['reason=~"Unhealthy|FailedScheduling"']
-    #         equal: [node]
+    #       - sourceMatchers: ['reason="VolumeFailedDelete"']
+    #         targetMatchers: ['reason=~"FailedMount|FailedAttachVolume"']
+    #         equal: [name]
     #
     #     # Time intervals — the one axis the other three cannot express.
     #     # `for:` verifies a condition still holds, and during a scheduled
@@ -231,19 +263,42 @@ eventsAdapter:
     # the source says so on its Ready condition, and names the interval: a muted
     # lane and an idle lane look identical from outside, and only one of them
     # means the cluster is healthy.
-    route: {}
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
     #
-    # Group by WORKLOAD, not by object. `name` here used to be a POD name —
-    # unique per replica and regenerated on every rollout — so conversation
-    # count scaled with pods × rollouts and the manager's 7-day window reuse
-    # could never fire, because the signature never repeated. `workload` is the
-    # owning controller (Deployment/api), resolved through owner references, so
-    # every replica shares one conversation and it survives rollouts.
-    grouping:
-      signatureLabels:
-        - namespace
-        - workload
+    #     # The node-STATE axis: while a node is cordoned or maintenance-
+    #     # tainted, every event on its objects (and on the Node itself) is
+    #     # suppressed, no matter which reason it carries — this is what makes
+    #     # a rolling reboot manager (kured is the canonical case) open zero
+    #     # conversations regardless of how many DaemonSets have pods there.
+    #     # Uncommented, this is already the DEFAULT: omitting it is
+    #     # `drainingNodes: suppress`, unnarrowed. Set it to "report" to opt
+    #     # this source out entirely, or narrow what it suppresses:
+    #     drainingNodes: suppress
+    #     drainingNodeMatchers:
+    #       - reason=~"NodeNotReady|Unhealthy|FailedMount|FailedScheduling"
+    #     # A drain nobody ends must not go silent forever: past this, ONE
+    #     # kind: Node signal (reason NodeDrainExceeded) is posted naming the
+    #     # node and how long it has been draining, and suppression on it
+    #     # stops until it drains again. Default 1h.
+    #     drainingNodeBound: 1h
+    #
+    # Needs the events ClusterRole's `nodes` grant (rbac.clusterWide: true,
+    # the default) — a namespaced install has no equivalent, since nodes are
+    # cluster-scoped, so this axis is off there and every source says so once.
+    route: {}
+    # Cooldown: suppress a repeat of the same initiationId within this window.
+    # The adapter's own `initiationId` is workload-keyed (namespace/workload,
+    # resolved through owner references, FIXED — see the k8s-bundle spec), not
+    # per-pod, so every replica shares one conversation and it survives
+    # rollouts. The pending/dwell queue (pending.go) re-posts a surviving
+    # workload failure on its own refractory clock — as short as 1m, never
+    # longer than a rule's own `for:` dwell (3-10m here) — relying on the
+    # manager to let those re-posts through rather than swallow them as
+    # duplicates. The CRD default (6h) would instead silently drop every
+    # re-post but the first one for up to 6 hours, erasing the occurrence
+    # count the bundle's own spec promises, so this source overrides it to 0
+    # (cooldown off, the adapter's own refractory window is the only pacing
+    # this needs).
+    cooldownHours: 0
 
 # The agent that answers. IDENTITY ONLY — one AgentProfile and nothing else.
 # What executes it is the parent chart's `runtimes:` list and its
@@ -279,9 +334,10 @@ profile:
     You are a Kubernetes site reliability engineer operating a live cluster.
 
     The mcp__kubernetes__* tools are how you reach the cluster. The runtime
-    image ships no Kubernetes CLI, so there is no shell fallback: if a tool for
-    something is not in your allowlist, you cannot do it — say so plainly
-    instead of trying to improvise one.
+    image ships no Kubernetes CLI of its own — if a tool for something is
+    not in your allowlist, say so plainly instead of trying to improvise
+    one. Whether `pods_exec`/`pods_run` are in that allowlist depends on
+    this install, stated below.
 
     Those tools return kubectl-shaped tables and cannot filter server-side, so
     ask for the narrowest scope you can (a namespace rather than the cluster)
@@ -298,6 +354,49 @@ profile:
     or would affect the control plane, describe what you would do and stop.
 
     Answer briefly. Lead with the finding, then the evidence.
+  # THE THIRD WALL ON `allowPodExecution`, AND IT IS APPENDED TO THE ROLE ABOVE.
+  #
+  # global.agentops.runtimeDefaults.allowPodExecution gates every write that
+  # produces or enters a pod, on the route account's rules AND on the MCP
+  # server's role — two walls, one value. Neither is visible from the agent's
+  # tool list: the server advertises the workload-patch tool whatever the gate
+  # says, and the API server refuses it one hop later. So the agent used to
+  # learn the posture by hitting it, and reported an RBAC fault where the
+  # install had made a decision.
+  #
+  # This paragraph is the third wall, on the same value — ONE SIDE OR THE
+  # OTHER, never both and never neither. It is appended after `systemPrompt`
+  # — the shipped one or yours — whichever of this and
+  # `podExecutionAllowedPrompt` below matches the gate's current state. ONE
+  # profile, never a second one per posture: a profile picked by hand to
+  # match a value drifts the first time the value is flipped. Set it to ""
+  # to decline the paragraph (the agent is then told nothing either way).
+  podExecutionWithheldPrompt: |
+    This install withholds pod execution. You cannot create a pod, exec into
+    one, or change the pod template of a Deployment, StatefulSet, DaemonSet,
+    ReplicaSet, Job or CronJob: the API server refuses those writes whatever
+    your tools advertise, because a pod spec can mount any Secret in its
+    namespace. Do not attempt such a change. When asked for one, say that
+    this install withholds pod-template edits and pod execution, say what you
+    can still do where your tools allow — scale, restart or evict a pod,
+    cordon a node, delete a workload, edit ConfigMaps, Services, Ingresses,
+    NetworkPolicies, PodDisruptionBudgets, HorizontalPodAutoscalers and
+    PersistentVolumeClaims — and suggest the operator makes the edit. The
+    value that decides this is global.agentops.runtimeDefaults.allowPodExecution.
+  # THE OTHER SIDE OF THE SAME WALL. Appended instead of the paragraph above
+  # once the gate is ON, so the agent is told what it gained, not just left
+  # to infer it from a tool appearing in its allowlist.
+  podExecutionAllowedPrompt: |
+    This install allows pod execution: `pods_exec` and `pods_run` are real,
+    not advertised-but-refused. When a workload has no dedicated API or MCP
+    tool of its own — its own database, a config only its local CLI can
+    read, a cache only reachable from inside the pod — exec into its pod and
+    run that workload's own tooling (psql, sqlite3, a local curl) rather
+    than reporting that nothing can be done. This is not improvising a tool
+    you lack; it is the tool this install granted you for exactly this case.
+    The same caution rules still apply: investigate before you act, and
+    describe a risky or irreversible change instead of making it. The value
+    that decides this is global.agentops.runtimeDefaults.allowPodExecution.
   maxTurns: 40
   # Names an AgentRuntime other than the parent's `default` — a higher-trust or
   # different-vendor runtime you applied yourself. Empty emits no runtimeRef and
@@ -478,8 +577,15 @@ mcpServers:
 # render is a channel — and that is values-supplied and omitted when unset. A
 # bundle whose route spanned other components could not, and telegram
 # still ships none.
+#
+# Paired with the parent's `global.agentops.wiringMode`: this says WHETHER the
+# bundle's own route(s) render at all, wiringMode says AS WHAT — a `Pipeline`
+# under `pipelines` mode, an `AgentCapability` on the chart-rendered
+# `Coordinator` under `coordinator` mode. Kept out of the `pipelines:` block
+# below so the name does not tie it to one of those two shapes.
+wiringEnabled: null
+
 pipelines:
-  enabled: null
   # TWO routes, differing in exactly one binding — the mutating toolset. At most
   # one renders by default.
   #
@@ -503,6 +609,20 @@ pipelines:
     # network and works air-gapped. `mdi:<name>` or a URL also work, where the
     # surface can fetch one.
     icon: aops:observe
+    # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
+    # Coordinator's own coordinating agent. It states what this agent IS and
+    # CAN DO, in the actions its toolset supports, what it cannot, and what to
+    # hand it — so a person's instruction matches it as readily as a signal.
+    # Never a trigger alone ("a cluster event"): an instruction matches no
+    # trigger, and the coordinating agent then reports it has nothing. Never
+    # a routing rule of its own. Unused under `pipelines` mode.
+    description: >-
+      A read-only Kubernetes engineer. Can list and inspect any resource in
+      any namespace, read pod and node logs, events and live CPU and memory
+      usage, and explain what it finds — why a pod restarts, whether a
+      rollout is stuck, what an event means. Cannot change anything in the
+      cluster. Hand it any question about the cluster's state, and any
+      signal or alert whose cause is not yet known.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
@@ -511,11 +631,57 @@ pipelines:
     # Named k8s-operate, not k8s-admin: k8s-admin is already the MCPToolset this
     # route binds, and "bind k8s-admin on k8s-admin" is a sentence nobody should
     # have to parse.
+    #
+    # This route ALSO binds global.builtinToolsets.websearch (agentops-websearch)
+    # when the catalog is enabled — the admin route is already trusted to act on
+    # the cluster, so it is the one that gets to look things up on the open
+    # internet too. k8s-observe stays read-only and does not gain it.
     name: k8s-operate
     icon: aops:operate
+    # See observe.description above — same purpose, coordinator mode only. The
+    # actions named are the k8s-admin toolset's: there is no "restart" tool, so
+    # the text says how a restart happens, and the pod-execution clause follows
+    # global.agentops.runtimeDefaults.allowPodExecution exactly as the
+    # profile's own posture paragraph does.
+    description: >-
+      A Kubernetes engineer that can act on the cluster. Can read everything
+      — resources, logs, events, usage — and change it: restart a workload by
+      deleting its pod so its controller recreates it, scale a Deployment or
+      StatefulSet, patch or create any resource, delete one, and, where this
+      install allows pod execution, exec into a pod or run a one-off pod. It
+      can also look things up on the web. It investigates before it acts and
+      describes a risky change instead of making it. Cannot touch kube-system
+      or the control plane. Hand it an instruction to change something —
+      "restart X", "scale Y to N", "fix the Z ConfigMap" — or a known cause
+      that needs a fix.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
+  # The demo-mode showcase route (demo-dual-wiring-showcase): the SAME observing
+  # route above, rendered a SECOND time as a plain Pipeline alongside whatever
+  # `global.agentops.wiringMode` already renders for this bundle — so a demo
+  # install exhibits both wiring primitives (Pipeline and Coordinator) at once.
+  #
+  # This is NOT a third route. It carries no `enabled`, `rbac` or `runtimeRef`
+  # override of its own — `pipeline-showcase.yaml` reads `pipelines.observe.*`
+  # directly for the profile, toolset and privilege level, so the showcase can
+  # never drift into configuring a route that no longer matches what it shows.
+  # The ONLY thing here is the one value that must differ: its own object name,
+  # so it never collides with the `k8s-observe` AgentCapability of the same
+  # underlying route under coordinator mode.
+  #
+  # Gated by `kubernetes.demoShowcaseActive` (global.demo.wiringShowcase) AND
+  # `global.agentops.wiringMode` resolving `coordinator` — see
+  # pipeline-showcase.yaml.
+  demoShowcase:
+    name: k8s-observe-pipeline
+    # Display only, same convention as observe.icon above.
+    icon: aops:observe
+    description: >-
+      The same read-only Kubernetes engineer as k8s-observe, reached directly
+      by name instead of through the coordinator — always replies in its own
+      thread, demonstrating the Pipeline primitive alongside the Coordinator
+      this demo also renders.
   # Channels to deliver to, BY NAME — the one class of object this bundle does
   # not render, so it is values-supplied and the key is omitted entirely when
   # this list is empty. Empty is a working configuration, not a degraded one:

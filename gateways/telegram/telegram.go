@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -22,12 +25,33 @@ type Telegram struct {
 	BaseURL string
 }
 
-// telegramAPIBase is the real Bot API root.
+// telegramAPIBase is the real Bot API root — the DEFAULT. An adapter's
+// outbound base URL is configuration, never a constant: TELEGRAM_API_BASE
+// points this one poller at a local double, and the single-consumer rule is
+// unaffected by where it points.
 const telegramAPIBase = "https://api.telegram.org"
 
-// NewTelegram builds a client; the HTTP timeout leaves room for 20s long-polls.
-func NewTelegram(token string) *Telegram {
-	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}}
+// apiBaseEnv is optional, unlike the forwarding targets and the bot token:
+// absent takes the default without comment.
+const apiBaseEnv = "TELEGRAM_API_BASE"
+
+// resolveAPIBase reads the override from the environment, defaulting to the
+// real host; a trailing slash is dropped so the method path joins cleanly.
+func resolveAPIBase() string {
+	base := strings.TrimSpace(os.Getenv(apiBaseEnv))
+	if base == "" {
+		return telegramAPIBase
+	}
+	return strings.TrimRight(base, "/")
+}
+
+// NewTelegram builds a client for the configured Bot API root; the HTTP
+// timeout leaves room for 20s long-polls.
+func NewTelegram(token, base string) *Telegram {
+	if base == "" {
+		base = telegramAPIBase
+	}
+	return &Telegram{Token: token, HTTP: &http.Client{Timeout: 35 * time.Second}, BaseURL: strings.TrimRight(base, "/")}
 }
 
 type tgResponse struct {
@@ -35,6 +59,8 @@ type tgResponse struct {
 	Description string          `json:"description"`
 	Result      json.RawMessage `json:"result"`
 }
+
+const headerContentType = "Content-Type"
 
 // API calls a Bot API method with a JSON body.
 func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMessage, error) {
@@ -51,7 +77,7 @@ func (t *Telegram) API(ctx context.Context, method string, body any) (json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, "application/json")
 	resp, err := t.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -133,6 +159,43 @@ func classifyUpdate(raw json.RawMessage) (update, error) {
 func (t *Telegram) Acknowledge(ctx context.Context, callbackID string) error {
 	_, err := t.API(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": callbackID})
 	return err
+}
+
+// Call performs an arbitrary Bot API method on channel-telegram's behalf —
+// the consolidation that makes this process the SOLE holder of the bot
+// token, inbound and outbound alike (see gotchas.md, 2026-10-11:
+// chat-ops-broker-telegram-gateway).
+//
+// Body and contentType are forwarded VERBATIM, and so is the response's
+// status and body: a JSON method call and a multipart sendDocument upload
+// both pass through unchanged, and the caller's own tgResponse parsing
+// (including `parameters.retry_after`) needs nothing new to read. Unlike
+// API, this does not retry, inspect `ok`, or unwrap `result` — the caller
+// already owns a retry budget keyed off a manager claim this process knows
+// nothing about, and retrying here as well would let the two bounds race.
+func (t *Telegram) Call(ctx context.Context, method, contentType string, body []byte) (status int, respBody []byte, respContentType string, err error) {
+	base := t.BaseURL
+	if base == "" {
+		base = telegramAPIBase
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		base+"/bot"+t.Token+"/"+method, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, "", err
+	}
+	if contentType != "" {
+		req.Header.Set(headerContentType, contentType)
+	}
+	resp, err := t.HTTP.Do(req)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	return resp.StatusCode, out, resp.Header.Get(headerContentType), nil
 }
 
 // GetUpdates long-polls for message updates from the given offset, preserving

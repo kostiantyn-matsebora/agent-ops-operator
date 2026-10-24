@@ -48,6 +48,15 @@ type Route struct {
 	// suppression, and it belongs in the half that already speaks it.
 	TimeIntervals     []TimeInterval     `json:"timeIntervals,omitempty"`
 	MuteTimeIntervals []MuteTimeInterval `json:"muteTimeIntervals,omitempty"`
+	// DrainingNodes is the NODE-STATE axis: "suppress" (default) or "report"
+	// to disable it for this source. See drain.go.
+	DrainingNodes string `json:"drainingNodes,omitempty"`
+	// DrainingNodeMatchers narrows what a draining node suppresses. Absent =
+	// every event on that node's objects, for as long as it drains.
+	DrainingNodeMatchers []string `json:"drainingNodeMatchers,omitempty"`
+	// DrainingNodeBound bounds how long a drain suppresses before it is
+	// reported once and released. Default 1h.
+	DrainingNodeBound string `json:"drainingNodeBound,omitempty"`
 }
 
 // defaultEscalateAfterObjects: one object misbehaving is churn, several at once
@@ -199,6 +208,13 @@ type ruleSet struct {
 	// warnings are non-fatal problems (an unreachable rule) reported on the
 	// source's Ready condition without failing the source.
 	warnings []string
+
+	// The NODE-STATE axis (drain.go). drainSuppress is true ("suppress",
+	// the default) or false ("report", the opt-out). drainMatchers narrows
+	// what is suppressed; empty suppresses everything on a draining node.
+	drainSuppress bool
+	drainMatchers []matcher
+	drainBound    time.Duration
 }
 
 func parseDuration(s string) (time.Duration, error) {
@@ -270,6 +286,29 @@ func compileRules(rules []Rule, route Route) (*ruleSet, error) {
 	}
 	if rs.mutes, err = compileMutes(route.MuteTimeIntervals, intervals); err != nil {
 		return nil, err
+	}
+
+	switch mode := strings.ToLower(strings.TrimSpace(route.DrainingNodes)); mode {
+	case "", "suppress":
+		rs.drainSuppress = true
+	case "report":
+		rs.drainSuppress = false
+	default:
+		return nil, fmt.Errorf("route.drainingNodes: %q is not \"suppress\" or \"report\"", route.DrainingNodes)
+	}
+	if rs.drainMatchers, err = parseMatchers(route.DrainingNodeMatchers); err != nil {
+		return nil, fmt.Errorf("route.drainingNodeMatchers: %w", err)
+	}
+	rs.drainBound = defaultDrainBound
+	if strings.TrimSpace(route.DrainingNodeBound) != "" {
+		d, err := parseDuration(route.DrainingNodeBound)
+		if err != nil {
+			return nil, fmt.Errorf("route.drainingNodeBound: %w", err)
+		}
+		if d == 0 {
+			return nil, fmt.Errorf("route.drainingNodeBound: must be greater than zero")
+		}
+		rs.drainBound = d
 	}
 
 	rs.warnings = shadowedRules(rs.rules)

@@ -27,7 +27,21 @@ import (
 
 func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	ctx := context.Background()
+	createConsoleAdapterAndChannel(t, ctx)
+	reconcileAdapter(t, "console")
 
+	workload := types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("console")}
+	var deploy appsv1.Deployment
+	if err := k8sClient.Get(ctx, workload, &deploy); err != nil {
+		t.Fatalf("console workload not created: %v", err)
+	}
+	assertConsoleWorkloadShape(t, &deploy.Spec.Template.Spec)
+	assertConsoleServiceShape(t, ctx, workload)
+	assertConsoleChannelServedOnceAvailable(t, ctx, &deploy)
+}
+
+func createConsoleAdapterAndChannel(t *testing.T, ctx context.Context) {
+	t.Helper()
 	adapter := &agentopsv1alpha1.ChannelAdapter{}
 	adapter.Name, adapter.Namespace = "console", ns
 	adapter.Spec.Image = "kmatsebora/agentops-console:0.1.0"
@@ -51,15 +65,13 @@ func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	if err := k8sClient.Create(ctx, ch); err != nil {
 		t.Fatal(err)
 	}
-	reconcileAdapter(t, "console")
+}
 
-	workload := types.NamespacedName{Namespace: ns, Name: controller.AdapterDeploymentName("console")}
-	var deploy appsv1.Deployment
-	if err := k8sClient.Get(ctx, workload, &deploy); err != nil {
-		t.Fatalf("console workload not created: %v", err)
-	}
-	pod := deploy.Spec.Template.Spec
-	// API identity for the watch cache — granted by the chart's Role, never here
+// assertConsoleWorkloadShape: the SA token for the watch cache (granted by
+// the chart's Role, never here), scoping and contract env, and the browser
+// token arriving by projection, never by an API read.
+func assertConsoleWorkloadShape(t *testing.T, pod *corev1.PodSpec) {
+	t.Helper()
 	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
 		t.Fatal("console needs its SA token mounted — it names the account the chart grants")
 	}
@@ -80,7 +92,6 @@ func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	if env["ADAPTER_TOKEN"] != chat.DeriveAdapterToken(testMasterToken, "console") {
 		t.Fatal("console must receive its own derived contract token")
 	}
-	// the browser token arrives by projection, never by an API read
 	prefix := controller.CredentialEnvPrefix("console")
 	found := false
 	for _, ef := range pod.Containers[0].EnvFrom {
@@ -91,8 +102,12 @@ func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	if !found {
 		t.Fatalf("UI token Secret not projected: %+v", pod.Containers[0].EnvFrom)
 	}
+}
 
-	// browser-facing Service, owned by the reconciler
+// assertConsoleServiceShape: the browser-facing Service, owned by the
+// reconciler.
+func assertConsoleServiceShape(t *testing.T, ctx context.Context, workload types.NamespacedName) {
+	t.Helper()
 	var svc corev1.Service
 	if err := k8sClient.Get(ctx, workload, &svc); err != nil {
 		t.Fatalf("console Service not rendered: %v", err)
@@ -100,15 +115,18 @@ func TestConsoleAdapterReconcilesToAReachableWorkload(t *testing.T) {
 	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 8080 {
 		t.Fatalf("console Service port wrong: %+v", svc.Spec.Ports)
 	}
+}
 
-	// the Channel is Served once the adapter reports available
-	// no kubelet here: report availability by hand so the adapter reconciler
-	// can compute Ready
+// assertConsoleChannelServedOnceAvailable: the Channel is Served once the
+// adapter reports available — no kubelet here, so availability is reported
+// by hand so the adapter reconciler can compute Ready.
+func assertConsoleChannelServedOnceAvailable(t *testing.T, ctx context.Context, deploy *appsv1.Deployment) {
+	t.Helper()
 	deploy.Status.Replicas = 1
 	deploy.Status.ReadyReplicas = 1
 	deploy.Status.UpdatedReplicas = 1
 	deploy.Status.AvailableReplicas = 1
-	if err := k8sClient.Status().Update(ctx, &deploy); err != nil {
+	if err := k8sClient.Status().Update(ctx, deploy); err != nil {
 		t.Fatal(err)
 	}
 	reconcileAdapter(t, "console")

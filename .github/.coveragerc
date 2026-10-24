@@ -1,0 +1,27 @@
+# Coverage for the workflow's own scripts, read by COVERAGE_PROCESS_START.
+#
+# The suite in tests/ is bash driving Python: every script runs as a child
+# process of the shell, so `coverage run` over any one command would measure
+# the shell. Instead ci.yml installs a site-packages .pth hook that calls
+# coverage.process_startup() in EVERY interpreter that starts while this file
+# is named in the environment, each writing its own data file (`parallel`);
+# `coverage combine` then folds them into one. `include` confines what is
+# recorded to the scripts — a guard the suite invokes from elsewhere is
+# started under the hook too, and dropped here. It is a glob over ABSOLUTE
+# paths rather than `source = scripts`, because that is relative to each
+# process's working directory and the tests run from throwaway repositories.
+[run]
+parallel = true
+include = */.github/scripts/*.py
+
+[xml]
+output = coverage.xml
+
+# Several tests COPY a script into a throwaway repository and run it there, so
+# the recorded path is that copy's. combine folds every such path onto the
+# checkout's own scripts/ — the first entry is the canonical one, relative to
+# where combine runs (this directory).
+[paths]
+scripts =
+    scripts
+    */.github/scripts

@@ -120,6 +120,64 @@ Deployment and a patch to a pod template are the same path.
 Keys and worked examples in
 [The agent's power]({{ '/installation/' | relative_url }}#the-agents-power).
 
+#### The events adapter's own read access
+
+**A separate identity from the acting account above** —
+`agentops-signal-k8s-events`, granted `list`/`watch` on events, pods and
+replicasets, and (cluster-wide installs only) nodes, for drain awareness. No
+agent runs as it and it never calls a tool; it only decides which cluster
+Events become conversations.
+
+- **The grant is a resource, not a field list.** `nodes: list, watch` permits
+  reading whole Node objects — names, labels, addresses, allocatable
+  capacity — even though the adapter itself decodes only `spec.unschedulable`
+  and taints and keeps no node status. Kubernetes RBAC has no way to narrow a
+  grant to the fields code happens to read.
+- **Nothing here is a Secret**, and no adapter identity in this chart carries
+  a `secrets` verb.
+- **A namespaced install (`rbac.clusterWide: false`) has no nodes grant at
+  all** — nodes are cluster-scoped, so there is no namespaced equivalent to
+  fall back to. Drain awareness is simply off there, reported once on each
+  source's condition.
+
+### Agent-invoked agents
+
+**Coordination adds no new crossing.** A `Coordinator`'s conversation reaches
+the aops MCP server exactly like any other bound server — through crossing 2,
+the same egress-controlled path every MCP call takes.
+
+What is new is what a call across it can cause: the MANAGER creating more
+conversations and runtime pods on the caller's behalf, each under its own
+capability and identity.
+
+| | |
+|---|---|
+| **Threat** | a conversation causes the manager to provision more conversations and pods than its own route declared |
+| **Control** | the manager enforces every bound — the caller's own `agents[]` list, its own subtree, one hop for `close` — from a per-conversation token the aops server only forwards |
+| **Cost** | the aops server and its `NetworkPolicy`, reachable only from runtime pods |
+| **Residual risk** | a fan-out an operator did not expect, bounded but not forbidden — see [Residual risk](#residual-risk) |
+
+Three bounds keep it from becoming a second cluster boundary:
+
+- **A typed list, not a name.** `invoke` reaches only what the caller's own
+  Coordinator lists in `agents[]`, never an object it merely knows the name
+  of.
+- **A budget per level.** `maxAgents`, `maxTurns` and `deadline` close a
+  runaway coordination, evaluated on every level's own conversation and never
+  pooled across nesting.
+- **A cycle is refused outright.** A Coordinator invoking a chain that
+  returns to itself never terminates on its own, so the manager refuses it
+  rather than relying on the budget to eventually catch it.
+
+**Each invoked member gets its OWN capability and its OWN identity** — never
+the caller's, and never widened by it. A coordinating agent with a strong
+ServiceAccount can still invoke only members whose own `AgentCapability`
+names a weaker one, exactly as any other wiring resolves.
+
+**The aops MCP server decides none of this.** It holds no credential of its
+own and forwards the caller's token verbatim — every bound above is the
+manager's, re-checked on every call, never the server's.
+
 ---
 
 ## The platform's own posture
@@ -129,13 +187,35 @@ Properties of the product you cannot read off the values.
 | Property | What holds |
 |---|---|
 | **The manager reads no Secrets** | it holds no verb on `secrets` at all. Everything secret-shaped compiles to a pod-spec reference the kubelet resolves |
+| **The Telegram bot credential has one holder** | `agentops-gateway-telegram` alone holds the bot token. The channel adapter holds only a chart-generated call token and relays every Bot API call through the router, whose NetworkPolicy ingress admits the channel adapter on `router.callPort` |
 | **Adapter credentials are not stored** | a per-adapter token is an HMAC of a master key and the adapter's name, validated by re-deriving it. Nothing is minted, stored, or read back |
+| **The control-plane surface holds its own credential** | `/control-plane/*`'s token is distinct from `ADAPTER_TOKEN` and the coordinator token — a caller holding one cannot reach another's surface. Unconfigured, it refuses every request rather than falling open |
 | **Runtime pods are non-root** | at a fixed uid, and each conversation's workspace is its own subpath of the claim, so concurrent pods cannot see each other's tree |
 | **Under egress control the container is hardened further** | all capabilities dropped, privilege escalation refused |
 
 Every published image carries an **SBOM** and **max-mode provenance**, recorded
-by the build. **Nothing is signed, and the chart is not attested.** Read what an
-image carries:
+by the build. **Nothing is signed, and the chart is not attested.**
+
+**Every image is scanned for known vulnerabilities**, twice over. On the pull
+request that builds it, a CRITICAL or HIGH finding **with a fix available**
+blocks the merge. Weekly, the published images are scanned again against a
+newer database.
+
+Both scans report to the repository's security tab, and both fail on the same
+fixable finding. The pull-request scan blocks the merge. The weekly scan
+reports before it fails, and turns the README's published-images badge red
+until the image is re-released.
+
+On a pull request from a fork the gate blocks without reporting — a fork's
+token cannot write there.
+
+**A finding with no available fix does not block**, knowingly. An unfixable
+upstream vulnerability is information rather than a task, and a gate that
+cannot be made green is one that gets switched off.
+
+The SBOM is the complete inventory. The scan is the actionable part of it.
+
+Read what an image carries:
 
 {% raw %}
 ```sh
@@ -150,6 +230,53 @@ docker buildx imagetools inspect `
   --format '{{ json .Provenance }}'
 ```
 {% endraw %}
+
+### Code analysis
+
+Security hotspots in the code itself — as opposed to vulnerabilities in what
+an image ships — are reported by SonarCloud, one project per component. They
+appear on that service's dashboard and in its check on the pull request, not
+in the security tab.
+
+Hotspots are reported and not gated: a hotspot is a place to review rather
+than a finding. The quality gate's verdict IS gated — the scan step waits on
+it and fails the component's job, which reports through the required check.
+
+### The fixing loop's push credential
+
+`review-dispatch.yml` fixes review findings and SonarCloud issues on a pull
+request its owner has labelled `conveyor:fix` (the renamed `autofix`). The step
+that writes a fix runs a model under a read-only token and holds no other
+secret.
+
+That step accepts a run started by one bot, `github-actions`, and no other,
+because a carried `conveyor:fix` round is dispatched by this repository's own
+workflow. The gate before it has already re-read the standing instruction the
+bot relayed, and refused the run without one. The archive station is a session
+started the same way, and a person still merges what it opens.
+
+The model-free step after it pushes the commit through a WRITE DEPLOY KEY
+(`AUTOFIX_DEPLOY_KEY`), repository-scoped and `contents` only, because a push
+made with the workflow token starts no workflow and a `workflow_dispatch`
+run's checks never reach the merge box. It is read by that one job alone.
+
+What crosses between the two is a patch cut by a program read from the base
+branch, never from the pull request.
+
+- It carries every change to a tracked file.
+- A new file crosses only where the model's report declares it.
+- Anything else the model left in the checkout is deleted before the cut and
+  named on the pull request.
+
+What that key can do is push to a branch of this repository. It cannot
+approve, merge, resolve a review thread, or change anything in SonarCloud.
+
+The label is the only thing that makes the job run. Only a person with write
+access can place it directly.
+
+A workflow may also carry it forward on their behalf. It RE-CHECKS their
+standing instruction still stands and still has write access, on the issue it
+opened from, every time.
 
 ### Context isolation
 
@@ -201,6 +328,15 @@ claim that the rest is handled too.
 | **Context isolation a runtime does not get** | a runtime declaring no context paths mounts the whole shared context volume into its agent container |
 | **Conversation content in pod logs** | the runtime writes what the agent produced to its pod's stdout |
 | **Signing and attestation** | no image is signed, and the chart carries no attestation |
+| **Depth in a coordination** | a tree of agents invoking agents nests as deep as every level's own budget allows — nothing bounds the number of LEVELS, only a repeated Coordinator is refused |
+| **A member's consent boundary is a prompt, not a gate** | An instruction tells an invoked member not to act past its task, and nothing checks it at `/coordinate/invoke` |
+
+**The consent boundary is the agent honoring an instruction.** The manager
+enforces WHO may be invoked, never WHAT the invoked agent then does with the
+task.
+
+Several rounds of prompt tuning, reverted twice, preceded the current wording
+(#296). It is stated as open rather than assumed solid.
 
 **None of this is a surprise to the project.** These are decisions with reasons,
 and the reasons are in

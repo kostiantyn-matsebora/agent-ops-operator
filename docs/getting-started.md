@@ -9,7 +9,7 @@ next:
   eyebrow: Next
   title: The screen you are looking at
   body: >-
-    A tour of the console's six views, what each one answers, and the one
+    A tour of the console's five views, what each one answers, and the one
     decision to make before you let anyone else reach it.
   url: /agent-ops-operator/console/
 ---
@@ -18,35 +18,23 @@ Install the operator and get your first question answered, in the console. About
 fifteen minutes, most of it the install.
 
 {: .ao-callout}
-> **A demo, not a deployment.** It exists to show you the product quickly. Do
-> not build on it — [Installation]({{ '/installation/' | relative_url }}) is the
-> real one.
+> **This is a demo, not a deployment**
 >
-> The agent is **read-only** and cannot change your cluster. Three walls, not
-> one: the MCP server runs `--read-only`, its identity holds only `view`, and
-> the route grants observing tools alone.
+> It shows you the product in fifteen minutes, and
+> [Installation]({{ '/installation/' | relative_url }}) is the one to build on.
+>
+> **The agent is read-only and cannot change your cluster**
+>
+> Three walls, not one:
+>
+> - the MCP server runs `--read-only`
+> - its identity is granted reads and nothing else
+> - the route grants observing tools alone
 
 ## Before you begin
 
 - A cluster you can `kubectl` into, and Helm.
 - A model credential — a Claude subscription token or an Anthropic API key.
-
-**Storage. Nothing to decide.** A conversation's accumulated context lives on a
-claim the chart creates, and demo mode asks for `ReadWriteOnce` — which is what
-`local-path` provides, the only storage class rancher-desktop, k3d, kind and
-minikube ship.
-
-So the demo remembers. Follow-ups in a thread keep their context on a laptop
-cluster exactly as they do on a real one.
-
-**A real install asks for `ReadWriteMany` instead**, because runtime pods land
-wherever the scheduler puts them and every one of them mounts this volume — see
-[Installation]({{ '/installation/' | relative_url }}).
-
-**No storage at all?** `--set persistence.context.enabled=false` runs the demo
-against `emptyDir`. Everything works — agents run, answer and deliver — but
-every run starts fresh, and the operator says so up front rather than failing a
-follow-up later.
 
 ## Install
 
@@ -71,7 +59,7 @@ follow-up later.
    ```
 
 2. **Install the chart.** The flag brings up
-   [the Kubernetes bundle](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md),
+   [the Kubernetes integration]({{ '/integrations/kubernetes/' | relative_url }}),
    wired to the console. The token is just to sign in — pick a real one outside
    a laptop.
 
@@ -91,6 +79,16 @@ follow-up later.
      --set console.auth.uiToken=demo
    ```
 
+   {: .ao-callout}
+   > **Demo mode's own default.** Left unset, demo mode resolves
+   > `global.agentops.wiringMode` to `coordinator`: a chart-rendered
+   > `Coordinator` claims the console's source and channel on its own, plus a
+   > second, plain `Pipeline` (`k8s-observe-pipeline`) claiming the same
+   > sources — so this walkthrough exercises both of the product's wiring
+   > primitives at once. See
+   > [Coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }})
+   > for what the `Coordinator` adds beyond this.
+
 3. **Wait for the manager.**
 
    ```sh
@@ -100,28 +98,6 @@ follow-up later.
    ```powershell
    kubectl -n agent-ops rollout status deploy/agentops-manager
    ```
-
-Four objects matter here:
-
-| Object | What it is |
-|---|---|
-| `SignalSource/console` | where your questions enter |
-| `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
-| `Pipeline/k8s-observe` | the wiring: those sources, that profile, a read-only toolset |
-| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
-
-**THE AGENT HAS NO KUBERNETES PERMISSIONS OF ITS OWN.** The route runs as an
-account bound to nothing, and demo mode does not change that.
-
-It reads your cluster through the bundle's **MCP server**, which carries its own
-ServiceAccount and its own read-only grant. Two identities, each reviewable
-alone — and the reason a one-flag demo is not a one-flag privilege grant.
-
-{: .ao-callout}
-> **If you turn off the `claude` bundle without declaring a replacement, the
-> render FAILS**, naming the missing `default` runtime and the routes that
-> resolve to it. That is deliberate: the alternative is an install whose
-> conversations sit in `Pending` forever with the reason in the manager's log.
 
 ## Ask it something
 
@@ -137,13 +113,37 @@ alone — and the reason a one-flag demo is not a one-flag privilege grant.
 
 2. **Open <http://localhost:8080>** and sign in with `demo`.
 
-3. **Press New conversation** and ask:
+3. **Press New conversation** and address one by name:
 
-   > How many nodes does this cluster have?
+   > /agentops-coordinator How many nodes does this cluster have?
 
-No special API is involved. Your question is an ordinary signal, and the route
-claiming the console decides who answers
-([contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md)).
+   Two routes claim the console's source — the chart-rendered `Coordinator`
+   and the showcase `Pipeline` — so an unaddressed message would show a
+   choice list instead of answering. Addressing one by name skips it. Try
+   the showcase route too:
+
+   > /k8s-observe-pipeline How many nodes does this cluster have?
+
+   Both answer from the same read-only toolset. The `Coordinator` always
+   decides which of its own `agents[]` to invoke first, even with only one
+   enabled bundle. The `Pipeline` answers directly, in its own thread, every
+   time.
+
+## What you just installed
+
+That answer came from objects the chart created:
+
+| Object | What it is |
+|---|---|
+| `SignalSource/console` | where your questions enter |
+| `AgentProfile/k8s-engineer` | who the agent is. Behaviour only, no tools and no runtime |
+| `AgentCapability/k8s-observe` | the coordinator-mode wiring: those sources, that profile, a read-only toolset, gathered under the `Coordinator`'s own `agents[]` |
+| `Pipeline/k8s-observe-pipeline` | the SAME route rendered a second time, as a plain `Pipeline` — demo mode's showcase of the simpler primitive |
+| `Coordinator/agentops-coordinator` | the orchestrator every enabled bundle's capability is gathered under |
+| `AgentRuntime/default` | the image it runs in, and the credential it uses. It comes from the `claude` bundle, which is on by default |
+
+Neither route has permissions of its own — both read your cluster through the
+bundle's read-only MCP server.
 
 ## What a good run looks like
 
@@ -157,9 +157,8 @@ console:
 
 The answer lands in the thread. Follow-ups in the same thread keep their context.
 
-**It opens with the conclusion.** A long answer arrives as a title, a few named
-sections, and the detail behind a control you expand — the profile declares
-`outputFormat: blocks`, and every surface renders that shape its own way.
+**It opens with the conclusion**, then a few named sections, with the long
+detail behind a control you can expand.
 
 From the outside:
 
@@ -195,8 +194,7 @@ exits on the idle TTL.
 | Cause | Where it shows |
 |---|---|
 | Bad or missing credential | the run fails — `status.runs[].status: failed`, non-zero exit code, reason in `kubectl logs` |
-| No storage provisioner at all | the `agentops-context` PVC sits `Pending` with no events. The conversation exists but never gets a pod. Install with `--set persistence.context.enabled=false` |
-| A pre-created volume that will not bind | the `agentops-context` PVC sits `Pending` too, and it looks identical. Different cause: a claim naming a volume must also name the right storage class. `kubectl describe pvc agentops-context` tells the two apart — `VolumeMismatch: storageClassName does not match` means the class is wrong, no event at all means there is no provisioner. For a volume you created by hand use `persistence.context.storageClassName: "-"`. For one RETAINED from an earlier release, name the class the PV already carries — a dynamically provisioned volume keeps it forever |
+| No storage provisioner | the `agentops-context` PVC sits `Pending` and no pod is created. Reinstall with `--set persistence.context.enabled=false` |
 | Nothing claims the source | the source's `Wired` condition is `False` with a reason. The console reports its composer unavailable, and signals are dropped |
 | At capacity | phase `Pending`, no pod, no thread. Five run at once by default |
 
@@ -208,10 +206,10 @@ exits on the idle TTL.
 - **[Introduction]({{ '/introduction/' | relative_url }})** — the model behind
   what you just did, and the rest of the guides.
 - **A real lane** —
-  [cluster events](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/kubernetes.md),
-  [Prometheus alerts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/prometheus.md),
-  [Telegram](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/telegram.md),
-  [Home Assistant](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/home-assistant.md).
+  [cluster events]({{ '/integrations/kubernetes/' | relative_url }}),
+  [Prometheus alerts]({{ '/integrations/prometheus/' | relative_url }}),
+  [Telegram]({{ '/integrations/telegram/' | relative_url }}),
+  [Home Assistant]({{ '/integrations/home-assistant/' | relative_url }}).
 - **[Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)**
   and **[the CR reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md)**
   — every kind, every field, and how tool access resolves.

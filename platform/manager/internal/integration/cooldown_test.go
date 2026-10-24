@@ -52,7 +52,7 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 
 	before := apiServer()
 	rec := postSignal(t, before.Handler(), testMasterToken, "src-cool", []map[string]any{{
-		"fingerprint": "cool-1", "labels": map[string]string{"alertname": "Flapping", "namespace": "prod"},
+		"initiationId": "cool-1", "labels": map[string]string{"alertname": "Flapping", "namespace": "prod"},
 		"payload": "first sighting",
 	}})
 	if rec.Code != 200 {
@@ -63,8 +63,8 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 	}
 
 	src := loadSource(t, "src-cool")
-	if len(src.Status.Cooldown) != 1 || src.Status.Cooldown[0].Fingerprint != "cool-1" {
-		t.Fatalf("an admitted fingerprint must be recorded on the source, got %+v", src.Status.Cooldown)
+	if len(src.Status.Cooldown) != 1 || src.Status.Cooldown[0].InitiationID != "cool-1" {
+		t.Fatalf("an admitted initiationId must be recorded on the source, got %+v", src.Status.Cooldown)
 	}
 	if src.Status.Cooldown[0].At.IsZero() {
 		t.Fatal("a recorded suppression needs its timestamp — the window runs from it")
@@ -74,7 +74,7 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 	// and the whole design rests on it staying free.
 	recorded := loadSource(t, "src-cool").ResourceVersion
 	rec = postSignal(t, before.Handler(), testMasterToken, "src-cool", []map[string]any{{
-		"fingerprint": "cool-1", "payload": "same alert again",
+		"initiationId": "cool-1", "payload": "same alert again",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("re-delivery: %d %s", rec.Code, rec.Body.String())
@@ -86,7 +86,7 @@ func TestCooldownIsRecordedAndSurvivesARestart(t *testing.T) {
 	// Restart: the new process rebuilds the window by reading the source.
 	after := apiServer()
 	rec = postSignal(t, after.Handler(), testMasterToken, "src-cool", []map[string]any{{
-		"fingerprint": "cool-1", "payload": "still firing after the restart",
+		"initiationId": "cool-1", "payload": "still firing after the restart",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("post-restart delivery: %d %s", rec.Code, rec.Body.String())

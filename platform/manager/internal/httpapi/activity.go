@@ -28,6 +28,8 @@ import (
 // standard way to stay under that.
 const streamKeepAlive = 20 * time.Second
 
+const errActivityDisabled = "activity telemetry is disabled"
+
 // activityResponse is the replay envelope. `resync` is the load-bearing field:
 // a client whose cursor has been evicted is TOLD so, rather than handed a
 // shorter list it would mistake for continuity.
@@ -39,9 +41,17 @@ type activityResponse struct {
 
 func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	if s.Activity == nil {
-		writeJSON(w, 503, map[string]string{"error": "activity telemetry is disabled"})
+		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
+	// leaderProxyMiddleware already tried proxying this to the leader — the
+	// activity log is a per-process ring buffer (hardcode-manager-replicas'
+	// gotcha), and a hop the RECONCILER emitted only ever lands in the
+	// LEADER's own buffer, since reconciliation is leader-elected. Reaching
+	// this line means that attempt failed (or this replica IS the leader),
+	// so — unlike /channel/ops — serve from THIS replica's own buffer rather
+	// than refuse: a partial view is strictly better than none for
+	// telemetry.
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	events, resync := s.Activity.Since(r.URL.Query().Get("since"), limit)
 	if events == nil {
@@ -56,9 +66,16 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 	if s.Activity == nil {
-		writeJSON(w, 503, map[string]string{"error": "activity telemetry is disabled"})
+		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
+	// Same reasoning as handleActivity: leaderProxyMiddleware already tried
+	// the leader. httputil.ReverseProxy flushes text/event-stream writes
+	// immediately (stdlib default since Go 1.20), so when that attempt DOES
+	// succeed the SSE stream relays live, not batched — ServeHTTP blocks for
+	// as long as the leader keeps the connection open, exactly as a direct
+	// dial would. Reaching this line means it didn't, so this replica serves
+	// its own buffer instead.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
@@ -150,9 +167,14 @@ type reportedEvent struct {
 // graph through manager-side events; it simply never confirms delivery.
 func (s *Server) handleActivityReport(w http.ResponseWriter, r *http.Request) {
 	if s.Activity == nil {
-		writeJSON(w, 503, map[string]string{"error": "activity telemetry is disabled"})
+		writeJSON(w, 503, map[string]string{"error": errActivityDisabled})
 		return
 	}
+	// Same reasoning as the two read endpoints above, for the write side: a
+	// report landing on a non-leader's own buffer would never reach a reader
+	// proxied (or pinned) to the leader. leaderProxyMiddleware already tried
+	// forwarding this to the leader; recording it HERE when that fails is
+	// still strictly better than dropping the report.
 	scope, _ := r.Context().Value(adapterScopeKey{}).(string)
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var in reportedEvent

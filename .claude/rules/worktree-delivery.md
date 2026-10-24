@@ -2,51 +2,19 @@
 
 **ONE SESSION, ONE CHANGE, ONE WORKTREE, ONE BRANCH, ONE PULL REQUEST.**
 
-`session-naming.md` already names a session `<phase> <change>`. This is the
-other half: the session also OWNS a working copy, and that is what makes
-branching safe here.
+A session named `<phase> <change>` (`session-naming.md`) OWNS a working
+copy — own HEAD, own files, own index. Sharing one checkout once let a
+cleanup in one session delete another's unstaged work.
 
-### THE SHARED WORKING COPY WAS THE DEFECT. IT COST WORK TWICE
-
-Several sessions run this repository at once. While they shared one checkout
-they shared one HEAD **and one set of files**:
-
-| Date | What happened |
-|---|---|
-| 2026-08-23 | a session created a branch, a concurrent session's commit landed on it, the branches diverged, `--ff-only` refused, the fix was cherry-picked back |
-| 2026-08-24 | a session cleaned the tree and **deleted another session's entire unstaged change directory** — four artifacts, no branch and no stash to recover from |
-
-- **The old rule — commit straight to `master`, never branch — contained the
-  first and not the second.** It is RETIRED, and the history is kept because the
-  argument was correct under the conditions that produced it: anyone who meets
-  one shared checkout again will re-derive it.
-- **A worktree removes the CAUSE.** Own HEAD, own files, own index.
-
-### PLACEMENT IS FORCED, NOT PREFERRED
+A remote session's clone IS that same isolation, in place on
+`change/<name>`. NEVER `git worktree add` there (`remote-session.md`).
 
 ```
 ../agent-ops-worktrees/<change>/        branch: change/<change>
 ```
 
-**A worktree INSIDE the repository breaks two things that read the tree, and
-both fail silently:**
-
-| Reader | Breaks how |
-|---|---|
-| `.github/components.sh` | it finds components with `find . -name go.mod -mindepth 2` and `find . -name Dockerfile`, so a second copy reports **26** components and hands every CI matrix twice the work, publishing under names that describe nothing |
-| `structure.md`'s standing test | `find . -type d -name docs` must return ONE line |
-
-- **That test needs `-not -path '*/node_modules/*'` to be run honestly**, exactly
-  as `components.sh` does. An installed console tree carries five vendored
-  `docs/` directories, so the bare command already returns six and a worktree
-  would be lost in the noise rather than caught by it.
-- **`.gitignore` does not help.** `find` does not read it. An ignore entry makes
-  the copy invisible to `git status` and leaves it visible to everything that
-  actually breaks.
-- **The tell is a matrix that grew**, which reads as a new component rather than
-  as a working copy.
-
-### THE COMMANDS OWN THE LIFECYCLE
+A worktree INSIDE the repo silently breaks `components.sh`'s component
+count and `structure.md`'s one-`docs/` test. `.gitignore` doesn't help.
 
 | Command | Does |
 |---|---|
@@ -60,52 +28,94 @@ git worktree remove ../agent-ops-worktrees/<name>      # after archive
 git worktree list                                      # what is in flight
 ```
 
-### THE MERGE IS A SQUASH, AND THE TITLE IS THE SUBJECT
+**THE MERGE IS A SQUASH. THE PR TITLE BECOMES THE COMMIT SUBJECT** (CI checks
+the commit-convention format) — one change, one `git log --oneline` line.
+`change/<name>` is the only record of which openspec change a PR belongs to.
 
-**One change is ONE line of `git log --oneline`**, which `CONTRIBUTING.md` says
-is meant to read as an account of the project.
+**ARCHIVE INSIDE THE PULL REQUEST, ON THE BRANCH, BEFORE MERGE** — so the diff
+shows the contract changing.
 
-- **The pull request TITLE becomes the commit subject**, so it obeys the commit
-  convention — `type(scope): what it does, as a sentence`. A CI check enforces
-  that, because a title is the one field nobody proofreads.
-- **A merge commit adds a line describing nothing.** A rebase of the working
-  history adds twenty describing the writing rather than the change.
+The archive PR must say `Closes #<n>`. Every earlier PR of that change
+must say `Refs #<n>` (a `Closes` on a proposing/applying PR is refused).
+`/opsx:archive` is refused while a round is running or a dispute is
+unanswered.
 
-### THE BRANCH IS THE STATEMENT OF PROVENANCE
+**BRANCH PROTECTION'S ONLY STATUS CHECK IS `ci-green`.** Every real gate
+reports through its `needs:`. The one exception is conversation
+resolution — evaluated LIVE at merge time, not a job, so an open review
+thread blocks the merge without racing replies.
 
-`change/<name>` names the change, so **nothing asks for it again**. The pull
-request template does not carry a "which openspec change" field, and anything
-needing the name reads the branch.
+### The review and the fixing loop
 
-### ARCHIVE INSIDE THE PULL REQUEST
+`claude-review.yml` posts findings as threads. An open one blocks the merge.
 
-`openspec archive` folds the delta specs into `openspec/specs/`, so doing it on
-the branch means **the diff shows the contract changing** — which is what a
-reviewer of this project should be looking at, since `openspec/specs/` is the
-answer to "is this behaviour intended".
+`queue` marks each path READ/CARRIED. `read` builds and reads each
+component blind, one `claude -p` per file. `consolidate` (the only poster)
+folds blind findings against open/dismissed/fixed threads. `reconcile`
+resolves recorded threads, failing on nothing else. Nothing the review
+runs comes from the PR — scripts/prompts restore from the BASE branch.
 
-- **Archiving on `master` after the merge was rejected**: the spec change would
-  reach the published contract reviewed by nobody, and it puts direct commits
-  back on the default branch in the one change meant to stop them.
-- **Cost, accepted:** an archive commit that must reflect review feedback needs
-  an amend or a follow-up commit on the branch.
+| You type | Where | Means |
+|---|---|---|
+| `fix it` (or `.github/review-triage.json`) | a finding's thread | ACCEPTED |
+| `/fix-accepted` | a PR comment | DISPATCH — fixes everything accepted |
+| resolve it yourself | the thread | dismissed, not raised again |
+| `conveyor:fix` | a PR | fix every finding/Sonar issue/failed check, round after round |
+| `conveyor:run` | an issue | STANDING: implement → mergeable → archive |
+| `conveyor:implement` / `conveyor:archive` | issue | one station each |
+| `station:<x>` / `loop:<x>` | issue/PR | STATE only, set by the workflow |
+| `conveyor:keep-going` | a capped PR | one more set of rounds |
 
-### THE GATES ARE ALREADY REQUIRED — THROUGH ONE CHECK
+**A PROGRAM MAY CARRY A GRANT FORWARD OR CONSUME ONE.
 
-Branch protection names **`ci-green`** and nothing else. Every real gate reports
-through it, so **adding a required gate is a line in that job's `needs:`**, never
-a settings change somebody has to remember.
+IT MAY NEVER MINT ONE.** A label is placed by a write-access person, or
+CARRIED by `carry.py`, re-checked at every start (#201). A session opens
+its own PRs unlabelled.
 
-That is what `continuous-integration`'s always-present-check requirement is for:
-a protection rule names a check by NAME, and a job skipped for untouched paths
-never reports that name.
+Dispatch is a trigger, not an instruction — the work list comes from the
+threads, and only write access may dispatch.
 
-### WHAT THE MAIN CHECKOUT IS STILL FOR
+The model never pushes — a model-free job applies the patch via a scoped
+deploy key, resolving threads only where it landed. New files land only
+where the report declares them (#243).
 
-Reading, reviewing, and work with no change behind it — a typo, a broken link.
+Every failed required check is a work item (read from `ci-green`'s
+`needs:`). The fixer reproduces and re-runs each before patching, disputing
+what the tree doesn't explain, and re-runs an unexplained red every round
+the budget allows before asking anyone.
 
-- **A `PreToolUse` hook refuses a commit there that belongs to a change owning a
-  branch**, and FAILS OPEN on anything it cannot read. A hook that blocks work it
-  does not understand gets disabled, and then it enforces nothing.
-- **The CI check is what makes failing open safe**, by asserting the same
-  decision where it cannot be skipped.
+`max_rounds` (default 5) is bounded, a round changing nothing ends it
+early. A carried round runs as `github-actions` only.
+
+A person's comment — never a check — restarts a waiting round, and a
+15-minute sweep catches a resolved thread (fires no event).
+
+A failed fix is UNADDRESSED, not a dispute. SonarCloud is the second
+required reviewer. `/opsx:archive` is refused while any of this is open.
+
+### `conveyor.py` decides. Nothing else does
+
+One pure function, facts in, a `Decision` out — ten places once disagreed
+(#248/254/255) with the rule copied into several scripts.
+
+| Decision | Asked by |
+|---|---|
+| `standing_grant`, `carry_fix`, `carry_archive` | `carry.py` |
+| `fire` | `remote-implement.py` |
+| `gate`, `round_may_start` | `dispatch-gate.py` |
+| `ending`, `check_is_work`, `cap_for` | `land-dispatch.py`, `failed-checks.py` |
+| `guard` | the archive hook |
+
+State labels are written only by the event that earns them, never a
+caller-supplied value. A table test walks every state against every event.
+
+`conveyor:run` stands for every station, and `conveyor:archive` also stands
+for the fix station of a `Closes #<n>` PR. Unreadable facts fail CLOSED
+(told a session is at work).
+
+### The main checkout
+
+Still for reading, reviewing, and work with no change behind it. A
+`PreToolUse` hook refuses a commit there that belongs to a branch-owning
+change, failing OPEN on anything unreadable — CI asserts the same decision
+where the hook can't be skipped.

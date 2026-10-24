@@ -78,19 +78,15 @@ func TestARouteKeepsItsOwnVolumeWhereTheReleaseHasNone(t *testing.T) {
 // volumes — and the runtime is in no part of the answer, so it cannot appear.
 func TestTwoRoutesOnOneRuntimeResolveDifferently(t *testing.T) {
 	defaults := Config{ContextPVC: "agentops-context"}
-	observe := &agentopsv1alpha1.Pipeline{}
-	observe.Name = "observe"
-	observe.Spec.Persistence = &agentopsv1alpha1.PipelinePersistence{
+	observePersistence := &agentopsv1alpha1.PipelinePersistence{
 		Context: &agentopsv1alpha1.PersistenceBinding{ClaimName: "observe-context"},
 	}
-	act := &agentopsv1alpha1.Pipeline{}
-	act.Name = "act"
-	act.Spec.Persistence = &agentopsv1alpha1.PipelinePersistence{
+	actPersistence := &agentopsv1alpha1.PipelinePersistence{
 		Context: &agentopsv1alpha1.PersistenceBinding{VolumeName: "pv-act"},
 	}
 
-	oCtx, _ := ResolvePersistence(observe, defaults)
-	aCtx, _ := ResolvePersistence(act, defaults)
+	oCtx, _ := ResolvePersistence("observe", observePersistence, defaults)
+	aCtx, _ := ResolvePersistence("act", actPersistence, defaults)
 	if oCtx != "observe-context" {
 		t.Fatalf("observe context = %q", oCtx)
 	}
@@ -103,12 +99,10 @@ func TestTwoRoutesOnOneRuntimeResolveDifferently(t *testing.T) {
 // default rather than dragging it along.
 func TestTheVolumesResolveIndependently(t *testing.T) {
 	defaults := Config{ContextPVC: "agentops-context", WorkspacePVC: "agentops-workspace"}
-	p := &agentopsv1alpha1.Pipeline{}
-	p.Name = "route"
-	p.Spec.Persistence = &agentopsv1alpha1.PipelinePersistence{
+	persistence := &agentopsv1alpha1.PipelinePersistence{
 		Workspace: &agentopsv1alpha1.PersistenceBinding{ClaimName: "route-workspace"},
 	}
-	ctxClaim, wsClaim := ResolvePersistence(p, defaults)
+	ctxClaim, wsClaim := ResolvePersistence("route", persistence, defaults)
 	if ctxClaim != "agentops-context" {
 		t.Fatalf("context = %q, want the release default", ctxClaim)
 	}
@@ -120,7 +114,7 @@ func TestTheVolumesResolveIndependently(t *testing.T) {
 // A conversation with no Pipeline behind it takes the release defaults, which
 // is exactly what it did before this field existed.
 func TestNoPipelineTakesTheReleaseDefaults(t *testing.T) {
-	ctxClaim, wsClaim := ResolvePersistence(nil,
+	ctxClaim, wsClaim := ResolvePersistence("", nil,
 		Config{ContextPVC: "agentops-context", WorkspacePVC: "agentops-workspace"})
 	if ctxClaim != "agentops-context" || wsClaim != "agentops-workspace" {
 		t.Fatalf("ResolvePersistence(nil) = %q, %q", ctxClaim, wsClaim)

@@ -72,8 +72,14 @@ const deliverySection = "Your final printed answer IS the deliverable — it is 
 // that is — the runtime is the only component holding the repository, so it
 // needs the name to find the file.
 type WorkUnit struct {
-	RunID    string  `json:"runId"`
-	Convo    string  `json:"convo"`
+	// RunID is a unique id for this unit, echoed back in the completion
+	// report.
+	RunID string `json:"runId"`
+	// Convo is the Conversation this unit belongs to.
+	Convo string `json:"convo"`
+	// ThreadID is the bound channel's thread id, present only for a
+	// conversation bound to exactly one channel. The runtime never posts to
+	// it -- the manager delivers to every bound channel after the report.
 	ThreadID *string `json:"threadId,omitempty"`
 	// RuntimeContextID is the runtime's OWN handle for this conversation's
 	// accumulated context, echoed back from the last run. Continue that context,
@@ -83,22 +89,34 @@ type WorkUnit struct {
 	// Empty means "start fresh, nothing is being continued", which is also what
 	// a deployment that cannot carry context sends every time, deliberately.
 	RuntimeContextID string `json:"runtimeContextId,omitempty"`
-	// ResumeSessionID is the former name of RuntimeContextID, sent alongside it
-	// for ONE release so a runtime image can be upgraded independently of the
-	// manager. Runtimes must read RuntimeContextID.
+	// ResumeSessionID is the former name of `runtimeContextId`, sent alongside
+	// it for ONE release so a runtime image can be upgraded independently of
+	// the manager. Runtimes must read `runtimeContextId`.
 	//
 	// DEPRECATED.
-	ResumeSessionID string            `json:"resumeSessionId,omitempty"`
-	PromptFile      string            `json:"promptFile,omitempty"` // repo-relative; the runtime renders PromptVars
-	PromptText      string            `json:"promptText,omitempty"` // fully rendered by the manager
-	PromptVars      map[string]string `json:"promptVars,omitempty"`
-	Agent           string            `json:"agent,omitempty"`
+	ResumeSessionID string `json:"resumeSessionId,omitempty"`
+	// PromptFile is a repo-relative path to render, when the profile
+	// supplies its own prompt file. The runtime renders PromptVars into it.
+	PromptFile string `json:"promptFile,omitempty"`
+	// PromptText is the fully rendered prompt, when the manager rendered it
+	// from a built-in template. Exactly one of PromptFile/PromptText is set.
+	PromptText string `json:"promptText,omitempty"`
+	// PromptVars is the set of template variables rendered into `promptFile`.
+	PromptVars map[string]string `json:"promptVars,omitempty"`
+	// Agent is the agent definition's name, for the runtime to resolve from
+	// the checked-out repository.
+	Agent string `json:"agent,omitempty"`
 	// SystemPrompt is inline role text the runtime APPENDS to the agent's
 	// system prompt. Identity only — it never affects the allowlist.
 	SystemPrompt string `json:"systemPrompt,omitempty"`
+	// AllowedTools is the wiring's half of the tool allowlist,
+	// comma-separated.
 	AllowedTools string `json:"allowedTools,omitempty"`
-	ToolsMode    string `json:"toolsMode,omitempty"`
-	MaxTurns     int32  `json:"maxTurns,omitempty"`
+	// ToolsMode is "merge" or "overwrite", directing how `allowedTools`
+	// composes with the agent definition's own declared tools.
+	ToolsMode string `json:"toolsMode,omitempty"`
+	// MaxTurns is the profile's turn budget for this run, when set.
+	MaxTurns int32 `json:"maxTurns,omitempty"`
 }
 
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).

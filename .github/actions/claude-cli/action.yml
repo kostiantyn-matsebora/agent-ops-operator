@@ -1,0 +1,104 @@
+# THE MODEL'S TOOLING, PINNED, CACHED, AND WHAT IT READS TAKEN FROM THE BASE.
+#
+# Every job of the review that runs a model uses this and nothing else to get
+# a `claude` on the path — so the VERSION is written once, here, and the
+# install is served from the cache keyed on it. The unpinned
+# `npm install -g @anthropic-ai/claude-code` it replaces resolved "latest" on
+# every run: uncacheable by definition, and the review's toolchain changing
+# under it without a commit.
+#
+# THE RESTORE LIVES HERE TOO. A pull request may not rewrite the thing that
+# judges it: the role files a model reads are taken from the BASE branch before
+# the model runs. Both model jobs need that, and each carrying the loop would
+# be two places for it to rot. The caller restores THIS FILE the same way, in a
+# step before `uses:` resolves it — a composite is a file in the checkout, so
+# it is as editable by a pull request as the roles are.
+name: Claude CLI
+description: >
+  Installs a pinned @anthropic-ai/claude-code from the cache (npm on a miss),
+  asserts the version, and restores the named files from the base branch so a
+  pull request cannot rewrite the review that judges it.
+
+inputs:
+  version:
+    description: >
+      The @anthropic-ai/claude-code version to install. The default is THE ONE
+      PLACE the version is written; bump it here and every model job moves.
+    required: false
+    default: "2.1.247"
+  base-ref:
+    description: >
+      The base branch, as a ref git can resolve (e.g. origin/master). The
+      files in `restore` are checked out from it.
+    required: true
+  restore:
+    description: >
+      Paths to restore from the base branch, one per line. A path the base
+      does not have is left as the checkout has it — the pull request that
+      introduces a file is the one case, and the workflow file's own guard
+      covers it.
+    required: false
+    default: ""
+
+outputs:
+  restored:
+    description: The restored paths whose base copy differed from the checkout's, space-separated. Empty when none did.
+    value: ${{ steps.restore.outputs.restored }}
+
+runs:
+  using: composite
+  steps:
+    # A DETERMINISTIC, USER-OWNED PREFIX. The runner's default global prefix
+    # is root-owned and differs by image; caching it would cache a path that
+    # the next runner does not have. `~/.npm-global` is the same everywhere.
+    - shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.npm-global"
+        npm config set prefix "$HOME/.npm-global"
+        echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
+
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm-global
+        key: claude-cli-${{ inputs.version }}-${{ runner.os }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        npm install -g "@anthropic-ai/claude-code@${VERSION}" >/dev/null
+
+    # A CACHE THAT RESTORED THE WRONG THING FAILS HERE, not three minutes
+    # later inside a review nobody can tell was run by a different version.
+    - shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        got=$(claude --version)
+        case "$got" in
+          *"$VERSION"*) echo "claude $got" ;;
+          *) echo "::error::expected claude ${VERSION}, got: ${got}"; exit 1 ;;
+        esac
+
+    - id: restore
+      shell: bash
+      env:
+        BASE: ${{ inputs.base-ref }}
+        RESTORE: ${{ inputs.restore }}
+      run: |
+        set -euo pipefail
+        restored=""
+        while IFS= read -r f; do
+          [ -n "$f" ] || continue
+          # A file the base does not have yet cannot be restored from it.
+          git cat-file -e "$BASE:$f" 2>/dev/null || continue
+          if ! git diff --quiet "$BASE" -- "$f"; then restored="$restored $f"; fi
+          git checkout "$BASE" -- "$f"
+        done <<< "$RESTORE"
+        echo "restored=${restored# }" >> "$GITHUB_OUTPUT"
+        [ -z "$restored" ] || echo "restored from $BASE:$restored"

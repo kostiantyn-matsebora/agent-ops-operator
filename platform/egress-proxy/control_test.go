@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // managerSide answers one /work long-poll with the given unit, and records what
@@ -26,9 +27,9 @@ func managerSide(t *testing.T, unit string) (net.Conn, chan string) {
 			got <- req.URL.Path
 			resp := &http.Response{
 				StatusCode: 200, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
-				Request: req,
-				Header:  http.Header{"Content-Type": []string{"application/json"}},
-				Body:    io.NopCloser(strings.NewReader(unit)),
+				Request:       req,
+				Header:        http.Header{"Content-Type": []string{"application/json"}},
+				Body:          io.NopCloser(strings.NewReader(unit)),
 				ContentLength: int64(len(unit)),
 			}
 			_ = resp.Write(srv)
@@ -95,6 +96,50 @@ func TestOnlyTheWorkPathCarriesADecision(t *testing.T) {
 	}
 	if !isWorkPath("/work") {
 		t.Fatal("/work is the one path that carries a decision")
+	}
+}
+
+// A malformed work unit must not touch the policy at all — a corrupt body
+// silently clearing the allowlist would be worse than leaving the previous
+// grant in place. Every other learn() test uses a well-formed body, so the
+// json.Unmarshal error return was never taken.
+func TestMalformedWorkUnitLeavesThePolicyUntouched(t *testing.T) {
+	state := newPolicy()
+	state.set([]string{"mcp__kubernetes__pods_list"})
+	learn([]byte("not json at all"), state)
+	if !state.permits("mcp__kubernetes__pods_list") {
+		t.Fatal("a malformed unit must not clear or alter what was already granted")
+	}
+}
+
+// serveControl's non-keepalive exit was never taken — every other test sends
+// one request and lets the goroutine idle rather than ending the loop.
+func TestServeControlStopsOnConnectionClose(t *testing.T) {
+	unit := `{"id":"u1","allowedTools":"mcp__kubernetes__pods_list"}`
+	client, proxySide := pair(t)
+	upstream, seen := managerSide(t, unit)
+
+	state := newPolicy()
+	go serveControl(bufio.NewReader(proxySide), proxySide, upstream, state)
+
+	req, _ := http.NewRequest("GET", "http://manager:8080/work?convo=c1", nil)
+	req.Header.Set("Connection", "close")
+	go func() { _ = req.Write(client) }()
+	resp, err := http.ReadResponse(bufio.NewReader(client), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	if p := <-seen; p != "/work" {
+		t.Fatalf("forwarded path = %q", p)
+	}
+
+	// serveControl must have returned rather than looped again: a second
+	// request must never reach the manager side.
+	select {
+	case p := <-seen:
+		t.Fatalf("a second request reached the manager after Connection: close: %q", p)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

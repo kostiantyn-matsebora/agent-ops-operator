@@ -78,12 +78,25 @@ const MIME: Record<string, string> = {
   '.png': 'image/png', '.ico': 'image/x-icon',
 }
 
-/** The six views, in the order the page tours them. */
-const VIEWS = [
+/**
+ * The six views, in the order the page tours them — the topology three times,
+ * once per view of it. `pick` is the view toggle the capture presses once the
+ * page is ready, and the graph's own label is what it then waits for.
+ */
+const VIEWS: { file: string; path: string; ready: string; pick?: string }[] = [
   { file: 'overview', path: '/overview', ready: 'Installation' },
   { file: 'topology', path: '/topology', ready: 'k8s-observe' },
+  { file: 'topology-components', path: '/topology', ready: 'k8s-observe', pick: 'Components' },
+  { file: 'topology-infrastructure', path: '/topology', ready: 'k8s-observe', pick: 'Infrastructure' },
   { file: 'conversations', path: '/conversations', ready: 'checkout-api is restarting' },
   { file: 'conversation', path: '/conversations/cluster-events-7c1d4e', ready: 'OOM-killed' },
+  // The Incident tab, on the tree's root — one interleaved timeline, three
+  // members collapsed, one of which is itself a nested Coordinator's root
+  // (design D-G). Selected by URL, the same way every other view here is.
+  {
+    file: 'incident', path: '/conversations/incident-response-4a8f21?tab=incident',
+    ready: 'Coordinating triage and mitigation for the checkout-api 5xx spike.',
+  },
   { file: 'queues', path: '/queues', ready: 'Queues and capacity' },
   // The Pipelines inventory rather than the kind index: the tour asks "what is
   // wired to what", and a grid of object counts does not answer it.
@@ -310,6 +323,10 @@ test('captures every console view in both themes', async ({ browser }) => {
         await page.setViewportSize({ width: WIDTH, height: MIN_HEIGHT })
         await page.goto(`${harness.url}${view.path}`)
         await page.getByText(view.ready, { exact: false }).first().waitFor({ timeout: 30_000 })
+        if (view.pick) {
+          await page.getByRole('button', { name: view.pick, exact: true }).click()
+          await page.getByLabel(`topology graph, ${view.pick} view`).waitFor({ timeout: 30_000 })
+        }
         await page.waitForLoadState('networkidle')
         // Text metrics change when a web font lands, and the fonts are cold in
         // the first context — measuring the layout before they arrive is how a

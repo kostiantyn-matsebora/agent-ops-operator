@@ -12,7 +12,7 @@ import (
 // Conversation whose runtime pod cannot start emits a Warning event on that
 // pod; the event becomes a signal; the signal opens a Conversation; that
 // Conversation creates another runtime pod under a NEW name, and the cycle
-// repeats without bound. Nothing downstream catches it: the fingerprint is
+// repeats without bound. Nothing downstream catches it: the initiationId is
 // fresh (new pod name), the workload is fresh (the owner is the Conversation
 // CR), and even a correct liveness re-check passes it through because the pod
 // really is still broken. The conversation cap bounds concurrent pods and the
@@ -73,7 +73,9 @@ const ownLabelPrefix = "agentops.dev/"
 // wired in (mechanism 1 still works without it — that is its entire point).
 type selfExcluder struct {
 	// ownNamespace is the namespace this adapter runs in, injected as
-	// POD_NAMESPACE by ChannelAdapter/SignalAdapter kubernetesAccess.
+	// POD_NAMESPACE (a downward-API field) by the SignalAdapter reconciler on
+	// every adapter workload — it is not a permission, and does not depend on
+	// spec.serviceAccountName.
 	ownNamespace string
 	// cache answers the owner/label rule. Nil is valid and means only the
 	// name-prefix and namespace rules apply.

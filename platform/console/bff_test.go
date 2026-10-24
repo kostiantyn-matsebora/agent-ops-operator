@@ -194,7 +194,7 @@ func TestTopologyCarriesEveryKindAndCapabilityEdges(t *testing.T) {
 	for _, e := range out.Topology.Edges {
 		kinds[e.Kind]++
 	}
-	if kinds["uses"] < 2 {
+	if kinds["uses"] == 0 || kinds["runs-on"] == 0 {
 		t.Fatalf("capability + runtime edges missing: %+v", kinds)
 	}
 	if kinds["feeds"] == 0 || kinds["answers"] == 0 || kinds["posts"] == 0 || kinds["served-by"] == 0 {

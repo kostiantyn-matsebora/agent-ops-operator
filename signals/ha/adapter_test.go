@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -21,14 +22,29 @@ type statusReport struct {
 	Message string `json:"message"`
 }
 
+// contractInboundBound is docs/contracts/signal-adapter.md's bound on a
+// `POST /signal/inbound` body, restated here so the double does not borrow the
+// constant the code under test is held to.
+const contractInboundBound = 1 << 20
+
 type fakeManager struct {
 	srv *httptest.Server
 
-	mu      sync.Mutex
-	sources []SourceInfo
-	state   map[string]string
-	posted  []Signal
-	status  []statusReport
+	mu          sync.Mutex
+	sources     []SourceInfo
+	state       map[string]string
+	posted      []Signal
+	status      []statusReport
+	failInbound bool
+}
+
+// SetFailInbound makes /signal/inbound answer as an unreachable manager would,
+// so a test can exercise the post-failure and recovery reporting without a
+// real outage.
+func (m *fakeManager) SetFailInbound(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failInbound = v
 }
 
 func newFakeManager(t *testing.T, sources ...SourceInfo) *fakeManager {
@@ -41,11 +57,21 @@ func newFakeManager(t *testing.T, sources ...SourceInfo) *fakeManager {
 		_ = json.NewEncoder(w).Encode(m.sources)
 	})
 	mux.HandleFunc("/signal/inbound", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		fail := m.failInbound
+		m.mu.Unlock()
+		if fail {
+			http.Error(w, "manager unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		var in struct {
 			Source  string   `json:"source"`
 			Signals []Signal `json:"signals"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		// The contract's inbound body bound, enforced as the manager does: a
+		// batch over it is refused whole.
+		body := http.MaxBytesReader(w, r.Body, contractInboundBound)
+		if err := json.NewDecoder(body).Decode(&in); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
@@ -336,21 +362,44 @@ func TestHealthLadder(t *testing.T) {
 	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue",
 		location: "light.py:88", countAtOpen: 3}
 	key := ref.logger + "@" + ref.location
+	// The closing part of the window began at `since`; a record's Timestamp is
+	// its LATEST occurrence, in epoch seconds.
+	since := time.Date(2026, 8, 21, 12, 2, 0, 0, time.UTC)
+	before, after := float64(since.Add(-time.Minute).Unix()), float64(since.Add(30*time.Second).Unix())
 
 	cases := []struct {
 		name string
 		snap *healthSnapshot
 		want verdict
 	}{
-		{"no snapshot at all", nil, verdictUnknown},
+		{"no snapshot at all", nil, verdictUnreadable},
+		// A read failed through the close and left an older view in place:
+		// nothing about the closing part was observed, whatever it records.
+		{"stale snapshot", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 3}},
+			entries: map[string][]string{},
+			at:      since.Add(-time.Second),
+		}, verdictUnreadable},
 		{"config entry still failing", &healthSnapshot{
 			records: map[string]logRecord{key: {Count: 3}},
 			entries: map[string][]string{"hue": {"setup_retry"}},
 		}, verdictUnhealthy},
-		{"count rose during the window", &healthSnapshot{
-			records: map[string]logRecord{key: {Count: 5}},
+		{"count rose, still rising at the close", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 5, Timestamp: after}},
 			entries: map[string][]string{"hue": {"loaded"}},
 		}, verdictUnhealthy},
+		// It recurred, and then it stopped: a blip that healed. The loaded
+		// entry says recovered.
+		{"count rose early, quiet at the close, loaded", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 5, Timestamp: before}},
+			entries: map[string][]string{"hue": {"loaded"}},
+		}, verdictHealthy},
+		// Same blip, no predicate: the log alone cannot say, so rung 2 decides
+		// from the arrival timeline.
+		{"count rose early, quiet at the close, no predicate", &healthSnapshot{
+			records: map[string]logRecord{key: {Count: 5, Timestamp: before}},
+			entries: map[string][]string{},
+		}, verdictUnknown},
 		{"loaded and quiet", &healthSnapshot{
 			records: map[string]logRecord{key: {Count: 3}},
 			entries: map[string][]string{"hue": {"loaded"}},
@@ -375,11 +424,169 @@ func TestHealthLadder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Every case but the staleness ones reads a view taken inside the
+			// closing part, as the flusher's refresh guarantees in production.
+			if tc.snap != nil && tc.snap.at.IsZero() {
+				tc.snap.at = since.Add(time.Second)
+			}
 			a := adapterWithSnapshot(tc.snap)
-			if got := a.health(ref); got != tc.want {
+			if got := a.health(ref, since); got != tc.want {
 				t.Fatalf("health = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A snapshot taken before the window's closing part is the log becoming
+// unreadable mid-window: the flusher's refreshes failed and left the old view in
+// place. The one-off record it holds must emit (fail open), where the same
+// record against a fresh view is dropped as quiet — the live defect this pins
+// is an HA outage turning a still-failing record into silence.
+func TestStaleSnapshotFailsOpen(t *testing.T) {
+	opened := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	dwell := 3 * time.Minute
+	closeAt := opened.Add(dwell)
+	logger, location := "homeassistant.core", "core.py:1"
+	cases := []struct {
+		name     string
+		takenAt  time.Time
+		wantEmit bool
+	}{
+		{"fresh snapshot, no recurrence", closeAt.Add(-dwellTick), false},
+		{"stale snapshot, no recurrence", opened.Add(10 * time.Second), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := adapterWithSnapshot(&healthSnapshot{
+				records: map[string]logRecord{logger + "@" + location: {Count: 1}},
+				entries: map[string][]string{},
+				at:      tc.takenAt,
+			})
+			var got []Signal
+			q := newPendingQueue(a.health, func(_ string, sigs []Signal) { got = append(got, sigs...) })
+			q.now = func() time.Time { return opened }
+			q.Add("ha-logs", Signal{
+				InitiationID: "ha-logs@" + logger + "@" + location,
+				Labels:       map[string]string{"integration": logger, "logger": logger, "location": location, "level": "ERROR"},
+			}, compiledRule{dwell: dwell, escalate: 99}, 1)
+			q.Flush(closeAt)
+			if emitted := len(got) == 1; emitted != tc.wantEmit {
+				t.Fatalf("emitted = %v (%+v), want %v", emitted, got, tc.wantEmit)
+			}
+		})
+	}
+}
+
+// A snapshot taken inside the closing part says the log was read THEN. When
+// the latest read failed, or the session ended, the log is unreadable AT the
+// close: rung 3, whatever the snapshot holds and however long the closing
+// part is. Without the mark, a Home Assistant lost late in a long window was
+// judged against its last good view, and a one-off record dropped as quiet.
+func TestUnreadableAtTheCloseOutranksAFreshSnapshot(t *testing.T) {
+	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue",
+		location: "light.py:88", countAtOpen: 1}
+	since := time.Date(2026, 8, 21, 12, 2, 0, 0, time.UTC)
+	for _, entries := range []map[string][]string{
+		{},                       // no predicate: would otherwise be rung 2's quiet drop
+		{"hue": {"loaded"}},      // a loaded entry: would otherwise be healthy
+		{"hue": {"setup_retry"}}, // still failing: rung 3 still answers first
+	} {
+		a := adapterWithSnapshot(&healthSnapshot{
+			records: map[string]logRecord{ref.key(): {Count: 1}},
+			entries: entries,
+			at:      since.Add(time.Second),
+		})
+		a.sources["ha-logs"].unreadable = true
+		if got := a.health(ref, since); got != verdictUnreadable {
+			t.Fatalf("entries %v: health = %v, want verdictUnreadable", entries, got)
+		}
+	}
+}
+
+// A source the adapter no longer serves was withdrawn, not lost: its pending
+// conditions are gone, and nothing is posted for it.
+func TestWithdrawnSourceIsGoneNotUnreadable(t *testing.T) {
+	a := &adapter{sources: map[string]*servedSource{}}
+	ref := recordRef{source: "ha-logs", integration: "hue", logger: "homeassistant.components.hue", location: "light.py:88"}
+	if got := a.health(ref, time.Now()); got != verdictGone {
+		t.Fatalf("health = %v, want verdictGone", got)
+	}
+}
+
+// readListing is what keeps the mark honest: a failed read sets it and keeps
+// the last snapshot, and the next successful read clears it.
+func TestReadListingMarksTheLogUnreadable(t *testing.T) {
+	ha := newFakeHA(t, "secret")
+	f, err := parseConfig(json.RawMessage(`{"endpoint":"` + ha.URL + `"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &adapter{sources: map[string]*servedSource{"ha-logs": {filter: f}}}
+	a.pending = newPendingQueue(a.health, func(string, []Signal) {})
+	unreadable := func() (bool, *healthSnapshot) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.sources["ha-logs"].unreadable, a.sources["ha-logs"].snapshot
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sess, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if _, err := a.readListing(ctx, "ha-logs", sess); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if flagged, snap := unreadable(); flagged || snap == nil {
+		t.Fatalf("after a good read: unreadable=%v snapshot=%v, want false and a snapshot", flagged, snap)
+	}
+	_, good := unreadable()
+
+	sess.Close()
+	if _, err := a.readListing(ctx, "ha-logs", sess); err == nil {
+		t.Fatal("a read on a closed session must fail")
+	}
+	if flagged, snap := unreadable(); !flagged || snap != good {
+		t.Fatalf("after a failed read: unreadable=%v, snapshot kept=%v, want true and true", flagged, snap == good)
+	}
+
+	again, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	defer again.Close()
+	if _, err := a.readListing(ctx, "ha-logs", again); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if flagged, _ := unreadable(); flagged {
+		t.Fatal("a successful read must clear the mark")
+	}
+}
+
+// A dwell flush can decide more integrations at once than one batch holds.
+// Every signal past the batch size must still reach the manager, in further
+// batches, rather than being cut with nothing reporting it.
+func TestPostSplitsMoreThanOneBatch(t *testing.T) {
+	fm := newFakeManager(t)
+	a := newTestAdapter(fm)
+	a.cap = newEmitCap(10 * maxBatchPerSrc)
+	total := 2*maxBatchPerSrc + 7
+	sigs := make([]Signal, total)
+	for i := range sigs {
+		sigs[i] = Signal{InitiationID: fmt.Sprintf("ha-logs@integration-%d", i)}
+	}
+	if !a.post(context.Background(), "ha-logs", sigs) {
+		t.Fatalf("post reported a failure: %+v", fm.Status())
+	}
+	posted := fm.Posted()
+	if len(posted) != total {
+		t.Fatalf("posted %d signals, want all %d", len(posted), total)
+	}
+	for i, sig := range posted {
+		if want := sigs[i].InitiationID; sig.InitiationID != want {
+			t.Fatalf("signal %d = %q, want %q (order kept)", i, sig.InitiationID, want)
+		}
 	}
 }
 
@@ -398,4 +605,385 @@ func TestCredentialTokenErrors(t *testing.T) {
 	}
 }
 
+// ---- the dwell verification ladder, wired end to end ------------------------
+
+// Everywhere else, health() is tested against a hand-built healthSnapshot
+// (TestHealthLadder). This test instead runs the REAL wiring the reconciler
+// exercises in production: a dwell rule defers a matched record into the
+// pending queue, runDwellFlusher's own ticker refreshes the snapshot from a
+// real Home Assistant session (system_log/list + config_entries/get), and the
+// flush decides it — none of runDwellFlusher, refreshSnapshots or
+// refreshSnapshot (all 0%/81.2% in the coverage profile before this test) were
+// reached by any other test.
+func TestDwellVerificationLadderEndToEnd(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	// A config entry stuck in setup_retry is rung 1 of the ladder: still
+	// broken, whatever the log itself says.
+	ha.SetEntries(configEntry{Domain: "hue", State: "setup_retry"})
+
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{
+		"rules": []map[string]any{{
+			"matchers": []string{`integration="hue"`},
+			"for":      "150ms",
+		}},
+	}))
+	a := newTestAdapter(fm)
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	<-ha.subscribed
+	ha.PushLogEvent(record("homeassistant.components.hue", "temporary failure", time.Now(), 1))
+
+	// dwellTick is 5s in production code, so the flusher's second tick is what
+	// actually decides this entry; give it generous room.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	posted := fm.Posted()
+	if len(posted) != 1 {
+		t.Fatalf("expected exactly one dwell-verified signal, got %d: %+v", len(posted), posted)
+	}
+	if !strings.Contains(posted[0].Payload, "failing for") {
+		t.Fatalf("expected the dwell evidence in the payload, got %q", posted[0].Payload)
+	}
+}
+
+// A config-entry setup failure that never recurs is exactly the incident this
+// change fixes: before it, the record's mislabeled identity (the logger name,
+// never the domain) meant rung 1 could never apply, and a single occurrence
+// with no second log line was dropped as quiet by rung 2's recurrence check
+// (pending.go's stillRecurring) — even though the entry was genuinely still
+// broken. With the domain resolved correctly, rung 1's config-entry predicate
+// confirms it and the signal is emitted despite never recurring.
+func TestDwellVerificationLadderConfigEntryNeverRecurring(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	ha.SetEntries(configEntry{Domain: "tuya", State: "setup_retry"})
+
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{
+		"rules": []map[string]any{{
+			"matchers": []string{`integration="tuya"`},
+			"for":      "150ms",
+		}},
+	}))
+	a := newTestAdapter(fm)
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	<-ha.subscribed
+	ha.PushLogEvent(record(configEntriesLogger, "Error setting up entry someone@example.com for tuya", time.Now(), 1))
+
+	// A single record, never repeated — the exact shape rung 2 alone cannot
+	// confirm. dwellTick is 5s in production code, so the flusher's second
+	// tick is what decides this entry; give it generous room.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	posted := fm.Posted()
+	if len(posted) != 1 {
+		t.Fatalf("expected exactly one dwell-verified signal despite no recurrence, got %d: %+v", len(posted), posted)
+	}
+	if posted[0].Labels["integration"] != "tuya" {
+		t.Fatalf("integration label = %q, want %q", posted[0].Labels["integration"], "tuya")
+	}
+}
+
+// ---- the emit cap and post failure/recovery reporting ------------------------
+
+// post() is the single exit from the adapter, and reportClipping/
+// reportPostFailure/reportPostRecovered were 25%/0%/66.7% — none of their
+// "already reported, do nothing again" branches, nor the len(allowed)==0 exit
+// from post() itself, were exercised.
+func TestPostReportsClippingOnceAndTakesTheZeroAllowedExit(t *testing.T) {
+	fm := newFakeManager(t)
+	a := newTestAdapter(fm)
+	a.cap = newEmitCap(1)
+	ctx := context.Background()
+
+	sigs := []Signal{{InitiationID: "a"}, {InitiationID: "b"}}
+	if !a.post(ctx, "src", sigs) {
+		t.Fatal("expected the signal within the cap to post")
+	}
+	if len(fm.Posted()) != 1 {
+		t.Fatalf("expected exactly the one signal under the cap, got %d", len(fm.Posted()))
+	}
+	clipReports := func() int {
+		n := 0
+		for _, s := range fm.Status() {
+			if s.Reason == "EmitCapReached" {
+				n++
+			}
+		}
+		return n
+	}
+	if clipReports() != 1 {
+		t.Fatalf("expected exactly one EmitCapReached report, got %d", clipReports())
+	}
+
+	// The window is still exhausted: this call finds zero room, so post()
+	// takes its len(allowed)==0 exit and never reaches mgr.Inbound.
+	if a.post(ctx, "src", sigs) {
+		t.Fatal("expected a fully-clipped batch to report false")
+	}
+	if len(fm.Posted()) != 1 {
+		t.Fatal("the fully-clipped batch must not have reached the manager")
+	}
+	if clipReports() != 2 {
+		t.Fatalf("expected the clip count CHANGE to be reported again, got %d reports", clipReports())
+	}
+}
+
+// A manager that rejects a post is reported once, not once per failed
+// attempt, and its recovery is reported once the next post succeeds.
+func TestPostReportsFailureOnceThenRecovers(t *testing.T) {
+	fm := newFakeManager(t)
+	fm.SetFailInbound(true)
+	a := newTestAdapter(fm)
+	ctx := context.Background()
+
+	if a.post(ctx, "src", []Signal{{InitiationID: "x"}}) {
+		t.Fatal("expected the post to fail while the manager is down")
+	}
+	failReports := func() int {
+		n := 0
+		for _, s := range fm.Status() {
+			if s.Reason == "PostFailed" {
+				n++
+			}
+		}
+		return n
+	}
+	if failReports() != 1 {
+		t.Fatalf("expected exactly one PostFailed report, got %d", failReports())
+	}
+
+	// Still down: reportPostFailure's LoadOrStore guard must keep this quiet.
+	if a.post(ctx, "src", []Signal{{InitiationID: "x"}}) {
+		t.Fatal("expected the post to keep failing")
+	}
+	if failReports() != 1 {
+		t.Fatalf("a repeated failure while already failing must not re-report, got %d", failReports())
+	}
+
+	fm.SetFailInbound(false)
+	if !a.post(ctx, "src", []Signal{{InitiationID: "x"}}) {
+		t.Fatal("expected the post to succeed once the manager recovers")
+	}
+	recovered := false
+	for _, s := range fm.Status() {
+		if s.Reason == "AdapterReady" && s.Message == "posting to the manager again" {
+			recovered = true
+		}
+	}
+	if !recovered {
+		t.Fatal("expected the recovery to be reported")
+	}
+}
+
+// ---- small env-reading helpers ----------------------------------------------
+
+func TestMustEnvReturnsTheSetValue(t *testing.T) {
+	t.Setenv("HA_TEST_MUST_ENV", "configured")
+	if got := mustEnv("HA_TEST_MUST_ENV"); got != "configured" {
+		t.Fatalf("mustEnv = %q, want %q", got, "configured")
+	}
+}
+
+func TestEnvIntFallsBackOnUnsetOrUnparsable(t *testing.T) {
+	os.Unsetenv("HA_TEST_ENV_INT")
+	if got := envInt("HA_TEST_ENV_INT", 42); got != 42 {
+		t.Fatalf("unset: envInt = %d, want the fallback 42", got)
+	}
+	t.Setenv("HA_TEST_ENV_INT", "not-a-number")
+	if got := envInt("HA_TEST_ENV_INT", 42); got != 42 {
+		t.Fatalf("unparsable: envInt = %d, want the fallback 42", got)
+	}
+	t.Setenv("HA_TEST_ENV_INT", "7")
+	if got := envInt("HA_TEST_ENV_INT", 42); got != 7 {
+		t.Fatalf("envInt = %d, want the parsed value 7", got)
+	}
+}
+
 var _ = fmt.Sprintf
+
+// ---- the poll: records are observed without Home Assistant firing events ----
+
+// Home Assistant fires `system_log_event` only under `system_log: fire_event:
+// true`, which is off by default. Before the poll, an adapter on such an
+// install saw the listing once per reconnect and nothing in between — the
+// reference install posted nothing for a day while a stream error recurred
+// forty-two times. The fake here fires no event unless a test pushes one,
+// which is exactly the default install.
+func TestPolledRecordBecomesASignal(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, nil))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	waitFor(t, "the connect-time sweep", func() bool { return ha.ListCalls() >= 1 })
+	// Logged AFTER the connect, with no event to announce it.
+	ha.SetRecords(record("homeassistant.components.stream", "Error demuxing stream (Operation timed out)", time.Now(), 1))
+
+	waitFor(t, "the polled signal to be posted", func() bool { return len(fm.Posted()) == 1 })
+	if got := fm.Posted()[0].Labels["integration"]; got != "stream" {
+		t.Fatalf("integration = %q, want stream", got)
+	}
+	time.Sleep(200 * time.Millisecond) // several more polls: the same occurrence must not post again
+	if n := len(fm.Posted()); n != 1 {
+		t.Fatalf("one occurrence posted %d times", n)
+	}
+}
+
+// Recurrence is what the dwell's second rung is built on, and on a default
+// install the listing is the only place it can be seen: Home Assistant advances
+// a deduplicated entry's timestamp and count on each occurrence, so the poll
+// sees a recurring record as a newer one. Two records under one dwell rule, no
+// config-entry predicate for either: the one that keeps recurring through the
+// window is reported at the close; the one seen once is dropped as quiet.
+func TestPolledRecurrenceSurvivesTheDwell(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{
+		"rules": []map[string]any{{"matchers": []string{}, "for": "300ms"}},
+	}))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	ctx := runAdapter(t, a)
+	go a.runDwellFlusher(ctx)
+
+	<-ha.subscribed
+	waitFor(t, "the connect-time sweep", func() bool { return ha.ListCalls() >= 1 })
+	first := time.Now()
+	recurring := record("homeassistant.components.stream", "Error demuxing stream", first, 1)
+	once := record("homeassistant.components.hue", "one bad frame", first, 1)
+	ha.SetRecords(recurring, once)
+	calls := ha.ListCalls()
+	waitFor(t, "both records to be polled", func() bool { return ha.ListCalls() > calls })
+
+	// The stream error recurs: same entry, later timestamp, higher count.
+	recurring.Timestamp = float64(time.Now().UnixNano()) / 1e9
+	recurring.Count = 2
+	ha.SetRecords(recurring, once)
+
+	// dwellTick is 5s in production code, so the flusher's second tick is what
+	// decides these entries; give it generous room.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && len(fm.Posted()) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // let a wrong second post show up
+	posted := fm.Posted()
+	if len(posted) != 1 {
+		t.Fatalf("expected exactly the recurring record, got %d: %+v", len(posted), posted)
+	}
+	if posted[0].Labels["integration"] != "stream" {
+		t.Fatalf("reported the wrong record: %+v", posted[0])
+	}
+	if !strings.Contains(posted[0].Payload, "failing for") {
+		t.Fatalf("expected the dwell evidence in the payload, got %q", posted[0].Payload)
+	}
+}
+
+// Where the instance does fire events, the event is the fast path and the
+// other path must not count the same occurrence again — in EITHER order. The
+// dedup is per record, on the occurrence's timestamp: event first, then the
+// listing shows it; and listing first, then the event for it arrives.
+func TestEventDeliveredRecordIsNotPolledTwice(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, nil))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	rec := record("homeassistant.components.zwave_js", "Failed to set temperature", time.Now(), 1)
+	ha.PushLogEvent(rec)
+	waitFor(t, "the event-delivered signal", func() bool { return len(fm.Posted()) == 1 })
+
+	// The listing now shows the same occurrence, as it would on a real instance.
+	ha.SetRecords(rec)
+	calls := ha.ListCalls()
+	waitFor(t, "several polls over it", func() bool { return ha.ListCalls() >= calls+3 })
+	if n := len(fm.Posted()); n != 1 {
+		t.Fatalf("the poll re-posted an occurrence the event already delivered: %d posts", n)
+	}
+
+	// The other order: a new occurrence reaches the listing first (the sweep
+	// considers it), and its event arrives after.
+	rec.Timestamp = float64(time.Now().UnixNano()) / 1e9
+	rec.Count = 2
+	ha.SetRecords(rec)
+	waitFor(t, "the polled second occurrence", func() bool { return len(fm.Posted()) == 2 })
+	ha.PushLogEvent(rec)
+	time.Sleep(200 * time.Millisecond)
+	if n := len(fm.Posted()); n != 2 {
+		t.Fatalf("the event re-posted an occurrence the poll already considered: %d posts", n)
+	}
+}
+
+// `backfill: false` means "do not report what was logged while I was down". It
+// used to be implemented as "skip the connect-time read", which under polling
+// would skip every read; the intent survives as a cursor moved past the
+// listing on connect, with polling going on from there.
+func TestBackfillOffStillPolls(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	now := time.Now().UTC().Truncate(time.Second)
+	ha := newFakeHA(t, "secret")
+	ha.SetRecords(record("homeassistant.components.hue", "logged while we were down", now.Add(-time.Minute), 1))
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, map[string]any{"backfill": false}))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	waitFor(t, "the cursor to be moved past the listing", func() bool {
+		return fm.State("ha-logs", "last-record") == now.Add(-time.Minute).Format(time.RFC3339)
+	})
+	waitFor(t, "a poll after the connect", func() bool { return ha.ListCalls() >= 2 })
+	if n := len(fm.Posted()); n != 0 {
+		t.Fatalf("backfill: false reported what predates the connect: %d posts", n)
+	}
+
+	ha.SetRecords(
+		record("homeassistant.components.hue", "logged while we were down", now.Add(-time.Minute), 1),
+		record("homeassistant.components.mqtt", "logged after we connected", time.Now(), 1),
+	)
+	waitFor(t, "the post-connect record", func() bool { return len(fm.Posted()) == 1 })
+	if got := fm.Posted()[0].Labels["integration"]; got != "mqtt" {
+		t.Fatalf("reported the wrong record: %q", got)
+	}
+}
+
+// Two records logged in the same instant: the first advances the cursor to
+// that instant, and the second must not be dropped for sharing it. The cursor
+// gate is strict, and the per-record memory is what tells them apart.
+func TestSecondRecordAtTheCursorInstantIsNotDropped(t *testing.T) {
+	t.Setenv("AGENTOPS_CRED_HA_LOGS_token", "secret")
+	ha := newFakeHA(t, "secret")
+	fm := newFakeManager(t, sourceInfo("ha-logs", ha.URL, nil))
+	a := newTestAdapter(fm)
+	a.poll = 50 * time.Millisecond
+	runAdapter(t, a)
+
+	<-ha.subscribed
+	waitFor(t, "the connect-time sweep", func() bool { return ha.ListCalls() >= 1 })
+	instant := time.Now()
+	first := record("homeassistant.components.hue", "bridge lost", instant, 1)
+	ha.SetRecords(first)
+	waitFor(t, "the first record", func() bool { return len(fm.Posted()) == 1 })
+	// The second appears in the listing with the SAME timestamp.
+	ha.SetRecords(first, record("homeassistant.components.mqtt", "broker lost", instant, 1))
+	waitFor(t, "the second record at the same instant", func() bool { return len(fm.Posted()) == 2 })
+	calls := ha.ListCalls()
+	waitFor(t, "several more polls", func() bool { return ha.ListCalls() >= calls+3 })
+	if n := len(fm.Posted()); n != 2 {
+		t.Fatalf("expected exactly two posts, got %d", n)
+	}
+}

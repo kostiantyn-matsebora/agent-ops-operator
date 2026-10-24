@@ -10,7 +10,9 @@ the same contract Telegram does and through no other path.
 Its thread ids are DERIVED from the conversation's UID, so a restart re-resolves
 every binding with nothing stored, and its transcript is a CACHE of
 `status.runs[]`, never the only copy of what was said.
+
 ## Requirements
+
 ### Requirement: Console serves the channel adapter contract
 The console SHALL be a conforming channel adapter: it long-polls `GET /channel/ops?adapter=console`, completes operations via `POST /channel/ops/{id}/done`, and submits UI-typed user messages via `POST /channel/inbound`, authenticating every call with its injected per-adapter derived token. It SHALL tolerate at-least-once op delivery by deduplicating on operation id.
 
@@ -94,3 +96,33 @@ The console SHALL serve both the channel adapter contract (carrying conversation
 - **WHEN** the console is running
 - **THEN** a single pod long-polls `/channel/ops` and posts to `/signal/inbound`, and no second workload exists for the signal role
 
+### Requirement: The signal card draws severity when present
+
+The transcript's signal card SHALL draw the `signal` message's `severity`
+field where present, tinted from the theme's existing status tokens.
+
+| Severity | Token |
+|---|---|
+| `critical` | `--ao-danger` |
+| `error` | `--ao-danger` |
+| `warning` | `--ao-warning` |
+| `info` | `--ao-neutral` |
+
+No new theme token SHALL be added for this. A card whose message carries
+no `severity` SHALL render exactly as it does today.
+
+#### Scenario: A critical signal is tinted
+
+- **WHEN** a `signal` message carries `severity: critical`
+- **THEN** the card draws the severity tinted with `--ao-danger`
+
+#### Scenario: A warning signal is tinted
+
+- **WHEN** a `signal` message carries `severity: warning`
+- **THEN** the card draws the severity tinted with `--ao-warning`
+
+#### Scenario: An unrated signal is unchanged
+
+- **WHEN** a `signal` message carries no `severity`
+- **THEN** the card renders exactly as it did before this requirement
+  existed

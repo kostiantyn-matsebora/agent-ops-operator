@@ -70,11 +70,19 @@ const ConditionTopicReady = "TopicReady"
 // communicated and `Topic` describes the thread to create. The adapter turns
 // either into whatever its surface speaks. See message.go for why.
 type Op struct {
-	ID           string  `json:"id"`
-	Channel      string  `json:"channel"`
-	Conversation string  `json:"conversation,omitempty"`
-	Kind         OpKind  `json:"kind"`
-	ThreadID     *string `json:"threadId,omitempty"` // send target; nil = general
+	ID           string `json:"id"`
+	Channel      string `json:"channel"`
+	Conversation string `json:"conversation,omitempty"`
+	// ConversationID is the owning conversation's own spec.conversationId —
+	// the sender-minted correlation id, carried BESIDE Conversation (the
+	// object's name) rather than in place of it (channel-adapter-contract
+	// OPS-9). Additive and opaque: a conformant adapter ignores it exactly as
+	// it ignores any field it does not recognise. Empty on a conversation
+	// that predates the field (legacy — never synthesized) and on an op with
+	// no owning conversation at all (a general-surface notice).
+	ConversationID string  `json:"conversationId,omitempty"`
+	Kind           OpKind  `json:"kind"`
+	ThreadID       *string `json:"threadId,omitempty"` // send target; nil = general
 
 	// Topic describes the thread to create (ensure-topic only).
 	Topic *TopicDescriptor `json:"topic,omitempty"`
@@ -112,6 +120,14 @@ type OpResult struct {
 const ReclaimAfter = 5 * time.Minute
 
 var sendSeq atomic.Int64
+
+// sendEpoch makes a fire-and-forget send id unique ACROSS manager restarts,
+// not merely within one process. Adapters dedup by op id, as the contract
+// tells them to, so a counter that restarted at 1 handed a fresh notice the
+// id of one already acknowledged — and the adapter, correctly, refused to
+// repeat it. Found by the conformance suite's ack-once rule meeting the
+// system pack's manager restart.
+var sendEpoch = strconv.FormatInt(time.Now().UnixNano(), 36)
 
 // OpQueue holds pending outbound ops per channel type. In-memory by design and
 // NEVER the record of what is owed: every op is either DERIVED from CR state —
@@ -173,12 +189,21 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 	// while making each reopen's request distinct — without it a reopen's
 	// ensure-topic dedups against the original topic creation and never reaches
 	// the adapter.
-	id := "topic:" + conv.Name + ":" + ch.Name
+	//
+	// UID, not just name: AllocateName reuses a name once its holder is
+	// deleted, and `recent`'s dedup window outlives any one Conversation. A
+	// freshly created object sharing a deleted one's exact name would
+	// otherwise derive the SAME id as that deleted conversation's already-
+	// completed ensure-topic, silently dropping the new one's own enqueue —
+	// measured live: `chat-echo-console` recreated across two sequential
+	// smoke tests never got a thread id, because the manager process (and its
+	// in-memory `recent` map) outlived the first one.
+	id := "topic:" + conv.Name + ":" + string(conv.UID) + ":" + ch.Name
 	if conv.Status.Reopens > 0 {
 		id += ":r" + strconv.Itoa(int(conv.Status.Reopens))
 	}
 	q.enqueue(ctx, &Op{
-		ID: id, Channel: ch.Name, Conversation: conv.Name,
+		ID: id, Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.Spec.ConversationID,
 		Kind: OpEnsureTopic, Topic: &topic, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
@@ -186,10 +211,10 @@ func (q *OpQueue) EnqueueEnsureTopic(ctx context.Context, ch *agentopsv1alpha1.C
 // EnqueueCloseTopic queues archiving of one conversation thread. The id is
 // stable per conversation×channel, so the reconciler re-enqueuing it on every
 // pass while the finalizer holds dedups instead of piling up.
-func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, conversation string) {
+func (q *OpQueue) EnqueueCloseTopic(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string, conv *agentopsv1alpha1.Conversation) {
 	tid := threadID
 	q.enqueue(ctx, &Op{
-		ID: CloseTopicOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
+		ID: CloseTopicOpID(conv.Name, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.Spec.ConversationID,
 		Kind: OpCloseTopic, ThreadID: &tid, channelType: ch.Spec.Adapter, stable: true,
 	})
 }
@@ -207,12 +232,12 @@ func CloseTopicOpID(conversation, channel string) string {
 // message: the manager states what happened, and escaping, splitting and
 // placement belong to whoever knows the transport. An adapter is free to ignore
 // the text and express the ending structurally instead.
-func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID, conversation string) {
+func (q *OpQueue) EnqueueDeleteConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string, conv *agentopsv1alpha1.Conversation) {
 	tid := threadID
 	msg := Notice("🗑 This conversation has been deleted, along with everything it recorded. " +
 		"The thread stays here to read. A new message starts a NEW conversation — it will not continue this one.")
 	q.enqueue(ctx, &Op{
-		ID: DeleteConversationOpID(conversation, ch.Name), Channel: ch.Name, Conversation: conversation,
+		ID: DeleteConversationOpID(conv.Name, ch.Name), Channel: ch.Name, Conversation: conv.Name, ConversationID: conv.Spec.ConversationID,
 		Kind: OpDeleteConversation, ThreadID: &tid, Message: &msg,
 		channelType: ch.Spec.Adapter, stable: true,
 	})
@@ -252,8 +277,16 @@ func (q *OpQueue) Settled(id string) bool {
 // (Notice, Warn, AnswerMessage, RelayMessage, SignalMessage) — there is no
 // string-valued form on purpose, because that is what let transport markup back
 // into the manager.
-func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID *string, msg Message) {
-	q.enqueueMessage(ctx, "send:"+strconv.FormatInt(sendSeq.Add(1), 36), ch, "", threadID, msg, false)
+//
+// conv is nilable: a general-surface notice (command usage, an unwired-source
+// warning) belongs to no conversation, so both Conversation and
+// ConversationID stay empty on its op rather than being guessed.
+func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Channel, conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
+	name, conversationID := "", ""
+	if conv != nil {
+		name, conversationID = conv.Name, conv.Spec.ConversationID
+	}
+	q.enqueueMessage(ctx, "send:"+sendEpoch+":"+strconv.FormatInt(sendSeq.Add(1), 36), ch, name, conversationID, threadID, msg, false)
 }
 
 // EnqueueFarewell posts a conversation's closing notice with a STABLE id, so a
@@ -273,7 +306,7 @@ func (q *OpQueue) EnqueueMessage(ctx context.Context, ch *agentopsv1alpha1.Chann
 func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
 	id := fmt.Sprintf("farewell:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // EnqueueReopenNotice announces that a conversation is live again, on every
@@ -290,7 +323,22 @@ func (q *OpQueue) EnqueueFarewell(ctx context.Context, ch *agentopsv1alpha1.Chan
 func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.Channel,
 	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
 	id := fmt.Sprintf("reopened:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
-	q.enqueueMessage(ctx, id, ch, conv.Name, threadID, msg, true)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
+}
+
+// EnqueueEscalationMessage posts the digest an `escalate` call supplied as the
+// opening message of a newly-bound escalation thread (design D-D).
+//
+// The ensure-topic enqueue and the topic actually existing (an adapter
+// completing it with a thread id) are two different moments, so this is a
+// SEPARATE op rather than data riding on ensure-topic — the reconciler calls
+// it once a bound channel has a thread, exactly as it does for the reopen
+// notice. Stable per conversation×channel×reopen count, so re-deriving it on
+// every reconcile pass posts the digest once.
+func (q *OpQueue) EnqueueEscalationMessage(ctx context.Context, ch *agentopsv1alpha1.Channel,
+	conv *agentopsv1alpha1.Conversation, threadID *string, msg Message) {
+	id := fmt.Sprintf("escalate:%s:%s:%d", conv.Name, ch.Name, conv.Status.Reopens)
+	q.enqueueMessage(ctx, id, ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // EnqueueInputDelivery queues ONE input's delivery to ONE channel — the event
@@ -304,9 +352,9 @@ func (q *OpQueue) EnqueueReopenNotice(ctx context.Context, ch *agentopsv1alpha1.
 // that, a conversation would repost its alert, and everything anyone said, on
 // every reconcile.
 func (q *OpQueue) EnqueueInputDelivery(ctx context.Context, ch *agentopsv1alpha1.Channel,
-	conversation, inputID string, threadID *string, msg Message) {
+	conv *agentopsv1alpha1.Conversation, inputID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, InputOpID(conversation, inputID, ch.Name), ch, conversation, threadID, msg, true)
+	q.enqueueMessage(ctx, InputOpID(conv.Name, inputID, ch.Name), ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // InputOpID is the stable id of one input's delivery on one channel.
@@ -323,9 +371,9 @@ func InputOpID(conversation, inputID, channel string) string {
 // Ack and notice sends stay on the counter-based id: saying the same thing twice
 // is correct when a user asked twice, and neither derives from CR state.
 func (q *OpQueue) EnqueueRunReply(ctx context.Context, ch *agentopsv1alpha1.Channel,
-	conversation, runID string, threadID *string, msg Message) {
+	conv *agentopsv1alpha1.Conversation, runID string, threadID *string, msg Message) {
 
-	q.enqueueMessage(ctx, RunReplyOpID(conversation, ch.Name, runID), ch, conversation, threadID, msg, true)
+	q.enqueueMessage(ctx, RunReplyOpID(conv.Name, ch.Name, runID), ch, conv.Name, conv.Spec.ConversationID, threadID, msg, true)
 }
 
 // RunReplyOpID is the stable id of one run's reply on one channel. Exported
@@ -348,10 +396,10 @@ func ParseRunReplyOpID(id string) (conversation, channel, runID string, ok bool)
 }
 
 func (q *OpQueue) enqueueMessage(ctx context.Context, id string, ch *agentopsv1alpha1.Channel,
-	conversation string, threadID *string, msg Message, stable bool) {
+	conversation, conversationID string, threadID *string, msg Message, stable bool) {
 
 	q.enqueue(ctx, &Op{
-		ID: id, Channel: ch.Name, Conversation: conversation,
+		ID: id, Channel: ch.Name, Conversation: conversation, ConversationID: conversationID,
 		Kind: OpSend, ThreadID: threadID, Message: &msg, channelType: ch.Spec.Adapter, stable: stable,
 	})
 }
@@ -547,6 +595,16 @@ func (q *OpQueue) Complete(ctx context.Context, id string, res OpResult) {
 			delete(q.recent, id)
 			q.mu.Unlock()
 		}
+	case op.Kind == OpSend && res.Error != "" && isRunReply(op.ID):
+		// The dedup entry was already released above, so reconciliation
+		// re-derives this send on the next pass regardless. This is the
+		// state-durability half: an owed reply is visible on the object
+		// itself, not only in manager logs.
+		if err := q.markUndelivered(ctx, op); err != nil {
+			log.FromContext(ctx).Error(err, "mark run reply undelivered", "conversation", op.Conversation, "op", op.ID)
+		}
+		log.FromContext(ctx).Info("run reply send failed; released for re-derivation",
+			"channel", op.Channel, "conversation", op.Conversation, "op", op.ID, "error", res.Error)
 	case op.Kind == OpDeleteConversation:
 		// Terminal either way, and never regenerated: the Conversation is on
 		// its way out, so there is no object left to carry a condition and
@@ -609,7 +667,7 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 		if conv.Status.ThreadArchived(channel) {
 			return nil
 		}
-		patch := client.MergeFrom(conv.DeepCopy())
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		conv.Status.ThreadsArchived = append(conv.Status.ThreadsArchived, channel)
 		err := q.Client.Status().Patch(ctx, &conv, patch)
 		if err == nil {
@@ -625,6 +683,15 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // markDelivered records that a run's reply reached one channel's thread, so
 // reconciliation stops re-deriving it. Retried on conflict: the reply and the
 // next run's status write compete for the same subresource.
+//
+// THE PATCH IS OPTIMISTICALLY LOCKED, AND WITHOUT THAT THE RETRY WAS THEATRE.
+// A merge patch on `status.runs` replaces the whole array, and a plain merge
+// patch carries no resourceVersion — so two threads' completions milliseconds
+// apart each wrote the array they had read, the last one won, and the other
+// channel's mark was gone with nothing left to re-derive it. The system pack's
+// fan-out test found it: console plus Telegram bound to one conversation,
+// `delivered: [tg-ops]` forever. With the lock the second write is a 409 and
+// this loop does what it always claimed to.
 func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
 	if !ok || q.Client == nil {
@@ -638,7 +705,7 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
 			return client.IgnoreNotFound(err)
 		}
-		patch := client.MergeFrom(conv.DeepCopy())
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		found := false
 		for i := range conv.Status.Runs {
 			run := &conv.Status.Runs[i]
@@ -656,6 +723,13 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 			// is no longer recorded cannot be re-derived either.
 			return nil
 		}
+		// This reply just reached the thread, so whatever was owed to it is no
+		// longer owed — clear the marker regardless of which run it names: an
+		// older undelivered reply that is itself no longer recorded (aged out,
+		// same as `found` above) has nothing left to re-derive either.
+		if b := conv.Status.Thread(channel); b != nil {
+			b.UndeliveredReply = ""
+		}
 		err := q.Client.Status().Patch(ctx, &conv, patch)
 		if err == nil {
 			return nil
@@ -667,29 +741,81 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	return fmt.Errorf("conflict marking run %s delivered on %s", runID, channel)
 }
 
+// markUndelivered records that a run's reply failed to reach one channel's
+// thread, so an empty-looking chat thread is diagnosable from the Conversation
+// object alone rather than only from manager logs (state-durability).
+//
+// The dedup entry for this op was already released by the caller, so
+// reconciliation re-derives the send on its own; this is purely the
+// observable half of that re-derivation, and never the thing re-derivation
+// depends on.
+func (q *OpQueue) markUndelivered(ctx context.Context, op *Op) error {
+	_, channel, runID, ok := ParseRunReplyOpID(op.ID)
+	if !ok || q.Client == nil {
+		return nil
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		var conv agentopsv1alpha1.Conversation
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		binding := conv.Status.Thread(channel)
+		if binding == nil || binding.UndeliveredReply == runID {
+			return nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		binding.UndeliveredReply = runID
+		err := q.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("conflict marking run %s undelivered on %s", runID, channel)
+}
+
+// finishEnsureTopic records the thread an adapter created. Optimistically
+// locked and retried, for the reason markDelivered gives: two channels'
+// topics complete within milliseconds of each other on a multi-channel
+// conversation, and a plain merge patch on `status.threads` let the second
+// binding overwrite the first — the fan-out then had one thread forever.
 func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) error {
+	for attempt := 0; attempt < 5; attempt++ {
+		done, err := q.tryFinishEnsureTopic(ctx, op, res)
+		if done || err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("conflict recording the %s thread of %s", op.Channel, op.Conversation)
+}
+
+const channelMsgPrefix = "channel "
+
+// tryFinishEnsureTopic is one attempt; a false, nil result is a conflict.
+func (q *OpQueue) tryFinishEnsureTopic(ctx context.Context, op *Op, res OpResult) (bool, error) {
 	var conv agentopsv1alpha1.Conversation
 	if err := q.Client.Get(ctx, types.NamespacedName{Namespace: q.Namespace, Name: op.Conversation}, &conv); err != nil {
-		return client.IgnoreNotFound(err)
+		return true, client.IgnoreNotFound(err)
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
+	patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	cond := metav1.Condition{Type: ConditionTopicReady, Status: metav1.ConditionTrue, Reason: "TopicCreated",
-		Message: "channel " + op.Channel}
+		Message: channelMsgPrefix + op.Channel}
 	if res.Error != "" {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
-		cond.Message = "channel " + op.Channel + ": " + res.Error
+		cond.Message = channelMsgPrefix + op.Channel + ": " + res.Error
 	} else if res.ThreadID == "" {
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "AdapterError"
-		cond.Message = "channel " + op.Channel + ": adapter completed ensure-topic without a thread id"
-	} else if existing := conv.ThreadFor(op.Channel); existing == nil {
-		binding := agentopsv1alpha1.ThreadBinding{
-			// ReadTracked for EVERY channel, whether or not its adapter reports
-			// reads: the backfill rule has to stay one rule, or "no readAt" would
-			// mean "pre-upgrade" on some channels and "never seen" on others.
-			Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true,
-		}
+		cond.Message = channelMsgPrefix + op.Channel + ": adapter completed ensure-topic without a thread id"
+	} else if binding := conv.Status.Thread(op.Channel); binding == nil || binding.ThreadID == "" {
+		// Brand new thread — including a binding that so far carries only a
+		// durable-chat-ops-broker claim, never a real thread id. Treated exactly
+		// as "no binding at all": a claim-only placeholder is bookkeeping about
+		// dispatch, not a prior thread.
+		var readers []agentopsv1alpha1.ReaderMark
 		// The person who STARTED this conversation has seen it — they typed it.
 		// Stamping their own watermark here, at the one moment their thread
 		// comes into existence, is what stops a conversation being presented
@@ -697,21 +823,39 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 		// only; everyone else's view is untouched, which is what makes this
 		// safe to do at all.
 		if o := conv.Spec.OriginReader; o != nil && o.Key != "" && o.Channel == op.Channel {
-			now := metav1.Now()
-			binding.Readers = []agentopsv1alpha1.ReaderMark{{Key: o.Key, ReadAt: &now}}
+			// Opaque RFC3339Nano string, never metav1.Time — see
+			// ThreadBinding.ReadAt's comment.
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			readers = []agentopsv1alpha1.ReaderMark{{Key: o.Key, ReadAt: &now}}
 		}
-		conv.Status.Threads = append(conv.Status.Threads, binding)
+		if binding == nil {
+			// ReadTracked for EVERY channel, whether or not its adapter reports
+			// reads: the backfill rule has to stay one rule, or "no readAt" would
+			// mean "pre-upgrade" on some channels and "never seen" on others.
+			conv.Status.Threads = append(conv.Status.Threads, agentopsv1alpha1.ThreadBinding{
+				Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true, Readers: readers,
+			})
+		} else {
+			binding.ThreadID = res.ThreadID
+			binding.ReadTracked = true
+			binding.Readers = readers
+			binding.Claim = nil
+		}
 	} else {
 		// A REOPEN re-establishing an archived thread. Whatever came back is
 		// the thread now: an adapter that honoured the hint returns the same id
 		// and the conversation continues where it left off, one that could not
 		// returns a fresh one. Both are recorded the same way, because both are
 		// the truth about that transport.
-		for i := range conv.Status.Threads {
-			if conv.Status.Threads[i].Channel == op.Channel {
-				conv.Status.Threads[i].ThreadID = res.ThreadID
-			}
-		}
+		binding.ThreadID = res.ThreadID
+		binding.Claim = nil
+	}
+	// The op completed one way or the other, so it is no longer in flight —
+	// clear a claim here too on the FAILURE paths above, or a claim that is
+	// still fresh (inside the staleness bound) would make the next reconcile
+	// pass wait it out instead of retrying at once.
+	if b := conv.Status.Thread(op.Channel); b != nil {
+		b.Claim = nil
 	}
 	if res.Error == "" && res.ThreadID != "" {
 		// No longer archived: there is a live thread here again.
@@ -725,12 +869,15 @@ func (q *OpQueue) finishEnsureTopic(ctx context.Context, op *Op, res OpResult) e
 	}
 	apimeta.SetStatusCondition(&conv.Status.Conditions, cond)
 	if err := q.Client.Status().Patch(ctx, &conv, patch); err != nil {
-		return err
+		if apierrors.IsConflict(err) {
+			return false, nil
+		}
+		return true, err
 	}
 	if cond.Status == metav1.ConditionFalse {
-		return fmt.Errorf("ensure-topic for %s: %s", op.Conversation, cond.Message)
+		return true, fmt.Errorf("ensure-topic for %s: %s", op.Conversation, cond.Message)
 	}
-	return nil
+	return true, nil
 }
 
 // Pending reports whether an op is queued or claimed (used by tests).

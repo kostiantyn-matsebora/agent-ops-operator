@@ -223,6 +223,31 @@ cmd_open() {
   echo "$n"
 }
 
+# The sentence every pointer carries, and the test for whether a body is ours.
+POINTER_MARK="The change directory is the source of truth"
+
+refresh_pointer() {
+  local n="$1" change="$2" current id
+  current=$(gh issue view "$n" --json body --jq .body 2>/dev/null || true)
+  case "$current" in
+    *"$POINTER_MARK"*)
+      gh issue edit "$n" --body "$(body "$change")" >/dev/null
+      return 0 ;;
+  esac
+  # A promoted issue: find the pointer comment and rewrite it in place. The
+  # FIRST match, since promotion leaves exactly one and a later comment quoting
+  # the sentence is somebody's reply.
+  id=$(gh api "repos/{owner}/{repo}/issues/$n/comments" --paginate \
+         --jq "[.[] | select(.body | contains(\"$POINTER_MARK\"))][0].id // empty" \
+       2>/dev/null || true)
+  if [ -n "$id" ]; then
+    gh api -X PATCH "repos/{owner}/{repo}/issues/comments/$id" \
+      -f body="$(body "$change")" >/dev/null
+  else
+    gh issue comment "$n" --body "$(body "$change")" >/dev/null
+  fi
+}
+
 cmd_phase() {
   local change="$1" to="$2"; shift 2
   local note=""
@@ -237,12 +262,26 @@ cmd_phase() {
   done
   gh issue edit "$n" "${args[@]}" >/dev/null
 
-  # THE BODY IS REGENERATED AT EVERY TRANSITION, and that is what makes the
+  # THE POINTER IS REGENERATED AT EVERY TRANSITION, and that is what makes the
   # links honest. At `propose` the change exists only in a working copy, so its
   # branch link resolves to nothing; by `applying` the branch is pushed, and at
   # `archived` the directory has moved and only the default branch still has it.
-  # A body written once would be a 404 for the whole life of the issue.
-  gh issue edit "$n" --body "$(body "$change")" >/dev/null
+  # A pointer written once would be a 404 for the whole life of the issue.
+  #
+  # WHICH TEXT IS THE POINTER DEPENDS ON WHO WROTE THE ISSUE. On one this script
+  # opened, the body. On a PROMOTED one the body is the reporter's, and the
+  # pointer is the comment promotion left — so that comment is what gets
+  # rewritten. This used to regenerate the body unconditionally, and the first
+  # promoted issue taken through `phase archived` lost the reporter's words to
+  # the project's table: exactly the discard promotion exists to prevent, one
+  # transition later than the one that was tested.
+  #
+  # DECIDED BY READING THE ISSUE, NOT BY REMEMBERING. The sidecar holds a
+  # number and nothing else, so "was this promoted" is answered by whether the
+  # body carries the pointer's own sentence. An unreadable body is treated as
+  # somebody else's: the worst outcome is a redundant pointer comment, where
+  # the other way round it is a reporter's text overwritten.
+  refresh_pointer "$n" "$change"
 
   # ONE comment per transition, not per task. A stream of progress comments
   # makes the issue longer than the artifact it points at.

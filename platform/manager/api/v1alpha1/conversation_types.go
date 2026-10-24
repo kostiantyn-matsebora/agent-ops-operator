@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -16,10 +18,24 @@ const (
 	InputJob        InputType = "job"
 )
 
-// OriginKind says HOW an input reached the manager. Two values, and there are
-// only two doors: a signal through a claimed SignalSource, or a channel the user
-// is already looking at. (`POST /task` was a third once; it is gone.)
-// +kubebuilder:validation:Enum=signal;channel
+// Severity is a signal's own urgency rating, a closed vocabulary distinct
+// from any adapter's own "severity" label. Absent means unrated — the only
+// state a signal carried before this field existed.
+// +kubebuilder:validation:Enum=critical;error;warning;info
+type Severity string
+
+const (
+	SeverityCritical Severity = "critical"
+	SeverityError    Severity = "error"
+	SeverityWarning  Severity = "warning"
+	SeverityInfo     Severity = "info"
+)
+
+// OriginKind says HOW an input reached the manager. There are three doors: a
+// signal through a claimed SignalSource, a channel the user is already looking
+// at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
+// was a fourth once; it is gone.)
+// +kubebuilder:validation:Enum=signal;channel;member
 type OriginKind string
 
 const (
@@ -29,6 +45,12 @@ const (
 	// OriginChannel: the input was typed into a channel — a command or a thread
 	// reply. Name is that channel.
 	OriginChannel OriginKind = "channel"
+	// OriginMember: the input crossed a `causedBy` edge between a coordinated
+	// conversation and its immediate parent (coordination-loop) — either a
+	// task an `invoke` handed down, or a member's result routed back up. Name
+	// is the CONVERSATION on the other side of that edge, and Entry is the
+	// `agents[]` entry name the edge was invoked through.
+	OriginMember OriginKind = "member"
 )
 
 // SignalProvenance is the originating signal, kept for attribution.
@@ -41,7 +63,10 @@ type SignalProvenance struct {
 	// +optional
 	SourceRef *ObjectRef `json:"sourceRef,omitempty"`
 
-	// Labels are the signal's grouping labels, as the adapter sent them.
+	// Labels are the signal's own context, as the adapter sent them — opaque
+	// attribution only, rendered on signal cards. They feed no routing
+	// decision: the manager routes purely by ConversationID/InitiationID
+	// equality, never by a label.
 	//
 	// BOUNDED at MaxSignalLabels. A Conversation is long-lived where the
 	// ConversationInput that used to hold these was not, and an adapter's label
@@ -49,6 +74,13 @@ type SignalProvenance struct {
 	// cost nobody chose.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
+
+	// Severity is the originating signal's own severity rating, written once
+	// at creation from the signal that opened the conversation and never
+	// rewritten by a later recurrence. Omitted wherever that signal carried
+	// none.
+	// +optional
+	Severity Severity `json:"severity,omitempty"`
 }
 
 // MaxSignalLabels bounds SignalProvenance.Labels. Comfortably above what the
@@ -69,9 +101,16 @@ const MaxSignalLabels = 32
 // is only what cannot be derived afterwards.
 type InputOrigin struct {
 	Kind OriginKind `json:"kind"`
-	// Name is the SignalSource or Channel the input came from.
+	// Name is the SignalSource or Channel the input came from, or — for
+	// OriginMember — the conversation on the other side of the `causedBy`
+	// edge this input crossed.
 	// +optional
 	Name string `json:"name,omitempty"`
+	// Entry is the parent Coordinator's `agents[]` entry name the edge was
+	// invoked through. Set only for OriginMember, on both directions of the
+	// edge: the task `invoke` handed down, and the result routed back up.
+	// +optional
+	Entry string `json:"entry,omitempty"`
 	// SignalKind is the originating signal's lane (alert | job | task | chat)
 	// for `signal` origins, empty otherwise. It says whether a PERSON typed
 	// this input — which decides how it is rendered on the surfaces that did
@@ -107,6 +146,36 @@ const (
 	LabelChatChannel = "agentops.dev/channel"
 	LabelChatSender  = "agentops.dev/sender"
 )
+
+// LabelCausedBy indexes a member conversation by its immediate parent's name —
+// the same fact `spec.causedBy.parent` carries, mirrored onto a label so the
+// close cascade (coordination-loop) can list one parent's direct members with
+// `client.MatchingLabels` rather than scanning every conversation in the
+// namespace. Set once at creation, alongside `spec.causedBy`, and never
+// changed — exactly like the field it mirrors.
+const LabelCausedBy = "agentops.dev/caused-by"
+
+// IndexConversationID names the informer field index on
+// Conversation.spec.conversationId — equality routing, reopen's
+// at-most-one-open check, and coordination's member reuse all read it
+// (signal-correlation-id), in place of the removed
+// agentops.dev/signature-hash label. initiationId values are not
+// label-safe (an Alertmanager groupKey carries "{}", quotes, spaces), so
+// the lookup moved to a cache-backed field index instead of a derived
+// label. Registered by internal/controller.SetupConversationIndexes;
+// defined here, not there, so a package with no reason to import
+// internal/controller (internal/chat, which internal/controller itself
+// imports) can still build the same client.MatchingFields query.
+const IndexConversationID = "spec.conversationId"
+
+// LabelNameBase names a conversation's own word-chain base name —
+// "<kind>-<words>", with no numeric collision suffix — so a later creation
+// for the same base can find every prior conversation sharing it with one
+// exact-match List (`client.MatchingLabels`), rather than scanning the
+// namespace or guessing names one Create attempt at a time
+// (readable-conversation-names). Set once at creation and never changed,
+// exactly like LabelCausedBy.
+const LabelNameBase = "agentops.dev/name-base"
 
 // InputItem is one queued work unit. Payload is inline OR referenced via
 // PayloadRef (a ConversationInput object) for large payloads.
@@ -204,13 +273,77 @@ func (i *InputItem) DeliverTo(channel, originSurface string, originEchoes bool) 
 	return !(channel == originSurface && originEchoes)
 }
 
+// Provenance names the conversation that invoked this one as a coordinated
+// MEMBER, and the entry it was invoked through.
+//
+// Parent is the IMMEDIATE parent — one hop, never the tree's ultimate root.
+// A member may itself be a Coordinator's root for its own members, so
+// walking to the uncaused root means following Parent one link at a time,
+// never reading it as already resolved.
+type Provenance struct {
+	// Parent is the parent conversation's name (same namespace).
+	// +kubebuilder:validation:MinLength=1
+	Parent string `json:"parent"`
+	// Entry is the name of the parent Coordinator's `agents[]` entry this
+	// conversation was invoked through.
+	// +kubebuilder:validation:MinLength=1
+	Entry string `json:"entry"`
+}
+
 // ConversationSpec pins a conversation to its chat surfaces and an agent
 // profile, and carries its queue of work units (append-only; pruned once
 // processed).
 type ConversationSpec struct {
+	// CausedBy is set when this conversation was created by the `invoke`
+	// verb on another conversation, rather than by a signal or a chat
+	// command. MATERIALIZED at creation, never set by hand.
+	//
+	// Independent of CoordinatorRef: a conversation may carry both when a
+	// Coordinator was invoked from inside another coordination — it is then
+	// simultaneously a MEMBER of its own parent and the ROOT of its own
+	// members.
+	// +optional
+	CausedBy *Provenance `json:"causedBy,omitempty"`
+	// CoordinatorRef names the Coordinator this conversation is itself the
+	// ROOT of — set only for a conversation the `invoke` verb (or an
+	// addressed/claimed signal) originated FROM a Coordinator, exactly as
+	// PipelineRef is set for one originated from a Pipeline. The two refs
+	// are mutually exclusive: a conversation has exactly one originating
+	// wiring object.
+	//
+	// PROVENANCE, never wiring — nothing resolves the Coordinator's
+	// agents[], sources or channels through this ref at dispatch time; those
+	// were already snapshotted at creation (ChannelRefs carries the
+	// Coordinator's own channels, bound unconditionally — see ChannelRefs'
+	// own comment — and status.budget carries the limits). It exists so
+	// `invoke` knows which Coordinator's `agents[]` this conversation may
+	// invoke from, and so a nested cycle guard can name the Coordinator
+	// repeated.
+	// +optional
+	CoordinatorRef *ObjectRef `json:"coordinatorRef,omitempty"`
+	// EscalationChannelRefs is the SNAPSHOT of the originating Coordinator's
+	// own `channelRefs`, taken at creation — set only alongside CoordinatorRef,
+	// and only for an UNCAUSED root (a member never binds it).
+	//
+	// UNCONDITIONALLY BOUND INTO ChannelRefs AT CREATION TOO
+	// (coordinator-unconditional-channels): any open coordinator root must be
+	// reachable by a human from the moment it exists, whether or not its agent
+	// ever calls `escalate` — exactly as a Pipeline's own `channelRefs` already
+	// are. `escalate` no longer binds anything; it posts into a thread already
+	// open. This field survives as its own PROVENANCE — the Coordinator's own
+	// declared set, as opposed to ChannelRefs, which for a chat-addressed root
+	// may additionally carry the one channel it was addressed from. Editing
+	// the Coordinator's `channelRefs` after creation changes nothing here,
+	// exactly as editing its `limits` cannot reach the budget already
+	// snapshotted into status.
+	// +optional
+	EscalationChannelRefs []ObjectRef `json:"escalationChannelRefs,omitempty"`
 	// ChannelRefs — every listed channel mirrors the whole conversation (own
 	// thread per channel, replies and acks fanned out). Empty = chat-less
-	// (HTTP-only / shadow).
+	// (HTTP-only / shadow). For a Coordinator-rooted conversation this is
+	// bound from the Coordinator's own `channelRefs` at creation, the same way
+	// a Pipeline's is (coordinator-unconditional-channels) — never left empty
+	// pending an `escalate` call.
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
 	ProfileRef  ObjectRef   `json:"profileRef"`
@@ -225,7 +358,7 @@ type ConversationSpec struct {
 	//
 	// It exists because a source is SHAREABLE: two Pipelines listing one source
 	// both open a conversation per signal, and those conversations carry the
-	// same signature. Without the ref, the second Pipeline's next signal would
+	// same conversationId. Without the ref, the second Pipeline's next signal would
 	// be absorbed by the first Pipeline's conversation and run under the wrong
 	// profile with the wrong tools. It also replaces attribution-by-inference,
 	// which went blank exactly when two Pipelines wired identically.
@@ -243,9 +376,9 @@ type ConversationSpec struct {
 	// for display, and nothing is ever resolved through it.
 	//
 	// It is on the CONVERSATION because a conversation has exactly one
-	// originating signal — reuse is scoped to one signature and one pipeline,
-	// so every signal that lands here came from the same source with the same
-	// grouping labels.
+	// originating signal — reuse is scoped to one conversationId and one
+	// pipeline, so every signal that lands here came from the same source
+	// carrying the same correlation id.
 	//
 	// IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on
 	// `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the
@@ -260,12 +393,30 @@ type ConversationSpec struct {
 	// channel started. Render it as absent rather than guessing.
 	// +optional
 	Signal *SignalProvenance `json:"signal,omitempty"`
+	// Title is bounded by MaxConversationTitle — see that constant's own
+	// comment for why a cap belongs HERE despite the message-body rule
+	// against transport-shaped limits.
 	// +optional
+	// +kubebuilder:validation:MaxLength=500
 	Title string `json:"title,omitempty"`
-	// Signature groups same/similar problems into one conversation
-	// (e.g. alertgroup/alertname/namespace, job:<name>).
+	// ConversationID is the adopted initiationId of the signal that opened
+	// this conversation — the sender-minted correlation identity equality
+	// routing matches on. It replaces the derived Signature and the
+	// agentops.dev/signature-hash label: the manager routes by pure id
+	// equality now, nothing is computed from labels any more.
+	//
+	// OPAQUE. The manager compares it only for equality and never parses,
+	// derives or interprets it.
+	//
+	// WRITTEN ONCE AT CREATION, like PipelineRef and Signal above — reopening,
+	// re-wiring or reconciling this conversation never changes it.
+	//
+	// Absent on a conversation created before this field existed. NEVER
+	// backfilled — equality routing simply never matches a legacy
+	// conversation, so a recurrence opens a new one beside it rather than
+	// risking a wrong merge.
 	// +optional
-	Signature string `json:"signature,omitempty"`
+	ConversationID string `json:"conversationId,omitempty"`
 	// OriginReader records WHO started this conversation, so their own read
 	// watermark can be stamped the moment their thread is created — the person
 	// who typed the request has by definition seen it, and presenting it back
@@ -413,6 +564,18 @@ type RunStatus struct {
 	// re-post to the delivered thread or abandon the other two.
 	// +optional
 	Delivered []string `json:"delivered,omitempty"`
+	// RoutedToParent marks a run on a conversation carrying `spec.causedBy`
+	// whose result has already been appended as an input on its PARENT
+	// (coordination-loop). The same derivability shape as DeliveryTracked: the
+	// fast path in `/work/done` sets it once the append succeeds, and the
+	// reconciler backstop re-derives a missing append from `causedBy ∧
+	// !RoutedToParent` rather than from scanning the parent's own queue, which
+	// pruning empties.
+	//
+	// Absent on a conversation with no `causedBy` — there is no parent to
+	// route to, so the zero value already means "nothing owed".
+	// +optional
+	RoutedToParent bool `json:"routedToParent,omitempty"`
 	// Inputs are the messages this run consumed, kept where the run keeps its
 	// answer — so a conversation records the questions as well as the answers
 	// and its whole timeline reads off status in order.
@@ -469,6 +632,17 @@ type RecordedInput struct {
 	// Sender is who typed it, when a sender was named. Attribution only.
 	// +optional
 	Sender string `json:"sender,omitempty"`
+	// Origin is this input's OriginKind, carried into the durable record so a
+	// reader rehydrating a thread from `status.runs[]` alone can tell a
+	// coordination-internal input (OriginMember — a task `invoke` handed down,
+	// or a member's result routed back up) from an ordinary one, WITHOUT
+	// re-deriving it from Surface: both an OriginMember input and a genuine
+	// surfaceless signal (an alert, a job tick) record Surface as "", so Surface
+	// alone cannot tell them apart. Absent on an input recorded before this
+	// field existed, which reads as neither kind and renders exactly as it
+	// always has.
+	// +optional
+	Origin OriginKind `json:"origin,omitempty"`
 	// +optional
 	ReceivedAt *metav1.Time `json:"receivedAt,omitempty"`
 }
@@ -483,6 +657,9 @@ func (i *InputItem) Record(text string, labels map[string]string) RecordedInput 
 	rec := RecordedInput{
 		ID: i.ID, Type: i.Type, PayloadRef: i.PayloadRef,
 		Surface: i.OriginSurface(labels), Sender: i.OriginSender(labels),
+	}
+	if i.Origin != nil {
+		rec.Origin = i.Origin.Kind
 	}
 	if !i.ReceivedAt.IsZero() {
 		at := i.ReceivedAt
@@ -541,8 +718,18 @@ type ThreadBinding struct {
 	// Per THREAD, therefore per CHANNEL: a conversation bound to Telegram and the
 	// console has two audiences reading it in two places, and one shared mark
 	// would let a Telegram reader clear the console's.
+	//
+	// AN OPAQUE RFC3339(-NANO) STRING, NEVER metav1.Time. metav1.Time's
+	// MarshalJSON truncates to WHOLE-SECOND precision on the round trip through
+	// the API server — UnmarshalJSON on the way IN preserves sub-second digits,
+	// the loss is in STORAGE — so a watermark stamped from a message's own
+	// full-precision timestamp could round-trip to a value that same message's
+	// timestamp still reads as strictly after, leaving the thread it was meant
+	// to clear unread forever. A plain string stores exactly the bytes it was
+	// given. Parse with ParseWatermark; never compare it as a time.Time
+	// directly.
 	// +optional
-	ReadAt *metav1.Time `json:"readAt,omitempty"`
+	ReadAt *string `json:"readAt,omitempty"`
 	// ReadTracked marks a binding created by a manager that tracks reads. It is
 	// what tells a NEVER-READ binding from a PRE-UPGRADE one — both look like "a
 	// binding with no readAt", and no timestamp can separate them, exactly as
@@ -565,10 +752,46 @@ type ThreadBinding struct {
 	// who has never reported does.
 	// +optional
 	Readers []ReaderMark `json:"readers,omitempty"`
+	// UndeliveredReply names the run whose reply failed delivery to this
+	// thread and has not yet succeeded — the run id, not the text, exactly
+	// as this project never stores rendered text on the CR. Cleared the
+	// moment delivery to this thread succeeds.
+	//
+	// Durable state, not telemetry: it is what lets an operator diagnose an
+	// empty-looking chat thread from the object alone, without reading
+	// manager logs, and it is what reconciliation re-derives the "send" op
+	// from after a restart or a transient transport failure.
+	// +optional
+	UndeliveredReply string `json:"undeliveredReply,omitempty"`
+	// Claim records which manager replica currently owns dispatching this
+	// thread's outstanding ensure-topic op to a polling adapter, and when.
+	// Written and cleared ONLY by the current leader-election Lease holder
+	// (durable-chat-ops-broker) — never by a non-leader, however current its
+	// own cached view of this object looks.
+	//
+	// Absent: no claim outstanding and no replica currently owns dispatching
+	// it.
+	// +optional
+	Claim *OpClaim `json:"claim,omitempty"`
 }
 
 // MaxReadersPerThread bounds the per-identity overlay on one binding.
 const MaxReadersPerThread = 50
+
+// OpClaim records which replica is dispatching a thread's pending
+// ensure-topic op, and since when. The durable, restart-surviving substitute
+// for what used to live only in a dead process's in-memory OpQueue.
+type OpClaim struct {
+	// Holder identifies the replica that wrote this claim — the same identity
+	// the leader-election Lease records. Compared against the CURRENT Lease
+	// holder on every reconcile: a mismatch means the writing replica is no
+	// longer leader, and the claim is cleared at once rather than waited out.
+	Holder string `json:"holder"`
+	// ClaimedAt is when the claim was written. A claim older than the
+	// configured staleness bound, on a thread still carrying no threadId, is
+	// treated as abandoned and cleared by the current leader.
+	ClaimedAt metav1.Time `json:"claimedAt"`
+}
 
 // ReaderMark is one identity's watermark on a thread.
 type ReaderMark struct {
@@ -578,8 +801,10 @@ type ReaderMark struct {
 	// conversation records THAT someone read it without recording WHO. Same
 	// contract as ThreadID and RuntimeContextID.
 	Key string `json:"key"`
+	// ReadAt carries the same opaque RFC3339(-Nano) string as
+	// ThreadBinding.ReadAt, for the same reason — see that field's comment.
 	// +optional
-	ReadAt *metav1.Time `json:"readAt,omitempty"`
+	ReadAt *string `json:"readAt,omitempty"`
 }
 
 // Watermark returns how far a reader has seen this thread: their own mark when
@@ -590,7 +815,7 @@ type ReaderMark struct {
 // inherit where the channel as a whole got to — so a teammate joining today is
 // not handed a namespace-sized backlog they can act on none of, which is the
 // ReadTracked backfill argument one level down.
-func (t *ThreadBinding) Watermark(reader string) *metav1.Time {
+func (t *ThreadBinding) Watermark(reader string) *string {
 	if reader != "" {
 		for i := range t.Readers {
 			if t.Readers[i].Key == reader {
@@ -599,6 +824,22 @@ func (t *ThreadBinding) Watermark(reader string) *metav1.Time {
 		}
 	}
 	return t.ReadAt
+}
+
+// ParseWatermark parses a ReadAt string into a comparable time.Time. It is the
+// ONE place a stored or reported watermark is interpreted — Unread uses it
+// below, and the HTTP read-report handler uses it too, so a malformed
+// watermark reads the same way on both sides of the write.
+//
+// An empty or unparsable string reports !ok. Nothing today writes such a
+// value, but a reader must not panic on one it did not itself produce — it is
+// treated the same as "no watermark at all", conservatively.
+func ParseWatermark(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	return t, err == nil
 }
 
 // Unread reports whether this thread has activity newer than its watermark,
@@ -620,10 +861,88 @@ func (t *ThreadBinding) Unread(lastActivity *metav1.Time, reader string) bool {
 	if at == nil {
 		return true
 	}
+	parsed, ok := ParseWatermark(*at)
+	if !ok {
+		// Carries no usable information — the same as no watermark at all.
+		return true
+	}
 	if lastActivity == nil {
 		return false
 	}
-	return lastActivity.Time.After(at.Time)
+	return lastActivity.Time.After(parsed)
+}
+
+// ConversationBudget is a Coordinator-rooted conversation's own resource
+// ceiling, snapshotted at creation from its originating Coordinator's
+// `limits` — and the running counts against it.
+//
+// PER-LEVEL, ON PURPOSE: nesting never pools a budget across levels. A
+// conversation that is itself a Coordinator's root enforces only its OWN
+// budget, independent of any ancestor's — a nested Coordinator's parent
+// increments its own turns separately, on its own run.
+type ConversationBudget struct {
+	// MaxAgents ceilings AgentsInvoked over this conversation's lifetime.
+	// Zero means unset, not zero — enforcement supplies its own default.
+	// +optional
+	MaxAgents int32 `json:"maxAgents,omitempty"`
+	// MaxTurns ceilings Turns.
+	// +optional
+	MaxTurns int32 `json:"maxTurns,omitempty"`
+	// Deadline is the ABSOLUTE instant after which this conversation is
+	// closed `budget-exceeded` — the Coordinator's relative `limits.deadline`
+	// resolved against this conversation's own creation time, once, at
+	// snapshot: re-resolving against a later clock would let the same
+	// duration mean a different moment depending on when it was read.
+	// +optional
+	Deadline *metav1.Time `json:"deadline,omitempty"`
+	// AgentsInvoked counts agents invoked over this conversation's lifetime,
+	// incremented by the manager under optimistic concurrency as each
+	// `invoke` succeeds.
+	// +optional
+	AgentsInvoked int32 `json:"agentsInvoked,omitempty"`
+	// Turns counts completed runs on THIS conversation's own status,
+	// incremented when its OWN run is recorded — not when a member's result
+	// arrives as an input — so several members finishing at once is one
+	// turn.
+	// +optional
+	Turns int32 `json:"turns,omitempty"`
+}
+
+// MaxCloseReason bounds ConversationStatus.CloseReason.
+const MaxCloseReason = 256
+
+// MaxBrief bounds ConversationStatus.Brief.
+const MaxBrief = 512
+
+// MaxConversationTitle bounds ConversationSpec.Title.
+//
+// This is NOT the transport-shaped-limit mistake the "no manager-side cut"
+// rule (gotchas.md, invariants.md) warns against. That rule is about a
+// MESSAGE BODY an adapter renders and a transport bounds in its own way
+// (Telegram's own 128-rune topic-name cap, enforced only at
+// channels/telegram/telegram.go's CreateTopic). Title is a different thing:
+// a ConversationSpec field, stored permanently in the API server and
+// returned on every list/watch of this object, set directly from
+// attacker-or-adopter-controlled text (an alert or chat payload, an
+// addressed command's task, an invoked member's entry) with no per-transport
+// cap standing between the input and etcd. Every other free-text field on
+// this type IS bounded here (CloseReason, EscalationMessage,
+// RecordedInput.Text) — Title was the one exception, able to grow to
+// whatever the inbound request body's own limit allowed.
+const MaxConversationTitle = 500
+
+// BoundConversationTitle truncates s to MaxConversationTitle runes, applied
+// at every site that sets ConversationSpec.Title from request-shaped text
+// (internal/httpapi/signals.go's title construction, internal/chat's
+// CreateTaskConversation and memberTitle). Rune-safe — a Title carries an
+// emoji prefix (🛠, 🤖, 🤝, 🔍) ahead of the caller's own words, and a byte
+// slice would cut a multi-byte character in half.
+func BoundConversationTitle(s string) string {
+	runes := []rune(s)
+	if len(runes) <= MaxConversationTitle {
+		return s
+	}
+	return string(runes[:MaxConversationTitle])
 }
 
 // ConversationStatus is the observed state.
@@ -683,6 +1002,52 @@ type ConversationStatus struct {
 	// and CLEARED by a reopen — which is what stops the delete clock.
 	// +optional
 	ClosedAt *metav1.Time `json:"closedAt,omitempty"`
+	// Budget is set only on a conversation that is itself a Coordinator's
+	// root (spec.coordinatorRef non-nil) — the snapshot of that
+	// Coordinator's limits, plus the running counts against them. Absent
+	// on any other conversation: there is nothing to enforce.
+	// +optional
+	Budget *ConversationBudget `json:"budget,omitempty"`
+	// EscalatedAt stamps the moment the `escalate` verb was called on this
+	// conversation — an UNCAUSED root only; a caused member escalates by
+	// closing instead (see CloseReason) and never sets this.
+	//
+	// Its threads were already open at creation
+	// (coordinator-unconditional-channels), so this no longer gates DeliverInputs
+	// at all — it is the record of the agent's decision, not a bind moment.
+	// +optional
+	EscalatedAt *metav1.Time `json:"escalatedAt,omitempty"`
+	// EscalationMessage is the digest the escalating agent supplied, snapshotted
+	// at the same moment as EscalatedAt so the reconciler can post it into
+	// each already-bound channel's thread once that thread exists — the
+	// ensure-topic enqueue and the topic actually being created by the adapter
+	// are two separate moments, so the message has to sit somewhere between
+	// them.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2000
+	EscalationMessage string `json:"escalationMessage,omitempty"`
+	// CloseReason is why the MCP `close` verb (or an internal
+	// `budget-exceeded` close) ended this conversation. Required by that
+	// verb; absent when `/close` ended it from a surface, or when nothing
+	// has closed it — a reader must not infer a reason from silence.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	CloseReason string `json:"closeReason,omitempty"`
+	// Brief is what this conversation is ABOUT — one or two sentences
+	// somebody could recognise it by, reported by the runtime in
+	// `/work/done` beside its result. LATEST-WINS, the same rule as
+	// RuntimeContextID: a report omitting it leaves the stored one
+	// untouched, and a runtime that never sends it leaves Title as the only
+	// description.
+	//
+	// It reports what the conversation CONCERNS, never where it stands —
+	// status already carries that, and Brief is never derived by re-reading
+	// status.runs[].result: that reach is exactly what a projection built on
+	// this field (a Coordinator's listing, the channel-reader token) exists
+	// to withhold.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	Brief string `json:"brief,omitempty"`
 	// ThreadsArchived names the bound channels whose thread has already been
 	// archived by a completed close-topic op.
 	//
@@ -825,9 +1190,14 @@ func (c *Conversation) SetContextID(id string) {
 }
 
 // ThreadFor returns the thread id bound for a channel, or nil.
+//
+// An empty ThreadID is treated the same as no binding at all: a binding may
+// now exist carrying only a Claim (durable-chat-ops-broker) while its topic is
+// still being created, and every caller here answers "has a thread to post
+// to", never "is there bookkeeping for this channel yet".
 func (c *Conversation) ThreadFor(channel string) *string {
 	for i := range c.Status.Threads {
-		if c.Status.Threads[i].Channel == channel {
+		if c.Status.Threads[i].Channel == channel && c.Status.Threads[i].ThreadID != "" {
 			return &c.Status.Threads[i].ThreadID
 		}
 	}
@@ -842,6 +1212,24 @@ func (c *Conversation) BoundTo(channel string) bool {
 		}
 	}
 	return false
+}
+
+// SameOrigin reports whether c and other were originated by the SAME
+// Pipeline or the SAME Coordinator — the scoping equality routing and
+// reopen's at-most-one-open check both apply on top of a conversationId
+// match (pipeline-model: "a signal MAY only be appended to an open
+// conversation originated by the SAME Pipeline"). The two refs are mutually
+// exclusive, and a conversation naming NEITHER predates both fields — never
+// a match, since nothing backfills them.
+func (c *Conversation) SameOrigin(other *Conversation) bool {
+	switch {
+	case c.Spec.PipelineRef != nil:
+		return other.Spec.PipelineRef != nil && other.Spec.PipelineRef.Name == c.Spec.PipelineRef.Name
+	case c.Spec.CoordinatorRef != nil:
+		return other.Spec.CoordinatorRef != nil && other.Spec.CoordinatorRef.Name == c.Spec.CoordinatorRef.Name
+	default:
+		return false
+	}
 }
 
 // +kubebuilder:object:root=true

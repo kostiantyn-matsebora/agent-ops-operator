@@ -25,14 +25,11 @@ agentops-mcp-prometheus
 {{ .Values.mcpServers.serviceAccountName }}
 {{- end -}}
 
-{{- /* Wiring gate. The demo branch is inert here (active has no demo path) and is
-kept only so the rule reads identically in every bundle that ships wiring. */ -}}
+{{- /* Wiring gate. Demo mode never forces it: only an explicit wiringEnabled does. */ -}}
 {{- define "prometheus.wiringActive" -}}
 {{- if include "prometheus.active" . -}}
-{{- if kindIs "bool" .Values.pipelines.enabled -}}
-{{- if .Values.pipelines.enabled }}true{{ end -}}
-{{- else if dig "demo" "enabled" false (.Values.global | default dict) -}}
-true
+{{- if kindIs "bool" .Values.wiringEnabled -}}
+{{- if .Values.wiringEnabled }}true{{ end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -71,4 +68,26 @@ inherits. */ -}}
 {{- $rbac := $p.rbac | default dict -}}
 {{- if or ($rbac.clusterRoles | default list) ($rbac.bindClusterRoles | default list) -}}true{{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{- /* COORDINATOR-MODE CONTRIBUTION (coordinator-deployment-mode): see
+kubernetes.coordinatorContribution for the calling convention and why this
+lives beside the gating it mirrors. One route, one capability — the capability
+is named after the PROFILE (`alert-investigator`), not the Pipeline route name
+(`alert-triage`): this bundle offers exactly one route, and the spec names the
+rendered capability for the agent it runs rather than for the job label the
+route used under pipelines mode. */ -}}
+{{- define "prometheus.coordinatorContribution" -}}
+{{- $sources := list -}}
+{{- $agents := list -}}
+{{- if and (include "prometheus.wiringActive" .) .Values.profile.enabled -}}
+{{- $p := .Values.pipelines -}}
+{{- $am := .Values.alertmanager -}}
+{{- if and $am.enabled $am.defaultSource.enabled -}}{{- $sources = append $sources $am.defaultSource.name -}}{{- end -}}
+{{- $agents = append $agents (dict "name" .Values.profile.name "capability" .Values.profile.name "description" $p.description) -}}
+{{- end -}}
+sources:
+{{ toYaml $sources | indent 2 }}
+agents:
+{{ toYaml $agents | indent 2 }}
 {{- end -}}

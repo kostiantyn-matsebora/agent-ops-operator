@@ -1,0 +1,334 @@
+//go:build system
+
+package system
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+)
+
+const kubeconfigFlag = "--kubeconfig"
+
+// Resolved once, and used everywhere the harness shells out to kubectl or
+// helm — go:S4036 wants a caller to say explicitly where the binary comes
+// from rather than leaving PATH to answer implicitly at each call site. When
+// the binary is not on PATH the fallback is the bare name, so the resulting
+// exec error is the same "not found" a reader would already expect.
+var (
+	kubectlBin = lookupBin("kubectl")
+	helmBin    = lookupBin("helm")
+)
+
+func lookupBin(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
+}
+
+// Cluster is one k3d cluster and the kubeconfig that reaches it.
+type Cluster struct {
+	Name       string
+	Kubeconfig string
+	reused     bool
+}
+
+// EnsureCluster creates the cluster, or adopts a running one when reuse is
+// asked for. Traefik and servicelb are disabled: they add startup time and a
+// LoadBalancer the chart does not assume, and a Service that behaves
+// differently under test than in a typical install is false confidence.
+func EnsureCluster(ctx context.Context, name string, reuse bool) (*Cluster, error) {
+	c := &Cluster{Name: name}
+	exists := exec.Command(lookPath("k3d"), "cluster", "get", name).Run() == nil
+	if exists && !reuse {
+		if out, err := exec.CommandContext(ctx, lookPath("k3d"), "cluster", "delete", name).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("deleting the stale cluster: %v\n%s", err, out)
+		}
+		exists = false
+	}
+	if !exists {
+		// The registries file names the pull test's registry as plain HTTP;
+		// containerd reads it at start only, so it is given at creation.
+		//
+		// CreateTemp, never a computed name under os.TempDir(): a predictable
+		// path in a world-writable directory is open to a symlink planted
+		// there ahead of us, which a fixed name cannot detect or refuse.
+		regsFile, err := os.CreateTemp("", "agentops-e2e-"+name+"-registries-*.yaml")
+		if err != nil {
+			return nil, err
+		}
+		regs := regsFile.Name()
+		// k3d reads it once, at `cluster create` below, and nothing after
+		// this function needs it -- unlike the kubeconfig, its lifetime is
+		// this function's, not the cluster's.
+		defer func() { _ = os.Remove(regs) }()
+		_, writeErr := regsFile.Write([]byte(registriesYAML))
+		closeErr := regsFile.Close()
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		args := []string{"cluster", "create", name,
+			"--k3s-arg", "--disable=traefik@server:0",
+			"--k3s-arg", "--disable=servicelb@server:0",
+			"--registry-config", regs,
+			"--wait", "--timeout", "180s",
+			"--no-lb",
+		}
+		if out, err := exec.CommandContext(ctx, lookPath("k3d"), args...).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("k3d cluster create: %v\n%s", err, out)
+		}
+	} else {
+		c.reused = true
+	}
+	kc, err := exec.CommandContext(ctx, lookPath("k3d"), "kubeconfig", "get", name).Output()
+	if err != nil {
+		return nil, fmt.Errorf("k3d kubeconfig get: %w", err)
+	}
+	// CreateTemp, for the same reason as the registries file above: a fixed
+	// name under os.TempDir() is predictable, CreateTemp's is not.
+	kcFile, err := os.CreateTemp("", "agentops-e2e-"+name+"-*.kubeconfig")
+	if err != nil {
+		return nil, err
+	}
+	path := kcFile.Name()
+	_, writeErr := kcFile.Write(kc)
+	closeErr := kcFile.Close()
+	if writeErr != nil {
+		return nil, writeErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	c.Kubeconfig = path
+	// Wait for the node to be Ready and the local-path provisioner to exist —
+	// the context volume is bound by it.
+	if out, err := c.Kubectl(ctx, "wait", "--for=condition=Ready", "node", "--all", "--timeout=180s"); err != nil {
+		return nil, fmt.Errorf("node readiness: %v\n%s", err, out)
+	}
+	return c, nil
+}
+
+// Delete tears the cluster down and removes the CreateTemp'd kubeconfig
+// that reached it -- unlike the registries file, this one lives for the
+// cluster's whole lifetime, so it is Delete's to remove rather than
+// EnsureCluster's.
+func (c *Cluster) Delete() {
+	_ = exec.Command(lookPath("k3d"), "cluster", "delete", c.Name).Run()
+	if c.Kubeconfig != "" {
+		_ = os.Remove(c.Kubeconfig)
+	}
+}
+
+// Kubectl runs kubectl against the cluster.
+func (c *Cluster) Kubectl(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, kubectlBin, append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// Helm runs helm against the cluster.
+func (c *Cluster) Helm(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, helmBin, append([]string{kubeconfigFlag, c.Kubeconfig}, args...)...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// Import loads locally built images into the node so they are never pulled.
+//
+// ONE IMAGE PER CALL, RETRIED. k3d 5.9 importing a dozen images in one call
+// deadlocked inside itself on a hosted runner ("all goroutines are asleep")
+// after passing three times with the same list; per-image calls keep a
+// single hang from taking the whole run, and a retry rides out the flake.
+func (c *Cluster) Import(ctx context.Context, images ...string) error {
+	for _, image := range images {
+		var last error
+		for attempt := 0; attempt < 3; attempt++ {
+			cmd := exec.CommandContext(ctx, lookPath("k3d"), "image", "import", "-c", c.Name, "-m", "direct", image)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				last = nil
+				break
+			}
+			last = fmt.Errorf("k3d image import %s (attempt %d): %v\n%s", image, attempt+1, err, out)
+			fmt.Fprintln(os.Stderr, last)
+			time.Sleep(5 * time.Second)
+		}
+		if last != nil {
+			return last
+		}
+	}
+	return nil
+}
+
+// Forward is a kubectl port-forward to one Service. `kubectl port-forward
+// svc/<name>` pins itself to ONE backing pod's IP for its whole life — a
+// pod churned out from under it (a replica lane force-deleting the manager's
+// pods, as scaleManagerReplicas does) makes the kubectl process exit, and
+// every later request through this Forward fails with "connection refused"
+// forever, naming a port nothing listens on. Measured live: three unrelated
+// tests failed this way after TestReplicasThreeDeliversEveryConsoleThreadInParallel's
+// own cleanup restored the replica count, which is exactly the kind of churn
+// this forward cannot survive on its own. A supervisor goroutine relaunches
+// it on the SAME local port whenever the process exits before Stop is
+// called, so a caller's URL() never needs to change.
+type Forward struct {
+	Port int
+
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	stopped bool
+
+	namespace  string
+	target     string
+	remotePort int
+	kubeconfig string
+}
+
+// URL is the local base URL.
+func (f *Forward) URL() string { return fmt.Sprintf("http://127.0.0.1:%d", f.Port) }
+
+// Stop ends the port-forward and its supervisor.
+func (f *Forward) Stop() {
+	f.mu.Lock()
+	f.stopped = true
+	cmd := f.cmd
+	f.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+}
+
+var forwardingRE = regexp.MustCompile(`Forwarding from 127\.0\.0\.1:(\d+)`)
+
+// Forward opens a port-forward on a free local port, waits for it, and
+// keeps it alive across a backing pod's death for the rest of this run.
+func (c *Cluster) Forward(namespace, target string, remotePort int) (*Forward, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	f := &Forward{Port: port, namespace: namespace, target: target, remotePort: remotePort, kubeconfig: c.Kubeconfig}
+	if err := f.start(); err != nil {
+		return nil, err
+	}
+	go f.supervise()
+	return f, nil
+}
+
+// start launches kubectl port-forward on f.Port and waits for it to report
+// ready, storing the running *exec.Cmd under f.mu.
+func (f *Forward) start() error {
+	cmd := exec.Command(kubectlBin, kubeconfigFlag, f.kubeconfig, "-n", f.namespace, "port-forward", f.target,
+		fmt.Sprintf("%d:%d", f.Port, f.remotePort))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	ready := make(chan bool, 1)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			if forwardingRE.MatchString(sc.Text()) {
+				ready <- true
+				break
+			}
+		}
+	}()
+	select {
+	case <-ready:
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("port-forward %s never came up: %s", f.target, stderr.String())
+	}
+	f.mu.Lock()
+	f.cmd = cmd
+	f.mu.Unlock()
+	return nil
+}
+
+// supervise relaunches the port-forward whenever its process exits on its
+// own, until Stop marks it intentional. A relaunch that fails to come back
+// up (the Service genuinely has no endpoint yet) is retried rather than
+// given up on — the backing pod it lost is usually mid-replacement.
+func (f *Forward) supervise() {
+	for {
+		f.mu.Lock()
+		cmd, stopped := f.cmd, f.stopped
+		f.mu.Unlock()
+		if stopped || cmd == nil {
+			return
+		}
+		_ = cmd.Wait()
+		f.mu.Lock()
+		stopped = f.stopped
+		f.mu.Unlock()
+		if stopped {
+			return
+		}
+		for {
+			if err := f.start(); err == nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
+			f.mu.Lock()
+			stopped = f.stopped
+			f.mu.Unlock()
+			if stopped {
+				return
+			}
+		}
+	}
+}
+
+// Dump writes the unconditional failure diagnostics: manager and adapter
+// logs, the pod list, cluster events and the full YAML of every agentops
+// CR. A remote cluster that no longer exists is unreproducible, so a failure
+// that did not capture its own context costs a full re-run to learn anything.
+func (c *Cluster) Dump(dir string) {
+	_ = os.MkdirAll(dir, 0o755)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	write := func(name string, args ...string) {
+		out, _ := c.Kubectl(ctx, args...)
+		_ = os.WriteFile(filepath.Join(dir, name), []byte(out), 0o644)
+	}
+	write("pods.txt", "-n", Namespace, "get", "pods", "-o", "wide")
+	write("pods.yaml", "-n", Namespace, "get", "pods", "-o", "yaml")
+	write("events.txt", "get", "events", "-A", "--sort-by=.lastTimestamp")
+	write("agentops-crs.yaml", "-n", Namespace, "get",
+		"agentprofiles,agentruntimes,channels,channeladapters,conversations,mcpconfigs,mcptoolsets,pipelines,signaladapters,signalsources",
+		"-o", "yaml")
+	write("helm-values.yaml", "-n", Namespace, "get", "secret", "-l", "owner=helm", "-o", "name")
+	// Pod NAMES only: kubectl's combined output can carry a warning line, and
+	// an artifact upload refuses a filename with a colon in it.
+	out, _ := c.Kubectl(ctx, "-n", Namespace, "get", "pods", "-o", "name")
+	for _, line := range strings.Fields(out) {
+		pod, ok := strings.CutPrefix(line, "pod/")
+		if !ok || strings.ContainsAny(pod, ":/ ") {
+			continue
+		}
+		write("log-"+pod+".txt", "-n", Namespace, "logs", pod, "--all-containers", "--tail=2000")
+		write("log-"+pod+"-previous.txt", "-n", Namespace, "logs", pod, "--all-containers", "--previous", "--tail=500")
+	}
+	fmt.Fprintf(os.Stderr, "diagnostics written to %s\n", dir)
+}

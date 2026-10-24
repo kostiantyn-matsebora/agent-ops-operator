@@ -4,20 +4,24 @@
 
 # agent-ops
 
-**A Kubernetes operator for agents you can address.**
+**A Kubernetes operator for LLM agents within boundaries you declare, cluster you control and conversations you stay in.**
 
 Something happens — an alert fires, a pod crashloops, someone asks. A
 conversation opens, an agent works in its own pod, and answers in a thread you
 can reply to.
 
 <img src="docs/assets/img/claim-thinks.svg" width="18" alt=""> **Automation that thinks** &nbsp;·&nbsp;
-<img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes-native** &nbsp;·&nbsp;
-<img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps-ready** &nbsp;·&nbsp;
-<img src="docs/assets/img/logos/claude.svg" width="18" alt=""> **Runs Claude Code**
+<img src="docs/assets/img/logos/kubernetes.svg" width="18" alt=""> **Kubernetes native** &nbsp;·&nbsp;
+<img src="docs/assets/img/claim-gitops.svg" width="18" alt=""> **GitOps ready**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
 [![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](docs/cr-reference.md)
+[![Chart](https://img.shields.io/github/v/tag/kostiantyn-matsebora/agent-ops-operator?filter=chart-v*&label=chart)](docs/CHANGELOG.md)
+[![CI](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml)
+[![Published images](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml)
+[![System nightly](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/system-full.yml/badge.svg)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/system-full.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=kostiantyn-matsebora_agent-ops-operator_manager&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=kostiantyn-matsebora_agent-ops-operator_manager)
 
 ### **→ [The documentation site](https://kostiantyn-matsebora.github.io/agent-ops-operator/) is the main source of information.**
 
@@ -27,7 +31,7 @@ This page is the short version of it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/readme-flow-dark.svg">
-  <img alt="Left to right. SOMETHING HAPPENS: an alert fires (Alertmanager), a pod crashloops (cluster events), a schedule comes due (cron), someone asks (chat). YOU DECLARE IT, ONE PIPELINE — the only place wiring lives, naming what starts it (signalSourceRefs), what it should do (profileRef), what it may touch (toolsets and mcpConfigs) and where it answers (channelRefs). THE OPERATOR RUNS IT: a Conversation, one per incident, resumable, with its own thread; and its own agent pod — isolated, serial, capped — which investigates, explains and acts ONLY where your wiring granted it. YOU ANSWER on your channels: Telegram, the console, your own adapter; and when you reply, the same conversation continues." src="docs/assets/img/readme-flow-light.svg" width="1000">
+  <img alt="Left to right. SOMETHING HAPPENS: an alert fires (Alertmanager), a pod crashloops (cluster events), a schedule comes due (cron), someone asks (chat). YOU DECLARE IT — ONE PIPELINE, naming what starts it (signalSourceRefs), what it should do (profileRef), what it may touch (toolsets and mcpConfigs) and where it answers (channelRefs) — OR ONE COORDINATOR, which reads what arrives, delegates by purpose to the agents it lists, reads what each one returns, and decides what happens next. THE OPERATOR RUNS IT: a Conversation, one per incident, resumable, with its own thread, and its own agent pod, isolated, serial and capped, investigating, explaining and acting only where your wiring granted it. YOU ANSWER on your channels: Telegram, the console, your own adapter. When you reply, the same conversation continues, and a Coordinator escalates to those same channels only when it decides to." src="docs/assets/img/readme-flow-light.svg" width="1000">
 </picture>
 
 <sup>The whole story at page scale, as one drawing: [light](docs/assets/img/agent-ops-light.svg) ·
@@ -38,8 +42,12 @@ This page is the short version of it.
 <img src="docs/assets/img/logos/prometheus.svg" width="18" alt=""> Prometheus &nbsp;·&nbsp;
 cron schedules &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/home-assistant.svg" width="18" alt=""> Home Assistant &nbsp;·&nbsp;
+<img src="docs/assets/img/logos/pulse.svg" width="18" alt=""> Pulse &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/telegram.svg" width="18" alt=""> Telegram &nbsp;·&nbsp;
 <img src="docs/assets/img/logos/agent-ops.svg" width="18" alt=""> the console &nbsp;·&nbsp;
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/ollama-dark.svg"><img src="docs/assets/img/logos/ollama-light.svg" width="18" alt=""></picture> Ollama &nbsp;·&nbsp;
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/img/logos/github-dark.svg"><img src="docs/assets/img/logos/github-light.svg" width="18" alt=""></picture> GitHub Copilot &nbsp;·&nbsp;
 any MCP server &nbsp;·&nbsp; your own
 
 ## How it works
@@ -49,7 +57,7 @@ any MCP server &nbsp;·&nbsp; your own
 2. **One Helm install puts an agent in the path** — your cluster, your credentials.
 3. **You declare the route. One `Pipeline`** — what starts it, what it should
    do, what it may touch, which servers those tools come from, and where you
-   talk to it.
+   talk to it. Or one `Coordinator`, composing several agents into one.
 4. **Then it runs.** One conversation per incident, in its own isolated pod,
    strictly serial and capped. A restart loses nothing.
 5. **Every part of it is a Kubernetes object.** `kubectl get conversations`.
@@ -78,53 +86,52 @@ spec:
     - name: telegram            # where you talk to it
 ```
 
-## When it runs
+## What agent-ops is
 
-- **Investigates** — queries the system, reads state.
-- **Explains** — in a thread you can reply to.
-- **Acts** — only where your wiring granted it.
-- **Asks** — when it needs you, it says so.
+agent-ops gives you a platform that puts an LLM agent behind the systems you
+already run. One Helm install and your cluster grows a brain and a pair of hands.
 
-## Why it is built this way
+agent-ops is more than a model and a prompt in a pod: grouping and cooldown, a
+capacity cap with a queue, context that survives a restart, per-route cluster
+identity, mediated egress and at-least-once delivery are already in it.
 
-- **Judgment, not a fixed sequence.** You describe the job in prose. Nobody
-  enumerates the steps, and nothing has to have been predicted in advance.
-- **Self-hosted, end to end.** It runs in your cluster on your credentials. No
-  prompt, transcript or alert is sent to a vendor.
-- **Bounded by construction.** One isolated pod per conversation. Tools come
-  only from the wiring, and the operator itself never reads a Secret.
+- **Kubernetes native** — thirteen custom resources, validated by the API
+  server like anything else you deploy.
+- **GitOps ready** — every route is text. It reviews as a diff and deploys
+  through the pipeline you already run.
+- **Open at three seams** — your own signal source, runtime or channel.
+  Documented HTTP contracts, no fork.
+- **Compose agents, another seam** — a `Coordinator` analyses what arrived,
+  delegates by purpose to the agents it lists, reads what they return, and
+  decides what happens next.
+- **Any model you can run** — Claude Code, Ollama and GitHub Copilot ship with
+  it. Point it at your own image and the work contract is unchanged.
+- **A pod per conversation** — isolated, serial and capped.
+- **Tools that come from the wiring** — not from the prompt. An agent holds the
+  cluster identity its route named and nothing else.
 
-## Pluggable at three seams
+## What it gives you
 
-Documented HTTP contracts, no fork.
-
-- **Your own signal source** — Datadog, Dynatrace, Sentry, a sensor on your bench.
-- **Your own agent runtime** — swap the image; the work contract does not change.
-- **Your own channel** — Slack, Teams, Discord, e-mail. The operator sends meaning,
-  your adapter renders it.
-
-## Why agent-ops?
-
-The same wiring, wherever something needs looking at.
-
-| Where | What happens |
+| | |
 |---|---|
-| **Watch and fix your cluster** | It reads the events, the pods and the logs, and names the cause. |
-| **Answer your alerts** | Every firing alert arrives with the investigation already done. |
-| **Run the checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
+| **A cluster that explains itself** | It reads the events, the pods and the logs, names the cause, and fixes what you allowed it to. |
+| **Alerts that arrive investigated** | Every firing alert turns up with the work already done. |
+| **The checks nobody gets to** | Certificates, drift and capacity, on a schedule. |
 | **An assistant for your home** | Its logs, its devices, its config. Not everything is a cluster. |
-| **Ask it from chat** | It answers in the thread where your team already talks. |
-| **Plug in your own** | Three HTTP contracts: your source, your runtime, your channel. |
+| **An answer where your team already talks** | Ask it in chat and reply in the thread it answers in. |
+| **Routine work on a model you host** | Route the lanes that run all day to a local model. Nothing they read ever leaves. |
 
-**And all of it in one place.** The [console](docs/console.md) ships enabled and
+**Console — all in one place.** The [console](docs/console.md) ships enabled and
 [read-only on your cluster](docs/console.md) — every conversation as it happens,
-what is queued, what is stuck and why, and the whole wiring as a graph. It is a
-channel too, so you answer the agent right there.
+what is queued, what is stuck and why, and the whole install as a live network,
+down to each model and tool call.
+
+It is a channel too, so you answer the agent right there.
 **[Watch one signal, start to finish](https://kostiantyn-matsebora.github.io/agent-ops-operator/#tour)** — a minute, no sound.
 
 ## The kinds you declare
 
-Eleven, one line each. [Every field, in full](docs/concepts.md).
+Thirteen, one line each. [Every field, in full](docs/concepts.md).
 
 | Kind | What it defines |
 |---|---|
@@ -137,6 +144,8 @@ Eleven, one line each. [Every field, in full](docs/concepts.md).
 | [`SignalSource`](docs/concepts.md#signalsource) | An ingest lane. Inert until a Pipeline claims it. |
 | [`SignalAdapter`](docs/concepts.md#signaladapter) | A signal implementation — the inbound-only sibling of ChannelAdapter. |
 | [`Pipeline`](docs/concepts.md#pipeline) | **The wiring**: sources × channels + profile + capabilities + what executes it and under whose identity. The only place any of them is declared. |
+| [`AgentCapability`](docs/concepts.md#agentcapability) | A named capability — profile, runtime, identity, tools, persistence — referenced by a Pipeline or Coordinator instead of inlined. |
+| [`Coordinator`](docs/concepts.md#coordinator) | The second wiring kind: a coordinating agent that invokes named members, budgeted per level, escalating to a channel only when it decides to. |
 | [`MCPConfig`](docs/concepts.md#mcpconfig) | Reusable MCP server sets, bound per wiring. |
 | [`MCPToolset`](docs/concepts.md#mcptoolset) | A named list of tool patterns — the allowlist half of a route's tools. |
 
@@ -175,20 +184,24 @@ in learning order. The reference pages are read here:
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, capacity and queueing, and how a route's tools resolve |
 | [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
-| [docs/contracts.md](docs/contracts.md) | The work contract, both adapter contracts, and the HTTP API |
+| [docs/contracts.md](docs/contracts.md) | The manager's own surfaces: the aops MCP server, activity, introspection, metrics, and the HTTP API |
+| [docs/contracts/runtime.md](docs/contracts/runtime.md) | The runtime contract: the work unit, the report, and the lifecycle |
+| [docs/contracts/channel-adapter.md](docs/contracts/channel-adapter.md) | The channel adapter contract: long-poll, push, and the body grammar |
+| [docs/contracts/signal-adapter.md](docs/contracts/signal-adapter.md) | The signal adapter contract: normalize, push, and the lane rules |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [kubernetes](docs/kubernetes.md) · [telegram](docs/telegram.md) · [prometheus](docs/prometheus.md) · [home-assistant](docs/home-assistant.md) · [claude](docs/claude.md) | The bundles: what each ships, and the agent — or runtime — it brings |
+| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](docs/claude.md) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the three runtimes |
 | [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
 ## Contributing
 
 **[CONTRIBUTING.md](CONTRIBUTING.md)** states the workflow, which cannot be
-inferred from the tree: changes are planned as specifications in `openspec/`, and
-documentation is part of a change rather than a follow-up.
+inferred from the tree. Changes are planned as specifications in `openspec/`,
+and documentation is part of a change rather than a follow-up.
+
 [`.claude/rules/`](.claude/rules/) is the working context, one topic per file.
 **One directory per container** — `platform/` `runtimes/` `signals/` `channels/`
-`gateways/` — and the path is the published image name; the operator is
+`gateways/` — and the path is the published image name. The operator is
 `platform/manager/`.
 
 [SECURITY.md](SECURITY.md): report privately, never in an issue.
@@ -197,7 +210,7 @@ documentation is part of a change rather than a follow-up.
 ## Status
 
 **`v1alpha1` — young, and running in production for its author.** The API group is
-provisional and may be renamed before 1.0; breaking chart changes carry an upgrade
+provisional and may be renamed before 1.0. Breaking chart changes carry an upgrade
 entry in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 © 2026 [kostiantyn-matsebora](https://github.com/kostiantyn-matsebora). Licensed

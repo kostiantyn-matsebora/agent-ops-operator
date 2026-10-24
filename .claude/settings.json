@@ -15,6 +15,38 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/require-change-branch.sh",
             "timeout": 10,
             "statusMessage": "Checking the change owns a branch"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/require-release-docs.sh",
+            "timeout": 30,
+            "statusMessage": "Checking the docs print the release being tagged"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/rules_compliance.py",
+            "timeout": 10,
+            "statusMessage": "Checking the writing rules"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/cloud-bootstrap.sh --verify",
+            "timeout": 10,
+            "statusMessage": "Checking what a remote session has"
           }
         ]
       }

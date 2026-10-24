@@ -55,20 +55,59 @@ func readyPipelines(ctx context.Context, c client.Reader, namespace string) []ag
 	return ready
 }
 
-// PipelinesForSource returns EVERY Ready pipeline listing a signal source, in
-// stable order — empty when none does (the unwatched case, Wired=False).
+// readyCoordinators lists Ready coordinators oldest-first (name tiebreak), for
+// stable output order only — the Coordinator sibling of readyPipelines.
+func readyCoordinators(ctx context.Context, c client.Reader, namespace string) []agentopsv1alpha1.Coordinator {
+	var list agentopsv1alpha1.CoordinatorList
+	if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		return nil
+	}
+	var ready []agentopsv1alpha1.Coordinator
+	for i := range list.Items {
+		if apimeta.IsStatusConditionTrue(list.Items[i].Status.Conditions, "Ready") {
+			ready = append(ready, list.Items[i])
+		}
+	}
+	sort.Slice(ready, func(i, j int) bool {
+		if !ready[i].CreationTimestamp.Time.Equal(ready[j].CreationTimestamp.Time) {
+			return ready[i].CreationTimestamp.Time.Before(ready[j].CreationTimestamp.Time)
+		}
+		return ready[i].Name < ready[j].Name
+	})
+	return ready
+}
+
+// PipelinesForSource returns EVERY Ready claimant — Pipeline or Coordinator —
+// listing a signal source, in stable order — empty when none does (the
+// unwatched case, Wired=False).
 //
 // Plural is the whole point. It replaced a PipelineForSource that returned the
 // oldest claimant, which silently decided who answered; a caller that wants one
 // answer must now say what it does with several, and the two that do are the
 // signal fan-out (all of them) and the bare chat message (refuse unless there
 // is exactly one).
-func PipelinesForSource(ctx context.Context, c client.Reader, namespace, source string) []agentopsv1alpha1.Pipeline {
-	var out []agentopsv1alpha1.Pipeline
+//
+// A Coordinator claims a source exactly as a Pipeline does — shareable,
+// fanned out, counted in Wired (design D-B, coordinator-model). Pipelines are
+// listed before Coordinators; each half keeps its own stable order, so a
+// namespace with no Coordinator sees byte-identical output to before this
+// kind existed.
+func PipelinesForSource(ctx context.Context, c client.Reader, namespace, source string) []Claimant {
+	var out []Claimant
 	for _, p := range readyPipelines(ctx, c, namespace) {
+		p := p
 		for _, ref := range p.Spec.SignalSourceRefs {
 			if ref.Name == source {
-				out = append(out, p)
+				out = append(out, pipelineClaimant{&p})
+				break
+			}
+		}
+	}
+	for _, co := range readyCoordinators(ctx, c, namespace) {
+		co := co
+		for _, ref := range co.Spec.SignalSourceRefs {
+			if ref.Name == source {
+				out = append(out, coordinatorClaimant{&co})
 				break
 			}
 		}
@@ -109,20 +148,27 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha
 		return nil
 	}
 	var match *agentopsv1alpha1.Pipeline
-	for _, p := range candidates {
-		if p.Spec.ProfileRef.Name != conv.Spec.ProfileRef.Name {
+	for i := range candidates {
+		p := &candidates[i]
+		// Inference over an INLINE capability only: a candidate reached through
+		// capabilityRef resolves to nothing here on purpose. This is a
+		// best-effort fallback for conversations predating spec.pipelineRef —
+		// nothing routes on it, and the honest answer for a candidate this
+		// cannot see into is "does not match", never a guess.
+		capability := p.InlineCapability()
+		if capability.ProfileName() != conv.Spec.ProfileRef.Name {
 			continue
 		}
 		if !sameRefs(p.Spec.ChannelRefs, conv.Spec.ChannelRefs) {
 			continue
 		}
-		if !sameToolsets(p.Spec.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(p.Spec.MCPConfigs, conv.Spec.MCPConfigs) {
+		if !sameToolsets(capability.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(capability.MCPConfigs, conv.Spec.MCPConfigs) {
 			continue
 		}
 		if match != nil {
 			return nil // ambiguous: two pipelines wire identically
 		}
-		cp := p
+		cp := *p
 		match = &cp
 	}
 	return match

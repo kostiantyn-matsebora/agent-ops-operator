@@ -1,0 +1,20 @@
+stateDiagram-v2
+    direction LR
+    [*] --> round_started
+    note left of round_started
+        loop  --  subject: pull_request
+    end note
+    classDef loopState fill:#c9e4de,stroke:#2f6b5e,color:#1a3b33
+    state "round:started" as round_started
+    state "round:fixing" as round_fixing
+    state "round:mergeable" as round_mergeable
+    state "round:fixing_failed" as round_fixing_failed
+    state "round:restarted" as round_restarted
+    round_started --> round_fixing : loop.fix [has_access]
+    round_fixing --> round_mergeable : round_finished [session_finished AND checks_completed AND pr_is_mergeable]
+    round_fixing --> round_fixing_failed : round_finished [session_finished AND checks_completed AND NOT pr_is_mergeable]
+    round_fixing_failed --> round_fixing : loop.fix [NOT is_capped]
+    round_fixing_failed --> round_restarted : loop.restart [is_capped AND reset AND has_access]
+    round_restarted --> round_fixing : loop.fix [has_access]
+    round_mergeable --> [*]
+    class round_started, round_fixing, round_mergeable, round_fixing_failed, round_restarted loopState

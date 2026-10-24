@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""The failed required checks on a pull request's head, as work-list items.
+
+THE THIRD REVIEWER. The review posts threads, the analysis service posts
+issues, and CI posts a verdict -- and all three hold the merge. A loop that
+fixed two of them while the third stayed red would end with the pull request
+still blocked and nobody told why. "Approved for fixing as a whole" means a
+pull request that MERGES, not one whose threads are closed.
+
+WHICH CHECKS COUNT: the jobs `ci-green` names in its `needs:`, read from
+`ci.yml` rather than restated here -- adding a required gate in this project is
+a line in that list, so a copy would go stale the first time somebody added
+one. A matrix job's check run carries a suffix (`images (manager)`), so the
+match is on the name up to the first ` (`.
+
+WHAT IS EXCLUDED, AND WHY:
+  - the review's own jobs. The review's findings are already the work list's
+    first source, collected from the threads; a failed review job is a broken
+    reviewer, not a finding.
+  - `ci-green` itself. It is the aggregate: it fails BECAUSE one of its needs
+    failed, and reporting both would hand the fixer the symptom beside the
+    cause with no way to tell them apart.
+  - anything not `failure`. A `cancelled` or `timed_out` run is not a verdict
+    about the tree, and `skipped` is how a job that had nothing to do reports.
+
+NOT YET CONCLUDED IS A FLAG, NEVER AN EMPTY LIST -- the same rule
+`sonar-issues.py` states for the analysis. A round collecting before CI has run
+on the head, or while it is still running, must not report the checks clean, so
+`consulted` is false until every required check run on this sha has completed,
+and the summary says so. (A check run exists queued from the moment its run
+starts, so "has a check run" was true 38 seconds into a run on #259.)
+
+THE LOG TAIL IS BOUNDED, and it is what a person reading the checks tab
+already sees. GitHub masks registered secrets in logs, and the job that hands
+this to a model holds `contents: read` -- so nothing the log could say lets
+anything push.
+
+`gh` is the only way out, so the suite stands one in on PATH and never touches
+the network.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the state machine: which red job is work is its rule, not this program's
+
+DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
+DISPUTED_ITEM = "<!-- conveyor:disputed-item {} -->"   # what land-dispatch.py writes inside a check's dispute comment
+DISPUTED_ITEM_RE = re.compile(re.escape(DISPUTED_ITEM).replace(re.escape("{}"), r"(check:[^ ]+(?: \([^)]*\))?)"))
+
+# The aggregate, excluded by NAME because that is what a check run carries.
+# `ci-green` fails BECAUSE one of its needs did, so reporting both hands the
+# fixer the symptom beside the cause with no way to tell them apart.
+#
+# The review's own jobs need no list: they are not in `ci-green`'s `needs:`, so
+# the required-jobs test already excludes them. A second list naming them would
+# be a copy to keep in step for nothing.
+EXCLUDED = {"ci-green"}   # kept for the docstring's sake: `conveyor.check_is_work` is what excludes it now
+
+
+def gh(*args: str) -> str:
+    out = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(f"gh {' '.join(args)}: {out.stderr.strip()}")
+    return out.stdout
+
+
+def required_jobs(ci: pathlib.Path) -> set[str]:
+    """The jobs `ci-green` needs, from ci.yml. NEVER a copy: a required gate is
+    added to this project by a line in that `needs:`, and a list restated here
+    would be wrong the first time somebody added one."""
+    try:
+        import yaml  # noqa: PLC0415 -- optional, and the regex below is the fallback
+        spec = yaml.safe_load(ci.read_text())
+        needs = ((spec.get("jobs") or {}).get("ci-green") or {}).get("needs") or []
+        if isinstance(needs, str):
+            needs = [needs]
+        if needs:
+            return {str(n).strip() for n in needs}
+    except Exception:  # noqa: BLE001 -- ANY parse failure falls back to the regex
+        # A malformed or unreadable ci.yml must not crash the collector: the
+        # regex below reads the same line, and reporting no required jobs is
+        # safer than reporting none at all by dying.
+        pass
+    m = re.search(r"^  ci-green:.*?^    needs:\s*\[(.*?)\]", ci.read_text(), re.S | re.M)
+    return {n.strip() for n in m.group(1).split(",")} if m else set()
+
+
+def job_name(check_name: str) -> str:
+    """`images (manager)` is the `images` job. A matrix job's check run carries
+    its matrix value in parentheses, and `ci-green` needs the job."""
+    return check_name.split(" (", 1)[0].strip()
+
+
+def newline_delimited_json(raw: str) -> list:
+    """`gh api --paginate --jq '...'` prints one JSON VALUE per line, one line
+    per page -- an object where the filter selects one, an array where it
+    selects several. Parsed here rather than `json.loads`ed whole, since a
+    multi-page answer is several such lines back to back, not one document."""
+    values = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if line:
+            values.append(json.loads(line))
+    return values
+
+
+def check_runs(repo: str, sha: str) -> list[dict]:
+    # `--method GET` IS NOT OPTIONAL. Without it `gh api` with `-f` sends the
+    # params as a BODY, and this route answers a bodied GET with a plain 404 —
+    # not an error a caller can tell from "no checks". gotchas.md has the day
+    # that cost.
+    raw = gh("api", "--method", "GET", "--paginate",
+             f"repos/{repo}/commits/{sha}/check-runs", "--jq", ".check_runs[]")
+    return newline_delimited_json(raw)
+
+
+def run_id(check: dict) -> str:
+    """The Actions run this check run belongs to, from its details url
+    (`.../actions/runs/<id>/job/<id>`)."""
+    m = re.search(r"/actions/runs/(\d+)", check.get("details_url") or "")
+    return m.group(1) if m else ""
+
+
+def failed_log(repo: str, run: str, job: str, tail_lines: int) -> str:
+    """The failed steps' log, cut to a tail. `--log-failed` prints only the
+    steps that failed, which is what makes a bound of a couple of hundred lines
+    enough to reproduce with."""
+    if not run:
+        return ""
+    try:
+        raw = gh("run", "view", run, "--repo", repo, "--log-failed")
+    except RuntimeError as exc:
+        return f"(the log could not be read: {exc})"
+    lines = [ln for ln in raw.splitlines() if not job or ln.startswith(job)]
+    if not lines:
+        lines = raw.splitlines()
+    return "\n".join(lines[-tail_lines:])
+
+
+GATE_LINE = "QUALITY GATE STATUS: FAILED"
+GATE_COMPONENT_RE = re.compile(r"agent-ops-operator_([A-Za-z0-9-]+)")
+
+
+def gate_verdict(tail: str, pr: int) -> dict | None:
+    """The failing quality-gate conditions, when the failed step IS the gate.
+
+    A gate verdict is the analysis service judging THIS TREE — `new_coverage`
+    under the threshold is tests to write, an issue rating is issues to fix —
+    and the fixer disputed one as not-the-tree on #272 because the item said
+    nothing but "the gate failed" and the log names no local command. The
+    conditions are public (the org is on a public plan), read anonymously
+    with one bounded curl; any failure to read them still marks the item a
+    gate verdict, which is the load-bearing half.
+
+    The component comes out of the dashboard URL in the LOG TAIL, where the
+    org half of the project key is masked (it is stored as a secret), so the
+    key is rebuilt from SONAR_ORG — set in the same step env that already
+    serves sonar-issues.py."""
+    if GATE_LINE not in tail:
+        return None
+    gate: dict = {"status": "FAILED", "failing": []}
+    org = os.environ.get("SONAR_ORG", "")
+    m = GATE_COMPONENT_RE.search(tail)
+    if org and m:
+        url = (f"https://sonarcloud.io/api/qualitygates/project_status"
+               f"?projectKey={org}_agent-ops-operator_{m.group(1)}"
+               f"&pullRequest={pr}")
+        out = subprocess.run(["curl", "-sf", "--max-time", "20", url],
+                             capture_output=True, text=True)
+        if out.returncode == 0:
+            try:
+                status = json.loads(out.stdout).get("projectStatus") or {}
+                gate["failing"] = [c for c in status.get("conditions") or []
+                                   if c.get("status") != "OK"]
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    return gate
+
+
+def disputed_checks(repo: str, pr: int, marker: str, since: str = "") -> set[str]:
+    """The `check:<job>` ids an earlier round disputed and no person has answered
+    since. A disputed check has no thread, so its dispute is a pull request
+    comment carrying the marker and one hidden line per item; a person's later
+    comment answers every dispute before it, exactly as `autofix-guard.py` reads
+    it. Unreadable is an empty set: the check is then work, never waved through.
+
+    ONLY DISPUTES SINCE THE LABEL WAS PLACED COUNT. Re-placing `conveyor:fix`
+    is documented as a fresh start, and the round and grant counters already
+    read `since` — but this memory did not, measured live on #269: a re-label
+    with a fresh budget still reported every check as awaiting a person, on
+    the strength of a dispute the removed label's loop had posted."""
+    try:
+        raw = gh("api", f"repos/{repo}/issues/{pr}/comments", "--paginate", "--jq",
+                 '[.[] | {body: .body, created_at: .created_at, '
+                 'author: {login: .user.login, __typename: .user.type}}]')
+        # ONE JSON ARRAY PER PAGE (the jq filter above wraps each page as
+        # `[...]`), so a page's own comments are the elements to flatten in --
+        # unlike `check_runs`, whose filter already yields one object per line.
+        comments: list[dict] = [c for page in newline_delimited_json(raw) for c in page]
+    except (RuntimeError, json.JSONDecodeError):
+        return set()
+    if since:
+        comments = [c for c in comments if (c.get("created_at") or "") >= since]
+    if not conveyor.unanswered_after_marker(comments, marker):
+        return set()
+    # every dispute comment AFTER the last person's comment names items still awaiting
+    last_person = max((i for i, c in enumerate(comments) if conveyor.is_person(c.get("author"))), default=-1)
+    ids: set[str] = set()
+    for c in comments[last_person + 1:]:
+        body = c.get("body") or ""
+        if conveyor.carries_marker(body, marker):
+            ids.update(m.group(1) for m in DISPUTED_ITEM_RE.finditer(body))
+    return ids
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--repo", required=True)
+    ap.add_argument("--pr", type=int, required=True)
+    ap.add_argument("--sha", required=True, help="the pull request's head sha")
+    ap.add_argument("--since", default="", help="the fix label's placement time — disputes before it are a "
+                    "removed label's and do not hold a check awaiting")
+    ap.add_argument("--out", type=pathlib.Path, required=True)
+    ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY,
+                    help="review-triage.json, for the dispute marker")
+    ap.add_argument("--tail-lines", type=int, default=200,
+                    help="how much of each failed job's log reaches the work list")
+    ap.add_argument("--ci", type=pathlib.Path,
+                    default=pathlib.Path(__file__).resolve().parents[1] / "workflows" / "ci.yml")
+    args = ap.parse_args()
+
+    required = required_jobs(args.ci)
+    if not required:
+        print("::warning::ci-green names no needs; no check is treated as required")
+
+    try:
+        runs = check_runs(args.repo, args.sha)
+    except RuntimeError as exc:
+        result = {"consulted": False, "detail": str(exc), "checks": [], "items": []}
+        args.out.write_text(json.dumps(result, indent=2) + "\n")
+        print(f"the checks API could not be asked: {exc}", file=sys.stderr)
+        return 0
+
+    # CONSULTED means EVERY required job has a check run AND every one of them
+    # has COMPLETED. A check run exists from the moment its run starts, queued,
+    # so "every required job has a check run" was true 38 seconds into a
+    # ten-minute CI run on #259 and the round said "0 failures" over jobs that
+    # had not spoken. A run in progress is not a verdict; the summary says the
+    # checks were not consulted rather than implying green, and the gate does
+    # not start a round on such a head at all (`conveyor.round_may_start`).
+    seen = {job_name(c.get("name") or "") for c in runs}
+    concluded = all(c.get("status") == "completed" for c in runs if job_name(c.get("name") or "") in required)
+    consulted = bool(required) and seen >= required and concluded
+
+    try:
+        marker = json.loads(args.vocabulary.read_text()).get("dispute_marker", "<!-- conveyor:disputed -->")
+    except (OSError, ValueError):
+        marker = "<!-- conveyor:disputed -->"
+    awaiting_ids = disputed_checks(args.repo, args.pr, marker, args.since)
+
+    items: list[dict] = []
+    checks: list[dict] = []
+    awaiting: list[dict] = []
+    for c in runs:
+        name = c.get("name") or ""
+        job = job_name(name)
+        conclusion = c.get("conclusion")
+        entry = {"job": name, "conclusion": conclusion, "status": c.get("status")}
+        # THE MACHINE DECIDES what a red job is. Every failed required check is
+        # work for a fixer, with no exemption: the loop's own guard is no longer
+        # a check, so there is no red a fixer may not act on (#259).
+        verdict = conveyor.check_is_work(name, conclusion, required)
+        if job not in required:
+            continue
+        checks.append(entry)
+        if verdict.action != "work":
+            continue
+        if f"check:{name}" in awaiting_ids:
+            # DISPUTED BY AN EARLIER ROUND, AND NO PERSON HAS ANSWERED. Not disputed
+            # twice and not fixed: it waits for the person, and the round's ending
+            # says so rather than calling the head clean.
+            awaiting.append({"id": f"check:{name}", "job": name, "reason": "disputed by an earlier round, awaiting the person"})
+            continue
+        run = run_id(c)
+        url = c.get("html_url") or c.get("details_url") or ""
+        tail = failed_log(args.repo, run, name, args.tail_lines)
+        item = {
+            "id": f"check:{name}",
+            "source": "check",
+            "kind": "check",
+            "job": name,
+            "run_url": url,
+            "path": ".github/workflows/ci.yml",
+            "line": None,
+            "tail": tail,
+        }
+        gate = gate_verdict(tail, args.pr)
+        if gate is not None:
+            # THE GATE'S VERDICT RIDES ON THE ITEM, so the fixer reads WHICH
+            # condition failed instead of a log line it cannot act on.
+            item["gate"] = gate
+        items.append(item)
+
+    result = {"consulted": consulted, "checks": checks, "items": items, "awaiting": awaiting}
+    args.out.write_text(json.dumps(result, indent=2) + "\n")
+    for i in items:
+        print(f"  failure  {i['job']}")
+    for w in awaiting:
+        print(f"  awaiting {w['job']}: {w['reason']}")
+    print(f"checks {'consulted' if consulted else 'NOT consulted'}: "
+          f"{len(items)} failed required check(s) written to {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except RuntimeError as exc:
+        print(f"{exc}", file=sys.stderr)
+        sys.exit(1)

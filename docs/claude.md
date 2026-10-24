@@ -3,15 +3,26 @@
 The reference agent runtime, shipped as a bundle: `claude-code` implementing the
 operator's work contract.
 
-`chart/charts/claude/` renders exactly two objects — one `AgentRuntime` and, when
-you supply a token, its credential `Secret`.
+It conforms to the [runtime specification](contracts/runtime.md), version
+2.0.0.
+
+`chart/charts/claude/` renders exactly two objects — one `AgentRuntime` named
+`claude` and, when you supply a token, its credential `Secret`. The PARENT
+renders the `AgentRuntime` named `default` as a copy of it, unless another
+runtime is flagged `default: true`.
 
 **ON by default**, unlike every other bundle here. It is what a fresh install
-executes on.
+executes on. The other runtime bundles:
+
+- `chart/charts/ollama/`, the local-model one — see
+  [runtimes/ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/).
+- `chart/charts/copilot/`, GitHub Copilot through its SDK — see
+  [runtimes/copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/).
 
 | Renders | When |
 |---|---|
-| `AgentRuntime` (named `default`) | always, while `claude.enabled` |
+| `AgentRuntime` (named `claude`) | always, while `claude.enabled` |
+| `AgentRuntime` named `default`, a copy of it | rendered by the PARENT while this is the flagged or first configured runtime |
 | `Secret` (the model credential) | only when a token is supplied |
 
 ## Why a bundle at all
@@ -90,6 +101,51 @@ anything — see
 
 Point `claude.image` at your derived image, or declare a second runtime beside
 this one under the parent's `runtimes:` and select it per route.
+
+## A tool call the model cannot FORM
+
+A model writes its tool arguments as text, and that text is not always valid
+JSON. When it is not, `runtime-claude` **discards the call before anything
+runs** — no MCP server sees it, no allowlist refuses it, no request leaves
+the pod.
+
+That failure is invisible from outside. The run looks busy, and the model
+tends to write the same broken call again, because nothing tells it which
+character was wrong.
+
+`runtime-claude` therefore counts them:
+
+| Situation | What happens |
+|---|---|
+| a call whose arguments do not parse | logged, and counted |
+| the run ANSWERS having made some | the answer carries a line saying how many never ran, and which tool |
+| the SAME tool, the SAME arguments, `RUNTIME_UNPARSED_REPEAT_LIMIT` times in a row (default 5) | the run is ended and reported **failed**, naming the tool and quoting what was written |
+
+**Consecutive and identical, both deliberately.** A model that varies its
+arguments is trying something, and one whose next call parses has
+recovered. The failure worth ending is the loop that cannot end, because
+nothing about it changes.
+
+**A run that recovers still says so.** Recovery usually means ABANDONING
+the tool, not fixing the call. Twice out of twice observed, the model then
+answered from what the session already held and the run was reported a
+success.
+
+The notice is appended to the answer, never substituted for it, because the
+answer itself does not mention it.
+
+**Failing is the point of the breaker.** Without one, a spin ends the same
+way: a successful-looking run, answered from memory, presented as current.
+
+**A schema with no declared type is the usual cause.** A parameter typed
+`string` gets quoted, and one whose schema says nothing gets a bare word.
+Set the limit to `0` to disable the breaker without disabling the
+counting.
+
+**This breaker is `runtime-claude`'s own mitigation**, not a manager
+obligation or a requirement on every runtime — see
+the [runtime specification](contracts/runtime.md) for what the contract
+itself requires.
 
 ## What it does NOT ship
 

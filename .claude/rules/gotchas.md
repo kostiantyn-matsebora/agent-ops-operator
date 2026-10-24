@@ -1,195 +1,74 @@
-## Gotchas (paid for in debugging)
+## Gotchas
 
-- **RBAC `resources:` are lowercase plurals.** A blanket rename once produced
-  `AgentRuntimes` and silently broke the informer — forbidden loops in the log,
-  reconciler does nothing.
-- **SSH deploy keys in Secrets must be LF-only with a trailing newline.** CRLF
-  or flattened-to-one-line keys fail with `error in libcrypto`. Prefer building
-  the Secret from base64 rather than shell `--from-literal` interpolation.
-- **envtest needs `KUBEBUILDER_ASSETS`.**
-- **`kubectl auth can-i` misparses the `pods/eviction` slash form.** Use
-  `--subresource=eviction`.
+| Gotcha | Fix |
+|---|---|
+| RBAC `resources:` must be lowercase plurals | wrong case breaks the informer silently |
+| SSH deploy keys need LF-only, trailing newline | build the Secret from base64, never `--from-literal` |
+| envtest needs `KUBEBUILDER_ASSETS` | `kubectl auth can-i` needs `--subresource=eviction` for `pods/eviction` |
+| Clearing `close-topics` first does nothing | `helm uninstall` FIRST, then clear it, or the namespace hangs `Terminating` |
+| A rendered pod isn't a running one | pin env-var NAMES, smoke new workloads |
+| `resource-policy: keep` isn't retroactive | annotate BEFORE the release that stops rendering it |
+| Helm never upgrades an existing CRD | `kubectl apply -f chart/crds/` on every install, or fields silently prune |
+| A tag can publish nothing, silently | check the REGISTRY not the tag, 3 tags per push max |
+| One smoke run per tag races | reuse a passed check run, `gh api` check-runs needs `--method GET` |
+| Idle `worker_status` looks dead | check the ARTIFACT (PR/branch/comment), never the transcript |
+| `gh variable set` can store a wrapped newline | `.strip()` can't reach it — `printf`, verify with `cat -A` |
+| A cloud routine's push rules | fresh `change/<name>` only — labels arrive via `/fire`, not `issues` |
+| `lookup` is empty without a cluster | generate under `.Release.IsInstall` only, verify with `--dry-run=server` |
+| A hand-patched field survives `helm upgrade` | 3-way merge only patches diffs, check the OBJECT |
+| Kubelet remembers a pulled image ID forever | push a DERIVED image (extra `LABEL`) |
+| Cilium: EPERM not ECONNREFUSED on no endpoint | a rollout race, check endpoint/ReplicaSet age |
+| HA config-entry failures log under `config_entries` | parse the domain from the MESSAGE TEXT |
+| Telegram's `reply_to_message` never nests | name the addressed form in the menu text |
+| Two `getUpdates` consumers, one bot token | 409s — stop the old poller, confirm, then start new |
+| Two Telegram components held the same bot token, splitting custody the gateway's own name argued against | consolidate into the gateway — `POST /telegram/call/{method}` relay, one chart-generated shared call token |
 
-**Tearing down a throwaway release: UNINSTALL FIRST, then clear the
-`agentops.dev/close-topics` finalizer.**
+### Wiring, review and CI mechanics
 
-- **Clearing it while the manager still runs achieves nothing.** The reconciler
-  re-adds it within a second, and then `helm uninstall` removes the only thing
-  that could ever release it, so the namespace hangs in `Terminating` forever.
-- **The order is the whole trick**, and getting it backwards looks identical
-  right up until it wedges.
-- **Conversations carry the finalizer even with NO channels bound**, so "no
-  chat, no problem" is not a reason to skip this.
+| Fact | Fix |
+|---|---|
+| A bundle ships wiring only behind an OFF-by-default flag, values-only refs | `wiringMode` picks the rendered OBJECT, never eligibility |
+| `claude -p` on a bare runner runs at DEFAULT effort (198s vs 18s) | always set `--model`/`--effort` |
+| A `workflow_dispatch` run's checks never reach the merge box (#131) | fan out via Actions matrix, push via deploy key |
+| `apt-get upgrade` in a cached layer patches nothing | every Dockerfile reads a CI-dated `ARG APT_REFRESH` |
+| A `pull_request` run's `base.sha` freezes at opening | diff `origin/<base>...<head>`, `fetch-depth: 0` |
+| `t.Run` does NOT lower Sonar's `go:S3776` (closure charges the enclosing fn) | extract to a separate named top-level function |
 
-**A rendered pod is not a running one, and a chart render test cannot tell the
-difference.**
+### The conveyor loop — one drifted rule per issue, now in `conveyor.py`
 
-- **`mcpServers` shipped `PROMETHEUS_MCP_TRANSPORT` for a whole implementation
-  pass.** The real name is `PROMETHEUS_MCP_SERVER_TRANSPORT`, so the server fell
-  back to stdio — and a stdio process in a pod prints a banner and exits, giving
-  a `Completed` pod behind a Service that answers nothing.
-- **Every guard, every assertion and `--dry-run=server` passed.** Only starting
-  the thing found it.
-- **Pin env-var NAMES third-party images read**, and smoke any new workload
-  before believing its values.
+| # | Was | Fixed by |
+|---|---|---|
+| #201 | a session's own `autofix` label was refused, PR left dead | only a WORKFLOW carries a person's grant forward |
+| #51 | the carry required `ci` already green — backwards | `success \|\| failure` |
+| #220 | a bot-dispatched round died pre-model | `allowed_bots: github-actions` |
+| #243 | no `timeout-minutes`, job hung 15h unseen | sized timeout, `cancelled` handled too |
+| #243 | fixer's scratch files landed in commits | real paths in the prompt, new files land only if declared |
+| #248/254/255 | one rule drifted across ten copies | `conveyor.py`, every state × event tested |
+| #259 | guard never heard a resolved thread | guard is archive-only now, a 15m sweep catches it |
+| #259 | action checks the branch's own workflow copy vs master's | check out master's, restore after |
+| #53 | moving a station LABEL didn't restart the session | explicit `restart_ok` flag |
+| — | `run-name:` breaks a `workflow_run.name` match | match `.path` instead |
 
-**`helm.sh/resource-policy: keep` protects nothing retroactively.**
+### Replica scaling — chat delivery and rollout races above 1 replica
 
-- **Helm reads it off the LIVE object** when a resource leaves the manifest,
-  never off the manifest dropping it. Adding the annotation in the same release
-  that stops rendering the resource DELETES it. Verified against helm v4, all
-  three cases.
-- **Anything that stops being rendered needs the annotation on the object
-  FIRST** — the generated credential Secrets are the case, which is why
-  `agentops.generatedSecretGuard` fails the render rather than trusting a
-  migration note.
-
-**HELM INSTALLS A CRD FROM `crds/` ONLY WHEN ABSENT, AND NEVER UPGRADES ONE.**
-
-CRDs are CLUSTER-scoped, so they survive everything an install tears down —
-`helm upgrade`, `helm uninstall`, and `kubectl delete ns` alike. **A full
-wipe-and-redeploy therefore lands on the OLD CRDs.**
-
-- **The API server then PRUNES every field the new version added**, silently. No
-  error, no warning, no event. `Pipeline.spec.persistence` and the conversation's
-  claim snapshot vanished exactly this way on a redeploy that had deleted the
-  whole namespace first — every conversation resolved to EPHEMERAL and answered
-  normally.
-- **The reinstall case is the one that catches people**, because deleting the
-  namespace feels like it cannot leave a migration owed.
-- **`kubectl apply -f chart/crds/` is the fix**, and it is a step for INSTALL as
-  much as for upgrade.
-- **Verify rather than assume** — the symptom of skipping it is silence:
-
-  ```sh
-  kubectl get crd pipelines.agentops.dev \
-    -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.persistence.type}'
-  ```
-
-**A TAG THAT PUBLISHED NOTHING IS SILENT, AND THE PRIVATE REPOSITORY IS NO
-LONGER THE REASON.** This repository is PUBLIC, so a `<component>-v<semver>` tag
-runs the release workflow and CI publishes. The caveat that it did not — that a
-tag pushed here publishes NOTHING and reports nothing — is WITHDRAWN, and
-re-adding it describes a repository this is not.
-
-- **The absence still looks identical to a build still queued**, so **check the
-  registry, not the tag**, before believing an image shipped. The live reasons a
-  tag ships nothing are a FAILED RUN and the package's ACTIONS ACCESS, both in
-  `build-test.md`.
-- **The hand build is the ordinary buildx push**, and it MUST stay multi-arch —
-  the cluster is mixed x86/arm64, and a single-arch image fails at SCHEDULE
-  time, possibly weeks later.
-- **Never read a credential to test whether auth works.** `docker-credential-*
-  get` PRINTS THE SECRET. Attempt the push and read the error instead; a leaked
-  token costs a rotation and a re-login everywhere it was used.
-
-**`lookup` returns empty on any renderer without a cluster** — `helm template`,
-CI, a GitOps controller, `--dry-run=client`.
-
-- **A template generating a value on the UPGRADE path APPLIES a new credential**,
-  not merely shows one in a diff. Generate under `.Release.IsInstall` only.
-- **A `lookup`-driven guard is silent under `helm template`**, so no chart render
-  test can pin it. Verify with `helm upgrade --dry-run=server`.
-
-**A HAND-PATCHED FIELD SURVIVES EVERY LATER `helm upgrade`.**
-
-Helm's three-way merge patches only what differs between the PREVIOUS rendered
-manifest and the NEW one, so an unchanged rendered value generates no patch at
-all.
-
-- **A `kubectl patch` made while debugging is therefore never corrected.**
-  `k8s-ops` carried a debugging icon through five chart upgrades that way.
-- **Every signal says it worked.** The release reports success and
-  `helm get manifest` shows the DECLARED value, while the live object holds the
-  other one.
-- **A live patch is undone by ANOTHER live patch**, never by re-syncing.
-- **Check the OBJECT, not the release**, when the cluster disagrees with the
-  values.
-
-**CILIUM ANSWERS A BACKEND-LESS SERVICE WITH EPERM, NOT ECONNREFUSED.**
-
-Under `kube-proxy-replacement: strict` the socket load balancer fails
-`connect()` in the pod's own kernel when a ClusterIP has no READY endpoint:
-
-```
-dial tcp 192.0.2.187:8080: connect: operation not permitted
-```
-
-- **It is a rollout race, not a denial**, and clears the moment an endpoint goes
-  ready. kube-proxy would have said `connection refused` at the same instant.
-- **`gateway-telegram` logs it once at startup**, reading the offset while
-  `channel-telegram` is mid-rollout, then retries every 5s and recovers.
-- **Confirm against the ENDPOINT LIST and the ReplicaSet timestamps before
-  suspecting policy.** Three sessions read that line as a NetworkPolicy problem.
-
-**`reply_to_message` IS ONE LEVEL DEEP AND NEVER NESTS.**
-
-**A reply carries the message it answers, and no further.** That message holds
-no `reply_to_message` of its own, so a chain walked two links up to recover an
-original command finds nil, every time.
-
-- **The menu prompt NAMES the addressed form in its own text** —
-  `Reply with the task for /<pipeline>` — and `signal-telegram` reads the first
-  slash-token back out.
-- **Guarded on `from.is_bot`**, so quoting `/ha-ops` at a colleague starts
-  nothing.
-- **The question's WORDING is load-bearing**, and is stated on both sides for
-  that reason.
-- **A payload shape is settled by the live transport or not at all.** It shipped
-  broken because the test hand-wrote NESTED JSON Telegram never sends — an
-  assumption asserting itself, which a fixture cannot catch.
-
-**Never run two getUpdates consumers against one Telegram bot token** — 409s and
-stolen updates.
-
-Migrating from another system, or from the old single-container adapter:
-
-1. Stop its poller.
-2. CONFIRM none remains.
-3. Start `gateway-telegram`.
-
-**`Channel.spec.config.pollingEnabled` is gone.** Ingest is on when the router
-runs.
-
-**The router's bot Secret is the SAME one the Channel uses**, since it polls the
-bot the channel sends as, injected by the chart as `TELEGRAM_BOT_TOKEN`.
-
-**It used to be an adapter with a signal-free `SignalSource`** purely to carry
-that credential, which then sat at `Wired=False` until some Pipeline faked a
-claim. Modelling plumbing as an adapter produced that whole chain.
-
-### THE PARENT CHART IS WHERE WIRING IS DECLARED
-
-**A bundle ships it only under the four conditions.**
-
-**A subchart sees only itself**, while wiring names a profile, sources and
-channels that routinely come from DIFFERENT bundles — so one that shipped wiring
-could only ever wire ITSELF. Declare routes in the top-level `pipelines:`
-values.
-
-A bundle MAY ship its own only when ALL of:
-
-1. **Rendering is behind an explicit wiring flag.**
-2. **Every reference to an object the bundle does not itself render is a
-   values-supplied NAME**, omitted when unset.
-3. **Each Pipeline renders only with its own profile.**
-4. **The flag DEFAULTS OFF**, forced on by nothing but a values path whose
-   declared purpose is a turnkey install (`global.demo.enabled`), and then only
-   the LEAST-PRIVILEGED route.
-
-| Bundle | Qualifies | `enabled` default | Routes |
-|---|---|---|---|
-| `kubernetes.pipelines` | yes — it owns its whole lane (source, profile, both toolsets), so channels are the only foreign name | **nullable**, so an explicit `false` can decline the route even under demo mode | one |
-| `prometheus.pipelines` | yes, on the same grounds | plain `false` — demo mode never enables that bundle, so there is nothing for an explicit `false` to beat | one |
-| `home-assistant.pipelines` | yes, same plain `false` for the same reason | plain `false` | **two**, because its lane has two privilege levels |
-| `telegram` | **no — the counter-example.** Its routes genuinely span bundles, because a chat surface is answered by an agent from somewhere else | — | none |
-
-**`home-assistant`'s acting route claims the log source and NO chat source**, so
-reaching it is `/ha-ops <task>` and never an accident.
-
-- **Name pipelines for their JOB**, not for the channel they answer on.
-- **A SignalSource is NOT claimed by exactly one pipeline.** Sources are
-  shareable, so a bundle's route and an install's route claiming one source both
-  render and the source fans out to both.
-- **That is reported in NOTES.txt, never refused.** Refusing it would be the
-  deleted `sourceConflicts` guard returning one layer up.
+| Bug | Fix |
+|---|---|
+| `OpQueue` is in-memory, leader-only | claim lives on the Conversation CR (`durable-chat-ops-broker`) |
+| `isLeader()` matched a bare hostname, missing the Lease's uuid suffix | prefix match: `HasPrefix(holder, identity+"_")` |
+| A kept-alive connection stays pinned to one replica | `CloseIdleConnections()` on the 503 path |
+| A reply could mark `Delivered` with an empty `ThreadID` | skip delivery while empty, mark `owed` |
+| `ChannelAdapter` re-applies `spec.image` every reconcile | patch the CR, never the Deployment |
+| Hard anti-affinity stalls a same-node rollout | scale the OLD ReplicaSet to 0 |
+| The old pod's grace period still blocks scheduling | force-delete it right after |
+| The new pod can still lose that scheduling race | force-delete Pending pods of the CURRENT ReplicaSet too |
+| ...which also caught an unrelated healthy scale-up | scope the delete to calls that cleared old affinity |
+| A fresh ReplicaSet may not list right after patching | retry the list up to 30s |
+| `t.Cleanup` after a risky call skips on `t.Fatal` | register `t.Cleanup` BEFORE the risky call |
+| Idle conversations hold a GLOBAL slot, starving the next lane | each lane closes its own, waits for `Closed` |
+| `port-forward` doesn't survive its pod being deleted | a supervisor goroutine relaunches it |
+| Leader churn stalls a few conversations for whole staleness cycles | widen only that wait to 5m |
+| `/channel/ops` 503'd any non-leader unconditionally — a Service pins one connection to one replica for its whole life | non-leader reverse-proxies to the leader (`leaderProxyMiddleware`), refuses only if truly unreachable. A Telegram topic went uncreated 9+ hours before this was measured. Verify: `TestChannelOpsProxiesToLeaderWhenReachable` |
+| `/activity/stream`'s SSE connection has the same pinning, but the activity log is itself a per-process ring buffer a non-leader's copy never fills | proxy it too, but fall through to LOCAL state when unreachable — a partial activity view beats none, unlike `/channel/ops`. Verify: `TestActivityProxiesToLeaderWhenReachable` |
+| Fixing one endpoint at a time (`/channel/ops`, then `/activity*`) was itself the failure | generalized into ONE middleware proxying every route except `/healthz`, each handler keeping its own local fallback |
+| The middleware was silently a no-op: the manager's own NetworkPolicy never admitted its own kind, so every non-leader dial was DROPPED with no log anywhere — measured as a 503 every ~35s for 15+ minutes across one stable leader | admit `app.kubernetes.io/name: agentops-manager` in the existing ingress rule on 8080 — a dumb-proxy design needs a traffic pattern (a component calling its own kind) nothing else did, and a NetworkPolicy allow-list is blind to it until told. Verify: `TestEveryWiredFlowIsAllowed` |
+| `call-auth.yaml`'s Secret body rendered unconditionally, unlike `adapter-auth.yaml`'s own guard — a cluster-less upgrade (GitOps sync, `helm template --is-upgrade`) minted a fresh `gatewayToken` every run | gate the body on `$existingVal` or a fresh install, matching `adapter-auth.yaml`. Verify: `TestTelegramGatewayTokenRendersNoGeneratedCredentialOnUpgrade` |

@@ -1,6 +1,6 @@
 // Integration tests: real API server (envtest), no kubelet. Covers the
 // conversation lifecycle: input -> runtime pod -> dispatch -> done -> prune,
-// plus alert routing with signature grouping and recurrence.
+// plus alert routing with id-equality routing and recurrence.
 package integration
 
 import (
@@ -11,15 +11,19 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -36,6 +40,17 @@ var (
 	testEnv   *envtest.Environment
 	scheme    = runtime.NewScheme()
 	ns        = "default"
+
+	// routingClient is a CACHE-BACKED client, mirroring production's
+	// mgr.GetClient(): writes reach the API server directly, reads for
+	// cached (typed) kinds come off the informer cache. It is the ONLY
+	// client that can serve client.MatchingFields{IndexConversationID:...}
+	// correctly — a raw client (k8sClient above) forwards an unrecognized
+	// field selector straight to the API server, which has no CRD field
+	// named spec.conversationId and matches nothing. Used for the Server
+	// and Router instances the signal-routing/reopen/coordination tests
+	// exercise; every other test keeps reading k8sClient directly.
+	routingClient client.Client
 )
 
 // chartDir locates the chart from a test's working directory, which is this
@@ -65,7 +80,36 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+
+	// The informer cache backing routingClient — started once for the whole
+	// suite, exactly like a manager's own cache, and never stopped until
+	// TestMain returns.
+	routingCacheCtx, stopRoutingCache := context.WithCancel(context.Background())
+	routingCache, err := cache.New(cfg, cache.Options{Scheme: scheme})
+	if err != nil {
+		panic(err)
+	}
+	if err := controller.SetupConversationIndexes(routingCache); err != nil {
+		panic(err)
+	}
+	go func() {
+		if err := routingCache.Start(routingCacheCtx); err != nil && routingCacheCtx.Err() == nil {
+			panic(err)
+		}
+	}()
+	if !routingCache.WaitForCacheSync(routingCacheCtx) {
+		panic("routing cache did not sync")
+	}
+	routingClient, err = client.New(cfg, client.Options{
+		Scheme: scheme,
+		Cache:  &client.CacheOptions{Reader: routingCache},
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	code := m.Run()
+	stopRoutingCache()
 	_ = testEnv.Stop()
 	os.Exit(code)
 }
@@ -119,7 +163,12 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	rt := runtimepod.Config{ContextPVC: "test-context"}
 	ops := &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry(), Activity: acts}
 	return &httpapi.Server{
-		Client: k8sClient, Reader: k8sClient, Namespace: ns,
+		// routingClient: equality routing and reopen's at-most-one-open check
+		// both read client.MatchingFields{IndexConversationID:...}, which only
+		// a cache-backed client answers correctly (see routingClient's own
+		// comment). Reader stays the raw k8sClient, as production's
+		// mgr.GetAPIReader() does.
+		Client: routingClient, Reader: k8sClient, Namespace: ns,
 		// A deployment that CAN carry context: continuity is now promised only
 		// where the conversation resolved somewhere to keep it, so a fixture with
 		// no context volume would (correctly) withhold every handle and make the
@@ -130,7 +179,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		// The router carries the SAME runtime config, exactly as main.go wires
 		// it: /exit reports whether a released conversation keeps its context,
 		// and it must not answer that differently from dispatch.
-		Router:                 &chat.Router{Client: k8sClient, Reader: k8sClient, Namespace: ns, Ops: ops, Activity: acts, Runtime: rt},
+		Router:                 &chat.Router{Client: routingClient, Reader: k8sClient, Namespace: ns, Ops: ops, Activity: acts, Runtime: rt},
 		AdapterToken:           "test-adapter-token",
 		Activity:               acts,
 		Version:                "test",
@@ -160,6 +209,72 @@ func reconcile(t *testing.T, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// waitForRoutingCacheToObserve blocks until routingClient's informer cache has
+// caught up to a write already confirmed by a direct (k8sClient) read — the
+// resourceVersion the write itself returned. Bridges the cache's inherent
+// watch-propagation lag behind a just-made write: a live cluster never needs
+// this (a source's repeat arrives seconds-to-minutes later, long past any
+// such lag), but a test that reposts immediately, through the SAME shared
+// cache production equality-routing reads, otherwise races its own setup.
+// obj is overwritten with the cache's view once observed — any client.Object
+// named by Namespace/Name works, so one helper serves Conversation and
+// SignalSource fixtures alike.
+func waitForRoutingCacheToObserve(t *testing.T, obj client.Object, resourceVersion string) {
+	t.Helper()
+	want, err := strconv.ParseInt(resourceVersion, 10, 64)
+	if err != nil {
+		t.Fatalf("resourceVersion %q is not numeric: %v", resourceVersion, err)
+	}
+	key := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := routingClient.Get(context.Background(), key, obj); err == nil {
+			if gotRV, err := strconv.ParseInt(obj.GetResourceVersion(), 10, 64); err == nil && gotRV >= want {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("routing cache never observed %s/%s at resourceVersion >= %s", key.Namespace, key.Name, resourceVersion)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// backdateCooldown rewrites a SignalSource's recorded cooldown entry for one
+// initiationId to look EXPIRED — simulating "outside the source's cooldown
+// window" without waiting out its real multi-hour default. A test cannot
+// reach cooldownHours:0 through the typed client to sidestep this instead:
+// omitempty drops a literal zero, and the CRD's own default re-applies 6.
+// Also waits for the routing cache to observe the backdate, since a fresh
+// apiServer()'s cooldown map recovers from exactly this field on first use.
+func backdateCooldown(t *testing.T, sourceName, initiationID string) {
+	t.Helper()
+	ctx := context.Background()
+	var src agentopsv1alpha1.SignalSource
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: sourceName}, &src); err != nil {
+		t.Fatal(err)
+	}
+	hours := src.Spec.CooldownHours
+	if hours <= 0 {
+		hours = 6
+	}
+	patch := client.MergeFrom(src.DeepCopy())
+	found := false
+	for i := range src.Status.Cooldown {
+		if src.Status.Cooldown[i].InitiationID == initiationID {
+			src.Status.Cooldown[i].At = metav1.NewTime(time.Now().Add(-time.Duration(hours+1) * time.Hour))
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no recorded cooldown entry for %q on signal source %s", initiationID, sourceName)
+	}
+	if err := k8sClient.Status().Patch(ctx, &src, patch); err != nil {
+		t.Fatal(err)
+	}
+	waitForRoutingCacheToObserve(t, &src, src.ResourceVersion)
 }
 
 func TestConversationLifecycle(t *testing.T) {
@@ -237,11 +352,14 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 }
 
-// TestSignalBatchGrouping pins the manager-side grouping semantics the
-// removed built-in webhook used to exercise: a batch of same-signature
-// signals collapses to ONE conversation with ONE combined input, and
-// same-signature reuse across batches with a session becomes a recurrence.
-func TestSignalBatchGrouping(t *testing.T) {
+// TestSignalBatchSharingOneInitiationIDCombines pins id-equality routing's
+// batch shape: several signals in ONE POST that share a single sender-minted
+// initiationId (a sender's own aggregation, e.g. several readings under one
+// incident) collapse to ONE conversation with ONE combined input — adopting
+// that id as spec.conversationId, never a derived signature. A repeat of the
+// SAME id outside cooldown lands on that same OPEN conversation as a
+// recurrence.
+func TestSignalBatchSharingOneInitiationIDCombines(t *testing.T) {
 	ctx := context.Background()
 	mkProfile(t, "prof-alert")
 	mkSignalSource(t, "am", "batch-sig-t", "")
@@ -252,11 +370,19 @@ func TestSignalBatchGrouping(t *testing.T) {
 	h := apiServer().Handler()
 	labels := map[string]string{"alertgroup": "g", "alertname": "TestAlert", "namespace": "ha"}
 
-	// two fresh same-signature signals in ONE batch → one conversation, one
-	// combined out-of-line input
+	conv := postBatchAndFindCombinedConversation(t, ctx, h, labels)
+	assertCooldownSuppressesDuplicateInitiationID(t, h, labels)
+	assertRepeatOutsideCooldownBecomesRecurrence(t, ctx, conv)
+}
+
+// postBatchAndFindCombinedConversation posts two fresh signals sharing ONE
+// initiationId in a single batch, which must open one conversation adopting
+// that id, with one combined out-of-line input.
+func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h http.Handler, labels map[string]string) *agentopsv1alpha1.Conversation {
+	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{
-		{"fingerprint": "fp-a", "labels": labels, "payload": "alert-a"},
-		{"fingerprint": "fp-a2", "labels": labels, "payload": "alert-a2"},
+		{"initiationId": "batch-a", "labels": labels, "payload": "alert-a"},
+		{"initiationId": "batch-a", "labels": labels, "payload": "alert-a2"},
 	})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"conversations":1`) {
 		t.Fatalf("batch: %d %s", rec.Code, rec.Body.String())
@@ -265,7 +391,7 @@ func TestSignalBatchGrouping(t *testing.T) {
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	var conv *agentopsv1alpha1.Conversation
 	for i := range list.Items {
-		if list.Items[i].Spec.Signature == "g/TestAlert/ha" {
+		if list.Items[i].Spec.ConversationID == "batch-a" {
 			conv = &list.Items[i]
 		}
 	}
@@ -282,32 +408,47 @@ func TestSignalBatchGrouping(t *testing.T) {
 	if !strings.Contains(ci.Spec.Payload, "alert-a") || !strings.Contains(ci.Spec.Payload, "alert-a2") {
 		t.Fatalf("combined payload expected: %q", ci.Spec.Payload)
 	}
+	return conv
+}
 
-	// same fingerprint suppressed by cooldown
-	rec = postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-a", "labels": labels}})
+func assertCooldownSuppressesDuplicateInitiationID(t *testing.T, h http.Handler, labels map[string]string) {
+	t.Helper()
+	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{{"initiationId": "batch-a", "labels": labels}})
 	if !strings.Contains(rec.Body.String(), `"queued":0`) {
 		t.Fatalf("cooldown: %s", rec.Body.String())
 	}
+}
 
-	// new fingerprint, same signature, session present -> recurrence into SAME conversation
+// assertRepeatOutsideCooldownBecomesRecurrence: once the conversation has a
+// session, a repeat of its OWN initiationId — on a fresh process that has
+// never suppressed it, standing in for "outside the source's cooldown" —
+// lands as a recurrence on that SAME open conversation, never a duplicate
+// one (signal-adapter-contract: "A repeated id lands on its open
+// conversation").
+func assertRepeatOutsideCooldownBecomesRecurrence(t *testing.T, ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	t.Helper()
 	patch := client.MergeFrom(conv.DeepCopy())
 	conv.Status.SessionID = "sess-x"
 	if err := k8sClient.Status().Patch(ctx, conv, patch); err != nil {
 		t.Fatal(err)
 	}
-	if rec = postSignal(t, h, testMasterToken, "am", []map[string]any{{"fingerprint": "fp-b", "labels": labels}}); rec.Code != 200 {
+	waitForRoutingCacheToObserve(t, conv, conv.ResourceVersion)
+	backdateCooldown(t, "am", "batch-a")
+	h2 := apiServer().Handler()
+	if rec := postSignal(t, h2, testMasterToken, "am", []map[string]any{{"initiationId": "batch-a"}}); rec.Code != 200 {
 		t.Fatal("recurrence post")
 	}
+	var list agentopsv1alpha1.ConversationList
 	_ = k8sClient.List(ctx, &list, client.InNamespace(ns))
 	count := 0
 	for i := range list.Items {
-		if list.Items[i].Spec.Signature == "g/TestAlert/ha" {
+		if list.Items[i].Spec.ConversationID == "batch-a" {
 			count++
 			conv = &list.Items[i]
 		}
 	}
 	if count != 1 {
-		t.Fatalf("duplicate conversation created: %d for one signature", count)
+		t.Fatalf("duplicate conversation created: %d for one conversationId", count)
 	}
 	_ = k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Name}, conv)
 	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {

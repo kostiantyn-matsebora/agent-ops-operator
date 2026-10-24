@@ -32,14 +32,10 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
-
-// LabelSignatureHash indexes conversations by grouping signature.
-const LabelSignatureHash = "agentops.dev/signature-hash"
 
 // ConditionContextContinuity reports whether this conversation still carries the
 // context it accumulated. False means a run could not reach it and the thread
@@ -112,6 +108,12 @@ type ConversationReconciler struct {
 	// the cap for as long as it exists — this bounds how long that is, which is
 	// a different thing from exempting it.
 	RuntimeStartDeadline time.Duration
+	// MasterToken derives AOPS_MCP_TOKEN for a Coordinator-rooted conversation
+	// whose wiring binds the aops MCPConfig (design D-F) — the same
+	// ADAPTER_TOKEN every other derived token in this manager is HMAC'd from.
+	// Empty disables the injection (tests), same as every other optional field
+	// here.
+	MasterToken string
 	// StorageBreaker is the install-wide judgement about whether context
 	// storage is reachable. SHARED with the HTTP API, which feeds it the
 	// reporting edge; the reconciler feeds it the PROVISIONING edge — a pod
@@ -147,6 +149,36 @@ type ConversationReconciler struct {
 	// common configuration, and must not require declining the destructive half.
 	AutoDeleteEnabled   bool
 	AutoDeleteClosedAge time.Duration
+	// ReplicaIdentity names THIS process for the claim this reconciler writes
+	// (durable-chat-ops-broker). It needs no relation to the leader-election
+	// Lease's own HolderIdentity string: this reconciler runs ONLY while this
+	// process holds that Lease (controller-runtime gates every reconciler on
+	// it), so any claim this process did not itself write was written by a
+	// FORMER leader, by construction — comparing against "me" is exactly
+	// comparing against "the current leader". Empty is tolerated (tests) and
+	// behaves as a single, unvarying identity.
+	ReplicaIdentity string
+	// ClaimStaleness bounds how long an ensure-topic claim may sit with no
+	// thread yet before the current leader treats it as abandoned and
+	// re-dispatches — the SAME leader's own claim running legitimately slow,
+	// never a second writer. Zero means DefaultClaimStalenessSeconds.
+	ClaimStaleness time.Duration
+}
+
+// DefaultClaimStalenessSeconds is the fallback claim staleness bound when the
+// chart's claimStalenessSeconds value is unset. Sized with margin over a
+// measured ensure-topic round-trip against the slowest shipped adapter
+// (Telegram, forum-topic creation): comfortably longer than any observed
+// single call, short enough that a genuinely abandoned claim (the leader that
+// wrote it crashed, rather than merely answering slowly) does not leave a
+// conversation topic-less for long.
+const DefaultClaimStalenessSeconds = 90
+
+func (r *ConversationReconciler) claimStaleness() time.Duration {
+	if r.ClaimStaleness > 0 {
+		return r.ClaimStaleness
+	}
+	return DefaultClaimStalenessSeconds * time.Second
 }
 
 // Reconcile implements the reconciliation loop.
@@ -173,26 +205,29 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// CLOSED IS INERT. Everything below this line provisions something — a
 	// topic, a ConfigMap, a pod, a work unit — and a closed conversation gets
-	// none of it. Placed before the signature label and the input pruning on
-	// purpose: a closed conversation is not a place work can land, so there is
-	// nothing to keep groupable or to prune toward.
+	// none of it. A closed conversation is not a place work can land, so
+	// there is nothing to prune toward either.
 	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
 		return r.reconcileClosed(ctx, &conv)
 	}
 
-	// signature label for grouping lookups
-	if conv.Spec.Signature != "" {
-		want := ingest.SignatureHash(conv.Spec.Signature)
-		if conv.Labels[LabelSignatureHash] != want {
-			patch := client.MergeFrom(conv.DeepCopy())
-			if conv.Labels == nil {
-				conv.Labels = map[string]string{}
-			}
-			conv.Labels[LabelSignatureHash] = want
-			if err := r.Patch(ctx, &conv, patch); err != nil {
-				return ctrl.Result{}, err
-			}
+	// The DEADLINE budget edge (design D-E): a Coordinator-rooted conversation
+	// past its own snapshotted deadline is closed budget-exceeded — its own
+	// members first, then escalated — whatever else is happening on it. This is
+	// the one edge the RECONCILER owns rather than a request handler, since
+	// nothing else calls in when a conversation simply sits idle past its time.
+	//
+	// A deadline still ahead does NOT return early: everything below still runs
+	// (dispatch, topics, delivery), and deadlineRequeue only CAPS whichever
+	// requeue this pass would otherwise choose, so the reconciler is guaranteed
+	// to revisit no later than the deadline itself.
+	var deadlineRequeue time.Duration
+	if budget := conv.Status.Budget; budget != nil && budget.Deadline != nil && r.Router != nil {
+		if !budget.Deadline.Time.After(time.Now()) {
+			digest := fmt.Sprintf("budget-exceeded: deadline (%s) passed", budget.Deadline.Time.Format(time.RFC3339))
+			return ctrl.Result{}, r.Router.CloseBudgetExceeded(ctx, &conv, digest)
 		}
+		deadlineRequeue = time.Until(budget.Deadline.Time)
 	}
 
 	// input pruning: drop processed inputs from spec, GC consumed payload objects
@@ -329,6 +364,12 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if conv.Status.Reopens > 0 && r.Router != nil {
 			r.Router.FanOutReopenNotice(ctx, &conv)
 		}
+		// The escalation digest (design D-D): the ensure-topic enqueue above and
+		// the topic actually existing are two different moments, so this waits
+		// for a thread before posting — same ordering reason as the reopen
+		// notice, and the op id is stable so re-deriving it every pass posts the
+		// digest once.
+		r.deliverEscalation(ctx, &conv)
 		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
 		// the human reads the event while the agent is already working, and a
 		// run that hangs or dies still leaves the thread saying what happened.
@@ -336,6 +377,17 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// The BACKSTOP that makes a reply derivable rather than queue-resident.
 		if err := r.deliverRunReplies(ctx, &conv); err != nil {
 			logger.Error(err, "re-deriving undelivered run replies")
+		}
+	}
+	// The BACKSTOP for a member's result reaching its parent
+	// (coordination-loop): the FAST PATH in `/work/done` marks a run
+	// RoutedToParent once its append succeeds, and this re-derives any it
+	// missed — a manager restart between the two, or a conflict the fast path
+	// gave up retrying. Independent of chat topics entirely: a caused
+	// conversation binds no channel, so this must not be gated on r.Ops.
+	if r.Router != nil {
+		if err := r.deliverMemberResults(ctx, &conv); err != nil {
+			logger.Error(err, "re-deriving unrouted member results")
 		}
 	}
 
@@ -361,12 +413,28 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if topicPending {
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return capRequeue(ctrl.Result{RequeueAfter: 15 * time.Second}, deadlineRequeue), nil
 	}
 	if needsWorker {
-		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+		return capRequeue(ctrl.Result{RequeueAfter: 60 * time.Second}, deadlineRequeue), nil
 	}
-	return r.autoClose(ctx, &conv, podExists)
+	result, err := r.autoClose(ctx, &conv, podExists)
+	return capRequeue(result, deadlineRequeue), err
+}
+
+// capRequeue bounds a reconcile result's requeue to at most `extra`, when
+// `extra` is set — the mechanism a Coordinator-rooted conversation's own
+// deadline uses to guarantee a revisit no later than the deadline itself,
+// without pre-empting whatever sooner requeue the rest of this pass already
+// chose.
+func capRequeue(result ctrl.Result, extra time.Duration) ctrl.Result {
+	if extra <= 0 {
+		return result
+	}
+	if result.RequeueAfter <= 0 || extra < result.RequeueAfter {
+		result.RequeueAfter = extra
+	}
+	return result
 }
 
 // autoClose closes a FINISHED conversation that has been idle for the window,
@@ -625,6 +693,17 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 			if conv.Status.ThreadArchived(t.Channel) {
 				continue
 			}
+			if t.ThreadID == "" {
+				// No topic was ever created on this channel — ensure-topic
+				// never succeeded. There is nothing to close yet, and an op
+				// carrying an empty thread id can only ever be rejected
+				// (every adapter's close-topic handler validates it), so
+				// enqueueing it would retry forever and log an error every
+				// pass. Leave it unarchived: the next pass re-evaluates, and
+				// a later successful ensure-topic enqueues close-topic
+				// normally once a real thread id exists.
+				continue
+			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
 				continue // channel gone: nothing left to archive on it
@@ -632,7 +711,7 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 			if ch.Spec.Adapter == "" {
 				continue
 			}
-			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv.Name)
+			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv)
 		}
 	}
 	return r.autoDelete(ctx, conv)
@@ -712,7 +791,7 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 			// were told it could be reopened; deletion makes that false, and
 			// correcting it is the whole point. Sending both would leave an
 			// adapter guessing whether the pair meant one ending or two.
-			r.Ops.EnqueueDeleteConversation(ctx, &ch, t.ThreadID, conv.Name)
+			r.Ops.EnqueueDeleteConversation(ctx, &ch, t.ThreadID, conv)
 			if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
 				outstanding = true
 			}
@@ -899,7 +978,7 @@ func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *agentop
 	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return
 	}
-	r.Ops.EnqueueMessage(ctx, &ch, conv.ThreadFor(ref.Name), chat.Notice(
+	r.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref.Name), chat.Notice(
 		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up."))
 }
 
@@ -938,14 +1017,131 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 		if ch.Spec.Adapter == "" {
 			continue
 		}
+		pending = true
+		// durable-chat-ops-broker: only a channel binding with no LIVE claim —
+		// none at all, one held by a former leader, or one of this leader's own
+		// gone stale — is dispatched this pass. One already claimed and fresh is
+		// an op genuinely in flight with an adapter; re-enqueuing it here would
+		// not change what the in-memory queue already holds, but it would race
+		// the claim write against nothing, for no reason. See claimEnsureTopic.
+		claimed, err := r.claimEnsureTopic(ctx, conv.Namespace, conv.Name, ref.Name)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if !claimed {
+			continue
+		}
 		d := r.topicDescriptor(ctx, conv)
 		if existing != nil {
 			d.PreviousThreadID = *existing
 		}
 		r.Ops.EnqueueEnsureTopic(ctx, &ch, conv, d)
-		pending = true
 	}
 	return pending, firstErr
+}
+
+// claimEnsureTopic writes (or refreshes) THIS leader's claim on one channel
+// binding's ensure-topic dispatch, so a crashed leader's in-flight work is
+// recoverable from the Conversation's own status rather than from a second,
+// hand-rolled heartbeat (durable-chat-ops-broker).
+//
+// Returns claimed=true when the caller should (re-)dispatch the op now: no
+// claim existed, the existing one belongs to a replica that is not this one
+// (a former leader — this reconciler runs only while its process holds the
+// leader-election Lease, so any claim it did not itself write is by
+// construction a former leader's), or this leader's own claim has sat past
+// the staleness bound with no thread yet. Returns false when a live claim
+// already held by this leader is outstanding — the op is genuinely in flight
+// with an adapter and nothing new is dispatched this pass.
+//
+// Does its own fresh Get/patch retry rather than reusing the caller's
+// (possibly several-reconcile-functions-old) copy: every other writer in this
+// file that touches Conversation status does the same, for the same
+// optimistic-concurrency reason (see finishEnsureTopic, markDelivered).
+func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, namespace, name, channel string) (bool, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		var conv agentopsv1alpha1.Conversation
+		if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &conv); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+		if r.holdsLiveClaim(&conv, channel) {
+			return false, nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		r.setClaim(&conv, channel)
+		err := r.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return true, nil
+		}
+		if !apierrors.IsConflict(err) {
+			return false, client.IgnoreNotFound(err)
+		}
+	}
+	return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s", channel, name)
+}
+
+// holdsLiveClaim reports whether THIS replica's claim on the channel's
+// ensure-topic is still inside the staleness bound.
+func (r *ConversationReconciler) holdsLiveClaim(conv *agentopsv1alpha1.Conversation, channel string) bool {
+	existing := conv.Status.Thread(channel)
+	if existing == nil || existing.Claim == nil {
+		return false
+	}
+	return existing.Claim.Holder == r.ReplicaIdentity &&
+		time.Since(existing.Claim.ClaimedAt.Time) <= r.claimStaleness()
+}
+
+// setClaim stamps this replica's claim on the channel's binding, creating the
+// binding when none exists yet.
+func (r *ConversationReconciler) setClaim(conv *agentopsv1alpha1.Conversation, channel string) {
+	claim := &agentopsv1alpha1.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: metav1.Time{Time: time.Now()}}
+	if binding := conv.Status.Thread(channel); binding != nil {
+		binding.Claim = claim
+		return
+	}
+	conv.Status.Threads = append(conv.Status.Threads,
+		agentopsv1alpha1.ThreadBinding{Channel: channel, Claim: claim})
+}
+
+// deliverEscalation posts the digest an `escalate` call snapshotted
+// (status.escalationMessage) into every bound channel's already-open thread
+// (coordinator-unconditional-channels: a coordinator root's channels are
+// bound at creation, so this is no longer a thread's opening post, merely
+// the decision made visible on one already running). A conversation that
+// never escalated, or whose threads are not established yet, gets nothing —
+// Ops itself is what makes a second delivery a no-op.
+func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+	if conv.Status.EscalatedAt == nil || r.Ops == nil {
+		return
+	}
+	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
+		r.Ops.EnqueueEscalationMessage(ctx, ch, conv, tid, chat.Notice(conv.Status.EscalationMessage))
+	})
+}
+
+// eachBoundThread mirrors chat.Router's own helper of the same shape: every
+// bound channel that already has a thread, so a send to one that does not
+// exist yet is never queued.
+func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
+
+	for _, ref := range conv.Spec.ChannelRefs {
+		if ref.Name == skip {
+			continue
+		}
+		tid := conv.ThreadFor(ref.Name)
+		if tid == nil {
+			continue
+		}
+		var ch agentopsv1alpha1.Channel
+		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+			continue
+		}
+		fn(&ch, tid)
+	}
 }
 
 // topicDescriptor describes a conversation's thread for the adapter to NAME.
@@ -1020,13 +1216,25 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 				continue
 			}
 			owed[t.Channel] = true
+			// durable-chat-ops-broker: a binding carrying only a claim — no
+			// ThreadID yet — is bookkeeping about a dispatch in flight, not a
+			// topic. EnqueueRunReply would still accept the empty id and the
+			// adapter would park the reply on a channel-level pseudo-thread,
+			// marking it delivered there PERMANENTLY: once DeliveredTo is
+			// true this run is never re-enqueued, so the real thread
+			// ensureTopics creates moments later would never receive the
+			// answer the person is waiting for. Leaving it owed (above) is
+			// what brings this reconcile back once the thread exists.
+			if t.ThreadID == "" {
+				continue
+			}
 			var ch agentopsv1alpha1.Channel
 			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil ||
 				ch.Spec.Adapter == "" {
 				continue
 			}
 			tid := t.ThreadID
-			r.Ops.EnqueueRunReply(ctx, &ch, conv.Name, run.RunID, &tid, msg)
+			r.Ops.EnqueueRunReply(ctx, &ch, conv, run.RunID, &tid, msg)
 		}
 	}
 	r.setDeliveryPendingCondition(ctx, conv, owed)
@@ -1034,6 +1242,36 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 		return nil
 	}
 	return r.backfillDelivered(ctx, conv, backfill)
+}
+
+// deliverMemberResults is the reconciler backstop for coordination-loop's
+// "member's result becomes an input on its parent" rule: any run on THIS
+// conversation not yet marked RoutedToParent gets appended again (idempotent
+// per its dedup id) and marked once that succeeds.
+func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	if conv.Spec.CausedBy == nil {
+		return nil
+	}
+	var firstErr error
+	for i := range conv.Status.Runs {
+		run := &conv.Status.Runs[i]
+		if run.RoutedToParent {
+			continue
+		}
+		dedup := "member:" + conv.Name + ":" + run.RunID
+		if err := r.Router.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name, dedup, run.Result); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		patch := client.MergeFrom(conv.DeepCopy())
+		run.RoutedToParent = true
+		if err := r.Status().Patch(ctx, conv, patch); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // setDeliveryPendingCondition names the channels still owed an answer.
@@ -1257,7 +1495,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 			"conversation", conv.Name, "failures", conv.Status.RuntimeStartFailures)
 	}
 
-	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved)
+	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved, r.MasterToken)
 	pod.Namespace = conv.Namespace
 	if err := controllerutil.SetControllerReference(conv, pod, r.Scheme); err != nil {
 		return false, err

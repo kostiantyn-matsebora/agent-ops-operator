@@ -89,7 +89,7 @@ logsAdapter:
   name: home-assistant
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-ha
-    tag: 0.2.2
+    tag: 0.4.2
   resources: {}
   # The log source. It is INERT until a Pipeline claims it — wiring is
   # pipeline-only, so either turn the `pipelines:` component below on or declare
@@ -118,6 +118,39 @@ logsAdapter:
     # want a restart to forget.
     backfill: true
 
+    # THE HEALTH SURFACES beside the log. Home Assistant reports most of what
+    # is wrong with a house somewhere other than its log: an integration that
+    # cannot reach its device sits in a config entry state and logs one line at
+    # startup; a problem it has already diagnosed is a repair; a device fault
+    # is a binary sensor; a package behind is an update entity. Each is read
+    # on its own cadence and takes the same rules path a log record does,
+    # labelled `surface=` so a rule can pick it out. A surface that is off is
+    # never read — no command, no memory.
+    surfaces:
+      # An entry in one of these states, one signal per entry, with the entry's
+      # own reason as the message. `not_loaded` is deliberately absent: a
+      # disabled integration is a choice.
+      configEntries:
+        enabled: true
+        states: [setup_retry, setup_error, migration_error]
+      # The issue registry, one signal per issue. Warning-severity repairs are
+      # deprecation and version notices — the same background hum `levels`
+      # keeps out of the log lane.
+      repairs:
+        enabled: true
+        severities: [critical, error]
+      # binary_sensor entities of these device classes in their fault state —
+      # `problem` on, `connectivity` off. Only classes with a fault polarity
+      # may be listed; a door being open is not a problem.
+      sensors:
+        enabled: true
+        deviceClasses: [problem, connectivity]
+      # ONE digest signal listing every update.* entity in state on, re-posted
+      # when a new one joins the set. Off: a list of pending packages is not an
+      # incident until you say you want to hear about it.
+      updates:
+        enabled: false
+
     # The suppression policy. Ordered, FIRST MATCH WINS.
     #
     # Two halves, spelled after the systems they come from — the same vocabulary
@@ -130,8 +163,10 @@ logsAdapter:
     #
     # `for` holds a matched record, then RE-CHECKS before emitting: the
     # integration's config entries loaded again (it recovered) or the record
-    # never recurred (it stopped) means drop; still failing means emit once,
-    # with the whole burst's evidence attached.
+    # was no longer recurring as the window closed (it stopped) means drop;
+    # still failing means emit once, with the whole burst's evidence attached.
+    # "Still recurring" is the window's last third, floored at 30s: a network
+    # blip that logged for thirty seconds and stopped is churn, not a report.
     #
     # Two properties make this set safe to trust, and both are pinned by test:
     #   * the LAST rule is a catch-all with a dwell, never a drop — so an error
@@ -144,6 +179,26 @@ logsAdapter:
     # it never becomes a label, because a label carrying free text would key
     # conversation grouping on the exact wording.
     rules:
+      # 0 ── the health surfaces, ahead of the log rules ───────────────────
+      # Selected by `surface=`, so a log rule's message pattern cannot capture
+      # a repair whose text happens to say "Timeout". Config entries and
+      # sensors DWELL: a Home Assistant restart passes both through their
+      # failed states, and the re-check asks the surface itself at the close.
+      # Repairs and the update digest do not: a repair is a standing fact and
+      # a digest is a list — a re-check would find both exactly as they were.
+      - matchers:
+          - surface="config-entry"
+        for: 5m
+      - matchers:
+          - surface="sensor"
+        for: 5m
+      - matchers:
+          - surface="repair"
+        for: "0"
+      - matchers:
+          - surface="update"
+        for: "0"
+
       # 1 ── never actionable on their own ─────────────────────────────────
       # A slow update or a slow setup is Home Assistant telling you a device is
       # sleepy. If it is actually broken it also logs an error the tiers below
@@ -206,14 +261,15 @@ logsAdapter:
     # window that silently never fires.
     route: {}
 
-    # SignalSource grouping policy (manager-side; defaults apply when empty).
-    #
-    # Group by INTEGRATION. The alternative — grouping per record — would open a
-    # conversation for every failing code path of one broken hub, and the
-    # manager's window reuse could never fire.
-    grouping:
-      signatureLabels:
-        - integration
+    # Cooldown: suppress a repeat of the same initiationId within this window.
+    # The pending/dwell queue (pending.go) already re-posts a surviving
+    # failure on its own refractory clock — as short as 1m, never longer than
+    # a rule's own `for:` dwell (5-10m here) — relying on the manager to let
+    # those re-posts through rather than swallow them as duplicates. The CRD
+    # default (6h) would instead silently drop every re-post but the first
+    # one for up to 6 hours, so this source overrides it to 0 (cooldown off,
+    # the adapter's own refractory window is the only pacing this needs).
+    cooldownHours: 0
 
 # Structured Home Assistant access as MCP tools — an MCPConfig (the server) and
 # MCPToolsets (the permission to call it).
@@ -268,16 +324,36 @@ mcp:
   # starting point to check against your own /mcp_server, not a contract. A name
   # that resolves to nothing is inert, and a tool you use that is missing here
   # is a values edit.
+  #
+  # EVERY TOOL IS LISTED TWICE, and that is deliberate. Home Assistant 2026.9
+  # prefixes each LLM tool with the domain of the integration offering it, and
+  # the prefix differs per tool: `GetLiveContext` became
+  # `homeassistant__GetLiveContext`, `HassTurnOn` became `intent__HassTurnOn`,
+  # `HassLightSet` became `light__HassLightSet`. The bare names serve an
+  # instance older than 2026.9, the prefixed ones a newer one, and whichever
+  # half your instance does not register is inert. With only the bare names, an
+  # agent on 2026.9 is left with no Home Assistant tool at all, and nothing
+  # reports it: the allowlist fails closed.
+  #
+  # Two reads have no prefixed twin. `HassGetCurrentDate` and
+  # `HassGetCurrentTime` are one tool on 2026.9, `llm__GetDateTime`.
   toolsets:
     observe:
       name: ha-observability
       tools:
+        # Home Assistant before 2026.9
         - "mcp__homeassistant__GetLiveContext"
         - "mcp__homeassistant__HassGetState"
         - "mcp__homeassistant__HassGetWeather"
         - "mcp__homeassistant__HassGetCurrentDate"
         - "mcp__homeassistant__HassGetCurrentTime"
         - "mcp__homeassistant__todo_get_items"
+        # Home Assistant 2026.9 and later
+        - "mcp__homeassistant__homeassistant__GetLiveContext"
+        - "mcp__homeassistant__intent__HassGetState"
+        - "mcp__homeassistant__weather__HassGetWeather"
+        - "mcp__homeassistant__llm__GetDateTime"
+        - "mcp__homeassistant__todo__get_items"
     actions:
       # Rendered whenever the MCP component is, and NOT gated on a credential:
       # Home Assistant registers the same Assist intents for any user, so there
@@ -290,6 +366,7 @@ mcp:
       enabled: true
       name: ha-actions
       tools:
+        # Home Assistant before 2026.9
         - "mcp__homeassistant__HassTurnOn"
         - "mcp__homeassistant__HassTurnOff"
         - "mcp__homeassistant__HassLightSet"
@@ -303,6 +380,20 @@ mcp:
         - "mcp__homeassistant__HassBroadcast"
         - "mcp__homeassistant__HassCancelAllTimers"
         - "mcp__homeassistant__HassListAddItem"
+        # Home Assistant 2026.9 and later
+        - "mcp__homeassistant__intent__HassTurnOn"
+        - "mcp__homeassistant__intent__HassTurnOff"
+        - "mcp__homeassistant__light__HassLightSet"
+        - "mcp__homeassistant__intent__HassSetPosition"
+        - "mcp__homeassistant__climate__HassClimateSetTemperature"
+        - "mcp__homeassistant__media_player__HassMediaPause"
+        - "mcp__homeassistant__media_player__HassMediaUnpause"
+        - "mcp__homeassistant__media_player__HassMediaNext"
+        - "mcp__homeassistant__vacuum__HassVacuumStart"
+        - "mcp__homeassistant__vacuum__HassVacuumReturnToBase"
+        - "mcp__homeassistant__assist_satellite__HassBroadcast"
+        - "mcp__homeassistant__intent__HassCancelAllTimers"
+        - "mcp__homeassistant__todo__HassListAddItem"
 
 # THE ADMIN MCP PATH — how `ha-ops` reaches everything Assist intents cannot.
 #
@@ -345,7 +436,7 @@ adminMcp:
   # Assistant, deleting registry objects and installing HACS packages in one
   # line, which is the whole thing the enumeration prevents.
   #
-  # Verified against ha-mcp 8.3.0: 78 tools, of which these 52 ship.
+  # Verified against ha-mcp 8.3.0: 78 tools, of which these 62 ship.
   toolset:
     name: ha-admin
     tools:
@@ -362,6 +453,10 @@ adminMcp:
       - "mcp__homeassistant_admin__ha_config_list_dashboard_resources"
       - "mcp__homeassistant_admin__ha_config_list_groups"
       - "mcp__homeassistant_admin__ha_config_list_helpers"
+      - "mcp__homeassistant_admin__ha_config_remove_calendar_event"
+      - "mcp__homeassistant_admin__ha_config_remove_category"
+      - "mcp__homeassistant_admin__ha_config_remove_group"
+      - "mcp__homeassistant_admin__ha_config_remove_label"
       - "mcp__homeassistant_admin__ha_config_set_automation"
       - "mcp__homeassistant_admin__ha_config_set_calendar_event"
       - "mcp__homeassistant_admin__ha_config_set_category"
@@ -394,6 +489,12 @@ adminMcp:
       - "mcp__homeassistant_admin__ha_list_floors_areas"
       - "mcp__homeassistant_admin__ha_list_services"
       - "mcp__homeassistant_admin__ha_reload_core"
+      - "mcp__homeassistant_admin__ha_remove_area_or_floor"
+      - "mcp__homeassistant_admin__ha_remove_device"
+      - "mcp__homeassistant_admin__ha_remove_entity"
+      - "mcp__homeassistant_admin__ha_remove_helpers_integrations"
+      - "mcp__homeassistant_admin__ha_remove_todo_item"
+      - "mcp__homeassistant_admin__ha_remove_zone"
       - "mcp__homeassistant_admin__ha_search"
       - "mcp__homeassistant_admin__ha_set_area_or_floor"
       - "mcp__homeassistant_admin__ha_set_device"
@@ -401,37 +502,33 @@ adminMcp:
       - "mcp__homeassistant_admin__ha_set_integration"
       - "mcp__homeassistant_admin__ha_set_todo_item"
       - "mcp__homeassistant_admin__ha_set_zone"
-  # NOT SHIPPED, and each for a reason: they restart Home Assistant, delete
-  # registry objects, manage backups, or install software. Add the ones you want
-  # by appending to `toolset.tools` above — Helm replaces lists rather than
-  # merging them, so restate the whole list.
+  # NOT SHIPPED, and each for a reason, stated by the class it belongs to.
+  # Registry removals (entities, devices, areas/floors, zones, helpers and
+  # integrations, categories, labels, groups, to-do items, calendar events)
+  # ship above — they are cheap to recreate, and the operator's prompt gates
+  # them. These sixteen stay withheld. Add the ones you want by appending to
+  # `toolset.tools` above — Helm replaces lists rather than merging them, so
+  # restate the whole list.
   #
-  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard"
-  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard_resource"
-  #   - "mcp__homeassistant_admin__ha_config_remove_automation"
-  #   - "mcp__homeassistant_admin__ha_config_remove_calendar_event"
-  #   - "mcp__homeassistant_admin__ha_config_remove_category"
-  #   - "mcp__homeassistant_admin__ha_config_remove_group"
-  #   - "mcp__homeassistant_admin__ha_config_remove_label"
-  #   - "mcp__homeassistant_admin__ha_config_remove_scene"
-  #   - "mcp__homeassistant_admin__ha_config_remove_script"
+  # restart and backups:
+  #   - "mcp__homeassistant_admin__ha_manage_backup"
+  #   - "mcp__homeassistant_admin__ha_restart"
+  # software and preferences:
   #   - "mcp__homeassistant_admin__ha_import_blueprint"
   #   - "mcp__homeassistant_admin__ha_manage_app"
-  #   - "mcp__homeassistant_admin__ha_manage_backup"
   #   - "mcp__homeassistant_admin__ha_manage_energy_prefs"
   #   - "mcp__homeassistant_admin__ha_manage_hacs"
   #   - "mcp__homeassistant_admin__ha_manage_pipeline"
   #   - "mcp__homeassistant_admin__ha_manage_radio"
   #   - "mcp__homeassistant_admin__ha_manage_theme"
   #   - "mcp__homeassistant_admin__ha_manage_updates"
-  #   - "mcp__homeassistant_admin__ha_remove_area_or_floor"
-  #   - "mcp__homeassistant_admin__ha_remove_device"
-  #   - "mcp__homeassistant_admin__ha_remove_entity"
-  #   - "mcp__homeassistant_admin__ha_remove_helpers_integrations"
-  #   - "mcp__homeassistant_admin__ha_remove_todo_item"
-  #   - "mcp__homeassistant_admin__ha_remove_zone"
   #   - "mcp__homeassistant_admin__ha_report_issue"
-  #   - "mcp__homeassistant_admin__ha_restart"
+  # authored configuration — deletes of what a person WROTE:
+  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard"
+  #   - "mcp__homeassistant_admin__ha_config_delete_dashboard_resource"
+  #   - "mcp__homeassistant_admin__ha_config_remove_automation"
+  #   - "mcp__homeassistant_admin__ha_config_remove_scene"
+  #   - "mcp__homeassistant_admin__ha_config_remove_script"
 
 # The admin MCP server WORKLOAD — a sibling of `adminMcp`, which renders only
 # the CRs. Runs ha-mcp in-cluster when you do not already have a server.
@@ -628,11 +725,16 @@ profiles:
       DESCRIBE AND STOP - do not act - when any of these is true:
         * the change is hard to undo (a lock, an alarm, a garage door, anything
           that could leave someone locked out or a house unheated in winter);
-        * it restarts Home Assistant or reloads its core configuration;
+        * it restarts Home Assistant, reloads its core configuration, OR
+          reloads a SINGLE integration's config entry — a reload can fail
+          mid-way (`failed_unload`) and leave a HEALTHY integration worse off
+          than when you started, so "it's just a reload" is not a reason to
+          skip this;
         * it would remove or re-pair a device, or delete history;
         * it edits automations or scripts someone else wrote;
         * you are not confident which entity or integration was meant.
-      In those cases, write exactly what you would do and wait to be told.
+      In those cases, write exactly what you would do and wait to be told —
+      see the instruction on authorization that follows this role.
 
       Never touch an entity you were not asked about and did not diagnose.
 
@@ -652,21 +754,59 @@ profiles:
 # renders the source, both profiles and both toolsets, so the only objects it
 # does not render are chat surfaces and channels, and those are values-supplied
 # names omitted when unset.
+#
+# Paired with the parent's `global.agentops.wiringMode`: this says WHETHER the
+# routes render, wiringMode says AS WHAT — `Pipeline`s under `pipelines` mode,
+# `AgentCapability`s on the chart-rendered `Coordinator` under `coordinator`
+# mode.
+wiringEnabled: false
+
 pipelines:
-  enabled: false
   control:
     # The user-facing route. Claims the chat sources below, so an unaddressed
     # message on those surfaces reaches ha-user.
     name: ha-control
     # Display only — see kubernetes's `pipelines.observe.icon`.
     icon: aops:home
+    # Read under `global.agentops.wiringMode: coordinator` by the chart-rendered
+    # Coordinator's own coordinating agent. It states what this agent IS and
+    # CAN DO, what it cannot, and what to hand it — so a person's instruction
+    # matches it as readily as a signal does. Never a trigger alone, and never
+    # a routing rule of its own. Unused under `pipelines` mode.
+    #
+    # It used to say "read-only". It is not: this agent USES the house — see
+    # profiles.user.systemPrompt. What it lacks is configuration, not action.
+    description: >-
+      The household's everyday assistant, acting through Assist intents. Can
+      report the state of any entity and operate the house the way a resident
+      would — lights, switches, climate, media, scenes and automations. Cannot
+      reach configuration: no integration setup or reload, no automation edit,
+      no repair of anything Home Assistant reports as broken. Hand it a
+      question about the house or an instruction to operate something in it.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""
   ops:
     # The ops route. Claims ha-logs and NOTHING ELSE — see chatSources.
+    #
+    # This route ALSO binds global.builtinToolsets.websearch (agentops-websearch)
+    # when the catalog is enabled — ha-ops is already trusted to repair the
+    # house, so it is the one that gets to look things up on the open internet
+    # too. ha-control stays scoped to the house and does not gain it.
     name: ha-ops
     icon: aops:operate
+    # See control.description above — same purpose, coordinator mode only.
+    description: >-
+      The Home Assistant repair engineer, with the REST API and the operator
+      credential. Can read the error log and every integration's state,
+      diagnose a failed setup or an unavailable device, call any service,
+      validate configuration and make the narrowest change that fixes a
+      fault — the only agent that reaches configuration. Describes and stops
+      instead of acting on anything hard to undo: a restart, a reload, a
+      re-pairing, deleting history, editing someone else's automations. Hand
+      it a question about Home Assistant's own health or status, an error it
+      logs about itself, a device that went unavailable, or an instruction to
+      repair or reconfigure an integration.
     # Optional per-route overrides of the two at the bottom of this stanza.
     runtimeRef: ""
     serviceAccountName: ""

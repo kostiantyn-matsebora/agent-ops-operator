@@ -173,6 +173,35 @@ func TestFragmentedMessageWithInterleavedPing(t *testing.T) {
 	}
 }
 
+// Err() was entirely untested (0% in the coverage profile): it is the read
+// side of the read loop's failure path, and a caller (runSession) relies on it
+// to log why a session ended.
+func TestSessionErrReportsWhyItEnded(t *testing.T) {
+	ha := newFakeHA(t, "secret")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sess, err := haConnect(ctx, ha.URL, "secret", nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if sess.Err() != nil {
+		t.Fatalf("a live session must report no error yet, got %v", sess.Err())
+	}
+
+	// Sever the connection from the server side: the read loop's next read
+	// fails, which is what fail() and Err() exist to report.
+	ha.Close()
+
+	select {
+	case <-sess.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session never observed the severed connection")
+	}
+	if sess.Err() == nil {
+		t.Fatal("expected Err() to report why the session ended")
+	}
+}
+
 func TestLogRecordShape(t *testing.T) {
 	raw := `{"name":"homeassistant.components.hue","message":["a","b"],"level":"ERROR",
 	         "source":["components/hue/light.py",88],"timestamp":1755782400.5,"count":3,

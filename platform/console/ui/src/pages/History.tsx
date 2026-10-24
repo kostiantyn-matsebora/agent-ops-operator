@@ -1,4 +1,4 @@
-import { Card, CardBody, CardTitle, Grid, GridItem, Label } from '@patternfly/react-core'
+import { Card, CardBody, CardExpandableContent, CardHeader, CardTitle, Grid, GridItem, Label } from '@patternfly/react-core'
 import { Chart, ChartAxis, ChartGroup, ChartLine, ChartThemeColor } from '@patternfly/react-charts/victory'
 import { Empty } from '../components/States'
 import { useChart } from '../api/hooks'
@@ -20,29 +20,39 @@ const CHARTS: { key: string; title: string; unit: string }[] = [
   { key: 'queueDepth', title: 'Channel ops queued', unit: '' },
 ]
 
-export function HistoryCharts({ available }: { available: boolean }) {
-  if (!available) {
-    return (
-      <Card>
-        <CardTitle>History</CardTitle>
-        <CardBody>
-          <Empty title="No metrics backend is configured">
-            Windows beyond the manager's activity buffer are unavailable. Set{' '}
-            <code>console.metrics.url</code> to a Prometheus or VictoriaMetrics query endpoint to
-            enable throughput, run-duration percentiles and queue depth over long ranges.
-          </Empty>
-        </CardBody>
-      </Card>
-    )
-  }
+export function HistoryCharts({
+  available, expanded, onToggle,
+}: {
+  available: boolean
+  /** Collapsed to its title, the card stays on the page and reopens from the same chevron. */
+  expanded: boolean
+  onToggle: () => void
+}) {
   return (
-    <Grid hasGutter>
-      {CHARTS.map((c) => (
-        <GridItem key={c.key} md={4}>
-          <HistoryChart chartKey={c.key} title={c.title} unit={c.unit} />
-        </GridItem>
-      ))}
-    </Grid>
+    <Card isExpanded={expanded} data-testid="history">
+      <CardHeader onExpand={onToggle} toggleButtonProps={{ 'aria-label': 'Toggle history', 'aria-expanded': expanded }}>
+        <CardTitle>History</CardTitle>
+      </CardHeader>
+      <CardExpandableContent>
+        <CardBody>
+          {available ? (
+            <Grid hasGutter>
+              {CHARTS.map((c) => (
+                <GridItem key={c.key} md={4}>
+                  <HistoryChart chartKey={c.key} title={c.title} unit={c.unit} />
+                </GridItem>
+              ))}
+            </Grid>
+          ) : (
+            <Empty title="No metrics backend is configured">
+              Windows beyond the manager's activity buffer are unavailable. Set{' '}
+              <code>console.metrics.url</code> to a Prometheus or VictoriaMetrics query endpoint to
+              enable throughput, run-duration percentiles and queue depth over long ranges.
+            </Empty>
+          )}
+        </CardBody>
+      </CardExpandableContent>
+    </Card>
   )
 }
 

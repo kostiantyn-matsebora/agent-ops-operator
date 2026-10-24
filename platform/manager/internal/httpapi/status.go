@@ -146,6 +146,84 @@ func (s *Server) leaderIdentity(ctx context.Context) string {
 	return *lease.Spec.HolderIdentity
 }
 
+// isLeader reports whether THIS replica currently holds the leader-election
+// Lease, for /channel/ops's durable-chat-ops-broker gate.
+//
+// ReplicaIdentity unset disables the check entirely (every existing test, and
+// any Server wired with no leader election behind it) — that Server answers
+// exactly as it always has. Once set, an UNREADABLE lease answers false, the
+// same conservative direction leaderIdentity's own "best effort" takes:
+// a replica that cannot tell whether it is the leader cannot safely claim an
+// op on one either, and the adapter contract already tolerates retrying a 503
+// immediately.
+//
+// A PREFIX match, never a bare equality: controller-runtime's own
+// leaderelection.NewResourceLock mints the Lease's HolderIdentity as
+// os.Hostname() + "_" + a per-process uuid, while ReplicaIdentity is the bare
+// hostname (main.go, deliberately — the claims this process writes need no
+// relation to that uuid). An exact-equality check here never matched, even
+// for the real leader, so every /channel/ops poll 503'd forever: measured
+// live in the system pack, where ensure-topic/send never completed for any
+// channel. Hostnames are unique per pod, so a prefix match is exact enough.
+func (s *Server) isLeader(ctx context.Context) bool {
+	if s.ReplicaIdentity == "" {
+		return true
+	}
+	holder := s.leaderIdentity(ctx)
+	return holder == s.ReplicaIdentity || strings.HasPrefix(holder, s.ReplicaIdentity+"_")
+}
+
+// managerPodLabel is the Deployment's own pod-template label (chart
+// deployment.yaml), used only to resolve the CURRENT leader's address so a
+// non-leader can reverse-proxy a poll to it — never to select a target by
+// identity, which leaderProxyTarget already does.
+const managerPodLabel = "app.kubernetes.io/name"
+const managerPodLabelValue = "agentops-manager"
+
+// leaderProxyTarget resolves "host:port" for the pod currently holding the
+// leader-election Lease, so /channel/ops can reverse-proxy a non-leader's
+// poll there instead of rejecting it. Empty when the leader is unknown, or
+// its pod cannot be found with an IP yet.
+//
+// Every replica runs the identical image on the identical listen address, so
+// the leader's port is simply this process's own (Server.Addr) — only the
+// host differs.
+func (s *Server) leaderProxyTarget(ctx context.Context) string {
+	holder := s.leaderIdentity(ctx)
+	if holder == "" {
+		return ""
+	}
+	// controller-runtime mints the Lease holder as
+	// os.Hostname()+"_"+a per-process uuid (isLeader's own comment). The pod
+	// name is set as the Pod's hostname by Kubernetes for an ordinary
+	// Deployment, so splitting on the LAST "_" recovers it.
+	podName := holder
+	if i := strings.LastIndex(holder, "_"); i > 0 {
+		podName = holder[:i]
+	}
+	var pods corev1.PodList
+	if err := s.Client.List(ctx, &pods, client.InNamespace(s.Namespace),
+		client.MatchingLabels{managerPodLabel: managerPodLabelValue}); err != nil {
+		return ""
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Name == podName && p.Status.PodIP != "" {
+			return p.Status.PodIP + s.listenPort()
+		}
+	}
+	return ""
+}
+
+// listenPort is this process's own ":<port>" (Server.Addr, e.g. ":8080"),
+// identical on every replica of the same Deployment.
+func (s *Server) listenPort() string {
+	if i := strings.LastIndex(s.Addr, ":"); i >= 0 {
+		return s.Addr[i:]
+	}
+	return ":8080"
+}
+
 // runtimeSlots counts capacity the way admission does: live pods against the
 // ceiling, and conversations that want a pod and have none.
 func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
@@ -172,6 +250,16 @@ func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 	for i := range convs.Items {
 		c := &convs.Items[i]
 		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] {
+			continue
+		}
+		// A closed conversation is INERT (invariants.md: "no place in the FIFO
+		// waiting set") — it can carry unpruned spec.inputs forever (an input
+		// that arrived but was never processed before close), and PendingInputs
+		// has no phase awareness by design, so this is the one caller that must
+		// apply it. Left unchecked, every such conversation inflated this count
+		// and the console's Queues page with conversations that will never be
+		// dispatched again.
+		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
 			continue
 		}
 		if len(dispatch.PendingInputs(c)) > 0 || c.Status.Inflight != nil {
@@ -276,10 +364,15 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 404, map[string]string{"error": "unknown pipeline " + name})
 		return
 	}
+	capability, err := dispatch.ResolveCapability(ctx, s.Reader, &p)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "pipeline " + name + ": capability does not resolve"})
+		return
+	}
 	out := resolvedResponse{
 		Pipeline:     p.Name,
-		Profile:      p.Spec.ProfileRef.Name,
-		ToolsMode:    dispatch.ToolsModeOf(p.Spec.Toolsets),
+		Profile:      capability.ProfileName(),
+		ToolsMode:    dispatch.ToolsModeOf(capability.Toolsets),
 		AllowedTools: []string{},
 		Toolsets:     []string{},
 		MCPConfigs:   []string{},
@@ -287,10 +380,10 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var profile agentopsv1alpha1.AgentProfile
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: p.Spec.ProfileRef.Name}, &profile); err != nil {
-		out.Unresolved = append(out.Unresolved, "AgentProfile/"+p.Spec.ProfileRef.Name)
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: capability.ProfileName()}, &profile); err != nil {
+		out.Unresolved = append(out.Unresolved, "AgentProfile/"+capability.ProfileName())
 	} else {
-		out.Runtime = s.pipelineRuntimeName(ctx, &p, &profile)
+		out.Runtime = s.pipelineRuntimeName(ctx, capability, &profile)
 	}
 
 	// Composed through the SAME function dispatch uses, over the same inputs.
@@ -298,8 +391,8 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 	// prevent — the console asks precisely so a second implementation cannot
 	// drift from the one that runs.
 	var byRef [][]string
-	if p.Spec.Toolsets != nil {
-		for _, ref := range p.Spec.Toolsets.Refs {
+	if capability.Toolsets != nil {
+		for _, ref := range capability.Toolsets.Refs {
 			out.Toolsets = append(out.Toolsets, ref.Name)
 			var ts agentopsv1alpha1.MCPToolset
 			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ts); err != nil {
@@ -316,9 +409,9 @@ func (s *Server) handlePipelineResolved(w http.ResponseWriter, r *http.Request) 
 		out.AllowedTools = strings.Split(tools, ",")
 	}
 
-	if p.Spec.MCPConfigs != nil {
+	if capability.MCPConfigs != nil {
 		seen := map[string]bool{}
-		for _, ref := range p.Spec.MCPConfigs.Refs {
+		for _, ref := range capability.MCPConfigs.Refs {
 			out.MCPConfigs = append(out.MCPConfigs, ref.Name)
 			var cfg agentopsv1alpha1.MCPConfig
 			if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &cfg); err != nil {

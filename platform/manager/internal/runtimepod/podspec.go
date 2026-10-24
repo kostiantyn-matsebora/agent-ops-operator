@@ -25,6 +25,13 @@ import (
 // value and egressProxyUID must stay distinct or the boundary is not one.
 const runtimeUID int64 = 1000
 
+// aopsMCPServerKey is the server key the chart's aops MCPConfig renders under
+// (design D-F). AOPS_MCP_TOKEN is injected only when a conversation's bound
+// MCPConfigs actually compiled this key — a Coordinator-rooted conversation
+// whose capability never lists that toolset gets no token, since nothing
+// would ever present it.
+const aopsMCPServerKey = "aops"
+
 const (
 	LabelApp          = "app.kubernetes.io/name"
 	LabelAppValue     = "agentops-runtime"
@@ -122,6 +129,13 @@ type Resolved struct {
 	// redirected through an enforcing proxy. Nil means today's pod: the agent
 	// reaches whatever the network reaches.
 	EgressMediation *agentopsv1alpha1.EgressMediation
+	// ActingCoordinator is the Coordinator a MEMBER conversation acts for,
+	// resolved by walking causedBy (design D-A, coordinator-owner-reach) —
+	// "" for a conversation that is itself a Coordinator's own root (Build
+	// reads conv.Spec.CoordinatorRef directly for that case) or that acts for
+	// no Coordinator at all. See ResolveActingCoordinator's doc comment for
+	// why this is a duplicated walk rather than an imported one.
+	ActingCoordinator string
 }
 
 // ResolveFor picks the execution backend for a CONVERSATION and reports whether
@@ -185,6 +199,17 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 		sa = conv.Spec.ServiceAccountName
 		ctxClaim, wsClaim = conv.Spec.ContextClaimName, conv.Spec.WorkspaceClaimName
 	}
+	// ActingCoordinator (design D-A, coordinator-owner-reach): resolved here,
+	// once, regardless of which branch below answers — a MEMBER conversation
+	// (no coordinatorRef of its own, like the self-heal reaper) still needs a
+	// usable AOPS_MCP_TOKEN, and this is the only place in the pod-build path
+	// with a Reader to walk causedBy with. Best-effort: a broken ancestry
+	// chain must not fail an otherwise-ordinary pod build over a token this
+	// conversation may not even use.
+	actingCoordinator := ""
+	if conv != nil {
+		actingCoordinator = resolveActingCoordinatorBestEffort(ctx, r, namespace, conv)
+	}
 	applyStorage := func(cfg Config) Config {
 		if ctxClaim != "" {
 			cfg.ContextPVC = ctxClaim
@@ -203,7 +228,7 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 		if sa != "" {
 			cfg.ServiceAccount = sa
 		}
-		return Resolved{Config: cfg}, nil
+		return Resolved{Config: cfg, ActingCoordinator: actingCoordinator}, nil
 	}
 	// A bad contextSync declaration fails HERE, where the error reaches the
 	// Conversation's RuntimeStarted condition. Nothing writes AgentRuntime
@@ -219,10 +244,11 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 		cfg.ServiceAccount = sa
 	}
 	return Resolved{
-		Config:          cfg,
-		ContextStorage:  rt.Spec.ContextStorage,
-		ContextSync:     rt.Spec.ContextSync,
-		EgressMediation: rt.Spec.EgressMediation,
+		Config:            cfg,
+		ContextStorage:    rt.Spec.ContextStorage,
+		ContextSync:       rt.Spec.ContextSync,
+		EgressMediation:   rt.Spec.EgressMediation,
+		ActingCoordinator: actingCoordinator,
 	}, nil
 }
 
@@ -276,7 +302,7 @@ func (r Resolved) ContinuityPossible() bool {
 // profile-keyed one, or the conversation's own when its wiring binds MCPConfigs
 // (raw refs in mcp override it).
 func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
-	mcp mcpcompile.Result, mcpCM string, resolved Resolved) *corev1.Pod {
+	mcp mcpcompile.Result, mcpCM string, resolved Resolved, masterToken string) *corev1.Pod {
 
 	cfg := resolved.Config
 	// SIDECAR MODE moves the live context onto pod-local storage and leaves the
@@ -320,6 +346,30 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
 		}},
+	}
+
+	// AOPS_MCP_TOKEN (design D-F, widened by coordinator-owner-reach's design
+	// D-A/D-D): derived here, never stored — the manager validates any
+	// presented token by re-derivation, exactly as every other adapter token
+	// in this manager is. Only a conversation whose wiring actually bound the
+	// aops MCPConfig gets one; every other pod is unchanged.
+	//
+	// A Coordinator's own root names ITS coordinator directly. A MEMBER (no
+	// coordinatorRef of its own — the self-heal reaper is the case this
+	// exists for) falls back to resolved.ActingCoordinator, resolved by
+	// ResolveFor walking causedBy to the uncaused root. Same token format
+	// either way: `coordinator:<name>:<conversation>`, no new context.
+	coordinatorName := resolved.ActingCoordinator
+	if conv.Spec.CoordinatorRef != nil {
+		coordinatorName = conv.Spec.CoordinatorRef.Name
+	}
+	if coordinatorName != "" {
+		if _, bound := mcp.Endpoints[aopsMCPServerKey]; bound {
+			env = append(env, corev1.EnvVar{
+				Name:  "AOPS_MCP_TOKEN",
+				Value: DeriveCoordinatorToken(masterToken, coordinatorName, conv.Name),
+			})
+		}
 	}
 
 	// workspace: the repository checkout, on a claim or ephemeral.

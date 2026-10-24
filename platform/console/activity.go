@@ -43,7 +43,10 @@ type ActivityEvent struct {
 	LatencyMs    int64     `json:"latencyMs,omitempty"`
 	Code         string    `json:"code,omitempty"`
 	Detail       string    `json:"detail,omitempty"`
-	Adapter      string    `json:"adapter,omitempty"`
+	// Data is the hop's bounded facts — a model call's tokens, a tool call's
+	// tool — passed through to the browser untouched.
+	Data    map[string]string `json:"data,omitempty"`
+	Adapter string            `json:"adapter,omitempty"`
 }
 
 // NodeRef names one graph node, in the manager's vocabulary — which is the

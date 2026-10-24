@@ -33,6 +33,16 @@ test('a marker without raw text still reads as unparsable', () => {
   assert.ok(got && got.includes('len'), `want something readable, got ${got}`);
 });
 
+// A marker whose only content cannot even be JSON.stringify'd (a circular
+// structure) must still resolve to SOMETHING readable rather than throwing
+// out of unparsedInput and aborting the whole stdout parse loop over one
+// malformed event.
+test('a marker that cannot be JSON.stringify\'d (circular) still resolves, rather than throwing', () => {
+  const circular = { len: 3 };
+  circular.self = circular;
+  assert.strictEqual(unparsedInput({ __unparsedToolInput: circular }), '(unreadable)');
+});
+
 // ---- the judgement ------------------------------------------------------------
 
 test('a healthy run never trips', () => {

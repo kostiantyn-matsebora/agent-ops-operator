@@ -8,15 +8,18 @@
 //
 //	config:   {"schedule": "0 6 * * *", "input": "...", "title": "..."}   (opaque spec.config)
 //	cursor:   state key "last-fire" via /signal/state (restart-safe)
-//	firing:   POST /signal/inbound, kind=job, fingerprint "<source>@<tick>"
+//	firing:   POST /signal/inbound, kind=job, initiationId "<source>" (the job's own identity)
 //
-// The deterministic fingerprint makes at-least-once delivery idempotent (the
-// manager's cooldown absorbs a re-fired tick), and the stable labels give
-// every source its own signature under the default signatureLabels — so
-// consecutive runs land in ONE conversation, later ticks resuming the agent
-// session (a recurring job that remembers). Missed ticks during downtime fire
-// at most once (the latest missed tick) on recovery; ticks from before a
-// source was first seen never fire.
+// initiationId is the SOURCE NAME, not the tick — every tick of one job is
+// the same recurring job, so all of them correlate to one conversation,
+// later ticks resuming the agent session. A crash between firing and
+// persisting the cursor re-fires the same tick under the same id, which the
+// manager's cooldown absorbs as a re-send (a cron source sizes its own
+// cooldownHours below its schedule interval so consecutive, DISTINCT ticks
+// still reach the open conversation as recurrences rather than being
+// dropped). Missed ticks during downtime fire at most once (the latest
+// missed tick) on recovery; ticks from before a source was first seen never
+// fire.
 //
 // Run single-instance (the SignalAdapter reconciler's singleton default) —
 // two schedulers would double-fire ticks.
@@ -65,6 +68,13 @@ func mustEnv(key string) string {
 	return v
 }
 
+// baseContext supplies the parent for main's signal-derived context. A test
+// swaps it to inject a context it can cancel directly, so it can call the
+// real main() in-process and stop it exactly as a real SIGTERM would —
+// without sending any OS signal that could also reach other tests sharing
+// this process.
+var baseContext = context.Background
+
 func main() {
 	sourceType := os.Getenv("ADAPTER_NAME")
 	if sourceType == "" {
@@ -76,7 +86,7 @@ func main() {
 		sources:    map[string]servedSource{},
 		reported:   map[string]string{},
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	log.Printf("signal-cron adapter starting (adapter=%s)", sourceType)
 
@@ -105,6 +115,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %v", err)
 		return
 	}
+	a.pruneReported(infos)
 	next := map[string]servedSource{}
 	for _, info := range infos {
 		var cfg sourceConfig
@@ -119,24 +130,11 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		} else if sched, err = ParseCron(cfg.Schedule); err != nil {
 			problem = "spec.config.schedule: " + err.Error()
 		}
-		a.mu.Lock()
-		last := a.reported[info.Name]
-		a.mu.Unlock()
 		if problem != "" {
-			if last != problem {
-				_ = a.mgr.ReportStatus(ctx, info.Name, false, "InvalidConfig", problem)
-				a.mu.Lock()
-				a.reported[info.Name] = problem
-				a.mu.Unlock()
-			}
+			a.reportOnce(ctx, info.Name, false, "InvalidConfig", problem)
 			continue // keep serving the other sources
 		}
-		if last != "ok" {
-			_ = a.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady", "served by signal-cron")
-			a.mu.Lock()
-			a.reported[info.Name] = "ok"
-			a.mu.Unlock()
-		}
+		a.reportOnce(ctx, info.Name, true, "AdapterReady", "served by signal-cron")
 		next[info.Name] = servedSource{sched: sched, cfg: cfg}
 	}
 	a.mu.Lock()
@@ -144,9 +142,61 @@ func (a *adapter) refreshSources(ctx context.Context) {
 	a.mu.Unlock()
 }
 
+// reportedReady is the reported-map entry for a source last reported Ready.
+// An invalid source's entry is its problem text instead, so a changed problem
+// re-reports too.
+const reportedReady = "ok"
+
+// reportOnce posts a source's Ready condition unless the manager already
+// accepted that same state. The entry is recorded only after the post
+// succeeds: recording a failed post would suppress the report until the
+// config changed, leaving the source's Ready condition unset or stale.
+func (a *adapter) reportOnce(ctx context.Context, name string, ready bool, reason, message string) {
+	state := message
+	if ready {
+		state = reportedReady
+	}
+	a.mu.Lock()
+	unchanged := a.reported[name] == state
+	a.mu.Unlock()
+	if unchanged {
+		return
+	}
+	if err := a.mgr.ReportStatus(ctx, name, ready, reason, message); err != nil {
+		log.Printf("report status %s: %v (retried next refresh)", name, err)
+		return
+	}
+	a.mu.Lock()
+	a.reported[name] = state
+	a.mu.Unlock()
+}
+
+// pruneReported drops the last-reported status of every source the manager no
+// longer serves. Without it a deleted source's entry outlives the object, so a
+// recreation under the same name with the same invalid config would match the
+// stale entry and never re-report Ready=False — and the map would grow with
+// every source ever seen.
+//
+// Called only after a successful list. A failed list prunes nothing, as it
+// keeps `sources`: entries are written only for listed names, so the map
+// cannot grow during an outage, and the first successful list prunes it.
+func (a *adapter) pruneReported(infos []SourceInfo) {
+	served := make(map[string]struct{}, len(infos))
+	for _, info := range infos {
+		served[info.Name] = struct{}{}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for name := range a.reported {
+		if _, ok := served[name]; !ok {
+			delete(a.reported, name)
+		}
+	}
+}
+
 // evaluate fires the latest elapsed tick of one source, if any. Fire-then-
-// persist: a crash between the two re-fires the same fingerprint, which the
-// manager's cooldown absorbs.
+// persist: a crash between the two re-fires the same tick under the same
+// initiationId, which the manager's cooldown absorbs.
 func (a *adapter) evaluate(ctx context.Context, name string, now time.Time) error {
 	a.mu.Lock()
 	src, ok := a.sources[name]
@@ -179,14 +229,13 @@ func (a *adapter) evaluate(ctx context.Context, name string, now time.Time) erro
 
 	tick := latest.UTC().Format(time.RFC3339)
 	err = a.mgr.Inbound(ctx, name, []Signal{{
-		Fingerprint: name + "@" + tick,
-		// distinct default-signature labels per source, so different cron
-		// sources never group into one conversation; "source" supports custom
-		// grouping.signatureLabels
-		Labels:  map[string]string{"alertgroup": "cron", "alertname": name, "source": name},
-		Title:   src.cfg.Title,
-		Payload: src.cfg.Input,
-		Kind:    "job",
+		// The source's own job identity — every tick of this job shares it,
+		// so all of them correlate to the one recurring conversation.
+		InitiationID: name,
+		Labels:       map[string]string{"alertgroup": "cron", "alertname": name, "source": name},
+		Title:        src.cfg.Title,
+		Payload:      src.cfg.Input,
+		Kind:         "job",
 	}})
 	if err != nil {
 		return err

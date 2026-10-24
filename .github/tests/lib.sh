@@ -99,6 +99,15 @@ printf '%s\n' "$*" >> "${GH_CALLS:-/dev/null}"
 case "$*" in
   "issue create"*)  echo "https://github.com/o/r/issues/${GH_NEW_ISSUE:-101}" ;;
   "issue view"*)    cat "${GH_FIXTURE:-/dev/null}" 2>/dev/null || echo '{}' ;;
+  # The issue LIST a lookup reads. `[]` by default, which is what real `gh
+  # ... --json` returns for a repository with no matching issues — NOT empty
+  # output. Modelling that wrongly made a caller's "this JSON is unreadable"
+  # guard fire on every run against a repo with no fixture.
+  # GH_LIST_FAILS models the transient half — an expired token, a rate limit, a
+  # dropped connection. A caller must be able to tell that from "no match".
+  "issue list"*)    if [ -n "${GH_LIST_FAILS:-}" ]; then exit 1
+                    elif [ -n "${GH_ISSUES:-}" ]; then cat "$GH_ISSUES"
+                    else echo '[]'; fi ;;
   "api graphql"*)   cat "${GH_FIXTURE:-/dev/null}" 2>/dev/null || echo '{"data":{}}' ;;
   *)                : ;;
 esac

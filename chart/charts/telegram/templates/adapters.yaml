@@ -6,7 +6,9 @@ configured. The reconcilers own every Deployment and Service.
 {{- if include "telegram.active" . }}
 {{- $ca := .Values.channelAdapter }}
 # CONTINUATION and delivery. Does NOT poll: gateway-telegram owns the single
-# getUpdates loop and pushes topic updates here.
+# getUpdates loop and pushes topic updates here. It also does not SEND
+# directly any more (chat-ops-broker-telegram-gateway): every Bot API call
+# goes through gateway-telegram's outbound relay instead.
 apiVersion: agentops.dev/v1alpha1
 kind: ChannelAdapter
 metadata:
@@ -14,6 +16,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $ca.image.repository (toString $ca.image.tag) | quote }}
   # Receives forwarded topic updates: the reconciler owns Service
@@ -24,11 +27,18 @@ spec:
   resources:
 {{ toYaml . | indent 4 }}
   {{- end }}
+  # Metadata only: what this implementation faces outside the install. The
+  # manager verifies none of it and grants nothing from it.
+  # The router polls the same API, but it is no adapter and declares nothing.
+  externals:
+    - name: Telegram Bot API
+      kind: api
   # Interface metadata: makes `kubectl get channeladapter` answer "what goes in
   # spec.config?" without reading adapter source. Advisory — the manager
   # reports ConfigValid, the adapter stays the authority.
   configSchema:
     type: object
+    additionalProperties: false
     properties:
       chatId:
         type: string
@@ -50,13 +60,19 @@ spec:
     required:
       - chatId
   credentialKeys:
-    # documentation only — the manager never reads Secrets
-    - key: botToken
+    # documentation only — the manager never reads Secrets.
+    - key: gatewayUrl
       required: false
       description: >-
-        Bot API token for this surface, used to SEND. The same Secret backs the
-        router, which uses it to poll. Optional because the adapter also
-        accepts TELEGRAM_BOT_TOKEN from its environment.
+        gateway-telegram's in-cluster base URL for this surface. Optional
+        because the adapter also accepts TELEGRAM_GATEWAY_URL from its
+        environment.
+    - key: gatewayToken
+      required: false
+      description: >-
+        Shared secret authenticating this surface's calls to
+        gateway-telegram's POST /telegram/call. Optional because the adapter
+        also accepts TELEGRAM_GATEWAY_TOKEN from its environment.
 ---
 {{- $sa := .Values.signalAdapter }}
 # ORIGINATION. A message on a chat's general surface is a signal like any
@@ -70,6 +86,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   image: {{ printf "%s:%s" $sa.image.repository (toString $sa.image.tag) | quote }}
   # Receives forwarded general-surface updates.
@@ -82,6 +99,7 @@ spec:
   {{- end }}
   configSchema:
     type: object
+    additionalProperties: false
     properties:
       chatId:
         type: string

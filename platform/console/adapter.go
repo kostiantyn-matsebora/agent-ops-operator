@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -87,6 +88,14 @@ type Adapter struct {
 	// authLogged is the last auth mode written to the log, so a mode that has
 	// not changed is not restated every refresh.
 	authLogged string
+
+	// vocabRevision is the last vocabulary revision observed on the ops
+	// long-poll. ADA-6: a command-menu surface learns of a change from THIS,
+	// never a timer — the manager has no other way to dial an otherwise idle
+	// adapter.
+	vocabRevision string
+	vocabNextID   int
+	vocabSubs     map[int]chan struct{}
 }
 
 // NewAdapter builds the channel-side half of the console.
@@ -94,6 +103,7 @@ func NewAdapter(mgr *Manager, cache *Cache, transcripts *Transcripts, adapterNam
 	return &Adapter{
 		mgr: mgr, cache: cache, transcripts: transcripts, adapterName: adapterName,
 		channels: map[string]consoleChannelConfig{}, reported: map[string]string{},
+		vocabSubs: map[int]chan struct{}{},
 	}
 }
 
@@ -108,7 +118,8 @@ func (a *Adapter) Run(ctx context.Context) {
 	a.refreshChannels(ctx)
 	go a.refreshLoop(ctx)
 	for ctx.Err() == nil {
-		op, err := a.mgr.NextOp(ctx, a.adapterName, 25)
+		op, revision, err := a.mgr.NextOp(ctx, a.adapterName, 25)
+		a.noteVocabularyRevision(revision)
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Printf("ops poll: %v", err)
@@ -358,7 +369,13 @@ func (a *Adapter) ThreadFor(conversation string) (channel, thread string, ok boo
 		return "", "", false
 	}
 	for _, t := range conversationView(obj).Status.Threads {
-		if t.Channel == ch {
+		// A bound-but-not-yet-established thread carries an empty ThreadID
+		// (ensure-topic queued, not yet answered) — reporting ok=true for it
+		// anyway sends an empty threadId downstream, which the manager's
+		// /channel/inbound correctly refuses as "threadId is required".
+		// Measured live: a bulk close hit exactly this window and failed
+		// with that error instead of the ordinary "not joined" skip.
+		if t.Channel == ch && t.ThreadID != "" {
 			return ch, t.ThreadID, true
 		}
 	}
@@ -369,7 +386,14 @@ func (a *Adapter) ThreadFor(conversation string) (channel, thread string, ok boo
 func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) {
 	switch op.Kind {
 	case "ensure-topic":
-		tid := a.threadID(op.Conversation)
+		tid, err := a.threadID(ctx, op.Conversation)
+		if err != nil {
+			// Redelivery is the recovery path here: the manager retries an
+			// ensure-topic it never got a threadId for, and a cache miss the
+			// watch has not caught up with yet is exactly the condition a
+			// retry outlives.
+			return "", err.Error()
+		}
 		// A REOPEN arrives as an ordinary ensure-topic, and this console's
 		// thread id is deterministic, so the reopened conversation lands back
 		// in the thread it already had. Clearing the archived flag is what
@@ -390,48 +414,110 @@ func (a *Adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		if thread == "" {
 			// a channel-level notice with no thread (e.g. an /agents reply):
 			// park it on the channel's own pseudo-thread so it is still visible
+			// — the transcript API serves this back as the channel's general
+			// feed (design: "Thread-less console sends surface as the
+			// channel's general feed").
 			thread = "channel:" + op.Channel
 		}
 		a.transcripts.AppendOp(op.ID, thread, op.Message, op.Channel)
 		return "", ""
 	case "delete-conversation":
+		// A threadId is required: with none there is no thread to archive and
+		// nowhere to put the tombstone, so completing this silently would read
+		// as "handled" when nothing happened. The manager redelivers on error.
+		if op.ThreadID == nil {
+			return "", "delete-conversation requires a threadId"
+		}
 		// The CR is about to vanish from the watch cache. The transcript is
 		// NOT: it stays for this console session with the tombstone at the end,
 		// so whoever was reading can still see how it ended — and archived, so
 		// there is no composer offering to reply to something that is gone.
-		if op.ThreadID != nil {
-			if op.Message != nil {
-				a.transcripts.AppendOp(op.ID, *op.ThreadID, op.Message, op.Channel)
-			}
-			a.transcripts.Archive(*op.ThreadID)
+		if op.Message != nil {
+			a.transcripts.AppendOp(op.ID, *op.ThreadID, op.Message, op.Channel)
 		}
+		a.transcripts.Archive(*op.ThreadID)
 		return "", ""
 	case "close-topic":
+		// Same requirement as delete-conversation: nothing to archive without
+		// a thread, so this must not read as a no-op success.
+		if op.ThreadID == nil {
+			return "", "close-topic requires a threadId"
+		}
 		// The Conversation is being deleted and its CR is about to vanish from
 		// the watch cache. The transcript is NOT: it stays for this console
 		// session, marked archived, so whoever was reading the thread when it
 		// ended can still see how it ended.
-		if op.ThreadID != nil {
-			a.transcripts.Archive(*op.ThreadID)
-		}
+		a.transcripts.Archive(*op.ThreadID)
 		return "", ""
 	}
 	return "", "unknown op kind " + op.Kind
 }
 
-// threadID derives a conversation's console thread id.
+// noteVocabularyRevision records the long-poll's current vocabulary revision
+// and wakes every subscriber the first time it CHANGES — never on the first
+// observation, which a fresh snapshot fetch already covers.
+func (a *Adapter) noteVocabularyRevision(revision string) {
+	if revision == "" {
+		return
+	}
+	a.mu.Lock()
+	changed := a.vocabRevision != "" && a.vocabRevision != revision
+	a.vocabRevision = revision
+	var wake []chan struct{}
+	if changed {
+		for _, ch := range a.vocabSubs {
+			wake = append(wake, ch)
+		}
+	}
+	a.mu.Unlock()
+	for _, ch := range wake {
+		select {
+		case ch <- struct{}{}:
+		default: // already has an unconsumed notification queued
+		}
+	}
+}
+
+// SubscribeVocabulary notifies on every vocabulary revision change observed on
+// the ops long-poll (ADA-6), so a browser connection can tell its composer to
+// refetch `/api/vocabulary` without polling the manager on a timer.
+func (a *Adapter) SubscribeVocabulary() (<-chan struct{}, func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	id := a.vocabNextID
+	a.vocabNextID++
+	ch := make(chan struct{}, 1)
+	a.vocabSubs[id] = ch
+	return ch, func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if cur, ok := a.vocabSubs[id]; ok {
+			delete(a.vocabSubs, id)
+			close(cur)
+		}
+	}
+}
+
+// threadID derives a conversation's console thread id, always `console-<uid>`.
 //
 // Deterministic from the conversation's UID, so the same conversation maps to
 // the same thread across console restarts and a redelivered ensure-topic
-// completes identically. Falls back to the conversation NAME when the cache
-// has not seen the object — also deterministic, and the binding the manager
-// persists is whichever id it received first, so the two can never disagree
-// about a live conversation.
-func (a *Adapter) threadID(conversation string) string {
-	if obj := a.cache.Get("conversations", conversation); obj != nil && obj.Metadata.UID != "" {
-		return "console-" + obj.Metadata.UID
+// completes identically. A cache miss resolves the UID through the watch
+// client directly rather than answering a name-based id some other shape:
+// there is exactly one thread-id shape, and a second one invented for "the
+// cache hasn't caught up yet" would let two ensure-topics for the same
+// conversation bind two different threads. A genuinely unresolvable
+// conversation errors, so the manager's at-least-once redelivery retries
+// rather than this console completing an op it could not answer.
+func (a *Adapter) threadID(ctx context.Context, conversation string) (string, error) {
+	obj, err := a.cache.GetOrFetch(ctx, "conversations", conversation)
+	if err != nil {
+		return "", fmt.Errorf("resolving conversation %q UID: %w", conversation, err)
 	}
-	return "console-name-" + conversation
+	if obj.Metadata.UID == "" {
+		return "", fmt.Errorf("conversation %q has no UID yet", conversation)
+	}
+	return "console-" + obj.Metadata.UID, nil
 }
 
 // Send posts a UI-typed message into the manager's router and records it as
@@ -500,6 +586,9 @@ func (a *Adapter) ReaderKey(identity string) string {
 type ReadReport struct {
 	Conversation string
 	ReadAt       string
+	// Rewind asks the manager to set the acting reader's own watermark to
+	// ReadAt regardless of what is stored — "mark unread" (design D-E).
+	Rewind bool
 }
 
 // ReadResult is one conversation's outcome, named for the CONVERSATION rather
@@ -533,7 +622,7 @@ func (a *Adapter) ReportRead(ctx context.Context, reader string, reports []ReadR
 			continue
 		}
 		byThread[thread] = rep.Conversation
-		entries = append(entries, ReadEntry{ThreadID: thread, ReadAt: rep.ReadAt, Reader: reader})
+		entries = append(entries, ReadEntry{ThreadID: thread, ReadAt: rep.ReadAt, Reader: reader, Rewind: rep.Rewind})
 	}
 	if len(entries) == 0 {
 		return results, nil

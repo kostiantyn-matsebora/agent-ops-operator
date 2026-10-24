@@ -2,12 +2,16 @@
 
 ## Purpose
 
-The Home Assistant log signal adapter: a standalone dependency-free module
-reading that instance's WebSocket API, with no Kubernetes client at all.
+The Home Assistant signal adapter: a standalone dependency-free module
+reading that instance's WebSocket API, with no Kubernetes client at all. It
+polls the system log, and beside it four health surfaces — config entry
+state, repairs, fault sensors and pending updates — each switchable, on one
+source through one rules policy.
 
 It reuses the cluster-events rule vocabulary exactly rather than inventing a
-second one, fingerprints on Home Assistant's OWN dedup identity — logger plus
-source location, never the occurrence — resumes where it stopped, and takes its
+second one, mints its `initiationId` from Home Assistant's OWN dedup identity
+— logger plus source location for a log record, the condition's own identity
+for a surface, never the occurrence — resumes where it stopped, and takes its
 credential as environment projected per SOURCE.
 
 Its loop breaker is the agent SURFACE: a failed agent call is logged there, and
@@ -19,18 +23,41 @@ reporting it would reach the agent that made it.
 
 `signals/ha/` SHALL be its own Go module with no dependencies outside this
 repository, reaching Home Assistant over plain HTTP and the manager over the
-`/signal/*` contract. It SHALL hold no Kubernetes client and SHALL NAME NO
-ServiceAccount, because its data source is Home Assistant, not the cluster —
-so it runs as the release floor, an account bound to nothing.
+`/signal/*` contract.
 
-It SHALL normalize what it observes into signals — `fingerprint`, `labels`,
+It SHALL hold no Kubernetes client and SHALL NAME NO ServiceAccount, because
+its data source is Home Assistant, not the cluster — so it runs as the
+release floor, an account bound to nothing.
+
+It SHALL normalize what it observes into signals — `initiationId`, `labels`,
 optional `title`, `payload`, `kind` — and post them to the manager's inbound
-endpoint. It SHALL apply no grouping, cooldown or recurrence logic: those stay
-manager-side, driven by the `SignalSource`.
+endpoint.
+
+The adapter SHALL mint each signal's `initiationId` in its existing pending
+and dwell logic — the point where it already decides what constitutes one
+problem.
+
+The id's scope follows the path that emitted the signal, never the
+occurrence:
+
+| Path | The id keys on |
+|---|---|
+| a dwelled condition | the source plus the INTEGRATION the condition belongs to — the dwell queue's own "same problem" key, stable across every dwell cycle the trouble recurs through |
+| a zero-dwell rule | the source plus the record's own identity — logger and source location for a log record, the surface's condition id for a surface condition |
+
+Cooldown and routing stay manager-side, keyed on that id.
 
 #### Scenario: Adapter normalizes and posts
 - **WHEN** the adapter observes a Home Assistant condition matching its configuration
-- **THEN** it posts a normalized signal to the manager and performs no grouping of its own
+- **THEN** it posts a normalized signal carrying the `initiationId` its own dwell logic minted, and no manager-side policy regroups it
+
+#### Scenario: A recurring condition repeats its id
+- **WHEN** a condition already reported recurs and is emitted again, outside the source's cooldown and while its conversation is open
+- **THEN** the signal carries the same `initiationId` and lands on that conversation as a recurrence
+
+#### Scenario: A dwelled integration keeps one id across cycles
+- **WHEN** one integration's recurring trouble passes two dwell windows, each cycle sampling a different log record
+- **THEN** both emitted signals carry the same source-and-integration id, so the history stays in one conversation
 
 #### Scenario: No cluster access
 - **WHEN** the adapter's workload is rendered
@@ -38,19 +65,53 @@ manager-side, driven by the `SignalSource`.
 
 ### Requirement: Configuration reuses the cluster-events vocabulary exactly
 The adapter's `spec.config` SHALL use the same two-part shape as the cluster
-Events adapter: `rules` — ordered, first-match-wins, each selecting with
-matchers over the signal's labels and either dropping or holding for a dwell
-period after which the condition is re-checked before emitting — and `route`,
-carrying inhibition.
+Events adapter:
+
+- `rules` — ordered, first-match-wins, each selecting with matchers over the
+  signal's labels, and either dropping or holding for a dwell period after
+  which the condition is re-checked before emitting.
+- `route` — carrying inhibition.
 
 The dwell SHALL be spelled with the Prometheus term, never the Alertmanager
 batching term: they are different mechanisms and naming one after the other
 would describe behaviour the borrowed system does not have.
 
+The re-check SHALL follow the same ladder as the cluster Events adapter, with
+the integration's config-entry state as the health predicate where one exists.
+
+A record's integration identity SHALL resolve to the real Home Assistant
+domain whenever the message names one.
+
+A config-entry setup-failure record logged under the core
+`homeassistant.config_entries` logger resolves the same way, so the predicate
+can actually be looked up for the one failure class it exists to confirm.
+
+Where the message names no domain, the record SHALL fall back to its
+logger-derived identity, unchanged from today.
+
+Where no config-entry predicate exists for the resolved identity, the record
+SHALL be emitted only if it was **still recurring as the window closed**, and
+dropped if it went silent before then.
+
+"Still recurring" means its last arrival fell within the closing part of the
+window actually waited — the final third, with a floor of thirty seconds.
+
+A record that repeated for half a minute and then stopped has recurred, and
+is the transient the dwell exists to drop.
+
+The quiet-drop verdict SHALL apply only where the log could actually be
+observed through the window. When the log cannot be read at the close, the
+adapter SHALL emit, failing open.
+
+An unreadable Home Assistant is itself an incident, never quiet churn. No
+other verdict SHALL swallow that emit.
+
 A condition describing something already COMPLETED SHALL carry a zero dwell,
 because a dwell would re-check and find the recovered state, erasing the
-incident. The LAST rule SHALL be a catch-all with a dwell rather than a drop, so
-an unanticipated condition is verified rather than discarded.
+incident.
+
+The LAST rule SHALL be a catch-all with a dwell rather than a drop, so an
+unanticipated condition is verified rather than discarded.
 
 #### Scenario: First match wins
 - **WHEN** an observed condition matches two rules
@@ -64,11 +125,57 @@ an unanticipated condition is verified rather than discarded.
 - **WHEN** a condition matches no earlier rule
 - **THEN** the catch-all holds it for its dwell and re-checks, rather than discarding it
 
+#### Scenario: A network blip that logged for thirty seconds is churn
+- **WHEN** an integration with no config-entry predicate logs the same error repeatedly for thirty seconds and then stops, under a rule with a three-minute dwell
+- **THEN** no signal is emitted
+
+#### Scenario: An integration still logging at the close is reported
+- **WHEN** an integration with no config-entry predicate keeps logging the same error through the whole dwell
+- **THEN** one signal is emitted at the deadline, naming when the last record arrived
+
+#### Scenario: An unreadable log at the close fails open
+- **WHEN** a dwelled record's window closes while the system log cannot be read
+- **THEN** one signal is emitted, rather than the record being dropped for want of observed recurrence
+
+#### Scenario: A config-entry setup failure resolves to its domain
+- **WHEN** Home Assistant logs a config-entry setup failure under the
+  `homeassistant.config_entries` logger naming an integration domain in its
+  message (for example "Error setting up entry ... for tuya")
+- **THEN** the record's integration identity is that domain, not the logger
+  name, and the domain's config-entry state is used as the health predicate
+
+#### Scenario: A still-broken config entry is confirmed, not dropped as quiet
+- **WHEN** a config-entry setup failure is logged once, its domain's config
+  entry remains in a failed state for the whole dwell window, and no second
+  matching log line arrives
+- **THEN** the health predicate confirms it as still broken and one signal is
+  emitted at the deadline, rather than the record being dropped for want of
+  recurrence
+
+#### Scenario: An unparseable config-entry message keeps today's behavior
+- **WHEN** Home Assistant logs a `homeassistant.config_entries` record whose
+  message names no recognizable domain
+- **THEN** the record's integration identity falls back to the logger name,
+  and it is verified by recurrence exactly as before this change
+
 ### Requirement: The adapter resumes where it stopped
+The adapter SHALL observe Home Assistant's log by reading the system log
+listing on a short fixed interval, and SHALL NOT depend on Home Assistant
+firing `system_log_event`: that event is off by default, and an install that
+never enabled it MUST still have every matching record observed, including
+every RECURRENCE of a record — Home Assistant's listing advances a
+deduplicated entry's timestamp and count on each occurrence, and the adapter
+SHALL treat an entry newer than its read position as an occurrence to
+consider. The live event, where the instance fires it, SHALL be accepted as
+a lower-latency path for the same records, and a record delivered by one
+path SHALL NOT be considered again by the other.
+
 The adapter SHALL persist its read position through the manager's signal state
 API and SHALL resume from it on restart, so a restart neither replays what it
 already reported nor skips what arrived while it was down. A position the
 upstream no longer accepts SHALL cause a full re-read rather than a stall.
+Where the configuration declines the backfill, the adapter SHALL move its read
+position past the listing on connect rather than stop observing.
 
 #### Scenario: Restart resumes
 - **WHEN** the adapter restarts
@@ -78,11 +185,27 @@ upstream no longer accepts SHALL cause a full re-read rather than a stall.
 - **WHEN** the persisted position is no longer valid upstream
 - **THEN** the adapter re-reads from the current position and continues, rather than failing repeatedly
 
+#### Scenario: A default install is observed
+- **WHEN** Home Assistant never fires `system_log_event` and a matching record appears in its listing after the adapter connected
+- **THEN** the adapter observes the record within one poll interval and it enters the rule path exactly as a live event would
+
+#### Scenario: Recurrence is observed without events
+- **WHEN** Home Assistant fires no events and a record already observed recurs, so the listing's entry carries a later timestamp and a higher count
+- **THEN** the adapter observes the recurrence, and a dwell rule with no health predicate can find the record still recurring at the close
+
+#### Scenario: A record is not counted twice
+- **WHEN** the instance fires `system_log_event` and a record arrives through it
+- **THEN** the next poll does not consider that occurrence again
+
+#### Scenario: Declining the backfill still polls
+- **WHEN** the source's configuration sets `backfill: false`
+- **THEN** records present at connect time are not reported, and records logged after the connect are still observed
+
 ### Requirement: The adapter never reports on agent-ops itself
 The adapter SHALL NOT emit a signal about agent-ops' own machinery. Health of
 the system is status, not signal: routing it back through ingest would open a
 conversation with an agent whose own failure produces the next signal, and nothing downstream stops
-that loop — each occurrence carries a fresh fingerprint.
+that loop — each occurrence mints a fresh `initiationId`.
 
 #### Scenario: Self-observation produces nothing
 - **WHEN** an observed condition is attributable to agent-ops' own components
@@ -103,3 +226,123 @@ missing, rather than starting and silently reporting nothing.
 #### Scenario: Missing configuration is loud
 - **WHEN** the adapter starts with no endpoint configured
 - **THEN** it reports the missing configuration rather than running and emitting nothing
+
+### Requirement: The adapter observes Home Assistant's health surfaces beside its log
+The adapter SHALL observe four further surfaces of the instance it serves and
+normalize each into the same signal shape a log record produces, on the same
+`SignalSource`, so one route and one rules policy cover everything the
+instance reports about its own health:
+
+| Surface | One signal per | `initiationId` under the shipped defaults | Message |
+|---|---|---|---|
+| a config entry in a failed state (`setup_retry`, `setup_error`, `migration_error` by default) | entry | the entry's domain, source-scoped — the shipped rules dwell this surface, so the id takes the dwelled path | the entry's own reason |
+| a repair issue | issue | domain and issue id — the shipped rules give repairs a zero dwell, so the condition's own identity applies | the issue's translation key and placeholders |
+| a `binary_sensor` of device class `problem` in state `on`, or `connectivity` in state `off` (by default) | entity | the owning platform, source-scoped — dwelled like config entries | the entity's name, state and device class |
+| pending updates — `update.*` entities in state `on` | the source (ONE digest) | the source | every pending entity with its installed and latest version |
+
+The id column states the shipped defaults, not a property of the surface. A
+rule set moving a surface between the dwelled and zero-dwell paths moves its
+id scope with it, per the module requirement's two paths.
+
+Every signal, log records included, SHALL carry a `surface` label — `log`,
+`config-entry`, `repair`, `sensor` or `update`. The `integration` label SHALL
+name the integration the condition belongs to, so a rule can select a surface
+and a reader can tell integrations apart.
+
+Repair severity SHALL map to the `level` label. The `levels` configuration
+SHALL apply to log records only — a surface is silenced by disabling it or by
+a rule.
+
+Each surface SHALL be enable-able independently in the source configuration,
+the first three enabled by default and the update digest disabled by default.
+A disabled surface SHALL cause no read on its own account.
+
+The one read two consumers share is the config entry listing, which the log
+lane's dwell re-check already uses as its health predicate. With the
+config-entry surface disabled it SHALL be read only while a dwell is pending,
+and never otherwise.
+
+The set of config entry states, repair severities and sensor device classes
+that count SHALL each be configurable, with the defaults above.
+
+A standing condition SHALL be reported when it appears, and again only after
+it went away and came back. The update digest SHALL be re-posted when a new
+pending update joins the set, carrying the whole set.
+
+Where the adapter restarts, re-reporting what still stands is permitted: the
+re-report repeats the same `initiationId`, so the manager's cooldown absorbs
+it or the open conversation receives it as a recurrence.
+
+#### Scenario: An integration that stopped working without logging is reported
+- **WHEN** a config entry enters `setup_retry` with a reason and no log record is written
+- **THEN** one signal is emitted for that entry, `surface=config-entry`, `integration` naming its domain, with the reason as its message
+
+#### Scenario: A repair is reported once, with what it names
+- **WHEN** the issue registry holds an issue of a counting severity
+- **THEN** one signal is emitted for it, `surface=repair`, `level` from its severity, its placeholders in the payload, and it is not emitted again while it stands
+
+#### Scenario: A device fault reported as state is reported
+- **WHEN** a `binary_sensor` of device class `problem` turns on
+- **THEN** one signal is emitted, `surface=sensor`, `integration` naming the platform that owns the entity
+
+#### Scenario: A dwelled surface correlates on its integration
+- **WHEN** one domain's config entry fails, recovers, and fails again days later under the shipped dwell defaults
+- **THEN** both emitted signals carry the same source-and-domain id, landing as one conversation's recurrence rather than two conversations
+
+#### Scenario: Updates are one digest, and off unless asked for
+- **WHEN** several `update.*` entities are in state `on` and the update surface is not enabled
+- **THEN** nothing is emitted
+- **WHEN** the update surface is enabled
+- **THEN** exactly one signal is emitted for the source, listing every pending update, and it is emitted again only when a new one joins the set
+
+#### Scenario: A disabled surface is not read
+- **WHEN** a surface is disabled in the source configuration
+- **THEN** the adapter issues no command on that surface's account and emits nothing from it
+
+#### Scenario: Recovery and recurrence
+- **WHEN** a reported condition goes away and later comes back
+- **THEN** it is reported again — while it merely stands it is not
+
+### Requirement: Surface conditions pass the same policy as log records
+A condition from any surface SHALL pass the same path a log record does —
+self-exclusion, the ordered first-match rules, inhibition and the dwell — so
+a rule may drop or hold it by its `surface`, `integration` or `level` label.
+At the close of a dwell the re-check SHALL consult the surface's own current
+truth: a config entry still in a failed state, an issue still filed, a sensor
+still faulting — and a condition that cleared before the close SHALL be
+dropped as the churn it was. Self-exclusion's marker and own-user mechanisms
+SHALL apply to every surface; the agent-surface mechanism concerns loggers and
+applies to log records alone.
+
+#### Scenario: A restart's churn is dropped
+- **WHEN** a config entry passes through `setup_retry` during a Home Assistant restart and is loaded before the rule's dwell closes
+- **THEN** no signal is emitted
+
+#### Scenario: A surface can be silenced by rule
+- **WHEN** a rule matches `surface="sensor"` with `action: drop`
+- **THEN** no sensor condition is emitted, and every other surface is unaffected
+
+#### Scenario: A repair about agent-ops itself produces nothing
+- **WHEN** a repair issue's text names agent-ops or the adapter's own user
+- **THEN** no signal is emitted, whatever the configuration says
+
+### Requirement: The dwell queue declares a post-emit refractory window
+
+After emitting a condition's signal, the adapter SHALL suppress its own
+re-posts of that condition — the same `initiationId` — for the emitting
+rule's own dwell, floored at one minute.
+
+This is the signal adapter contract's one named allowance, declared here as
+that allowance requires. The window opens only on emit, never collapses
+distinct ids, and substitutes for nothing: the manager's cooldown stays the
+dedup authority, and the window only spends fewer round trips.
+
+#### Scenario: Chatter inside the window is not re-posted
+- **WHEN** an emitted condition keeps recurring within its refractory window
+- **THEN** no further post is made for that id, and nothing the manager keeps
+  differs from what its cooldown would have produced
+
+#### Scenario: Recurrence past the window lands as a recurrence
+- **WHEN** the condition still recurs after the window closes
+- **THEN** the adapter posts again under the same `initiationId` and the
+  manager appends it to the open conversation

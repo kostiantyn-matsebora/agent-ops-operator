@@ -41,6 +41,30 @@ type fakeManager struct {
 	reads     []ReadEntry
 	skipReads map[string]bool
 	failRead  bool
+	// vocabRevisions is consumed one entry per /channel/ops call (last entry
+	// repeats), set as the X-Agentops-Vocabulary-Revision response header —
+	// ADA-6, the only way an otherwise-idle adapter learns of a change.
+	vocabRevisions []string
+	vocabCalls     int
+}
+
+func (f *fakeManager) setVocabRevisions(revs ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.vocabRevisions = revs
+	f.vocabCalls = 0
+}
+
+func (f *fakeManager) nextVocabRevision() string {
+	if len(f.vocabRevisions) == 0 {
+		return ""
+	}
+	i := f.vocabCalls
+	if i >= len(f.vocabRevisions) {
+		i = len(f.vocabRevisions) - 1
+	}
+	f.vocabCalls++
+	return f.vocabRevisions[i]
 }
 
 func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
@@ -50,6 +74,9 @@ func newFakeManager(t *testing.T, channels ...ChannelInfo) *fakeManager {
 	mux.HandleFunc("GET /channel/ops", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if rev := f.nextVocabRevision(); rev != "" {
+			w.Header().Set(VocabularyRevisionHeader, rev)
+		}
 		if f.next >= len(f.ops) {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -192,6 +219,17 @@ func consoleUnderTest(t *testing.T, f *fakeManager, objs ...*Object) (*Adapter, 
 	return a, tr, cache
 }
 
+// mustThreadID resolves a thread id for a test fixture already in the cache —
+// the happy path, where threadID never touches the live fallback.
+func mustThreadID(t *testing.T, a *Adapter, conversation string) string {
+	t.Helper()
+	id, err := a.threadID(context.Background(), conversation)
+	if err != nil {
+		t.Fatalf("threadID(%q): %v", conversation, err)
+	}
+	return id
+}
+
 func runUntil(t *testing.T, a *Adapter, cond func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -222,7 +260,11 @@ func TestEnsureTopicIsDeterministicFromConversationUID(t *testing.T) {
 	}
 	// a fresh console (new process, same cluster) must mint the same id
 	a2, _, _ := consoleUnderTest(t, f, conv)
-	if id := a2.threadID("task-abc"); id != got["threadId"] {
+	id, err := a2.threadID(context.Background(), "task-abc")
+	if err != nil {
+		t.Fatalf("threadID: %v", err)
+	}
+	if id != got["threadId"] {
 		t.Fatalf("thread id not stable across restarts: %q vs %q", id, got["threadId"])
 	}
 }

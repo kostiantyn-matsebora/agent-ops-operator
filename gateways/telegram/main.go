@@ -16,6 +16,13 @@
 // filtering stay in the receiving adapters, each against its own contract
 // listing.
 //
+// It now ALSO holds the OUTBOUND half (chat-ops-broker-telegram-gateway):
+// channel-telegram no longer keeps its own copy of the bot token to send
+// with. Every Bot API call it makes — sendMessage, sendDocument, the forum
+// topic lifecycle, setMyCommands — is relayed through this process' own
+// POST /telegram/call/{method} (see call.go), so this is the SOLE holder of
+// the bot credential, both directions. See gotchas.md, 2026-10-11.
+//
 // This is PLUMBING, not an adapter. It produces no signals, so it is not a
 // SignalAdapter and has no served CR: the chart that renders the two real
 // adapters also renders this Deployment and injects the two Service URLs it
@@ -33,14 +40,18 @@
 //
 // Environment (all required except where noted):
 //
-//	TELEGRAM_BOT_TOKEN  the bot to poll; or AGENTOPS_CRED_<PREFIX>botToken
-//	SIGNAL_TARGET       base URL of signal-telegram  (originations)
-//	CHANNEL_TARGET      base URL of channel-telegram (continuations + offset)
+//	TELEGRAM_API_BASE    optional: the Bot API root, default https://api.telegram.org
+//	TELEGRAM_BOT_TOKEN   the bot to poll and send as; or AGENTOPS_CRED_<PREFIX>botToken
+//	SIGNAL_TARGET        base URL of signal-telegram  (originations)
+//	CHANNEL_TARGET       base URL of channel-telegram (continuations + offset)
+//	TELEGRAM_CALL_TOKEN  shared secret channel-telegram authenticates /telegram/call with
+//	LISTEN_ADDR          optional: where /telegram/call is served, default :8080
 package main
 
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -61,6 +72,16 @@ type config struct {
 	ChannelTarget string
 	// Token is the bot whose stream this process owns, exclusively.
 	Token string
+	// APIBase is the Bot API root getUpdates is issued against. Optional:
+	// absent is the real host, and a missing value is a normal configuration
+	// rather than the misconfiguration the three above are.
+	APIBase string
+	// CallToken authenticates channel-telegram's calls to /telegram/call. See
+	// call.go's validCallToken for why this leg, unlike the /updates push in
+	// the other direction, needs one at all.
+	CallToken string
+	// ListenAddr is where /telegram/call is served.
+	ListenAddr string
 }
 
 type router struct {
@@ -78,6 +99,12 @@ func loadConfig() config {
 		SignalTarget:  strings.TrimSuffix(os.Getenv("SIGNAL_TARGET"), "/"),
 		ChannelTarget: strings.TrimSuffix(os.Getenv("CHANNEL_TARGET"), "/"),
 		Token:         os.Getenv("TELEGRAM_BOT_TOKEN"),
+		APIBase:       resolveAPIBase(),
+		CallToken:     os.Getenv("TELEGRAM_CALL_TOKEN"),
+		ListenAddr:    os.Getenv("LISTEN_ADDR"),
+	}
+	if c.ListenAddr == "" {
+		c.ListenAddr = ":8080"
 	}
 	// The chart projects the bot Secret with a prefix; accept either the plain
 	// name or exactly one projected AGENTOPS_CRED_*botToken.
@@ -100,19 +127,44 @@ func loadConfig() config {
 	if c.ChannelTarget == "" {
 		missing = append(missing, "CHANNEL_TARGET (base URL of the telegram channel adapter)")
 	}
+	if c.CallToken == "" {
+		missing = append(missing, "TELEGRAM_CALL_TOKEN (shared secret for POST /telegram/call)")
+	}
 	if len(missing) > 0 {
 		log.Fatalf("gateway-telegram is misconfigured, missing: %s", strings.Join(missing, ", "))
 	}
 	return c
 }
 
+// baseContext supplies the parent for main's signal-derived context. A test
+// swaps it to inject a context it can cancel directly, so it can call the
+// real main() in-process and stop it exactly as a real SIGINT would —
+// without sending any OS signal to the test process itself.
+var baseContext = context.Background
+
 func main() {
 	cfg := loadConfig()
-	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token)}
+	r := &router{cfg: cfg, down: NewDownstream(), tg: NewTelegram(cfg.Token, cfg.APIBase)}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(baseContext(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Printf("gateway-telegram starting (signal=%s channel=%s)", cfg.SignalTarget, cfg.ChannelTarget)
+	log.Printf("gateway-telegram starting (signal=%s channel=%s listen=%s)",
+		cfg.SignalTarget, cfg.ChannelTarget, cfg.ListenAddr)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /telegram/call/{method}", r.handleCall)
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("telegram call server: %v", err)
+		}
+	}()
 
 	r.poll(ctx)
 }
@@ -124,39 +176,68 @@ func (r *router) poll(ctx context.Context) {
 	offset := int64(-1) // -1 = not yet obtained
 	for ctx.Err() == nil {
 		if offset < 0 {
-			raw, err := r.down.GetOffset(ctx, r.cfg.ChannelTarget)
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Printf("offset read: %v", err)
-					sleepCtx(ctx, 5*time.Second)
-				}
+			next, ok := r.resolveOffset(ctx)
+			if !ok {
 				continue
 			}
-			offset, _ = strconv.ParseInt(raw, 10, 64)
+			offset = next
 		}
-		updates, err := r.tg.GetUpdates(ctx, offset)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("getUpdates: %v", err)
-				sleepCtx(ctx, 5*time.Second)
-			}
+		updates, ok := r.fetchUpdates(ctx, offset)
+		if !ok {
 			continue
 		}
-		for _, upd := range updates {
-			r.route(ctx, upd)
-			offset = upd.UpdateID + 1
-			// Report AFTER forwarding: a crash in between replays the batch,
-			// which is harmless (signals collapse on fingerprint, and a
-			// duplicate topic message is the same exposure the single-container
-			// adapter had on restart). Losing an update would not be.
-			if err := r.down.PutOffset(ctx, r.cfg.ChannelTarget, strconv.FormatInt(offset, 10)); err != nil {
-				if ctx.Err() == nil {
-					log.Printf("offset report: %v", err)
-				}
-				break
+		offset = r.deliverUpdates(ctx, updates, offset)
+	}
+}
+
+// resolveOffset reads the persisted offset once. A failure sleeps out the
+// retry window and reports false, so poll's own loop simply tries again.
+func (r *router) resolveOffset(ctx context.Context) (int64, bool) {
+	raw, err := r.down.GetOffset(ctx, r.cfg.ChannelTarget)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("offset read: %v", err)
+			sleepCtx(ctx, 5*time.Second)
+		}
+		return 0, false
+	}
+	offset, _ := strconv.ParseInt(raw, 10, 64)
+	return offset, true
+}
+
+// fetchUpdates polls Telegram once, on the same retry shape as resolveOffset.
+func (r *router) fetchUpdates(ctx context.Context, offset int64) ([]update, bool) {
+	updates, err := r.tg.GetUpdates(ctx, offset)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("getUpdates: %v", err)
+			sleepCtx(ctx, 5*time.Second)
+		}
+		return nil, false
+	}
+	return updates, true
+}
+
+// deliverUpdates routes each update and reports the confirmed offset
+// downstream, returning the offset actually reached — which the caller
+// resumes from on the next poll if reporting fails partway through the
+// batch.
+func (r *router) deliverUpdates(ctx context.Context, updates []update, offset int64) int64 {
+	for _, upd := range updates {
+		r.route(ctx, upd)
+		offset = upd.UpdateID + 1
+		// Report AFTER forwarding: a crash in between replays the batch,
+		// which is harmless (signals collapse on fingerprint, and a
+		// duplicate topic message is the same exposure the single-container
+		// adapter had on restart). Losing an update would not be.
+		if err := r.down.PutOffset(ctx, r.cfg.ChannelTarget, strconv.FormatInt(offset, 10)); err != nil {
+			if ctx.Err() == nil {
+				log.Printf("offset report: %v", err)
 			}
+			break
 		}
 	}
+	return offset
 }
 
 // route is the entire routing rule: topic → continuation → channel adapter;

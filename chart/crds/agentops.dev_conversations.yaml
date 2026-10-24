@@ -63,11 +63,39 @@ spec:
               profile, and carries its queue of work units (append-only; pruned once
               processed).
             properties:
+              causedBy:
+                description: |-
+                  CausedBy is set when this conversation was created by the `invoke`
+                  verb on another conversation, rather than by a signal or a chat
+                  command. MATERIALIZED at creation, never set by hand.
+
+                  Independent of CoordinatorRef: a conversation may carry both when a
+                  Coordinator was invoked from inside another coordination — it is then
+                  simultaneously a MEMBER of its own parent and the ROOT of its own
+                  members.
+                properties:
+                  entry:
+                    description: |-
+                      Entry is the name of the parent Coordinator's `agents[]` entry this
+                      conversation was invoked through.
+                    minLength: 1
+                    type: string
+                  parent:
+                    description: Parent is the parent conversation's name (same namespace).
+                    minLength: 1
+                    type: string
+                required:
+                - entry
+                - parent
+                type: object
               channelRefs:
                 description: |-
                   ChannelRefs — every listed channel mirrors the whole conversation (own
                   thread per channel, replies and acks fanned out). Empty = chat-less
-                  (HTTP-only / shadow).
+                  (HTTP-only / shadow). For a Coordinator-rooted conversation this is
+                  bound from the Coordinator's own `channelRefs` at creation, the same way
+                  a Pipeline's is (coordinator-unconditional-channels) — never left empty
+                  pending an `escalate` call.
                 items:
                   description: ObjectRef references another object by name (same namespace).
                   properties:
@@ -100,6 +128,78 @@ spec:
                   bootstrap default, exactly as it did before.
                 maxLength: 253
                 type: string
+              conversationId:
+                description: |-
+                  ConversationID is the adopted initiationId of the signal that opened
+                  this conversation — the sender-minted correlation identity equality
+                  routing matches on. It replaces the derived Signature and the
+                  agentops.dev/signature-hash label: the manager routes by pure id
+                  equality now, nothing is computed from labels any more.
+
+                  OPAQUE. The manager compares it only for equality and never parses,
+                  derives or interprets it.
+
+                  WRITTEN ONCE AT CREATION, like PipelineRef and Signal above — reopening,
+                  re-wiring or reconciling this conversation never changes it.
+
+                  Absent on a conversation created before this field existed. NEVER
+                  backfilled — equality routing simply never matches a legacy
+                  conversation, so a recurrence opens a new one beside it rather than
+                  risking a wrong merge.
+                type: string
+              coordinatorRef:
+                description: |-
+                  CoordinatorRef names the Coordinator this conversation is itself the
+                  ROOT of — set only for a conversation the `invoke` verb (or an
+                  addressed/claimed signal) originated FROM a Coordinator, exactly as
+                  PipelineRef is set for one originated from a Pipeline. The two refs
+                  are mutually exclusive: a conversation has exactly one originating
+                  wiring object.
+
+                  PROVENANCE, never wiring — nothing resolves the Coordinator's
+                  agents[], sources or channels through this ref at dispatch time; those
+                  were already snapshotted at creation (ChannelRefs carries the
+                  Coordinator's own channels, bound unconditionally — see ChannelRefs'
+                  own comment — and status.budget carries the limits). It exists so
+                  `invoke` knows which Coordinator's `agents[]` this conversation may
+                  invoke from, and so a nested cycle guard can name the Coordinator
+                  repeated.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              escalationChannelRefs:
+                description: |-
+                  EscalationChannelRefs is the SNAPSHOT of the originating Coordinator's
+                  own `channelRefs`, taken at creation — set only alongside CoordinatorRef,
+                  and only for an UNCAUSED root (a member never binds it).
+
+                  UNCONDITIONALLY BOUND INTO ChannelRefs AT CREATION TOO
+                  (coordinator-unconditional-channels): any open coordinator root must be
+                  reachable by a human from the moment it exists, whether or not its agent
+                  ever calls `escalate` — exactly as a Pipeline's own `channelRefs` already
+                  are. `escalate` no longer binds anything; it posts into a thread already
+                  open. This field survives as its own PROVENANCE — the Coordinator's own
+                  declared set, as opposed to ChannelRefs, which for a chat-addressed root
+                  may additionally carry the one channel it was addressed from. Editing
+                  the Coordinator's `channelRefs` after creation changes nothing here,
+                  exactly as editing its `limits` cannot reach the budget already
+                  snapshotted into status.
+                items:
+                  description: ObjectRef references another object by name (same namespace).
+                  properties:
+                    name:
+                      description: Name of the referenced object.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               inputs:
                 items:
                   description: |-
@@ -130,18 +230,28 @@ spec:
                         provenance existed — and an absent origin means NOT POSTED to bound
                         channels, so upgrading cannot fill open threads with history.
                       properties:
+                        entry:
+                          description: |-
+                            Entry is the parent Coordinator's `agents[]` entry name the edge was
+                            invoked through. Set only for OriginMember, on both directions of the
+                            edge: the task `invoke` handed down, and the result routed back up.
+                          type: string
                         kind:
                           description: |-
-                            OriginKind says HOW an input reached the manager. Two values, and there are
-                            only two doors: a signal through a claimed SignalSource, or a channel the user
-                            is already looking at. (`POST /task` was a third once; it is gone.)
+                            OriginKind says HOW an input reached the manager. There are three doors: a
+                            signal through a claimed SignalSource, a channel the user is already looking
+                            at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
+                            was a fourth once; it is gone.)
                           enum:
                           - signal
                           - channel
+                          - member
                           type: string
                         name:
-                          description: Name is the SignalSource or Channel the input
-                            came from.
+                          description: |-
+                            Name is the SignalSource or Channel the input came from, or — for
+                            OriginMember — the conversation on the other side of the `causedBy`
+                            edge this input crossed.
                           type: string
                         sender:
                           description: |-
@@ -268,7 +378,7 @@ spec:
 
                   It exists because a source is SHAREABLE: two Pipelines listing one source
                   both open a conversation per signal, and those conversations carry the
-                  same signature. Without the ref, the second Pipeline's next signal would
+                  same conversationId. Without the ref, the second Pipeline's next signal would
                   be absorbed by the first Pipeline's conversation and run under the wrong
                   profile with the wrong tools. It also replaces attribution-by-inference,
                   which went blank exactly when two Pipelines wired identically.
@@ -336,9 +446,9 @@ spec:
                   for display, and nothing is ever resolved through it.
 
                   It is on the CONVERSATION because a conversation has exactly one
-                  originating signal — reuse is scoped to one signature and one pipeline,
-                  so every signal that lands here came from the same source with the same
-                  grouping labels.
+                  originating signal — reuse is scoped to one conversationId and one
+                  pipeline, so every signal that lands here came from the same source
+                  carrying the same correlation id.
 
                   IT USED TO LIVE ONLY ON THINGS BUILT TO BE PRUNED. The source was on
                   `spec.inputs[].origin.name`, which `pruneProcessed` empties, and the
@@ -356,13 +466,28 @@ spec:
                     additionalProperties:
                       type: string
                     description: |-
-                      Labels are the signal's grouping labels, as the adapter sent them.
+                      Labels are the signal's own context, as the adapter sent them — opaque
+                      attribution only, rendered on signal cards. They feed no routing
+                      decision: the manager routes purely by ConversationID/InitiationID
+                      equality, never by a label.
 
                       BOUNDED at MaxSignalLabels. A Conversation is long-lived where the
                       ConversationInput that used to hold these was not, and an adapter's label
                       set is its own business — an unbounded map on a durable object is an etcd
                       cost nobody chose.
                     type: object
+                  severity:
+                    description: |-
+                      Severity is the originating signal's own severity rating, written once
+                      at creation from the signal that opened the conversation and never
+                      rewritten by a later recurrence. Omitted wherever that signal carried
+                      none.
+                    enum:
+                    - critical
+                    - error
+                    - warning
+                    - info
+                    type: string
                   sourceRef:
                     description: SourceRef is the SignalSource this conversation came
                       from.
@@ -375,12 +500,12 @@ spec:
                     - name
                     type: object
                 type: object
-              signature:
-                description: |-
-                  Signature groups same/similar problems into one conversation
-                  (e.g. alertgroup/alertname/namespace, job:<name>).
-                type: string
               title:
+                description: |-
+                  Title is bounded by MaxConversationTitle — see that constant's own
+                  comment for why a cap belongs HERE despite the message-body rule
+                  against transport-shaped limits.
+                maxLength: 500
                 type: string
               toolsets:
                 description: |-
@@ -435,6 +560,72 @@ spec:
           status:
             description: ConversationStatus is the observed state.
             properties:
+              brief:
+                description: |-
+                  Brief is what this conversation is ABOUT — one or two sentences
+                  somebody could recognise it by, reported by the runtime in
+                  `/work/done` beside its result. LATEST-WINS, the same rule as
+                  RuntimeContextID: a report omitting it leaves the stored one
+                  untouched, and a runtime that never sends it leaves Title as the only
+                  description.
+
+                  It reports what the conversation CONCERNS, never where it stands —
+                  status already carries that, and Brief is never derived by re-reading
+                  status.runs[].result: that reach is exactly what a projection built on
+                  this field (a Coordinator's listing, the channel-reader token) exists
+                  to withhold.
+                maxLength: 512
+                type: string
+              budget:
+                description: |-
+                  Budget is set only on a conversation that is itself a Coordinator's
+                  root (spec.coordinatorRef non-nil) — the snapshot of that
+                  Coordinator's limits, plus the running counts against them. Absent
+                  on any other conversation: there is nothing to enforce.
+                properties:
+                  agentsInvoked:
+                    description: |-
+                      AgentsInvoked counts agents invoked over this conversation's lifetime,
+                      incremented by the manager under optimistic concurrency as each
+                      `invoke` succeeds.
+                    format: int32
+                    type: integer
+                  deadline:
+                    description: |-
+                      Deadline is the ABSOLUTE instant after which this conversation is
+                      closed `budget-exceeded` — the Coordinator's relative `limits.deadline`
+                      resolved against this conversation's own creation time, once, at
+                      snapshot: re-resolving against a later clock would let the same
+                      duration mean a different moment depending on when it was read.
+                    format: date-time
+                    type: string
+                  maxAgents:
+                    description: |-
+                      MaxAgents ceilings AgentsInvoked over this conversation's lifetime.
+                      Zero means unset, not zero — enforcement supplies its own default.
+                    format: int32
+                    type: integer
+                  maxTurns:
+                    description: MaxTurns ceilings Turns.
+                    format: int32
+                    type: integer
+                  turns:
+                    description: |-
+                      Turns counts completed runs on THIS conversation's own status,
+                      incremented when its OWN run is recorded — not when a member's result
+                      arrives as an input — so several members finishing at once is one
+                      turn.
+                    format: int32
+                    type: integer
+                type: object
+              closeReason:
+                description: |-
+                  CloseReason is why the MCP `close` verb (or an internal
+                  `budget-exceeded` close) ended this conversation. Required by that
+                  verb; absent when `/close` ended it from a surface, or when nothing
+                  has closed it — a reader must not infer a reason from silence.
+                maxLength: 256
+                type: string
               closedAt:
                 description: |-
                   ClosedAt stamps the transition into phase Closed, and is the ORIGIN of the
@@ -562,6 +753,27 @@ spec:
                 - at
                 - quiesced
                 type: object
+              escalatedAt:
+                description: |-
+                  EscalatedAt stamps the moment the `escalate` verb was called on this
+                  conversation — an UNCAUSED root only; a caused member escalates by
+                  closing instead (see CloseReason) and never sets this.
+
+                  Its threads were already open at creation
+                  (coordinator-unconditional-channels), so this no longer gates DeliverInputs
+                  at all — it is the record of the agent's decision, not a bind moment.
+                format: date-time
+                type: string
+              escalationMessage:
+                description: |-
+                  EscalationMessage is the digest the escalating agent supplied, snapshotted
+                  at the same moment as EscalatedAt so the reconciler can post it into
+                  each already-bound channel's thread once that thread exists — the
+                  ensure-topic enqueue and the topic actually being created by the adapter
+                  are two separate moments, so the message has to sit somewhere between
+                  them.
+                maxLength: 2000
+                type: string
               inflight:
                 description: InflightRun tracks the unit currently dispatched to the
                   runtime pod.
@@ -680,6 +892,22 @@ spec:
                             description: ID is the input's id, the same one runs[].inputIds
                               names.
                             type: string
+                          origin:
+                            description: |-
+                              Origin is this input's OriginKind, carried into the durable record so a
+                              reader rehydrating a thread from `status.runs[]` alone can tell a
+                              coordination-internal input (OriginMember — a task `invoke` handed down,
+                              or a member's result routed back up) from an ordinary one, WITHOUT
+                              re-deriving it from Surface: both an OriginMember input and a genuine
+                              surfaceless signal (an alert, a job tick) record Surface as "", so Surface
+                              alone cannot tell them apart. Absent on an input recorded before this
+                              field existed, which reads as neither kind and renders exactly as it
+                              always has.
+                            enum:
+                            - signal
+                            - channel
+                            - member
+                            type: string
                           payloadRef:
                             description: |-
                               PayloadRef names the ConversationInput the full text was read from, when
@@ -732,6 +960,19 @@ spec:
                       type: string
                     result:
                       type: string
+                    routedToParent:
+                      description: |-
+                        RoutedToParent marks a run on a conversation carrying `spec.causedBy`
+                        whose result has already been appended as an input on its PARENT
+                        (coordination-loop). The same derivability shape as DeliveryTracked: the
+                        fast path in `/work/done` sets it once the append succeeds, and the
+                        reconciler backstop re-derives a missing append from `causedBy ∧
+                        !RoutedToParent` rather than from scanning the parent's own queue, which
+                        pruning empties.
+
+                        Absent on a conversation with no `causedBy` — there is no parent to
+                        route to, so the zero value already means "nothing owed".
+                      type: boolean
                     runId:
                       type: string
                     startedAt:
@@ -789,6 +1030,35 @@ spec:
                     channel:
                       description: Channel name (same namespace).
                       type: string
+                    claim:
+                      description: |-
+                        Claim records which manager replica currently owns dispatching this
+                        thread's outstanding ensure-topic op to a polling adapter, and when.
+                        Written and cleared ONLY by the current leader-election Lease holder
+                        (durable-chat-ops-broker) — never by a non-leader, however current its
+                        own cached view of this object looks.
+
+                        Absent: no claim outstanding and no replica currently owns dispatching
+                        it.
+                      properties:
+                        claimedAt:
+                          description: |-
+                            ClaimedAt is when the claim was written. A claim older than the
+                            configured staleness bound, on a thread still carrying no threadId, is
+                            treated as abandoned and cleared by the current leader.
+                          format: date-time
+                          type: string
+                        holder:
+                          description: |-
+                            Holder identifies the replica that wrote this claim — the same identity
+                            the leader-election Lease records. Compared against the CURRENT Lease
+                            holder on every reconcile: a mismatch means the writing replica is no
+                            longer leader, and the claim is cleared at once rather than waited out.
+                          type: string
+                      required:
+                      - claimedAt
+                      - holder
+                      type: object
                     readAt:
                       description: |-
                         ReadAt is how far this thread has been SEEN — reported by the adapter that
@@ -799,7 +1069,16 @@ spec:
                         Per THREAD, therefore per CHANNEL: a conversation bound to Telegram and the
                         console has two audiences reading it in two places, and one shared mark
                         would let a Telegram reader clear the console's.
-                      format: date-time
+
+                        AN OPAQUE RFC3339(-NANO) STRING, NEVER metav1.Time. metav1.Time's
+                        MarshalJSON truncates to WHOLE-SECOND precision on the round trip through
+                        the API server — UnmarshalJSON on the way IN preserves sub-second digits,
+                        the loss is in STORAGE — so a watermark stamped from a message's own
+                        full-precision timestamp could round-trip to a value that same message's
+                        timestamp still reads as strictly after, leaving the thread it was meant
+                        to clear unread forever. A plain string stores exactly the bytes it was
+                        given. Parse with ParseWatermark; never compare it as a time.Time
+                        directly.
                       type: string
                     readTracked:
                       description: |-
@@ -836,7 +1115,9 @@ spec:
                               contract as ThreadID and RuntimeContextID.
                             type: string
                           readAt:
-                            format: date-time
+                            description: |-
+                              ReadAt carries the same opaque RFC3339(-Nano) string as
+                              ThreadBinding.ReadAt, for the same reason — see that field's comment.
                             type: string
                         required:
                         - key
@@ -846,6 +1127,18 @@ spec:
                       description: |-
                         ThreadID — an opaque string in the channel type's own id space (e.g. a
                         Telegram forum topic id in decimal, a Slack ts).
+                      type: string
+                    undeliveredReply:
+                      description: |-
+                        UndeliveredReply names the run whose reply failed delivery to this
+                        thread and has not yet succeeded — the run id, not the text, exactly
+                        as this project never stores rendered text on the CR. Cleared the
+                        moment delivery to this thread succeeds.
+
+                        Durable state, not telemetry: it is what lets an operator diagnose an
+                        empty-looking chat thread from the object alone, without reading
+                        manager logs, and it is what reconciliation re-derives the "send" op
+                        from after a restart or a transient transport failure.
                       type: string
                   required:
                   - channel

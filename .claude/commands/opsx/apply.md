@@ -23,21 +23,30 @@ Implement tasks from an OpenSpec change.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
-1.5 **Work in the change's own worktree — THIS REPOSITORY'S RULE**
+1.5 **Work in the change's own working copy — THIS REPOSITORY'S RULE**
 
-   Every openspec change is implemented in its own worktree on its own branch and
-   lands as a pull request. See `.claude/rules/worktree-delivery.md`.
+   Every openspec change is implemented in its own working copy on its own branch
+   and lands as a pull request: on a workstation its own git worktree — or, in a
+   remote session, the session's clone with `change/<name>` checked out in place,
+   never a worktree added beside it. See `.claude/rules/worktree-delivery.md` and
+   `.claude/rules/remote-session.md`.
 
    ```bash
+   # on a workstation:
    git worktree list                                  # is one already open?
    git worktree add -b change/<name> ../agent-ops-worktrees/<name> origin/master
+
+   # in a REMOTE session, the clone IS the working copy — never `worktree add`:
+   git checkout -b change/<name> origin/master        # or check out the existing branch
    ```
 
    - **The worktree lives OUTSIDE the repository.** One inside it doubles the
-     derived component inventory and breaks CI's matrices, silently.
+     derived component inventory and breaks CI's matrices, silently — and that
+     is why a remote session adds none: its clone already is the working copy.
    - **Reuse an existing worktree** rather than creating a second; `git worktree
      list` is the check.
-   - **Everything below runs in that worktree**, including the commits.
+   - **Everything below runs in that working copy**, including the commits —
+     the worktree on a workstation, the clone in a remote session.
    - **Advance the tracking issue** to `opsx:applying` and say so once:
 
      ```bash
@@ -46,8 +55,10 @@ Implement tasks from an OpenSpec change.
      ```
 
      **THE SCRIPT, NEVER RAW `gh issue edit`.** It advances the label, removes
-     the three it is not, comments once — and REGENERATES THE BODY, which is
-     what makes the issue's link to the change resolve. At `/opsx:propose` the
+     the three it is not, comments once — and REGENERATES THE POINTER (the body
+     on an issue it opened, its own comment on a PROMOTED one, whose body is the
+     reporter's), which is what makes the issue's link to the change resolve. At
+     `/opsx:propose` the
      branch does not exist yet, so the link written then points at nothing; this
      transition is what fixes it. Raw `gh` calls do the labels and leave the
      404 in place for the life of the issue.
@@ -111,6 +122,43 @@ Implement tasks from an OpenSpec change.
    - Implementation reveals a design issue → suggest updating artifacts
    - Error or blocker encountered → report and wait for guidance
    - User interrupts
+
+6.5 **Dispatch each named section to its role agent — THIS REPOSITORY'S RULE**
+
+   The tasks file names a role agent in each implementation section's heading
+   (`## <n>. <title> — <agent>`, the rule `openspec/config.yaml` injects).
+   The five roles live in `.claude/agents/`: `api-architect`,
+   `backend-developer`, `deployment-engineer`, `frontend-developer`,
+   `testing-specialist`.
+
+   - **One Agent dispatch per named section**, handing it the section's
+     tasks, the change name and the working copy's path. The agent edits in
+     its lane and never commits.
+   - **This session is the sole integrator.** Read the report, verify the
+     work with the section's own gates, tick the tasks, commit on
+     `change/<name>`.
+   - **A section naming no agent is worked directly**, exactly as step 6
+     says. Tasks files predating the convention have no named sections and
+     stay valid.
+   - **Dispatch per SECTION, never per task.** Each dispatch pays the full
+     inherited-rules context (`.claude/rules/gotchas.md`), so the section is
+     the unit that keeps the cost at a handful of dispatches.
+
+6.6 **Cross-role review before the pull request — THIS REPOSITORY'S RULE**
+
+   After the implementation sections are complete and before the pull
+   request opens, one round:
+
+   - **Each section's diff is reviewed by a role other than the one that
+     wrote it.** Picked by lane: `api-architect` for a diff touching its
+     lane that it did not write, otherwise `testing-specialist` for
+     sections it did not write, otherwise `backend-developer`. The writer
+     is excluded at every step of that chain.
+   - **Every finding is fixed on the branch, or recorded in the change with
+     the reason it stands.** None is silently dropped.
+   - **One round, bounded.** The CI review and its human triage remain the
+     authority — this pass catches what a role's bar sees before CI spends
+     a matrix on it.
 
 7. **On completion or pause, show status**
 

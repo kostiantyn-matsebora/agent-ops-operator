@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -29,7 +30,13 @@ const (
 	verdictGone      verdict = iota // the object no longer exists
 	verdictHealthy                  // it exists and recovered
 	verdictUnhealthy                // it exists and is still broken
-	verdictUnknown                  // we cannot say
+	// verdictUnknown: the kind has no health predicate, so the object cannot
+	// be evaluated — rung 2 decides, on recurrence alone.
+	verdictUnknown
+	// verdictUnreadable: the adapter's OWN view is unreadable — the object
+	// cache has not synced, or its reads are denied — so nothing about the
+	// object can be evaluated at all. Rung 3: emit, failing open.
+	verdictUnreadable
 )
 
 // badWaitingReasons are container waiting states that mean broken rather than
@@ -57,11 +64,17 @@ type pendingEntry struct {
 	// delayed because a lax one happened to arrive first.
 	deadline time.Time
 	rule     compiledRule
-	// recurred records whether any event arrived after the first. It is the
-	// whole basis of verification rung 2, for kinds with no health predicate.
-	recurred bool
+	// lastSeen is when the most recent event arrived. It is the whole basis of
+	// verification rung 2, for kinds with no health predicate: not WHETHER the
+	// event recurred, but whether it was still recurring as the window closed.
+	// A boolean here once cost twelve conversations about Longhorn retries
+	// that had healed two minutes before the catch-all fired.
+	lastSeen time.Time
 	// sample is the most recent signal, used as the emitted signal's base so
-	// labels, fingerprint and title stay exactly as normalize built them.
+	// labels, initiationId and title stay exactly as normalize built them —
+	// stable across members because every member of this entry shares one
+	// (source, namespace, workload), which is what normalize's initiationId
+	// is keyed on.
 	sample Signal
 }
 
@@ -90,6 +103,38 @@ const minEscalationDwell = time.Minute
 // four times faster for a real outage, and still long enough that a slow start
 // resolves first.
 const escalationDivisor = 4
+
+// closingWindowDivisor and minClosingWindow define the CLOSING part of a dwell
+// — the tail of the window an event must still be arriving in for rung 2 to
+// believe it. A third of the window actually waited, floored at thirty
+// seconds: a 3m catch-all believes an event seen in its last minute, a window
+// shortened to 1m believes one seen in its last 30s. Derived rather than
+// configured, for the same reason escalation's quarter is: the only sensible
+// setting is a fraction of `for`, and a knob would document itself as a
+// decision an adopter must make. signals/ha/pending.go carries the same two
+// numbers, and they are changed together.
+const closingWindowDivisor = 3
+const minClosingWindow = 30 * time.Second
+
+// closingWindow is how long before `now` the closing part of the window began.
+func closingWindow(waited time.Duration) time.Duration {
+	w := waited / closingWindowDivisor
+	if w < minClosingWindow {
+		w = minClosingWindow
+	}
+	return w
+}
+
+// stillRecurring is rung 2: was the event still arriving as the window closed?
+// A controller with a live problem keeps re-emitting right up to the deadline;
+// a burst that retried for thirty seconds and healed has recurred, and is the
+// transient this rung exists to drop.
+func (e *pendingEntry) stillRecurring(now time.Time) bool {
+	if e.lastSeen.Equal(e.firstSeen) {
+		return false // never recurred at all
+	}
+	return now.Sub(e.lastSeen) <= closingWindow(now.Sub(e.firstSeen))
+}
 
 type pendingQueue struct {
 	mu      sync.Mutex
@@ -138,8 +183,7 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule) {
 
 	// Refractory: this workload was reported recently, so there is nothing to
 	// add by reporting it again. The manager already collapses repeats
-	// (fingerprint cooldown, signature window reuse) — re-posting only spends
-	// round trips.
+	// (initiationId cooldown) — re-posting only spends round trips.
 	if last, ok := q.emitted[key]; ok {
 		quiet := rule.dwell
 		if quiet < minRefractory {
@@ -159,12 +203,13 @@ func (q *pendingQueue) Add(source string, sig Signal, rule compiledRule) {
 			members:      map[string]objectRef{},
 			reasonCounts: map[string]int{},
 			firstSeen:    now,
+			lastSeen:     now,
 			deadline:     now.Add(rule.dwell),
 			rule:         rule,
 		}
 		q.entries[key] = e
 	} else {
-		e.recurred = true
+		e.lastSeen = now
 		if d := now.Add(rule.dwell); d.Before(e.deadline) {
 			e.deadline = d
 		}
@@ -248,32 +293,49 @@ func (q *pendingQueue) Flush(now time.Time) {
 
 // decide runs the verification ladder over an entry's members.
 //
-//	rung 1  a member has a health predicate  -> is it still unhealthy?
-//	rung 2  no predicate, but the object exists -> did the event RECUR?
-//	rung 3  we cannot even say it exists -> EMIT (fail open)
+//	rung 1  a member has a health predicate   -> is it still unhealthy?
+//	rung 2  no predicate                      -> was it STILL RECURRING at the close?
+//	rung 3  the adapter's own view unreadable -> EMIT (fail open)
+//
+// Rung 2 is not an existence check, either way: whether a predicate-less
+// object still exists — or whether that can be determined — is not evidence
+// of a live problem. Rung 3 is about the ADAPTER, never a kind: its own outage
+// must never read as a clean bill of health.
 //
 // An entry survives if ANY member is still unhealthy: a Deployment with one
 // broken pod out of three is a broken Deployment.
 func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
-	anyUnhealthy, anyUnknown := false, false
+	anyUnhealthy, anyUnknown, anyUnreadable := false, false, false
 	for _, ref := range e.members {
 		switch q.health(ref) {
 		case verdictUnhealthy:
 			anyUnhealthy = true
 		case verdictUnknown:
 			anyUnknown = true
+		case verdictUnreadable:
+			anyUnreadable = true
 		case verdictGone, verdictHealthy:
 			// this member resolved itself — the rollout case
 		}
 	}
 
+	note := ""
 	switch {
 	case anyUnhealthy:
 		// rung 1: confirmed still broken
-	case anyUnknown && e.recurred:
-		// rung 2: no predicate, but it kept happening — still live
-	case anyUnknown && !e.recurred:
-		// rung 2: no predicate and it went quiet — it stopped
+	case anyUnreadable:
+		// rung 3: the object cache could not be consulted at the close
+		note = "the object cache was unreadable at the close — emitted unverified, failing open"
+		log.Printf("dwell: %s emitted unverified — object cache unreadable at the close", e.workload)
+	case anyUnknown && e.stillRecurring(now):
+		// rung 2: no predicate, but it was still happening at the close — live
+	case anyUnknown:
+		// rung 2: no predicate and it went quiet before the close — it stopped.
+		// Logged because this is the one drop a reader cannot reconstruct from
+		// the object: it looks exactly like the live case until the timeline
+		// is on the record.
+		log.Printf("dwell: %s dropped as quiet — last event %s before the window closed (waited %s)",
+			e.workload, now.Sub(e.lastSeen).Round(time.Second), now.Sub(e.firstSeen).Round(time.Second))
 		return Signal{}, false
 	default:
 		// every member is gone or healthy: churn
@@ -281,7 +343,7 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	}
 
 	sig := e.sample
-	sig.Payload = e.evidence(now)
+	sig.Payload = e.evidence(now, note)
 	if len(e.members) > 1 {
 		sig.Title = fmt.Sprintf("%s (%d objects)", sig.Title, len(e.members))
 	}
@@ -291,7 +353,11 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 // evidence renders the accumulated burst. This is the reason dwell is a
 // feature rather than only a filter: what emits carries strictly more than the
 // N separate signals it replaced.
-func (e *pendingEntry) evidence(now time.Time) string {
+//
+// note, when set, states how the entry was verified where that departs from
+// the ordinary ladder — the fail-open rung, which a reader must be able to
+// tell apart from a confirmed problem.
+func (e *pendingEntry) evidence(now time.Time, note string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s — unhealthy for %s\n\n", e.workload, now.Sub(e.firstSeen).Round(time.Second))
 
@@ -317,6 +383,10 @@ func (e *pendingEntry) evidence(now time.Time) string {
 	fmt.Fprintf(&b, "\n  objects (%d): %s\n", len(names), strings.Join(names, ", "))
 	fmt.Fprintf(&b, "  first seen %s, still true at %s\n",
 		e.firstSeen.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  last seen %s before the window closed\n", now.Sub(e.lastSeen).Round(time.Second))
+	if note != "" {
+		fmt.Fprintf(&b, "  verification: %s\n", note)
+	}
 	if len(e.sample.Payload) > 0 {
 		fmt.Fprintf(&b, "\nmost recent event:\n%s\n", e.sample.Payload)
 	}
@@ -326,24 +396,31 @@ func (e *pendingEntry) evidence(now time.Time) string {
 // health is the adapter's verification ladder over the object cache.
 //
 // Only Pod carries a health predicate. Node, Job, PVC and every other kind fall
-// to rung 2 (recurrence), deliberately: giving them predicates would mean
-// watching nodes, jobs and PVCs, and the reasons that concern them
-// (NodeNotReady, disk pressure, BackoffLimitExceeded) ship with `for: 0` and so
-// are never verified at all. Paying three more RBAC grants for a path the
-// defaults never take is not a trade worth making.
+// to rung 2 (recurrence), deliberately, and BEFORE any cache read: whether such
+// an object is present, absent or undeterminable must not change its verdict.
+// Giving Job and PVC predicates would mean watching them — more external RBAC
+// grants — and Node is cached for drain awareness only, its entry keeping no
+// status to judge. The reasons that concern those kinds (NodeNotReady, disk
+// pressure, BackoffLimitExceeded) ship with `for: 0` and so are never verified
+// at all.
+//
+// For a Pod the adapter's own view comes first: no cache, a pods/replicasets
+// grant found missing, or no landed pod list covering the pod's namespace all
+// answer unreadable (rung 3) — a pod absent from a cache that could not have
+// listed it is not gone.
 func (a *adapter) health(ref objectRef) verdict {
-	if a.cache == nil {
+	if ref.kind != "Pod" {
 		return verdictUnknown
+	}
+	if a.cache == nil || a.accessErr.Load() != nil {
+		return verdictUnreadable
 	}
 	oi, known := a.cache.Get(ref.ns, ref.kind, ref.name)
 	if !known {
-		return verdictUnknown
+		return verdictUnreadable
 	}
 	if oi == nil {
 		return verdictGone
-	}
-	if ref.kind != "Pod" {
-		return verdictUnknown
 	}
 	switch oi.Phase {
 	case "Failed":

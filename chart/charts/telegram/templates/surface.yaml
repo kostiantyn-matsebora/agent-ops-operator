@@ -1,6 +1,11 @@
 {{- /*
-The chat surface: the bot Secret (when this bundle owns it), the Channel, the
-chat SignalSource, and the bot Secret.
+The chat surface: the bot Secret (when this bundle owns it), the Channel, and
+the chat SignalSource.
+
+The bot Secret backs the ROUTER alone now (chat-ops-broker-telegram-gateway):
+channel-telegram's credentialsSecretRef points at the gateway binding Secret
+instead (call-auth.yaml), so the Channel below carries no Telegram credential
+at all.
 
 Opt-in via surface.enabled, which makes chatId and a credential REQUIRED — the
 helper fails the render naming whatever is missing, rather than installing a
@@ -18,8 +23,8 @@ notes print the Pipeline to apply.
 {{- $sourceName := include "telegram.sourceName" . }}
 {{- $secretName := include "telegram.secretName" . }}
 {{- if include "telegram.createSecret" . }}
-# Created because surface.credentials.botToken was supplied. Both the Channel
-# and the router Deployment reference it by NAME only — nothing in the operator reads it.
+# Created because surface.credentials.botToken was supplied. The router
+# Deployment references it by NAME only — nothing in the operator reads it.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -41,14 +46,16 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   # names the ChannelAdapter serving this surface; that adapter's
   # implementation is what defines and validates `config` below
   adapter: {{ .Values.channelAdapter.name }}
   # projected into the adapter pod as env by the reconciler, kubelet-resolved —
-  # nothing reads the Secret through the API
+  # nothing reads the Secret through the API.
+  # The gateway binding Secret, not the bot token.
   credentialsSecretRef:
-    name: {{ $secretName }}
+    name: {{ include "telegram.gatewaySecretName" . }}
   # opaque to the operator; this shape is what channel-telegram parses
   config:
     chatId: {{ $s.chatId | quote }}
@@ -72,6 +79,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: agentops-telegram
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | quote }}
 spec:
   adapter: {{ .Values.signalAdapter.name }}
   # No credentialsSecretRef: signal-telegram never contacts Telegram.
@@ -84,12 +92,7 @@ spec:
     approvers:
 {{ toYaml . | indent 6 }}
     {{- end }}
-  grouping:
-    # Chat defaults cooldown OFF: a person repeating a request means it twice,
-    # and fingerprint dedup would swallow the second ask.
-    cooldownHours: {{ $s.source.cooldownHours }}
-    {{- with $s.source.signatureLabels }}
-    signatureLabels:
-{{ toYaml . | indent 6 }}
-    {{- end }}
+  # Chat defaults cooldown OFF: a person repeating a request means it twice,
+  # and initiationId dedup would swallow the second ask.
+  cooldownHours: {{ $s.source.cooldownHours }}
 {{- end }}

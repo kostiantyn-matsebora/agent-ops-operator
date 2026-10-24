@@ -99,6 +99,48 @@ describe('startThemeSync', () => {
   })
 })
 
+// Item 27: a `<Label color="purple">` (the root/coordinator chip,
+// ConversationRow's `RowBadges`) read near-black text on the medium-purple
+// `--ao-accent` background in light mode. PatternFly pairs each nonstatus
+// background with its own matched foreground token, and overriding only the
+// background orphaned that pairing — this asserts the fix stays wired rather
+// than re-drifting, since jsdom does not compute real cascaded contrast from
+// an external stylesheet the way a screenshot would.
+describe('Label contrast tokens (item 27)', () => {
+  // Vite reads the source at build time, so this needs no Node `fs` —
+  // the same `?raw` idiom `Text.test.tsx` uses to scan every `.ts`/`.tsx`
+  // file, here pointed at the one stylesheet.
+  const css = Object.values(
+    import.meta.glob('./theme.css', { eager: true, query: '?raw', import: 'default' }),
+  )[0] as string
+  const lightBlock = css.slice(css.indexOf(':root,\n.pf-v6-theme-light {'), css.indexOf('.pf-v6-theme-dark {'))
+  const darkBlock = css.slice(css.indexOf('.pf-v6-theme-dark {'), css.indexOf('/*\n * Map PatternFly'))
+
+  it('pairs the light theme\'s saturated brand/accent backgrounds with light text', () => {
+    expect(lightBlock).toContain('--ao-on-brand: var(--ao-surface);')
+    expect(lightBlock).toContain('--ao-on-accent: var(--ao-surface);')
+  })
+
+  it('pairs the dark theme\'s pale, inverted brand/accent backgrounds with dark text', () => {
+    expect(darkBlock).toContain('--ao-on-brand: var(--ao-canvas);')
+    expect(darkBlock).toContain('--ao-on-accent: var(--ao-canvas);')
+  })
+
+  it('wires PatternFly\'s on-blue/on-purple text AND icon tokens to the matched pairing, not left on its own stock default', () => {
+    for (const nonstatus of ['blue', 'purple']) {
+      const own = nonstatus === 'blue' ? '--ao-on-brand' : '--ao-on-accent'
+      for (const state of ['default', 'hover', 'clicked']) {
+        expect(css).toContain(`--pf-t--global--text--color--nonstatus--on-${nonstatus}--${state}: var(${own});`)
+        expect(css).toContain(`--pf-t--global--icon--color--nonstatus--on-${nonstatus}--${state}: var(${own});`)
+      }
+    }
+  })
+
+  it('leaves grey Labels untouched — PatternFly\'s own stock gray pairing is never overridden', () => {
+    expect(css).not.toMatch(/nonstatus--gray/)
+  })
+})
+
 describe('ThemeSwitcher', () => {
   it('offers three states, because "follow the system" is a real choice', () => {
     render(<ThemeSwitcher />)

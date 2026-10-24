@@ -22,8 +22,8 @@ import (
 // needs: list and watch on core v1 Events.
 
 const (
-	saDir       = "/var/run/secrets/kubernetes.io/serviceaccount"
-	tokenMaxAge = 5 * time.Minute
+	defaultSADir = "/var/run/secrets/kubernetes.io/serviceaccount"
+	tokenMaxAge  = 5 * time.Minute
 )
 
 // Kube is a minimal in-cluster API client.
@@ -41,6 +41,17 @@ type Kube struct {
 	tokenLoaded time.Time
 }
 
+// saDir is where the kubelet mounts the ServiceAccount — the default path in
+// every real pod. KUBERNETES_SERVICEACCOUNT_DIR overrides it so the built
+// binary can be driven black-box against a fake API server by the contract
+// conformance suite; nothing in a chart sets it.
+func saDir() string {
+	if d := os.Getenv("KUBERNETES_SERVICEACCOUNT_DIR"); d != "" {
+		return d
+	}
+	return defaultSADir
+}
+
 // NewInClusterKube builds a client from the pod's ServiceAccount mount and the
 // API server address the kubelet injects.
 func NewInClusterKube() (*Kube, error) {
@@ -48,17 +59,17 @@ func NewInClusterKube() (*Kube, error) {
 	if host == "" || port == "" {
 		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST/PORT unset")
 	}
-	caPEM, err := os.ReadFile(saDir + "/ca.crt")
+	caPEM, err := os.ReadFile(saDir() + "/ca.crt")
 	if err != nil {
 		return nil, fmt.Errorf("reading API server CA: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("API server CA at %s/ca.crt is not valid PEM", saDir)
+		return nil, fmt.Errorf("API server CA at %s/ca.crt is not valid PEM", saDir())
 	}
 	k := &Kube{
 		BaseURL:   "https://" + net.JoinHostPort(host, port),
-		TokenPath: saDir + "/token",
+		TokenPath: saDir() + "/token",
 		HTTP: &http.Client{
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
 		},

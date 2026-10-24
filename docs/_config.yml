@@ -40,6 +40,13 @@ exclude:
 
 # Every page gets the on-this-page column. It is a default rather than an opt-in
 # because a forgotten flag is invisible — the page simply lacks the column.
+#
+# THE LANDING PAGE IS THE ONE EXCEPTION, and it is what puts that page on the
+# wider column. A rail is for navigating a reference page you are reading out of
+# order; a landing page's sections are an argument read top to bottom, and its
+# "Where to start" IS its navigation. Starlight sizes the text column from which
+# rails are present — 45rem beside a rail, 58rem without one — so declining the
+# rail here is the same decision as widening the middle.
 defaults:
   - scope:
       path: ""
@@ -49,3 +56,4 @@ defaults:
       path: index.md
     values:
       layout: home
+      toc: false

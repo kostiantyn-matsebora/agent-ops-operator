@@ -6,6 +6,9 @@ is moving between components right now.
 It is **also a channel**, so you can reply to an agent from the screen you are
 watching it on, and **also a signal source**, so you can start one.
 
+As a channel, it conforms to the [channel adapter specification](contracts/channel-adapter.md),
+version 1.3.0.
+
 It ships as its own pod, **enabled by default**, and is disabled with one value.
 
 ```yaml
@@ -33,7 +36,7 @@ It fans in five sources the browser never touches directly:
 | Source | From | Why the console owns it |
 |---|---|---|
 | CR state, every `agentops.dev` kind | Kubernetes list/watch | RBAC belongs to a ServiceAccount, not a browser token |
-| Install facts — Deployments, pods, images, digests, restarts | Kubernetes list/watch | needs a read grant the browser cannot hold |
+| Install facts — Deployments, CronJobs, pods, images, digests, restarts, the node a pod runs on | Kubernetes list/watch | needs a read grant the browser cannot hold |
 | Per-hop activity | manager `GET /activity/stream` | one upstream connection multiplexed to N browsers |
 | Runtime state — op queues, slots, cooldowns, leader | manager `GET /status` | in-memory only, and exists nowhere else |
 | Resolved capabilities | manager `GET /pipelines/{name}/resolved` | authoritative — recomputing it invites disagreement |
@@ -70,9 +73,11 @@ the browser recomputes nothing.
    passed, and no event announces that.
 
 **Sending a message is not one of them.** The manager delivers the message back
-to this channel, so the bubble arrives on the stream like any other. The console
-used to answer its own send by re-reading the whole conversation, which is the
-heaviest read on the page and asked for what was already on its way.
+to this channel, so the bubble arrives on the stream like any other.
+
+The console used to answer its own send by re-reading the whole conversation.
+That is the heaviest read on the page, and it asked for what was already on its
+way.
 
 **There is no fifth reason.** A timed refresh that exists to observe change does
 not survive the test that scans for it.
@@ -98,10 +103,25 @@ per page, not a convention.
 | Eviction of unused data | 5 minutes | a conversation glanced at an hour ago should not still cost memory |
 | Freshness on remount | 1 minute | returning to a view loads fresh rather than rendering what was last applied |
 
-**Nothing is persisted.** No `localStorage`, no IndexedDB, no service worker —
-closing the tab leaves nothing behind. Correctness comes from the resync rule
-rather than from cache lifetime: applied state is replaced wholesale whenever
-the client may have missed an event.
+**Nothing CORRECTNESS-BEARING is persisted.** No conversation state survives a
+closed tab — applied state is replaced wholesale whenever the client may have
+missed an event, which is what the resync rule is for.
+
+Three exceptions, each a per-browser preference and neither a fact about any
+conversation:
+
+- The navigation's fold state (`shell.ts`).
+- The Conversations view's pane widths, inbox collapse, "show closed" toggle
+  and the tree's default fold, under `agentops.console.layout`. A root with
+  members starts folded for a first-time viewer, and from there follows
+  whatever "Collapse all" / "Expand all" was last clicked — applied to every
+  root as it is first seen, present at mount or arriving later, so a reload
+  and a live arrival land on the same preference. Reads and writes are
+  guarded in `try`/`catch`, so a private window or a cleared store falls back
+  to the view's defaults rather than breaking it.
+- The `/close` confirm dialog's "don't ask again" opt-out, under
+  `agentops.console.skipCloseConfirm`. Guarded the same way, so a private
+  window or a cleared store simply asks again.
 
 ## Pages
 
@@ -166,87 +186,313 @@ write path to the Kubernetes API anywhere in the module.
 
 ### Topology
 
-The wiring graph with live traffic.
+The install as a network, with live traffic. **Three views of one activity
+feed**, each a layer of the architecture with its own node identity.
 
-- **Nodes: all nine kinds** — SignalSource, SignalAdapter, Pipeline, AgentProfile,
-  AgentRuntime, Channel, ChannelAdapter, MCPToolset, MCPConfig. Not just the
-  spine: "what can this agent actually reach" is a question about exactly those
-  last two.
-- **Edges:** `feeds`, `answers`, `posts`, `served-by`, `uses`.
-- **Health comes from reconciler conditions only** (`Ready`, `Served`, `Wired`).
-  The console asserts no health of its own, so the graph cannot disagree with
-  `kubectl`.
-- **Traffic animates from recorded hops**, not from status transitions.
-  - Edge dash speed scales with event rate.
-  - Error events mark the edge.
-  - An edge the manager enqueued but no adapter confirmed renders as **sent,
-    unconfirmed** rather than as success. Adapter reporting is optional, and an
-    adapter that reports nothing must not look like one that delivered.
-- An edge with no events is **visibly idle**, which is a different statement from
-  absent.
-- **Every graph fits its viewing area and centres in it** when first displayed —
-  including one rendered inside a tab that was not the open one. It re-fits when
-  the area resizes, and stops once you pan or zoom, so an automatic fit never
-  overrules a view you chose.
-- Unclaimed sources render **detached** with their `Wired=False` reason. Dangling
-  refs render as broken edges to placeholder nodes.
+| View | Nodes | The spine, which cannot be hidden |
+|---|---|---|
+| **Model** | the declared objects: SignalSources, SignalAdapters, Pipelines, Coordinators, AgentProfiles, AgentCapabilities, AgentRuntimes, MCPToolsets, MCPConfigs, Channels, ChannelAdapters, Conversations | pipelines |
+| **Components** | one node per component the repository builds — each adapter, the gateway, the manager, each runtime image, context-sync, egress-proxy, housekeeping — plus the systems outside: models, MCP servers, repositories, the externals an adapter declares, the Kubernetes API | the manager |
+| **Infrastructure** | every pod, plus the models, MCP servers, repositories and externals outside the cluster. Nothing from the model is a node | the manager's pod |
 
-#### Scoped view
+**A hop is mapped onto every view.** The hop feed, the content panel and both
+replays are identical on all three. One `run.dispatched` moves:
 
-Selecting an element narrows the graph to that element and everything connected
-to it, and names what it is scoped to. Past a handful of pipelines the whole
-picture is the wrong picture, and tracing one channel's edges by eye is what
-this replaces.
+| View | Along |
+|---|---|
+| Model | the pipeline's runtime edge |
+| Components | manager → context-sync → runtime image |
+| Infrastructure | the manager's pod → the conversation's pod |
 
-- **The scope is the ROUTE THROUGH the element** — everything upstream of it and
-  everything downstream. Both directions, so a channel scopes to every pipeline
-  that posts to it, not only to its adapter.
-- **A route never turns around.** This system shares objects on purpose: one
-  AgentRuntime per install, one Channel receiving from several pipelines. Walking
-  the wiring as if it were undirected turns each of those into a shortcut — on a
-  30-node install that put the Home Assistant toolsets 3 hops from a Kubernetes
-  pipeline, and made every depth show almost the whole graph.
-- **Routes run with the FLOW**, which is not always how an edge is drawn. A
-  signal adapter feeds its source, a channel adapter is fed by its channel, and
-  `served-by` is drawn from the served CR to the adapter in both cases.
-- **Depth defaults to `all`**, and the control offers only the levels a route
-  actually has. A Pipeline is the centre of its own route — its sources, profile,
-  toolsets, MCP configs and channels are all one hop — so it gets one ring and
-  `All`, while a signal adapter at the head of a long route gets more. An
-  element with no route gets no control.
-- **Scoping a heavily shared element returns most of its route.** A source three
-  pipelines claim reaches all three, and that is the true answer for it.
-- **Reachability is computed over what is VISIBLE.** A class hidden by the
-  Display panel is not a stepping stone between two elements you cannot see, so
-  hiding a class can split a component and shrink a scope.
-- **Reset** returns the whole graph, and so does selecting the focused element
+- **Model edges** are `feeds`, `answers`, `runs-on`, `posts`, `served-by`,
+  `uses` and `opened`.
+  - **The runtime edge runs from the Pipeline**, never from the profile.
+  - A runtime's image, harness and vendor are facts in its panel, not nodes.
+- **Components folds** model objects into the manager, runtimes into the image
+  that runs them, and pods into the component they run. A runtime image in
+  three pods is one node carrying `×3`.
+- **Infrastructure keeps a pod's pipeline and conversation as attributes** in
+  its panel. A conversation pod is one node until **Expand pod**, or a
+  double-click, opens it into agent, context-sync and egress-proxy.
+  - **Opened, the hops re-route through the sidecars.** The work hop reaches
+    the agent through context-sync, and every model and tool call leaves
+    through egress-proxy.
+  - Collapsing restores the one node.
+
+**A model is known by the calls made to it**, so it is drawn only while its
+calls are inside the window. Nothing declares a model ahead of time.
+
+- **An idle model leaves Components and Infrastructure** until it is called
   again.
-- **The scope is not persisted.** Display panel selections survive reload because
-  they are a standing preference. A scope is a question asked once, and a page
-  that reopened narrowed would present a filtered graph as the whole one.
+- **That is the activity-driven design, not a lost node.**
 
-Out-of-scope elements are reported **separately** from Display panel hidden ones,
-and a failing one is named by class. A scope is a filter, and answers to the same
-rule: it may simplify the picture, never conceal a broken component.
+**Model and tool calls are hops too.** A runtime reports its turns and tool
+calls with its result, and the manager records them as `model.call` and
+`tool.call` (see [contracts](contracts.md#the-activity-contract)).
+
+On Model a call pulses on the route's runtime, or along its MCP config for an
+MCP tool.
+
+- **A runtime that reports no turns draws no model hops**, and the panel's
+  hop list says nothing crossed.
+- **An adapter CR that declares no `externals` draws no sender** beside it.
+  See [concepts](concepts.md#interface-metadata-configschema-credentialkeys-externals).
+
+**Health comes from reconciler conditions only** (`Ready`, `Served`, `Wired`),
+and from pod phase for pods. The console asserts no health of its own, so the
+graph cannot disagree with `kubectl`.
+
+- Unclaimed sources render **detached** with their `Wired=False` reason.
+- Dangling refs render as broken edges to placeholder nodes.
+
+#### Layouts
+
+Three layouts, Kiali's, and **each view remembers its own**.
+
+| Layout | Draws | Default on |
+|---|---|---|
+| **Concentric** | the view's hub at the centre, rings by distance, each node near its inner neighbour | Components |
+| **Cola** | a constraint layout with groups kept together | Model, Infrastructure |
+| **Dagre** | ranks along the flow, top down or left to right, whichever fits larger | — |
+
+**A compaction pass follows Concentric and Cola.** Members settle inside their
+groups, each group packs as one rectangle under a gravity shaped to the canvas,
+then positions separate until no two boxes or marks intersect. Dagre is left
+alone.
+
+- **The canvas takes the picture's aspect**, so the fit is bound by width.
+- **Every graph fits its viewing area and centres in it** when first displayed,
+  including one rendered inside a tab that was not the open one. It re-fits
+  when the area resizes, and stops once you pan or zoom.
+- **A dragged node keeps its place** until the next layout. Positions are not
+  remembered across reloads.
+
+#### Boxes are ownership, never kind
+
+| View | Box by | Owner |
+|---|---|---|
+| Model | **bundle** (default) | the chart bundle that installs the object, from its `helm.sh/chart` label |
+| Model | **route** | the one pipeline that reaches the object |
+| Infrastructure | **cluster node** (default) | the pod's `spec.nodeName`, with an opened pod a box of its own inside it |
+| Components | — | no boxes |
+
+- **Shared substrate stays unboxed.** A runtime two bundles use, or an object
+  two routes reach, sits outside every box.
+- **No rule positions a box.** It sits where its members' edges put it, and an
+  element that belongs to no box is evicted from any it landed in.
+- **An external never sits in a cluster node's box.**
+
+#### Traffic
+
+**Every edge with recorded hops carries a continuous stream** whose density
+follows its rate in the window.
+
+- **Errors appear in the edge's own proportion.** A fifth of its hops failing
+  makes a fifth of its marks error marks, and tones the edge as failing.
+- **Unconfirmed delivery is marked distinctly.** An op the manager enqueued but
+  no adapter confirmed reads **sent, unconfirmed**, never success.
+- **Every recorded hop is also a PULSE**, larger than the stream, in the
+  direction it travelled. A hop with no destination pulses on its node. A pulse
+  is clickable.
+- **An edge with no hops renders idle**, which is a different statement from
+  absent.
+
+The stream is a rendering of the recorded rate, not an event. Nothing animates
+because a status field changed.
 
 #### The Display panel
 
-Per-class show/hide (sources, channels, adapters, profiles, runtimes, toolsets,
-MCP configs, runtime pods, conversations), traffic animation on/off, idle
-elements shown/hidden, edge labels (none / rate / latency), and the time window.
-Selections persist across navigation and reload.
+Per view:
 
-**Hiding is presentation only.** A hidden class still counts toward the graph's
-health summary and the overview's problem rollup, and the panel says when hidden
-classes contain failures.
+- **Its own classes**, listing only what that view can draw. The spine class is
+  listed and fixed. On Infrastructure the pod class is hideable, but the
+  manager's pod stays.
+- **Detail, on Model only.** **Full model** (default) draws every object.
+  **Routes only** folds each pipeline's profile, runtime, toolsets, MCP configs
+  and conversations into one node, leaving sources, channels and adapters
+  around it.
+- **Layout and box**, as above.
 
-A filter that could conceal a broken component without saying so is the one way
-this view could mislead, so the counts are computed before filtering and never
-move because you hid something.
+Shared by every view:
 
-The capability layer (toolsets, MCP configs, runtime pods) starts folded away:
-it is what you bring forward when debugging reach, not what you want between you
-and the wiring on first look.
+- **Traffic animation** on or off.
+- **Idle elements** and **idle edges** shown or hidden. Hidden idle elements
+  are counted.
+- **Edge labels**: none (default), rate, or latency (p50). An edge with no
+  hops shows no label rather than a zero.
+- **The time window**: 1, 5 (default), 10 or 30 minutes.
+
+**Selections persist across navigation and reload, per view.** A selection
+saved by the old single-view graph is dropped rather than misapplied.
+
+**Hiding is presentation only.** A hidden class still counts toward the
+graph's health summary and the overview's problem rollup, and the panel says
+when hidden elements include failures.
+
+A filter that could conceal a broken component without saying so is the one
+way this view could mislead. So the counts are computed before filtering and
+never move because you hid something.
+
+#### Scoping
+
+Three ways to narrow the picture, and **all three count what they put out of
+view** and name the classes of any failing element among it.
+
+| Control | Narrows to |
+|---|---|
+| **Pipelines** selector | the selected routes only. Persisted like the display panel |
+| **Scope to route**, from any element's panel or a double-click | that element's route, with a depth control |
+| **Find** and **Hide** | find highlights, hide removes, over the view's facts |
+
+**A route is the pipeline and everything it reaches**, down and up, walked
+separately and unioned. It never turns around through a shared element.
+
+- **A shared channel is not a shortcut.** Scoping one of two pipelines that
+  post to a channel does not reach the other pipeline or its capabilities.
+- **A channel adapter's second role is refused.** The console adapter also
+  serves the console chat source, and the walk never passes from its served-by
+  edge into that source. Entering one role and leaving through the other
+  joined every pipeline to every other.
+- **A shared runtime image is credited per route.** Its tool calls count along
+  the route's own MCP config, never along the image every route shares.
+- **Connection runs both ways.** A channel scopes to every pipeline that posts
+  to it, not only to its adapter.
+
+**Depth defaults to `All`**, and the control offers only the levels the route
+actually has. Past the chosen depth, the elements still connected are counted.
+A scope on a hub element still reports as a scope rather than as a reset.
+
+**The scope is not persisted.** Display selections survive reload because they
+are a standing preference. A scope is a question asked once, and a page that
+reopened narrowed would present a filtered graph as the whole one.
+
+**Reset scope**, or selecting the focused element again, returns the whole
+picture.
+
+Find and Hide take terms joined by `and`:
+
+| Term | Matches |
+|---|---|
+| `healthy`, `!healthy` | health |
+| `idle`, `!idle` | hops in the window |
+| `detached` | an unclaimed source |
+| `kind=`, `name=`, `name~` | class, exact name, name substring |
+| `bundle=`, `node=`, `pipeline=` | owner, cluster node, route |
+| `rate>`, `rate<` | hops per minute |
+
+An unknown term matches nothing, and the view names it.
+
+#### The panels fold, so the picture can take the screen
+
+**The canvas fits the viewport.** It is sized from where it starts to the
+bottom of the window, less the folded History title under it, so the picture
+is seen whole with no scrolling.
+
+**The column beside it folds to a strip**, from the chevron at its edge, and
+unfolds from the same chevron. Inside it, the Display card and the hop feed
+each fold to their title from the chevron in their header.
+
+**The History card under the graph folds the same way**, and stays on the
+page as its title.
+
+**A selection always has somewhere to show.** With the column folded, clicking
+an element, an edge or a pulse opens its panel beside the canvas. Folding the
+column again drops the selection.
+
+**The navigation folds too**, to its icons, from the button at the foot of the
+sidebar. Every link keeps its name as a tooltip and for a screen reader, and
+the unread count stays on Conversations.
+
+**Folded, the masthead keeps the mark alone**, since its brand column is as
+narrow as the strip.
+
+**Every fold is kept across reloads**, the way the display is.
+
+**Every mark's glyph clears its outline.** Each shape states the rectangles its
+outline stays out of, in `platform/console/ui/src/graph/shapes.tsx`, and a
+test flattens every outline and glyph to hold it.
+
+The cloud shipped once with the globe crossing its bottom line. No fixture
+happened to draw an external system, so no screenshot showed it.
+
+**An unrouted edge bows around the marks between its ends.** A quadratic's bow
+is chosen per edge, and to the side that clears more of them.
+
+**A pipeline wears the icon it declares, wherever it is named.** In the
+graph, `Pipeline.spec.icon` is drawn in the mark in place of the class glyph.
+
+Everywhere else the name is drawn, the icon sits beside it:
+
+- the Configuration list and detail, the crumb and a reference chip
+- a conversation's chips and a queue row
+- the topology's panels, its routes chip and its pipeline selector
+
+One lookup serves them all, so no mention draws a different icon from the next.
+
+| Reference | Drawn as |
+|---|---|
+| the built-in `aops:` set | a path |
+| a URL, or a named set | an image |
+| an emoji | text |
+| anything unknown | nothing: the class glyph stays, as the list stays blank |
+
+#### What crossed: the hop feed and the content panel
+
+**The hop feed lists recent hops**, the same on every view, with the
+conversations active in the window beneath it. An edge's panel lists the hops
+that crossed it in the window, with its rate, errors and p50/max latency.
+
+**A pulse, a feed row or an edge-history row opens the hop**: its kind, path,
+status, latency, and what it carried.
+
+| Hop | What it carried |
+|---|---|
+| a signal | its title and labels |
+| an input | its text |
+| a work unit | its tools and context handle |
+| a run's completion | its exit and result |
+| an op | its message type and body |
+| an adapter report | its delivery report |
+| `model.call` | model, tokens in and out, cache reads, stop reason |
+| `tool.call` | tool, target server, duration, result size |
+
+**Content is joined from its durable home.** The event carries ids and a
+bounded `data` map, never content.
+
+- **The input text, the run's result and the op's message** are read from the
+  conversation's status by conversation, run, op and input id.
+- **What is shown is what the cluster recorded**, never an excerpt the event
+  carried.
+
+#### Replay
+
+**Window replay** replays a past window on any view, in Kiali's shape.
+
+1. Press **Replay** and choose the interval: 1, 5, 10 or 30 minutes.
+2. The window is cut into **ten-second frames**. The slider selects one, and
+   the bar shows its time and index.
+3. **Play** advances at one of three speeds: slow, medium or fast, one frame a
+   second at fast. Pause keeps the frame.
+
+In a frame the graph shows the rates of the minute ending at that frame, and
+that frame's hops pulse. **Live** returns without a reload.
+
+**The replay is bounded by the activity buffer.** A window reaching past what
+the buffer holds says how much of its start is not held, rather than drawing
+those minutes as quiet.
+
+**Conversation replay** steps one conversation's latest run, hop by hop, on
+any view.
+
+- **Opened from** its node, its pod, any of its hops, or the list of
+  conversations active in the window.
+- **Each hop shows its offset** from the first and its latency. So a runtime
+  that took thirty seconds to start shows it on the pod-start hop.
+- **Step, play, or choose a hop.** Play compresses the real gaps, so a long
+  gap reads as long without reading as forever.
+- **Everything off the conversation's route is dimmed**, and the panel shows
+  what the current hop carried.
+- **Back to live** restores the view with the display selections untouched.
 
 #### Time windows
 
@@ -310,55 +556,196 @@ index by cursor replay.
 
 ### Conversations
 
+**One view, not a table plus a separate detail.** Both `/conversations` and
+`/conversations/:name` render the same layout, and opening a row switches the
+thread pane in place — there is no navigation away from the list.
+
+| Column | Shows |
+|---|---|
+| Icon rail | the app's own sidebar, collapsed to icons on this view |
+| Inbox | scopes, in this order: All, Working, Mine, Errored, then every Ready Pipeline and Coordinator, then Closed — each with a count matching what opening it lists |
+| List | the rows in the active scope, as a coordination tree by default |
+| Thread pane | the open conversation |
+
+Two `Splitter`s resize the inbox and list columns: drag, double-click to
+reset, or `←`/`→` in 16px steps with `Enter` as the keyboard reset. Minimum
+widths are 200px (inbox), 280px (list) and 480px (thread pane).
+
+The inbox collapses to an icon strip with badges. These widths and the
+collapse state are the one conversation-adjacent thing the browser keeps —
+see [What the browser keeps](#what-the-browser-keeps).
+
+**Below 900px the view shows one column at a time** — list or thread pane —
+instead of shrinking all four past legibility.
+
+**Keyboard**: `↑`/`↓` moves the selection in the list, `Enter` opens it,
+`⌘`/`Ctrl`-click adds to a multi-selection, `Esc` clears selection mode.
+
 Server-side filtering (phase, pipeline, profile, channel, errored, unread,
-search), sorting by last activity, and pagination with a total match count.
+search) backs every scope, with pagination in pages of 50 rows. An event
+storm makes thousands, and shipping them all so the browser can hide most is
+how a viewer becomes an API-server problem.
 
-An event storm makes thousands, and shipping them all so the browser can hide
-most is how a viewer becomes an API-server problem.
+#### The coordination tree
 
-Run history is dropped from list rows. A result is a whole agent message, and
-each row carries its read state instead.
+A root — a Coordinator's own conversation, or one with no `causedBy` — and
+every conversation it caused, at any depth, render as one group. Depth
+follows `causedBy.parent` from the snapshot the list already holds.
 
-Detail is tabbed:
+A root carries a caret, its member count, its turn and deadline from its own
+`status.budget`. Flattening the list restores the server's own newest-first
+ordering, one conversation per row.
 
-- **Transcript** with a composer. Conversations the console started are joined
-  automatically. For ones another source started, the composer is live when the
-  console channel holds a thread. When it does not, the tab explains why and shows
-  the exact patch. The console never edits a Pipeline — showing the edit is the
-  answer.
+A member reached whose parent the snapshot does not hold renders at the top
+level with a marker, never dropped.
 
-  The transcript is a **cache of the conversation's durable record**, never its
-  only copy. Every read merges the live buffer with `status.runs[]` — the
-  messages each run consumed AND its result, in time order — so a reload or a
-  console restart rebuilds the whole thread, starting at the message that opened
-  it. Only acks and notices are lost, because nothing records them.
+**A member carries no conversation-level actions of its own** — mark
+read/unread, reopen, close, delete — because it holds no channel binding. Its
+row menu offers only *Open in new tab*, *Copy link* and *Open incident*.
 
-  A message typed here is shown at once and **confirmed** by the copy the manager
-  delivers back. The console declares `echoesOwnMessages: false`, so it receives
-  its own users' messages like any other destination, matched to the pending
-  bubble by the input it names — never by comparing text.
-- **Runs** — `status.runs[]` with status, exit code, result and the messages each
-  run consumed, plus the bindings the conversation materialized and its runtime
-  pod.
-- **Graph** — every element this conversation involved, **built from what the
-  Conversation recorded, not from the Pipeline's current spec**. A Conversation
-  snapshots the bindings it materialized, so after a re-wire this graph still
-  shows the capabilities that run actually had, and says the current wiring
-  differs. Reading the live Pipeline would silently rewrite history, and the
-  forensic value of this view is precisely that it does not.
+Opened directly, its thread pane shows its own run history read-only, with a
+link back to the incident.
+
+#### The thread pane
+
+**Transcript** is the default view, with a composer. Conversations the
+console started are joined automatically. For ones another source started,
+the composer is live when the console channel holds a thread.
+
+When it does not, the tab explains why and shows the exact patch — the
+console never edits a Pipeline, showing the edit is the answer.
+
+The transcript is a **cache of the conversation's durable record**, never its
+only copy. Every read merges the live buffer with `status.runs[]` — the
+messages each run consumed AND its result, in time order.
+
+Run events interleave with the messages, folded per run, with a gap marker
+over the activity between them. A reload or a console restart rebuilds the
+whole thread this way, starting at the message that opened it.
+
+Only acks and notices are lost, rendered as a presence row rather than a
+bubble while they last.
+
+**A signal's card draws its severity when the message carries one.** A
+small tinted mark, tied to the theme's existing danger/warning/neutral
+tones (`critical`/`error`/`warning`/`info`).
+
+A card whose message carries none renders exactly as it did before this
+existed. It survives a console restart the same way the card's label
+table already does.
+
+A new-messages divider sits above the first uncounted message. Opening
+scrolls to it, and the view autoscrolls only while already at the bottom,
+with a jump pill showing the count otherwise.
+
+A message typed here is shown at once and **confirmed** by the copy the
+manager delivers back. The console declares `echoesOwnMessages: false`, so
+it receives its own users' messages like any other destination.
+
+It matches the confirmation to the pending bubble by the input it names,
+never by comparing text.
+
+**Quick chips** open a new conversation prefilled with `/<pipeline> ` or
+`/<coordinator> ` (start chips, from the vocabulary), or send a thread or
+choice chip's text directly. Absent when the write gate is off.
+
+The secondary views **replace the transcript in place**, same pane, a toggle
+row above it:
+
+- **Runs** — `status.runs[]` with status, exit code, result and the messages
+  each run consumed, plus the bindings the conversation materialized and its
+  runtime pod. Each run also carries its own `turns`/`toolCalls`, the console
+  API's DERIVED view of that run's `model.call`/`tool.call` activity hops
+  (see [the activity contract](contracts.md#the-activity-contract)) — the
+  manager itself writes neither field to the Conversation.
+- **Graph** — the install's topology, **opened on this conversation's
+  replay**, with every element its run did not touch dimmed. The three views,
+  the hop feed and the content panel are the Topology page's own.
+  - **A re-wire is reported, never hidden.** A Conversation snapshots the
+    bindings it materialized. When they differ from the Pipeline's current
+    wiring, the tab names each difference above the graph, because the graph
+    draws the current wiring.
 - **Sequence** — a waterfall over the same hops, in time order, with per-hop
-  latency. This is where "why did that take 40 seconds" gets answered, and it is
-  the view a graph cannot replace.
+  latency. This is where "why did that take 40 seconds" gets answered, and it
+  is the view a graph cannot replace.
 - **YAML** — the Conversation object.
+
+**On a Coordinator's root**, the transcript is instead an incident timeline:
+invocation lines, result cards linking each member's own transcript, nested
+cards for a member that is itself coordinating, and (once it happens) the
+escalation divider at `status.escalatedAt`.
+
+A root's composer is live from creation, unconditionally. It does not wait for
+the agent to escalate.
 
 ### Unread
 
-Conversations whose console thread has activity newer than its watermark are
-marked in the list, an **Unread only** switch narrows to them, and the count
-rides on the *Conversations* navigation item.
+**The count is messages, not lateness.** A conversation's `unreadCount` is
+the counted messages — `signal`, `agent`, `relay` — newer than the reader's
+watermark. Acks, notices, listings, refusals and run events never count, and
+a phase change is not a message at all.
 
-Opening a conversation reports its console thread read. **Mark read** over a
-selection clears a batch of them.
+Neither does a coordinator's reply to a causedBy member's report alone —
+real content, delivered like any other answer, but internal to the
+coordination loop, never new for a person.
+
+The source is `status.runs[]` — a run's inputs and its result — merged with
+the live buffer for a message not yet recorded. A member conversation has no
+console thread and so no count of its own.
+
+Its result arrives on its root as an input, and is counted there instead.
+
+**All is a total, not an unread count.** It is every conversation a person
+can open, read or not — unchanged from what it always meant.
+
+Every OTHER fixed scope but Closed (Working, Mine, Errored), each Pipeline or
+Coordinator, is an unread count instead.
+
+That is what made the dedicated Unread scope redundant: every category
+already carried its own unread count one level down. It was removed. All
+was not, and is not an unread count either.
+
+An invoked member never counts, on any scope. It binds no console thread and
+no action of its own — the tree under its root is the only way to reach it.
+
+| Scope | Counts |
+|---|---|
+| All (`kind: 'all'`) | every root, read or not, excluding a closed root while "Show closed" is off |
+| Closed (Archive) | every closed root, read or not — the archive holds everything it ever closed |
+| Working, Mine, Errored, each Pipeline or Coordinator | unread roots its own filter admits |
+
+A Coordinator's own root conversations are reached through ITS scope, same as
+any pipeline's. There is no separate "Incidents" scope.
+
+**"Show closed" moves every count except Closed's own.** Switching scopes
+never moves a count that belongs to a different one, computed before that
+filter applies.
+
+Every list but Closed's own hides a closed row while the toggle is off —
+All included — so a badge for one of those lists excludes that row too.
+
+Closed's own list is exempt from that one filter — it IS the closed view —
+so its count ignores the toggle too.
+
+**Unread is the separate axis Closed and All both sit outside of.** A read
+closed conversation still belongs to the archive, the same way a read
+email still belongs in "All Mail".
+
+So Closed's count, like All's, is never gated on unread either. There is
+no "show closed" checkbox on this scope — the whole point of it is to show
+everything, unfiltered.
+
+**The navigation rail's own badge, outside the Inbox, is a plain unread
+count** — `unreadTotal`, every unread root, no further filter, the same
+number the removed Unread scope used to show.
+
+It answers "is there anything to read", a different question from what All
+answers now.
+
+Opening a conversation reports it read, at `max(the newest counted message's
+time, status.lastActivity)` — the second term keeps the report monotone
+across a dispatch that stamped `lastActivity` after the answer. **Mark
+read** over a selection clears a batch of them the same way.
 
 **Read is per PERSON where the console can tell people apart, and per console
 otherwise.** Which install you have depends on one thing — whether a request
@@ -395,9 +782,6 @@ The rest of what it does, and why:
   never unread: the console has no watermark on it and no standing to call it
   new. Same reach boundary as closing, and a batch naming one comes back
   `skipped` with the same fix.
-- **The count is computed before any filter**, over every conversation, so
-  narrowing the view never moves it — a count that shrank because you filtered
-  would let a filter hide a backlog without saying so.
 - **The browser never invents a timestamp.** A read is reported with the
   watermark the server read off the conversation's own state, and nothing is
   sent when it would not advance. The manager clamps and enforces monotonicity
@@ -411,9 +795,21 @@ The rest of what it does, and why:
   read-only console still selects rows and marks them read — one that could show
   a backlog and never clear it would be broken in the way the unread mark exists
   to fix.
-- **The mark only moves forward.** There is no "mark as unread": a watermark
-  that could go backwards is a different mechanism, and reading a conversation
-  again is what makes it read.
+
+**Mark unread** reclaims a conversation. It is a reader-scoped REWIND on the
+same read verb, never a client-side flag: the console sends the newest
+counted message's time minus one nanosecond, so exactly that message counts
+again.
+
+- **Named-reader only.** There is no per-reader entry to rewind under a
+  shared token or with no salt projected, so the row menu offers it only
+  where the console can tell readers apart (above).
+- **It never touches the channel-wide mark.** Rewinding your own watermark
+  cannot un-read a thread for anyone else.
+- **It is the one exception to monotonic.** Every other report only ever
+  advances a watermark — see [the rewind
+  rule](contracts/channel-adapter.md#post-channelread).
+- **Bounded at 50 and attributed exactly like mark read.**
 
 Threads bound before this existed are treated as **read** — see the backfill
 rule in [concepts](concepts.md#read-state-per-thread). Right after the upgrade
@@ -466,10 +862,24 @@ What that costs, and why each cost is the right one:
   logged against the identity that ordered it. A read-only console renders no
   close action, and refuses the request if one is made anyway.
 
+**Closing cascades to every live descendant.** `/close` on a root closes
+every conversation it caused, recursively, in the manager — not a second
+request the console makes. The confirmation names the member count the
+cascade will also reach.
+
+**A member selected directly is skipped, naming its parent.** It holds no
+channel binding, so there is nothing to send `/close` to — selecting its
+root reaches it instead. The row menu agrees: a member's menu offers no
+close action at all.
+
 ### Reopening one
 
 A `Closed` row offers **Reopen**. It goes back to `Idle` with its wiring, its
 recorded runs and its context handle exactly as they were.
+
+**Reopen never cascades, unlike close and delete.** It acts on exactly the
+one named conversation, and a member's row menu never offers it — the same
+reach rule that leaves a member with no close or delete action of its own.
 
 The materialized refs are not re-resolved, so a Pipeline edit made in the
 meantime does not leak into a conversation that already exists.
@@ -505,6 +915,14 @@ disk**.
   server-side, the same explicit selection over rows on screen, the same
   per-item outcomes (`deleted` / `skipped` / `failed`) with reasons, and the
   same write gate, identity and logging.
+
+**Deleting cascades to every already-closed descendant**, the same way
+closing does, and for the same reason: a member holds no channel of its
+own, so the console has no way to reach it directly.
+
+A member selected directly is skipped and names its parent, exactly as for
+closing. Every descendant is already `Closed` by the time its root is, so
+none is ever turned away as not-yet-closed.
 
 **Delete and reopen are manager verbs the console calls**, not Kubernetes
 writes — the console still has no write path to the API.
@@ -551,7 +969,7 @@ binds the console as a channel, so a turnkey install can start a conversation in
 the console with no wiring step.
 
 The names come from `global.agentops.console`, and the render fails if they
-disagree with the console's own (see [the Kubernetes bundle](kubernetes.md)).
+disagree with the console's own (see [the Kubernetes integration](integrations/kubernetes.md)).
 
 Nothing else claims it for you. Wiring names a profile, sources and channels
 from different bundles, so only the installer sees all of it.
@@ -740,6 +1158,15 @@ What this mode requires of the proxy:
   proxy that passes them through lets a caller choose their own identity. This
   is a requirement of every forward-auth deployment, not a peculiarity of this
   one — the console does not reimplement the check weakly.
+- **It must set `X-Forwarded-Proto` from the connection it actually
+  terminated, never relay a client's own copy.** The console reads it to
+  decide the session cookie's `Secure` flag (`Secure: r.TLS != nil ||
+  X-Forwarded-Proto == "https"`) — the same "only route to the Service" trust
+  boundary above, one header over. `ingress-nginx` does this by default,
+  computing the header from `$scheme` on the connection it received rather
+  than passing a client-sent one through. Only `use-forwarded-headers: true`
+  in its ConfigMap changes that, and it exists for a CHAIN of proxies this
+  console does not need. Leave it off.
 - **It should FORWARD one.** Without an identity the console is **read-only**:
   reads are served, writes are refused, and the masthead shows `unknown` with
   the reason. There is no `token` fallback in this mode — no token was proven,
@@ -767,13 +1194,21 @@ Role is the chart's grant.
 
 | Group | Resources | Verbs |
 |---|---|---|
-| `agentops.dev` | all ten kinds | get, list, watch |
+| `agentops.dev` | all twelve kinds, `AgentCapability` and `Coordinator` included | get, list, watch |
 | `apps` | deployments | get, list, watch |
 | (core) | pods | get, list, watch |
+| `batch` | cronjobs | get, list, watch |
 
-The pod/deployment grant is a deliberate widening past `agentops.dev`: image
-digests, restart counts and pod failure reasons exist in no CR, and an operations
-console that cannot see a CrashLoopBackOff is not one.
+The pod, deployment and cronjob grant is a deliberate widening past
+`agentops.dev`. Image digests, restart counts, pod failure reasons and the node
+a pod runs on exist in no CR, and an operations console that cannot see a
+CrashLoopBackOff is not one.
+
+- **The Components and Infrastructure views are drawn from it.** A component is
+  a Deployment, a CronJob, an adapter CR or a runtime image, and a pod's box is
+  its `spec.nodeName`.
+- **The housekeeping CronJob is why `cronjobs` is here.** It is a component,
+  and the topology draws it.
 
 ## Values
 

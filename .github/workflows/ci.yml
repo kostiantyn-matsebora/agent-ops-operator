@@ -8,9 +8,27 @@
 name: ci
 
 on:
+  # A DRAFT RUNS NOTHING. `ready_for_review` is listed because the default
+  # types do not include it, and a pull request marked ready would otherwise
+  # carry no CI until its next push. The gate is on `discover`, below, which
+  # every job needs.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
+  # BY HAND, AGAINST A PULL REQUEST — the way the automatic fixing loop gets
+  # this workflow onto a commit the workflow token pushed. GitHub withholds
+  # `pull_request: synchronize` from such a push, and `workflow_dispatch` is
+  # the documented exception; the check runs it produces attach to the sha of
+  # the ref dispatched, which for a branch of this repository IS the pull
+  # request's head. The jobs that need the pull request's number read it from
+  # this input where the event would have carried it.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: The pull request number this run stands in for
+        required: true
+        type: number
 
 permissions:
   contents: read
@@ -32,15 +50,23 @@ env:
 jobs:
   # WHAT EXISTS, asked once and answered for every matrix below.
   discover:
+    # A DRAFT PULL REQUEST RUNS NOTHING — not one component, not one gate.
+    # Every job below needs this one (the path-independent gates too, for
+    # exactly this reason), so skipping it skips them all, and
+    # `ci-green` stays "expected" until the pull request is marked ready,
+    # which it cannot merge before anyway. A hand run (`workflow_dispatch`)
+    # is a person asking, and runs on a draft.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       modules: ${{ steps.list.outputs.modules }}
       images: ${{ steps.list.outputs.images }}
       operator: ${{ steps.list.outputs.operator }}
-      ui: ${{ steps.list.outputs.ui }}
       chart: ${{ steps.list.outputs.chart }}
       docs: ${{ steps.list.outputs.docs }}
       site: ${{ steps.list.outputs.site }}
+      system: ${{ steps.list.outputs.system }}
+      scripts: ${{ steps.list.outputs.scripts }}
     steps:
       # FULL HISTORY, because the filter below diffs against a base commit.
       # fetch-depth: 1 makes every diff report the whole tree as changed, which
@@ -72,16 +98,17 @@ jobs:
             changed=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" || true)
           fi
 
-          # THE THREE FILES THAT REBUILD EVERYTHING. The shared Dockerfile is
+          # THE FOUR PATHS THAT REBUILD EVERYTHING. The shared Dockerfile is
           # nine components' recipe, `components.sh` decides what exists at all,
-          # and this workflow decides how any of it is tested. A change to one
-          # of them touches no component directory and invalidates all of them.
+          # this workflow decides how any of it is tested, and the scan action
+          # runs against every image. A change to one of them touches no
+          # component directory and invalidates all of them.
           if [ -z "$changed" ] \
-             || echo "$changed" | grep -qE '^\.github/(docker/|components\.sh|workflows/ci\.yml)'; then
+             || echo "$changed" | grep -qE '^\.github/(docker/|components\.sh|workflows/ci\.yml|actions/)'; then
             echo "building everything: base=${BASE_SHA:-none}" >&2
             echo "modules=$ALL_MODULES" >> "$GITHUB_OUTPUT"
             echo "images=$ALL_IMAGES" >> "$GITHUB_OUTPUT"
-            for j in operator ui chart docs site; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
+            for j in operator chart docs site system scripts; do echo "$j=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
 
@@ -107,10 +134,15 @@ jobs:
           m() { grep -qE "$1" /tmp/changed.txt && echo true; }
           {
             echo "operator=$(m '^(platform/manager/|chart/)')"
-            echo "ui=$(m '^platform/console/ui/')"
             echo "chart=$(m '^(chart/|platform/manager/api/)')"
             echo "docs=$(m '^(docs/|chart/|platform/manager/api/|\.github/scripts/docs-generate)')"
             echo "site=$(m '^docs/')"
+            # Anything a running install is built from: every component
+            # group, the chart, the test doubles and the pack itself.
+            echo "system=$(m '^(platform/|runtimes/|signals/|channels/|gateways/|chart/|test/|\.github/workflows/system\.yml)')"
+            # The workflow's own scripts, their suite, and the hooks the suite
+            # exercises. The workflow files are the everything case above.
+            echo "scripts=$(m '^(\.github/scripts/|\.github/tests/|\.github/\.coveragerc|\.claude/hooks/)')"
           } >> "$GITHUB_OUTPUT"
 
           echo "images=$(echo "$ALL_IMAGES" | jq -c --rawfile c /tmp/changed.txt '
@@ -128,7 +160,11 @@ jobs:
       run:
         working-directory: ${{ env.ENVTEST_MODULE }}
     steps:
+      # FULL HISTORY for the analysis step: new-code detection and blame read
+      # it, and a shallow clone makes every line "new" on every pull request.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod
@@ -147,13 +183,34 @@ jobs:
       - run: go vet ./...
       # -count=1 so a cached PASS can never stand in for a run that did not
       # happen; the integration suite must actually execute.
-      - run: go test -count=1 ./...
+      # -coverprofile because THIS is the one run of the envtest suite, and the
+      # analysis step below reads the profile from where it landed.
+      # -coverpkg because a profile otherwise records only the package the
+      # test binary belongs to, so the envtest suite's exercise of the
+      # controller, the HTTP API, the chat core and the pod builder counted for
+      # none of them and the operator reported 27%. The flag names the packages
+      # whose coverage is RECORDED, whichever binary reached them.
+      - run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
       # The suite FAILS without assets rather than skipping (verified: envtest
       # start returns an error and the package reports FAIL), so `go test ./...`
       # above already proves it ran. This only catches provisioning that
       # silently produced an empty path.
       - name: Assert envtest was provisioned
         run: test -n "$KUBEBUILDER_ASSETS" || { echo "envtest assets were never provisioned"; exit 1; }
+      # STATIC ANALYSIS AND COVERAGE, here, where the checkout and the profile
+      # already are. A FORK'S PULL REQUEST SKIPS IT, visibly: SONAR_TOKEN is
+      # withheld from fork workflows and the scanner's 401 would read as a
+      # broken workflow. The step fails on submission AND on the quality gate's
+      # verdict, which reaches `ci-green` through this job — the gate is
+      # required, and it is the fixing loop's termination signal for the
+      # analysis half. .github/actions/sonar-scan.
+      - uses: ./.github/actions/sonar-scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        with:
+          dir: ${{ env.ENVTEST_MODULE }}
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
 
   # Every OTHER module. Dependency-free by design, so these are seconds each,
   # and separate from `operator` so a module break is legible without reading an
@@ -170,7 +227,10 @@ jobs:
       run:
         working-directory: ${{ matrix.module }}
     steps:
+      # FULL HISTORY for the analysis step, as in `operator`.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # THE CONSOLE'S GO BUILD EMBEDS ITS BROWSER BUNDLE — `go:embed all:ui/dist`
       # — and that bundle is build output, so it is absent from a fresh
       # checkout. Without this step the module does not COMPILE, in a job about
@@ -195,32 +255,70 @@ jobs:
           cache-dependency-path: ${{ matrix.module }}/go.sum
       - run: go build ./...
       - run: go vet ./...
-      - run: go test -count=1 ./...
-
-  # The console's browser application. The only non-Go job, and it exists
-  # because these tests run nowhere today: a broken bundle currently surfaces
-  # inside the console IMAGE build, at the end of a long log, and a failing
-  # component test surfaces for nobody.
-  #
-  # Screenshots are deliberately out: they need a browser, and they are
-  # regenerated when the UI changes, not on every pull request.
-  console-ui:
-    needs: discover
-    if: needs.discover.outputs.ui == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
+      # -coverpkg for the same reason the operator carries it: coverage is
+      # attributed to every package a test exercises, not only to the package
+      # the test belongs to. These modules are single-package suites today, so
+      # the flag costs them nothing and stops being a special case one module
+      # alone carries.
+      - run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
+      # THE CONSOLE IS ONE COMPONENT WITH TWO TOOLCHAINS, and one project, and
+      # THIS IS THE UI SUITE'S ONE RUN. It had a job of its own (`console-ui`)
+      # that ran the same suite a second time once coverage had to be produced
+      # here beside the Go profile; the step is named so a failing UI test
+      # names the UI in this job's log. The lcov names files relative to ui/
+      # and the analysis is rooted one level up, so the paths are re-anchored —
+      # without it every UI file is reported unmatched and coverage reads zero.
+      - name: Console UI tests, with coverage
+        if: matrix.module == 'platform/console'
         working-directory: platform/console/ui
+        run: |
+          npm run test:coverage
+          sed -i 's#^SF:#SF:ui/#' coverage/lcov.info
+      - uses: ./.github/actions/sonar-scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        with:
+          dir: ${{ matrix.module }}
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
+
+  # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
+  # arrived with 55 tests nothing executed. No npm install: the suites import
+  # only the modules beside runtime.js, by design -- the copilot SDK bundles a
+  # 300 MB CLI, and a suite that needed it would be a suite that does not run.
+  node-runtimes:
+    needs: discover
+    if: contains(needs.discover.outputs.images, 'runtime-claude') || contains(needs.discover.outputs.images, 'runtime-copilot')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runtime: [claude, copilot]
     steps:
+      # Each entry runs only when ITS directory changed; the job-level `if`
+      # admits the matrix, this one admits the runtime.
       - uses: actions/checkout@v4
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: platform/console/ui/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
+      # Two reporters: spec to the log, lcov to a file the analysis step reads.
+      # Naming only lcov would leave the log with no test output at all.
+      - run: >-
+          node --test --experimental-test-coverage
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=lcov --test-reporter-destination=coverage.lcov
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime))
+        working-directory: runtimes/${{ matrix.runtime }}
+      - uses: ./.github/actions/sonar-scan
+        if: contains(needs.discover.outputs.images, format('runtime-{0}', matrix.runtime)) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        with:
+          dir: runtimes/${{ matrix.runtime }}
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
 
   # Render AND validate. A lint proves the templates parse; only rendering
   # every meaningful permutation and validating the result proves they produce
@@ -268,6 +366,7 @@ jobs:
             [default]=""
             [demo]="--set global.demo.enabled=true"
             [kubernetes]="--set kubernetes.enabled=true"
+            [copilot]="--set copilot.enabled=true --set copilot.credentialsSecret.token=placeholder"
             [prometheus]="$PROM"
             [home-assistant]="$HA"
             [telegram]="$TG"
@@ -276,7 +375,12 @@ jobs:
             # ever looked at their ServiceAccounts. One of them mounted a token
             # while holding no grant, and only a live render found it.
             [mcp-servers]="--set kubernetes.enabled=true --set kubernetes.mcpServers.enabled=true $PROM --set prometheus.mcpServers.enabled=true --set prometheus.mcpServers.backend=http://metrics.example:8428 $HA --set home-assistant.adminMcp.enabled=true --set home-assistant.adminMcpServer.enabled=true"
-            [everything]="--set global.demo.enabled=true --set kubernetes.enabled=true $PROM $HA $TG"
+            # mcp-aops renders in NO OTHER PERMUTATION either — same gap,
+            # same fix, both network-policy shapes so the gated NetworkPolicy
+            # is validated too.
+            [coordination]="--set coordination.enabled=true"
+            [coordination-netpol]="--set coordination.enabled=true --set global.agentops.networkPolicy.enabled=true"
+            [everything]="--set global.demo.enabled=true --set kubernetes.enabled=true --set coordination.enabled=true $PROM $HA $TG"
           )
           failed=0
           for name in "${!PERMUTATIONS[@]}"; do
@@ -368,10 +472,66 @@ jobs:
   # Every Dockerfile builds. amd64 only and never pushed: pull-request feedback
   # speed matters more than arch coverage here, and the multi-arch build is
   # exercised at release, where a manifest is actually produced to assert on.
-  images:
+  # TRIVY'S DATABASE, PULLED ONCE. Every image leg below scans, and every scan
+  # needs the day's vulnerability database from ghcr.io — anonymously, which is
+  # rate-limited. Fourteen concurrent legs each fetching it is slow and fails
+  # in a way that reads as a flaky scanner. This job saves it under the key
+  # `.github/actions/trivy-scan` restores, so the matrix starts warm.
+  trivy-db:
     needs: discover
     if: needs.discover.outputs.images != '[]'
     runs-on: ubuntu-latest
+    steps:
+      - id: date
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - id: cached
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+          lookup-only: true
+      - if: steps.cached.outputs.cache-hit != 'true'
+        uses: oras-project/setup-oras@v1
+      - if: steps.cached.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.cache/trivy/db"
+          oras pull ghcr.io/aquasecurity/trivy-db:2
+          tar -xzf db.tar.gz -C "$GITHUB_WORKSPACE/.cache/trivy/db"
+          rm db.tar.gz
+          # The Java database too: the action tells Trivy to skip BOTH updates
+          # on a cache hit, so both must be in the cache.
+          mkdir -p "$GITHUB_WORKSPACE/.cache/trivy/java-db"
+          oras pull ghcr.io/aquasecurity/trivy-java-db:1
+          tar -xzf javadb.tar.gz -C "$GITHUB_WORKSPACE/.cache/trivy/java-db"
+          rm javadb.tar.gz
+      - if: steps.cached.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+
+  # BUILT, THEN SCANNED, NEVER PUSHED. `load: true` puts the single-platform
+  # result in the runner's daemon so Trivy can read it; `load:` cannot express
+  # a multi-platform result, which is why the build stays `linux/amd64` and why
+  # nothing here is added to the release path (design D3). Nothing escapes a
+  # pull request: `push: false` is unchanged.
+  # `trivy-db` IS BEST-EFFORT, twice over. A failed warm-up must not skip
+  # fourteen build and scan legs: the action's restore misses and downloads
+  # instead, which is slower and still a scan. `!cancelled()` runs this whatever
+  # `trivy-db` did, while a cancelled run stays cancelled — and `ci-green` does
+  # not list `trivy-db` either, because a warm-up that failed while every scan
+  # still ran is not a reason to block a merge.
+  images:
+    needs: [discover, trivy-db]
+    if: ${{ !cancelled() && needs.discover.result == 'success' && needs.discover.outputs.images != '[]' }}
+    runs-on: ubuntu-latest
+    # `security-events: write` HERE AND NOWHERE ELSE — the SARIF upload needs
+    # it, and the workflow-level `contents: read` stays the default for every
+    # other job.
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -380,14 +540,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      # THE APT LAYER IS REBUILT ONCE A DAY. The cache keys a RUN on its text
+      # and the build arguments it reads, so a layer cached before a security
+      # fix was published keeps its vulnerable package for as long as the
+      # instruction stays unchanged — `apt-get upgrade` in a cached layer runs
+      # nothing. Every Dockerfile that runs apt reads `APT_REFRESH`, so the
+      # date is the one thing that changes. Computed HERE rather than taken
+      # from `trivy-db`, which is best-effort: a failed warm-up must not hand
+      # every build an empty argument that never changes again.
+      - id: date
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/amd64
           push: false
+          load: true
+          tags: agentops-${{ matrix.image.component }}:scan
+          build-args: APT_REFRESH=${{ steps.date.outputs.date }}
           cache-from: type=gha,scope=${{ matrix.image.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.component }}
+      # THE CATEGORY IS DERIVED, per component. Under one shared category each
+      # upload replaces the last and the security tab shows one component's
+      # findings while appearing to describe fourteen — green all the way.
+      #
+      # A FORK'S PULL REQUEST CANNOT UPLOAD: its token is read-only whatever
+      # the block above says, and `upload-sarif` fails on it. The upload is
+      # skipped there so an external contribution never goes red for a
+      # permission it cannot hold; the GATE still runs, and that is the half
+      # that protects the merge.
+      - uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: agentops-${{ matrix.image.component }}:scan
+          category: trivy-${{ matrix.image.component }}
+          upload: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
 
   # THE SITE BUILDS. GitHub Pages builds `docs/` natively on merge, which means
   # nothing checks it BEFORE merge: a bad Liquid tag, a missing include or a
@@ -424,6 +611,7 @@ jobs:
   # them to the audience it exists to protect the tree from. `--show` prints
   # matches locally, where the fixing happens.
   publication:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -456,6 +644,7 @@ jobs:
   # Two guards, opposite shapes, each following from its subject. Neither is a
   # template for the other.
   retired-vocabulary:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -484,6 +673,7 @@ jobs:
   # them would fail every pull request for work it was not about, and the job
   # would be switched off within a day.
   openspec:
+    needs: discover
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -540,33 +730,105 @@ jobs:
   # every session whose harness is not installed, and for automation -- and this
   # repository is public, so "every other contributor" is a real population now.
   #
-  # The hook and this job call the SAME script, and a third step proves they
-  # agree. Two enforcement points asking one question is safe only while they
-  # give one answer.
+  # The hook and this job call the SAME script, and the script suite in the
+  # `scripts` job proves they agree. Two enforcement points asking one
+  # question is safe only while they give one answer.
   docs-task:
+    needs: discover
     runs-on: ubuntu-latest
+    # Reading the pull request, its threads and its workflow runs is what the
+    # archive guard needs; nothing here writes.
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # EVERY SCRIPT THIS WORKFLOW DEPENDS ON, not only the documentation gate.
-      # They decide things — refusing a commit, refusing to resolve somebody's
-      # review thread, opening an issue — and each was originally verified once
-      # by hand. `gh` and `openspec` are stubbed, so the suite reaches no network
-      # and touches no real repository.
-      - name: The workflow's own scripts
-        run: ./.github/tests/run.sh
-      - name: Every change this pull request touches carries a finished documentation task
+      # PULL REQUESTS ONLY. A push to master is the merge the pull request
+      # already gated, so there is nothing left to refuse there — and a change
+      # planned under an older shape that merges and THEN meets a stricter
+      # guard turns master red for work nobody can act on from master. The
+      # squash of #127 did exactly that on 2026-08-29.
+      - name: Every change this pull request finishes ends in finished test and documentation tasks
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A hand run against a pull request carries no base sha; ask for it.
+          if [ -z "$BASE_SHA" ] && [ -n "${PR_NUMBER:-}" ]; then
+            BASE_SHA=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefOid --jq .baseRefOid || true)
+          fi
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             echo "no base commit to diff against; nothing to check"
             exit 0
           fi
           python3 .github/scripts/docs-task-guard.py --range "$BASE_SHA..$GITHUB_SHA"
+
+  # THE SCRIPTS THAT JUDGE PULL REQUESTS ARE TESTED AND MEASURED LIKE A
+  # COMPONENT. They decide things — refusing a commit, refusing to resolve
+  # somebody's review thread, building the review's queue, opening an issue —
+  # and each was originally verified once by hand. `gh` and `openspec` are
+  # stubbed, so the suite reaches no network and touches no real repository.
+  #
+  # THE UNIT IS NAMED, NOT DERIVED. components.sh answers "what publishes an
+  # image", and the scripts publish none; teaching it a second kind of thing
+  # would put a directory on the release's list. So the analysis step is told
+  # the name here, the one call site that is not a component.
+  #
+  # COVERAGE IS COLLECTED AT INTERPRETER START-UP. The suite is bash driving
+  # Python as child processes, so `coverage run` over any command would
+  # measure the shell. A site-packages .pth calls coverage.process_startup()
+  # in every interpreter that starts while COVERAGE_PROCESS_START names the
+  # config; each writes its own data file, and combine folds them. The
+  # config (.github/.coveragerc) says why the paths are the shape they are.
+  scripts:
+    needs: discover
+    if: needs.discover.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # PyYAML because the suite reads workflow files, and setup-python's
+      # interpreter has none of the packages the runner's system Python ships.
+      - name: coverage.py, hooked into every interpreter start
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet coverage pyyaml
+          site=$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+          echo 'import coverage; coverage.process_startup()' > "$site/coverage-startup.pth"
+      - name: The workflow's own scripts
+        env:
+          COVERAGE_PROCESS_START: ${{ github.workspace }}/.github/.coveragerc
+          COVERAGE_FILE: ${{ github.workspace }}/.github/.coverage
+        run: ./.github/tests/run.sh
+      - name: One coverage report from every process the suite started
+        working-directory: .github
+        run: |
+          set -euo pipefail
+          python -m coverage combine --quiet
+          python -m coverage xml --quiet
+          python -m coverage report
+      - uses: ./.github/actions/sonar-scan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        with:
+          dir: .github
+          name: scripts
+          sources: scripts
+          tests: scripts,tests
+          test-inclusions: "**/*.test.sh,**/*-test.sh"
+          token: ${{ secrets.SONAR_TOKEN }}
+          organization: ${{ secrets.SONAR_ORG }}
+          pr: ${{ inputs.pr }}
 
   # THE TITLE IS THE COMMIT SUBJECT, BECAUSE THE MERGE IS A SQUASH.
   #
@@ -578,14 +840,22 @@ jobs:
   # Push events skip this: there is no title to check, and `ci-green` treats a
   # skipped job as passed by having nothing to do.
   pr-title:
-    if: github.event_name == 'pull_request'
+    needs: discover
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: The title follows the commit convention
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ inputs.pr }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A hand run has no event title; the pull request it stands in for does.
+          [ -n "$TITLE" ] || TITLE=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
           if printf '%s' "$TITLE" \
              | grep -qE '^(feat|fix|docs|chore|refactor|test|ci)(\([a-z0-9._/-]+\))?!?: .+'; then
             echo "ok: $TITLE"
@@ -623,10 +893,201 @@ jobs:
   # treats a skipped dependency inconsistently while reading as though it were
   # checking one. Reading the results explicitly states what the gate means — a
   # SKIPPED job passed by having nothing to do, a CANCELLED one did not pass.
+  # A CHANGE'S TRACKING ISSUE CLOSES AT ARCHIVE, NOT AT MERGE.
+  #
+  # GitHub closes an issue itself when a merged pull request's body says
+  # `Closes #<n>`, so a PROPOSAL carrying the template's closing keyword ends the
+  # issue that was meant to follow its change through applying, review and
+  # archiving. #54 was exactly that: a proposal saying `Closes #53`.
+  #
+  # The template now writes `Refs #` — but a template is a suggestion at the
+  # moment somebody is typing quickly, and this failure is silent and days late.
+  # `needs:` CANNOT CROSS WORKFLOW FILES, and `claude-review.yml` is its own
+  # top-level workflow -- so this is the bridge: ask the platform directly
+  # whether it finished and how, the same shape `smoke-evidence.py` already
+  # uses for a different question on the same commit. NEVER on `push`: there
+  # is no pull request on the default branch, so no review ever runs there.
+  review-clean:
+    needs: discover
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # ONE QUESTION: DID THE REVIEW RUN FOR THIS HEAD, AND FINISH. Its
+    # conclusion means "it ran and posted", nothing about content. WHETHER A
+    # REVIEW THREAD IS STILL OPEN IS DELIBERATELY NOT A CHECK: branch
+    # protection's required conversation resolution already blocks the merge
+    # on an open thread, and it is evaluated LIVE at merge time -- a resolved
+    # thread unblocks the merge at once. A check reporting thread state
+    # freezes it instead: the review's own `reconcile` job did that, #220 sat
+    # red after its thread was resolved, and the loop's dispute on it could
+    # not be answered. The obvious repair -- re-run this job when a thread is
+    # resolved -- does not exist: `pull_request_review_thread` is a webhook
+    # event and NOT an Actions trigger, measured (the workflow file is
+    # refused). So the content question belongs to the platform, and this
+    # job asks only the one a check can answer.
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: The review ran for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          out=$(python3 .github/scripts/review-is-green.py --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA")
+          echo "$out"
+          [ "$out" = "green=true" ]
+
+  pr-closes:
+    needs: discover
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # READING THE PULL REQUEST IS A PERMISSION, and the workflow's default is
+    # `contents: read` alone. Stated here rather than inherited, so the fetch
+    # cannot silently fall back to the frozen payload the moment somebody
+    # tightens the top-level block.
+    #
+    # WRITE, NOT READ — A FAILURE HERE MUST BE SEEN, NOT ONLY LOGGED. The
+    # guard's own message already names the issue, the change and the exact
+    # line to add, but it printed to a job's stderr, which nobody reads
+    # unless they click into a red check. #211 sat refused for hours this
+    # way: `conveyor-labels` archived on its branch, its tracking issue
+    # (#204) left open, and the only trace was a check nobody had opened.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: A tracking issue is not closed by the pull request that proposes it
+        env:
+          # THE BODY IS FETCHED LIVE, NOT TAKEN FROM THE EVENT PAYLOAD.
+          #
+          # `github.event.pull_request.body` is frozen at the moment the run was
+          # CREATED. A re-run replays that payload, so a body corrected after a
+          # refusal is judged as it was before the correction — and `edited` is
+          # not one of `pull_request`'s default trigger types, so the edit starts
+          # no new run either. #54 sat refused with `Refs #53` in its description
+          # and `Closes #53` in the payload, and nothing about the failure said
+          # which text was being read.
+          #
+          # A guard whose subject is the body has to read the body. The payload
+          # remains the fallback for anything without a number to ask about.
+          FALLBACK_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          # THE RANGE IS THE PULL REQUEST'S OWN COMMITS, AND NEITHER SHA THE
+          # EVENT HANDS OVER BOUNDS THEM.
+          #
+          # `github.sha` on a `pull_request` run is the MERGE commit, so it
+          # carries the base branch as it is now; `base.sha` is the base as it
+          # was when the pull request was OPENED, and a later push does not move
+          # it. `base.sha..github.sha` therefore holds every commit master
+          # gained since the pull request was opened — #174 was refused for not
+          # closing the issues of two changes that #179 and #180 had archived on
+          # master, days after its branch was cut, and a rebase would not have
+          # helped: the head would then hold the archives too. The range is the
+          # three-dot form against the base branch as it stands, which is the
+          # merge base to the pull request's HEAD and nothing else.
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A hand run carries neither; the pull request it stands in for does.
+          if [ -z "$BASE_REF" ] || [ -z "$HEAD_SHA" ]; then
+            BASE_REF=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefName --jq .baseRefName)
+            HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          fi
+          git fetch -q origin "$BASE_REF" "$HEAD_SHA"
+          body="$RUNNER_TEMP/pr-body.md"
+          if [ -n "${PR_NUMBER:-}" ] && gh pr view "$PR_NUMBER" --json body --jq .body > "$body" 2>/dev/null; then
+            echo "read the pull request body as it stands now"
+          else
+            # THROUGH THE ENVIRONMENT, never interpolated into the script: a pull
+            # request body is text a stranger wrote.
+            printf '%s' "$FALLBACK_BODY" > "$body"
+            echo "::notice::could not read the live body; judging the event payload, which a re-run freezes"
+          fi
+          out="$RUNNER_TEMP/pr-closes-guard.out"
+          rc=0
+          python3 .github/scripts/pr-closes-guard.py \
+            --body-file "$body" \
+            --range "origin/$BASE_REF...$HEAD_SHA" \
+            --root . > "$out" 2>&1 || rc=$?
+          cat "$out"
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          # EXIT 1 IS THE GUARD'S OWN, DELIBERATE REFUSAL. Any other code is a
+          # SCRIPT ERROR — a crash, a bad invocation — wearing the same shape,
+          # and posting its traceback to the pull request as though it were
+          # the guard's verdict would tell a reader their `Closes #` line is
+          # wrong when the truth is the guard itself broke.
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::pr-closes-guard.py exited $rc, not a refusal — see the log above for the script error"
+            exit "$rc"
+          fi
+          # POST WHAT THE GUARD ALREADY SAID, WHERE A PERSON WILL SEE IT — a
+          # comment on the pull request, never only the job log. MARKER-DEDUPED
+          # the same way carry.py's own comments are: a re-run after an
+          # unrelated push must not repeat the same paragraph every time.
+          [ -n "${PR_NUMBER:-}" ] || { echo "::error::no pull request to comment on"; exit 1; }
+          marker="<!-- pr-closes-guard -->"
+          body_comment="$marker"$'\n'"$(cat "$out")"
+          if ! gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments \
+            --jq '.comments[].body' 2>/dev/null | grep -qF "$marker"; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body_comment" || true
+          fi
+          exit 1
+
+  # CONTRACT CONFORMANCE: every adapter's built binary, black-box, against a
+  # fake manager — a minute, no cluster, no secret. It is the one thing from
+  # the e2e-testing change that gates a pull request. The k3s smoke does NOT:
+  # it runs before a release (release.yml) and on demand on any branch
+  # (system-smoke.yml).
+  conformance:
+    needs: discover
+    if: needs.discover.outputs.system == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.ENVTEST_MODULE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.ENVTEST_MODULE }}/go.mod
+          cache: true
+      - run: go test -tags conformance -count=1 -timeout 20m -v ./test/conformance/
+
+  # A PINNED RUNTIME IMAGE MUST CARRY THE WORK-REPORT CONTRACT. The manager
+  # draws a run's model/tool statistics only from what the runtime reports, so
+  # a chart pin older than the report module ships installs whose Runs show no
+  # statistics — with every code test green, since each half passes alone.
+  # Measured: runtime-claude 0.9.0 stayed pinned for three weeks after the
+  # contract landed. The guard reads the repository's own tags, hence the full
+  # fetch, and enforces the order: push the release tag FIRST, bump the pin
+  # after.
+  pinned-runtimes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - run: python3 .github/scripts/pinned-runtime-guard.py
+
   ci-green:
     name: ci-green
-    if: always()
-    needs: [discover, operator, modules, console-ui, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, pr-title]
+    # Never reports on a draft: a green required check on a pull request that
+    # ran nothing would be a claim.
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance, review-clean, pinned-runtimes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

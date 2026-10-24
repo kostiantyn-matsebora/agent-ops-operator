@@ -44,6 +44,13 @@ export interface EdgeTraffic {
   unconfirmed?: boolean
 }
 
+/** A system outside the install an adapter CR declares it faces, verbatim. */
+export interface ExternalRef {
+  name: string
+  /** sender (pushes to the adapter), api (called by it) or kubernetes. */
+  kind: string
+}
+
 export interface GraphNode {
   id: string
   kind: string
@@ -54,9 +61,26 @@ export interface GraphNode {
   detached?: boolean
   active: number
   recent: number
+  /** A pipeline's declared icon reference, verbatim, drawn in its mark. */
+  icon?: string
+  /** The chart bundle that installs the object, from its Helm label. */
+  bundle?: string
+  image?: string
+  harness?: string
+  vendor?: string
+  externals?: ExternalRef[]
+  servedBy?: string
+  phase?: string
+  runtimePod?: string
 }
 
-export type EdgeKind = 'feeds' | 'answers' | 'posts' | 'served-by' | 'uses'
+export type EdgeKind =
+  | 'feeds' | 'answers' | 'posts' | 'served-by' | 'uses' | 'runs-on' | 'opened'
+  | 'sends' | 'calls'
+  // capability: a Pipeline or Coordinator naming an AgentCapability instead of
+  // inlining it. escalates-to: a Coordinator's channelRefs, opened only on
+  // escalation. invokes: a Coordinator's agents[] entry.
+  | 'capability' | 'escalates-to' | 'invokes'
 
 export interface GraphEdge {
   from: string
@@ -66,11 +90,74 @@ export interface GraphEdge {
   traffic?: EdgeTraffic
 }
 
+/** One node of the Components view: a component the repository builds, or a system outside. */
+export interface Component {
+  /** `<role>/<name>`, which is `<activity node kind>/<name>` wherever a hop names one. */
+  id: string
+  role: string
+  name: string
+  image?: string
+  /** Pods running it now. */
+  count: number
+  health: Health
+  reason?: string
+  message?: string
+  bundle?: string
+  /** The Model node ids this component carries. */
+  implements?: string[]
+  workload?: string
+  servedBy?: string
+  externalKind?: string
+  harness?: string
+  vendor?: string
+  url?: string
+}
+
+export interface Container {
+  name: string
+  image?: string
+  /** On a runtime pod: runtime-image, context-sync or egress-proxy. */
+  role?: string
+  ready: boolean
+  restarts: number
+}
+
+/** One node of the Infrastructure view. */
+export interface Pod {
+  id: string
+  name: string
+  component?: string
+  clusterNode?: string
+  phase?: string
+  health: Health
+  reason?: string
+  conversation?: string
+  pipeline?: string
+  containers: Container[]
+}
+
+/** One windowed hop aggregate, in the activity vocabulary. */
+export interface EdgeStat {
+  from: NodeRef
+  to: NodeRef
+  events: number
+  errors: number
+  ratePerMin: number
+  p50LatencyMs?: number
+  maxLatencyMs?: number
+  lastTs?: string
+  unconfirmed: boolean
+}
+
 export interface Topology {
   nodes: GraphNode[]
   edges: GraphEdge[]
   windowSeconds?: number
   eventNodeKinds: Record<string, string>
+  components?: Component[]
+  componentEdges?: GraphEdge[]
+  pods?: Pod[]
+  hops?: EdgeStat[]
 }
 
 export interface TopologyResponse {
@@ -106,6 +193,14 @@ export interface ActivityEvent {
   code?: string
   detail?: string
   adapter?: string
+  /** Bounded facts with no durable home: tokens, a tool, a stop reason. Never content. */
+  data?: Record<string, string>
+}
+
+export interface ActivityResponse {
+  events: ActivityEvent[]
+  cursor: string
+  stream: StreamHealth
 }
 
 export interface StreamHealth {
@@ -253,6 +348,8 @@ export interface KindInfo {
 
 export interface InventoryRow {
   name: string
+  /** A pipeline's declared icon reference, verbatim. */
+  icon?: string
   uid?: string
   created?: string
   labels?: Record<string, string>
@@ -313,6 +410,26 @@ export interface ThreadBinding {
   readTracked?: boolean
 }
 
+/**
+ * One message a run consumed, as the Conversation records it — the DURABLE
+ * half of a conversation's questions, kept beside the run's own answer.
+ * Absent on a run recorded before the manager kept them (`Run.inputs`,
+ * `omitempty` on the console's own wire).
+ */
+export interface RecordedInput {
+  id: string
+  type?: string
+  text?: string
+  /** `text` is the beginning of a larger payload, not the whole of it. */
+  truncated?: boolean
+  /** The channel the message was typed on. Empty when no surface displayed
+   * it — an alert, a job tick, a posted task, or a Coordinator's own
+   * `invoke` (which addresses no human channel at all). */
+  surface?: string
+  sender?: string
+  receivedAt?: string
+}
+
 export interface Run {
   runId: string
   jobKind?: string
@@ -321,6 +438,35 @@ export interface Run {
   result?: string
   startedAt?: string
   finishedAt?: string
+  /** The messages THIS run consumed — already on the wire
+   * (`platform/console/conversations.go`'s `Run.Inputs`), not previously
+   * modelled here. A member conversation's own task is recorded exactly
+   * this way: it binds no human channel, so this is the only place its task
+   * text lives. */
+  inputs?: RecordedInput[]
+  /** One entry per model call this run made. Absent — never an empty array —
+   * when the runtime did not report this data for the run. */
+  turns?: RunTurn[]
+  /** One entry per tool invocation this run made, same absence rule as
+   * `turns`. */
+  toolCalls?: RunToolCall[]
+}
+
+export interface RunTurn {
+  model?: string
+  tokensIn?: number
+  tokensOut?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  stopReason?: string
+}
+
+export interface RunToolCall {
+  tool?: string
+  /** Empty means a BUILT-IN tool, never "missing data" — render accordingly. */
+  server?: string
+  durationMs?: number
+  resultBytes?: number
 }
 
 export interface BlockedReason {
@@ -329,6 +475,45 @@ export interface BlockedReason {
   /** True for the subset that means "your volume is broken" rather than
    * "this pod had a bad day". */
   storage: boolean
+}
+
+/**
+ * The console's read of `Conversation.spec.causedBy` — the immediate parent,
+ * one hop, never the tree's ultimate root. A member's own `causedBy` may
+ * itself be set, so the client walks it one hop at a time to reach the
+ * uncaused root (design D-G).
+ */
+export interface Provenance {
+  /** The parent conversation's name. */
+  parent: string
+  /** The parent Coordinator's `agents[]` entry this was invoked through. */
+  entry: string
+}
+
+/**
+ * The console's read of `Conversation.status.budget` — a Coordinator-rooted
+ * conversation's own resource ceiling, PER LEVEL: nesting never pools a
+ * budget across levels. Set only on a conversation that is itself a
+ * Coordinator's root.
+ */
+export interface ConversationBudget {
+  maxAgents?: number
+  maxTurns?: number
+  deadline?: string
+  agentsInvoked?: number
+  turns?: number
+}
+
+/**
+ * The most recent counted-kind message (signal, agent, relay — see
+ * `countedKinds` on the Go side) on a conversation's console thread — the
+ * row's snippet, read or not. Never an ack: an ack is PRESENCE, not a line
+ * of transcript.
+ */
+export interface LastMessage {
+  kind: string
+  sender?: string
+  text: string
 }
 
 export interface ConversationSummary {
@@ -359,9 +544,31 @@ export interface ConversationSummary {
    * merely queued — its pod could not come up, and this is the kubelet's own
    * reason for it. The 2026-08-20 outage showed a phase and nothing else. */
   blocked?: BlockedReason
-  /** The CONSOLE's own thread has activity newer than its watermark. Observed
-   * conversations — no console thread — are never unread. */
+  /** `unreadCount` is above zero. Observed conversations — no console thread
+   * — are never unread. */
   unread: boolean
+  /**
+   * The number of counted-kind messages (signal, agent, relay) on the
+   * CONSOLE's own thread, after the reader's watermark. An ack, a notice, a
+   * console user's own words and a run event are never counted.
+   *
+   * Optional here only because older fixtures in this tree predate it —
+   * the server always sends it, with no `omitempty` on its Go side.
+   */
+  unreadCount?: number
+  /** The most recent counted-kind message on the console thread, read or
+   * not — the row's snippet. Absent on a conversation with no console
+   * thread, or with no counted message yet. */
+  lastMessage?: LastMessage
+  /** A run is inflight right now. Drawn apart from `unread` — a conversation
+   * can be both, either or neither. Optional for the same fixture reason as
+   * `unreadCount`; always sent. */
+  presence?: boolean
+  /** The requesting reader is who STARTED this conversation (its
+   * `originReader`, in this console's own channel). The inbox's "Mine"
+   * scope. Always false with no reader resolved. Optional for the same
+   * fixture reason as `unreadCount`; always sent. */
+  mine?: boolean
   /** The console thread's watermark, so a read is reported only when it advances. */
   readAt?: string
   ageSeconds: number
@@ -372,6 +579,27 @@ export interface ConversationSummary {
    * finalizer while its threads are archived. Named `closing` once, from when
    * /close deleted the conversation — those are two verbs now. */
   deleting: boolean
+
+  /** "" unless this conversation is a Coordinator's ROOT. Independent of
+   * `causedBy`: a nested Coordinator's root carries both. */
+  coordinator?: string
+  /** Set when this conversation was itself INVOKED as a member — the
+   * immediate parent, one hop. There is no server-side tree endpoint; the
+   * client walks this to the uncaused root (design D-G). */
+  causedBy?: Provenance
+  /** Set only on a conversation that is itself a Coordinator's root. */
+  budget?: ConversationBudget
+  /** When `escalate` opened this conversation's own thread. Empty on a
+   * member, which bubbles instead of escalating. */
+  escalatedAt?: string
+  /** Why this conversation closed. Set by an ordinary /close only when the
+   * caller gave one; always set by budget-exceeded and by a member's own
+   * close. An UN-escalated root closing with a reason is marked distinctly
+   * from an escalated one that opened a thread. */
+  closeReason?: string
+  /** One or two sentences of what this conversation is about, agent-written —
+   * shown wherever a list would otherwise show only a name. */
+  brief?: string
 }
 
 // ---- closing a batch ---------------------------------------------------------
@@ -420,13 +648,35 @@ export interface DeleteResponse {
 
 export interface ConversationPage {
   items: ConversationSummary[]
+  /** Every conversation, root or invoked member — what `items`/pagination
+   * count against, since the tree is rebuilt client-side from the full flat
+   * page. Never what a badge should read; see `rootTotal` and `unreadTotal`. */
   total: number
-  /** Unread across ALL conversations, counted BEFORE any filter — a count that
-   * moved because the view narrowed would let a filter hide a backlog. */
+  /** Every conversation a person can open, root only (no invoked member),
+   * respecting `showClosed` — NOT gated on read state. What the Inbox's "All"
+   * row (`Scope` kind `'all'` — no further predicate) reads. The navigation
+   * rail's own badge (outside the Inbox) reads `unreadTotal` instead, below —
+   * that one IS a notification count, this one is a plain total. */
+  rootTotal: number
+  /** Unread, non-member roots, counted BEFORE any filter except `showClosed`
+   * — a count that moved because the view narrowed to one named scope would
+   * let a filter hide a backlog, but `showClosed=false` means "and don't
+   * count what I can't currently reach either." What the navigation rail's
+   * badge reads (`useUnreadCount` in App.tsx) — the Inbox's own "All" row
+   * reads `rootTotal` above instead. */
   unreadTotal: number
   offset: number
   limit: number
   facets: Record<string, string[]>
+  /**
+   * Present on the count-only form alone: the UNREAD count within every
+   * fixed inbox scope but All (`working`, `mine`, `errored`, `closed`), plus
+   * one entry keyed by name for every pipeline and coordinator a row
+   * attributes to, also unread-gated. What the inbox's per-scope badges
+   * read. There is no `incidents` scope: that concept was removed from the
+   * inbox outright.
+   */
+  scopes?: Record<string, number>
 }
 
 // ---- marking a batch read ----------------------------------------------------
@@ -482,6 +732,15 @@ export interface Message {
    * inside the text it is a wall of JSON between the card and the reply box.
    */
   payload?: string
+  /**
+   * A SIGNAL's optional urgency rating — closed vocabulary (`critical` |
+   * `error` | `warning` | `info`). Carried structured, like `payload`, so
+   * the card can tint it rather than parsing it back out of `text`.
+   *
+   * Absent whenever the originating signal carried none, which is every
+   * signal today — no shipped adapter sets it yet.
+   */
+  severity?: string
 }
 
 /**
@@ -505,6 +764,22 @@ export interface Choice {
   label: string
   /** The addressed text this choice stands for. */
   command: string
+}
+
+/**
+ * The channel's general feed — `GET /api/channel/feed` — every thread-less
+ * send the adapter parked on the `channel:<name>` pseudo-thread (a manager
+ * notice with no conversation behind it, like an `/agents` reply). Mirrors
+ * Telegram's general topic: just another thread, read with the SAME
+ * `Message` shape and the SAME rendering components as a conversation's own
+ * transcript (B1, UI half).
+ */
+export interface ChannelFeed {
+  /** The served channel name, empty with none served yet (a fresh console
+   * before the first refresh) — the feed degrades to empty rather than
+   * erroring. */
+  channel: string
+  messages: Message[]
 }
 
 export interface ConversationDetail {
@@ -586,8 +861,10 @@ export interface SourcesResponse {
  * has never held one. What a message addresses is a PIPELINE.
  */
 export interface VocabularyEntry {
-  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline. */
-  kind: 'builtin' | 'pipeline'
+  /** `builtin` for a manager command, `pipeline` for an addressable Pipeline,
+   * `coordinator` for an addressable Coordinator — the two share one name
+   * space and are addressed identically (manager's `chat/vocabulary.go`). */
+  kind: 'builtin' | 'pipeline' | 'coordinator'
   name: string
   /** Menu text. For a pipeline, the profile answering for it. */
   description?: string

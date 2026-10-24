@@ -131,11 +131,13 @@ func (f *filter) Scopes() []string {
 
 // normalize turns one Event into a contract signal for a source.
 //
-// The fingerprint deliberately excludes the event's own name/UID and its
-// timestamps: Kubernetes recreates Event objects for a recurring problem, and a
-// fingerprint that changed with them would open a fresh conversation on every
-// repeat of the same crash loop. Keyed on the OBJECT and REASON instead, a
-// flapping pod collapses into one conversation under the manager's cooldown.
+// initiationId is `<source>@<namespace>/<workload>` — deliberately excluding
+// the event's own name/UID, timestamps AND reason: Kubernetes recreates Event
+// objects for a recurring problem, pod names churn every rollout, and a
+// workload can fail for several reasons across its lifetime. Keyed on the
+// WORKLOAD alone, every failure of one workload — whichever reason, however
+// many pods and rollouts — correlates to one conversation. Minting this id IS
+// the correlation decision; the manager only equality-matches it.
 func normalize(source string, ev *Event, enr enrichment) Signal {
 	ns := ev.Namespace()
 	kind, name := ev.InvolvedObject.Kind, ev.InvolvedObject.Name
@@ -171,11 +173,11 @@ func normalize(source string, ev *Event, enr enrichment) Signal {
 	}
 
 	return Signal{
-		Fingerprint: fmt.Sprintf("%s@%s/%s/%s/%s", source, ns, kind, name, ev.Reason),
-		Labels:      labels,
-		Title:       fmt.Sprintf("%s: %s", ev.Reason, subject),
-		Payload:     string(payload),
-		Kind:        "alert",
+		InitiationID: fmt.Sprintf("%s@%s/%s", source, ns, subject),
+		Labels:       labels,
+		Title:        fmt.Sprintf("%s: %s", ev.Reason, subject),
+		Payload:      string(payload),
+		Kind:         "alert",
 	}
 }
 

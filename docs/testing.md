@@ -1,0 +1,249 @@
+# Testing
+
+agent-ops is verified at four tiers, and each of the first three exists for
+what the one below it structurally cannot decide. The fourth is orthogonal to
+that chain — see below.
+
+| Tier | Runs | Decides | Cannot decide |
+|---|---|---|---|
+| **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
+| **Contract conformance** | every adapter's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the reclaim window for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter | anything about the cluster |
+| **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
+| **Console browser e2e** (`e2e-live`, manual) | Playwright driving a real browser against an ALREADY-RUNNING install — the real console, the real manager, `kubectl` against a real context | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
+
+**Every change declares its first and third tiers in its own task list.**
+`docs-task` in CI refuses to finish a change missing any of the three — see
+`CONTRIBUTING.md`.
+
+An openspec change's `tasks.md` ends with, in order:
+
+1. a unit-test section
+2. a system-test section — one ticked line states when nothing a cluster decides was touched
+3. a documentation section
+
+## The console's browser tier (`e2e-live`), and why it exists beside the other three
+
+`platform/console/ui/e2e-live/` — 21 Playwright specs, `global-setup.ts` and
+`support/` — was added for `chat-shaped-conversations` because unit tests and
+envtest both missed a defect only a real API server and a real rendered page,
+together, could expose:
+
+- `ThreadBinding.ReadAt` / `ReaderMark.ReadAt` were `*metav1.Time`, which the
+  Kubernetes API serializes at SECOND granularity, silently dropping the
+  sub-second component the mark-unread rewind needs.
+- A freshly-read message could therefore count as unread forever, in
+  ordinary, continuous operation.
+- `platform/manager/test/system/lifecycle_test.go`'s
+  `TestConsoleMarkReadThenUnreadRewind` is this defect's own regression test.
+- `internal/integration/channelread_test.go`'s
+  `TestChannelReadPreservesSubSecondPrecision` now pins the same round-trip
+  in the gating envtest suite.
+
+- **It is a BLACK-BOX reader of the rendered page**, never a second way to
+  arrange state — setup goes straight at `kubectl` and the manager's own HTTP
+  surface (`support/kube.ts`, `support/manager.ts`), exactly as the Go system
+  pack's typed client does, and every assertion reads the console's own
+  rendering.
+- **It is NOT CI-gated, and no workflow dispatches it.** No job under
+  `.github/workflows/` invokes it, and no `package.json` script runs it either
+  — `test:e2e` is the pre-existing mocked-API rendering smoke (a different
+  config, under `../e2e`, with no real backend). The only way it runs is by
+  hand:
+
+  ```sh
+  cd platform/console/ui
+  kubectl port-forward svc/agentops-adapter-console 18099:8080 &
+  npx playwright test --config e2e-live/playwright.config.ts
+  ```
+
+  ```powershell
+  cd platform/console/ui
+  Start-Process kubectl -ArgumentList 'port-forward','svc/agentops-adapter-console','18099:8080'
+  npx playwright test --config e2e-live/playwright.config.ts
+  ```
+
+- **It is WORKSTATION-ONLY**, on the same footing `.claude/rules/remote-session.md`
+  gives the local cluster and any deploy. `global-setup.ts` hard-requires an
+  already-running cluster — `kubectl` on PATH against a real context, a
+  reachable manager Service — that the cloud bootstrap does not provide: it
+  installs no `k3d`/docker and deploys nothing, so a remote session cannot
+  satisfy it.
+- **It owns no cluster lifecycle.** Point it at any already-running install —
+  the Go system pack's own cluster (`SYSTEM_REUSE=1`), a local `rancher-desktop`
+  deploy, anything reachable — it arranges its own fixtures through
+  `global-setup.ts` and tears down only what it opened (a port-forward to the
+  manager).
+
+| Variable | Does |
+|---|---|
+| `E2E_LIVE_CONSOLE_URL` | the console's base URL — default `http://localhost:18099` |
+| `E2E_LIVE_KUBE_CONTEXT` | the `kubectl` context to use — default `k3d-agentops-e2e` |
+| `E2E_LIVE_NAMESPACE` | the namespace fixtures are created in — default `agent-ops` |
+| `E2E_LIVE_KUBECTL` | overrides the `kubectl` binary resolved from an absolute `PATH` entry |
+
+## What gates a pull request
+
+**Contract conformance, and nothing that needs a cluster.** It is a minute of
+`go test`, deterministic, with no secret, so it runs for every pull request —
+from a fork too — and reports through `ci-green`, the one required check.
+
+The cluster smoke — a thin k3s run on the stub runtime — gates a **release**
+instead: it runs on the tagged commit before an image or
+the chart is published, and on demand against any branch.
+
+**It runs ONCE PER COMMIT, not once per tag** — a release publishes many
+independently-versioned artifacts from one commit, so before provisioning a
+cluster the release workflow:
+
+- looks up the commit's existing smoke result
+- reuses a passed one from any earlier run
+- waits — bounded — for one already in flight rather than racing it
+- runs its own only where none passed and none is in flight
+
+The full pack, including the lane that drives the real agent runtime with a
+real credential, gates nothing:
+
+- it runs nightly when master moved, and on demand
+- its lane spends real tokens
+- its flakiness must not block work while it is tuned
+
+A fork pull request runs every tier its secret access allows and is not failed
+for the rest. Secrets being unavailable to forks is the intended access
+boundary, not a limitation to work around.
+
+## The oracle split
+
+**The real agent runtime is the primary oracle.** The questions worth asking
+end to end are ones only an agent can answer: did context survive a gap, is the
+answer right, does the bound toolset actually constrain it. Assertions are
+closed-form rather than judged:
+
+- a nonce stated in one turn and asked back after a pod restart
+- a pod name the test already knows
+- a mutation asked for outside the bound toolset, asserted on the OBJECT
+  staying unchanged rather than on whatever the agent said about refusing
+
+Every agent-dependent assertion carries
+a bounded retry whose count is reported, so a lane that passes while retrying
+constantly is visible rather than quietly degrading.
+
+**A stub runtime exists for what no agent exhibits on cue.** A handle that
+names nothing, a crash that reports nothing, a stall past the idle TTL, a
+storage outage — these are manager mechanisms.
+
+The stub is an instrument for them, not a cost workaround. A test that could
+have been written against the real runtime is.
+
+- Its behaviour is scripted by the first word of the input: `echo`, `fail`,
+  `stale-context`, `no-context`, `die`, `stall`, `storage-outage`.
+- Identical input gives an identical report.
+- It is built by the pack only, published by no release, and referenced by
+  no chart default.
+
+## No third party is deployed
+
+Every inbound adapter is driven by a captured, scrubbed payload from
+`test/fixtures/` — an Alertmanager webhook body POSTed to the adapter's
+`/webhook/{source}`, a Telegram `Update` fed to a fake Bot API.
+
+The fake is faithful because `gateway-telegram` forwards updates verbatim:
+what it replays is byte-identical to what Telegram would have produced.
+
+The same fixtures are the owning modules' unit-test inputs, so one captured
+payload cannot drift between the two suites.
+
+The console is the end-to-end channel: a conforming `ChannelAdapter` with no
+third-party dependency, driven through its own HTTP API — the path a person
+takes minus the browser — so origination, dispatch, delivery and close run
+through production code with nothing simulated.
+
+## Run it yourself
+
+Conformance needs a Go toolchain and nothing else:
+
+```sh
+cd platform/manager && go test -tags conformance -count=1 -v ./test/conformance/
+```
+
+```powershell
+cd platform/manager; go test -tags conformance -count=1 -v ./test/conformance/
+```
+
+The pack needs Docker, `k3d`, `kubectl` and `helm` on the PATH:
+
+```sh
+cd platform/manager && go test -tags system -count=1 -timeout 45m -v ./test/system/
+```
+
+```powershell
+cd platform/manager; go test -tags system -count=1 -timeout 45m -v ./test/system/
+```
+
+| Variable | Does |
+|---|---|
+| `SYSTEM_TIER` | `smoke` (default) or `full` — `full` adds the real-runtime lane and the slow lanes |
+| `SYSTEM_REUSE=1` | keep an existing cluster and leave it running afterwards — the loop for local iteration |
+| `SYSTEM_SKIP_BUILD=1` | with `SYSTEM_REUSE`, images are already built and imported |
+| `SYSTEM_ARTIFACT_DIR` | where failure diagnostics land — manager and adapter logs, the pod list, cluster events, every agentops CR as YAML |
+| `SYSTEM_BUDGET` | wall-clock budget of the gating tier (default `20m`) — exceeding it fails the run, so growth is visible rather than gradual |
+| `CLAUDE_CODE_OAUTH_TOKEN` | the real-runtime lane's credential — absent, that lane reports itself skipped |
+
+On any failure the diagnostics are written unconditionally: a cluster that no
+longer exists is unreproducible, and a failure that did not capture its own
+context costs a full re-run to learn anything.
+
+**Every CI run of the pack — pass or fail — also appends a report to the
+Actions run's own summary page**, built by `.github/scripts/system-report.py`
+from the pack's `go test -json` output. A result is readable without opening
+the job log.
+
+The two tiers get different depth, matched to how much of each is worth
+reading in full:
+
+| Tier | Report level | Because |
+|---|---|---|
+| `full` | summary — pass/fail/skip counts, total elapsed, and the names of anything that did not pass | it runs nightly across every lane including the real-runtime one, and is the larger of the two |
+| `smoke` | full — every test's name, status and elapsed, plus a failing test's captured output | it is short and gates a release, so its detail is cheap and worth having at a glance |
+
+## What the repository must hold
+
+Three workflows share one definition, `.github/workflows/system.yml`, and `ci.yml` runs conformance on its own:
+
+| Workflow | Runs | When |
+|---|---|---|
+| `ci.yml` | contract conformance only — no cluster | every pull request, reporting through `ci-green` |
+| `release.yml` | the smoke tier — once per COMMIT, reused across every tag of a release | on the tagged commit, before anything is published |
+| `system-smoke.yml` | the smoke tier | on demand, on any branch |
+| `system-full.yml` | the full tier, real-runtime lane included | nightly at 03:17 UTC when master moved since its last successful run, and on demand |
+
+The code review reaches the merge box three ways, and only the first is a
+check:
+
+| Question | Answered by |
+|---|---|
+| did the review run for the head, and finish | `review-clean`, a job in `ci.yml`, through `ci-green` |
+| is a review thread still open | branch protection's required conversation resolution, live at merge time |
+| has a person answered a dispute the loop posted | no check. The loop's `loop:waiting` label and its summary say so, and the person's comment, or the sweep once the thread is resolved, starts the next round |
+
+Resolving a thread unblocks the merge at once, and nothing needs re-running.
+
+```sh
+gh workflow run system-smoke.yml --ref my-branch
+gh workflow run system-full.yml
+```
+
+```powershell
+gh workflow run system-smoke.yml --ref my-branch
+gh workflow run system-full.yml
+```
+
+One thing exists already and one is a decision:
+
+1. **The repository secret `CLAUDE_CODE_OAUTH_TOKEN`** — the same Claude Code
+   token the review workflow already runs on, and the credential the claude
+   bundle projects into the runtime. Read only by `system-full.yml`. Pull
+   requests never see it. Without it the real-runtime lane reports itself
+   skipped and every other lane still runs.
+2. **The cadence.** The cron lives in `system-full.yml` and nowhere else. A
+   night on which master did not move is skipped, so the spend tracks the
+   change rate rather than the calendar.

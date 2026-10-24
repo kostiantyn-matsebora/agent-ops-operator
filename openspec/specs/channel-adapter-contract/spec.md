@@ -6,17 +6,81 @@ The HTTP contract between the manager and out-of-process channel adapters: outbo
 
 ## Requirements
 
-### Requirement: Outbound operations delivered to adapters by long-poll
-The manager SHALL expose `GET /channel/ops?adapter=<name>&wait=<seconds>` (non-leader-gated) returning the next pending outbound operation for any Channel served by that adapter, or 204 on timeout. The parameter names the adapter (the same value Channels carry in `spec.adapter`), replacing the former `?type=`; a request carrying the retired parameter SHALL fail with 400 naming the replacement rather than being served an empty list, so an outdated adapter fails loudly instead of appearing to work while delivering nothing. The polling adapter SHALL additionally declare the outbound contract version it speaks, and an absent or unsupported declaration SHALL fail with 400 naming what is expected.
+### Requirement: Every outbound operation carries the conversation's correlation id
 
-Operations SHALL carry a stable id, the channel and conversation names, a kind (`ensure-topic`, `send`, `close-topic` or `delete-conversation`), and a kind-specific **structured** payload. `send` SHALL carry a typed message — one of `signal`, `answer`, `relay`, or `notice` — with markdown-valued free text and typed structured fields, plus the target thread id; it SHALL NOT carry pre-rendered display text. `ensure-topic` SHALL carry a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`) rather than a rendered title string; `pipeline` is inferred and MAY be empty. `close-topic` SHALL carry the target thread id and asks the adapter to archive or close that thread on its transport. Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility; the manager SHALL emit no transport markup and declare no maximum message size. Operations SHALL be derived from CR state or router actions such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped; delivery is at-least-once and adapters MUST tolerate duplicates by id. A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the deleting conversation's finalizer guarantees.
+Each operation delivered on `/channel/ops` SHALL additionally carry the conversation's `conversationId`, beside the channel and conversation names it already carries. The id is OPAQUE to the adapter — carried, compared, never parsed.
+
+This makes the adapter's thread mapping pure transport translation: `conversationId` on one side, the transport's thread id on the other. No adapter needs the retired signature-hash label, a `status.threads` lookup of its own, or a member-origin backref.
+
+The field is ADDITIVE. The wire `contract` version is unchanged, an adapter that ignores the field SHALL remain fully conformant, and the specification document moves MINOR.
+
+#### Scenario: An op arrives with the id
+
+- **WHEN** an adapter receives any operation for a conversation that carries a `conversationId`
+- **THEN** the operation names that id verbatim, beside the conversation and channel names
+
+#### Scenario: An adapter that ignores the id stays conformant
+
+- **WHEN** an adapter built before the field existed polls for operations
+- **THEN** it receives and completes operations unchanged, declaring the same `contract` version
+
+#### Scenario: A legacy conversation delivers without one
+
+- **WHEN** an operation is delivered for a conversation created before `conversationId` existed
+- **THEN** the field is absent and the operation is otherwise complete
+
+### Requirement: A channel adapter never mints a conversation id
+
+A channel adapter SHALL NOT create, derive or alter any conversation id. It sits downstream of signal processing: the manager-issued `conversationId` reaches it with the binding and its operations.
+
+The adapter's only id work is transport translation — `conversationId` on one side, the thread id on the other.
+
+An inbound message on a bound thread stays reply-only (`POST /channel/inbound`, the existing invariant that a channel CARRIES a conversation and never starts one). It is correlated by the binding's `conversationId` — the adapter attaches what it was given and mints nothing.
+
+Origination from a chat surface stays on the signal lane, owned by `chat-signal-origination`, never on this contract.
+
+#### Scenario: A reply carries the id it was given
+
+- **WHEN** a person replies in a bound thread and the adapter posts it inbound
+- **THEN** the message is correlated by the `conversationId` the manager issued for that binding, and the adapter has created no id of its own
+
+#### Scenario: No origination through the channel contract
+
+- **WHEN** a channel adapter wants a new conversation started
+- **THEN** no `/channel/*` route accepts one — origination travels the signal lane, where the originating surface supplies the `initiationId`
+
+### Requirement: Outbound operations delivered to adapters by long-poll
+The manager SHALL expose `GET /channel/ops?adapter=<name>&contract=<version>&wait=<seconds>`. It SHALL return the next pending outbound operation for any Channel served by that adapter, 204 on timeout, or 503 when the serving replica is not the current leader and cannot safely claim one on this adapter's behalf.
+
+The parameter names the adapter, the same value Channels carry in `spec.adapter`, replacing the former `?type=`.
+
+A request carrying the retired parameter SHALL fail with 400 naming the replacement, rather than being served an empty list. An outdated adapter then fails loudly instead of appearing to work while delivering nothing.
+
+The polling adapter SHALL additionally declare the outbound contract version it speaks, in the `contract=<version>` query parameter (`GET /channel/ops?adapter=<name>&contract=2&wait=25`). An absent or unsupported declaration SHALL fail with 400 naming what is expected.
+
+A 503 response SHALL be distinguishable from 204: an adapter MUST retry a 503 immediately rather than waiting out its normal idle backoff, and MUST NOT treat it as an error to surface.
+
+Every operation SHALL carry a stable id, the channel and conversation names, a kind, and a kind-specific **structured** payload — never pre-rendered display text:
+
+| Kind | Payload |
+|---|---|
+| `send` | a typed message (`signal`, `answer`, `relay`, or `notice`) with markdown-valued free text and typed structured fields, plus the target thread id |
+| `ensure-topic` | a topic descriptor (`conversation`, `pipeline?`, `source?`, `title`, `labels`, `kind`), never a rendered title string — `pipeline` is inferred and MAY be empty |
+| `close-topic` | the target thread id, asking the adapter to archive or close that thread on its transport |
+| `delete-conversation` | the target thread id and the notice, reporting that the conversation ended for good, as the requirement "A delete-conversation operation reports that a conversation ended for good" defines |
+
+Escaping, length limits, chunking, truncation, and thread naming SHALL be the adapter's responsibility. The manager SHALL emit no transport markup and declare no maximum message size.
+
+Operations SHALL be derived from CR state or router actions, such that an operation lost in flight (manager restart, adapter crash) is regenerated or safely skipped. Delivery is at-least-once, and adapters MUST tolerate duplicates by id.
+
+A `close-topic` operation SHALL be derivable from CR state for as long as it is outstanding, which the Conversation surviving its close guarantees.
 
 #### Scenario: Adapter receives a topic-creation op
 - **WHEN** a Conversation referencing a Channel with `adapter: slack` is reconciled with no `threadId` and an adapter is long-polling `/channel/ops?adapter=slack`
 - **THEN** the adapter receives an `ensure-topic` operation identifying that conversation, carrying a descriptor it names the thread from
 
 #### Scenario: Adapter receives a topic-close op
-- **WHEN** a Conversation bound to a Channel with `adapter: slack` is deleted while holding a thread id
+- **WHEN** a Conversation bound to a Channel with `adapter: slack` is closed while holding a thread id
 - **THEN** the adapter receives a `close-topic` operation carrying that thread id
 
 #### Scenario: No ops available
@@ -39,8 +103,24 @@ Operations SHALL carry a stable id, the channel and conversation names, a kind (
 - **WHEN** a `send` op is delivered for an agent's answer
 - **THEN** it carries an `answer` message with a markdown body and no transport markup, and the adapter renders it
 
+#### Scenario: A poll served by a non-leader is rejected, not answered empty
+- **WHEN** an adapter's poll is handled by a manager replica that is not the current leader
+- **THEN** the manager responds 503, never a 204 that would read as "nothing to deliver" when a claim-worthy op may in fact exist
+
+#### Scenario: A conforming adapter retries a 503 immediately
+- **WHEN** an adapter receives a 503 from `/channel/ops`
+- **THEN** it re-polls at once, the same way it already does on `204`, and does not report the response as a failure
+
 ### Requirement: Asynchronous operation completion
-The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation result — for `ensure-topic`, the thread id string to store in the conversation's status; for `close-topic`, an empty body on success; for failures, an error the manager records (condition/event) and may retry via regeneration. The Conversation reconciler SHALL tolerate the pending window between enqueue and completion: inputs stay queued, serial-per-conversation semantics hold, and runtime-pod handling proceeds per existing ordering rules. A failed `close-topic` SHALL be logged rather than recorded on the Conversation and SHALL NOT be regenerated after its grace period, because the conversation it belongs to is being deleted and no object remains to carry a condition; an adapter that does not implement the kind therefore leaves the thread open without blocking anything.
+The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation result. For `ensure-topic` it is the thread id string to store in the conversation's status. For `close-topic` it is an empty body on success. For failures it is an error the manager records (condition/event) and may retry via regeneration.
+
+The Conversation reconciler SHALL tolerate the pending window between enqueue and completion: inputs stay queued, serial-per-conversation semantics hold, and runtime-pod handling proceeds per existing ordering rules.
+
+A failed `close-topic` or `delete-conversation` is the exception to the failure rule above: it SHALL be logged and SHALL write no Conversation condition. A failed `close-topic` SHALL NOT be exempt from regeneration.
+
+The conversation survives its close. The thread stays absent from `status.threadsArchived[]`, so the archive is still owed and the next reconciliation re-derives the op.
+
+A failed `delete-conversation` is logged and not regenerated. No object remains to carry the obligation.
 
 #### Scenario: Topic id lands asynchronously
 - **WHEN** an adapter completes an `ensure-topic` op with `{threadId: "9876"}`
@@ -52,11 +132,19 @@ The manager SHALL expose `POST /channel/ops/{id}/done` accepting the operation r
 
 #### Scenario: Close-topic completes with an empty result
 - **WHEN** an adapter archives the thread and completes the `close-topic` op with an empty body
-- **THEN** the manager releases the conversation's finalizer and the object is deleted
+- **THEN** the thread is recorded in `status.threadsArchived[]`
 
-#### Scenario: Failed close-topic does not block deletion
+#### Scenario: Failed close-topic is re-derived
 - **WHEN** an adapter completes a `close-topic` op with an error
-- **THEN** the failure is logged, no Conversation condition is written, and deletion proceeds
+- **THEN** the thread stays absent from `status.threadsArchived[]` and the next reconciliation re-enqueues the op
+
+#### Scenario: Failed close-topic is logged without a condition
+- **WHEN** an adapter completes a `close-topic` op with an error
+- **THEN** the failure is logged, no Conversation condition is written, and the next reconciliation re-derives the op while the object exists
+
+#### Scenario: Failed delete-conversation is not regenerated
+- **WHEN** an adapter completes a `delete-conversation` op with an error
+- **THEN** the failure is logged and no op is regenerated
 
 ### Requirement: Inbound messages enter through the shared router
 The manager SHALL expose `POST /channel/inbound` accepting `{channel, threadId, text, sender?}` as the CONTINUATION path only: `threadId` is REQUIRED, and the message SHALL be routed through the transport-neutral router as a reply input on the matching conversation (busy-ack preserved). Resulting acks SHALL flow back to the adapter as `send` operations, and the message SHALL be delivered to every OTHER bound channel that did not already display it as a `relay` message carrying its attribution as fields rather than composed into the text. Whether the originating surface displayed it is the serving adapter's declaration (`ChannelAdapter.spec.echoesOwnMessages`), not a property of the message — the decision is made PER DESTINATION. In-process (registry) providers SHALL use the same operation pipeline so routing behavior is identical for built-in and external types.
@@ -311,22 +399,28 @@ request, and a failure on one entry SHALL NOT stop the rest.
 
 ### Requirement: Adapters absorb retryable backpressure inside the claim window
 An adapter SHALL distinguish **retryable** transport conditions — rate limits,
-timeouts, and transient server errors — from **terminal** ones, and SHALL retry
-retryable conditions in-process before reporting the operation. Only a terminal
-failure, or exhaustion of the adapter's retry budget, SHALL be reported as an
-error to `POST /channel/ops/{id}/done`.
+timeouts, and transient server errors — from **terminal** ones. It SHALL retry
+retryable conditions in-process before reporting the operation.
+
+Only a terminal failure, or exhaustion of the adapter's retry budget, SHALL be
+reported as an error to `POST /channel/ops/{id}/done`.
 
 When the transport states how long to wait, the adapter SHALL honor that value
 rather than applying its own backoff. The adapter's total in-process retry
 budget for one operation SHALL remain strictly below the manager's claim
-reclaim interval, so that an operation still being worked is never re-issued to
-another claimant. An adapter that exceeds the reclaim interval converts the
-manager's at-least-once redelivery into a duplicate the transport cannot
-deduplicate, because the message has already been posted.
+reclaim interval.
+
+The budget is PER OPERATION, never per transport call. An operation that makes
+several calls — a reopen plus a create, one send per chunk, a fallback — SHALL
+charge every call's wait, retry and own timeout against the one budget.
+
+An adapter that exceeds the reclaim interval converts the manager's
+at-least-once redelivery into a duplicate the transport cannot deduplicate,
+because the message has already been posted.
 
 Reporting a retryable condition as an operation failure is permitted but
 degrades the system to the manager's recovery path for a condition the adapter
-could have ridden out; adapters SHALL NOT treat it as the normal path.
+could have ridden out. Adapters SHALL NOT treat it as the normal path.
 
 #### Scenario: Rate limit is slept out rather than reported
 - **WHEN** the transport rejects a `send` with a retryable rate-limit error and a stated wait
@@ -335,6 +429,10 @@ could have ridden out; adapters SHALL NOT treat it as the normal path.
 #### Scenario: Retry budget stays under the reclaim interval
 - **WHEN** an operation's retries would exceed the manager's claim reclaim interval
 - **THEN** the adapter abandons the retry, reports the operation as failed, and the manager re-derives it rather than two claimants posting the same message
+
+#### Scenario: A multi-call operation shares one budget
+- **WHEN** an operation requires several transport calls and each is rate-limited in turn
+- **THEN** the summed waits and timeouts stay below the reclaim interval, or the adapter reports failure while the claim is still valid
 
 #### Scenario: Terminal error is reported immediately
 - **WHEN** the transport rejects an operation for a reason retrying cannot fix, such as a missing thread or a rejected credential
@@ -408,3 +506,39 @@ not required to be addressable, and the contract stays pull-only.
 - **WHEN** the vocabulary changes
 - **THEN** the manager opens no connection to any adapter, and the change is
   observed on the next long-poll response
+
+### Requirement: Delivery operation ids are published shapes
+
+The manager SHALL mint stable, published ids for the two deliveries
+of conversation content:
+
+| Delivery | Id shape |
+|---|---|
+| an agent's reply, per run | `send:<conversation>:<channel>:<runId>` |
+| a person's input, fanned out | `input:<conversation>:<input>:<channel>` |
+
+Each SHALL be stable across redelivery and manager restarts, because the id is
+what makes at-least-once delivery deduplicable.
+
+A consumer MAY parse a published shape. In each, the conversation and channel
+segments are Kubernetes names, which cannot contain the separator — so the one
+remaining segment is recovered by position, whatever it contains.
+
+Any id matching NO published shape SHALL stay opaque. An adapter SHALL NOT
+infer structure the contract does not publish, so an unpublished id can change
+without breaking anyone.
+
+#### Scenario: An input delivery carries the published id
+
+- **WHEN** one input is fanned out to a bound channel and the operation is later redelivered
+- **THEN** both deliveries carry `input:<conversation>:<input>:<channel>`, the same id both times
+
+#### Scenario: A consumer correlates by the published shape
+
+- **WHEN** an adapter correlates a delivered `send` with the input or run it carries
+- **THEN** the published shape yields the conversation, the channel and the remaining segment, anchored on the name segments that cannot contain a separator
+
+#### Scenario: An unpublished id stays opaque
+
+- **WHEN** an operation arrives whose id matches no published shape
+- **THEN** the adapter treats the id as opaque, completes the operation by that id verbatim, and infers nothing from its content

@@ -1,6 +1,6 @@
 // signal-telegram: the chat ORIGINATION adapter. A message on a Telegram
 // chat's general surface is a signal like any other — it goes through the same
-// claim check, cooldown, grouping and observability as an alert or a cron job,
+// claim check, cooldown and observability as an alert or a cron job,
 // instead of creating a Conversation down a private path.
 //
 //	updates: POST /updates            (from gateway-telegram; LISTEN_ADDR, default :8080)
@@ -16,10 +16,14 @@
 // each against the same contract and drift shows up as messages silently
 // ignored, so both sides get the same test.
 //
-// NO adapter-side grouping: cooldown, signature grouping, window reuse and
-// recurrence stay manager-side from SignalSource.spec.grouping, and routing
-// requires the source's Pipeline claim (an unclaimed chat source drops with
-// Wired=False and the reason travels back to the user's surface).
+// A general-surface message is always its own aggregation unit — a FRESH
+// initiationId, minted here from the update's own delivery identity, never
+// propagated from anything remembered. (A reply inside a thread the manager
+// already bound is channel-telegram's continuation side, not this one.) NO
+// adapter-side cooldown or recurrence: those stay manager-side, keyed on
+// that id, and routing requires the source's Pipeline claim (an unclaimed
+// chat source drops with Wired=False and the reason travels back to the
+// user's surface).
 //
 // Environment: MANAGER_URL, ADAPTER_TOKEN, ADAPTER_NAME (default
 // "telegram"), LISTEN_ADDR (default ":8080" — in-cluster the reconciler
@@ -41,6 +45,22 @@ import (
 	"syscall"
 	"time"
 )
+
+// sanitizeLogText strips CR/LF from a string before it reaches a log line --
+// gosecurity:S5145's ask, since a value logged here can carry Telegram-relayed
+// content (a message's text, ultimately, or a manager response derived from
+// it) that could otherwise forge a second log line. strings.ReplaceAll on
+// each of \n and \r, chained, is the rule's own documented compliant
+// pattern -- a strings.Map closure is not reliably recognized as breaking the
+// taint by the analyzer, even though it removes strictly more.
+func sanitizeLogText(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", "_"), "\r", "_")
+}
+
+// sanitizeLog is sanitizeLogText for an error's own text.
+func sanitizeLog(err error) string {
+	return sanitizeLogText(err.Error())
+}
 
 // Reserved labels every chat adapter sets. agentops.dev/channel is what lets
 // the manager answer a command on the surface the message came from without
@@ -218,6 +238,7 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		log.Printf("list sources: %v", err)
 		return
 	}
+	a.pruneReported(infos)
 	next := map[string]servedSource{}
 	for _, info := range infos {
 		var cfg sourceConfig
@@ -231,29 +252,68 @@ func (a *adapter) refreshSources(ctx context.Context) {
 		} else if cfg.Channel == "" {
 			problem = "spec.config.channel is required — it names the Channel this chat is the general surface of, and replies have nowhere to go without it"
 		}
-		a.mu.Lock()
-		last := a.reported[info.Name]
-		a.mu.Unlock()
 		if problem != "" {
-			if last != problem {
-				_ = a.mgr.ReportStatus(ctx, info.Name, false, "InvalidConfig", problem)
-				a.mu.Lock()
-				a.reported[info.Name] = problem
-				a.mu.Unlock()
-			}
+			a.reportOnce(ctx, info.Name, false, "InvalidConfig", problem)
 			continue // keep serving the other sources
 		}
-		if last != "ok" {
-			_ = a.mgr.ReportStatus(ctx, info.Name, true, "AdapterReady",
-				"served by signal-telegram — general-surface messages originate conversations")
-			a.mu.Lock()
-			a.reported[info.Name] = "ok"
-			a.mu.Unlock()
-		}
+		a.reportOnce(ctx, info.Name, true, "AdapterReady",
+			"served by signal-telegram — general-surface messages originate conversations")
 		next[info.Name] = servedSource{cfg: cfg}
 	}
 	a.mu.Lock()
 	a.sources = next
+	a.mu.Unlock()
+}
+
+// pruneReported drops the last-reported status of every source the manager no
+// longer serves. Without it a deleted source's entry outlives the object, so a
+// recreation under the same name with the same invalid config would match the
+// stale entry and never re-report Ready=False — and the map would grow with
+// every source ever seen.
+//
+// Called only after a successful list. A failed list prunes nothing, as it
+// keeps `sources`: entries are written only for listed names, so the map
+// cannot grow during an outage, and the first successful list prunes it.
+func (a *adapter) pruneReported(infos []SourceInfo) {
+	served := make(map[string]struct{}, len(infos))
+	for _, info := range infos {
+		served[info.Name] = struct{}{}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for name := range a.reported {
+		if _, ok := served[name]; !ok {
+			delete(a.reported, name)
+		}
+	}
+}
+
+// reportedReady is the reported-map entry for a source last reported Ready.
+// An invalid source's entry is its problem text instead, so a changed problem
+// re-reports too.
+const reportedReady = "ok"
+
+// reportOnce posts a source's Ready condition unless the manager already
+// accepted that same state. The entry is recorded only after the post
+// succeeds: recording a failed post would suppress the report until the
+// config changed, leaving the source's Ready condition unset or stale.
+func (a *adapter) reportOnce(ctx context.Context, name string, ready bool, reason, message string) {
+	state := message
+	if ready {
+		state = reportedReady
+	}
+	a.mu.Lock()
+	unchanged := a.reported[name] == state
+	a.mu.Unlock()
+	if unchanged {
+		return
+	}
+	if err := a.mgr.ReportStatus(ctx, name, ready, reason, message); err != nil {
+		log.Printf("report status %s: %s (retried next refresh)", sanitizeLogText(name), sanitizeLog(err))
+		return
+	}
+	a.mu.Lock()
+	a.reported[name] = state
 	a.mu.Unlock()
 }
 
@@ -280,12 +340,12 @@ func (a *adapter) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.mgr.Inbound(r.Context(), source, []Signal{sig})
 	if err != nil {
-		log.Printf("inbound %s: %v", source, err)
+		log.Printf("inbound %s: %s", sanitizeLogText(source), sanitizeLog(err))
 		http.Error(w, "push failed", http.StatusBadGateway)
 		return
 	}
 	if res.Reason != "" {
-		log.Printf("source %s: %s", source, res.Reason)
+		log.Printf("source %s: %s", sanitizeLogText(source), sanitizeLogText(res.Reason))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -330,13 +390,20 @@ func (a *adapter) normalize(upd tgUpdate) (string, Signal, bool) {
 	}
 
 	return match, Signal{
-		// update_id is unique per bot, so identical text twice never
-		// collapses on cooldown — repeating yourself is not dedup.
-		Fingerprint: "tg-" + strconv.FormatInt(upd.UpdateID, 10),
-		Labels:      a.chatLabels(cfg, m.From, m.MessageID),
-		Kind:        "chat",
-		Payload:     text,
-		Title:       title(text),
+		// A fresh mint from the update's own delivery identity, scoped to
+		// the matched SOURCE as well as the update id: update_id is a
+		// per-bot sequence, so two SignalSources (two bot tokens, or the
+		// same bot served twice) claimed by one Pipeline could otherwise
+		// mint the same bare update_id and collide. Identical text twice
+		// never collapses on cooldown — repeating yourself is not dedup —
+		// while a crash-retried redelivery of the SAME update on the SAME
+		// source repeats the same id rather than posing as a second
+		// request.
+		InitiationID: "tg-" + match + "-" + strconv.FormatInt(upd.UpdateID, 10),
+		Labels:       a.chatLabels(cfg, m.From, m.MessageID),
+		Kind:         "chat",
+		Payload:      text,
+		Title:        title(text),
 	}, true
 }
 
@@ -378,13 +445,15 @@ func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
 		}
 	}
 	return match, Signal{
-		// The callback id is unique per tap, so tapping twice is two requests
-		// rather than one collapsed by cooldown.
-		Fingerprint: "tg-cb-" + cb.ID,
-		Labels:      a.chatLabels(cfg, cb.From, handle),
-		Kind:        "chat",
-		Payload:     payload,
-		Title:       title(payload),
+		// A fresh mint from the tap's own delivery identity, scoped to the
+		// matched source for the same reason the message path is: unique
+		// per tap, so tapping twice is two requests rather than one
+		// collapsed by cooldown.
+		InitiationID: "tg-cb-" + match + "-" + cb.ID,
+		Labels:       a.chatLabels(cfg, cb.From, handle),
+		Kind:         "chat",
+		Payload:      payload,
+		Title:        title(payload),
 	}, true
 }
 
@@ -474,8 +543,10 @@ func title(text string) string {
 			break
 		}
 	}
-	if len(text) > max {
-		return text[:max] + "…"
+	// Cut on a rune boundary: a byte cut can split a multi-byte character
+	// and hand the manager invalid UTF-8.
+	if runes := []rune(text); len(runes) > max {
+		return string(runes[:max]) + "…"
 	}
 	return text
 }

@@ -44,6 +44,15 @@ import (
 //     ChannelAdapter, the only component that knows;
 //   - a channel with no thread binding yet is skipped, and picked up on the
 //     reconcile the binding triggers — enqueuing earlier would drop the message.
+//
+// A COORDINATOR ROOT'S CHANNELS ARE BOUND AT CREATION, NOT AT ESCALATION
+// (coordinator-unconditional-channels, superseding design D-D's escalation
+// fencing): every channel in `conv.Spec.ChannelRefs` already has a thread from
+// the conversation's own start, so there is no "freshly bound channel" moment
+// for a backlog to flood. Every input is delivered to it in the ordinary
+// per-destination way, `escalate` included — it posts a notice into a thread
+// that was already open, not the thread's opening post. Nothing here is fenced
+// on `status.escalatedAt` any more.
 func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv *agentopsv1alpha1.Conversation) {
 	if ops == nil || len(conv.Spec.ChannelRefs) == 0 {
 		return
@@ -57,9 +66,9 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
 		}
-		body, inputRef, labels := item.Payload, "", map[string]string(nil)
+		body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
 		if ci := InputPayload(ctx, reader, ns, item); ci != nil {
-			body, inputRef, labels = ci.Spec.Payload, ci.Name, ci.Spec.Labels
+			body, inputRef, labels, severity = ci.Spec.Payload, ci.Name, ci.Spec.Labels, ci.Spec.Severity
 		}
 		surface := item.OriginSurface(labels)
 		surfaceEchoes := true
@@ -81,7 +90,7 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 				}
 				resolved = true
 			}
-			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body)
+			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body, item.Origin.Kind).WithSeverity(severity)
 		}
 		for _, ref := range conv.Spec.ChannelRefs {
 			if !item.DeliverTo(ref.Name, surface, surfaceEchoes) {
@@ -96,7 +105,7 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 				ch.Spec.Adapter == "" {
 				continue
 			}
-			ops.EnqueueInputDelivery(ctx, &ch, conv.Name, item.ID, tid, msg)
+			ops.EnqueueInputDelivery(ctx, &ch, conv, item.ID, tid, msg)
 		}
 	}
 }

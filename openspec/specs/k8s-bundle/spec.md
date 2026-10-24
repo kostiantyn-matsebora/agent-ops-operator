@@ -3,7 +3,9 @@
 ## Purpose
 
 The Kubernetes agent Helm subchart composition at `chart/charts/k8s-bundle/`: packages the k8s events signal source, the `k8s-engineer` profile, the Kubernetes MCP tooling and its own wiring as individually toggleable components. It ships no execution SUBSTRATE: the `AgentRuntime`, the model credential, the context volume and the release-wide floor identity are the parent chart's (`agent-runtime-ownership`). It DOES render the ServiceAccount each route it ships runs as, because it is the only scope that knows what its own routes do. Self-gated and off by default, it is also what demo mode turns on — demo mode is an enablement path for the bundle's read-only defaults, not a distinct feature set.
+
 ## Requirements
+
 ### Requirement: The k8s bundle ships as a self-gated subchart, off by default and on in demo mode
 The bundle SHALL be named for the system it integrates — `kubernetes` — and SHALL
 NOT carry a `-bundle` suffix, matching `prometheus`, `telegram`, `home-assistant`
@@ -42,13 +44,21 @@ operator who meant to leave it off.
 - **THEN** the same bundle components render — demo mode is an enablement path, not a distinct feature set — and NO Pipeline renders unless the wiring flag is set
 
 ### Requirement: Each component is individually toggleable
-Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, `mcp.enabled`, and `pipelines.enabled` SHALL independently control their component's objects. The first three SHALL default `true`, and the `mcpServers` sub-component that deploys the MCP server workload SHALL default `true` alongside `mcp`: the two flip together so the config's URL always has an endpoint to default onto, which is the only reason the MCP component was previously off. The endpoint guard SHALL remain and SHALL still fail loudly for `mcp.enabled` with no server workload and no `url`.
+Within an active bundle, `eventsAdapter.enabled`, `profile.enabled`, `mcp.enabled`, and `wiringEnabled` SHALL independently control their component's objects.
 
-`pipelines.enabled` SHALL default `false` — the exception among the four, because a route is the one component of this bundle that spends money and touches the cluster on its own. Demo mode SHALL force it on; nothing else SHALL.
+The first three SHALL default `true`. The `mcpServers` sub-component that deploys the MCP server workload SHALL default `true` alongside `mcp`: the two flip together so the config's URL always has an endpoint to default onto, which is the only reason the MCP component was previously off.
 
-The bundle SHALL expose no runtime-defaults or floor-account component; those are the parent's `global.agentops.runtimeDefaults` and `runtimes:`. It SHALL expose ONE stated setting for whether agents on its lane may CHANGE the cluster, which moves the server's read-only flag, that server's RBAC, the mutating toolset and which route ships — each still individually overridable, and none derived from a release-wide value.
+The endpoint guard SHALL remain and SHALL still fail loudly for `mcp.enabled` with no server workload and no `url`.
 
-Cross-component references SHALL be values-resolvable so partial enablement works. Wiring the bundle renders SHALL reference only objects the bundle itself renders, plus values-supplied names omitted when unset; a route that would span components the bundle cannot see SHALL be declared by the install, in the parent chart's `pipelines:`.
+`wiringEnabled` SHALL default `false` — the exception among the four, because a route is the one component of this bundle that spends money and touches the cluster on its own. Demo mode SHALL force it on. Nothing else SHALL force it on.
+
+The bundle SHALL expose no runtime-defaults or floor-account component. Those are the parent's `global.agentops.runtimeDefaults` and `runtimes:`.
+
+It SHALL expose ONE stated setting for whether agents on its lane may CHANGE the cluster, which moves the server's read-only flag, that server's RBAC, the mutating toolset and which route ships. Each stays individually overridable, and none is derived from a release-wide value.
+
+Cross-component references SHALL be values-resolvable so partial enablement works. Wiring the bundle renders SHALL reference only objects the bundle itself renders, plus values-supplied names omitted when unset.
+
+A route that would span components the bundle cannot see SHALL be declared by the install, in the parent chart's `pipelines:`.
 
 #### Scenario: Events-only bundle
 - **WHEN** the bundle is enabled with `profile.enabled=false`, `mcp.enabled=false` and wiring off
@@ -71,11 +81,32 @@ Cross-component references SHALL be values-resolvable so partial enablement work
 - **THEN** the `MCPConfig` and toolsets render for operators to bind from their own Pipelines
 
 ### Requirement: The events component packages the adapter with its access
-When active, the `eventsAdapter` component SHALL render: the `SignalAdapter` CR (default name `k8s-events` — the routing key SignalSources select with `spec.adapter` — values-configured image, singleton, and `serviceAccountName` NAMING the account this component renders); the adapter's ServiceAccount `agentops-signal-<name>` RENDERED BESIDE ITS GRANT — the operator creates no account and binds no RBAC, so the identity and what it may do are read from one file — carrying `events` `get`/`list`/`watch` AND `pods`/`replicasets` `list`/`watch` (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`); and, when `source.create` is on, a `SignalSource` naming that adapter with `severities` defaulting to `["Warning"]` and values-configurable `namespaces` and `grouping`. The claim on that source belongs to the wiring component or to the install — never to this one, so an events lane can be rendered for a route declared anywhere. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
+When active, the `eventsAdapter` component SHALL render:
+
+- the `SignalAdapter` CR (default name `k8s-events` — the routing key SignalSources select with `spec.adapter` — values-configured image, singleton, and `serviceAccountName` NAMING the account this component renders)
+- the adapter's ServiceAccount `agentops-signal-<name>` RENDERED BESIDE ITS GRANT — the operator creates no account and binds no RBAC, so the identity and what it may do are read from one file — carrying `events` `get`/`list`/`watch`, `pods`/`replicasets` `list`/`watch`, AND, cluster-wide only, `nodes` `list`/`watch` for drain awareness (ClusterRole by default, namespaced Role via `rbac.clusterWide: false`, none via `rbac.create: false`)
+- when `source.create` is on, a `SignalSource` naming that adapter with `severities` defaulting to `["Warning"]` and values-configurable `namespaces`
+
+The rendered source SHALL carry no grouping values. One conversation per workload comes from the adapter's own workload-keyed `initiationId`, not from rendered policy, so there is nothing for the bundle to configure there.
+
+The claim on that source belongs to the wiring component or to the install — never to this one, so an events lane can be rendered for a route declared anywhere. The manager SHALL NOT create or require any RBAC verbs on roles or rolebindings.
 
 The pods/replicasets grant is read-only and exists because the adapter resolves workload identity through owner references and re-checks liveness before emitting. Where the events grant is namespaced, the pods/replicasets grant SHALL be namespaced identically — the adapter never reads more broadly than it watches.
 
-The rendered source's default `grouping.signatureLabels` SHALL be `["namespace", "workload"]`, and its default `rules` SHALL be calibrated against both failure modes at once: they SHALL NOT open a conversation for ordinary rollout churn, and they SHALL NOT lose an actionable incident. Specifically the shipped defaults SHALL drop only pure-bookkeeping reasons whose underlying problem another undropped reason still reports, SHALL assign `for: 0` to reasons describing a completed event and to node-level conditions, SHALL assign longer dwells with breadth escalation to the known-flappy reasons, and SHALL end in a catch-all dwell so unanticipated reasons are verified rather than discarded.
+The `nodes` grant has NO namespaced equivalent — nodes are cluster-scoped — so a namespaced install renders none of it. The adapter's drain-awareness axis (see the `k8s-drain-awareness` capability) is off there, reported once on each source's condition without failing it.
+
+The source's default `rules` SHALL be calibrated against both failure modes at once: they SHALL NOT open a conversation for ordinary rollout churn, and they SHALL NOT lose an actionable incident. Specifically the shipped defaults SHALL:
+
+- drop only pure-bookkeeping reasons whose underlying problem another undropped reason still reports
+- assign `for: 0` to reasons describing a completed event and, matching `kind="Node"` only, to node-level conditions
+- assign longer dwells with breadth escalation to the known-flappy reasons
+- end in a catch-all dwell so unanticipated reasons are verified rather than discarded
+
+A pod-level copy of a node-condition reason (`NodeNotReady` chief among them, stamped by the node lifecycle controller on every pod scheduled on the affected node) is excluded by the `kind="Node"` qualifier.
+
+It falls to the catch-all's dwell and liveness re-check instead, which is what lets a routine node reboot that recovers within the dwell go unreported rather than firing once per workload.
+
+The rendered source's default `route.drainingNodes` SHALL be `suppress`.
 
 #### Scenario: A healthy rollout produces no conversation
 - **WHEN** the bundle renders with default values and a ten-replica Deployment rolls out normally, emitting probe and scheduling warnings on pods that then become Ready or terminate
@@ -105,9 +136,17 @@ The rendered source's default `grouping.signatureLabels` SHALL be `["namespace",
 - **WHEN** `eventsAdapter.rbac.clusterWide=false`
 - **THEN** only a namespaced Role/RoleBinding renders, covering events, pods and replicasets alike, and the adapter can watch only in the release namespace
 
+#### Scenario: Cluster-wide grant includes nodes
+- **WHEN** the bundle renders with default values
+- **THEN** the events ClusterRole lists `nodes` with `list` and `watch`, and the namespaced variant does not
+
+#### Scenario: Pod-level NodeNotReady dwells
+- **WHEN** a pod emits `NodeNotReady` on a node that is not draining and is Ready again within the catch-all dwell
+- **THEN** no signal is emitted
+
 #### Scenario: A default install groups by workload
 - **WHEN** the bundle renders with default values and a ten-replica Deployment crash-loops through several rollouts
-- **THEN** the rendered source's `signatureLabels` are `["namespace", "workload"]` and one conversation covers the workload rather than one per pod
+- **THEN** the rendered source carries no grouping values and one conversation covers the workload, because the adapter's `initiationId` keys on it
 
 #### Scenario: Default rules ship, not an empty filter
 - **WHEN** the bundle renders with default values
@@ -117,6 +156,10 @@ The rendered source's default `grouping.signatureLabels` SHALL be `["namespace",
 When active, the `profile` component SHALL render exactly one object: the `k8s-engineer` `AgentProfile` (values-configurable name, `maxTurns`, no repository, and **no capabilities** — no `allowedTools`, no `mcp`). It SHALL render no `AgentRuntime`, no ServiceAccount, and no credential Secret; the profile executes on the parent chart's runtime.
 
 Because the profile has NO repository, no agent definition file can be resolved for it. The component SHALL therefore support an inline role (`systemPrompt`) and ship a sensible default, so the shipped agent is not personality-free: a conversation started by a cluster event would otherwise arrive with no instructions at all.
+
+**The inline role SHALL state the install's pod-execution posture, rendered from the same value the RBAC reads.** `global.agentops.runtimeDefaults.allowPodExecution` gates every write that produces or enters a pod on the route account and on the MCP server's role; the profile is the third wall on the same value. When the gate is off, the rendered role SHALL carry a paragraph telling the agent that this install withholds pod execution — creating or entering a pod, and editing the pod template of a Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob — and that such a request is to be declined with that reason, naming what remains possible and suggesting the operator makes the edit, rather than attempted. When the gate is on, the paragraph SHALL be absent. The paragraph's text SHALL be a bundle value, appended after `systemPrompt` whether that prompt is the shipped one or the operator's own, because the posture is the chart's fact and not the prompt author's. There SHALL be one profile, never a second one per posture: a hand-kept copy drifts from the gate the first time it is flipped.
+
+The toolset wall is a different wall, and the role already covers it: a tool absent from the allowlist is reported as unavailable. The posture paragraph exists because the pod-execution gate is invisible from the tool list — the MCP server advertises the workload-patch tool whatever the gate says, and the refusal arrives from the API server one hop later.
 
 `profile.runtimeRef` SHALL remain, naming a runtime other than `default` — a different-vendor runtime the install declared. Left empty, the profile emits no `runtimeRef` and falls back to `default`, whose existence the render-time default-runtime guard is what guarantees.
 
@@ -151,6 +194,22 @@ Because the profile has NO repository, no agent definition file can be resolved 
 #### Scenario: The repo-less agent still has a role
 - **WHEN** the bundle renders with defaults
 - **THEN** the AgentProfile carries an inline role describing the agent's job and how to act on a cluster, which the runtime appends to its system prompt
+
+#### Scenario: The withheld posture is stated to the agent
+- **WHEN** the bundle renders with `allowPodExecution` false (the default)
+- **THEN** the AgentProfile's inline role ends with the posture paragraph: pod execution is withheld, a pod-template edit is declined with that reason, what remains possible is named, and the operator is pointed at making the edit
+
+#### Scenario: The agent declines instead of failing
+- **WHEN** `allowPodExecution` is false and a person asks the acting route to add a `nodeSelector` to a Deployment
+- **THEN** the agent does not call a workload-patch tool, and its answer says the install withholds pod-template edits, what it could still do, and that the operator can make the change — never an RBAC refusal read back from the API server
+
+#### Scenario: The paragraph follows the gate
+- **WHEN** the bundle renders with `allowPodExecution` true
+- **THEN** the inline role carries no posture paragraph, and the RBAC it describes is granted on the same render
+
+#### Scenario: An operator's own prompt keeps the posture
+- **WHEN** `profile.systemPrompt` is overridden and `allowPodExecution` is false
+- **THEN** the posture paragraph is appended after the operator's text, unchanged
 
 ### Requirement: Demo values migrate to bundle paths
 The pre-bundle demo values SHALL move: `demo.enabled` → `global.demo.enabled`, `demo.readOnlyRbac` → `global.agentops.runtime.rbacMode` (true ≙ `readonly`). The runtime-shaped demo values SHALL land in the parent's `runtime:` block rather than in this bundle: `demo.runtimeImage` → `runtime.image`, `demo.credentialsSecret.*` → `runtime.credentialsSecret.*`, inherited `persistence` → automatic, inherited `runtimeIdleTtlMinutes` → the manager default with `runtime.idleTtlMinutes` as an override.
@@ -272,3 +331,82 @@ gives it SHALL get that from the bundle rather than from a release-wide preset.
 #### Scenario: Route identities still hold nothing
 - **WHEN** the bundle ships its routes
 - **THEN** each runs as its own account, and those accounts carry no Kubernetes RBAC
+
+### Requirement: Demo mode renders a showcase Pipeline alongside coordinator mode
+
+When the bundle's demo-mode branch resolves `global.agentops.wiringMode` to
+`coordinator`, the bundle SHALL ALSO render one plain `Pipeline` — the
+showcase route — alongside the chart-rendered `Coordinator`'s own
+`AgentCapability` entries, so a demo install exhibits both wiring
+primitives at once rather than the Coordinator alone.
+
+The showcase route SHALL reuse the SAME `k8s-engineer` profile and the SAME
+observing toolset as the bundle's `k8s-observe` capability, at the SAME
+privilege level, so it needs no new identity, image, or credential.
+
+The showcase route SHALL claim the bundle's own `cluster-events` source and
+the console's chat source, on the SAME terms any `pipelines`-mode route
+claims them today — sources remain shareable, and the Coordinator's own
+claim on the same sources is unaffected.
+
+Rendering the showcase route SHALL be governed by `global.demo.wiringShowcase`
+(nullable):
+
+- Unset, under `global.demo.enabled: true` and a resolved `wiringMode` of
+  `coordinator`, it SHALL default to rendering the showcase route.
+- An explicit `false` SHALL decline it, in both directions — even under
+  demo mode.
+- Outside `global.demo.enabled: true`, or where the resolved `wiringMode`
+  is `pipelines`, it SHALL render nothing: the bundle's ordinary
+  `pipelines`-mode route already supplies the `Pipeline` primitive, and
+  adding a second one would duplicate it for no reason.
+
+A release that sets neither `global.demo.enabled` nor
+`global.agentops.wiringMode` SHALL render byte-identical to a release
+before this requirement existed: the showcase route depends on demo mode's
+own default resolving to `coordinator`, and nothing here changes
+`wiringMode`'s own resolution or `pipelines.yaml`'s existing rendering.
+
+#### Scenario: Demo mode's default renders both primitives
+
+- **WHEN** the chart is installed with `global.demo.enabled=true` and
+  nothing else
+- **THEN** the chart-rendered `Coordinator` and its `AgentCapability`
+  entries render, AND the kubernetes bundle also renders exactly one plain
+  `Pipeline` claiming the same `cluster-events` source
+
+#### Scenario: The showcase is declined explicitly
+
+- **WHEN** the chart is installed with `global.demo.enabled=true` and
+  `global.demo.wiringShowcase=false`
+- **THEN** the chart-rendered `Coordinator` renders as before, and the
+  bundle renders no additional `Pipeline`
+
+#### Scenario: Explicit pipelines mode under demo renders no showcase
+
+- **WHEN** the chart is installed with `global.demo.enabled=true` and
+  `global.agentops.wiringMode=pipelines`
+- **THEN** the bundle renders its ordinary `pipelines`-mode `Pipeline` and
+  no `Coordinator`, `AgentCapability`, or second `Pipeline` from this
+  requirement
+
+#### Scenario: A real install is unaffected
+
+- **WHEN** the chart is installed with `global.demo.enabled` unset or
+  `false`
+- **THEN** no object rendered by this requirement appears, whatever
+  `global.agentops.wiringMode` is set to
+
+#### Scenario: The showcase route shares the console and the cluster source
+
+- **WHEN** the showcase route renders
+- **THEN** it claims the kubernetes bundle's `cluster-events` source and
+  the console's chat source exactly as a `pipelines`-mode route would, and
+  the Coordinator's own claim on those same sources is unchanged
+
+#### Scenario: The showcase route costs no new substrate
+
+- **WHEN** the showcase route renders
+- **THEN** it names the bundle's own `k8s-engineer` profile and observing
+  toolset, renders no new `AgentRuntime`, ServiceAccount, or credential, and
+  runs at the same privilege level as the bundle's `k8s-observe` capability

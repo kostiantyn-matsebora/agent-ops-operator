@@ -1,0 +1,1015 @@
+#!/usr/bin/env python3
+"""Land a dispatch's patch, then answer and close the threads it fixed.
+
+THIS IS THE STEP THAT HOLDS `contents: write`, AND NO MODEL RUNS IN IT. The
+fixing job reads the repository and emits two files -- a patch and a report --
+and this program does the one fixed thing with them: apply, commit, push,
+reply, resolve. Its behaviour cannot be rewritten by what it is handed.
+
+WHAT IT TRUSTS, AND WHAT IT DOES NOT.
+
+  - The WORK LIST came from `accepted-findings.py` (and, on a labelled pull
+    request, `sonar-issues.py`), model-free programs that walked the threads
+    and asked the analysis service. It is the set of things this run may
+    touch. Every item carries an `id`: a thread id, or `sonar:<issue key>`.
+  - The REPORT came from the model. It is a CLAIM about which items were
+    addressed, and it is checked twice: an item is "fixed" only if it is on
+    the work list AND the patch changes the file the item points at. A claim
+    about an id the list does not carry is dropped and named.
+  - The PATCH came from the model. It lands as an ordinary commit on the
+    branch, where the review re-reads it and a person still merges. Nothing
+    here bypasses review; it produces work for it.
+
+THE ORDER IS THE CORRECTNESS ARGUMENT. Push first, reply second, resolve
+third. A reply reading "fixed in <sha>" written before the push is a claim
+rather than a report, and a thread resolved before its fix landed is a thread
+resolved on the strength of nothing.
+
+A PATCH THAT DOES NOT APPLY RESOLVES NOTHING. The branch moved between review
+and dispatch; the recovery is a re-dispatch after a rebase, and this program
+says so on the pull request rather than leaving a silent failed run.
+
+TWO MODES, ONE PROGRAM.
+
+  threads   a person accepted findings in their threads and sent a dispatch.
+            Everything above, then a comment saying the landed commit has no
+            CI and no review until somebody pushes again -- a push made with
+            the workflow token starts no workflow.
+  all       the pull request carries the approval label (`.github/
+            review-triage.json`, `approve_label`, `conveyor:fix`). Every item
+            the fixing step NAMED is FIXED or DISPUTED, never dropped: a
+            disputed thread gets a reply under the dispute marker and stays
+            open, disputed analysis issues get ONE pull request comment under
+            the same marker, and the person who placed the label is
+            mentioned. An item the report never mentions -- and every item, if
+            the fixing step wrote NO report at all (`--report-missing`) -- is
+            UNADDRESSED instead: silence is not a decision, so it is worded as
+            such and stays eligible for a later round rather than being
+            reported as a refusal nobody made. The landed commit is pushed
+            with a credential that is NOT the workflow token -- a write
+            deploy key the workflow configures on the remote before calling
+            this -- so the push is an ordinary push, CI and the review run on
+            it, and the review's completion starts the next round. (A check
+            run from a `workflow_dispatch` never reaches the merge box:
+            measured on #131, the gotchas rule file.)
+            `--push-starts-workflows` is how the workflow says that
+            credential was in place; without it a landed round ends the loop,
+            saying so.
+            Rounds are counted from this program's own round-marked comments
+            since the label was placed (state on the pull request, derivable,
+            no store), capped at `--max-rounds` -- read from the vocabulary
+            file's `max_rounds` by the caller -- and every ending posts ONE
+            summary. Reaching the cap is not the end: `keep_going_label`
+            (`conveyor:keep-going`) grants another set and is REMOVED the
+            moment a round runs under it, because a permanent extension is
+            not a decision.
+
+Resolution itself is DELEGATED to `resolve-review-threads.py`, which re-reads
+every thread and refuses any the review did not author. Two programs that
+could close a thread would be two places for that refusal to drift.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conveyor  # noqa: E402  -- the state machine, restored beside this program by the workflow
+
+DEFAULT_VOCABULARY = pathlib.Path(__file__).resolve().parents[1] / "review-triage.json"
+SUMMARY_MARKER = "<!-- conveyor:summary -->"
+
+# WHAT EACH ENDING IS, TO THE MACHINE. The words on the pull request stay as
+# they were; the machine's own kinds decide the loop label and whether the
+# round spent the budget, so there is one rule and this is only the mapping.
+ENDING_KIND = {
+    "clean": "clean",
+    "no report": "no report",
+    "fixing step failed": "failed",
+    "fixing step timed out": "timed out",
+    "stale patch": "stale patch",
+    "round cap reached": "landed",
+    "could not start the next round": "no next round",
+    "disputes only": "disputed",
+    # NOTHING LANDED AND ITEMS ARE STILL ELIGIBLE: the machine says the round
+    # starts the next one itself (#259: a failed fix is not a decision).
+    "disputed and unaddressed": "unaddressed",
+    "nothing addressed": "unaddressed",
+    # A RED CHECK THE FIXER COULD NOT EXPLAIN GETS ONE FRESH RUN before anyone
+    # is asked: an empty commit, so CI judges the head again under the merged
+    # workflows. On #259 the red was a check step that no longer existed.
+    "checks re-run": "checks re-run",
+}
+DISPUTED_ITEM = "<!-- conveyor:disputed-item {} -->"   # per item, inside a dispute comment, so a later round finds it
+
+
+def sh(*cmd: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(list(cmd), capture_output=True, text=True, check=check, **kw)
+
+
+def gh(*args: str) -> str:
+    return sh("gh", *args).stdout
+
+
+def pr_comment(repo: str, pr: int, body: str) -> None:
+    gh("pr", "comment", str(pr), "--repo", repo, "--body", body)
+
+
+def thread_reply(repo: str, pr: int, comment_id: int, body: str) -> None:
+    gh("api", f"repos/{repo}/pulls/{pr}/comments/{comment_id}/replies", "-f", f"body={body}")
+
+
+def patch_paths(patch: pathlib.Path) -> set[str]:
+    """The files a patch changes, as git reads them -- never by parsing the
+    patch here. `--numstat` is what `git apply` itself would touch."""
+    out = sh("git", "apply", "--numstat", str(patch)).stdout
+    return {line.split("\t")[2] for line in out.splitlines() if line.count("\t") >= 2}
+
+
+def read_dropped(path) -> list[str]:
+    """dispatch-patch.py's record of the new files the fixing step left in the
+    checkout WITHOUT declaring them -- deleted before the patch was cut, so
+    they are named here rather than landed. Absent (the fixing job never ran,
+    or an older artifact) is nothing dropped."""
+    if not path or not pathlib.Path(path).is_file():
+        return []
+    try:
+        data = json.loads(pathlib.Path(path).read_text() or "{}")
+    except json.JSONDecodeError:
+        return []
+    dropped = data.get("dropped") if isinstance(data, dict) else None
+    return [d for d in dropped if isinstance(d, str)] if isinstance(dropped, list) else []
+
+
+def dropped_note(dropped: list[str]) -> str:
+    """One sentence for a landing comment. A scratch file that did not land is
+    not silent: a person reading the round should see the fixer left it, in
+    case it was a fix the report forgot to declare."""
+    if not dropped:
+        return ""
+    return (f"\n\nNot landed: {', '.join(f'`{d}`' for d in dropped)} — created by the fixing step "
+            "but not declared in its report, so deleted before the patch was cut.")
+
+
+def first_line(text: str, limit: int = 72) -> str:
+    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def load_markers(path: pathlib.Path) -> dict:
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        doc = {}
+    return {"dispute": doc.get("dispute_marker", "<!-- conveyor:disputed -->"),
+            "round": doc.get("round_marker", "<!-- conveyor:round"),
+            "grant": doc.get("grant_marker", "<!-- conveyor:grant -->"),
+            "refresh": doc.get("refresh_marker", "<!-- conveyor:refreshed -->"),
+            "keep_going": doc.get("keep_going_label", "conveyor:keep-going")}
+
+
+# THE FIXING STEP'S OWN PROMPT ASKS FOR AT MOST 40 WORDS (this repository's
+# rules on answering and writing) -- this is the SECOND wall, because a
+# prompt is followed
+# until the model is tired, and a dispute's "reason" is posted VERBATIM to a
+# thread or a pull request comment. A wall of prose -- a timeline, a log
+# excerpt, quoted file content -- is exactly what those rules exist to keep
+# out of anything a maintainer reads. Measured live: a dispute reason ran to
+# several paragraphs, reproducing an investigation nobody asked to read to
+# decide `fix it` or leave it. This never truncates mid-sentence -- see
+# invariants.md, "NOTHING SHORTENS AN AGENT'S OUTPUT" -- it REPLACES an
+# over-length reason with a short, honest notice instead, so the thread
+# still gets an answer and the maintainer is told where the real one is.
+REASON_WORD_LIMIT = 40
+
+
+def shorten_reason(reason: str) -> str:
+    words = reason.split()
+    if len(words) <= REASON_WORD_LIMIT:
+        return reason
+    return (f"disputed, but the fixing step's own reason ran to {len(words)} words -- "
+            "over this repository's limit for anything posted to a thread. "
+            "See the run's own log for the actual reasoning.")
+
+
+def read_report(report: dict, work: dict) -> tuple[list[str], dict[str, str]]:
+    """The model's claims, in either shape it may have written:
+    {"items":[{"id","action","reason"}]} or the older {"fixed":[...],
+    "unfixed":[{"threadId","reason"}]}. Returns (claimed fixed ids,
+    {disputed id: reason}); ids the work list does not carry are dropped and
+    named. Every reason is passed through `shorten_reason` before it can
+    reach a comment."""
+    claimed_fixed: list[str] = []
+    claimed_disputed: dict[str, str] = {}
+    for entry in report.get("items", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        item_id = entry.get("id") or entry.get("threadId")
+        if entry.get("action") == "fixed":
+            claimed_fixed.append(item_id)
+        else:
+            claimed_disputed[item_id] = shorten_reason(entry.get("reason") or "no reason given")
+    claimed_fixed += [t for t in report.get("fixed", []) or [] if isinstance(t, str)]
+    for u in report.get("unfixed", []) or []:
+        if isinstance(u, dict):
+            claimed_disputed[u.get("id") or u.get("threadId")] = shorten_reason(u.get("reason") or "no reason given")
+    for stray in [t for t in claimed_fixed if t not in work] + [t for t in claimed_disputed if t not in work]:
+        print(f"  DROPPED  {stray}: the report names an item the work list does not carry")
+    return [t for t in claimed_fixed if t in work], {t: r for t, r in claimed_disputed.items() if t in work}
+
+
+def where(item: dict) -> str:
+    return f"{item.get('path')}:{item.get('line') or '?'}"
+
+
+def describe(item: dict) -> str:
+    if item.get("source") == "sonar":
+        return f"`{where(item)}` — {item.get('rule')}: {first_line(item.get('message', ''))}"
+    if item.get("source") == "check":
+        # A CHECK IS NAMED BY ITS JOB, never by a path. Its `path` is the
+        # workflow file, which is where the job is DEFINED and almost never
+        # where the failure is.
+        run = f" ([run]({item['run_url']}))" if item.get("run_url") else ""
+        return f"the `{item.get('job')}` check{run}"
+    return f"`{where(item)}` — {first_line(item.get('finding', ''))}"
+
+
+def parse_comments(raw: str) -> list[dict]:
+    """`gh api --paginate` without `--jq` concatenates each page's JSON array
+    back to back rather than merging them, so a bare `json.loads` raises on
+    any pull request whose comments span more than one page.
+
+    A STREAMING DECODE, NOT A STRING SPLIT -- the same fix `conveyor_io.
+    parse_paginated` carries, ported here rather than imported: this program
+    is restored to `$RUNNER_TEMP` beside `land-dispatch.py`, `conveyor.py` and
+    three others ALONE (`review-dispatch.yml`'s `land` job), and importing
+    `conveyor_io` would grow the trusted set a `contents: write` step
+    restores. Splitting on the literal `"]["` breaks the moment a value
+    inside a page -- a comment body -- contains that exact substring, which a
+    person's own reply can: `parse_comments('][')` on a first attempt of this
+    fix raised `JSONDecodeError` on a fixture built for exactly that."""
+    text = (raw or "[]").strip()
+    if not text:
+        return []
+    decoder = json.JSONDecoder()
+    comments: list[dict] = []
+    i = 0
+    while i < len(text):
+        page, end = decoder.raw_decode(text, i)
+        comments.extend(page)
+        i = end
+        while i < len(text) and text[i].isspace():
+            i += 1
+    return comments
+
+
+class Round:
+    """The labelled pull request's bookkeeping: which round this is, and the
+    one summary an ending posts."""
+
+    def __init__(self, args, markers: dict, work: dict):
+        self.args = args
+        self.markers = markers
+        self.work = work
+        self._comments_cache: list[dict] | None = None
+        self.number = self.count_rounds() + 1
+        self.sonar = self.read_json(self.args.sonar)
+        self.checks = self.read_json(getattr(self.args, "checks", None))
+        # THE EFFECTIVE CAP, not the bare constant. Each grant ADDS a full set
+        # of `max_rounds`, so a loop that has been extended once stops at
+        # 2 * max_rounds, extended twice at 3 * max_rounds -- "another SET of
+        # rounds", not one extra round.
+        self.grants = self.count_grants()
+        self.cap = conveyor.cap_for(self.args.max_rounds, self.grants)
+        # NOT CALLED HERE. Consuming the grant is deferred to the caller,
+        # once a commit has actually landed -- see consume_keep_going's own
+        # docstring for why a round that turns out to be a no-op (no report,
+        # a stale patch, everything disputed) must never spend it.
+
+    def consume_keep_going(self) -> None:
+        """CONSUMED ONLY WHEN A COMMIT ACTUALLY LANDS, never on an ordinary
+        round and never on a round that turns out to do nothing. A no-op
+        round -- no report at all, a stale patch, every item disputed -- is
+        called AT `__init__` TIME, before ANY of those outcomes is known;
+        spending the grant there would consume it on a round that pushed
+        nothing, leaving the loop stuck at the old cap with the standing
+        instruction already spent. The caller invokes this only after the
+        push succeeds.
+
+        `self.cap` already reflects every grant COUNTED SO FAR (comments
+        posted by earlier calls to this method, on earlier rounds), so a
+        round landing at or under it needed no new extension -- this round
+        is the one a fresh `conveyor:keep-going` exists to unblock exactly
+        when it lands PAST that cap. Consuming it on an ordinary round below
+        the cap would spend the grant on a round that needed no extension at
+        all."""
+        if self.number <= self.cap:
+            return
+        label = self.markers["keep_going"]
+        try:
+            current = gh("pr", "view", str(self.args.pr), "--repo", self.args.repo,
+                         "--json", "labels", "--jq", ".labels[].name")
+        except subprocess.CalledProcessError:
+            return
+        if label not in current.splitlines():
+            return
+        old_cap = self.cap
+        try:
+            gh("pr", "edit", str(self.args.pr), "--repo", self.args.repo, "--remove-label", label)
+        except subprocess.CalledProcessError:
+            # A FAILED REMOVAL MUST NOT ABORT A ROUND THAT OTHERWISE LANDS.
+            # The fix this round produces is real work; losing it because the
+            # label-removal call hit a transient error would be worse than
+            # leaving the label in place for a re-check next round.
+            return
+        try:
+            pr_comment(self.args.repo, self.args.pr,
+                       f"{self.markers['grant']}\nround {self.number} is running past the previous cap of "
+                       f"{old_cap} under `{label}`, which is now consumed.")
+        except subprocess.CalledProcessError:
+            # SAME ARGUMENT AS THE REMOVAL ABOVE, ONE STEP LATER: the label is
+            # already gone, so this round already spent the grant whether or
+            # not the record of it posts. An uncaught exception here would
+            # propagate past the thread replies and the landing summary this
+            # method is called in the middle of -- losing the whole round's
+            # report over a transient comment failure, after the fix already
+            # pushed. The cap still advances below for THIS process; a
+            # missing marker comment would only under-count on a LATER
+            # invocation's count_grants(), which is the label-removal's own
+            # transient-failure trade-off one step later.
+            print(f"::warning::grant marker comment failed to post for round {self.number}; "
+                  f"`{label}` was already removed and the cap is extended anyway", file=sys.stderr)
+        self.grants += 1
+        self.cap = conveyor.cap_for(self.args.max_rounds, self.grants)
+        print(f"consumed `{label}`: round {self.number} extends the cap to {self.cap}")
+
+    @staticmethod
+    def read_json(path) -> dict:
+        if path and pathlib.Path(path).is_file():
+            try:
+                return json.loads(pathlib.Path(path).read_text() or "{}")
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+
+    def _comments(self) -> list[dict]:
+        # CACHED ON THE INSTANCE -- count_rounds() and count_grants() both
+        # call this from __init__, and the pull request's comments do not
+        # change between those two calls.
+        if self._comments_cache is None:
+            try:
+                raw = gh("api", f"repos/{self.args.repo}/issues/{self.args.pr}/comments", "--paginate")
+            except subprocess.CalledProcessError:
+                raw = "[]"
+            self._comments_cache = parse_comments(raw)
+        return self._comments_cache
+
+    def count_rounds(self) -> int:
+        """Comments carrying the round marker since the label was placed, counted
+        by the machine's one counter, which the gate and the recovery use too.
+        The label's timestamp is what makes re-labelling a fresh count."""
+        return conveyor.count_marked(self._comments(), self.markers["round"], self.args.since)
+
+    def count_grants(self) -> int:
+        """One per `conveyor:keep-going` this program has already consumed, so the
+        effective cap grows by a full `max_rounds` for each."""
+        return conveyor.count_marked(self._comments(), self.markers["grant"], self.args.since)
+
+    def marker(self) -> str:
+        return f"{self.markers['round']} {self.number} -->"
+
+    def apply_loop(self, event: str) -> None:
+        """Apply a loop EVENT through conveyor-state.py, which reads the live label
+        and asks the machine's table what follows. STATE, NOT A GRANT: this never
+        fails a round. The script exits 0 on anything it cannot do, and a missing
+        script is a notice.
+
+        `--vocabulary` IS PASSED EXPLICITLY, AND THAT IS NOT OPTIONAL HERE.
+        `conveyor-state.py`'s own default resolves its vocabulary file
+        relative to ITS OWN restored path -- `$RUNNER_TEMP/conveyor-state.py`
+        -- as `$RUNNER_TEMP/../review-triage.json`, one directory ABOVE where
+        the workflow actually restores `review-triage.json`
+        (`$RUNNER_TEMP/review-triage.json` itself). That default is only
+        ever correct when the script runs from its real path in the repository
+        checkout, which `gate`'s own direct calls do and this restored-copy
+        call does not. Without this flag every `set_loop` call from `land`
+        silently failed the vocabulary lookup and did nothing -- the loop
+        label stuck wherever `gate` last left it, `running`, through every
+        ending `land` ever reported, `no report` included. Measured live on
+        #233: `land` posted "no report... every item is still open", and
+        `loop:running` never moved, with no error anywhere in the run."""
+        script = self.args.state_script
+        if not event:
+            return
+        if not script or not pathlib.Path(script).is_file():
+            print(f"::notice::loop event `{event}` not recorded: {script} is not there", file=sys.stderr)
+            return
+        sh(sys.executable, str(script), "--repo", self.args.repo, "--target", str(self.args.pr),
+           "--loop-event", event, "--vocabulary", str(self.args.vocabulary), check=False)
+
+    def waiting_on_person(self) -> bool:
+        """A failed required check a previous round DISPUTED and no person has
+        answered: failed-checks.py reports it apart from the work it hands the
+        fixer, and a clean round that finds one is waiting, not mergeable."""
+        return bool((self.checks or {}).get("awaiting"))
+
+    def start_next_round(self) -> tuple[bool, str]:
+        """Nothing landed and items are still eligible, so no push will start
+        the next round: this round starts it, through the same workflow_dispatch
+        the carry uses for the first. (ok, detail)."""
+        try:
+            gh("workflow", "run", self.args.next_round_workflow, "--repo", self.args.repo,
+               "-f", f"pr={self.args.pr}", "-f", "mode=all")
+        except subprocess.CalledProcessError as exc:
+            return False, (exc.stderr or "").strip() or "gh workflow run failed"
+        return True, ""
+
+    def threads_still_open(self) -> tuple[bool, str]:
+        """LIVE, NOT THE COLLECTED SNAPSHOT. `collect` read the threads once
+        at the start of this round; a `clean` ending is decided minutes
+        later, and a thread could have opened in between (a human reviewer's
+        own comment, a re-triggered review). `review-not-clean.py`, exit 1,
+        is the same live read `carry.py` trusts before ever calling a
+        pull request mergeable -- this round must not claim less carefully.
+
+        THREE OUTCOMES, NOT TWO. Exit 0 is clean, exit 1 is an open thread --
+        `review-not-clean.py`'s own verdicts. Anything else is that script
+        crashing before reaching one (an unhandled `gh` failure also exits
+        1), which is UNKNOWN, not a thread being open; claiming mergeable on
+        UNKNOWN would be worse than the caller's fallback of leaving the
+        round `running`, so this still withholds `mergeable`, but says why
+        accurately rather than naming a thread that was never seen.
+
+        Returns (withhold mergeable?, the reason to print, or "")."""
+        check = self.args.thread_check_script
+        if not check or not pathlib.Path(check).is_file():
+            return False, ""
+        rc = sh(sys.executable, str(check), "--repo", self.args.repo, "--pr", str(self.args.pr),
+               check=False).returncode
+        if rc == 0:
+            return False, ""
+        if rc == 1:
+            return True, "a review thread opened since collect ran"
+        return True, f"review-not-clean.py could not be read (exit {rc})"
+
+    def summary(self, ending: str, fixed: list[str], disputed: dict[str, str], sha: str | None = None,
+                note: str = "", unaddressed: dict[str, str] | None = None,
+                refreshed: dict[str, str] | None = None) -> None:
+        """ONE comment per ending: what was fixed, what was disputed, what was
+        unaddressed, rounds used, what remains, and the approver mentioned.
+
+        THE MACHINE DECIDES THE LABEL AND THE COUNT. `conveyor.ending` maps the
+        ending's kind to the loop event and says whether the round spent the
+        budget. Every round that ran a model counts and leaves its round marker,
+        either in the landing comment (a commit landed) or in this summary (none
+        did), so the gate can enforce the bound from the same comments."""
+        a = self.args
+        unaddressed = unaddressed or {}
+        kind = ENDING_KIND.get(ending, "disputed")
+        thread_open = False
+        if kind == "clean":
+            thread_open, why = self.threads_still_open()
+            if thread_open:
+                print(f"clean ending, but {why}; loop label set to waiting")
+        decision = conveyor.ending(kind, self.number, self.cap, thread_open=thread_open,
+                                   waiting_on_person=kind == "clean" and self.waiting_on_person())
+        self.apply_loop(decision.loop_event)
+        # A RETRY STARTS THE NEXT ROUND ITSELF, before the summary is composed so
+        # the one summary says what happened. A dispatch that fails is its own
+        # ending: the machine stopped, and the label says so.
+        if decision.dispatch_round:
+            ok, detail = self.start_next_round()
+            if ok:
+                note = (note + "\n" if note else "") + f"Round {self.number + 1} starts now over what is still eligible."
+            else:
+                self.apply_loop("end:stalled")
+                note = (note + "\n" if note else "") + (f"The next round could not be started ({detail}). "
+                        f"Remove and re-add `{self.markers['keep_going'].rsplit(':', 1)[0]}:fix`, or push, to start it.")
+                ending = "could not start the next round"
+        used = self.number if (sha or decision.counted) else self.number - 1
+        lines = [SUMMARY_MARKER]
+        if decision.counted and not sha:
+            # THE ROUND'S MARKER RIDES ON ITS SUMMARY where no landing comment
+            # carries it, so a round that ran a model and pushed nothing is still
+            # counted, and the gate's count of the bound sees it.
+            lines.append(self.marker())
+        lines.append(f"**Conveyor fix on #{a.pr}: {ending}** — @{a.approver}")
+        if note:
+            lines.append(note)
+        lines.append(f"Rounds used: {used} of {self.cap}.")
+        if fixed:
+            lines.append(f"\nFixed{f' in {sha[:7]}' if sha else ''} ({len(fixed)}):")
+            lines += [f"- {describe(self.work[t])}" for t in fixed]
+        if disputed:
+            lines.append(f"\nDisputed ({len(disputed)}) — each stays open until you answer it:")
+            lines += [f"- {describe(self.work[t])}: {why}" for t, why in disputed.items()]
+        if refreshed:
+            lines.append(f"\nRe-run ({len(refreshed)}) — the fixing step found nothing in the tree behind these, "
+                         "so the checks run again on a fresh commit. Red again, they wait for you:")
+            lines += [f"- {describe(self.work[t])}: {why}" for t, why in refreshed.items()]
+        if unaddressed:
+            # NEVER WORDED AS A DISPUTE. Nobody looked at these; they are
+            # eligible for the next round rather than settled.
+            lines.append(f"\nUnaddressed ({len(unaddressed)}) — the fixing step did not report on these; "
+                         "eligible for a later round:")
+            lines += [f"- {describe(self.work[t])}" for t in unaddressed]
+        dropped = read_dropped(getattr(a, "dropped", None))
+        if dropped:
+            # THE SCRATCH THAT DID NOT LAND IS NAMED, never silently gone: a
+            # new file the report forgot to declare looks exactly like one.
+            lines.append(f"\nNot landed ({len(dropped)}) — created by the fixing step but not declared "
+                         "in its report, so deleted before the patch was cut:")
+            lines += [f"- `{d}`" for d in dropped]
+        remaining = [t for t in self.work if t not in fixed]
+        if remaining:
+            lines.append(f"\nStill open: {plural(len(remaining), 'item')} from this round.")
+        elif fixed:
+            lines.append("\nNothing from this round is left open.")
+        if self.sonar:
+            if not self.sonar.get("consulted"):
+                stale = self.sonar.get("stale") or []
+                lines.append("\nThe analysis service was NOT consulted this round: it had no analysis of the "
+                             "head commit" + (f" (stale for {', '.join(stale)})" if stale else "")
+                             + ". Its next analysis runs with CI.")
+            else:
+                lines.append(f"\nThe analysis service reported {plural(len(self.sonar.get('issues') or []), 'open issue')}"
+                             " for the head commit.")
+        if self.checks:
+            # A FIXED CHECK GETS NO REPLY — there is no thread to reply in, and
+            # the check's next run on the landed commit is its verdict. The
+            # summary is where it is accounted for, AND IT SAYS WHAT COLOUR THE
+            # HEAD IS: "clean" beside a red pull request was what #259 posted.
+            failed = len(self.checks.get("items") or [])
+            awaiting = self.checks.get("awaiting") or []
+            if not self.checks.get("consulted"):
+                lines.append("\nThe head is NOT YET JUDGED: CI has not concluded on the head commit, so the "
+                             "required checks were not consulted this round.")
+            elif failed or awaiting:
+                names = ", ".join(f"`{c.get('job')}`" for c in awaiting)
+                parts = []
+                if failed:
+                    parts.append(f"{plural(failed, 'required check')} failed on the head commit, each fixed or "
+                                 "disputed above, and the next run is the verdict")
+                if awaiting:
+                    parts.append(f"{plural(len(awaiting), 'failed check')} ({names}) was disputed by an earlier round "
+                                 "and waits for your answer")
+                lines.append("\nThe head is RED: " + ", and ".join(parts) + ".")
+            else:
+                lines.append("\nThe head is GREEN: every required check passed on the head commit.")
+        if a.run_url:
+            lines.append(f"\n[run]({a.run_url})")
+        pr_comment(a.repo, a.pr, "\n".join(lines))
+        print(f"summary posted: {ending}")
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--repo", required=True, help="owner/name")
+    ap.add_argument("--pr", type=int, required=True)
+    ap.add_argument("--branch", required=True, help="the pull request's head branch")
+    ap.add_argument("--work-list", type=pathlib.Path, required=True,
+                    help="the collect job's output: accepted findings, plus analysis issues in --mode all")
+    ap.add_argument("--patch", type=pathlib.Path, required=True)
+    ap.add_argument("--report", type=pathlib.Path, required=True,
+                    help='the fixing step\'s {"items":[{"id","action","reason"}]}')
+    ap.add_argument("--dropped", type=pathlib.Path,
+                    help='dispatch-patch.py\'s {"dropped":[...]}: the new files the fixing step left in '
+                         "the checkout without declaring them, deleted before the patch was cut and "
+                         "named in the landing comment and the summary rather than landed. Optional: "
+                         "absent means nothing was dropped")
+    ap.add_argument("--resolve-list", type=pathlib.Path, default=pathlib.Path(".resolve-threads"))
+    ap.add_argument("--resolver", type=pathlib.Path,
+                    default=pathlib.Path(__file__).with_name("resolve-review-threads.py"))
+    ap.add_argument("--dispatched-by", default="a maintainer")
+    ap.add_argument("--run-url", default="")
+    ap.add_argument("--mode", choices=["threads", "all"], default="threads")
+    ap.add_argument("--approver", default="", help="--mode all: who placed the label; mentioned in every summary")
+    ap.add_argument("--since", default="", help="--mode all: when the label was placed (ISO 8601); rounds are counted from then")
+    ap.add_argument("--max-rounds", type=int, default=5)
+    ap.add_argument("--sonar", type=pathlib.Path, help="--mode all: sonar-issues.py output, for the summary")
+    ap.add_argument("--checks", type=pathlib.Path, help="--mode all: failed-checks.py output, for the summary")
+    ap.add_argument("--next-round-workflow", default="review-dispatch.yml",
+                    help="--mode all: the workflow a round that landed nothing dispatches to start the next, "
+                         "while items are eligible and the bound allows (the machine's `dispatch_round`)")
+    ap.add_argument("--vocabulary", type=pathlib.Path, default=DEFAULT_VOCABULARY)
+    ap.add_argument("--push-starts-workflows", action="store_true",
+                    help="--mode all: the push goes through a credential that starts CI and the review "
+                         "(a deploy key on the remote), so a landed round is followed by the next")
+    ap.add_argument("--report-missing", action="store_true",
+                    help="the fixing step wrote NO report at all (the workflow substituted an empty one "
+                         "so there is always a file to read); the round ends as its own outcome and no "
+                         "item is reported as disputed, rather than reading the substitution as refusal")
+    ap.add_argument("--fix-failed", action="store_true",
+                    help="the fixing JOB failed, so no model ran at all (the workflow substituted an "
+                         "empty patch and report); the round ends as its own outcome, `fixing step "
+                         "failed`, naming the run -- distinct from --report-missing, where a model ran "
+                         "and wrote nothing. Measured on #220, where a refused fixer left nothing on the "
+                         "pull request for three days")
+    ap.add_argument("--fix-timed-out", action="store_true",
+                    help="the fixing JOB hit its `timeout-minutes` bound, so GitHub marked it `cancelled` "
+                         "rather than `failure` -- a distinct fact worth telling apart from a crash, since "
+                         "it usually means the round's own work (or the model) stalled, not that it errored. "
+                         "Nothing was fixed and nothing is disputed, but the round COUNTS, unlike "
+                         "--fix-failed: a model ran for the whole bound. Measured on #243 (a step that sat "
+                         "`in_progress` for 15+ hours) and #248 (three thirty-minute rounds, none counted)")
+    ap.add_argument("--state-script", type=pathlib.Path,
+                    default=pathlib.Path(__file__).with_name("conveyor-state.py"),
+                    help="conveyor-state.py, restored beside this program by the workflow; moves the "
+                         "pull request's loop label at every ending, and never fails the round")
+    ap.add_argument("--thread-check-script", type=pathlib.Path,
+                    default=pathlib.Path(__file__).with_name("review-not-clean.py"),
+                    help="review-not-clean.py, restored beside this program by the workflow; read LIVE "
+                         "before a clean ending claims mergeable, since collect's own read of the "
+                         "threads is a snapshot from the start of the round")
+    args = ap.parse_args()
+    if args.mode == "all" and not args.approver:
+        args.approver = args.dispatched_by
+
+    # ABSENT AND EMPTY ARE DIFFERENT FACTS, for every one of the three inputs.
+    # The fixing job writes all of them before uploading, so a missing file is
+    # a broken transfer rather than a quiet run.
+    for name, path in (("work list", args.work_list), ("patch", args.patch), ("report", args.report)):
+        if not path.is_file():
+            print(f"the {name} is ABSENT at {path}: the transfer from the fixing job broke, "
+                  "so nothing was landed and nothing was resolved.", file=sys.stderr)
+            return 1
+
+    work = {item.get("id") or item["threadId"]: item for item in json.loads(args.work_list.read_text())}
+    for item in work.values():
+        item.setdefault("source", "review")
+    report = json.loads(args.report.read_text() or "{}")
+    dropped = dropped_note(read_dropped(args.dropped))
+    run = f" ([run]({args.run_url}))" if args.run_url else ""
+    markers = load_markers(args.vocabulary)
+    rnd = Round(args, markers, work) if args.mode == "all" else None
+
+    if not work:
+        print("nothing accepted: the work list is empty, so there is nothing to land")
+        if rnd:
+            waiting = rnd.waiting_on_person()
+            rnd.summary("clean", [], {},
+                        note=("A required check is red only on the loop's own guard: a dispute the loop "
+                              "posted waits for a person's answer, and no round can give it. Answer it, "
+                              "or resolve it, and the check re-runs." if waiting else
+                              "The review has no open finding and the analysis reports no open issue."))
+            return 0
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: no finding is accepted, so nothing was "
+                   f"written. Reply `fix it` under a finding to accept it.{run}")
+        return 0
+
+    # SILENCE IS NOT A DECISION. The fixing step wrote no report at all -- the
+    # workflow substituted an empty one so there is always a file to read, but
+    # reading that substitution as "every item disputed" tells a reader the
+    # machine considered each finding and declined it, when nobody looked. The
+    # round ends as its OWN outcome instead, disputing nothing; every item stays
+    # eligible for a later round.
+    if args.report_missing:
+        print("no report: the fixing step wrote nothing at all, so nothing was landed and nothing "
+              "is disputed")
+        if rnd:
+            rnd.summary("no report", [], {},
+                        note="The fixing step produced no report this round -- nothing was fixed and "
+                             "nothing is disputed. Every item is still open for the next round.")
+            return 0
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: the fixing step produced no report, so nothing "
+                   f"was landed. Every accepted finding is still open; dispatch again.{run}")
+        return 0
+
+    if args.fix_failed or args.fix_timed_out:
+        # SILENCE IS NOT A DECISION, AND NEITHER IS A DEAD JOB. Nothing was
+        # fixed and nothing is disputed; the ending says exactly that, links
+        # the run, and names what starts another round. Without this the pull
+        # request shows nothing at all.
+        #
+        # THE TWO SHAPES OF DEAD ARE NAMED SEPARATELY, and they are counted
+        # differently. A job that FAILED never started a model, so it spent
+        # nothing. A job that TIMED OUT ran a model for the whole of its bound,
+        # so it spent the budget as much as a landed round did: counted, and at
+        # the ceiling it ends the loop. It used to count for nothing, so a loop
+        # whose every round timed out sat at "0 of 5" for ever (#248).
+        ending = "fixing step timed out" if args.fix_timed_out else "fixing step failed"
+        cause = ("the fixing job ran past its time limit before finishing its work" if args.fix_timed_out
+                 else "the fixing job failed before or while doing its work")
+        print(f"{ending}: no model finished, so nothing was landed and nothing is disputed")
+        if rnd:
+            if args.fix_timed_out:
+                if rnd.number >= rnd.cap:
+                    after = (f"Round {rnd.number} reaches the bound of {rnd.cap}, so no further round starts. "
+                             f"Place `{markers['keep_going']}` to grant another {args.max_rounds}, or shrink "
+                             "what a round has to do.")
+                else:
+                    after = f"The next push or review completion starts round {rnd.number + 1}."
+                note = (f"The {cause}, so nothing was fixed and nothing is disputed. The run linked below says "
+                        f"how far it got. The round is counted, since it spent its time. Every item stays "
+                        f"open. {after}")
+            else:
+                note = (f"The {cause}, so no model looked at any item: nothing was fixed and nothing is "
+                        "disputed. The run linked below says why. Every item stays open. A push, or removing "
+                        f"and re-adding the label, starts another round; `{markers['keep_going']}` is not "
+                        "needed, since no round was counted.")
+            rnd.summary(ending, [], {}, note=note)
+            return 0
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: {cause}, so nothing was landed. Every accepted "
+                   f"finding is still open; dispatch again once the run is understood.{run}")
+        return 0
+
+    claimed_fixed, claimed_disputed = read_report(report, work)
+
+    patch_empty = args.patch.stat().st_size == 0
+    touched = set() if patch_empty else patch_paths(args.patch)
+
+    def evidence(item: dict) -> tuple[bool, str]:
+        """IS THERE A CHANGE BEHIND THIS CLAIM. A review or analysis finding
+        points at a LINE, so the patch must touch that file — the check that
+        catches a model reporting a fix it did not make. A CHECK points at a
+        JOB, and the fix for a red job is wherever the failure actually is
+        (a test, a template, a document), never the workflow file the item
+        names; so its evidence is that the patch is not empty. Asking for
+        `ci.yml` would dispute every genuine fix."""
+        if item.get("source") == "check":
+            return (not patch_empty), "reported fixed, but the patch is empty"
+        return item["path"] in touched, f"reported fixed, but the patch does not touch `{item['path']}`"
+
+    # THREE OUTCOMES, NOT TWO. An item the report NAMES as disputed is a DECISION
+    # -- the fixing step looked at it and said something. An item the report
+    # never mentions is UNADDRESSED: nobody looked, so it is worded as such and
+    # stays eligible for a later round. AND SO IS A FIX THE PATCH DOES NOT
+    # EVIDENCE: a claim that landed nothing is a failed fix, not a statement
+    # about the finding. It used to be posted as a dispute, and on #259 the loop
+    # then waited for a person to answer a question the fixing step never asked.
+    fixed: list[str] = []
+    disputed: dict[str, str] = {}
+    unaddressed: dict[str, str] = {}
+    for item_id, item in work.items():
+        if item_id in claimed_fixed:
+            ok, why = evidence(item)
+            if ok:
+                fixed.append(item_id)
+            else:
+                unaddressed[item_id] = why
+        elif item_id in claimed_disputed:
+            disputed[item_id] = claimed_disputed[item_id]
+        else:
+            unaddressed[item_id] = "not named in the fixing step's report"
+
+    for t in fixed:
+        print(f"  fixed      {t} ({work[t]['path']})")
+    for t, why in disputed.items():
+        print(f"  {'disputed' if rnd else 'unfixed '} {t} ({work[t]['path']}): {why}")
+    for t, why in unaddressed.items():
+        print(f"  unaddressed {t} ({work[t]['path']}): {why}")
+
+    def post_disputes() -> None:
+        """--mode all: a marked reply per disputed thread, one comment for
+        every disputed analysis issue. The marker is what the next round and
+        the archive guard read."""
+        for t, why in disputed.items():
+            item = work[t]
+            if item["source"] == "review":
+                thread_reply(args.repo, args.pr, item["commentId"],
+                             f"{markers['dispute']}\nDisputed by the fixing step: {why}\n\n"
+                             f"Left open for @{args.approver} — reply here to answer it, or resolve the thread to dismiss it.{run}")
+        sonar = {t: why for t, why in disputed.items() if work[t]["source"] == "sonar"}
+        if sonar:
+            lines = "\n".join(f"- `{work[t]['key']}` ({work[t].get('rule')}, `{where(work[t])}`): {why}"
+                              for t, why in sonar.items())
+            tags = "\n".join(DISPUTED_ITEM.format(t) for t in sonar)
+            pr_comment(args.repo, args.pr,
+                       f"{markers['dispute']}\nThe fixing step disputes {plural(len(sonar), 'analysis issue')}, "
+                       f"for @{args.approver}. Nothing was changed in the analysis service; mark them there "
+                       f"if you agree, or answer here.\n\n{lines}{run}\n{tags}")
+        # A CHECK HAS NO THREAD, so a disputed one is a pull request comment,
+        # exactly as an analysis issue is. The check stays red and the merge
+        # stays blocked, which is right: a failure nobody explained is a
+        # decision still owed.
+        # THE ITEM IS NAMED IN A HIDDEN LINE, so the next round's collector can
+        # tell a check disputed by an earlier round (awaiting the person) from
+        # one that is simply red again (work).
+        checks = {t: why for t, why in disputed.items() if work[t]["source"] == "check"}
+        if checks:
+            lines = "\n".join(f"- {describe(work[t])}: {why}" for t, why in checks.items())
+            tags = "\n".join(DISPUTED_ITEM.format(t) for t in checks)
+            pr_comment(args.repo, args.pr,
+                       f"{markers['dispute']}\nThe fixing step disputes {plural(len(checks), 'failed check')}, "
+                       f"for @{args.approver}. The tree was not changed for them. Answer here to resume "
+                       f"the loop, or place `conveyor:keep-going` to grant another set of rounds.\n\n"
+                       f"{lines}{run}\n{tags}")
+
+    def refresh_checks(items: dict[str, str]) -> str:
+        """An EMPTY commit pushed to the branch, so CI judges the head again.
+        The fixer found nothing in the tree behind these red checks, and on
+        #259 that was true: the red was a check step deleted from ci.yml since
+        the head last ran. A fresh run is the verdict. Returns the sha, or ""
+        when the push failed and the items stay disputed.
+
+        EVERY ROUND WITHIN THE BUDGET RE-RUNS, not the first alone. The gate
+        used to be one refresh per label placement, and #269 measured what
+        that costs: an external service (the SonarCloud lookup) failed for
+        hours, the one refresh was spent on round 1, and round 2 froze the
+        loop on a dispute a person had to notice, diagnose and answer -- the
+        exact intervention the conveyor exists to remove. A red the fixer
+        itself judged not-the-tree is a retryable event, not a judgment call,
+        so the round CAP is the bound on retrying it: transient failures
+        converge to green inside the budget, and a hard outage ends in the
+        designed `capped`/`waiting` states that `conveyor:keep-going` or a
+        person's answer restart."""
+        names = ", ".join(f"`{work[t].get('job')}`" for t in items)
+        sh("git", "commit", "-q", "--allow-empty", "-m",
+           f"chore(ci): re-run the checks (conveyor round {rnd.number})", "-m",
+           f"The fixing step found nothing in the tree behind {names}. A fresh run is the verdict.")
+        new_sha = sh("git", "rev-parse", "HEAD").stdout.strip()
+        push = sh("git", "push", "origin", f"HEAD:refs/heads/{args.branch}", check=False)
+        if push.returncode != 0:
+            print(f"the re-run commit could not be pushed:\n{push.stderr}", file=sys.stderr)
+            sh("git", "reset", "-q", "--hard", "HEAD~1", check=False)
+            return ""
+        pr_comment(args.repo, args.pr,
+                   f"{markers['refresh']}\nRound {rnd.number} re-runs the checks on {new_sha[:7]}: the fixing step "
+                   f"found nothing in the tree behind {names}. Red again, the next round re-runs them, "
+                   f"until the budget ({rnd.cap} rounds) is spent.{run}")
+        return new_sha
+
+    if not fixed:
+        print("no finding was fixed, so nothing is committed and nothing is resolved")
+        if rnd:
+            refreshed: dict[str, str] = {}
+            red_checks = {t: why for t, why in disputed.items() if work[t]["source"] == "check"}
+            # THE ROUND CAP BOUNDS THE RETRY, NOT A ONCE-PER-LABEL GATE. The
+            # last round of the budget disputes instead of refreshing, so the
+            # loop ends in a state a person can read and restart rather than
+            # burning its final round on a re-run nothing would judge.
+            if red_checks and args.push_starts_workflows and rnd.number < rnd.cap:
+                if refresh_checks(red_checks):
+                    for t in red_checks:
+                        refreshed[t] = disputed.pop(t)
+            post_disputes()
+            if refreshed:
+                rnd.summary("checks re-run", [], disputed, unaddressed=unaddressed, refreshed=refreshed,
+                            note="Nothing in the tree explained the red checks, so they run again on a fresh "
+                                 "commit; CI and the review run on it, and their completion starts the next round.")
+                return 0
+            # THREE DISTINCT ENDINGS, NOT TWO. "nothing addressed" is true
+            # only when NEITHER a dispute nor an unaddressed item exists --
+            # a round with some of each is a genuinely MIXED outcome, and
+            # calling it "nothing addressed" would contradict the very
+            # Disputed and Unaddressed sections the same comment lists.
+            if disputed and unaddressed:
+                ending = "disputed and unaddressed"
+                note = "Every item this round was either disputed or left unaddressed, so none was fixed."
+            elif disputed:
+                ending = "disputes only"
+                note = ("Every item this round was disputed and none was fixed. The loop waits for your answer: "
+                        "reply in a disputed thread (or resolve it to dismiss the finding), and for a disputed "
+                        "check — which has no thread — reply on the pull request.")
+            else:
+                ending = "nothing addressed"
+                note = "Nothing was fixed this round, and every item is still eligible."
+            rnd.summary(ending, [], disputed, unaddressed=unaddressed, note=note)
+            return 0
+        lines = "\n".join(f"- `{work[t]['path']}`: {why}" for t, why in disputed.items())
+        lines += ("\n" if lines and unaddressed else "") + \
+            "\n".join(f"- `{work[t]['path']}`: not addressed by the fixing step" for t in unaddressed)
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: nothing landed. Every accepted finding "
+                   f"is still open:\n\n{lines}{run}")
+        return 0
+
+    # APPLY. `--check` first so a stale patch changes nothing and says so.
+    check = sh("git", "apply", "--check", str(args.patch), check=False)
+    if check.returncode != 0:
+        print(f"the patch does not apply:\n{check.stderr}", file=sys.stderr)
+        if rnd:
+            rnd.summary("stale patch", [], {},
+                        note=f"The patch no longer applies to `{args.branch}` — the branch moved since the "
+                             f"review. Nothing was pushed and no thread was resolved, and every item is still "
+                             f"eligible.\n\n```\n{check.stderr.strip()}\n```")
+            return 0
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: the patch no longer applies to "
+                   f"`{args.branch}` — the branch moved since the review. Nothing was pushed and "
+                   f"no thread was resolved. Rebase, then dispatch again.{run}\n\n"
+                   f"```\n{check.stderr.strip()}\n```")
+        return 1
+    sh("git", "apply", "--index", str(args.patch))
+
+    n_review = sum(1 for t in fixed if work[t]["source"] == "review")
+    n_sonar = sum(1 for t in fixed if work[t]["source"] == "sonar")
+    n_check = sum(1 for t in fixed if work[t]["source"] == "check")
+    if rnd:
+        parts = [plural(n_review, "review finding")] if n_review else []
+        parts += [plural(n_sonar, "analysis issue")] if n_sonar else []
+        parts += [plural(n_check, "failed check")] if n_check else []
+        subject = f"fix(review): address {' and '.join(parts)} (conveyor round {rnd.number})"
+    else:
+        subject = f"fix(review): address {len(fixed)} accepted review finding{'s' if len(fixed) != 1 else ''}"
+    # A CHECK IS NAMED BY ITS JOB. Its `path` is the workflow file and it
+    # carries no `finding` or `message`, so the finding-shaped line rendered as
+    # `.github/workflows/ci.yml:? — ` with nothing after the dash.
+    def body_line(item: dict) -> str:
+        if item.get("source") == "check":
+            return f"- the `{item.get('job')}` check"
+        return (f"- {item['path']}:{item.get('line') or '?'} — "
+                f"{first_line(item.get('finding') or item.get('message', ''))}")
+
+    body = "\n".join(body_line(work[t]) for t in fixed)
+    trailer = f"Dispatched-By: {args.dispatched_by}"
+    sh("git", "commit", "-q", "-m", subject, "-m", body, "-m", trailer)
+    sha = sh("git", "rev-parse", "HEAD").stdout.strip()
+
+    # PUSH BEFORE ANY REPLY. What follows reports a fact.
+    push = sh("git", "push", "origin", f"HEAD:refs/heads/{args.branch}", check=False)
+    if push.returncode != 0:
+        print(f"push failed:\n{push.stderr}", file=sys.stderr)
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: the fix was produced but could not be "
+                   f"pushed to `{args.branch}`. Nothing landed and no thread was resolved.{run}\n\n"
+                   f"```\n{push.stderr.strip()}\n```")
+        return 1
+    print(f"pushed {sha[:7]} to {args.branch}")
+    # ONLY NOW: a commit genuinely landed, so a round past the cap has
+    # actually earned the extension it consumes.
+    if rnd:
+        rnd.consume_keep_going()
+
+    for t in fixed:
+        if work[t]["source"] == "review":
+            thread_reply(args.repo, args.pr, work[t]["commentId"],
+                         f"Fixed in {sha[:7]}, dispatched by @{args.dispatched_by}.{run}")
+    if rnd:
+        post_disputes()
+    else:
+        for t, why in disputed.items():
+            thread_reply(args.repo, args.pr, work[t]["commentId"],
+                         f"Not addressed by the dispatch ({why}). Left open.{run}")
+        for t in unaddressed:
+            thread_reply(args.repo, args.pr, work[t]["commentId"],
+                         f"Not addressed by the dispatch. Left open.{run}")
+
+    # THEN resolve, through the program that already refuses anything the
+    # review did not author. Analysis issues have no thread; the service
+    # closes them on its next analysis.
+    args.resolve_list.write_text("".join(f"{t}\n" for t in fixed if work[t]["source"] == "review"))
+    resolver = subprocess.run([sys.executable, str(args.resolver), "--repo", args.repo,
+                               "--pr", str(args.pr), "--file", str(args.resolve_list)],
+                              capture_output=True, text=True)
+    print(resolver.stdout, end="")
+    if resolver.returncode != 0:
+        print(resolver.stderr, file=sys.stderr)
+        return resolver.returncode
+
+    left = f", {plural(len(disputed) + len(unaddressed), 'item')} left open" if (disputed or unaddressed) else ""
+    if rnd:
+        # THE ROUND IS RECORDED ON THE PULL REQUEST, in the comment that
+        # announces the landing. Then either the cap ends the loop, or the
+        # next round is started by `workflow_dispatch`.
+        pr_comment(args.repo, args.pr,
+                   f"{rnd.marker()}\nConveyor round {rnd.number} of {rnd.cap}: {sha[:7]} addresses "
+                   f"{plural(len(fixed), 'item')}{left}.{run}{dropped}")
+        if rnd.number >= rnd.cap:
+            rnd.summary("round cap reached", fixed, disputed, sha=sha, unaddressed=unaddressed,
+                        note=f"{rnd.cap} rounds have run; no further round starts. "
+                             f"Place `{markers['keep_going']}` to grant another {args.max_rounds}.")
+        elif not args.push_starts_workflows:
+            # THE TOKEN PUSHED IT, so nothing runs on it. The loop cannot
+            # continue by itself; say so rather than wait for a round that
+            # will never be triggered.
+            rnd.summary("could not start the next round", fixed, disputed, sha=sha, unaddressed=unaddressed,
+                        note="The commit was pushed with the workflow token, which starts no workflow: "
+                             "no push credential (`AUTOFIX_DEPLOY_KEY`) is configured. Push again (an "
+                             "empty commit will do) to get CI and the review — and, with the label still "
+                             "on, the next round.")
+            return 1
+        else:
+            print(f"round {rnd.number} landed; the push starts CI and the review, "
+                  "and the review's completion starts the next round")
+    else:
+        # A PUSH MADE WITH THE WORKFLOW TOKEN STARTS NO WORKFLOW. GitHub
+        # withholds `synchronize` from it, so this commit has neither CI nor a
+        # review until somebody pushes again. Merge stays blocked meanwhile,
+        # which is the safe side; the comment is what stops it reading as CI
+        # silently passing.
+        pr_comment(args.repo, args.pr,
+                   f"Dispatch by @{args.dispatched_by}: {sha[:7]} addresses {len(fixed)} accepted "
+                   f"finding{'s' if len(fixed) != 1 else ''}{left}.{run}{dropped}\n\n"
+                   "A commit pushed by a workflow starts no workflow, so CI and the review have NOT "
+                   "run on it. Push again (an empty commit will do) to get both.")
+    print(f"\n{len(fixed)} fixed and pushed as {sha[:7]}, {len(disputed)} left open")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as exc:
+        print(f"{exc.cmd[0]} failed: {exc.stderr or exc}", file=sys.stderr)
+        sys.exit(1)

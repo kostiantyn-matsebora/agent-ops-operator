@@ -19,16 +19,28 @@
 // GET/PUT /offset and this adapter writes it to the contract's state API, so
 // restarts never replay updates and the router needs no RBAC of its own.
 //
-// Credentials are per channel: each served Channel's credentialsSecretRef is
-// projected into this pod's environment and located via the channel listing's
-// credentialEnvPrefix (key botToken); TELEGRAM_BOT_TOKEN remains the fallback
-// for channels without projected credentials (hand-deployed deployments). The
-// SAME Secret backs the router, which needs the token to poll.
+// It holds NO Telegram credential at all (chat-ops-broker-telegram-gateway).
+// Every Bot API call it makes — send, document upload, the forum topic
+// lifecycle, command registration — is relayed through gateway-telegram's
+// POST /telegram/call/{method}; that process is now the SOLE holder of the
+// bot token, both directions. See gotchas.md, 2026-10-11.
 //
-// Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_BOT_TOKEN (optional
-// fallback), ADAPTER_NAME (default "telegram"), LISTEN_ADDR (default ":8080" —
-// in-cluster the reconciler injects it from ChannelAdapter.spec.port),
-// projected AGENTOPS_CRED_* vars.
+// Gateway binding is per channel: each served Channel's credentialsSecretRef
+// is projected into this pod's environment and located via the channel
+// listing's credentialEnvPrefix (keys gatewayUrl, gatewayToken);
+// TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN remain the fallback for
+// channels without projected credentials (hand-deployed deployments) — the
+// same role TELEGRAM_BOT_TOKEN/TELEGRAM_API_BASE used to play.
+//
+// `ChannelAdapter` carries no general `env` field (adapters.md), so the
+// credential projection the Channel already offers is the one sanctioned
+// path for this to reach the pod at all.
+//
+// Environment: MANAGER_URL, ADAPTER_TOKEN, TELEGRAM_GATEWAY_URL (optional
+// fallback), TELEGRAM_GATEWAY_TOKEN (optional fallback), ADAPTER_NAME
+// (default "telegram"), LISTEN_ADDR (default ":8080" — in-cluster the
+// reconciler injects it from ChannelAdapter.spec.port), projected
+// AGENTOPS_CRED_* vars.
 package main
 
 import (
@@ -42,10 +54,27 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
+
+// sanitizeLogText strips CR/LF from a string before it reaches a log line --
+// gosecurity:S5145's ask, since a value logged here can carry Telegram-relayed
+// content (a message's text, ultimately, or a channel name resolved at
+// runtime) that could otherwise forge a second log line. strings.ReplaceAll on
+// each of \n and \r, chained, is the rule's own documented compliant pattern
+// -- a strings.Map closure is not reliably recognized as breaking the taint
+// by the analyzer, even though it removes strictly more.
+func sanitizeLogText(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", "_"), "\r", "_")
+}
+
+// sanitizeLog is sanitizeLogText for an error's own text.
+func sanitizeLog(err error) string {
+	return sanitizeLogText(err.Error())
+}
 
 // channelConfig is this adapter's interpretation of Channel spec.config.
 //
@@ -67,17 +96,32 @@ type channelConfig struct {
 	DeleteTopicOnConversationDelete bool `json:"deleteTopicOnConversationDelete,omitempty"`
 }
 
-// servedChannel is one validated channel with its resolved credentials.
+// servedChannel is one validated channel with its resolved gateway binding.
+//
+// There is no bot token here any more (chat-ops-broker-telegram-gateway):
+// gateway-telegram is the sole holder of it. What this adapter needs instead
+// is WHERE that gateway is and the shared secret that authenticates to it —
+// resolved exactly where the token used to be resolved from, because
+// `ChannelAdapter` carries no general `env` field (adapters.md: "pure
+// implementation... no env"). The Channel's `credentialsSecretRef` is the
+// one sanctioned path for implementation-specific configuration to reach
+// this pod, so the chart now projects `gatewayUrl`/`gatewayToken` through it
+// instead of `botToken`/`apiBase`.
 type servedChannel struct {
-	cfg   channelConfig
-	token string
+	cfg          channelConfig
+	gatewayURL   string
+	gatewayToken string
 }
 
 type adapter struct {
-	mgr           *Manager
-	channelType   string
-	fallbackToken string
-	listen        string
+	mgr         *Manager
+	channelType string
+	listen      string
+	// fallbackGatewayURL/Token are TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN,
+	// for a channel with no projected credential (hand-deployed back-compat) —
+	// the same role TELEGRAM_BOT_TOKEN used to play.
+	fallbackGatewayURL   string
+	fallbackGatewayToken string
 
 	// pace spreads outbound work across the Bot API's budgets. Telegram
 	// REJECTS rather than queues, so without this a burst is lost, not delayed.
@@ -91,7 +135,53 @@ type adapter struct {
 	mu       sync.Mutex
 	channels map[string]servedChannel // validated, by channel name
 	reported map[string]string        // last status message per channel (avoid spam)
-	clients  map[string]*Telegram     // bot client per token
+	clients  map[string]*Telegram     // Bot API client per gateway binding
+
+	// completed remembers the op ids this process already acted on. Ops are
+	// at-least-once — a completion the manager never received comes back
+	// under the SAME id — and a message posted twice cannot be unposted, so
+	// a redelivery is acknowledged again and acted on NOT AT ALL. Bounded:
+	// the manager reclaims within minutes, so a few hundred ids cover it.
+	completed *completedOps
+}
+
+// completedOps is a bounded FIFO set of op ids.
+type completedOps struct {
+	mu    sync.Mutex
+	ids   map[string]string // op id → thread id it completed with
+	order []string
+	limit int
+}
+
+func newCompletedOps(limit int) *completedOps {
+	return &completedOps{ids: map[string]string{}, limit: limit}
+}
+
+// seen reports whether id already completed, and the threadId it answered.
+func (c *completedOps) seen(id string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tid, ok := c.ids[id]
+	return tid, ok
+}
+
+func (c *completedOps) add(id, threadID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.ids[id]; ok {
+		return
+	}
+	c.ids[id] = threadID
+	c.order = append(c.order, id)
+	for len(c.order) > c.limit {
+		delete(c.ids, c.order[0])
+		c.order = c.order[1:]
+	}
+	// Re-slicing from the front keeps the whole backing array alive; copy it
+	// down once it has grown to twice what is kept.
+	if cap(c.order) > 2*c.limit {
+		c.order = append(make([]string, 0, c.limit), c.order...)
+	}
 }
 
 // servedChannelList snapshots the validated channels, deduplicated by chat: one
@@ -143,15 +233,17 @@ func main() {
 		listen = ":8080"
 	}
 	a := &adapter{
-		mgr:           NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
-		channelType:   channelType,
-		fallbackToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
-		listen:        listen,
-		pace:          newPacer(),
-		menu:          newMenu(),
-		channels:      map[string]servedChannel{},
-		reported:      map[string]string{},
-		clients:       map[string]*Telegram{},
+		mgr:                  NewManager(mustEnv("MANAGER_URL"), mustEnv("ADAPTER_TOKEN")),
+		channelType:          channelType,
+		fallbackGatewayURL:   os.Getenv("TELEGRAM_GATEWAY_URL"),
+		fallbackGatewayToken: os.Getenv("TELEGRAM_GATEWAY_TOKEN"),
+		listen:               listen,
+		pace:                 newPacer(),
+		menu:                 newMenu(),
+		channels:             map[string]servedChannel{},
+		reported:             map[string]string{},
+		clients:              map[string]*Telegram{},
+		completed:            newCompletedOps(1024),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -184,25 +276,29 @@ func (a *adapter) handler() http.Handler {
 }
 
 // refreshChannels re-reads served channels, validates config, resolves each
-// channel's bot token (projected credentials via credentialEnvPrefix, key
-// botToken; TELEGRAM_BOT_TOKEN fallback), and reports validity changes as the
-// channel's Ready condition.
+// channel's gateway binding (projected credentials via credentialEnvPrefix,
+// keys gatewayUrl/gatewayToken; TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN
+// fallback), and reports validity changes as the channel's Ready condition.
 func (a *adapter) refreshChannels(ctx context.Context) {
 	infos, err := a.mgr.Channels(ctx, a.channelType)
 	if err != nil {
-		log.Printf("list channels: %v", err)
+		log.Printf("list channels: %s", sanitizeLog(err))
 		return
 	}
 	next := map[string]servedChannel{}
 	for _, info := range infos {
 		var cfg channelConfig
 		problem := ""
-		token := ""
+		gatewayURL, gatewayToken := "", ""
 		if info.CredentialEnvPrefix != "" {
-			token = os.Getenv(info.CredentialEnvPrefix + "botToken")
+			gatewayURL = os.Getenv(info.CredentialEnvPrefix + "gatewayUrl")
+			gatewayToken = os.Getenv(info.CredentialEnvPrefix + "gatewayToken")
 		}
-		if token == "" {
-			token = a.fallbackToken
+		if gatewayURL == "" {
+			gatewayURL = a.fallbackGatewayURL
+		}
+		if gatewayToken == "" {
+			gatewayToken = a.fallbackGatewayToken
 		}
 		if len(info.Config) == 0 {
 			problem = "spec.config is missing"
@@ -210,8 +306,8 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			problem = "spec.config is not valid JSON for the telegram adapter: " + err.Error()
 		} else if cfg.ChatID == "" {
 			problem = "spec.config.chatId is required"
-		} else if token == "" {
-			problem = "no bot token: set Channel.credentialsSecretRef (Secret key botToken) or provide the adapter a TELEGRAM_BOT_TOKEN fallback"
+		} else if gatewayURL == "" || gatewayToken == "" {
+			problem = "no gateway binding: set Channel.credentialsSecretRef (Secret keys gatewayUrl/gatewayToken) or provide the adapter TELEGRAM_GATEWAY_URL/TELEGRAM_GATEWAY_TOKEN fallbacks"
 		}
 		a.mu.Lock()
 		last := a.reported[info.Name]
@@ -231,7 +327,7 @@ func (a *adapter) refreshChannels(ctx context.Context) {
 			a.reported[info.Name] = "ok"
 			a.mu.Unlock()
 		}
-		next[info.Name] = servedChannel{cfg: cfg, token: token}
+		next[info.Name] = servedChannel{cfg: cfg, gatewayURL: gatewayURL, gatewayToken: gatewayToken}
 	}
 	a.mu.Lock()
 	a.channels = next
@@ -245,15 +341,19 @@ func (a *adapter) channel(name string) (servedChannel, bool) {
 	return sc, ok
 }
 
-// client returns (caching) the Bot API client for a token.
-func (a *adapter) client(token string) *Telegram {
+// client returns (caching) the Bot API client for a served channel's gateway
+// binding — one per distinct (gatewayURL, gatewayToken) pair, since most
+// installs serve every channel through the same one gateway-telegram
+// instance but a hand-deployed one may not.
+func (a *adapter) client(sc servedChannel) *Telegram {
+	key := sc.gatewayURL + "|" + sc.gatewayToken
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if c := a.clients[token]; c != nil {
+	if c := a.clients[key]; c != nil {
 		return c
 	}
-	c := NewTelegram(token)
-	a.clients[token] = c
+	c := NewTelegram(sc.gatewayURL, sc.gatewayToken)
+	a.clients[key] = c
 	return c
 }
 
@@ -262,37 +362,56 @@ func (a *adapter) client(token string) *Telegram {
 func (a *adapter) opsLoop(ctx context.Context) {
 	a.refreshChannels(ctx)
 	for ctx.Err() == nil {
-		// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
-		// yet deliver stays queued in the manager, where it is still derivable
-		// from CR state and survives an adapter restart. Gating the send
-		// instead would hold a claim while waiting, and a crash mid-wait would
-		// strand the op until ReclaimAfter.
-		if !a.pace.wait(ctx, a.chatIDs()) {
-			continue
+		a.pollOnce(ctx)
+	}
+}
+
+// pollOnce is one iteration of opsLoop's body, split out so it is callable
+// directly with a mock manager rather than only through the infinite loop —
+// each of its error branches is otherwise unreachable from a test.
+func (a *adapter) pollOnce(ctx context.Context) {
+	// PACE BEFORE CLAIMING, not before sending. Work this adapter cannot
+	// yet deliver stays queued in the manager, where it is still derivable
+	// from CR state and survives an adapter restart. Gating the send
+	// instead would hold a claim while waiting, and a crash mid-wait would
+	// strand the op until ReclaimAfter.
+	if !a.pace.wait(ctx, a.chatIDs()) {
+		return
+	}
+	op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
+	// The revision rides EVERY poll response, delivered op or not, so a
+	// vocabulary change reaches this adapter while it is otherwise idle —
+	// the manager cannot dial us. Acted on before the error check: a poll
+	// that failed may still have carried it.
+	a.syncCommands(ctx, revision)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("ops poll: %s", sanitizeLog(err))
+			sleepCtx(ctx, 5*time.Second)
 		}
-		op, revision, err := a.mgr.NextOp(ctx, a.channelType, 25)
-		// The revision rides EVERY poll response, delivered op or not, so a
-		// vocabulary change reaches this adapter while it is otherwise idle —
-		// the manager cannot dial us. Acted on before the error check: a poll
-		// that failed may still have carried it.
-		a.syncCommands(ctx, revision)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("ops poll: %v", err)
-				sleepCtx(ctx, 5*time.Second)
-			}
-			continue
+		return
+	}
+	if op == nil {
+		return
+	}
+	// The claim window is the manager's to state and ours to respect: every
+	// Bot API call this op makes shares one retry budget, bounded well
+	// inside it.
+	// A redelivered id is answered as it was answered before, and the
+	// transport is not touched again: the effect happened once.
+	if tid, done := a.completed.seen(op.ID); done {
+		log.Printf("op %s redelivered; acknowledging without repeating it", op.ID)
+		if err := a.mgr.CompleteOp(ctx, op.ID, tid, ""); err != nil && ctx.Err() == nil {
+			log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 		}
-		if op == nil {
-			continue
-		}
-		// The claim window is the manager's to state and ours to respect: every
-		// Bot API call this op makes shares one retry budget, bounded well
-		// inside it.
-		threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
-		if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
-			log.Printf("complete op %s: %v", op.ID, err)
-		}
+		return
+	}
+	threadID, opErr := a.execute(WithRetryBudget(ctx, op.RetryBudget()), op)
+	if opErr == "" {
+		a.completed.add(op.ID, threadID)
+	}
+	if err := a.mgr.CompleteOp(ctx, op.ID, threadID, opErr); err != nil && ctx.Err() == nil {
+		log.Printf("complete op %s: %s", op.ID, sanitizeLog(err))
 	}
 }
 
@@ -322,7 +441,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 			return "", fmt.Sprintf("channel %s is not served (missing/invalid config or credentials)", op.Channel)
 		}
 	}
-	tg := a.client(sc.token)
+	tg := a.client(sc)
 	switch op.Kind {
 	case "ensure-topic":
 		if op.Topic == nil {
@@ -366,7 +485,7 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 				name := renderTopicName(*op.Topic)
 				if err := tg.Send(ctx, sc.cfg.ChatID, nil,
 					`💬 <a href="`+escape(link)+`">`+escape(name)+`</a>`); err != nil {
-					log.Printf("point at topic %d: %v", id, err)
+					log.Printf("point at topic %d: %s", id, sanitizeLog(err))
 				}
 			}
 		}
@@ -399,7 +518,11 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 		//
 		// The controls hang off the LAST chunk, where the reader ends up, and
 		// the reply linkage off the first, which is the one that answers.
-		chunks := renderChunks(a.menu, *op.Message)
+		//
+		// A choice whose callback_data cannot fit the keyboard is not simply
+		// left out of it — it is folded onto that same last chunk as text, so
+		// it is never silently dropped (A5, ADA-8).
+		chunks := appendChoiceFallback(renderChunks(a.menu, *op.Message), oversizedChoices(op.Message.Choices))
 		for i, chunk := range chunks {
 			extras := SendExtras{}
 			if i == 0 {
@@ -463,8 +586,8 @@ func (a *adapter) execute(ctx context.Context, op *Op) (threadID, opErr string) 
 					"</code> was deleted, and its topic removed with it."); err != nil {
 				// The topic is already gone; failing the op would ask the
 				// manager to retry a deletion that succeeded.
-				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %v",
-					op.Conversation, err)
+				log.Printf("delete-conversation %s: topic deleted but the general-surface note failed: %s",
+					op.Conversation, sanitizeLog(err))
 			}
 			return "", ""
 		}
@@ -533,6 +656,10 @@ func (a *adapter) handleUpdate(w http.ResponseWriter, r *http.Request) {
 // deliberate — it is what lets the router stay configuration-free — so both
 // sides carry the same test table.
 func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
+	if cq := upd.CallbackQuery; cq != nil {
+		a.dispatchCallback(ctx, cq)
+		return
+	}
 	m := upd.Message
 	if m == nil || m.Chat == nil || m.Text == "" {
 		return
@@ -555,9 +682,57 @@ func (a *adapter) dispatch(ctx context.Context, upd tgUpdate) {
 		}
 		threadID := strconv.FormatInt(m.MessageThreadID, 10)
 		if err := a.mgr.Inbound(ctx, name, &threadID, m.Text); err != nil {
-			log.Printf("inbound %s: %v", name, err)
+			log.Printf("inbound %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		}
 		return // first matching channel wins
+	}
+}
+
+// dispatchCallback turns a tapped inline button back into the command it
+// stands for, and pushes it inbound exactly as if the reader had typed it —
+// never Telegram's own callback_data encoding, which means nothing to the
+// manager (A6). choicePrefix is inlineKeyboard's own marker: data this stack
+// did not encode belongs to nothing this adapter attached, and is ignored.
+//
+// A SELECTION ON THE GENERAL SURFACE IS INERT HERE, for the same reason a
+// typed message is: origination is the signal path's, and this adapter must
+// never start a conversation from a tap any more than from a typed word.
+func (a *adapter) dispatchCallback(ctx context.Context, cq *tgCallbackQuery) {
+	if cq.Message == nil || cq.Message.Chat == nil || !cq.Message.IsTopicMessage {
+		return
+	}
+	cmd, ok := strings.CutPrefix(cq.Data, choicePrefix)
+	if !ok {
+		return
+	}
+	chatID := strconv.FormatInt(cq.Message.Chat.ID, 10)
+	for _, name := range a.channelNames() {
+		sc, ok := a.channel(name)
+		if !ok || sc.cfg.ChatID != chatID {
+			continue
+		}
+		if len(sc.cfg.Approvers) > 0 && (cq.From == nil || !containsID(sc.cfg.Approvers, cq.From.ID)) {
+			a.answerCallback(ctx, sc, cq.ID)
+			return // not an approved user — acknowledge, but ignore the tap
+		}
+		threadID := strconv.FormatInt(cq.Message.MessageThreadID, 10)
+		if err := a.mgr.Inbound(ctx, name, &threadID, "/"+cmd); err != nil {
+			log.Printf("inbound callback %s: %s", sanitizeLogText(name), sanitizeLog(err))
+		}
+		a.answerCallback(ctx, sc, cq.ID)
+		return // first matching channel wins
+	}
+}
+
+// answerCallback clears Telegram's own loading spinner on the tapped button.
+// Best-effort: the inbound push already happened, and failing the update over
+// a UI courtesy would make the manager retry work that already landed.
+func (a *adapter) answerCallback(ctx context.Context, sc servedChannel, id string) {
+	if id == "" {
+		return
+	}
+	if _, err := a.client(sc).API(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id}); err != nil {
+		log.Printf("answerCallbackQuery: %s", sanitizeLog(err))
 	}
 }
 
@@ -599,7 +774,7 @@ func (a *adapter) handleOffsetGet(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := a.mgr.GetState(r.Context(), name, "telegram-offset")
 	if err != nil {
-		log.Printf("offset read %s: %v", name, err)
+		log.Printf("offset read %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		http.Error(w, "offset read failed", http.StatusBadGateway)
 		return
 	}
@@ -620,7 +795,7 @@ func (a *adapter) handleOffsetPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.mgr.PutState(r.Context(), name, "telegram-offset", in.Value); err != nil {
-		log.Printf("offset write %s: %v", name, err)
+		log.Printf("offset write %s: %s", sanitizeLogText(name), sanitizeLog(err))
 		http.Error(w, "offset write failed", http.StatusBadGateway)
 		return
 	}

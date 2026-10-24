@@ -6,10 +6,11 @@ stating only what DIFFERS from `global.agentops.runtimeDefaults`; the shared
 renderer lives in `_helpers.tpl` so that a BUNDLE shipping a vendor's runtime
 emits exactly the same shape.
 
-`default` is the name a Pipeline declaring no `runtimeRef` resolves to. Nothing
-here guarantees one exists — a runtime may come from a bundle an operator turns
-off — so `agentops.defaultRuntimeGuard` fails the render when nothing answers to
-that name while a route still needs it.
+`default` is the name a Pipeline declaring no `runtimeRef` resolves to, and it
+is RENDERED HERE as a copy of one declared runtime — the one flagged
+`default: true`, or the first configured. Every runtime is optional; when none
+is declared at all and a route still needs one, `agentops.defaultRuntimeGuard`
+fails the render.
 
 The FLOOR ServiceAccount is created in rbac.yaml, unconditionally and bound to
 nothing. The account a runtime NAMES is a reference this chart never creates.
@@ -23,4 +24,14 @@ configuration, not through any CR here.
 {{- include "agentops.defaultRuntimeGuard" . }}
 {{- range $entry := (.Values.runtimes | default list) }}
 {{- include "agentops.renderRuntime" (dict "root" $ "entry" $entry) }}
+{{- end }}
+{{- /* THE ONE NAMED `default`: a copy of the flagged or first configured runtime
+(agentops.defaultRuntimeEntry). Every runtime keeps its own name, so a route can
+still select it by that name, and this copy is what a route naming none gets. */ -}}
+{{- $pick := fromYaml (include "agentops.defaultRuntimeEntry" .) }}
+{{- if and $pick (ne ($pick.name | default "") "default") }}
+{{- $copy := deepCopy $pick }}
+{{- $_ := set $copy "name" "default" }}
+{{- $_ := set $copy "defaultOf" $pick.name }}
+{{- include "agentops.renderRuntime" (dict "root" $ "entry" $copy) }}
 {{- end }}

@@ -61,7 +61,28 @@ spec:
               whose credentials, and split across two objects no single object states an
               agent's power. The Pipeline still carries no credentials and no server or
               tool definitions.
+
+              THE CAPABILITY — the six fields `AgentCapabilitySpec` holds — is either
+              INLINE here (today's shape, unchanged) or a `capabilityRef` naming an
+              `AgentCapability` object, mutually exclusive by CEL. Nothing here resolves
+              which: `dispatch.ResolveCapability` is the one place that reads either form,
+              and every consumer of a Pipeline's capability calls it rather than this
+              struct's embedded fields directly.
             properties:
+              capabilityRef:
+                description: |-
+                  capabilityRef names an AgentCapability holding this pipeline's capability
+                  INSTEAD of inlining it above — mutually exclusive with the inline fields
+                  by CEL. A Pipeline naming neither this nor `profileRef` fails `Ready`,
+                  not admission: CEL cannot express "one of" across an embedded struct.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               channelRefs:
                 description: |-
                   ChannelRefs: every conversation of this pipeline is mirrored on all of
@@ -102,7 +123,7 @@ spec:
                 type: string
               mcpConfigs:
                 description: |-
-                  MCPConfigs binds MCPConfig CRs supplying this wiring's MCP servers,
+                  MCPConfigs binds MCPConfig CRs supplying this capability's MCP servers,
                   overlaid per server key in ref order (later wins). No mode: an agent
                   definition declares no servers, so there is nothing to compose against.
                 properties:
@@ -127,17 +148,13 @@ spec:
                 - refs
                 type: object
               persistence:
-                description: "Persistence declares WHERE this route's conversations
-                  keep their state —\nthe CONTEXT volume and the WORKSPACE volume,
-                  independently.\n\nIt sits here for the reason `runtimeRef` and `serviceAccountName`
-                  do: a\nruntime is an engine, and where a route persists is the route's
-                  decision.\nAn AgentRuntime declares neither volume, so two Pipelines
-                  sharing one\nruntime keep their conversations on different volumes
-                  without cloning it.\n\nPRECEDENCE, and no other order:\n\n\tpipeline.spec.persistence.<volume>
-                  -> the chart's release default -> ephemeral\n\nThe CONVERSATION
-                  snapshots the RESOLVED claim at creation, so editing\nthis field
-                  re-wires only conversations created afterwards. Nothing reads\na
-                  Pipeline at pod-build time."
+                description: "Persistence declares WHERE this capability's conversations
+                  keep their\nstate — the CONTEXT volume and the WORKSPACE volume,
+                  independently.\n\nPRECEDENCE, and no other order:\n\n\t<embedding
+                  kind>.persistence.<volume> -> the chart's release default -> ephemeral\n\nThe
+                  CONVERSATION snapshots the RESOLVED claim at creation, so editing\nthis
+                  field re-wires only conversations created afterwards. Nothing\nreads
+                  a Pipeline or Coordinator at pod-build time."
                 properties:
                   context:
                     description: |-
@@ -249,9 +266,11 @@ spec:
                 type: object
               profileRef:
                 description: |-
-                  ProfileRef: the agent answering the conversations this pipeline
-                  originates — those from the signal sources it WATCHES, and those a chat
-                  command addresses to it by name. Channels supply no default.
+                  ProfileRef: the agent this capability answers as. Optional on the
+                  struct because a Pipeline embedding this inline may instead name a
+                  `capabilityRef` for the whole capability — CEL cannot express "one of"
+                  across an embedded struct, so the two-refs-or-neither check is a Ready
+                  condition on the EMBEDDING kind, not admission here.
                 properties:
                   name:
                     description: Name of the referenced object.
@@ -262,20 +281,22 @@ spec:
                 type: object
               runtimeRef:
                 description: |-
-                  RuntimeRef selects the AgentRuntime executing this wiring's
+                  RuntimeRef selects the AgentRuntime executing this capability's
                   conversations. Absent, the AgentRuntime named "default" — the one the
                   parent chart renders — then the manager's bootstrap configuration.
 
                   IT REPLACES `AgentProfile.spec.runtimeRef`, which is deprecated. An
                   AgentRuntime carries the ServiceAccount an agent runs as, so selecting
-                  one is selecting the agent's power in the cluster — and that is a wiring
-                  decision, made beside the tools and servers the same route grants, not an
-                  attribute of the prompts an agent is written with.
+                  one is selecting the agent's power in the cluster — and that is a
+                  capability decision, made beside the tools and servers the same
+                  capability grants, not an attribute of the prompts an agent is written
+                  with.
 
-                  The CONVERSATION snapshots the resolved name at creation, so editing this
-                  field re-wires only conversations created afterwards. The referenced CR's
-                  CONTENT — image, idle TTL, volumes — is re-read at every pod build, so
-                  fixing a runtime heals conversations already running.
+                  The CONVERSATION snapshots the resolved name at creation, so editing
+                  this field re-wires only conversations created afterwards. The
+                  referenced CR's CONTENT — image, idle TTL, volumes — is re-read at
+                  every pod build, so fixing a runtime heals conversations already
+                  running.
                 properties:
                   name:
                     description: Name of the referenced object.
@@ -290,15 +311,11 @@ spec:
                   OVERRIDING the AgentRuntime's own `serviceAccountName`. Absent, the
                   runtime's — which the chart still defaults to `agentops-runtime`.
 
-                  This is what makes one runtime image serve several trust levels: an
-                  observing route and an acting route differ in their account, not in their
-                  image, so the second no longer needs a cloned AgentRuntime to carry it.
-
                   NAMING IS NOT CREATING. No reconciler creates a ServiceAccount, and
                   nothing here validates that one exists or that its RBAC is sufficient:
                   who may create an account and what it is bound to stays an EXTERNAL
-                  grant, the same posture adapters already have. A name nothing backs fails
-                  at pod admission, naming the account.
+                  grant, the same posture adapters already have. A name nothing backs
+                  fails at pod admission, naming the account.
                 maxLength: 253
                 type: string
               signalSourceRefs:
@@ -322,7 +339,7 @@ spec:
               toolsets:
                 description: |-
                   Toolsets binds MCPToolset CRs contributing to the allowlist of this
-                  wiring's conversations, plus the mode composing them with what the
+                  capability's conversations, plus the mode composing them with what the
                   AGENT'S OWN DEFINITION declares (merge unions, overwrite replaces).
                 properties:
                   mode:
@@ -356,9 +373,14 @@ spec:
                 required:
                 - refs
                 type: object
-            required:
-            - profileRef
             type: object
+            x-kubernetes-validations:
+            - message: capabilityRef and the inline capability fields (profileRef,
+                runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence)
+                are mutually exclusive
+              rule: '!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef)
+                || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs)
+                || has(self.persistence)))'
           status:
             description: PipelineStatus reports wiring validity.
             properties:

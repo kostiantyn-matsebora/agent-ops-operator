@@ -21,7 +21,7 @@ func build(convName string, cfg Config) *corev1.Pod {
 
 // buildResolved is build for tests that need the sidecar declaration too.
 func buildResolved(convName string, r Resolved) *corev1.Pod {
-	return Build(conversation(convName), &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", r)
+	return Build(conversation(convName), &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", r, "master-key")
 }
 
 // volume finds a pod volume by name.

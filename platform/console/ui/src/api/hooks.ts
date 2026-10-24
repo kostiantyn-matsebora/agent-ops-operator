@@ -126,18 +126,49 @@ export function useMarkRead() {
   })
 }
 
+/** The reader-scoped rewind (design D-E) — absent wherever the console resolves no reader, same as mark read otherwise. */
+export function useMarkUnread() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (req: MarkReadRequest) => api.markUnread(req),
+    onSettled: () => client.invalidateQueries({ queryKey: ['conversations'] }),
+  })
+}
+
+/**
+ * The inbox's per-scope counts — the SAME count-only request the navigation
+ * badge already fetches (`useUnreadCount`, below), which also carries
+ * `rootTotal` and `scopes` (console-unread: "the count per scope SHALL be
+ * available for the inbox"). One query, one cache entry, one `apply.ts`
+ * invalidation rule for both readers.
+ *
+ * `showClosed` rides in the query key: the server excludes a closed
+ * conversation from `rootTotal` and every unread-gated scope when it is
+ * false, so toggling the list's own "Show closed" checkbox must refetch
+ * rather than reuse a cached answer computed the other way.
+ */
+export function useInboxCounts(showClosed: boolean) {
+  return useUnreadCount(showClosed)
+}
+
 /**
  * The unread count for the navigation, without the rows.
  *
  * count=1 asks for the totals only — the badge wants a number, and a page of
- * conversations it would throw away is the wrong thing to fetch on every route.
- * The count is computed server-side BEFORE any filter, so it is the same number
- * whatever the list page is currently showing.
+ * conversations it would throw away is the wrong thing to fetch on every
+ * route. `unreadTotal` is what the navigation rail itself reads, a plain
+ * notification count. The Inbox's "All" row reads `rootTotal` instead — every
+ * conversation, NOT gated on read state, the one count here that isn't.
+ * Every other scope (`working`, `mine`, `errored`, `closed`, each
+ * per-Pipeline/Coordinator entry in `scopes`) is unread, ANDed with its own
+ * predicate. `showClosed=false` excludes a closed conversation from all of
+ * these, Closed's own included, so a badge never promises a row the list is
+ * hiding.
  */
-export function useUnreadCount() {
+export function useUnreadCount(showClosed: boolean) {
   return useQuery({
-    queryKey: ['conversationCount'],
-    queryFn: () => api.conversations(new URLSearchParams({ count: '1' })),
+    queryKey: ['conversationCount', showClosed],
+    queryFn: () => api.conversations(new URLSearchParams({ count: '1', showClosed: String(showClosed) })),
   })
 }
 
@@ -160,8 +191,23 @@ export function useReopenConversation() {
   })
 }
 
-export function useConversation(name: string) {
-  return useQuery({ queryKey: ['conversation', name], queryFn: () => api.conversation(name) })
+export function useConversation(name: string, enabled = true) {
+  return useQuery({ queryKey: ['conversation', name], queryFn: () => api.conversation(name), enabled })
+}
+
+/**
+ * Everything the console's activity window holds, oldest first — FIRST LOAD.
+ * The stream appends to it from then on, so it is never re-read to observe a
+ * change; a replay reaching further back than it is told so rather than shown
+ * quiet.
+ */
+export function useActivityBuffer() {
+  return useQuery({
+    queryKey: ['activity'],
+    queryFn: () => api.activity(),
+    staleTime: Infinity,
+    retry: false,
+  })
 }
 
 export function useConversationGraph(name: string) {
@@ -175,9 +221,31 @@ export function useSources() {
   return useQuery({ queryKey: ['sources'], queryFn: api.sources })
 }
 
+/**
+ * The channel's general feed — the thread-less sends the adapter parks on
+ * its `channel:<name>` pseudo-thread, surfaced so they are visible rather
+ * than silently dropped (B1, UI half). No stream delta carries this today,
+ * so it is a plain FIRST-LOAD query like `useActivityBuffer` rather than a
+ * cache a live event ever applies to.
+ */
+export function useChannelFeed() {
+  return useQuery({ queryKey: ['channelFeed'], queryFn: api.channelFeed })
+}
+
 /** The Pipelines a message can address — Ready only, exactly like `/agents`. */
 export function useVocabulary() {
   return useQuery({ queryKey: ['vocabulary'], queryFn: api.vocabulary })
+}
+
+/**
+ * A Pipeline's declared icon, by name, from the vocabulary — which is fetched
+ * once and shared, so every mention of a Pipeline draws the same icon at no
+ * extra cost. Undefined for a name the vocabulary does not list.
+ */
+export function usePipelineIcon(): (name?: string) => string | undefined {
+  const vocabulary = useVocabulary()
+  return (name?: string) =>
+    name ? vocabulary.data?.entries.find((e) => e.kind === 'pipeline' && e.name === name)?.icon : undefined
 }
 
 /** Which historical charts the backend can answer, and whether one exists. */

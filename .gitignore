@@ -2,6 +2,7 @@ bin/
 *.exe
 .envtest/
 .serena/
+__pycache__/
 
 # local Jekyll preview output (the site is built by GitHub Pages, not here)
 docs/_site/
@@ -29,3 +30,10 @@ runtimes/*/[!.]*[!.]
 # Publication-scrub working file. The substitution map is used ONCE and deleted;
 # committing it would republish exactly what the scrub removes.
 .scrub-map.local
+
+# Coverage profiles CI uploads as artifacts; never committed.
+coverage.out
+coverage.lcov
+.github/coverage.xml
+.github/.coverage
+.github/.coverage.*

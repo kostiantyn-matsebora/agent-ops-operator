@@ -15,7 +15,7 @@ import (
 // on the manager's API port, bearer-token auth). Adapters need no Kubernetes
 // access — source config and status conditions go through this API;
 // normalized signals go in through /signal/inbound and the manager applies
-// grouping/cooldown/recurrence itself.
+// cooldown and recurrence itself, keyed on the adapter-minted initiationId.
 type Manager struct {
 	BaseURL string
 	Token   string
@@ -38,11 +38,11 @@ type SourceInfo struct {
 
 // Signal is the contract's normalized signal shape.
 type Signal struct {
-	Fingerprint string            `json:"fingerprint"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	Payload     string            `json:"payload,omitempty"`
-	Kind        string            `json:"kind,omitempty"` // empty = alert lane
+	InitiationID string            `json:"initiationId"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	Payload      string            `json:"payload,omitempty"`
+	Kind         string            `json:"kind,omitempty"` // empty = alert lane
 }
 
 // InboundResult is the manager's routing outcome for a signal batch.

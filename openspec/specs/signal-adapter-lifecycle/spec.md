@@ -5,8 +5,14 @@
 The SignalAdapter CRD and its reconciler: declaring a signal-type implementation as a CR whose adapter workload the reconciler owns with the channel-adapter security posture, per-type conflict guarding, credential projection from served sources, and Served visibility on SignalSources.
 
 ## Requirements
+
 ### Requirement: SignalAdapter CRD declares an implementation, never credentials
-The `SignalAdapter` CRD SHALL mirror `ChannelAdapter` as pure implementation: required `spec.image`, workload-run properties (`singleton` defaulting true, `resources`), an optional `spec.port` declaring the port the image's own HTTP surface listens on (webhook-receiving implementations), and an optional `spec.kubernetesAccess` (default false) declaring that the implementation talks to the Kubernetes API. It SHALL carry no `env`, no `type`, and no credentials. **The CR name IS the routing key**: SignalSources whose `spec.adapter` equals the adapter's name are served by it; one adapter per implementation holds by construction.
+
+The `SignalAdapter` CRD SHALL mirror `ChannelAdapter` as pure implementation: required `spec.image`, workload-run properties (`singleton` defaulting true, `resources`), and an optional `spec.port` declaring the port the image's own HTTP surface listens on (webhook-receiving implementations). It SHALL carry no `env`, no `type`, and no credentials.
+
+Kubernetes reach is `spec.serviceAccountName` alone. The retired `spec.kubernetesAccess` toggle is DELETED with no alias, per the requirement "An adapter's identity is a reference, and absent means the floor" in this capability's main spec — this spec SHALL state that nowhere else does it still exist.
+
+**The CR name IS the routing key**: SignalSources whose `spec.adapter` equals the adapter's name are served by it, and one adapter per implementation holds by construction.
 
 #### Scenario: Plug a new signal kind with CRs only
 - **WHEN** a `SignalAdapter` named `cron` naming an image is applied, followed by a `SignalSource` with `spec.adapter: cron`
@@ -23,28 +29,53 @@ adapter. **IT SHALL CREATE NO ServiceAccount.** It SHALL name the account
 resolved from `spec.serviceAccountName`, falling back to the release's FLOOR
 account, and SHALL mount that account's token.
 
-The Deployment SHALL carry `MANAGER_URL`, **`ADAPTER_NAME` (the CR's name — the
-same env name channel adapters receive, replacing `SOURCE_TYPE`)**,
-`POD_NAMESPACE`, and the per-adapter derived token; `replicas 1 + Recreate` when
-singleton; each served SignalSource's `credentialsSecretRef` projected as
-`envFrom` under `AGENTOPS_CRED_<SOURCE>_`; source changes roll the pod. When
-`spec.port` is set the reconciler SHALL also own a Service
+The Deployment SHALL carry:
+
+- `MANAGER_URL`
+- **`ADAPTER_NAME`** (the CR's name — the same env name channel adapters receive, replacing `SOURCE_TYPE`)
+- `POD_NAMESPACE`
+- `ADAPTER_TOKEN` (the per-adapter derived token)
+
+It SHALL run `replicas 1` with `Recreate` when singleton, and project each
+served SignalSource's `credentialsSecretRef` as `envFrom` under
+`AGENTOPS_CRED_<SOURCE>_`. Source changes roll the pod.
+
+When `spec.port` is set the reconciler SHALL also own a Service
 `agentops-signal-<name>` targeting that port and inject `LISTEN_ADDR=:<port>`.
 Deleting the SignalAdapter SHALL remove workload and Service. SignalSources
 select the adapter by `spec.adapter` equalling the CR's name.
 
-**NO RECONCILER CREATES AN IDENTITY, AND THIS WAS THE ONLY ONE THAT DID.** Every
-other identity in this API is a reference the chart creates. The exception cost
-what an exception costs: the manager is forbidden from binding RBAC to an
-adapter — correctly, since a `SignalAdapter` is an ordinary namespaced object and
-a reconciler that could grant one would make CR-edit rights a privilege
-escalation — so it created accounts it was not allowed to grant anything to. On
-the reference install six existed and one was bound.
+**EVERY SIGNAL ADAPTER SHARES ONE `app.kubernetes.io/name`, SO IT CANNOT TELL
+INSTANCES APART.** `cron`, `alertmanager`, `k8s-events` and `ha` all render
+the same value today, collapsing every instance into one node in
+label-grouping tooling — a service map, a dashboard, `kubectl get pods -l`.
+
+The Deployment, its Pod template, and its Service (when rendered) SHALL
+additionally carry `app.kubernetes.io/instance: <CR name>`.
+
+`app.kubernetes.io/name` is UNCHANGED. `chart/templates/networkpolicy.yaml`
+selects ingress to the manager by that exact value for every signal adapter,
+so repurposing it would break that policy. `app.kubernetes.io/instance` is
+additive only — no existing Deployment, Service, or NetworkPolicy selector
+reads it.
+
+**NO RECONCILER CREATES AN IDENTITY, AND THIS WAS THE ONLY ONE THAT DID.**
+Every other identity in this API is a reference the chart creates.
+
+The exception cost what an exception costs. The manager is forbidden from
+binding RBAC to an adapter — correctly, since a `SignalAdapter` is an
+ordinary namespaced object, and a reconciler that could grant one would make
+CR-edit rights a privilege escalation.
+
+So it created accounts it was not allowed to grant anything to. On the
+reference install six existed and one was bound.
 
 **THE GRANT AND THE IDENTITY ARE NOW IN ONE FILE.** The bundle that knows an
-adapter reads Events writes the ClusterRole, the account and the CR's reference
-together, and a reviewer answers "what can this adapter do" by reading one
-object rather than a chart template plus a Go reconciler.
+adapter reads Events writes the ClusterRole, the account and the CR's
+reference together.
+
+A reviewer answers "what can this adapter do" by reading one object rather
+than a chart template plus a Go reconciler.
 
 #### Scenario: Deployment shape matches the channel-adapter posture
 - **WHEN** a singleton SignalAdapter's Deployment is rendered for two credentialed sources
@@ -65,6 +96,10 @@ object rather than a chart template plus a Go reconciler.
 #### Scenario: Contract env carries the adapter's identity
 - **WHEN** a SignalAdapter named `cron` is reconciled
 - **THEN** its pod runs with `ADAPTER_NAME=cron` and no `SOURCE_TYPE`
+
+#### Scenario: Distinct instances carry distinct instance labels
+- **WHEN** `SignalAdapter`s named `cron` and `alertmanager` are both reconciled
+- **THEN** both Deployments carry `app.kubernetes.io/name: agentops-signal-adapter`, and their Pod templates carry `app.kubernetes.io/instance: cron` and `app.kubernetes.io/instance: alertmanager` respectively
 
 ### Requirement: An adapter's identity is a reference, and absent means the floor
 

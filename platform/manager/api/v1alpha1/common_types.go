@@ -121,3 +121,30 @@ type CredentialKeyDoc struct {
 	// +optional
 	Description string `json:"description,omitempty"`
 }
+
+// ExternalRef names one system outside the install that an adapter
+// implementation faces. It is METADATA ONLY, beside configSchema and
+// credentialKeys: the manager reads no config to verify it and grants nothing
+// from it — no RBAC, no network policy, no credential follows from declaring
+// one. The console draws it verbatim as a node beside the adapter.
+type ExternalRef struct {
+	// Name is the system as a reader knows it: "Alertmanager",
+	// "Telegram Bot API", "Kubernetes API".
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+	// Kind is how the adapter meets it: `sender` pushes to the adapter,
+	// `api` is called by the adapter, `kubernetes` is the cluster's own API.
+	// +kubebuilder:validation:Enum=sender;api;kubernetes
+	Kind string `json:"kind"`
+}
+
+// External kinds for ExternalRef.Kind.
+const (
+	// ExternalSender pushes to the adapter.
+	ExternalSender = "sender"
+	// ExternalAPI is called by the adapter.
+	ExternalAPI = "api"
+	// ExternalKubernetes is the cluster's own API.
+	ExternalKubernetes = "kubernetes"
+)

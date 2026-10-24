@@ -36,6 +36,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import argparse
 import pathlib
 import re
@@ -75,9 +76,25 @@ NAMESPACE = "agent-ops"
 #                from the chart check by KEY, never by value.
 DOCUMENTED_PLACEHOLDERS = {
     "https://ha.example.org",           # home-assistant/values.yaml, homeAssistant.endpoint
+    "https://pulse.example.org",        # pulse/values.yaml, mcpServer.backend
+    "pulse-adapter.example.org",        # pulse/values.yaml, signal.ingress.host
     "http://metrics.example:8428",      # RFC 2606 reserved domain
     "-1001234567890",                   # telegram/values.yaml, surface.chatId
+    # prometheus/values.yaml, mcpServers.backend — the chart's OWN example, and
+    # a cluster-internal service name, which is a shape the publication
+    # allowlist permits. An ENTRY, never a loosened rule.
+    "http://vmsingle-vm.monitoring.svc:8429",
+    # ollama/values.yaml examples — a cluster-internal service name and a
+    # public model name, both shapes the allowlist permits.
+    "http://ollama.ollama.svc:11434",
+    "qwen2.5:14b",
+    # chart/values.yaml, global.agentops.wiringMode — one of the two literal
+    # values the field accepts, not an invented example.
+    "pipelines",
 }
+# A value too generic to prove documentation by bare substring is anchored to
+# the chart text that actually documents it.
+PLACEHOLDER_ANCHORS = {"pipelines": "wiringMode: pipelines"}
 CREDENTIAL_PLACEHOLDERS = {
     "placeholder-token",
     "placeholder:token",
@@ -91,7 +108,8 @@ CREDENTIAL_KEY = re.compile(r"(?i)credential|token|secret|password")
 # infrastructure until proven otherwise.
 ALLOWED_HOSTS = {
     "example", "example.com", "example.net", "example.org",
-    "ha.example.org", "metrics.example",
+    "ha.example.org", "pulse.example.org", "pulse-adapter.example.org",
+    "metrics.example",
     "github.com", "kubernetes.io", "keepachangelog.com",
     "localhost", "127.0.0.1",
     # The SVG namespace, which every generated drawing must declare. The audit
@@ -99,6 +117,20 @@ ALLOWED_HOSTS = {
     # published as one typed into prose, and harder to notice.
     "www.w3.org",
 }
+
+# CLUSTER-INTERNAL SUFFIXES, READ FROM THE PUBLICATION ALLOWLIST rather than
+# listed again here. That file is this repository's statement of what is safe to
+# publish, and it already declares these -- a second copy in this script is a
+# rule stated twice, which is a rule that drifts. It drifted once: this audit
+# accepted `.svc.cluster.local` and refused the bare `.svc` the allowlist
+# permits, so a page naming a Service the way the chart's own values do failed a
+# guard the publication rule would have passed.
+CLUSTER_SUFFIXES = tuple(
+    "." + s
+    for s in json.loads(
+        (REPO / ".github" / "publication-allowlist.json").read_text()
+    )["hostname"]["clusterSuffixes"]
+)
 
 # Identifier shapes worth refusing on sight. A chat id is the one this
 # repository has actually shipped as "the value to copy".
@@ -114,12 +146,19 @@ PRESETS = {
         "sets": {
             "global.demo.enabled": "true",
             "kubernetes.enabled": "true",
+            # `guides/pipeline.md`'s worked example is a `Pipeline` object —
+            # pin the wiring posture explicitly so the preset keeps rendering
+            # one even now that `demo.enabled` alone selects `coordinator`
+            # (coordinator-deployment-mode). A preset reaching for a Pipeline
+            # example is about the PIPELINE kind, not about demo mode's own
+            # default posture.
+            "global.agentops.wiringMode": "pipelines",
         },
     },
     "tier2": {
         "sets": {
             "home-assistant.enabled": "true",
-            "home-assistant.pipelines.enabled": "true",
+            "home-assistant.wiringEnabled": "true",
             "home-assistant.homeAssistant.endpoint": "https://ha.example.org",
             "home-assistant.homeAssistant.credentials.operatorToken": "placeholder-token",
         },
@@ -133,6 +172,186 @@ PRESETS = {
         },
     },
     "tier4": {"sets": {}},
+    # PROMETHEUS HAD NO PRESET AT ALL, so no generated content on the site
+    # exercised that bundle -- its worked examples were the one lane nothing
+    # rendered. `backend` is REQUIRED when the server component is on and is
+    # never derived, so it is set here for the same reason tier2 sets an
+    # endpoint: omit it and the guard would be testing the chart's guards.
+    "tier5": {
+        "sets": {
+            "prometheus.enabled": "true",
+            "prometheus.mcp.enabled": "true",
+            "prometheus.mcpServers.enabled": "true",
+            "prometheus.mcpServers.backend": "http://vmsingle-vm.monitoring.svc:8429",
+            "prometheus.wiringEnabled": "true",
+        },
+    },
+}
+
+# What each bundle is made of, for the `renders` marker.
+#
+# A component's objects are a SET DIFFERENCE: render the bundle with the
+# component off, render it again with the component on, and the difference is
+# what that component contributes. Two things are DECLARED rather than derived,
+# and each was paid for by the naive version failing:
+#
+#   `flag`     the boolean that turns this component on, bundle-relative.
+#              `flags` where more than one does.
+#   `sets`     the values that turn this component on. A chart's flags are not
+#              independent -- `mcp.enabled=true` refuses to render without
+#              `mcp.url` unless `mcpServers` is on -- so toggling one boolean at
+#              a time reports a chart guard as an empty row.
+#   `requires` the components that must already be on for it to render at all.
+#              Without this a prerequisite's objects are attributed to whichever
+#              component needed it: `mcpServers` appears to render the
+#              `MCPConfig` and `MCPToolset` that belong to `mcp`.
+#
+# A MISSING `requires` FAILS THE RENDER, LOUDLY -- the chart's own guard
+# refuses, and that is what makes a hand-maintained dependency list safe. It
+# cannot silently produce a wrong row.
+#
+# `enable` carries what the BUNDLE needs whatever is on: its own key, plus any
+# endpoint or credential it refuses to render without. Component `sets` are
+# booleans, so the baseline is `enable` with every one of them false.
+#
+# Declaration ORDER is row order, and it is the order the components are meant
+# to be read in -- what arrives, who answers, what it may reach, and last the
+# wiring that joins them.
+#
+# THE FIRST ROW IS WHAT THE BUNDLE RENDERS WHATEVER YOU TURN OFF, and it is a
+# SECOND baseline rather than a component: the bundle disabled against the
+# bundle enabled with every component off. Without it `telegram` -- whose
+# adapters and gateway carry no flag at all -- has no describable table, and
+# every bundle's unconditional objects would simply go unattributed. It is
+# emitted only where that difference is non-empty.
+BUNDLES = {
+    "kubernetes": {
+        "components": {
+            "Events lane": {"flag": "eventsAdapter.enabled"},
+            "Profile": {"flag": "profile.enabled"},
+            "MCP tooling": {"flag": "mcp.enabled", "requires": ["MCP server"]},
+            "MCP server": {"flag": "mcpServers.enabled"},
+            "Wiring": {
+                "flag": "wiringEnabled",
+                "requires": ["Events lane", "Profile", "MCP tooling"],
+            },
+        },
+    },
+    "prometheus": {
+        "components": {
+            "Ingest lane": {"flag": "alertmanager.enabled"},
+            "Profile": {"flag": "profile.enabled"},
+            "MCP tooling": {"flag": "mcp.enabled", "requires": ["MCP server"]},
+            "MCP server": {
+                "flag": "mcpServers.enabled",
+                # REQUIRED when enabled, and never derived: the chart refuses
+                # rather than guess, because single-node VictoriaMetrics,
+                # cluster mode and Prometheus each serve the query API
+                # somewhere different.
+                "sets": {"mcpServers.backend": "http://vmsingle-vm.monitoring.svc:8429"},
+            },
+            "Wiring": {
+                "flag": "wiringEnabled",
+                "requires": ["Ingest lane", "Profile", "MCP tooling"],
+            },
+        },
+    },
+    "home-assistant": {
+        "enable": {
+            "homeAssistant.endpoint": "https://ha.example.org",
+            "homeAssistant.credentials.operatorToken": "placeholder-token",
+        },
+        "components": {
+            "Ingest lane": {"flag": "logsAdapter.enabled"},
+            "MCP tooling": {"flag": "mcp.enabled"},
+            # THE USER PROFILE IS GATED ON HAVING TOOLS -- `profiles.user.enabled`
+            # renders nothing unless the house is reachable, because an agent
+            # meant to USE the house with no way to reach it is a profile that
+            # can only apologise. The ops profile has no such gate.
+            "Profiles": {
+                "flags": ["profiles.user.enabled", "profiles.ops.enabled"],
+                "requires": ["MCP tooling"],
+            },
+            # ONE SWITCH, TWO FLAGS. Under the bundle's own values neither of
+            # these renders alone: the config refuses without a server to reach,
+            # and the server's workload is gated on the config. They separate
+            # only by pointing `adminMcp.url` at a server you already run, which
+            # the chart documents but gives no example of -- and an invented one
+            # is what the placeholder guard exists to keep out. So the table
+            # states the switch and the page states the escape hatch.
+            "Admin MCP": {"flags": ["adminMcp.enabled", "adminMcpServer.enabled"]},
+            "Wiring": {
+                "flag": "wiringEnabled",
+                "requires": ["Ingest lane", "Profiles", "MCP tooling"],
+            },
+        },
+    },
+    "pulse": {
+        "components": {
+            "Ingest lane": {
+                "flag": "signal.defaultSource.enabled",
+                "sets": {"signal.credentials.token": "placeholder-token"},
+            },
+            "Profiles": {"flags": ["profiles.observer.enabled", "profiles.operator.enabled"]},
+            "MCP tooling": {
+                "flags": ["mcp.observer.enabled", "mcp.operator.enabled"],
+                "sets": {
+                    "mcp.observer.credentials.token": "placeholder-token",
+                    "mcp.operator.credentials.token": "placeholder-token",
+                },
+                "requires": ["MCP server"],
+            },
+            "MCP server": {
+                "flag": "mcpServer.enabled",
+                # REQUIRED when enabled, never derived: mcp-pulse has no
+                # in-cluster endpoint to default onto, since Pulse is always
+                # operator-supplied.
+                "sets": {"mcpServer.backend": "https://pulse.example.org"},
+            },
+            "Webhook exposure": {
+                "flag": "signal.ingress.enabled",
+                "sets": {"signal.ingress.host": "pulse-adapter.example.org"},
+            },
+            "Wiring": {
+                "flags": [
+                    "wiringEnabled",
+                    "pipelines.observer.enabled",
+                    "pipelines.operator.enabled",
+                ],
+                "requires": ["Ingest lane", "Profiles", "MCP tooling"],
+            },
+        },
+    },
+    # TELEGRAM IS THE BUNDLE WITH ONE TOGGLE. Its channel adapter, its
+    # origination adapter and its gateway carry no `enabled` of their own --
+    # they render whenever the bundle does, which is what the page means by
+    # shipping in two layers: the implementations are guessable and the surface
+    # is not. That unconditional layer is the `always` row.
+    # A RUNTIME BUNDLE: one CR, no sub-components, so the whole of it is the
+    # "Always" row. Both values are required by the bundle, so they are set.
+    "ollama": {
+        "enable": {
+            "endpoint": "http://ollama.ollama.svc:11434",
+            "model": "qwen2.5:14b",
+        },
+        "components": {},
+    },
+    # The copilot bundle needs nothing to render: the token is optional at
+    # render time (empty references a Secret the adopter creates), so the
+    # "Always" row is the CR alone and the conditional Secret is not in it.
+    "copilot": {
+        "enable": {},
+        "components": {},
+    },
+    "telegram": {
+        "enable": {
+            "surface.chatId": "-1001234567890",
+            "surface.credentials.botToken": "placeholder:token",
+        },
+        "components": {
+            "Surface": {"flag": "surface.enabled"},
+        },
+    },
 }
 
 # Kinds an adopter writes, in the order the guides teach them. The reference
@@ -141,6 +360,7 @@ PRESETS = {
 # one teaches them to fight the reconciler.
 AUTHORED_KINDS = [
     "AgentProfile",
+    "AgentCapability",
     "Pipeline",
     "MCPToolset",
     "MCPConfig",
@@ -417,26 +637,39 @@ def assert_placeholders() -> list[str]:
     """
     values = chart_values_text()
     problems = []
-    for preset, config in PRESETS.items():
-        for key, value in config["sets"].items():
+    declared: list[tuple[str, dict[str, str]]] = [
+        (f"preset {name}", config["sets"]) for name, config in PRESETS.items()
+    ]
+    # A bundle's values are copied by no reader -- the renders table publishes
+    # object names and no URL -- but they are held to the SAME rule anyway. The
+    # value that reaches a render is the value somebody edits next, and an
+    # invented one there is an invented one waiting for a marker that publishes
+    # it.
+    for bundle, spec in BUNDLES.items():
+        sets = {f"{bundle}.{k}": v for k, v in spec.get("enable", {}).items()}
+        for title, component in spec["components"].items():
+            sets |= {f"{bundle}.{k}": v for k, v in component.get("sets", {}).items()}
+        declared.append((f"bundle {bundle}", sets))
+    for what, config in declared:
+        for key, value in config.items():
             if value in ("true", "false"):
                 continue
             if CREDENTIAL_KEY.search(key):
                 if value not in CREDENTIAL_PLACEHOLDERS:
                     problems.append(
-                        f"preset {preset}: {key}={value!r} is a credential and is not a "
+                        f"{what}: {key}={value!r} is a credential and is not a "
                         f"declared dummy. Add it to CREDENTIAL_PLACEHOLDERS -- and never "
                         f"to a values file."
                     )
                 continue
             if value not in DOCUMENTED_PLACEHOLDERS:
                 problems.append(
-                    f"preset {preset}: {key}={value!r} is not a declared placeholder. "
+                    f"{what}: {key}={value!r} is not a declared placeholder. "
                     f"Add it to DOCUMENTED_PLACEHOLDERS only once it names nothing real."
                 )
-            elif value not in values:
+            elif PLACEHOLDER_ANCHORS.get(value, value) not in values:
                 problems.append(
-                    f"preset {preset}: {key}={value!r} is no longer documented by any "
+                    f"{what}: {key}={value!r} is no longer documented by any "
                     f"chart values file. The site and the chart must name the SAME "
                     f"example -- put it back, or follow the chart to its new one."
                 )
@@ -457,7 +690,7 @@ def audit_identifiers(produced: dict[pathlib.Path, str]) -> list[str]:
             bare = host.split(":")[0]
             if host in ALLOWED_HOSTS or bare in ALLOWED_HOSTS:
                 continue
-            if bare.endswith(".svc.cluster.local") or bare.endswith(".example"):
+            if bare.endswith(CLUSTER_SUFFIXES) or bare.endswith(".example"):
                 continue
             problems.append(f"{path.name}: names host {host!r}, which is not a reserved example")
         for what, shape in IDENTIFIER_SHAPES.items():
@@ -470,26 +703,34 @@ def audit_identifiers(produced: dict[pathlib.Path, str]) -> list[str]:
     return problems
 
 
-_renders: dict[str, list[dict]] = {}
+_renders: dict[tuple, list[dict]] = {}
 
 
-def render_preset(preset: str) -> list[dict]:
-    """helm template a preset once, and keep every document's RAW text."""
-    if preset in _renders:
-        return _renders[preset]
-    config = PRESETS[preset]
+def render_values(sets: dict[str, str], what: str) -> list[dict]:
+    """helm template one set of values once, and keep every document's RAW text.
+
+    Memoised on the VALUES rather than on a preset name, because the renders
+    marker asks for many sets of values per bundle and shares a baseline
+    between every component of one.
+    """
+    key = tuple(sorted(sets.items()))
+    if key in _renders:
+        return _renders[key]
     argv = ["helm", "template", RELEASE, str(CHART), "-n", NAMESPACE]
-    for key, value in config["sets"].items():
+    for name, value in sets.items():
         if value not in ("true", "false") and value not in PLACEHOLDERS:
             raise SystemExit(
-                f"preset {preset}: {key}={value!r} is not a declared placeholder. "
+                f"{what}: {name}={value!r} is not a declared placeholder. "
                 "An example is copied by every reader -- add it to PLACEHOLDERS "
                 "only once it names nothing real."
             )
-        argv += ["--set", f"{key}={value}"]
+        argv += ["--set", f"{name}={value}"]
     out = subprocess.run(argv, capture_output=True, text=True)
     if out.returncode != 0:
-        raise SystemExit(f"preset {preset} failed to render:\n{out.stderr}")
+        # The chart's OWN message, verbatim. A component that refuses to render
+        # without another says so in one line, and that line is the fix -- a
+        # generator paraphrasing it would hide the `requires` that is missing.
+        raise SystemExit(f"{what} failed to render:\n{out.stderr}")
     docs: list[dict] = []
     for chunk in out.stdout.split("\n---\n"):
         text = chunk.strip("\n")
@@ -502,8 +743,13 @@ def render_preset(preset: str) -> list[dict]:
         if not isinstance(parsed, dict) or "kind" not in parsed:
             continue
         docs.append({"kind": parsed["kind"], "name": parsed["metadata"]["name"], "text": text})
-    _renders[preset] = docs
+    _renders[key] = docs
     return docs
+
+
+def render_preset(preset: str) -> list[dict]:
+    """helm template a preset once, and keep every document's RAW text."""
+    return render_values(PRESETS[preset]["sets"], f"preset {preset}")
 
 
 def build_example(preset: str, kind: str, name: str) -> str:
@@ -514,6 +760,111 @@ def build_example(preset: str, kind: str, name: str) -> str:
         sorted({f"{d['kind']}/{d['name']}" for d in render_preset(preset) if d["kind"] == kind})
     ) or "(no object of that kind)"
     raise SystemExit(f"preset {preset} renders no {kind}/{name}. Of that kind: {available}")
+
+
+def _flags(component: dict) -> list[str]:
+    """A component is turned on by one flag, or by more than one."""
+    return component.get("flags") or [component["flag"]]
+
+
+def _sets(bundle: str, component: dict, value: str) -> dict[str, str]:
+    """The values that turn a component on, or off.
+
+    Turning it ON also applies whatever non-boolean values the chart refuses to
+    render without. Turning it OFF applies the booleans alone -- a component
+    that is off needs none of them, and setting one anyway would put it in the
+    baseline where it could be attributed to somebody else.
+    """
+    sets = {f"{bundle}.{flag}": value for flag in _flags(component)}
+    if value == "true":
+        sets |= {f"{bundle}.{k}": v for k, v in component.get("sets", {}).items()}
+    return sets
+
+
+def _required(bundle: str, components: dict, title: str, seen: set[str]) -> dict[str, str]:
+    """Every component this one needs, TRANSITIVELY.
+
+    Kubernetes' wiring needs its MCP tooling, and that needs the MCP server --
+    so a baseline built from direct requirements alone renders an MCPConfig
+    pointing nowhere, and the chart refuses. Naming the whole chain on every
+    component instead would be the same fact written twice.
+    """
+    sets: dict[str, str] = {}
+    for name in components[title].get("requires", []):
+        if name not in components:
+            raise SystemExit(
+                f"bundle {bundle}: component {title!r} requires {name!r}, "
+                f"which is not declared"
+            )
+        if name in seen:
+            raise SystemExit(f"bundle {bundle}: {name!r} requires itself, through {title!r}")
+        sets |= _required(bundle, components, name, seen | {title})
+        sets |= _sets(bundle, components[name], "true")
+    return sets
+
+
+def _objects(docs: list[dict]) -> set[str]:
+    return {f"{d['kind']}/{d['name']}" for d in docs}
+
+
+def build_renders(bundle: str) -> str:
+    """What each of a bundle's components renders, by set difference.
+
+    The generator owns what is rendered. The page owns what it means -- which
+    object is conditional, which account carries which grant, why the component
+    exists at all -- so this emits objects and nothing else.
+    """
+    if bundle not in BUNDLES:
+        known = ", ".join(sorted(BUNDLES))
+        raise SystemExit(f"no bundle named {bundle!r}. Declared: {known}")
+    spec = BUNDLES[bundle]
+    components: dict[str, dict] = spec["components"]
+
+    off = {f"{bundle}.enabled": "true"}
+    off |= {f"{bundle}.{k}": v for k, v in spec.get("enable", {}).items()}
+    for component in components.values():
+        off |= _sets(bundle, component, "false")
+
+    rows: list[tuple[str, str, set[str]]] = []
+
+    # The unconditional layer: the bundle disabled against the bundle enabled
+    # with every component off. Emitted only where it is non-empty.
+    disabled = {**off, f"{bundle}.enabled": "false"}
+    always = _objects(render_values(off, f"bundle {bundle}")) - _objects(
+        render_values(disabled, f"bundle {bundle} disabled")
+    )
+    if always:
+        rows.append(("Always", "", always))
+
+    for title, component in components.items():
+        baseline = off | _required(bundle, components, title, {title})
+        before = _objects(render_values(baseline, f"bundle {bundle} baseline for {title}"))
+        after = _objects(
+            render_values(baseline | _sets(bundle, component, "true"),
+                          f"bundle {bundle} component {title}")
+        )
+        rows.append((title, " / ".join(_flags(component)), after - before))
+
+    # A LISTING, NOT A TABLE, AND THAT IS THE STYLE RULE RATHER THAN a
+    # preference. `docs/CLAUDE.md`: two long code values in a three-column table
+    # crush the last column, and "when that happens the table is the wrong shape
+    # -- use two columns, or a values snippet."
+    #
+    # It was built as a table twice. The first ran UNDER the on-this-page rail,
+    # because a code span never wraps in a table so the longest `Kind/name` sets
+    # the column. The second put it in a scroll frame, which hid half the names
+    # behind a scrollbar -- a worse failure, since a reader cannot tell there is
+    # anything to the right. An object name is monospace text one item per line,
+    # which is what a fenced block is for.
+    body: list[str] = []
+    for title, value, objects in rows:
+        if body:
+            body.append("")
+        body.append(f"# {title}{f'  ({value})' if value else ''}")
+        body.extend(sorted(objects, key=lambda o: (o.split("/")[0], o))
+                    or ["(nothing of its own)"])
+    listing = "\n".join(body)
+    return f"```text\n{listing}\n```\n"
 
 
 # --------------------------------------------------------------------------
@@ -585,6 +936,152 @@ def field_table(rows: list[dict]) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Go struct schema tables (the `struct-table` marker)
+# --------------------------------------------------------------------------
+#
+# A SECOND source of truth, beside `chart/crds/`: the manager's own Go structs,
+# for the work-unit and completion-report shapes `docs/contracts/runtime.md`
+# states as law but no CRD describes -- they travel over `GET /work` /
+# `POST /work/done`, never through the API server.
+#
+# `runtime-specification` built this once already and reversed it in the same
+# change (its own task 3.3): a Go doc comment is written in normal Go style --
+# a paragraph of rationale, why the field exists, what it replaced -- and
+# copying that verbatim into a table cell produced unreadable rows. This
+# generator avoids repeating that: GO_FIELD_RE / field_table() do the parsing
+# and rendering this already owns, and only the FIRST SENTENCE of a doc
+# comment reaches the Description column, exactly the trim `first_sentence`
+# already performs for a template's YAML comments.
+
+GO_FIELD_RE = re.compile(r"^\s*([A-Z]\w*)\s+([^\s`]+)\s+`([^`]*)`\s*$")
+GO_UNTAGGED_FIELD_RE = re.compile(r"^\s*([A-Z]\w*)\s+([^\s`]+)\s*$")
+
+
+def go_type(token: str) -> str:
+    """A Go type token in the bracket notation `type_of` uses for a CRD schema
+    (`[]Turn`, `map[string]string`) -- one table style for both sources.
+
+    A leading `*` carries no meaning here: `omitempty` on the json tag is what
+    the Required column reads, so a pointer and its pointee render identically.
+    """
+    token = token.removeprefix("*")
+    if token.startswith("[]"):
+        return f"[]{go_type(token[2:])}"
+    m = re.match(r"^map\[([^\]]+)\](.+)$", token)
+    if m:
+        return f"map[{go_type(m.group(1))}]{go_type(m.group(2))}"
+    token = token.rsplit(".", 1)[-1]  # drop a package qualifier
+    return {
+        "int": "integer", "int32": "integer", "int64": "integer",
+        "float32": "number", "float64": "number", "bool": "boolean",
+    }.get(token, token)
+
+
+def _go_struct_body(path: pathlib.Path, text: str, struct: str) -> str:
+    """The text between one Go struct's opening and matching closing brace.
+
+    Braces inside a comment or a backtick tag are prose, not structure, so
+    the depth count skips over them rather than toggling on them.
+    """
+    open_m = re.search(rf"(?m)^type {re.escape(struct)} struct \{{\s*$", text)
+    if not open_m:
+        raise SystemExit(f"{path}: no `type {struct} struct {{` declaration")
+    skip_re = re.compile(r"//[^\n]*|/\*.*?\*/|`[^`]*`", re.S)
+    depth, i = 1, open_m.end()
+    while depth and i < len(text):
+        skipped = skip_re.match(text, i)
+        if skipped:
+            i = skipped.end()
+            continue
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    if depth:
+        raise SystemExit(f"{path}: `{struct}` struct never closes")
+    return text[open_m.end():i - 1]
+
+
+def _go_field_row(path: pathlib.Path, struct: str, line: str, comment: list[str]) -> dict | None:
+    """One field line's `field_table()` row, or `None` when it is never on
+    the wire (untagged, or `json:"-"`)."""
+    m = GO_FIELD_RE.match(line)
+    if not m:
+        if GO_UNTAGGED_FIELD_RE.match(line):
+            return None  # no struct tag at all -- never on the wire
+        raise SystemExit(
+            f"{path}: `{struct}` has a field line this generator cannot "
+            f"parse -- scope is one field per line, a single-line struct "
+            f"tag: {line!r}"
+        )
+    name, gotype, tag = m.groups()
+    jm = re.search(r'json:"([^"]*)"', tag)
+    if not jm:
+        return None  # untagged -- never on the wire
+    tag_name, *opts = jm.group(1).split(",")
+    if tag_name == "-":
+        return None  # explicitly off the wire
+    json_name = tag_name or name  # an empty tag name keeps the Go name
+    desc = " ".join(comment)
+    for lead in (f"{name} is ", f"{name} are "):
+        if desc.startswith(lead):
+            desc = desc[len(lead):]
+            break
+    desc = one_line(first_sentence(desc)) if desc else ""
+    if desc:
+        desc = desc[0].upper() + desc[1:]
+        if not desc.endswith((".", "!", "?")):
+            desc += "."
+    return {
+        "path": json_name,
+        "type": go_type(gotype),
+        "required": "omitempty" not in opts,
+        "description": desc,
+    }
+
+
+def go_struct_fields(path: pathlib.Path, struct: str) -> list[dict]:
+    """Every json-tagged field of one Go struct, as field_table() rows.
+
+    Scope is deliberately narrow: a single-line `Name Type `json:"..."`` `
+    declaration, no embedding, no multi-line tags -- this reads a SHAPE, not a
+    compiler, and a struct outside that shape fails loudly rather than
+    silently skipping a field (`docs-generate.py --check` is the gate that
+    catches a renamed or added field; it must never catch one it never saw).
+    """
+    if not path.is_file():
+        raise SystemExit(f"{path}: no such file")
+    body = _go_struct_body(path, path.read_text(), struct)
+
+    rows: list[dict] = []
+    comment: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            comment = []
+            continue
+        if stripped.startswith("//"):
+            comment.append(stripped.removeprefix("//").strip())
+            continue
+        row = _go_field_row(path, struct, line, comment)
+        if row is not None:
+            rows.append(row)
+        comment = []
+    return rows
+
+
+def build_struct_table(file: str, struct: str) -> str:
+    # `file` is REPO-relative from a real marker's `file=` attribute, but the
+    # test suite points this at an absolute fixture path outside REPO
+    # entirely -- an explicit branch, not `REPO / file`'s implicit reliance
+    # on pathlib silently discarding the left side of `/` for an absolute
+    # right side.
+    path = pathlib.Path(file)
+    if not path.is_absolute():
+        path = REPO / path
+    rows = go_struct_fields(path, struct)
+    return "\n".join(field_table(rows)) + "\n"
+
+
+# --------------------------------------------------------------------------
 # Injection
 # --------------------------------------------------------------------------
 
@@ -618,8 +1115,19 @@ def generate_block(attrs: dict[str, str], schemas: dict[str, dict]) -> str:
         _emitted.append(yaml_text)
     elif "example" in attrs:
         yaml_text = build_example(attrs["preset"], kind, attrs["name"])
+    elif "renders" in attrs:
+        # The one marker whose block is NOT a yaml fence. Everything else here
+        # emits a resource; this emits a table, which is why the dispatcher
+        # returns the whole block rather than the text to wrap in one.
+        return build_renders(attrs["bundle"])
+    elif "struct-table" in attrs:
+        # A second table-shaped marker, same reason: it emits a `| Field | ...`
+        # block, not a resource to fence as yaml.
+        return build_struct_table(attrs["file"], attrs["struct"])
     else:
-        raise SystemExit(f"marker declares neither template nor example: {attrs}")
+        raise SystemExit(
+            f"marker declares none of template, example, renders or struct-table: {attrs}"
+        )
     return f"```yaml\n{yaml_text}\n```\n"
 
 
@@ -645,6 +1153,58 @@ def rewrite(path: pathlib.Path, schemas: dict[str, dict]) -> str:
 
 # --------------------------------------------------------------------------
 
+# A RELEASE CHANGES WHAT THE DOCS PRINT, AND NOTHING ELSE CHECKED THAT. Chart
+# 13.1.0 shipped while installation.md still told adopters to install 13.0.1,
+# and the reference runtime's image tag sat two patches behind in two worked
+# examples. Neither the docs-task hook (which checks a task is ticked) nor CI
+# (which checks generated blocks) could see it: the numbers are typed by hand.
+#
+# So every `--version X.Y.Z` a page prints must be the chart's own version, and
+# every first-party image tag a page prints must be the tag the chart ships.
+# Placeholders (`<version>`) are not numbers and pass. The changelog is exempt:
+# it is the one page that legitimately names every version there has been.
+VERSION_RE = re.compile(r"--version (\d+\.\d+\.\d+)")
+IMAGE_RE = re.compile(r"ghcr\.io/kostiantyn-matsebora/(agentops-[a-z0-9-]+):(\d+\.\d+\.\d+)")
+
+
+def shipped_image_tags() -> dict[str, str]:
+    """image name -> the tag the chart ships, from the parent and bundle values."""
+    tags: dict[str, str] = {}
+    for values in [CHART / "values.yaml", *sorted((CHART / "charts").glob("*/values.yaml"))]:
+        text = values.read_text()
+        for m in re.finditer(r"^\s*(?:image|repository):\s*(\S+)", text, re.M):
+            ref = m.group(1)
+            im = IMAGE_RE.search(ref)
+            if im:
+                tags[im.group(1)] = im.group(2)
+        # repository + tag on separate lines, comments between allowed: the
+        # parent's manager at the top level, and a bundle's images nested under
+        # their component key. Anchored on column 0 this saw only the manager,
+        # and a bundle's tag drifted unchecked.
+        for rep in re.finditer(r"^\s*image:\n(?:\s*#.*\n)*\s+repository:\s*ghcr\.io/kostiantyn-matsebora/(agentops-[a-z0-9-]+)\n(?:\s*#.*\n)*\s+tag:\s*(\S+)", text, re.M):
+            tags[rep.group(1)] = rep.group(2)
+    return tags
+
+
+def check_versions() -> list[str]:
+    """Every version and first-party tag the docs print, against the chart."""
+    chart_version = re.search(r"^version:\s*(\S+)", (CHART / "Chart.yaml").read_text(), re.M).group(1)
+    tags = shipped_image_tags()
+    problems: list[str] = []
+    pages = [p for p in [*DOCS.glob("*.md"), *DOCS.glob("*/*.md"), REPO / "README.md"]
+             if "_site" not in p.parts and p.name != "CHANGELOG.md" and p.parent.name != "changelog"]
+    for page in sorted(pages):
+        for n, line in enumerate(page.read_text().splitlines(), 1):
+            for m in VERSION_RE.finditer(line):
+                if m.group(1) != chart_version:
+                    problems.append(f"{page.relative_to(REPO)}:{n}: --version {m.group(1)}, chart is {chart_version}")
+            for m in IMAGE_RE.finditer(line):
+                want = tags.get(m.group(1))
+                if want and m.group(2) != want:
+                    problems.append(f"{page.relative_to(REPO)}:{n}: {m.group(1)}:{m.group(2)}, chart ships {want}")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail on any difference")
@@ -668,6 +1228,8 @@ def main() -> int:
     # The guide diagrams, both themes, coloured from the stylesheet's own tokens.
     light, dark = docs_diagrams.palette(STYLESHEET)
     for slug, spec in {**docs_diagrams.DIAGRAMS,
+                       **docs_diagrams.INTEGRATION_DIAGRAMS,
+                       **docs_diagrams.RUNTIME_DIAGRAMS,
                        **docs_diagrams.SECURITY_DIAGRAMS}.items():
         # `dir` is the page family the drawing belongs to. Guide diagrams state
         # none, so their directory is the default rather than repeated sixteen
@@ -701,6 +1263,16 @@ def main() -> int:
         return 1
 
     stale = [p for p, body in produced.items() if not p.exists() or p.read_text() != body]
+    # A DIFFERENT NAME from `stale`. This once read `stale := check_versions()`,
+    # which replaced the drift list with an empty one whenever every version
+    # agreed -- so nothing was ever written or reported, and a guide went on
+    # printing a tag the chart no longer shipped while every run said up to date.
+    if wrong_versions := check_versions():
+        print("Versions the docs print that the chart does not ship:", file=sys.stderr)
+        for problem in wrong_versions:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+
     if args.check:
         if stale:
             print("Generated documentation is stale:", file=sys.stderr)

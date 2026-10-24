@@ -6,10 +6,11 @@ The full CRD reference, and how an agent's capabilities are resolved.
 
 ### AgentProfile
 
-**Who the agent is.** Identity only:
+**Who the agent is and how it behaves.** Behaviour, never reach — the tools,
+MCP servers and channels are the Pipeline's:
 
 - **Git repository** — private OK, SSH key or HTTPS PAT via `secretRef`.
-- **Agent role file** in that repo — `.claude/agents/<name>.md`.
+- **Agent role file** in that repo — `.claude/agents/<name>.md` for the claude and ollama runtimes, `.github/agents/<name>.agent.md` for copilot.
 - **Credentials** as `env[]` with `valueFrom`.
 - **Prompts and limits.**
 
@@ -24,7 +25,7 @@ them.
 **What executes it.** The engine hosting the LLM agent — image, entrypoint,
 idle TTL, storage volumes, service account (the agent's RBAC).
 
-- **Any image speaking the [work contract](contracts.md#the-work-contract)
+- **Any image speaking the [runtime contract](contracts/runtime.md)
   plugs in.** A claude-code runtime ships with the chart.
 - **Resolution order**: the conversation's snapshot → `profile.runtimeRef`
   (deprecated) → CR named `default` → manager env. A `Pipeline` chooses it, and
@@ -99,7 +100,7 @@ bundling an MCP server in it. It also removes a version pin that could skew agai
 whatever cluster the image happened to run near.
 
 Practically: an agent reaches Kubernetes through the MCP tools its Pipeline
-binds (the [k8s bundle](kubernetes.md) ships them). `Bash` no longer implies
+binds (the [Kubernetes integration](integrations/kubernetes.md) ships them). `Bash` no longer implies
 cluster access. Binding `agentops-shell` is still useful for the workspace, it
 just stops being a second door to the API.
 
@@ -107,7 +108,7 @@ just stops being a second door to the API.
 exists so the runtime is swappable. Derive one:
 
 ```dockerfile
-FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
+FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.11.0
 USER root
 RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
  && chmod 0755 /usr/local/bin/kubectl
@@ -180,7 +181,7 @@ the Pipeline still cannot re-wire a conversation already running.
 
 **It exists because [sources are shareable](#sharing-a-source).** Two Pipelines
 listing one source both open a conversation per signal, and those conversations
-carry the same signature.
+carry the same `conversationId`.
 
 Without the ref, the second Pipeline's next signal would be absorbed by the
 first Pipeline's conversation and run under the wrong profile with the wrong
@@ -191,6 +192,29 @@ went blank exactly when two Pipelines wired identically.
 one.** Such a conversation stays reusable only while exactly one Ready Pipeline
 serves its source — the state it was created in. It is left alone once a second
 joins.
+
+**A conversation a `Coordinator` invokes carries `spec.causedBy` instead** —
+the same shape of provenance, naming its PARENT one hop up rather than the
+wiring object that started it. See [Coordinated
+agents](#coordinated-agents).
+
+**The object `Name` is a deterministic word-chain, never a random
+suffix.** `metadata.generateName` is not used, so `kubectl get conversations`
+reads as content instead of `member-h6jv7`. The word-chain's source:
+
+| Creation path | Word source |
+|---|---|
+| A signal-originated root (`alert`, `job`, `chat`, `task` kind) | the same title text as `spec.title` |
+| A chat command (`/<pipeline> <task>`) | the addressed pipeline's name |
+| A Coordinator member | the invoked `agents[]` entry's name |
+
+A repeat for the same base name gets the next integer suffix
+(`alert-node-down-ns-2`, `-3`, …). The manager finds it by listing
+conversations carrying the matching `agentops.dev/name-base` label, never by
+guessing names one at a time.
+
+Conversations created before this change keep their existing names. Nothing
+backfills a `name-base` label onto them.
 
 ### ConversationInput
 
@@ -243,7 +267,7 @@ transport show a person the message they just typed on it?
 
 **An ingest lane**, split like `Channel`:
 
-- **Implementation-agnostic metadata** — `adapter`, `grouping`,
+- **Implementation-agnostic metadata** — `adapter`, `cooldownHours`,
   `credentialsSecretRef`.
 - **An opaque `config`** only the serving signal implementation interprets.
 
@@ -254,44 +278,83 @@ Sources no Pipeline lists drop signals with an explicit reason.
 names them all, and a signal opens a conversation on each — see
 [Sharing a source](#sharing-a-source).
 
-**Grouping stays manager-side for every type.** Signature grouping puts the same
-problem in the same conversation, and recurrence resumes the session.
-Fingerprint cooldown suppresses repeats.
+**Correlation is the sender's job, not the manager's.** Every signal carries
+`initiationId` — minted where the sender's own aggregation already happens, or
+propagated verbatim on a round trip.
+
+The manager only compares it for equality. An open conversation whose
+`conversationId` matches gets the signal as a recurrence, resuming the
+session. It parses no label and owns no grouping policy of its own.
 
 **Every signal type is adapter-served** — the manager hosts no signal
 transports.
 
-`status.cooldown[]` records fingerprint suppression for this source, as
-`{fingerprint, at}` per admitted signal, pruned past the window and bounded.
+`status.cooldown[]` records `initiationId` suppression for this source, as
+`{initiationId, at}` per admitted signal, pruned past `cooldownHours` and
+bounded.
 
 - **The in-memory map is the hot path, this is the record.** It is read on first
   use per source after a restart, so a restart mid-incident does not re-open
   conversations for signals still inside their window.
-- **Only an admitted fingerprint writes.** A suppressed re-delivery — the
+- **Only an admitted `initiationId` writes.** A suppressed re-delivery — the
   high-volume case cooldown exists for — writes nothing.
 
-**Signal labels** are what `grouping.signatureLabels` selects over, so what an
-adapter emits determines what can be grouped.
+**`spec.attributeFilters` narrows which signals this source admits**, a list
+of `key`/`operator`/`values` requirements shaped like a Kubernetes
+`matchExpressions` entry (`In`, `NotIn`, `Exists`, `DoesNotExist`), evaluated
+against the normalized signal's `labels`.
+
+- A signal must satisfy EVERY requirement to be admitted. Failing any one
+  drops it before cooldown is consulted and before any pipeline sees it — a
+  filtered signal spends no cooldown state and is never counted received.
+- Empty or unset admits everything, identical to today's behavior.
+- An unknown `operator` is rejected by the API server at creation, not
+  silently ignored at ingest.
+
+**`spec.logFiltered`** (nullable, default `true`) governs only whether a
+filtered-out signal is still recorded as a `signal.dropped` activity event.
+Set `false` to silence a known-noisy filter — every other drop reason keeps
+logging regardless of this field.
+
+**Signal labels are opaque context, carried onto the conversation and its
+topic descriptor** — never a correlation key. What an adapter emits shapes
+display, not routing.
 
 | Vocabulary | Keys |
 |---|---|
 | Shared | `alertgroup`, `alertname`, `namespace`, `severity`, `source` |
 | Kubernetes events adapter adds | `kind`, `name`, **`workload`** (the owning controller, e.g. `Deployment/api`, resolved through owner references), `node`, plus the involved pod's own labels |
 
-**Adapter-defined keys are reserved.** A pod label named `name` or `workload` is
-never allowed to overwrite one, because through `signatureLabels` that would
-silently rewrite grouping.
+**Adapter-defined keys are reserved.** A pod label named `name` or `workload`
+is never allowed to overwrite one, so a signal's own identifying context stays
+legible regardless of what the underlying object happens to carry.
 
-**Suppression is the adapter's job, and is distinct from grouping.** It decides
-whether a signal is emitted at all — see
-[kubernetes](kubernetes.md#event-suppression-eventsadaptersourcerules).
+**`severity` here is a LABEL, unrelated to the normalized signal's own
+`severity` FIELD.** A posted signal may additionally carry a `severity`
+field, one of exactly `critical`, `error`, `warning`, `info`.
+
+`POST /signal/inbound` validates it and refuses an unmapped value. Absent
+means unrated, the only state a signal carried before this field existed.
+
+It is stored the same two places `labels` already is: once on the
+conversation's `SignalProvenance` at creation, and again on each
+`ConversationInput` that carries one. A later recurrence never rewrites
+the provenance.
+
+No shipped adapter populates it. `signals/k8s-events` and `signals/ha` keep
+writing their own `severity` **label**, shown in the table above, exactly
+as before.
+
+**Suppression is the adapter's job, and is distinct from correlation.** It
+decides whether a signal is emitted at all — see
+[kubernetes](integrations/kubernetes.md#tune-what-reaches-you).
 
 ### SignalAdapter
 
 **A signal implementation, nothing more.** The inbound-only sibling of
 `ChannelAdapter`: an image implementing the
-[signal contract](contracts.md#the-signal-adapter-contract), plugged in as a CR
-whose **name is the type key** SignalSources select via `spec.adapter`.
+[signal adapter specification](contracts/signal-adapter.md), plugged in as a
+CR whose **name is the type key** SignalSources select via `spec.adapter`.
 
 Same posture as `ChannelAdapter` — owned workload, zero-RBAC SA, singleton,
 derived name-scoped token, credential projection.
@@ -358,13 +421,49 @@ then sat at `Wired=False`.
 **What makes `servedBy` legitimate** is that an externally-served source
 **originates real conversations for a Pipeline that claims it**.
 
+### Interface metadata: `configSchema`, `credentialKeys`, `externals`
+
+Both adapter kinds may declare three facts about their IMPLEMENTATION. None of
+them is configuration, and none grants anything.
+
+| Field | Declares | Read by |
+|---|---|---|
+| `spec.configSchema` | a JSON Schema for the `config` of the Channels or SignalSources it serves | the reconciler, which reports `SchemaValid` and, on each served CR, an advisory `ConfigValid` — see [contracts](contracts/channel-adapter.md#discovering-what-config-needs) |
+| `spec.credentialKeys[]` | the Secret keys it expects in a served CR's `credentialsSecretRef` | people. The manager reads no Secrets, so it can never verify them |
+| `spec.externals[]` | each system outside the install the implementation faces, as a `name` and a `kind` | the console's topology, which draws each one beside the adapter, verbatim |
+
+**`externals[].kind` is a closed set**, enforced by the API server:
+
+| `kind` | The adapter meets it as |
+|---|---|
+| `sender` | a system that pushes to the adapter — Alertmanager, a browser |
+| `api` | a system the adapter calls — the Telegram Bot API |
+| `kubernetes` | the cluster's own API |
+
+`name` is the system as a reader knows it, 1 to 63 characters, and unique
+within the list.
+
+**`externals` is metadata only, and nothing verifies it.**
+
+- **It grants nothing.** No RBAC, no network policy and no credential follows
+  from declaring the Kubernetes API. What an adapter may do is still granted
+  by the chart against the account it names.
+- **The manager reads no config to check it.** A wrong declaration draws a
+  wrong picture, which is why the bundles declare their own externals beside
+  the adapters they ship, reviewed together.
+- **Declaring none is a normal answer.** The adapter draws with no external,
+  and nothing else about it changes.
+
 ### Pipeline
 
-**The wiring.** N `signalSourceRefs` × M `channelRefs` + one `profileRef`, plus
-the agent's **capabilities** (`toolsets` / `mcpConfigs`, see
-[below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
-`serviceAccountName`, see [below](#execution-is-wiring-too)) — the only place
-either is declared.
+**The wiring, for one agent.** N `signalSourceRefs` × M `channelRefs` + one
+`profileRef`, plus the agent's **capabilities** (`toolsets` / `mcpConfigs`,
+see [below](#capabilities-are-wiring)) and its **execution** (`runtimeRef` /
+`serviceAccountName`, see [below](#execution-is-wiring-too)).
+
+A `Coordinator` (below) declares the same `AgentCapabilitySpec` fields for its OWN coordinating
+agent, inline on itself, and an `AgentCapability` declares them standalone.
+A Pipeline is where an ordinary, single-agent route declares them inline.
 
 **It is reached two ways and no others**:
 
@@ -383,8 +482,8 @@ What the wiring produces:
 - **A user message on one surface is delivered to every other bound channel** as
   attributed text.
 
-**Wiring lives ONLY here.** Sources route nothing until a Ready Pipeline lists
-them.
+**Wiring lives only in a Pipeline or a Coordinator.** Sources route nothing
+until a Ready one of either lists them.
 
 **Sources are shareable, exactly as channels are** — see
 [Sharing a source](#sharing-a-source).
@@ -407,9 +506,9 @@ conversations — one per Pipeline**, each with that Pipeline's own profile,
 channels and capabilities. Two agents investigating one alert from two angles is
 a configuration, not a fault.
 
-**Per-source ingest policy is evaluated once, before the fan-out.** A
-fingerprint passes cooldown once and is then delivered to every server, so the
-first Pipeline cannot spend the window and starve the rest.
+**Per-source ingest policy is evaluated once, before the fan-out.** An
+`initiationId` passes cooldown once and is then delivered to every server, so
+the first Pipeline cannot spend the window and starve the rest.
 
 The counters keep the two apart:
 
@@ -458,6 +557,54 @@ Pipeline](#pipeline).
 nothing writes it, and dispatch reads it for one release so an input queued
 before the upgrade still reaches the agent it was parsed with.
 
+### AgentCapability
+
+**A named capability, declared once.** A Pipeline or a Coordinator references
+it with `capabilityRef` instead of inlining the same six fields.
+
+| Field | Selects |
+|---|---|
+| `profileRef` | the agent it answers as |
+| `runtimeRef` | the `AgentRuntime` that executes it |
+| `serviceAccountName` | the identity the runtime runs under |
+| `toolsets` | `MCPToolset` refs and the `merge` or `overwrite` mode |
+| `mcpConfigs` | `MCPConfig` refs, later wins per server key |
+| `persistence` | where its conversations keep context and workspace |
+
+- **It carries no wiring.** No signal sources and no channels, so one nothing
+  references is inert.
+- **`Ready` reports whether every reference it names resolves.**
+- **Precedence and snapshots are the Pipeline's.** The conversation freezes the
+  resolved runtime, account and claims at creation.
+
+### Coordinator
+
+**A coordinating agent.** Its own conversation reads what started it and
+invokes named members from `spec.agents[]`.
+
+- **It reconciles like a Pipeline.** Wiring validation only, and `Ready`
+  reports whether its capability and every entry resolve.
+- **It claims sources with `signalSourceRefs`**, shareable exactly as a
+  Pipeline's are.
+- **Each `agents[]` entry names ONE of `capabilityRef` or `coordinatorRef`.**
+  The second nests: the member is that Coordinator's own root. Every
+  entry's `description` is required and capped at 2048 bytes.
+- **It declares its own capability inline**, the same `AgentCapabilitySpec`
+  fields as a Pipeline: `profileRef`, `runtimeRef`, `serviceAccountName`,
+  `toolsets`, `mcpConfigs` and `persistence`.
+- **`spec.limits` bounds the tree**: `maxAgents`, `maxTurns` and `deadline`,
+  enforced per level and never pooled across nesting.
+- **`channelRefs` are reached only by escalation.** A member binds no channel
+  at creation.
+- **Its conversation reaches the verbs through the aops MCP server.** The
+  Coordinator's capability must bind the `agentops-coordinate` toolset and the aops
+  `MCPConfig`, and nothing else grants them.
+- **The chart may render one for you.** Under
+  `global.agentops.wiringMode: coordinator`, one chart-rendered Coordinator
+  claims every enabled bundle's source and lists each bundle's
+  `AgentCapability` in `agents[]` — see
+  [Deployment posture](#deployment-posture-globalagentopswiringmode) below.
+
 ### MCPConfig
 
 **Reusable MCP server sets**, bound per wiring.
@@ -478,6 +625,20 @@ before the upgrade still reaches the agent it was parsed with.
 
 The chart ships the built-in vocabulary as three risk-split toolsets.
 
+### ControlPlaneProbe
+
+**Disposable scaffolding, to be replaced, not extended.** It carries no
+real-world meaning — a bare key/value pair, no status subresource — and
+exists solely to prove the `/control-plane/*` HTTP surface end to end
+(`docs/contracts.md`) before any real resident depends on it.
+
+- **The manager's Role holds full CRUD on it.** Every other component's own
+  Role stays read-only (`get`/`list`/`watch`), or holds nothing, if it needs
+  the kind at all. This is the pattern every future resident of
+  `/control-plane/*` follows, not a one-off for this kind.
+- **Deleted or renamed**, never grown in place, once a real first resident is
+  proposed.
+
 ## The substrate: the runtime DEFAULTS and the FLOOR
 
 **The parent chart contributes the substrate, bundles contribute domain.**
@@ -490,11 +651,13 @@ It is the same whether a conversation started from a Prometheus alert, a cluster
 Event or a person typing on Telegram.
 
 **A BUNDLE MAY SHIP A RUNTIME.** The reference one does: `claude` is a subchart,
-on by default, and an install using another vendor turns it off. What no bundle
-renders is the DEFAULTS or the FLOOR — defaults differing per bundle would be
-one fact in as many places as there are vendors, and a floor a bundle could
-render would make "a route naming nothing holds nothing" a claim no single file
-checks.
+on by default, and an install using another vendor turns it off.
+
+What no bundle renders is the DEFAULTS or the FLOOR — defaults differing per
+bundle would be one fact in as many places as there are vendors.
+
+A floor a bundle could render would make "a route naming nothing holds
+nothing" a claim no single file checks.
 
 ### Two blocks, and the rule separating them
 
@@ -507,7 +670,7 @@ checks.
 global:
   agentops:
     runtimeDefaults:
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.8.0
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.11.0
       contextStorage: volume      # does this backend use a disk at all
       idleTtlMinutes: 1
       nodeSelector: {}
@@ -524,7 +687,7 @@ global:
         envName: CLAUDE_CODE_OAUTH_TOKEN
         token: ""                 # supplied = the chart CREATES the Secret
 
-runtimes: []                      # the `claude` bundle ships the one named `default`
+runtimes: []                      # the `claude` bundle ships `claude`; `default` is its copy
 ```
 
 **THE DEFAULTS ARE SUFFICIENT.** A runtime declaring nothing but a name renders
@@ -598,21 +761,26 @@ pipelines:
 | `namespaced` | your rules, as Roles in the namespaces you list |
 
 **THERE IS NO MODE, AT EITHER LEVEL.** A release-wide `rbacMode` was deleted
-first, and the per-account one was deleted with it — a mode name is a grant nobody reviewed, and
-declaring the account rather than defaulting it does not make the word readable.
+first, and the per-account one was deleted with it — a mode name is a grant
+nobody reviewed, and declaring the account rather than defaulting it does
+not make the word readable.
+
 `agentops.runtimeReadRules` / `runtimeWriteRules` in the chart are what those
 modes expanded to, and are the copyable starting point.
 
 **AN ACCOUNT EXISTS ONLY WHERE SOMETHING IS BOUND TO IT OR SOMETHING
 AUTHENTICATES AS IT.** A bundle renders a route's account only where it also
-grants that route something; a workload that mounts no token names none. Four
-accounts once existed bound to nothing, indistinguishable from the floor while
-adding four names to every audit of who holds what.
+grants that route something. A workload that mounts no token names none.
 
-**A named posture nobody declared is a grant nobody reviewed.** A release-wide
-permission MODE used to render an account from one value, and its name described
-a state the runtime was in — which is what it once meant, and the reading that
-caused the incident it was reverted for. It is deleted, with no alias.
+Four accounts once existed bound to nothing, indistinguishable from the
+floor while adding four names to every audit of who holds what.
+
+**A named posture nobody declared is a grant nobody reviewed.** A
+release-wide permission MODE used to render an account from one value, and
+its name described a state the runtime was in.
+
+That is what it once meant, and the reading that caused the incident it
+was reverted for. It is deleted, with no alias.
 
 **NO BINDING USES A BUILT-IN ROLE** — not `cluster-admin` under `full`, not
 `view` under `readonly`. Every grant is a role this chart writes out, so an
@@ -629,10 +797,11 @@ must not out-rank the one orchestrating it.
 ### Two accounts, and the second is the useful half
 
 `serviceAccountName` in the defaults names the account every unnamed route
-INHERITS, and it is a **REFERENCE this chart does not create**. Naming is not
-creating, which is the posture adapters already have — and it is what makes
-reusing an account you already own possible at all, since creating it would
-collide on Helm's ownership check.
+INHERITS, and it is a **REFERENCE this chart does not create**.
+
+Naming is not creating, which is the posture adapters already have — and
+it is what makes reusing an account you already own possible at all, since
+creating it would collide on Helm's ownership check.
 
 | Account | Created by | Is |
 |---|---|---|
@@ -669,10 +838,11 @@ compiled MCP ConfigMaps.
 > supervisor.
 
 **Namespaced Roles were tried and reverted.** RBAC cannot express "everywhere
-except", so bounding an agent meant an allow-list: one binding per namespace per
-account, 224 objects on a 28-namespace cluster, and every new namespace
-invisible until someone edited values and redeployed. The maintenance was worse
-than the exposure it bought.
+except", so bounding an agent meant an allow-list: one binding per namespace
+per account, 224 objects on a 28-namespace cluster, and every new namespace
+invisible until someone edited values and redeployed.
+
+The maintenance was worse than the exposure it bought.
 
 ### `allowPodExecution` — the Secret boundary
 
@@ -689,6 +859,17 @@ it is what makes the no-Secrets rule true rather than merely written down.
 declare AND the `kubernetes` bundle's MCP server role, through one shared
 helper — because an agent reaches the cluster THROUGH that server, so fixing one
 wall leaves the hole one indirection along.
+
+**And the agent is told, either way.** Neither wall shows in its tool list,
+so the `kubernetes` bundle's `k8s-engineer` role always ends with a posture
+paragraph naming which side of the gate it's on.
+
+Off, a pod-template edit is declined with the reason rather than attempted
+and reported as an RBAC refusal. On, it names `pods_exec` as the way into a
+workload with no tool of its own.
+
+Wording: `kubernetes.profile.podExecutionWithheldPrompt` /
+`podExecutionAllowedPrompt`.
 
 | | Off | On |
 |---|---|---|
@@ -733,7 +914,7 @@ yields a write-capable server under a `full` ServiceAccount, everything else a
 read-only server under a `readonly` one.
 
 Widening the agent therefore widens the MCP path unless you say otherwise — see
-[kubernetes](kubernetes.md#kubernetes-as-mcp-tools-mcp--mcpservers) for the
+[kubernetes](integrations/kubernetes.md#may-it-act) for the
 override that recovers the separation.
 
 ## Capabilities are wiring
@@ -782,7 +963,8 @@ looking for, and the reader would see the tags.
 printed answer is the deliverable is a fact about the system rather than a
 preference, and is injected whatever this says.
 
-See [contracts.md](contracts.md) for the grammar itself.
+See [contracts/channel-adapter.md](contracts/channel-adapter.md#the-body-grammar)
+for the grammar itself.
 
 What an agent may *do* comes from the `Pipeline` routing its conversation, which
 is the only place capabilities live:
@@ -805,8 +987,11 @@ keys are overlaid, with the later ref winning a collision.
 ### `toolsets.mode` — what the route composes against
 
 The `toolsets` stanza carries a `mode`, and the thing it composes against is the
-**agent's own definition**: the `tools:` frontmatter of
-`.claude/agents/<agent>.md` in the profile's repository.
+**agent's own definition**: the `tools:` frontmatter of the agent's file in the
+profile's repository — `.claude/agents/<agent>.md` on the claude and ollama
+runtimes, `.github/agents/<agent>.agent.md` on copilot.
+
+The path is the runtime's fact. The composition rule is the same on all of them.
 
 **Not the profile** — the profile carries no capabilities at all.
 
@@ -874,6 +1059,7 @@ The chart ships the built-in tool vocabulary as `MCPToolset` CRs, split by risk
 | `agentops-observe` | `Read`, `Grep`, `Glob` |
 | `agentops-shell` | `Bash` |
 | `agentops-edit` | `Edit`, `Write` |
+| `agentops-websearch` | `WebSearch` |
 
 One profile can therefore serve a route that observes and a route that executes,
 with no profile edit and no cloning.
@@ -884,7 +1070,7 @@ Programmatic work is an ordinary signal:
 
 ```json
 POST /signal/inbound
-{"source":"...","signals":[{"fingerprint":"...","kind":"task","payload":"..."}]}
+{"source":"...","signals":[{"initiationId":"...","kind":"task","payload":"..."}]}
 ```
 
 - **Every Ready Pipeline listing that source originates a conversation**,
@@ -895,9 +1081,9 @@ POST /signal/inbound
   caller picking its own wiring is what this model exists to prevent, and a
   request naming only a profile would have no wiring and therefore nothing to
   grant.
-- **A posted task inherits the target source's `grouping`** like any other
-  signal. With no `signatureLabels` declared it keys on its own fingerprint, so
-  each post is its own conversation.
+- **A posted task's correlation is the caller's own job**, exactly like any
+  other signal. A one-shot caller mints a fresh `initiationId` per request, so
+  each post is its own conversation by default.
 
 **Capabilities are declared, never inferred.** A Pipeline that declares no
 `toolsets` gives its conversations none — no default, no inheritance, and no
@@ -956,7 +1142,7 @@ pipelines:
     # names no account: the floor, so no cluster power at all
   - name: k8s-operate
     profile: k8s-engineer
-    toolsets: [agentops-observe, k8s-observability, k8s-admin]
+    toolsets: [agentops-observe, k8s-observability, k8s-admin, agentops-websearch]
     serviceAccountName: agentops-runtime-acting
 ```
 
@@ -1048,10 +1234,11 @@ there: a runtime is an ENGINE — an image and its pod-level defaults — and wh
 a route persists is the route's decision.
 
 **An `AgentRuntime` declares neither volume.** It keeps `spec.contextStorage`
-alone, which is the one storage question only it can answer: whether its BACKEND
-writes context to a disk at all. A runtime keeping context at a vendor API needs
-no volume and must not be given one. **The split is BACKEND SHAPE against
-PLACEMENT.**
+alone, which is the one storage question only it can answer: whether its
+BACKEND writes context to a disk at all.
+
+A runtime keeping context at a vendor API needs no volume and must not be
+given one. **The split is BACKEND SHAPE against PLACEMENT.**
 
 ### A binding names a claim or a volume, and that decides who creates what
 
@@ -1147,6 +1334,249 @@ prometheus-community and Bitnami already use:
 is by definition not the release's to create, and a release that created one
 would own the lifecycle of storage holding agent context it did not put there.
 
+## Coordinated agents
+
+**A `Coordinator`'s own conversation can cause the manager to open more
+conversations.** Each one — a MEMBER — gets its own capability, its own
+identity and its own pod.
+
+**This is composition, not a subagent inside one pod.** Every step can hold
+less power than the one before it.
+
+### Provenance: `causedBy` and `coordinatorRef`
+
+| Field | Names | Resolves |
+|---|---|---|
+| `spec.causedBy.parent` | the PARENT conversation, one hop — never the tree's uncaused root | nothing |
+| `spec.causedBy.entry` | the `agents[]` entry the parent invoked | nothing |
+| `spec.coordinatorRef` | the Coordinator this conversation is itself the ROOT of | nothing beyond identifying it |
+
+Both are written once at creation and never change.
+
+**A conversation may carry both.** A member invoked through a
+`coordinatorRef` entry is simultaneously a MEMBER of its own parent and the
+ROOT of its own members — nesting has no depth limit.
+
+**Walking to the uncaused root means following `causedBy` one hop at a
+time.** No field names the root directly, so a viewer or a budget check
+follows the chain rather than reading it as already resolved.
+
+**Reuse is scoped by `causedBy`, at one hop.** Two uncaused conversations with
+one `conversationId` stay two conversations. Two members invoked by the same
+parent through the same entry, with one `conversationId`, attach to the same
+conversation.
+
+### The loop: invoke, result, close
+
+A Coordinator's conversation reaches the objects its `agents[]` lists through
+the [aops MCP server](contracts.md#the-aops-mcp-server-contract) — never by
+name, and never anything its own `agents[]` does not list.
+
+| Step | What happens |
+|---|---|
+| `invoke(agent, task)` | creates or attaches to a member, returns its name at once — never waits for a result |
+| the member runs | strictly serially, exactly as any conversation does |
+| `/work/done` on the member | its result is appended as an **input on the PARENT** — the one `causedBy` names, one hop |
+| the parent's next run | includes that input, attributed to the member's entry name |
+
+**A member binds no channel at creation.** Its inputs and results reach no
+surface directly — only its UNCAUSED root's own bound channels ever show a
+human anything, whether that root's agent escalates or not (see below).
+
+**A conversation never receives its own output as input.** `/channel/inbound`
+refuses an inbound message whose origin surface is its own target
+conversation.
+
+**A member reporting after its parent is `Closed` is dropped.** No input is
+appended, and the result stays on the member's own record.
+
+### Escalation: a decision posted into a thread already open
+
+**An uncaused root's channels bind at creation, unconditionally** — the same
+moment a Pipeline's own `channelRefs` bind, and whether or not its agent ever
+calls `escalate`. Any open coordinator root is reachable by a human from the
+start.
+
+This replaced an earlier design where a Coordinator's `channelRefs` bound
+nothing until `escalate(message)` ran. That design is gone: an unescalated
+root used to run unseen, and now it does not.
+
+| Caller | `escalate` does |
+|---|---|
+| the uncaused root (no `causedBy`) | posts `message` as the digest into every already-bound channel's thread, and stamps `status.escalatedAt` |
+| a nested member (carries `causedBy`) | opens **no** thread — closes itself with `message` as `closeReason` and result, landing on its own parent as an ordinary member-result input |
+
+**The bubble repeats for a member.** A parent receiving that report may
+itself be nested, and calling `escalate` again closes it the same way, one
+hop up, until a call reaches the uncaused root — where it posts into the
+already-open thread rather than closing anything.
+
+**A second call is a no-op.** `status.escalatedAt` is set once. A later
+`escalate` on the same root replays no digest.
+
+**The root was already an ordinary multi-channel conversation, and stays
+one.** A person's reply is an input, delivered to every other bound channel
+as usual. Nothing about delivery changes at the moment of escalation, because
+nothing was ever fenced on it.
+
+**Close and drop record why.** `status.closeReason` is stamped beside
+`closedAt`. The MCP `close` verb requires one. `/close` from a surface does
+not set one. A root closed without ever escalating stays listed with its
+reason — see the [console's incident view](console-guide.md).
+
+### Budget: three edges, evaluated per Coordinator level
+
+Every conversation that is itself a Coordinator's root — uncaused or nested —
+snapshots its OWN `spec.limits` into `status.budget` and enforces them
+independently of any ancestor's. **Nesting never pools a budget across
+levels.**
+
+| Limit | Bounds | Enforced |
+|---|---|---|
+| `maxAgents` | agents this conversation may invoke over its lifetime | the `invoke` verb, before creating another member |
+| `maxTurns` | this conversation's own completed runs | after each of its own runs is recorded |
+| `deadline` | this conversation's age | the reconciler, on a requeue at the deadline |
+
+Past any limit the manager closes that conversation `budget-exceeded`, closes
+every live member with it (same reason, recursively), and calls `escalate`
+with a manager-written digest — never a separate close, since `escalate`
+already performs one of the two outcomes above.
+
+**Turns count on the conversation whose own status they are.** A member's run
+finishing increments the member's own `turns`, not its parent's. Several
+members finishing at once is one turn on the parent, when the parent's own run
+that read their results completes.
+
+### The invoke cycle guard
+
+**A Coordinator invoking itself, directly or through others, never
+terminates**, so it is refused rather than merely bounded by depth.
+
+On `invoke`, the manager collects the calling conversation's own
+`coordinatorRef`, then walks its `causedBy` chain to the uncaused root
+collecting each ancestor's. An invoke whose target resolves to a Coordinator
+already in that list is refused, naming the repeated Coordinator.
+
+**No depth limit exists elsewhere.** A tree may nest as deep as every level's
+own budget allows. Only a repeated Coordinator is refused, never a long but
+acyclic chain.
+
+A separate, STATIC check catches a cycle built directly into `agents[]`. A
+Coordinator's own `Ready` walks its `coordinatorRef` entries and reports
+`False`, naming a Coordinator that reappears on the path, rather than
+recursing into it again.
+
+The live `invoke`-time guard above catches what that check cannot —
+`agents[]` edited into a cycle after a chain through it already exists.
+
+### `status.brief`: what a conversation is about
+
+**One or two sentences, written by the agent, replacing what came before.**
+Reported as `brief` in `/work/done` beside `result`, recorded LATEST-WINS —
+the same rule as `runtimeContextId`.
+
+- **Never a summary of what happened.** It states what the conversation
+  CONCERNS — the objects, the ask — not where it stands. Status already
+  carries that.
+- **A report that omits it leaves the stored brief unchanged.** A runtime that
+  never sends one leaves `title` as the only description.
+- **The manager parses nothing to get it, and reads it for no decision of its
+  own.** It exists for a reader picking a conversation without reading its
+  transcript — a Coordinator's `list_conversations`, the channel-reader
+  projection, the console's conversation list.
+
+### Deployment posture: `global.agentops.wiringMode`
+
+**A chart-rendering choice, not a CRD field.** It decides how each ENABLED
+bundle renders its routes, release-wide:
+
+| Value | Each enabled bundle renders |
+|---|---|
+| `pipelines` (default) | an inline `Pipeline` per route, same as every release before this one |
+| `coordinator` | a standalone `AgentCapability` per route, gathered into one chart-rendered `Coordinator` |
+
+- **`global.demo.enabled: true` selects `coordinator` when the value is left
+  unset.** An explicit value wins either way — `wiringMode: pipelines` under
+  demo mode keeps today's single-Pipeline demo.
+- **A two-privilege bundle (home-assistant) still ships two `AgentCapability`
+  objects under `coordinator` mode**, never merged — the same privilege split
+  `pipelines` mode keeps.
+- **The chart-rendered Coordinator claims every enabled bundle's source** —
+  the same ones its `pipelines`-mode routes claim — plus the self-heal
+  reaper's own scheduled `signals/cron` claim, below, when the reaper is on.
+- **No API-server exclusivity exists between the two kinds.** An operator may
+  hand-write a `Pipeline` and a `Coordinator` claiming the same source in the
+  same cluster, whatever the chart last rendered. The API server accepts
+  both and fans the source out to each.
+- **Demo mode exercises that many-to-many sharing by default.** Under a
+  resolved `coordinator` mode, the kubernetes bundle renders one additional,
+  plain `Pipeline` (`global.demo.wiringShowcase`, nullable like
+  `wiringEnabled`) alongside the chart-rendered `Coordinator` — the SAME
+  observing route, reused rather than duplicated, claiming the same cluster
+  Events source and the console's chat source the Coordinator already
+  claims. A cluster `Warning` event then opens two conversations side by
+  side, demonstrating both wiring primitives at once instead of only the
+  orchestrator.
+
+### The self-heal reaper
+
+**An ordinary `agents[]` entry, shipped by `coordinator` mode alone — no new
+CRD.** It surveys its own Coordinator's open roots on a configured schedule
+(`reaper.schedule`, four times a day by default) and closes the ones it
+judges healed.
+
+**OFF by default** (`reaper.enabled: false`). A survey conversation is real
+LLM cost whether or not anything is stuck, so an install turns it on rather
+than carrying it the moment `coordinator` mode is.
+
+| Step | Does |
+|---|---|
+| a `signals/cron` signal on its configured schedule, claimed on the chart-rendered Coordinator | opens a conversation running the Coordinator's own coordinating agent |
+| the coordinating agent | recognises the cron signal and `invoke`s the reaper's `agents[]` entry |
+| the reaper | calls `list_open_roots`, then `invoke`s the SAME capability named in each root's `members` to re-check it |
+| a re-check reporting the condition cleared | the reaper `close`s that root, naming the re-check as the reason |
+| a re-check still finding the condition present | the root is left open for the next scheduled run or an escalation |
+
+- **It holds no domain toolset and no domain `MCPConfig`** — only the
+  coordination reach through `agentops-coordinate` and the aops `MCPConfig`.
+  It reaches a domain agent only by invoking it, never by calling that
+  agent's own tools.
+- **A root with more than one `members` entry heals only once EVERY entry's
+  re-check reports clear.**
+- **It never closes the root that invoked it.** `list_open_roots` excludes
+  that root at the listing step, below, and `close` refuses it even named
+  directly.
+- **Domain agent prompts carry a matching self-close instruction.** An agent
+  may `/close` its own conversation once it judges the problem resolved,
+  reusing the ordinary `/close` path, which carries no reason. It is a no-op
+  where no thread is bound — the shape every `coordinator`-mode member
+  conversation has. The delta spec is `coordinator-self-heal`.
+
+### Coordinator-owner reach: `list_open_roots` and the widened `close`
+
+**A caller acting for a Coordinator may see and close that Coordinator's own
+open roots — never a member, and never another Coordinator's tree.** This is
+how the reaper, an ordinary member rather than a root, reaches roots it did
+not cause.
+
+- **The manager resolves which Coordinator a caller acts for** by reading its
+  own `coordinatorRef` first and, if empty, walking `causedBy` to the
+  UNCAUSED root and reading that root's `coordinatorRef` instead — the SAME
+  walk the invoke cycle guard above already performs.
+- **`list_open_roots()` returns every open, uncaused root naming that
+  Coordinator**, excluding the caller's own root: name, title, brief, phase,
+  plus `members` (the root's direct `agents[]` entry names). Never a
+  transcript or a run.
+- **`close` widens for a caller that resolves to a Coordinator.** It may
+  also close any open, uncaused root of that SAME Coordinator, other than
+  its own ancestor root. A member is still never a valid target, and
+  neither is a different Coordinator's root.
+- **A caller resolving to no Coordinator** — an ordinary Pipeline-addressed
+  conversation — is refused outright for both.
+
+See [the aops MCP server contract](contracts.md#the-aops-mcp-server-contract)
+for the full verb and bound table.
+
 ## Capacity: how many run at once
 
 **A conversation is active while a runtime pod exists for it.** That is the only
@@ -1167,9 +1597,9 @@ no dispatch.
 
 - **Suppressing the topic is the point.** It is what stops a thousand signals
   becoming a thousand chat threads before anyone has read the first one.
-- **Its inputs, signature label and pipeline wiring snapshot are kept**, so
-  signature grouping and window reuse treat it exactly like an admitted
-  conversation.
+- **Its inputs, `conversationId` and pipeline wiring snapshot are kept**, so
+  equality routing treats it exactly like an admitted conversation — a
+  matching signal recurs onto it rather than opening a second one.
 - **The Conversation CR *is* the queue**, so the backlog survives a manager
   restart with no extra CRD.
 
@@ -1330,6 +1760,19 @@ payload is not copied into the conversation object.
   well as what the agent answered), adapter cursors, delivery markers and
   suppression windows. Recovered by reading. Survives any restart and any
   rescheduling.
+  - **A thread binding's `claim` (holder, claimedAt) and `undeliveredReply`
+    ride the same home.** The claim records which manager replica is
+    dispatching that channel's `ensure-topic` op, so a crashed leader's
+    in-flight work is recoverable rather than lost to a dead process's
+    memory — a claim held by a replica other than the current leader is
+    cleared on the next reconcile. `undeliveredReply` names a run whose
+    reply failed delivery, cleared once delivery succeeds.
+  - **Coordination state rides the same home.** `causedBy`, `coordinatorRef`,
+    `status.budget` (per-level counts against the snapshotted limits),
+    `escalatedAt`, `closeReason` and `brief` are all ordinary Conversation
+    spec and status fields. A restart between a member's run being recorded
+    and its result landing on the parent is closed by the reconciler
+    re-deriving the missing append, exactly as a missing delivery is.
 - **A PersistentVolume** — state that genuinely *is* a filesystem: a
   conversation's accumulated context, and optionally its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never
@@ -1343,7 +1786,7 @@ a second source of truth beside the CRs.
 |---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
 | Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — ingest cooldown | fingerprint suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
+| Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |
@@ -1553,15 +1996,21 @@ context, and a wrong guess persists nothing while looking configured.
 **Which is why the VENDOR'S BUNDLE ships the declaration for the runtime it
 ships.** The value above is `runtime-claude`'s, and it is the default in
 `chart/charts/claude/values.yaml` — beside that runtime's image and its model
-credential, which live there for the same reason. So a default install with a
-context volume runs synchronised without anyone setting anything.
+credential, which live there for the same reason.
+
+`chart/charts/ollama/` ships its own, `.agentops/contexts/**`, and
+`chart/charts/copilot/` ships `.copilot/session-state/**`, for the same
+reason again. So a default install with a context volume runs synchronised
+without anyone setting anything.
 
 **Not the release-wide runtime defaults.** Those are what every runtime
-inherits, and an include list is one vendor's filesystem layout: it describes
-where claude-code files transcripts and means nothing to another backend.
-**Running one means replacing the paths** with its own, in the same section that
-carries its image and credential — a runtime that declares none gets no
-synchronisation, and nothing is inferred on its behalf.
+inherits, and an include list is one vendor's filesystem layout: it
+describes where claude-code files transcripts and means nothing to
+another backend.
+
+**Running one means replacing the paths** with its own, in the same
+section that carries its image and credential — a runtime that declares
+none gets no synchronisation, and nothing is inferred on its behalf.
 
 **`paths` is an *include* list.** Caches and tool state are then excluded by
 construction, rather than by a list that has to chase every file a vendor adds.
@@ -1576,9 +2025,11 @@ with *ephemeral* context, and the conversation is told its context is not
 promised rather than failing to start.
 
 That is the same answer continuity resolution already gives — see
-`contextStorage` above. **The two agree by construction:** a pod that failed
-here instead would make the manager promise a fresh answer and then produce
-nothing. A missing sidecar image falls back by the same one rule.
+`contextStorage` above. **The two agree by construction:** a pod that
+failed here instead would make the manager promise a fresh answer and
+then produce nothing.
+
+A missing sidecar image falls back by the same one rule.
 
 **Synchronisation strands existing context.** Without the sidecar, context sits
 at the claim root. With it, each conversation reads its own subdirectory, which
@@ -1586,9 +2037,10 @@ starts empty.
 
 Any conversation that already holds a context handle will fail its next run
 rather than answer without memory — the continuity rule working, not a
-defect. Clear each one with the reset verb below. **On an install upgrading onto
-the default, that is every conversation holding a handle**; `CHANGELOG.md`
-carries the version it lands in.
+defect. Clear each one with the reset verb below.
+
+**On an install upgrading onto the default, that is every conversation
+holding a handle.** `CHANGELOG.md` carries the version it lands in.
 
 **Copies are labelled.**
 
@@ -1733,7 +2185,7 @@ Reading it on one channel says nothing about any other.
 thread there is no watermark and no claim to make.
 
 **The watermark is written only by the manager**, on an adapter's report to
-[`POST /channel/read`](contracts.md#post-channelread). No adapter and no console
+[`POST /channel/read`](contracts/channel-adapter.md#post-channelread). No adapter and no console
 writes it to the Kubernetes API.
 
 Two rules make it safe to report from a browser:
@@ -1759,6 +2211,16 @@ same fix for the same reason.
 Without it the first upgrade presents every conversation in the namespace as
 new. The manager sets `readTracked` on every binding it creates from that point
 on, for every channel, so the rule stays one rule.
+
+**The console counts unread MESSAGES, not just lateness.** Its own rule —
+which kinds count, and the per-conversation `unreadCount` it derives from
+them — is [the console's own](console.md#unread), built on this watermark
+rather than replacing it.
+
+A reader may also RECLAIM a message as unread. `POST /channel/read` accepts
+`rewind` beside `readAt`, moving that reader's own watermark backward
+instead of forward, still named and still clamped — see
+[the rewind rule](contracts/channel-adapter.md#post-channelread).
 
 ### Telemetry says where it lost the thread
 
@@ -1806,13 +2268,19 @@ nobody reached for it.
 
 - No runtime pod, no MCP ConfigMap, no dispatch and no work units.
 - No capacity consumed and no place in the pending backlog.
-- Absent from conversation **reuse**, so a signal whose signature matches opens
-  a NEW conversation.
+- Excluded from equality routing, so a signal carrying the same
+  `initiationId` opens a NEW conversation (`-N` suffixed) rather than
+  recurring onto the closed one.
 - Absent from every pipeline.
 - `status.closedAt` stamped, which is the origin of the delete clock.
 
 **A reply typed into a closed thread is answered with "this conversation is
 closed" and creates nothing.** An input there would never dispatch.
+
+**Closing cascades through `causedBy`, for every originator.** A human
+`/close`, the console's bulk close, and the idle timer all close every LIVE
+descendant recursively, through the path the coordinator's own `close` verb
+already used for its members. A plain conversation closes as before.
 
 **Deletion is a second verb** with its own trigger, window and flag.
 
@@ -1850,6 +2318,11 @@ gone and that a new message starts a new one.
   object is disappearing — and the finalizer's 2-minute grace releases
   regardless, because a deletion must never be wedged by an adapter that is
   down.
+
+**Deleting cascades through `causedBy` too**, for every originator: every
+conversation reachable from the deleted one is deleted first, recursively.
+Nothing is skipped as not-yet-closed, since the close cascade above already
+closed the whole subtree before any of it could be deleted.
 
 ### Reopening
 
@@ -1941,7 +2414,8 @@ sends each of them the same `/close` on the thread it holds, so all of the above
 happens per conversation, identically.
 
 **There is deliberately no remote close verb.** No HTTP endpoint, no adapter
-contract operation and no CRD field ends a conversation, so a surface's reach is
-exactly the threads it holds. A conversation it merely observes cannot be closed
-from it, because `/channel/inbound` is reply-only and there is nowhere to post
-the command.
+contract operation and no CRD field ends a conversation, so a surface's
+reach is exactly the threads it holds.
+
+A conversation it merely observes cannot be closed from it, because
+`/channel/inbound` is reply-only and there is nowhere to post the command.

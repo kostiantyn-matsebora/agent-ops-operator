@@ -114,19 +114,66 @@ func TestReplicasAndRolloutsShareOneWorkload(t *testing.T) {
 	}
 }
 
-// A kind the cache does not track is its own workload — a Node is a workload,
-// not a degraded pod.
+// A kind the cache does not track is its own workload — a Job is a workload,
+// not a degraded pod. (Node used to be this example; it is now TRACKED, for
+// drain awareness — see TestNodeWithNoOwnerIsItsOwnWorkload.)
 func TestUntrackedKindIsItsOwnWorkload(t *testing.T) {
 	a := adapterWithCache(syncedCache())
+	e := evt("Warning", "prod", "Job", "backup-27", "BackoffLimitExceeded")
+	if got := a.enrich(&e).Workload; got != "Job/backup-27" {
+		t.Fatalf("workload: got %q want Job/backup-27", got)
+	}
+}
+
+// A Node is TRACKED (drain.go needs its own view of it), but it still
+// resolves to its own workload: it carries no owner reference to walk, so the
+// tracked path lands on the same answer the untracked fallback used to give
+// directly.
+func TestNodeWithNoOwnerIsItsOwnWorkload(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "Node", Name: "node-1"})
+	a := adapterWithCache(c)
 	e := evt("Warning", "", "Node", "node-1", "NodeNotReady")
 	if got := a.enrich(&e).Workload; got != "Node/node-1" {
 		t.Fatalf("workload: got %q want Node/node-1", got)
 	}
 }
 
+// The kubelet records a Node's events in "default" with an empty
+// involvedObject namespace, so the event's namespace is not where the Node
+// lives. It must still resolve — workload AND node — or the Node's own events
+// would carry no `node` label and escape drain suppression on that node.
+func TestANodeEventRecordedInDefaultStillResolves(t *testing.T) {
+	c := syncedCache()
+	c.put(&objectInfo{Kind: "Node", Name: "node-1", Node: "node-1"})
+	a := adapterWithCache(c)
+	e := evt("Warning", "", "Node", "node-1", "NodeNotReady")
+	e.Metadata.Namespace = "default"
+	enr := a.enrich(&e)
+	if enr.Workload != "Node/node-1" || enr.Node != "node-1" {
+		t.Fatalf("a Node event in default must resolve: %+v", enr)
+	}
+	if sig := normalize("src", &e, enr); sig.InitiationID != "src@default/Node/node-1" {
+		t.Fatalf("resolving the node must not move the id: %s", sig.InitiationID)
+	}
+}
+
 // A tracked kind the cache has no entry for yields NO workload. Falling back to
-// the pod's own name would silently reinstate per-pod grouping, which is the
-// bug this whole change removes.
+// the pod's own name would dress a per-pod key up as a workload — the
+// per-object correlation keying on the owner exists to remove.
+// An untracked kind with no name at all (a malformed or partial
+// involvedObject) has nothing to name a workload after, so it must yield no
+// workload rather than a bare "/" — the untracked branch's other half from
+// TestUntrackedKindIsItsOwnWorkload, never reached because every other test
+// gives the involved object a name.
+func TestUntrackedKindWithNoNameYieldsNoWorkload(t *testing.T) {
+	a := adapterWithCache(syncedCache())
+	e := evt("Warning", "", "", "", "Unknown")
+	if got := a.enrich(&e).Workload; got != "" {
+		t.Fatalf("workload: got %q want empty", got)
+	}
+}
+
 func TestUnknownPodYieldsNoWorkloadRatherThanItsOwnName(t *testing.T) {
 	a := adapterWithCache(syncedCache())
 	e := evt("Warning", "prod", "Pod", "api-7f9c8d4-xk2p9", "BackOff")
@@ -162,7 +209,7 @@ func TestEnrichmentAddsNodeAndPodLabels(t *testing.T) {
 }
 
 // A user label may never rewrite the signal's own identity — through
-// signatureLabels that would silently change grouping.
+// `workload` that would silently change its initiationId.
 func TestPodLabelsCannotOverwriteReservedKeys(t *testing.T) {
 	c := syncedCache()
 	putPod(t, c, podJSON("prod", "api-1", "node-a",

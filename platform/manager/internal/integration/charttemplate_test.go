@@ -2,11 +2,16 @@ package integration
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/configschema"
 )
 
 // Chart-render assertions for the console bundle.
@@ -137,44 +142,51 @@ func TestConsoleSignalAdapterIsExternallyServed(t *testing.T) {
 // being exactly the three it needs — not on the absence of pods.
 func TestConsoleRoleIsReadOnly(t *testing.T) {
 	out := helmTemplate(t, "--set", "console.enabled=true")
-	var role string
-	for _, doc := range splitDocs(out) {
-		// "\nkind: Role\n" and not the RoleBinding's indented roleRef.kind
-		if strings.Contains(doc, "\nkind: Role\n") && strings.Contains(doc, "name: agentops-adapter-console") {
-			role = doc
-		}
-	}
-	if role == "" {
-		t.Fatal("console Role not rendered")
-	}
 	// assert on the RULES, not the prose above them: the template's own comment
 	// says the words this check forbids
-	rules := stripComments(role)
+	rules := findDocByKindAndName(t, out, "Role", "agentops-adapter-console")
+	assertOnlyReadVerbs(t, rules, "console Role")
+	assertRuleGrantsNone(t, rules, "console Role", "create", "update", "patch", "delete", "secrets")
+	assertExactlyAPIGroups(t, rules, "console Role",
+		`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`, `apiGroups: ["batch"]`)
+}
 
-	// EVERY rule is get/list/watch. The console has no write path to the
-	// Kubernetes API at all, so a write verb here would grant something no code
-	// in that module can use.
+// assertOnlyReadVerbs fails unless every verbs: line in rules is exactly
+// get/list/watch — the console has no write path to the Kubernetes API at
+// all, so any other verb would grant something no code in that module uses.
+func assertOnlyReadVerbs(t *testing.T, rules, label string) {
+	t.Helper()
 	for _, line := range strings.Split(rules, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "verbs:") && !strings.HasPrefix(trimmed, "- verbs:") {
 			continue
 		}
 		if !strings.Contains(trimmed, `["get", "list", "watch"]`) {
-			t.Fatalf("console Role verbs changed:\n%s", rules)
+			t.Fatalf("%s verbs changed:\n%s", label, rules)
 		}
 	}
-	for _, forbidden := range []string{"create", "update", "patch", "delete", "secrets"} {
-		if strings.Contains(rules, forbidden) {
-			t.Fatalf("console Role must not grant %q:\n%s", forbidden, rules)
+}
+
+// assertRuleGrantsNone fails if rules mentions any of forbidden.
+func assertRuleGrantsNone(t *testing.T, rules, label string, forbidden ...string) {
+	t.Helper()
+	for _, f := range forbidden {
+		if strings.Contains(rules, f) {
+			t.Fatalf("%s must not grant %q:\n%s", label, f, rules)
 		}
 	}
-	// exactly three groups: agentops.dev, apps (deployments) and core (pods)
-	if n := strings.Count(rules, "apiGroups:"); n != 3 {
-		t.Fatalf("console Role should cover exactly 3 API groups, found %d:\n%s", n, rules)
+}
+
+// assertExactlyAPIGroups fails unless rules names exactly len(want) apiGroups
+// entries, all of them in want.
+func assertExactlyAPIGroups(t *testing.T, rules, label string, want ...string) {
+	t.Helper()
+	if n := strings.Count(rules, "apiGroups:"); n != len(want) {
+		t.Fatalf("%s should cover exactly %d API groups, found %d:\n%s", label, len(want), n, rules)
 	}
-	for _, want := range []string{`apiGroups: ["agentops.dev"]`, `apiGroups: ["apps"]`, `apiGroups: [""]`} {
-		if !strings.Contains(rules, want) {
-			t.Fatalf("console Role missing %s:\n%s", want, rules)
+	for _, w := range want {
+		if !strings.Contains(rules, w) {
+			t.Fatalf("%s missing %s:\n%s", label, w, rules)
 		}
 	}
 }
@@ -409,10 +421,11 @@ func TestMetricsScrapeTemplatesAreOptIn(t *testing.T) {
 
 // ---- chart-generated credentials --------------------------------------------
 
-// The two credentials the chart can generate, and the key each carries.
+// The credentials the chart can generate, and the key each carries.
 var generatedCredentials = []struct{ name, key string }{
 	{"agentops-adapter-token", "token"},
 	{"agentops-console-console", "uiToken"},
+	{"agentops-control-plane-token", "token"},
 }
 
 // secretDoc returns the rendered Secret of that name, or "" if none was emitted.
@@ -432,10 +445,12 @@ func secretDoc(rendered, name string) string {
 func TestExplicitTokensAreRendered(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.uiToken=pinned-ui-token",
-		"--set", "adapterAuth.token=pinned-master-token")
+		"--set", "adapterAuth.token=pinned-master-token",
+		"--set", "controlPlaneAuth.token=pinned-control-plane-token")
 	for _, c := range []struct{ secret, key, want string }{
 		{"agentops-console-console", "uiToken", "pinned-ui-token"},
 		{"agentops-adapter-token", "token", "pinned-master-token"},
+		{"agentops-control-plane-token", "token", "pinned-control-plane-token"},
 	} {
 		doc := secretDoc(out, c.secret)
 		if doc == "" {
@@ -468,7 +483,8 @@ func TestUpgradeRendersNoGeneratedCredential(t *testing.T) {
 func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	out := helmTemplate(t, "--is-upgrade",
 		"--set", "console.auth.uiToken=rotated-ui",
-		"--set", "adapterAuth.token=rotated-master")
+		"--set", "adapterAuth.token=rotated-master",
+		"--set", "controlPlaneAuth.token=rotated-control-plane")
 	for _, c := range generatedCredentials {
 		if secretDoc(out, c.name) == "" {
 			t.Fatalf("%s must render on upgrade when configured explicitly", c.name)
@@ -476,11 +492,12 @@ func TestExplicitTokensRenderOnUpgrade(t *testing.T) {
 	}
 }
 
-// An install generates both, and each MUST carry the keep policy: not rendering
-// on upgrade is only safe because the object survives leaving the manifest.
-// Verified against helm — an unannotated resource dropped from the manifest is
-// deleted, so this annotation is load-bearing rather than decorative.
-func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
+// An install generates every one of them, and each MUST carry the keep
+// policy: not rendering on upgrade is only safe because the object survives
+// leaving the manifest. Verified against helm — an unannotated resource
+// dropped from the manifest is deleted, so this annotation is load-bearing
+// rather than decorative.
+func TestInstallGeneratesEveryCredentialAndKeepsThem(t *testing.T) {
 	out := helmTemplate(t)
 	for _, c := range generatedCredentials {
 		doc := secretDoc(out, c.name)
@@ -502,7 +519,8 @@ func TestInstallGeneratesBothCredentialsAndKeepsThem(t *testing.T) {
 func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	out := helmTemplate(t,
 		"--set", "console.auth.existingSecret=my-console-secret",
-		"--set", "adapterAuth.existingSecret=my-adapter-secret")
+		"--set", "adapterAuth.existingSecret=my-adapter-secret",
+		"--set", "controlPlaneAuth.existingSecret=my-control-plane-secret")
 	for _, c := range generatedCredentials {
 		if doc := secretDoc(out, c.name); doc != "" {
 			t.Fatalf("no Secret may be created when one is supplied, got:\n%s", doc)
@@ -525,6 +543,40 @@ func TestExistingSecretIsReferencedAndNotCreated(t *testing.T) {
 	}
 }
 
+// The credential tests above all assert on the Secret alone. None of them
+// parses the manager Deployment to check it actually carries
+// CONTROL_PLANE_TOKEN wired via secretKeyRef to that Secret's name — a
+// refactor of deployment.yaml dropping the env var, or pointing it at the
+// wrong Secret (adapterAuth's, say), would pass every one of them.
+func TestControlPlaneTokenEnvWiresToItsOwnSecret(t *testing.T) {
+	want := func(secret string) string {
+		return "name: CONTROL_PLANE_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: " + secret + "\n                  key: token"
+	}
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if deploy == "" {
+		t.Fatal("manager Deployment not rendered")
+	}
+	if !strings.Contains(deploy, want("agentops-control-plane-token")) {
+		t.Fatalf("manager Deployment must wire CONTROL_PLANE_TOKEN to the default Secret:\n%s", deploy)
+	}
+
+	renamed := findDocByKindAndMetaName(helmTemplate(t, "--set", "controlPlaneAuth.secretName=test"), "Deployment", "agentops-manager")
+	if !strings.Contains(renamed, want("test")) {
+		t.Fatalf("CONTROL_PLANE_TOKEN must follow controlPlaneAuth.secretName:\n%s", renamed)
+	}
+
+	existing := findDocByKindAndMetaName(helmTemplate(t, "--set", "controlPlaneAuth.existingSecret=my-control-plane-secret"), "Deployment", "agentops-manager")
+	if !strings.Contains(existing, want("my-control-plane-secret")) {
+		t.Fatalf("CONTROL_PLANE_TOKEN must follow controlPlaneAuth.existingSecret:\n%s", existing)
+	}
+	// ADAPTER_TOKEN must still point at its own Secret, never the control
+	// plane's — the two credentials stay isolated end to end, not just at
+	// the Secret level.
+	if !strings.Contains(deploy, "name: ADAPTER_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: agentops-adapter-token") {
+		t.Fatalf("ADAPTER_TOKEN must still reference its own Secret:\n%s", deploy)
+	}
+}
+
 func splitDocs(rendered string) []string {
 	return strings.Split(rendered, "\n---\n")
 }
@@ -538,6 +590,20 @@ func stripComments(doc string) string {
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+// findDocByKindAndName returns the comment-stripped rendered doc whose OWN
+// kind line (immediately followed by metadata:, never a binding's nested
+// roleRef.kind) matches kind and name. Fails naming both when none renders.
+func findDocByKindAndName(t *testing.T, rendered, kind, name string) string {
+	t.Helper()
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "kind: "+kind+"\nmetadata:") && strings.Contains(doc, "name: "+name) {
+			return stripComments(doc)
+		}
+	}
+	t.Fatalf("no %s named %s rendered", kind, name)
+	return ""
 }
 
 // ---- kubernetes events lane -------------------------------------------------
@@ -555,19 +621,7 @@ func TestEventsAdapterRBACCoversPodsAndReplicaSets(t *testing.T) {
 			out := helmTemplate(t, "--set", "kubernetes.enabled=true",
 				"--set", "kubernetes.eventsAdapter.rbac.clusterWide="+mode.flag)
 
-			// Anchor on the document's OWN kind line, which is followed by
-			// metadata:. A binding names the same kind and the same name in
-			// its roleRef, so both "kind: Role" and the name are ambiguous.
-			var found string
-			for _, doc := range splitDocs(out) {
-				if strings.Contains(doc, "kind: "+mode.kind+"\nmetadata:") &&
-					strings.Contains(doc, "name: agentops-signal-k8s-events-events") {
-					found = stripComments(doc)
-				}
-			}
-			if found == "" {
-				t.Fatalf("no %s for the events adapter rendered", mode.kind)
-			}
+			found := findDocByKindAndName(t, out, mode.kind, "agentops-signal-k8s-events-events")
 			for _, needle := range []string{`resources: ["events"]`, `resources: ["pods"]`, `resources: ["replicasets"]`} {
 				if !strings.Contains(found, needle) {
 					t.Errorf("%s missing %s\n%s", mode.kind, needle, found)
@@ -577,17 +631,46 @@ func TestEventsAdapterRBACCoversPodsAndReplicaSets(t *testing.T) {
 	}
 }
 
+// Drain awareness needs a nodes grant, and ONLY the cluster-wide ClusterRole
+// can carry it — nodes are cluster-scoped, so a namespaced Role has no
+// equivalent. Pinned as its own test: this grant differs from the
+// pods/replicasets one above in exactly this respect, and a namespaced
+// install losing (or gaining) it must fail a test naming that difference,
+// not the pods/replicasets one.
+func TestEventsAdapterRBACGrantsNodesOnlyClusterWide(t *testing.T) {
+	clusterWide := helmTemplate(t, "--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.eventsAdapter.rbac.clusterWide=true")
+	role := findDocByKindAndName(t, clusterWide, "ClusterRole", "agentops-signal-k8s-events-events")
+	if !strings.Contains(role, `resources: ["nodes"]`) {
+		t.Errorf("the cluster-wide ClusterRole must grant nodes (drain awareness):\n%s", role)
+	}
+
+	namespaced := helmTemplate(t, "--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.eventsAdapter.rbac.clusterWide=false")
+	nsRole := findDocByKindAndName(t, namespaced, "Role", "agentops-signal-k8s-events-events")
+	if strings.Contains(nsRole, `"nodes"`) {
+		t.Errorf("a namespaced Role must NOT grant nodes — they are cluster-scoped:\n%s", nsRole)
+	}
+}
+
 // Grouping by pod name is what produced hundreds of conversations: pod names
-// are unique per replica and regenerated on every rollout, so the signature
-// never repeated and window reuse could never fire.
-func TestEventsSourceGroupsByWorkload(t *testing.T) {
+// are unique per replica and regenerated on every rollout. Workload-keyed
+// correlation now lives in the adapter's own initiationId minting
+// (<source>@<namespace>/<workload>, owner-reference resolved), never in a
+// chart-rendered grouping value — the manager carries no grouping policy at
+// all. cooldownHours is pinned explicit at 0 because the adapter's own
+// pending/dwell queue is already the suppression window; the CRD's 6h
+// default would otherwise drop every repeat post of a persisting problem.
+func TestEventsSourceCarriesExplicitZeroCooldownNoGrouping(t *testing.T) {
 	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
 	src := eventsSourceDoc(t, out)
-	if !strings.Contains(src, "- workload") {
-		t.Fatalf("the events source must group by workload:\n%s", src)
+	if !strings.Contains(src, "cooldownHours: 0") {
+		t.Fatalf("the events source must pin cooldownHours to 0:\n%s", src)
 	}
-	if strings.Contains(src, "- name\n") {
-		t.Fatalf("per-pod grouping must be gone:\n%s", src)
+	for _, retired := range []string{"grouping:", "signatureLabels", "windowDays"} {
+		if strings.Contains(src, retired) {
+			t.Fatalf("the events source must carry no %s, grouping is adapter-side now:\n%s", retired, src)
+		}
 	}
 }
 
@@ -597,14 +680,43 @@ func TestEventsSourceGroupsByWorkload(t *testing.T) {
 func TestDefaultRulesShape(t *testing.T) {
 	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
 	src := eventsSourceDoc(t, out)
+	assertPastTenseReasonsNeverDwell(t, src)
+	assertEvictedDroppedWithSubstitutes(t, src)
+	assertLastRuleIsUndwelledCatchAll(t, src)
+	assertNodeConditionRuleIsNodeKind(t, src)
+}
 
-	// Reasons describing something that ALREADY happened must never dwell: a
-	// re-check would find the healthy replacement and erase the incident.
-	//
-	// Evicted is deliberately NOT in this list: it is dropped outright, not
-	// given a dwell. The two are different failures — a dwell would erase the
-	// incident silently, whereas the drop is justified below by the reasons
-	// that report the same incident from the cause end and the consequence end.
+// assertNodeConditionRuleIsNodeKind: the shipped node-condition rule (tier 3)
+// must match kind="Node" — otherwise NodeNotReady, which the node lifecycle
+// controller stamps on every POD scheduled on the affected node, fires once
+// per workload at `for: 0` with no chance to notice a rolling reboot's node
+// coming back in the next few seconds. Pinned separately from the
+// Evicted-substitutes assertion below: that one is about WHICH reasons this
+// rule carries, this one is about WHAT KIND it is scoped to, and the two must
+// be free to be re-tuned independently of each other.
+func assertNodeConditionRuleIsNodeKind(t *testing.T, src string) {
+	t.Helper()
+	line := ruleLineContaining(src, "NodeNotReady")
+	if line == "" {
+		t.Fatal("NodeNotReady is not covered by any rule")
+	}
+	if !strings.Contains(line, `kind="Node"`) {
+		t.Fatalf("the node-condition rule must match kind=\"Node\", so a pod-level "+
+			"NodeNotReady falls to the catch-all's dwell and liveness re-check "+
+			"instead of firing per workload at for: 0, got rule:\n%s", line)
+	}
+}
+
+// assertPastTenseReasonsNeverDwell: reasons describing something that
+// ALREADY happened must never dwell — a re-check would find the healthy
+// replacement and erase the incident.
+//
+// Evicted is deliberately NOT among them: it is dropped outright, not given
+// a dwell. The two are different failures — a dwell would erase the incident
+// silently, whereas the drop is justified by the reasons that report the
+// same incident from the cause end and the consequence end (see below).
+func assertPastTenseReasonsNeverDwell(t *testing.T, src string) {
+	t.Helper()
 	pastTense := []string{"OOMKilling", "SystemOOM", "BackoffLimitExceeded", "DeadlineExceeded"}
 	for _, reason := range pastTense {
 		line := ruleLineContaining(src, reason)
@@ -616,11 +728,14 @@ func TestDefaultRulesShape(t *testing.T) {
 			t.Errorf("past-tense reason %q must carry for: \"0\", got rule:\n%s", reason, line)
 		}
 	}
+}
 
-	// Evicted is dropped, and the drop is only defensible while BOTH of its
-	// substitutes survive. Pin them together: a later edit that re-tunes node
-	// pressure or FailedScheduling must not silently leave eviction unreported
-	// from every direction at once.
+// assertEvictedDroppedWithSubstitutes: the drop is only defensible while
+// BOTH substitutes survive. Pinned together so a later edit re-tuning node
+// pressure or FailedScheduling cannot silently leave eviction unreported
+// from every direction at once.
+func assertEvictedDroppedWithSubstitutes(t *testing.T, src string) {
+	t.Helper()
 	evicted := ruleLineContaining(src, "Evicted")
 	if evicted == "" {
 		t.Error("Evicted is not covered by any rule")
@@ -636,9 +751,12 @@ func TestDefaultRulesShape(t *testing.T) {
 	if line := ruleLineContaining(src, "FailedScheduling"); line == "" {
 		t.Error("dropping Evicted requires FailedScheduling to report pods that fail to come back")
 	}
+}
 
-	// The last rule must be a catch-all WITH a dwell, or an unanticipated
-	// reason is silently discarded instead of verified.
+// assertLastRuleIsUndwelledCatchAll: the last rule must be a catch-all WITH a
+// dwell, or an unanticipated reason is silently discarded instead of verified.
+func assertLastRuleIsUndwelledCatchAll(t *testing.T, src string) {
+	t.Helper()
 	rules := ruleBlocks(src)
 	if len(rules) == 0 {
 		t.Fatal("no default rules rendered")
@@ -707,29 +825,47 @@ func TestParentOwnsExactlyOneRuntime(t *testing.T) {
 		{"--set", "telegram.enabled=true"},
 		{"--set", "kubernetes.enabled=true", "--set", "telegram.enabled=true"},
 	} {
-		name := "defaults"
-		if len(combo) > 0 {
-			name = strings.Join(combo[1:], ",")
-		}
-		t.Run(name, func(t *testing.T) {
-			out := helmTemplate(t, combo...)
-			if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 1 {
-				t.Errorf("want exactly 1 AgentRuntime, got %d", n)
-			}
-			var sas int
-			for _, doc := range splitDocs(out) {
-				if strings.Contains(doc, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n") {
-					sas++
-				}
-			}
-			if sas != 1 {
-				t.Errorf("want exactly 1 runtime ServiceAccount, got %d", sas)
-			}
-			// the bundle-named identity must be gone everywhere, bindings included
-			if strings.Contains(out, "agentops-runtime-k8s") {
-				t.Error("the bundle-named runtime ServiceAccount must not render")
-			}
+		t.Run(comboName(combo), func(t *testing.T) {
+			assertParentOwnsExactlyOneRuntime(t, combo)
 		})
+	}
+}
+
+// comboName derives a subtest name from a helmTemplate combo: "defaults" for
+// none, or the joined --set values otherwise.
+func comboName(combo []string) string {
+	if len(combo) == 0 {
+		return "defaults"
+	}
+	return strings.Join(combo[1:], ",")
+}
+
+// countDocsContaining counts the rendered docs whose text contains needle.
+func countDocsContaining(rendered, needle string) int {
+	n := 0
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, needle) {
+			n++
+		}
+	}
+	return n
+}
+
+// assertParentOwnsExactlyOneRuntime renders combo and checks the parent
+// still owns exactly one runtime: the claude bundle's own CR plus the
+// parent's `default` copy of it, one ServiceAccount, and no bundle-named
+// identity anywhere (bindings included).
+func assertParentOwnsExactlyOneRuntime(t *testing.T, combo []string) {
+	t.Helper()
+	out := helmTemplate(t, combo...)
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 2 {
+		t.Errorf("want the claude runtime and its default copy, got %d", n)
+	}
+	if sas := countDocsContaining(out, "kind: ServiceAccount\nmetadata:\n  name: agentops-runtime\n"); sas != 1 {
+		t.Errorf("want exactly 1 runtime ServiceAccount, got %d", sas)
+	}
+	if strings.Contains(out, "agentops-runtime-k8s") {
+		t.Error("the bundle-named runtime ServiceAccount must not render")
 	}
 }
 
@@ -798,31 +934,39 @@ func TestNothingIsGrantedUnlessAnAccountIsDeclared(t *testing.T) {
 			"--set", "global.demo.enabled=true", "--set", "kubernetes.allowMutations=true"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			out := helmTemplate(t, tc.args...)
-			for _, doc := range strings.Split(out, "\n---") {
-				if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
-					!strings.Contains(doc, "\nkind: RoleBinding\n") {
-					continue
-				}
-				// The MCP server's and the adapters' own accounts are not the
-				// agent's — an agent reaches the cluster THROUGH the server,
-				// which is the point of the second identity.
-				if strings.Contains(doc, "name: agentops-mcp-") ||
-					strings.Contains(doc, "name: agentops-signal-") ||
-					strings.Contains(doc, "name: agentops-adapter-") ||
-					strings.Contains(doc, "name: agentops-manager") ||
-					strings.Contains(doc, "name: agentops-housekeeping") {
-					continue
-				}
-				if strings.Contains(doc, "name: agentops-runtime") {
-					t.Errorf("no runtime identity may be bound to anything when none is "+
-						"declared — silence must mean no power:\n%s", doc)
-				}
-			}
-			if strings.Contains(out, "name: cluster-admin") {
-				t.Error("cluster-admin must never be bound")
-			}
+			assertNoAccountGrantedWhenNoneDeclared(t, tc.args)
 		})
+	}
+}
+
+// assertNoAccountGrantedWhenNoneDeclared renders args and checks that no
+// runtime identity is bound to anything (silence must mean no power) and
+// cluster-admin is never bound.
+func assertNoAccountGrantedWhenNoneDeclared(t *testing.T, args []string) {
+	t.Helper()
+	out := helmTemplate(t, args...)
+	for _, doc := range strings.Split(out, "\n---") {
+		if !strings.Contains(doc, "\nkind: ClusterRoleBinding\n") &&
+			!strings.Contains(doc, "\nkind: RoleBinding\n") {
+			continue
+		}
+		// The MCP server's and the adapters' own accounts are not the
+		// agent's — an agent reaches the cluster THROUGH the server,
+		// which is the point of the second identity.
+		if strings.Contains(doc, "name: agentops-mcp-") ||
+			strings.Contains(doc, "name: agentops-signal-") ||
+			strings.Contains(doc, "name: agentops-adapter-") ||
+			strings.Contains(doc, "name: agentops-manager") ||
+			strings.Contains(doc, "name: agentops-housekeeping") {
+			continue
+		}
+		if strings.Contains(doc, "name: agentops-runtime") {
+			t.Errorf("no runtime identity may be bound to anything when none is "+
+				"declared — silence must mean no power:\n%s", doc)
+		}
+	}
+	if strings.Contains(out, "name: cluster-admin") {
+		t.Error("cluster-admin must never be bound")
 	}
 }
 
@@ -953,7 +1097,7 @@ func TestBundleShipsNoWiringUnlessAsked(t *testing.T) {
 		{"bundle enabled directly", []string{"--set", "kubernetes.enabled=true"}},
 		{"wiring declined under demo", []string{
 			"--set", "global.demo.enabled=true",
-			"--set", "kubernetes.pipelines.enabled=false"}},
+			"--set", "kubernetes.wiringEnabled=false"}},
 		{"no profile, no route", []string{
 			"--set", "global.demo.enabled=true",
 			"--set", "kubernetes.profile.enabled=false"}},
@@ -970,7 +1114,7 @@ func TestBundleShipsNoWiringUnlessAsked(t *testing.T) {
 // one value, and it has to leave a bundle that still watches, profiles and tools.
 func TestDecliningWiringLeavesTheRestOfTheBundle(t *testing.T) {
 	out := helmTemplate(t, "--set", "global.demo.enabled=true",
-		"--set", "kubernetes.pipelines.enabled=false")
+		"--set", "kubernetes.wiringEnabled=false")
 	for _, needle := range []string{
 		"kind: SignalAdapter", "name: cluster-events", "kind: AgentProfile",
 		"name: k8s-engineer", "kind: MCPConfig", "name: k8s-observability",
@@ -984,7 +1128,7 @@ func TestDecliningWiringLeavesTheRestOfTheBundle(t *testing.T) {
 // Demo mode's whole promise is one flag and a working install. Before this it
 // rendered an events lane, a profile and tooling that answered nothing.
 func TestDemoModeWiresTheObservingRoute(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines")
 	pipes := bundlePipelines(out)
 	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
 		t.Fatalf("demo mode must render exactly k8s-observe, got %v", got)
@@ -1006,13 +1150,70 @@ func TestDemoModeWiresTheObservingRoute(t *testing.T) {
 	}
 }
 
+// demo-dual-wiring-showcase: under coordinator mode, demo mode ALSO renders a
+// plain Pipeline (k8s-observe-pipeline) beside the chart-rendered Coordinator
+// — the SAME observing route, reused rather than duplicated, so a demo
+// install exhibits both of the product's wiring primitives at once.
+func TestDemoModeAlsoShowcasesAPlainPipelineUnderCoordinator(t *testing.T) {
+	// 1. Demo defaults (coordinator mode, left unset) render both the
+	// Coordinator and the showcase Pipeline.
+	out := helmTemplate(t, "--set", "global.demo.enabled=true")
+	findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	pipes := bundlePipelines(out)
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe-pipeline" {
+		t.Fatalf("demo defaults must render exactly k8s-observe-pipeline, got %v", got)
+	}
+	doc := pipes["k8s-observe-pipeline"]
+	for _, needle := range []string{
+		"name: k8s-engineer",   // the SAME observing route's profile
+		"name: cluster-events", // claims the bundle's source
+		"- name: console",      // and the console's
+		"name: k8s-observability",
+	} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("the showcase route must bind %q:\n%s", needle, doc)
+		}
+	}
+	if strings.Contains(doc, "name: k8s-admin") {
+		t.Errorf("the showcase route must NOT bind the mutating toolset:\n%s", doc)
+	}
+
+	// 2. An explicit false declines it, leaving the Coordinator alone.
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.demo.wiringShowcase=false")
+	findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if got := pipelineNames(out); len(got) != 0 {
+		t.Errorf("wiringShowcase=false must render no showcase Pipeline, got %v", got)
+	}
+
+	// 3. An explicit wiringMode=pipelines under demo mode keeps today's
+	// single-Pipeline demo: no Coordinator, no showcase, just k8s-observe.
+	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+		"--set", "global.agentops.wiringMode=pipelines")
+	if strings.Contains(out, "\nkind: Coordinator\n") {
+		t.Errorf("wiringMode=pipelines under demo must render no Coordinator:\n%s", out)
+	}
+	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-observe" {
+		t.Errorf("wiringMode=pipelines under demo must render k8s-observe, never the showcase, got %v", got)
+	}
+
+	// 4. Outside demo mode the showcase never renders, whatever wiringMode is.
+	for _, mode := range []string{"pipelines", "coordinator"} {
+		out = helmTemplate(t, "--set", "kubernetes.enabled=true",
+			"--set", "global.agentops.wiringMode="+mode)
+		if got := pipelineNames(out); len(got) != 0 {
+			t.Errorf("a non-demo install (wiringMode=%s) must render no showcase Pipeline, got %v", mode, got)
+		}
+	}
+}
+
 // ONE STATED SETTING, four consistent effects. `allowMutations` drops
 // --read-only, widens the server SA and renders k8s-admin; the route that binds
 // it has to move with them, or the setting grants a power no route can
 // exercise. It is the bundle's OWN value now — the release-wide permission mode
 // that used to drive all four named none of them.
 func TestAllowMutationsPromotesTheRouteToActing(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.allowMutations=true")
 	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-operate" {
 		t.Fatalf("allowMutations must render exactly k8s-operate, got %v", got)
@@ -1029,7 +1230,7 @@ func TestAllowMutationsPromotesTheRouteToActing(t *testing.T) {
 // decides in both directions, exactly as mcpServers.readOnly does.
 func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 	// acting route asked for under a read-only release
-	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.pipelines.admin.enabled=true",
 		"--set", "kubernetes.pipelines.observe.enabled=false")
 	if got := pipelineNames(out); len(got) != 1 || got[0] != "k8s-operate" {
@@ -1041,7 +1242,7 @@ func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 	}
 
 	// observing route asked for under `full`
-	out = helmTemplate(t, "--set", "global.demo.enabled=true",
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.allowMutations=true",
 		"--set", "kubernetes.pipelines.observe.enabled=true",
 		"--set", "kubernetes.pipelines.admin.enabled=false")
@@ -1050,11 +1251,85 @@ func TestExplicitRouteValuesBeatTheDerivation(t *testing.T) {
 	}
 }
 
+// A local shell inside the agent's own already-running pod is narrower than
+// allowPodExecution's own grant (pods/exec into ANY pod, which already
+// exposes every cluster Secret through the kubelet), so the acting route
+// binds agentops-shell once that flag is accepted and never before.
+func TestAllowPodExecutionAddsShellToTheActingRouteOnly(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
+		"--set", "kubernetes.allowMutations=true")
+	if doc := bundlePipelines(out)["k8s-operate"]; strings.Contains(doc, "name: agentops-shell") {
+		t.Errorf("allowPodExecution unset must leave the acting route without agentops-shell:\n%s", doc)
+	}
+
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
+		"--set", "kubernetes.allowMutations=true",
+		"--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	doc := bundlePipelines(out)["k8s-operate"]
+	for _, needle := range []string{"name: k8s-admin", "name: agentops-websearch", "name: agentops-shell"} {
+		if !strings.Contains(doc, needle) {
+			t.Errorf("allowPodExecution=true must leave the acting route with %q:\n%s", needle, doc)
+		}
+	}
+
+	out = helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
+		"--set", "kubernetes.allowMutations=false",
+		"--set", "kubernetes.pipelines.observe.enabled=true",
+		"--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	if doc := bundlePipelines(out)["k8s-observe"]; strings.Contains(doc, "name: agentops-shell") {
+		t.Errorf("the observing route must never bind agentops-shell, whatever allowPodExecution is:\n%s", doc)
+	}
+}
+
+// Under pipelines mode a bundle route claims the console's source and
+// channel (chart.md's "THE DEMO WIRES THE CONSOLE"). An AgentCapability
+// carries no subscription at all, so nothing claimed it under coordinator
+// mode — a known gap until now. The chart-rendered Coordinator claims it
+// directly, unconditional on demo mode or any bundle, since console.enabled
+// is true by default.
+func TestCoordinatorClaimsConsoleWhenEnabled(t *testing.T) {
+	out := helmTemplate(t, "--set", "global.agentops.wiringMode=coordinator")
+	doc := findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if !strings.Contains(doc, "signalSourceRefs:") || !strings.Contains(doc, "- name: console") {
+		t.Errorf("the Coordinator must claim the console source by default:\n%s", doc)
+	}
+	if !strings.Contains(doc, "channelRefs:") {
+		t.Errorf("the Coordinator must bind the console channel for escalation by default:\n%s", doc)
+	}
+
+	out = helmTemplate(t, "--set", "global.agentops.wiringMode=coordinator",
+		"--set", "console.enabled=false",
+		"--set", "global.agentops.console.signalSource=",
+		"--set", "global.agentops.console.channel=")
+	doc = findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if strings.Contains(doc, "console") {
+		t.Errorf("console disabled must leave no console reference on the Coordinator:\n%s", doc)
+	}
+
+	// An operator's own coordinator.channels still renders, deduped against
+	// the console claim rather than doubled.
+	out = helmTemplate(t, "--set", "global.agentops.wiringMode=coordinator",
+		"--set", "coordinator.channels[0]=ops-alerts",
+		"--set", "coordinator.channels[1]=console")
+	doc = findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	_, channelsBlock, ok := strings.Cut(doc, "channelRefs:\n")
+	if !ok {
+		t.Fatalf("no channelRefs rendered:\n%s", doc)
+	}
+	channelsBlock, _, _ = strings.Cut(channelsBlock, "\n  agents:")
+	if strings.Count(channelsBlock, "- name: console") != 1 {
+		t.Errorf("the console claim must dedup against an operator's own channels list, got:\n%s", channelsBlock)
+	}
+	if !strings.Contains(channelsBlock, "- name: ops-alerts") {
+		t.Errorf("an operator's own channel must still render:\n%s", channelsBlock)
+	}
+}
+
 // Two Ready Pipelines on one source is a SUPPORTED shape — sources are
 // shareable and sourceConflicts was deleted. Failing the render here would be
 // that guard returning one layer up.
 func TestBothRoutesRenderWithoutConflict(t *testing.T) {
-	out := helmTemplate(t, "--set", "global.demo.enabled=true",
+	out := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.pipelines.observe.enabled=true",
 		"--set", "kubernetes.pipelines.admin.enabled=true")
 	got := pipelineNames(out)
@@ -1074,7 +1349,7 @@ func TestBothRoutesRenderWithoutConflict(t *testing.T) {
 func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	// The console is deployed by default and the route claims it, so a turnkey
 	// install can start a conversation in the surface it just installed.
-	bare := bundlePipelines(helmTemplate(t, "--set", "global.demo.enabled=true"))["k8s-observe"]
+	bare := bundlePipelines(helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines"))["k8s-observe"]
 	if !strings.Contains(bare, "channelRefs:\n    - name: console") {
 		t.Errorf("the console must be bound as a channel by default:\n%s", bare)
 	}
@@ -1083,7 +1358,7 @@ func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
 	}
 
 	// A named channel joins the console rather than replacing it.
-	named := helmTemplate(t, "--set", "global.demo.enabled=true",
+	named := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.pipelines.channels={home-ops}")
 	if doc := bundlePipelines(named)["k8s-observe"]; !strings.Contains(doc, "- name: home-ops") ||
 		!strings.Contains(doc, "- name: console") {
@@ -1092,7 +1367,7 @@ func TestWiringNamesOnlyWhatWasRendered(t *testing.T) {
 
 	// Every component the route would reference, turned off at once — INCLUDING
 	// the console, whose names the parent must clear when it is not deployed.
-	off := helmTemplate(t, "--set", "global.demo.enabled=true",
+	off := helmTemplate(t, "--set", "global.demo.enabled=true", "--set", "global.agentops.wiringMode=pipelines",
 		"--set", "kubernetes.mcp.enabled=false",
 		"--set", "kubernetes.mcpServers.enabled=false",
 		"--set", "global.builtinToolsets.enabled=false",
@@ -1665,7 +1940,7 @@ func TestHaWiringDefaultsOff(t *testing.T) {
 	// the route names, so a grep would find itself.
 	for _, doc := range splitDocs(out) {
 		if strings.Contains(doc, "\nkind: Pipeline\n") && strings.Contains(doc, "agentops-home-assistant") {
-			t.Fatalf("home-assistant.pipelines.enabled defaults false:\n%s", doc)
+			t.Fatalf("home-assistant.wiringEnabled defaults false:\n%s", doc)
 		}
 	}
 	// ...and the rest of the bundle still renders.
@@ -1678,7 +1953,7 @@ func TestHaWiringDefaultsOff(t *testing.T) {
 // agent in the list an unaddressed message is answered with.
 func TestHaBothRoutesClaimTheChatSources(t *testing.T) {
 	out := helmTemplate(t, haArgs(
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 		"--set", "home-assistant.pipelines.chatSources={console-ha,home-ops}",
 	)...)
 
@@ -1723,7 +1998,7 @@ func TestHaWithoutOperatorCredentialShipsNoFixingLane(t *testing.T) {
 		"--set", "home-assistant.enabled=true",
 		"--set", "home-assistant.homeAssistant.endpoint=https://ha.example.org",
 		"--set", "home-assistant.homeAssistant.credentials.controlSecret=ha-control",
-		"--set", "home-assistant.pipelines.enabled=true")
+		"--set", "home-assistant.wiringEnabled=true")
 	for _, doc := range splitDocs(out) {
 		if !strings.Contains(doc, "agentops-home-assistant") {
 			continue
@@ -1824,17 +2099,18 @@ func TestHaDefaultRulesShape(t *testing.T) {
 	if len(blocks) == 0 {
 		t.Fatal("no default rules rendered")
 	}
+	assertHaPastTenseConditionsNeverDwell(t, blocks)
+	assertHaLastRuleIsUndwelledCatchAll(t, blocks)
+	assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow(t, src)
+}
 
-	// Anything describing something that ALREADY happened must never dwell: a
-	// re-check would find the recovered house and erase the incident.
+// assertHaPastTenseConditionsNeverDwell: anything describing something that
+// ALREADY happened must never dwell — a re-check would find the recovered
+// house and erase the incident.
+func assertHaPastTenseConditionsNeverDwell(t *testing.T, blocks []string) {
+	t.Helper()
 	for _, pastTense := range []string{"Error executing script", `level="CRITICAL"`} {
-		var line string
-		for _, b := range blocks {
-			if strings.Contains(b, pastTense) {
-				line = b
-				break
-			}
-		}
+		line := blockContaining(blocks, pastTense)
 		if line == "" {
 			t.Errorf("past-tense condition %q is not covered by any rule", pastTense)
 			continue
@@ -1843,7 +2119,20 @@ func TestHaDefaultRulesShape(t *testing.T) {
 			t.Errorf("past-tense condition %q must carry for: \"0\", got rule:\n%s", pastTense, line)
 		}
 	}
+}
 
+// blockContaining returns the first block containing needle, or "".
+func blockContaining(blocks []string, needle string) string {
+	for _, b := range blocks {
+		if strings.Contains(b, needle) {
+			return b
+		}
+	}
+	return ""
+}
+
+func assertHaLastRuleIsUndwelledCatchAll(t *testing.T, blocks []string) {
+	t.Helper()
 	last := blocks[len(blocks)-1]
 	if !strings.Contains(last, "matchers: []") {
 		t.Fatalf("the last rule must be a catch-all:\n%s", last)
@@ -1854,14 +2143,26 @@ func TestHaDefaultRulesShape(t *testing.T) {
 	if !strings.Contains(last, "for:") {
 		t.Fatalf("the catch-all must carry a dwell:\n%s", last)
 	}
+}
 
-	// Grouping by integration, never per record: one broken hub logs from
-	// several code paths and is one conversation.
-	if !strings.Contains(src, "- integration") {
-		t.Fatalf("the log source must group by integration:\n%s", src)
+// assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow: grouping by
+// integration is adapter-side now (minted in the existing pending/dwell
+// logic, keyed on condition identity), never a chart-rendered value — one
+// broken hub logs from several code paths and is one conversation.
+// cooldownHours is pinned explicit at 0 because that dwell logic is already
+// the suppression window; this adapter implements no time axis either, so a
+// window key would be one it silently never honors rather than one it
+// rejects.
+func assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow(t *testing.T, src string) {
+	t.Helper()
+	if !strings.Contains(src, "cooldownHours: 0") {
+		t.Fatalf("the log source must pin cooldownHours to 0:\n%s", src)
 	}
-	// This adapter implements no time axis, so a window here would be a key it
-	// rejects rather than one that silently never fires.
+	for _, retired := range []string{"grouping:", "signatureLabels", "windowDays"} {
+		if strings.Contains(src, retired) {
+			t.Fatalf("the log source must carry no %s, grouping is adapter-side now:\n%s", retired, src)
+		}
+	}
 	for _, absent := range []string{"timeIntervals", "muteTimeIntervals"} {
 		if strings.Contains(src, absent) {
 			t.Errorf("the log source must declare no %s:\n%s", absent, src)
@@ -1875,7 +2176,7 @@ func TestHaDefaultRulesShape(t *testing.T) {
 func TestHaRestAccessIsPerRoute(t *testing.T) {
 	shell := "- name: agentops-shell"
 
-	derived := helmTemplate(t, haArgs("--set", "home-assistant.pipelines.enabled=true")...)
+	derived := helmTemplate(t, haArgs("--set", "home-assistant.wiringEnabled=true")...)
 	if !strings.Contains(stripComments(haDoc(t, derived, "Pipeline", "ha-ops")), shell) {
 		t.Error("the ops route needs the REST path to reconfigure anything")
 	}
@@ -1884,7 +2185,7 @@ func TestHaRestAccessIsPerRoute(t *testing.T) {
 	}
 
 	off := helmTemplate(t, haArgs(
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 		"--set", "home-assistant.pipelines.restAccess=false")...)
 	if strings.Contains(stripComments(haDoc(t, off, "Pipeline", "ha-ops")), shell) {
 		t.Error("an explicit false must take the REST path away from the ops route too")
@@ -1949,7 +2250,7 @@ func haRuleBlocks(src string) []string {
 // an entity. Those live in registries served over the WebSocket API, and an ops
 // agent without this component hands the job back.
 func TestHaAdminMcpIsOffByDefault(t *testing.T) {
-	out := helmTemplate(t, haArgs("--set", "home-assistant.pipelines.enabled=true")...)
+	out := helmTemplate(t, haArgs("--set", "home-assistant.wiringEnabled=true")...)
 	for _, absent := range []string{"ha-admin-api", "agentops-mcp-ha"} {
 		if strings.Contains(out, absent) {
 			t.Fatalf("the admin MCP path is opt-in, found %q", absent)
@@ -1961,7 +2262,7 @@ func TestHaAdminMcpIsOffByDefault(t *testing.T) {
 // touch configuration, so the split is a wall rather than an allowlist.
 func TestHaAdminMcpIsBoundToTheOpsRouteOnly(t *testing.T) {
 	out := helmTemplate(t, haArgs(
-		"--set", "home-assistant.pipelines.enabled=true",
+		"--set", "home-assistant.wiringEnabled=true",
 		"--set", "home-assistant.adminMcp.enabled=true",
 		"--set", "home-assistant.adminMcpServer.enabled=true")...)
 
@@ -1996,18 +2297,35 @@ func TestHaAdminToolsetIsEnumeratedAndWithholdsTheDestructive(t *testing.T) {
 	if strings.Contains(doc, "*") {
 		t.Fatalf("the admin toolset must enumerate:\n%s", doc)
 	}
-	// The tools that answer the failures this component exists for.
-	for _, want := range []string{"ha_set_entity", "ha_set_integration", "ha_get_logs", "ha_reload_core"} {
+	// The tools that answer the failures this component exists for, including
+	// registry removal — a stale entity or device is cheap to recreate, and
+	// the operator's prompt is the gate on it.
+	for _, want := range []string{"ha_set_entity", "ha_set_integration", "ha_get_logs", "ha_reload_core", "ha_remove_entity", "ha_remove_device"} {
 		if !strings.Contains(doc, "mcp__homeassistant_admin__"+want) {
 			t.Errorf("the admin toolset must grant %s — it is why this component exists", want)
 		}
 	}
-	// Withheld by default: these restart Home Assistant, delete registry
-	// objects, or install software. Adding one is a values decision.
-	for _, absent := range []string{"ha_restart", "ha_manage_backup", "ha_remove_entity", "ha_manage_hacs"} {
+	// Withheld by default, one per class: restart and backups, software and
+	// preferences, and deletes of what a person WROTE. Adding one is a values
+	// decision.
+	for _, absent := range []string{"ha_restart", "ha_manage_backup", "ha_manage_hacs", "ha_config_remove_automation"} {
 		if strings.Contains(doc, "mcp__homeassistant_admin__"+absent) {
 			t.Errorf("%s must not ship in the default allowlist", absent)
 		}
+	}
+}
+
+// The operator's describe-and-stop rule states a CONFIRMATION GATE, not a
+// permanent refusal: a person's reply in the thread authorizes the described
+// action.
+func TestHaOperatorPromptStatesAConfirmationGate(t *testing.T) {
+	out := helmTemplate(t, haArgs()...)
+	doc := haDoc(t, out, "AgentProfile", "ha-operator")
+	if !strings.Contains(doc, "confirming it") || !strings.Contains(doc, "is that authorization") {
+		t.Fatalf("the operator prompt must state that a reply in the thread is the authorization:\n%s", doc)
+	}
+	if !strings.Contains(doc, "never ask twice") || !strings.Contains(doc, "Never read a later message as authorization") {
+		t.Fatalf("the operator prompt must forbid asking again and reading a later message as authorization:\n%s", doc)
 	}
 }
 
@@ -2118,6 +2436,496 @@ func TestOutputFormatCanBeDeclined(t *testing.T) {
 	}
 }
 
+// THE POSTURE PARAGRAPH IS THE THIRD WALL ON allowPodExecution.
+//
+// The route account's rules and the MCP server's role are gated by one value,
+// and neither is visible from the agent's tool list: the server advertises the
+// workload-patch tool whatever the gate says, and the API server refuses it one
+// hop later. On the reference install the acting route was asked to add a
+// nodeSelector to a Deployment, tried the patch, and reported an RBAC fault
+// where the install had made a decision. So the kubernetes bundle's profile is
+// TOLD, from the same value — one profile, never a second one per posture,
+// because a profile picked by hand to match a value drifts the first time it
+// is flipped. These pin the three states the spec names.
+
+// everyBundleCoordinator renders the chart-rendered Coordinator with EVERY
+// shipped route in its agents[]: both kubernetes routes, prometheus's one, and
+// both home-assistant routes, plus the reaper the template folds in itself.
+func everyBundleCoordinator(t *testing.T, args ...string) string {
+	t.Helper()
+	return helmTemplate(t, append([]string{
+		"--set", "global.agentops.wiringMode=coordinator",
+		"--set", "reaper.enabled=true",
+		"--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.wiringEnabled=true",
+		"--set", "kubernetes.pipelines.observe.enabled=true",
+		"--set", "kubernetes.pipelines.admin.enabled=true",
+		"--set", "prometheus.enabled=true",
+		"--set", "prometheus.wiringEnabled=true",
+		"--set", "home-assistant.enabled=true",
+		"--set", "home-assistant.homeAssistant.endpoint=https://ha.example.org",
+		"--set", "home-assistant.homeAssistant.credentials.controlToken=CTOK",
+		"--set", "home-assistant.homeAssistant.credentials.operatorToken=OTOK",
+		"--set", "home-assistant.wiringEnabled=true",
+	}, args...)...)
+}
+
+// coordinatorRole returns the coordinating agent's rendered systemPrompt body,
+// de-indented, the same way k8sEngineerRole does for the bundle profile.
+func coordinatorRole(t *testing.T, args ...string) string {
+	t.Helper()
+	out := everyBundleCoordinator(t, args...)
+	doc := findDocByKindAndName(t, out, "AgentProfile", "agentops-coordinator")
+	_, after, ok := strings.Cut(doc, "systemPrompt: |\n")
+	if !ok {
+		t.Fatalf("the coordinator profile renders no systemPrompt:\n%s", doc)
+	}
+	body, _, _ := strings.Cut(after, "\n  outputFormat:")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(strings.TrimRight(line, " "), "    ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// coordinatorAgentDescriptions reads name → description off the rendered
+// Coordinator's agents[] — the exact text list_agents hands the coordinating
+// agent, since the manager returns spec.agents as stored.
+func coordinatorAgentDescriptions(t *testing.T, rendered string) map[string]string {
+	t.Helper()
+	doc := findDocByKindAndName(t, rendered, "Coordinator", "agentops-coordinator")
+	_, agents, ok := strings.Cut(doc, "\n  agents:\n")
+	if !ok {
+		t.Fatalf("the Coordinator renders no agents[]:\n%s", doc)
+	}
+	out := map[string]string{}
+	name := ""
+	for _, line := range strings.Split(agents, "\n") {
+		switch {
+		case strings.HasPrefix(line, "    - name: "):
+			name = strings.TrimPrefix(line, "    - name: ")
+		case strings.HasPrefix(line, "      description: "):
+			quoted := strings.TrimPrefix(line, "      description: ")
+			text, err := strconv.Unquote(quoted)
+			if err != nil {
+				t.Fatalf("agents[%s].description is not a quoted scalar: %v\n%s", name, err, line)
+			}
+			out[name] = text
+		}
+	}
+	return out
+}
+
+// THE COORDINATING AGENT IS AN ORCHESTRATOR, AND THE PROMPT SAYS SO.
+//
+// It used to be a dispatcher — "your only job is reading what started the
+// conversation and routing it", "pick the one whose description matches what
+// arrived". A lookup with no hit returns nothing: asked directly to restart a
+// pod on the reference install, it answered that it had no tools while
+// k8s-operate sat in agents[]. This pins the sentences that make it delegate
+// instead, and the ordering the operator's prefix and the self-heal paragraph
+// have always had around them.
+//
+// A second live regression shaped the rest: a conversation that had delegated
+// correctly drifted, within the SAME conversation, into inventorying its own
+// toolbox and answering "this can't be answered live" from it. The prompt
+// also claimed "you hold no domain tool yourself" while the runtime visibly
+// handed it a shell — a prompt contradicting the observed toolbox gets
+// discounted wholesale. Hence the pins on the mandatory first call, the
+// re-scoped generic tools, the verdict rule and the loop-never-expires line.
+func TestCoordinatorPromptIsAnOrchestratorRole(t *testing.T) {
+	role := coordinatorRole(t)
+	for _, phrase := range []string{
+		"an orchestrator, not a",
+		"YOUR TOOLS ARE THE AGENTS",
+		"never answer that you have no tools",
+		"say which kind of agent",
+		"this install does not list",
+		"1. Analyse.",
+		"2. Delegate.",
+		"3. Decide.",
+		"`list_agents`",
+		"`invoke`",
+		"`escalate`",
+		"A person's direct instruction to act",
+		"IS the authorisation",
+		"Do not ask the person to confirm",
+		"A change YOU conclude is worth making",
+		"is proposed, not made",
+		"An observing agent running out of evidence is not a dead end",
+		"same task to that domain's acting counterpart",
+		"needs no approval",
+		"AND THE FIRST TOOL CALL OF EVERY CONVERSATION",
+		"that roster's fact",
+		"is not among your tools",
+		"your coordination path is broken",
+		"housekeeping around delegation",
+		"IS the signal to invoke the agent",
+		"This loop never expires",
+		"never your own recent attempts",
+		"Your own lack of access is never evidence",
+		"the answer is premature",
+	} {
+		if !strings.Contains(role, phrase) {
+			t.Errorf("the coordinating agent's role lacks %q:\n%s", phrase, role)
+		}
+	}
+	// The dispatcher's sentences are gone, not merely outnumbered — and so is
+	// the toolbox claim the agent could see was false.
+	for _, retired := range []string{
+		"only job is reading what started the conversation and routing it",
+		"Pick the one whose description matches",
+		"description of when to use it",
+		"You hold no domain tool yourself",
+	} {
+		if strings.Contains(role, retired) {
+			t.Errorf("the role still carries the dispatcher sentence %q:\n%s", retired, role)
+		}
+	}
+	// The self-heal paragraph (coordinator-self-heal) still closes the role and
+	// still names the reaper entry and its source — the one entry the prompt
+	// names, because it is chosen by trigger.
+	// findDocByKindAndName strips every `#`-led line, the markdown heading
+	// included, so the paragraph is anchored on its first sentence.
+	at := strings.LastIndex(role, "One of your claimed sources")
+	if at < 0 {
+		t.Fatalf("the self-heal paragraph is gone from the role:\n%s", role)
+	}
+	tail := role[at:]
+	if !strings.Contains(tail, "`reaper-sweep`") || !strings.Contains(tail, "invoke the entry named `reaper`") {
+		t.Errorf("the self-heal paragraph must still close the role naming the reaper and its source:\n%s", tail)
+	}
+	if !strings.HasPrefix(role, "You are the coordinating agent") {
+		t.Errorf("with no prefix the role opens with the orchestrator sentence:\n%s", role)
+	}
+}
+
+func TestCoordinatorPromptKeepsTheOperatorsPrefixFirst(t *testing.T) {
+	role := coordinatorRole(t, "--set", "coordinator.systemPromptPrefix=Severity P1 means a person is paged.")
+	if !strings.HasPrefix(role, "Severity P1 means a person is paged.\n\nYou are the coordinating agent") {
+		t.Errorf("the operator's prefix must lead the generated role after one blank line:\n%s", role)
+	}
+}
+
+// EVERY SHIPPED DESCRIPTION STATES PURPOSE AND REACH, NOT A TRIGGER.
+//
+// The description is the whole of what the coordinating agent knows about an
+// entry (coordinator-model). Written as a trigger — "a cluster event", "once
+// the cause is known", "a firing alert" — it matches an arriving signal and
+// nothing a person types, so a direct instruction found no entry at all. Each
+// now says what the agent IS, what it CAN do in the actions its toolset
+// supports, what it CANNOT, and what to hand it. The reaper is the stated
+// exception: for it the trigger is the purpose.
+func TestCoordinatorDescriptionsStatePurposeNotTrigger(t *testing.T) {
+	descs := coordinatorAgentDescriptions(t, everyBundleCoordinator(t))
+	// Prometheus's entry is named for the PROFILE (alert-investigator), not the
+	// route (alert-triage) — gotchas.md's bundle table says so.
+	for _, name := range []string{"k8s-observe", "k8s-operate", "alert-investigator", "ha-control", "ha-ops", "reaper"} {
+		if descs[name] == "" {
+			t.Errorf("agents[] lacks %q with every bundle enabled; got %v", name, descs)
+		}
+	}
+	retiredOpenings := []string{
+		"Investigate a Kubernetes cluster event",
+		"Act on the cluster to remediate",
+		"Investigate a firing alert",
+		"Answer an everyday question",
+		"Repair or reconfigure a Home Assistant integration once",
+	}
+	// What each domain entry must say it CAN do, in the words of its own
+	// toolset, and what it CANNOT — one of each, so a rewrite that drops either
+	// half fails here.
+	must := map[string][]string{
+		"k8s-observe":        {"read-only", "logs", "Cannot change anything", "Hand it"},
+		"k8s-operate":        {"act on the cluster", "restart a workload by deleting its pod", "scale", "patch", "pod execution", "Cannot touch kube-system", "Hand it an instruction"},
+		"alert-investigator": {"PromQL", "Cannot change anything", "Hand it a firing alert"},
+		"ha-control":         {"Assist intents", "operate the house", "Cannot reach configuration", "Hand it"},
+		"ha-ops":             {"REST API", "diagnose", "reaches configuration", "Describes and stops", "Hand it"},
+	}
+	// The CRD caps a description (coordinator_types.go, MaxLength) and helm
+	// template validates no schema, so the first live install of the
+	// purpose-shaped texts failed at the API server on two of them under the
+	// old 512-byte cap. Bytes, not runes: an em dash is three.
+	assertDescriptionsUnderCap(t, descs, 2048)
+	for name, phrases := range must {
+		assertPurposeDescription(t, name, descs[name], retiredOpenings, phrases)
+	}
+	// ha-control USES the house (profiles.user.systemPrompt) — it was described
+	// as read-only, which was simply false.
+	if strings.Contains(descs["ha-control"], "read-only") {
+		t.Errorf("ha-control acts on the house and must not be called read-only:\n%s", descs["ha-control"])
+	}
+	// The reaper keeps its instruction-shaped description, naming its source.
+	if !strings.Contains(descs["reaper"], "ONLY in response to the self-heal signal from source \"reaper-sweep\"") {
+		t.Errorf("the reaper's description must stay trigger-shaped and name its source:\n%s", descs["reaper"])
+	}
+}
+
+// assertPurposeDescription checks one entry's description states a purpose:
+// no retired trigger opening, every required phrase, no moment-gating.
+func assertPurposeDescription(t *testing.T, name, d string, retiredOpenings, phrases []string) {
+	t.Helper()
+	for _, opening := range retiredOpenings {
+		if strings.HasPrefix(d, opening) {
+			t.Errorf("%s's description is the retired trigger %q again:\n%s", name, opening, d)
+		}
+	}
+	for _, phrase := range phrases {
+		if !strings.Contains(d, phrase) {
+			t.Errorf("%s's description lacks %q:\n%s", name, phrase, d)
+		}
+	}
+	if strings.Contains(d, "once the cause is known") {
+		t.Errorf("%s's description still gates itself on a moment rather than stating a purpose:\n%s", name, d)
+	}
+}
+
+// assertDescriptionsUnderCap fails for every description over the byte cap.
+func assertDescriptionsUnderCap(t *testing.T, descs map[string]string, limit int) {
+	t.Helper()
+	for name, d := range descs {
+		if len(d) > limit {
+			t.Errorf("%s's description is %d bytes, over the CRD's %d:\n%s", name, len(d), limit, d)
+		}
+	}
+}
+
+// ---- coordinator.agents override (coordinator-agents-override) -----------
+
+// Empty coordinator.agents (today's default) must not change the derived
+// roster at all — a bundle install upgrading the chart gets byte-identical
+// output.
+func TestCoordinatorAgentsOverrideEmptyIsByteIdentical(t *testing.T) {
+	before := findDocByKindAndName(t, everyBundleCoordinator(t), "Coordinator", "agentops-coordinator")
+	after := findDocByKindAndName(t, everyBundleCoordinator(t, "--set", "coordinator.agents=null"), "Coordinator", "agentops-coordinator")
+	if before != after {
+		t.Fatalf("an unset coordinator.agents must not change the rendered Coordinator:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// A set coordinator.agents REPLACES the contributions-derived roster
+// outright (design.md - Decisions, "Replace, never merge") and maps
+// `capability` to capabilityRef, `coordinator` to coordinatorRef.
+func TestCoordinatorAgentsOverrideReplacesRoster(t *testing.T) {
+	out := everyBundleCoordinator(t,
+		"--set", "coordinator.agents[0].name=stated-capability",
+		"--set", "coordinator.agents[0].description=a stated agent",
+		"--set", "coordinator.agents[0].capability=some-capability",
+		"--set", "coordinator.agents[1].name=stated-coordinator",
+		"--set", "coordinator.agents[1].description=a nested coordinator",
+		"--set", "coordinator.agents[1].coordinator=nested-coordinator",
+	)
+	doc := findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if !strings.Contains(doc, "- name: stated-capability") || !strings.Contains(doc, "capabilityRef:\n        name: some-capability") {
+		t.Errorf("the capability entry must map to capabilityRef:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- name: stated-coordinator") || !strings.Contains(doc, "coordinatorRef:\n        name: nested-coordinator") {
+		t.Errorf("the coordinator entry must map to coordinatorRef:\n%s", doc)
+	}
+	// None of the bundle-contributed entries survive — the override replaces,
+	// it never merges.
+	for _, retired := range []string{"k8s-observe", "k8s-operate", "alert-investigator", "ha-control", "ha-ops"} {
+		if strings.Contains(doc, "- name: "+retired) {
+			t.Errorf("coordinator.agents must replace the derived roster, found %q still rendered:\n%s", retired, doc)
+		}
+	}
+}
+
+// The reaper fold-in (coordinator-self-heal) still appends on top of a set
+// override — the override point sits ABOVE the fold-in (design.md).
+func TestCoordinatorAgentsOverrideKeepsReaperFoldIn(t *testing.T) {
+	out := everyBundleCoordinator(t,
+		"--set", "coordinator.agents[0].name=stated",
+		"--set", "coordinator.agents[0].description=a stated agent",
+		"--set", "coordinator.agents[0].capability=some-capability",
+	)
+	doc := findDocByKindAndName(t, out, "Coordinator", "agentops-coordinator")
+	if !strings.Contains(doc, "- name: stated") {
+		t.Errorf("the overridden entry must still render:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- name: reaper") {
+		t.Errorf("the reaper fold-in must still append on top of a set override:\n%s", doc)
+	}
+	if !strings.Contains(doc, "signalSourceRefs:") || !strings.Contains(doc, "- name: reaper-sweep") {
+		t.Errorf("the reaper's signalSourceRefs claim must still fold in on top of a set override:\n%s", doc)
+	}
+}
+
+// A malformed entry — both refs, or neither — fails the render naming the
+// entry, mirroring coordinator-model's own "exactly one of" CEL rule rather
+// than shipping a manifest the API server would reject.
+func TestCoordinatorAgentsOverrideShapeGuard(t *testing.T) {
+	neither := helmTemplateErr(t, "--set", "global.agentops.wiringMode=coordinator", "--set", "coordinator.agents[0].name=bad")
+	if !strings.Contains(neither, "coordinator.agents[bad]") || !strings.Contains(neither, "neither capability nor coordinator") {
+		t.Errorf("an entry with neither ref must fail naming it:\n%s", neither)
+	}
+	both := helmTemplateErr(t, "--set", "global.agentops.wiringMode=coordinator",
+		"--set", "coordinator.agents[0].name=bad",
+		"--set", "coordinator.agents[0].capability=a",
+		"--set", "coordinator.agents[0].coordinator=b",
+	)
+	if !strings.Contains(both, "coordinator.agents[bad]") || !strings.Contains(both, "both capability and coordinator") {
+		t.Errorf("an entry with both refs must fail naming it:\n%s", both)
+	}
+}
+
+// k8sEngineerRole returns the rendered systemPrompt body of the bundle's
+// profile, de-indented, with the outputFormat line that follows it cut off.
+func k8sEngineerRole(t *testing.T, args ...string) string {
+	t.Helper()
+	out := helmTemplate(t, append([]string{"--set", "kubernetes.enabled=true"}, args...)...)
+	doc := findDocByKindAndName(t, out, "AgentProfile", "k8s-engineer")
+	_, after, ok := strings.Cut(doc, "systemPrompt: |\n")
+	if !ok {
+		t.Fatalf("k8s-engineer renders no systemPrompt:\n%s", doc)
+	}
+	body, _, _ := strings.Cut(after, "\n  outputFormat:")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(strings.TrimRight(line, " "), "    ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+const postureMarker = "This install withholds pod execution"
+const allowedPostureMarker = "This install allows pod execution"
+
+// selfCloseMarker is coordinator-deployment-mode's self-close instruction
+// (chart/templates/_helpers.tpl's `agentops.selfCloseInstruction`), appended
+// to every bundle profile's prompt after everything else — including the
+// posture paragraph, when both render.
+const selfCloseMarker = "If a thread is bound to this conversation"
+
+func TestK8sProfileStatesTheWithheldPosture(t *testing.T) {
+	role := k8sEngineerRole(t)
+	at := strings.Index(role, postureMarker)
+	if at < 0 {
+		t.Fatalf("with allowPodExecution off (the default) the role must state the posture:\n%s", role)
+	}
+	// LAST in the role: the shipped role precedes it, nothing follows it.
+	if job := strings.Index(role, "You are a Kubernetes site reliability engineer"); job < 0 || job > at {
+		t.Errorf("the posture paragraph must follow the shipped role, not replace or precede it:\n%s", role)
+	}
+	selfCloseAt := strings.Index(role, selfCloseMarker)
+	if selfCloseAt < 0 {
+		t.Fatalf("the self-close instruction must follow the posture paragraph:\n%s", role)
+	}
+	paragraph := role[at:selfCloseAt]
+	if strings.Contains(strings.TrimRight(paragraph, "\n"), "\n\n") {
+		t.Errorf("the posture paragraph must be the last thing before the self-close instruction:\n%s", paragraph)
+	}
+	// It names every workload kind runtimeWriteRules gates — widening the helper
+	// without widening the text fails here.
+	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob"} {
+		if !strings.Contains(paragraph, kind) {
+			t.Errorf("the posture paragraph does not name %s, which the gate refuses to patch", kind)
+		}
+	}
+	// ...and what the spec's scenario says it must say: the reason, what remains
+	// possible, and the operator as the one to make the edit.
+	for _, phrase := range []string{
+		"Do not attempt",
+		"where your tools allow",
+		"suggest the operator makes the edit",
+		"global.agentops.runtimeDefaults.allowPodExecution",
+	} {
+		if !strings.Contains(paragraph, phrase) {
+			t.Errorf("the posture paragraph lacks %q:\n%s", phrase, paragraph)
+		}
+	}
+}
+
+func TestK8sProfilePostureFollowsTheGate(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	if strings.Contains(role, postureMarker) {
+		t.Fatalf("with the gate on the RBAC grants the writes, so the role must not say they are withheld:\n%s", role)
+	}
+	if !strings.Contains(role, allowedPostureMarker) {
+		t.Fatalf("with the gate on the role must say pod execution is available, not fall silent on it:\n%s", role)
+	}
+	if !strings.Contains(role, "You are a Kubernetes site reliability engineer") {
+		t.Errorf("turning the gate on must leave the shipped role in place:\n%s", role)
+	}
+}
+
+func TestK8sProfilePostureSurvivesAnOperatorsOwnRole(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "kubernetes.profile.systemPrompt=Custom role text.")
+	if !strings.HasPrefix(role, "Custom role text.") {
+		t.Fatalf("the operator's role must come first:\n%s", role)
+	}
+	if !strings.Contains(role, "Custom role text.\n\n"+postureMarker) {
+		t.Errorf("the posture paragraph must follow the operator's role after one blank line — the posture is the chart's fact, not the prompt author's:\n%s", role)
+	}
+}
+
+// Emptying the value is how an install declines the paragraph, and the role
+// then renders exactly as it did before the value existed.
+func TestK8sProfilePostureCanBeDeclined(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "kubernetes.profile.podExecutionWithheldPrompt=")
+	if strings.Contains(role, postureMarker) {
+		t.Fatalf("an emptied value must render no posture paragraph:\n%s", role)
+	}
+	// The self-close instruction (coordinator-deployment-mode) always follows
+	// the shipped role now — declining the posture paragraph leaves the role
+	// itself untouched, right up to that addition.
+	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
+	if !ok {
+		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)
+	}
+	if !strings.HasSuffix(before, "Lead with the finding, then the evidence.") {
+		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", before)
+	}
+}
+
+// THE OTHER SIDE OF THE SAME WALL: an agent must be told what it gained, not
+// just left to infer it from a tool appearing in its allowlist.
+func TestK8sProfileStatesTheAllowedPosture(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true")
+	at := strings.Index(role, allowedPostureMarker)
+	if at < 0 {
+		t.Fatalf("with allowPodExecution on the role must state the posture:\n%s", role)
+	}
+	if job := strings.Index(role, "You are a Kubernetes site reliability engineer"); job < 0 || job > at {
+		t.Errorf("the posture paragraph must follow the shipped role, not replace or precede it:\n%s", role)
+	}
+	selfCloseAt := strings.Index(role, selfCloseMarker)
+	if selfCloseAt < 0 {
+		t.Fatalf("the self-close instruction must follow the posture paragraph:\n%s", role)
+	}
+	paragraph := role[at:selfCloseAt]
+	if strings.Contains(strings.TrimRight(paragraph, "\n"), "\n\n") {
+		t.Errorf("the posture paragraph must be the last thing before the self-close instruction:\n%s", paragraph)
+	}
+	for _, phrase := range []string{
+		"pods_exec",
+		"has no dedicated API or MCP",
+		"granted you for exactly this case",
+		"global.agentops.runtimeDefaults.allowPodExecution",
+	} {
+		if !strings.Contains(paragraph, phrase) {
+			t.Errorf("the posture paragraph lacks %q:\n%s", phrase, paragraph)
+		}
+	}
+}
+
+// Emptying the value is how an install declines the paragraph on the allowed
+// side too, and the role then renders exactly as it did before the value
+// existed.
+func TestK8sProfileAllowedPostureCanBeDeclined(t *testing.T) {
+	role := k8sEngineerRole(t, "--set", "global.agentops.runtimeDefaults.allowPodExecution=true",
+		"--set", "kubernetes.profile.podExecutionAllowedPrompt=")
+	if strings.Contains(role, allowedPostureMarker) {
+		t.Fatalf("an emptied value must render no posture paragraph:\n%s", role)
+	}
+	before, _, ok := strings.Cut(role, "\n\n"+selfCloseMarker)
+	if !ok {
+		t.Fatalf("the self-close instruction must follow the shipped role:\n%s", role)
+	}
+	if !strings.HasSuffix(before, "Lead with the finding, then the evidence.") {
+		t.Errorf("declining the paragraph must leave the shipped role exactly as it was:\n%s", before)
+	}
+}
+
 // RWX IS THE SHIPPED DEFAULT ON BOTH VOLUMES, AND NOTHING CHECKED IT.
 //
 // It is the mode a MULTI-NODE install needs: concurrent conversations mount one
@@ -2194,4 +3002,531 @@ func TestDemoModeAsksForReadWriteOnce(t *testing.T) {
 	if !strings.Contains(typed, "- ReadWriteMany") {
 		t.Errorf("an explicit mode must win under demo mode:\n%s", typed)
 	}
+}
+
+// The ollama bundle is the SECOND vendor runtime, in the claude bundle's exact
+// shape: off by default, one AgentRuntime through the parent's renderer, no
+// substrate. Enabled, it inherits the defaults and carries only what names the
+// vendor — the image, the endpoint and model as env, and its own sync paths.
+func TestOllamaBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "ollama.enabled=true",
+		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
+		"--set", "ollama.model=qwen2.5:14b")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, ollama and the default copy, got %d", n)
+	}
+	var rt string
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: ollama\n") {
+			rt = doc
+		}
+	}
+	if rt == "" {
+		t.Fatal("no AgentRuntime named ollama rendered")
+	}
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-ollama:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .agentops/contexts/**\n",
+		"name: OLLAMA_URL\n      value: http://ollama.ollama.svc:11434\n",
+		"name: OLLAMA_MODEL\n      value: qwen2.5:14b\n",
+		"name: OLLAMA_NUM_CTX\n      value: \"8192\"\n",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("ollama runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the ollama runtime must not inherit claude-code's sync paths")
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+}
+
+// Enabled without an endpoint, the render FAILS naming the key. A runtime
+// pointed at nothing starts fine and fails every run, which reads as a broken
+// model rather than a missing value. The MODEL is optional: unset, the runtime
+// uses the server's only pulled model and fails its runs naming the choices
+// when there are several.
+func TestOllamaBundleRequiresEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--set", "ollama.enabled=true"}, "ollama.endpoint is required"},
+	} {
+		if out := helmTemplateErr(t, tc.args...); !strings.Contains(out, tc.want) {
+			t.Errorf("%v: want %q, got %s", tc.args, tc.want, out)
+		}
+	}
+}
+
+// WHICH RUNTIME IS `default` IS A FLAG, OR THE FIRST CONFIGURED. Every runtime
+// renders under its own name and the parent renders one more CR named
+// `default`, a copy of the flagged one, annotated with its source. One runtime
+// alone is therefore always the default; the claude bundle off and the ollama
+// one on needs no rename; two flags is refused.
+func TestDefaultRuntimeIsTheFlaggedOrFirstConfigured(t *testing.T) {
+	ollama := []string{"--set", "ollama.enabled=true",
+		"--set", "ollama.endpoint=http://ollama.ollama.svc:11434",
+		"--set", "ollama.model=qwen2.5:14b",
+		"--set", "global.demo.enabled=true"} // a route naming no runtimeRef
+	// ollama alone: it is the default, under its own name plus the copy
+	out := helmTemplate(t, append(ollama, "--set", "claude.enabled=false")...)
+	if doc, src := defaultRuntimeDoc(out); src != "ollama" || !strings.Contains(doc, "name: OLLAMA_URL") {
+		t.Errorf("ollama alone must be copied as default, got source %q", src)
+	}
+	if strings.Count(out, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("ollama alone renders exactly ollama and default")
+	}
+	// both, none flagged: the first configured — claude — is the default
+	if _, src := defaultRuntimeDoc(helmTemplate(t, ollama...)); src != "claude" {
+		t.Errorf("with both and no flag the first configured is default, got %q", src)
+	}
+	// both, ollama flagged: the flag wins
+	if doc, src := defaultRuntimeDoc(helmTemplate(t, append(ollama, "--set", "ollama.default=true")...)); src != "ollama" || strings.Contains(doc, "kind: Secret") {
+		t.Errorf("the flag must move the default, got %q", src)
+	}
+	// the copy carries no Secret of its own, even when the source has a token
+	if out := helmTemplate(t, "--set", "claude.credentialsSecret.token=x"); strings.Count(out, "kind: Secret\nmetadata:\n  name: agentops-claude\n") != 1 {
+		t.Error("the default copy must not render a second credential Secret")
+	}
+	// two flags: refused by name
+	two := append(ollama, "--set", "ollama.default=true", "--set", "claude.default=true")
+	if out := helmTemplateErr(t, two...); !strings.Contains(out, "2 runtimes are flagged") {
+		t.Errorf("two flagged defaults must fail naming both, got %s", out)
+	}
+	// nothing declared and a route needing default: still refused
+	if out := helmTemplateErr(t, "--set", "claude.enabled=false", "--set", "global.demo.enabled=true"); !strings.Contains(out, "Declared runtimes: (none)") {
+		t.Errorf("no runtime at all must fail, got %s", out)
+	}
+}
+
+// The copilot bundle is the THIRD vendor runtime, in the ollama bundle's exact
+// shape: off by default, one AgentRuntime through the parent's renderer, no
+// substrate. Enabled, it inherits the defaults and carries only what names the
+// vendor — the image, the credential as env, the model and credit ceiling as
+// env, and its own sync paths.
+func TestCopilotBundleRendersOneRuntimeAndNoSubstrate(t *testing.T) {
+	out := helmTemplate(t, "--set", "copilot.enabled=true",
+		"--set", "copilot.credentialsSecret.token=ghp_placeholder",
+		"--set", "copilot.model=gpt-5",
+		"--set", "copilot.maxAiCredits=50")
+	if n := strings.Count(out, "\nkind: AgentRuntime\n"); n != 3 {
+		t.Fatalf("want claude, copilot and the default copy, got %d", n)
+	}
+	rt := findDocByKindAndMetaName(out, "AgentRuntime", "copilot")
+	if rt == "" {
+		t.Fatal("no AgentRuntime named copilot rendered")
+	}
+	assertCopilotRuntimeShape(t, rt)
+	secret := findDocByKindAndMetaName(out, "Secret", "agentops-copilot")
+	if secret == "" || !strings.Contains(secret, "githubToken: \"ghp_placeholder\"") {
+		t.Errorf("a supplied token must render the credential Secret:\n%s", secret)
+	}
+	// no substrate: the ServiceAccount count is unchanged from the default render
+	if got, want := strings.Count(out, "kind: ServiceAccount\n"), strings.Count(helmTemplate(t), "kind: ServiceAccount\n"); got != want {
+		t.Errorf("the bundle must render no ServiceAccount: %d vs %d", got, want)
+	}
+}
+
+// findDocByKindAndMetaName returns the first doc whose kind and
+// metadata.name match, anchored on "\n  name: <name>\n" (the standard
+// 2-space-indented metadata block Helm renders). Empty when none match —
+// callers decide whether that is an error.
+func findDocByKindAndMetaName(rendered, kind, name string) string {
+	for _, doc := range splitDocs(rendered) {
+		if strings.Contains(doc, "kind: "+kind+"\n") && strings.Contains(doc, "\n  name: "+name+"\n") {
+			return doc
+		}
+	}
+	return ""
+}
+
+func assertCopilotRuntimeShape(t *testing.T, rt string) {
+	t.Helper()
+	for _, want := range []string{
+		`image: "ghcr.io/kostiantyn-matsebora/agentops-runtime-copilot:`,
+		"serviceAccountName: agentops-runtime\n", // the floor, inherited
+		"contextStorage: volume\n",
+		"idleTtlMinutes: 1\n", // the release default, not the CRD's 10
+		"- .copilot/session-state/**\n",
+		"name: COPILOT_MODEL\n      value: gpt-5\n",
+		"name: COPILOT_MAX_AI_CREDITS\n      value: \"50\"\n",
+		// No trailing newline: Helm 3 closes a document with `---` on the very next
+		// line, so the last line of a doc carries none after splitDocs; Helm 4
+		// leaves a blank line. An assertion on the last line must not care.
+		"name: COPILOT_GITHUB_TOKEN\n      valueFrom:\n        secretKeyRef:\n          key: githubToken\n          name: agentops-copilot",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Errorf("copilot runtime lacks %q:\n%s", want, rt)
+		}
+	}
+	if strings.Contains(rt, ".claude/projects") {
+		t.Error("the copilot runtime must not inherit claude-code's sync paths")
+	}
+}
+
+// Without a token the runtime references the Secret by name and creates
+// nothing; without a model or a credit ceiling neither env entry renders, so
+// the runtime's own defaults apply. The reference bundle off and this one on
+// makes it the default with no rename.
+func TestCopilotBundleDefaultsAndBecomesDefault(t *testing.T) {
+	out := helmTemplate(t, "--set", "copilot.enabled=true")
+	for _, doc := range splitDocs(out) {
+		assertCopilotBundleDefaultDoc(t, doc)
+	}
+	alone := helmTemplate(t, "--set", "copilot.enabled=true", "--set", "claude.enabled=false")
+	if doc, src := defaultRuntimeDoc(alone); src != "copilot" || !strings.Contains(doc, "COPILOT_GITHUB_TOKEN") {
+		t.Errorf("copilot alone must be copied as default with its env, got source %q", src)
+	}
+	if strings.Count(alone, "\nkind: AgentRuntime\n") != 2 {
+		t.Error("copilot alone renders exactly copilot and default")
+	}
+}
+
+// assertCopilotBundleDefaultDoc checks one rendered doc against the
+// no-token-no-model-no-ceiling default shape.
+func assertCopilotBundleDefaultDoc(t *testing.T, doc string) {
+	t.Helper()
+	if strings.Contains(doc, "kind: Secret\n") && strings.Contains(doc, "agentops-copilot") {
+		t.Error("no token supplied, so no Secret may render")
+	}
+	if !strings.Contains(doc, "kind: AgentRuntime\n") || !strings.Contains(doc, "\n  name: copilot\n") {
+		return
+	}
+	for _, absent := range []string{"COPILOT_MODEL", "COPILOT_MAX_AI_CREDITS"} {
+		if strings.Contains(doc, absent) {
+			t.Errorf("unset %s must not render", absent)
+		}
+	}
+	if !strings.Contains(doc, "name: agentops-copilot") {
+		t.Error("the runtime must reference the credential Secret by name")
+	}
+}
+
+// defaultRuntimeDoc returns the rendered `default` AgentRuntime and the name of
+// the runtime it was copied from.
+func defaultRuntimeDoc(out string) (string, string) {
+	for _, doc := range splitDocs(out) {
+		if strings.Contains(doc, "kind: AgentRuntime\n") && strings.Contains(doc, "\n  name: default\n") {
+			src := ""
+			for _, line := range strings.Split(doc, "\n") {
+				if strings.Contains(line, "agentops.dev/default-of:") {
+					src = strings.Trim(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), `"`)
+				}
+			}
+			return doc, src
+		}
+	}
+	return "", ""
+}
+
+// call-auth.yaml's gatewayToken is generated the same way adapterAuth.token
+// and console.auth.uiToken are, so it owes the SAME property
+// TestUpgradeRendersNoGeneratedCredential pins for those two: a cluster-less
+// upgrade render must mint no fresh Secret at all, or a GitOps sync (or any
+// `helm template --is-upgrade` with no cluster to `lookup`) would rotate the
+// binding every time it ran, breaking channel-telegram's calls to the router
+// until both sides picked up the same new token.
+func TestTelegramGatewayTokenRendersNoGeneratedCredentialOnUpgrade(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	out := helmTemplate(t, append(append([]string{}, surface...), "--is-upgrade")...)
+	if doc := secretDoc(out, "agentops-telegram-gateway"); doc != "" {
+		t.Fatalf("an upgrade with no existing Secret for lookup to see must render no gateway-binding Secret, got:\n%s", doc)
+	}
+}
+
+// ...and the install side: a fresh install still must generate the Secret,
+// carrying the keep policy so an upgrade dropping it from the manifest does
+// not delete the live object.
+func TestTelegramGatewayTokenGeneratesOnInstall(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	out := helmTemplate(t, surface...)
+	doc := secretDoc(out, "agentops-telegram-gateway")
+	if doc == "" {
+		t.Fatal("agentops-telegram-gateway must be generated on install")
+	}
+	if !strings.Contains(doc, "helm.sh/resource-policy: keep") {
+		t.Fatalf("agentops-telegram-gateway must carry the keep policy, or the first upgrade deletes it:\n%s", doc)
+	}
+	if !strings.Contains(doc, "gatewayToken: ") {
+		t.Fatalf("agentops-telegram-gateway must carry gatewayToken:\n%s", doc)
+	}
+}
+
+// The Bot API root is configuration on the telegram bundle, and UNSET renders
+// nothing: the default install must be byte-identical to the one before the
+// value existed, or a render test on the router would be the only thing that
+// noticed an env entry appearing on every install.
+func TestTelegramAPIBaseRendersOnlyWhenSet(t *testing.T) {
+	surface := []string{
+		"--set", "telegram.enabled=true",
+		"--set", "telegram.surface.enabled=true",
+		"--set", "telegram.surface.chatId=-100",
+		"--set", "telegram.surface.credentials.botToken=x",
+	}
+	base := helmTemplate(t, surface...)
+	if strings.Contains(base, "TELEGRAM_API_BASE") {
+		t.Fatalf("an unset apiBase must render no env entry")
+	}
+	explicitEmpty := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=")...)
+	if telegramBundleDocs(explicitEmpty) != telegramBundleDocs(base) || telegramBundleDocs(base) == "" {
+		t.Fatalf("an explicit empty apiBase must render the telegram bundle byte-identically to the default")
+	}
+	set := helmTemplate(t, append(append([]string{}, surface...), "--set", "telegram.apiBase=http://fake-bot-api:8081/")...)
+	assertTelegramAPIBaseRendered(t, set)
+	assertChannelConfigHasNoAPIBase(t, set)
+}
+
+// telegramBundleDocs isolates the telegram bundle's own rendered documents:
+// generated credentials differ per render, so comparing the whole output
+// would never match even when the bundle itself is byte-identical.
+//
+// call-auth.yaml is excluded for the same reason, one level in: its
+// gatewayToken is `randAlphaNum 32` on every install-shaped render (no
+// existing release for `lookup` to reuse against), so two otherwise-identical
+// renders of this bundle would never compare equal while it stayed in scope.
+func telegramBundleDocs(out string) string {
+	var keep []string
+	for _, doc := range strings.Split(out, "\n---") {
+		if strings.Contains(doc, "/charts/telegram/templates/") &&
+			!strings.Contains(doc, "/charts/telegram/templates/call-auth.yaml") {
+			keep = append(keep, doc)
+		}
+	}
+	return strings.Join(keep, "\n---")
+}
+
+// assertTelegramAPIBaseRendered checks the router's own env only.
+// chat-ops-broker-telegram-gateway moved the bot credential (and apiBase
+// override) off the Channel's Secret entirely: channel-telegram no longer
+// holds a bot token, calls the gateway's POST /telegram/call instead of
+// Telegram directly, and the gateway (the router, this env var) is now the
+// sole place apiBase means anything.
+func assertTelegramAPIBaseRendered(t *testing.T, set string) {
+	t.Helper()
+	needle := "- name: TELEGRAM_API_BASE\n              value: \"http://fake-bot-api:8081/\""
+	if !strings.Contains(set, needle) {
+		t.Errorf("a set apiBase must render %q", needle)
+	}
+}
+
+// assertChannelConfigHasNoAPIBase: never a Channel.spec.config key — that
+// would let a channel edit move its own token.
+func assertChannelConfigHasNoAPIBase(t *testing.T, set string) {
+	t.Helper()
+	i := strings.Index(set, "kind: Channel")
+	if i < 0 {
+		return
+	}
+	doc := set[i:]
+	if j := strings.Index(doc, "\n---"); j >= 0 {
+		doc = doc[:j]
+	}
+	if strings.Contains(doc, "apiBase") {
+		t.Fatalf("the Channel must not carry apiBase in spec.config:\n%s", doc)
+	}
+}
+
+// The health surfaces beside the log: rendered from values with the stated
+// defaults, each switchable, and their rules ahead of the log rules so a log
+// rule's message pattern cannot capture a repair's text.
+func TestHomeAssistantSourceRendersTheSurfacesWithDefaults(t *testing.T) {
+	src := stripComments(haDoc(t, helmTemplate(t, haArgs()...), "SignalSource", "ha-logs"))
+	for _, want := range []string{
+		"surfaces:",
+		"configEntries:", "states:", "setup_retry", "setup_error", "migration_error",
+		"repairs:", "severities:", "critical",
+		"sensors:", "deviceClasses:", "problem", "connectivity",
+		"updates:",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the source config must carry %q:\n%s", want, src)
+		}
+	}
+	// Three on, the digest off: exactly one `enabled: false` under surfaces.
+	surfaces := src[strings.Index(src, "surfaces:"):]
+	if n := strings.Count(surfaces, "enabled: false"); n != 1 {
+		t.Fatalf("expected the update digest alone to default off, got %d disabled surfaces:\n%s", n, surfaces)
+	}
+	if n := strings.Count(surfaces, "enabled: true"); n != 3 {
+		t.Fatalf("expected config entries, repairs and sensors on, got %d enabled surfaces:\n%s", n, surfaces)
+	}
+	// EVERY surface rule comes before the first log rule — one that selects
+	// on the record's message — so a message pattern cannot capture a
+	// repair's text.
+	rules := src[strings.Index(src, "rules:"):]
+	firstMessage := strings.Index(rules, "message=~")
+	if firstMessage < 0 {
+		t.Fatalf("no log rule rendered:\n%s", rules)
+	}
+	for _, surface := range []string{"config-entry", "sensor", "repair", "update"} {
+		i := strings.Index(rules, `surface="`+surface+`"`)
+		if i < 0 || i > firstMessage {
+			t.Fatalf("the surface=%s rule must precede the log rules:\n%s", surface, rules)
+		}
+	}
+	// Config entries and sensors dwell (a restart churns both); repairs and
+	// the digest carry a zero dwell (a standing fact and a list — a re-check
+	// would find both exactly as they were).
+	// toYaml sorts keys, so a rule renders `for` BEFORE `matchers`; split the
+	// list into rule blocks at each item's first key rather than slicing from
+	// the matcher forward, which would read the NEXT rule's dwell.
+	blocks := splitRuleBlocks(rules)
+	for surface, wantZero := range map[string]bool{"config-entry": false, "sensor": false, "repair": true, "update": true} {
+		var rule string
+		for _, b := range blocks {
+			if strings.Contains(b, `surface="`+surface+`"`) {
+				rule = b
+				break
+			}
+		}
+		if rule == "" {
+			t.Fatalf("missing the default rule for surface=%s:\n%s", surface, rules)
+		}
+		zero := strings.Contains(rule, `for: "0"`)
+		if zero != wantZero {
+			t.Fatalf("surface=%s: zero dwell = %v, want %v:\n%s", surface, zero, wantZero, rule)
+		}
+	}
+}
+
+// splitRuleBlocks cuts a rendered rules list into one string per rule. A rule
+// item starts at a line whose first token after `- ` is one of the rule's
+// keys; a matcher entry (`- surface="…"`) carries no key and stays inside.
+func splitRuleBlocks(rules string) []string {
+	var blocks []string
+	var cur strings.Builder
+	for _, line := range strings.Split(rules, "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		isItem := false
+		for _, key := range []string{"for:", "matchers:", "action:", "escalateAfterObjects:"} {
+			if strings.HasPrefix(trimmed, "- "+key) {
+				isItem = true
+				break
+			}
+		}
+		if isItem && cur.Len() > 0 {
+			blocks = append(blocks, cur.String())
+			cur.Reset()
+		}
+		cur.WriteString(line + "\n")
+	}
+	if cur.Len() > 0 {
+		blocks = append(blocks, cur.String())
+	}
+	return blocks
+}
+
+func TestHomeAssistantSurfaceCanBeSwitchedOffInValues(t *testing.T) {
+	src := stripComments(haDoc(t, helmTemplate(t, haArgs(
+		"--set", "home-assistant.logsAdapter.source.surfaces.sensors.enabled=false")...), "SignalSource", "ha-logs"))
+	surfaces := src[strings.Index(src, "surfaces:"):]
+	sensors := surfaces[strings.Index(surfaces, "sensors:"):]
+	sensors = sensors[:strings.Index(sensors, "updates:")]
+	if !strings.Contains(sensors, "enabled: false") {
+		t.Fatalf("sensors must render disabled:\n%s", sensors)
+	}
+	if n := strings.Count(surfaces, "enabled: true"); n != 2 {
+		t.Fatalf("switching one surface off must leave the other two on, got %d:\n%s", n, surfaces)
+	}
+}
+
+// ---- telegram configSchema -------------------------------------------------
+
+// adapterConfigSchemaDoc is the ONE shape read out of a rendered ChannelAdapter
+// or SignalAdapter document — just enough to reach spec.configSchema as its own
+// raw JSON, which is what `internal/configschema` compiles.
+type adapterConfigSchemaDoc struct {
+	Spec struct {
+		ConfigSchema json.RawMessage `json:"configSchema"`
+	} `json:"spec"`
+}
+
+// compiledAdapterSchema renders the schema a named adapter CR actually ships,
+// the same document the manager's ConfigValid condition compiles — so a
+// template edit that breaks the JSON Schema is caught here, not only by an
+// envtest reconcile.
+func compiledAdapterSchema(t *testing.T, out, kind, name string) *configschema.Schema {
+	t.Helper()
+	doc := findDocByKindAndName(t, out, kind, name)
+	var parsed adapterConfigSchemaDoc
+	if err := yaml.Unmarshal([]byte(doc), &parsed); err != nil {
+		t.Fatalf("parsing %s/%s: %v", kind, name, err)
+	}
+	if len(parsed.Spec.ConfigSchema) == 0 {
+		t.Fatalf("%s/%s rendered no configSchema:\n%s", kind, name, doc)
+	}
+	s, err := configschema.Compile(parsed.Spec.ConfigSchema)
+	if err != nil {
+		t.Fatalf("%s/%s configSchema must compile: %v", kind, name, err)
+	}
+	return s
+}
+
+// A misspelled config key used to validate silently — the schema declared
+// properties but never closed the object, so "aprovers" (missing a "p") would
+// reach the adapter unflagged instead of reporting on ConfigValid (A8). Both
+// implementations' schemas are pinned: the channel side's and the signal
+// side's are two separate documents and a fix to one must not leave the other
+// behind.
+func TestTelegramConfigSchemaRejectsMisspelledKey(t *testing.T) {
+	out := helmTemplate(t, "--set", "telegram.enabled=true")
+
+	for _, tc := range []struct {
+		kind, name    string
+		conforming    string
+		nearMiss      string
+		misspelledKey string
+	}{
+		{"ChannelAdapter", "telegram",
+			`{"chatId":"-100"}`,
+			`{"chatId":"-100","aprovers":[123]}`,
+			"aprovers"},
+		{"SignalAdapter", "telegram",
+			`{"chatId":"-100","channel":"k8s-ops"}`,
+			`{"chatId":"-100","channel":"k8s-ops","aprovers":[123]}`,
+			"aprovers"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			s := compiledAdapterSchema(t, out, tc.kind, tc.name)
+
+			if vs := configschema.Validate(s, []byte(tc.conforming)); len(vs) != 0 {
+				t.Fatalf("a conforming config must validate clean, got: %v", vs)
+			}
+
+			vs := configschema.Validate(s, []byte(tc.nearMiss))
+			if len(vs) == 0 {
+				t.Fatalf("%s/%s must reject an unknown key (additionalProperties: false), got no violations", tc.kind, tc.name)
+			}
+			if !namesKey(vs, tc.misspelledKey) {
+				t.Fatalf("violation must name the misspelled key %q, got: %v", tc.misspelledKey, vs)
+			}
+		})
+	}
+}
+
+// namesKey reports whether any violation's message mentions key.
+func namesKey(vs []configschema.Violation, key string) bool {
+	for _, v := range vs {
+		if strings.Contains(v.Message, key) {
+			return true
+		}
+	}
+	return false
 }

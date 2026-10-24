@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent } from 'react'
+import { createContext, useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent } from 'react'
 import { Button, Tooltip } from '@patternfly/react-core'
 
 // Pan and zoom.
@@ -8,6 +8,9 @@ import { Button, Tooltip } from '@patternfly/react-core'
 // shrank with the zoom would make zooming out useless, which is the one thing
 // you zoom out to do.
 
+/** The current zoom, so a dragged mark moves in graph units whatever the scale. */
+export const ViewportScale = createContext(1)
+
 const MIN_SCALE = 0.25
 const MAX_SCALE = 3
 const STEP = 1.25
@@ -16,10 +19,36 @@ export interface ViewportProps {
   /** Content size in graph units, used by "fit". */
   contentWidth: number
   contentHeight: number
+  /** Where the content starts, in graph units: a layout centred on zero starts negative. */
+  contentX?: number
+  contentY?: number
   children: ReactNode
   ariaLabel?: string
   /** Re-fit whenever this changes (the graph was rebuilt). */
   fitKey?: string
+  /**
+   * The canvas takes the picture's aspect, so the fit is bound by width. A
+   * fixed-height canvas is fitted by whichever dimension binds, and the other
+   * dimension is air; one shaped like the picture makes the marks big.
+   */
+  aspect?: boolean
+  /** The tallest the canvas may be: what the viewport has left below its top edge. */
+  maxHeight?: number
+  /** Drawn over the canvas, top left: what the picture is scoped to. */
+  overlay?: ReactNode
+  onBackgroundClick?: () => void
+}
+
+/**
+ * The canvas height for a picture of this aspect on a host this wide, never
+ * over the ceiling — what the viewport has left below the canvas's top edge,
+ * so the picture is seen whole without scrolling.
+ */
+export function aspectHeight(hostWidth: number, contentWidth: number, contentHeight: number, maxHeight?: number): number {
+  const viewport = typeof window === 'undefined' ? 768 : window.innerHeight
+  const ceiling = Math.max(300, maxHeight ?? Math.max(600, viewport - 160))
+  const want = hostWidth * ((contentHeight + 40) / Math.max(1, contentWidth)) + 60
+  return Math.round(Math.min(Math.max(Math.min(520, ceiling), want), ceiling))
 }
 
 interface Transform {
@@ -32,9 +61,14 @@ function clamp(k: number): number {
   return Math.min(Math.max(k, MIN_SCALE), MAX_SCALE)
 }
 
-export function Viewport({ contentWidth, contentHeight, children, ariaLabel, fitKey }: ViewportProps) {
+export function Viewport({
+  contentWidth, contentHeight, contentX = 0, contentY = 0, children, ariaLabel, fitKey, aspect, maxHeight, overlay,
+  onBackgroundClick,
+}: ViewportProps) {
   const host = useRef<HTMLDivElement>(null)
   const [t, setT] = useState<Transform>({ x: 0, y: 0, k: 1 })
+  const [height, setHeight] = useState<number | undefined>()
+  const moved = useRef(false)
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
   // A fit that could not be performed yet, because the host had no size to fit
   // to. See the ResizeObserver below.
@@ -62,9 +96,16 @@ export function Viewport({ contentWidth, contentHeight, children, ariaLabel, fit
 
     owed.current = false
     adjusted.current = false
-    const k = clamp(Math.min((width - 24) / contentWidth, (height - 24) / contentHeight, 1))
-    setT({ k, x: (width - contentWidth * k) / 2, y: (height - contentHeight * k) / 2 })
-  }, [contentWidth, contentHeight])
+    // Fit to the height the canvas is about to have, not the one it had.
+    const h = aspect ? aspectHeight(width, contentWidth, contentHeight, maxHeight) : height
+    if (aspect) setHeight(h)
+    const k = clamp(Math.min((width - 24) / contentWidth, (h - 24) / contentHeight, 1))
+    setT({
+      k,
+      x: (width - contentWidth * k) / 2 - contentX * k,
+      y: (h - contentHeight * k) / 2 - contentY * k,
+    })
+  }, [contentWidth, contentHeight, contentX, contentY, aspect, maxHeight])
 
   // Fit on mount and whenever the graph is rebuilt — a re-render that left the
   // viewport where it was would strand the user off-canvas after a filter change.
@@ -119,9 +160,15 @@ export function Viewport({ contentWidth, contentHeight, children, ariaLabel, fit
       <div
         ref={host}
         data-testid="graph-viewport"
+        tabIndex={0}
         onWheel={onWheel}
+        // The keyboard's way to what a background click does: drop the selection.
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onBackgroundClick?.()
+        }}
         onPointerDown={(e) => {
           if (e.button !== 0) return
+          moved.current = false
           drag.current = { x: e.clientX, y: e.clientY, tx: t.x, ty: t.y }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
         }}
@@ -129,17 +176,22 @@ export function Viewport({ contentWidth, contentHeight, children, ariaLabel, fit
           const d = drag.current
           if (!d) return
           adjusted.current = true
+          moved.current = true
           setT((prev) => ({ ...prev, x: d.tx + (e.clientX - d.x), y: d.ty + (e.clientY - d.y) }))
         }}
         onPointerUp={() => {
           drag.current = null
         }}
+        onClick={() => {
+          // a pan ends in a click too, and that must not clear a selection
+          if (!moved.current) onBackgroundClick?.()
+        }}
         onPointerLeave={() => {
           drag.current = null
         }}
         style={{
-          height: '68vh',
-          minHeight: 420,
+          height: aspect && height ? height : '68vh',
+          minHeight: Math.min(420, maxHeight ?? 420),
           overflow: 'hidden',
           cursor: drag.current ? 'grabbing' : 'grab',
           background: 'var(--ao-canvas)',
@@ -150,10 +202,15 @@ export function Viewport({ contentWidth, contentHeight, children, ariaLabel, fit
       >
         <svg role="img" aria-label={ariaLabel ?? 'graph'} width="100%" height="100%">
           <g transform={`translate(${t.x},${t.y}) scale(${t.k})`} data-testid="graph-canvas">
-            {children}
+            <ViewportScale.Provider value={t.k}>{children}</ViewportScale.Provider>
           </g>
         </svg>
       </div>
+      {overlay && (
+        <div style={{ position: 'absolute', left: 12, top: 12, right: 12, pointerEvents: 'none' }}>
+          <div style={{ pointerEvents: 'auto', display: 'inline-flex', flexWrap: 'wrap', gap: 6 }}>{overlay}</div>
+        </div>
+      )}
 
       <div
         style={{ position: 'absolute', right: 12, bottom: 12, display: 'flex', gap: 4 }}

@@ -3,7 +3,9 @@
 ## Purpose
 
 The ChannelAdapter CRD and its reconciler: declaring a channel-type implementation as a CR whose adapter workload the reconciler owns, with per-adapter derived auth, kubelet-only credential projection from Channels, and served/not-served visibility on both sides.
+
 ## Requirements
+
 ### Requirement: ChannelAdapter CRD declares an implementation, never credentials
 The `ChannelAdapter` CRD SHALL declare a channel-type implementation as pure implementation: required `spec.image` plus workload-run properties (`singleton` defaulting true, `resources`). It SHALL carry **no configuration surface**: there is no `env` field and no credentials — per-surface settings live on the served Channels (`config`, `credentialsSecretRef`). **The CR name IS the routing key**: Channels whose `spec.adapter` equals the adapter's name are served by it; one adapter per implementation holds by construction (Kubernetes name uniqueness), with no conflict machinery.
 
@@ -22,24 +24,49 @@ The `ChannelAdapter` CRD SHALL declare a channel-type implementation as pure imp
 ### Requirement: Reconciler owns the adapter workload
 
 The ChannelAdapter reconciler SHALL render and own (ownerRef) a Deployment per
-adapter. **IT SHALL CREATE NO ServiceAccount.** It SHALL name the account
-resolved from `spec.serviceAccountName` — a REFERENCE, with the same semantics
-as `SignalAdapter.spec.serviceAccountName` — falling back to the release's FLOOR
-account, and SHALL mount that account's token.
+adapter. **IT SHALL CREATE NO ServiceAccount.**
 
-The Deployment SHALL carry `MANAGER_URL`, **`ADAPTER_NAME` (the CR's name — one
-env name across both adapter surfaces, replacing `CHANNEL_TYPE`)**,
-`POD_NAMESPACE`, and the per-adapter derived token; `replicas 1 + Recreate` when
-singleton; each served Channel's `credentialsSecretRef` projected as `envFrom`
-under `AGENTOPS_CRED_<CHANNEL>_` (collisions reported, never silently
-overwritten); channel add/remove/credential changes roll the pod. Deleting the
+It SHALL name the account resolved from `spec.serviceAccountName` — a
+REFERENCE, with the same semantics as `SignalAdapter.spec.serviceAccountName`
+— falling back to the release's FLOOR account, and SHALL mount that
+account's token.
+
+The Deployment SHALL carry:
+
+- `MANAGER_URL`
+- **`ADAPTER_NAME`** (the CR's name — one env name across both adapter surfaces, replacing `CHANNEL_TYPE`)
+- `POD_NAMESPACE`
+- the per-adapter derived token
+
+It SHALL run `replicas 1` with `Recreate` when singleton, and project each
+served Channel's `credentialsSecretRef` as `envFrom` under
+`AGENTOPS_CRED_<CHANNEL>_` (collisions reported, never silently overwritten).
+Channel add/remove/credential changes roll the pod. Deleting the
 ChannelAdapter SHALL remove the workload. Channels select the adapter by
 `spec.adapter` equalling the CR's name.
 
 The operator SHALL create and bind no RBAC. What the named account may do
 remains an external grant against the account the chart rendered — for the
-console, the read-only Role the chart binds to `agentops-adapter-<name>` (the
-channel-adapter workload name; `agentops-channel-<name>` does not exist).
+console, the read-only Role the chart binds to `agentops-adapter-<name>`.
+That is the channel-adapter workload name. `agentops-channel-<name>` does not
+exist.
+
+**EVERY CHANNEL ADAPTER SHARES ONE `app.kubernetes.io/name`, SO IT CANNOT
+TELL INSTANCES APART.** `console` and `telegram` both render
+`agentops-adapter` today, collapsing both into one node in label-grouping
+tooling — a service map, a dashboard, `kubectl get pods -l`.
+
+This holds even for the console, which is itself an ordinary
+`ChannelAdapter` CR and gets no special treatment.
+
+The Deployment, its Pod template, and its Service (when rendered) SHALL
+additionally carry `app.kubernetes.io/instance: <CR name>`.
+
+`app.kubernetes.io/name` is UNCHANGED. `chart/templates/networkpolicy.yaml`
+selects ingress to the manager by that exact value for every channel
+adapter, so repurposing it would break that policy. `app.kubernetes.io/instance`
+is additive only — no existing Deployment, Service, or NetworkPolicy
+selector reads it.
 
 #### Scenario: Singleton discipline enforced
 - **WHEN** a singleton ChannelAdapter's Deployment is rendered
@@ -60,6 +87,14 @@ channel-adapter workload name; `agentops-channel-<name>` does not exist).
 #### Scenario: Contract env carries the adapter's identity
 - **WHEN** a ChannelAdapter named `telegram` is reconciled
 - **THEN** its pod runs with `ADAPTER_NAME=telegram` and no `CHANNEL_TYPE`
+
+#### Scenario: Distinct instances carry distinct instance labels
+- **WHEN** ChannelAdapters named `console` and `telegram` are both reconciled
+- **THEN** both Deployments carry `app.kubernetes.io/name: agentops-adapter`, and their Pod templates carry `app.kubernetes.io/instance: console` and `app.kubernetes.io/instance: telegram` respectively
+
+#### Scenario: A rendered Service carries the instance label
+- **WHEN** a ChannelAdapter named `telegram` is reconciled and its Service is rendered
+- **THEN** the Service carries `app.kubernetes.io/instance: telegram`
 
 ### Requirement: Channel credentials are projected into the adapter pod
 For every `Channel` of the adapter's type with `credentialsSecretRef`, the reconciler SHALL project the secret into the adapter pod spec as `envFrom` under the deterministic prefix `AGENTOPS_CRED_<CHANNEL>_` (every key `K` becomes env `<prefix>K`), resolved by the kubelet — no component reads secret values or key names through the API. Channel additions, removals, or credential changes SHALL roll the adapter pod. Sanitized-name collisions SHALL be reported as a condition, never silently overwritten.

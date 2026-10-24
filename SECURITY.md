@@ -66,6 +66,12 @@ choice.
 - Vulnerabilities in upstream projects the chart references (Kubernetes, the
   MCP servers, the agent CLI). Report those to their own projects; if the chart's
   default makes one reachable that would not otherwise be, that part is in scope.
+- **A known CVE in a published image's packages with no fix released.** Every
+  image is scanned with Trivy on the pull request that builds it and weekly
+  after publication; a CRITICAL or HIGH finding **with a fix available** blocks
+  the merge, and one without is knowingly not gated. If you believe an
+  unfixable finding is reachable through what the chart deploys, that reasoning
+  is a report — the finding alone is one we already have.
 - An install that grants an agent more cluster power than the defaults do.
   `allowPodExecution` and `rbacMode` are documented decisions — see
   [docs/installation.md](docs/installation.md).

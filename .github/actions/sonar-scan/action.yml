@@ -1,0 +1,194 @@
+name: sonar-scan
+description: >-
+  Analyse one component on SonarCloud, from the job that just built and tested
+  it — the checkout, the coverage profile and the toolchain are already there,
+  so nothing is uploaded, downloaded or renamed.
+inputs:
+  dir:
+    description: The component directory — the analysis base directory, and what names the component
+    required: true
+  token:
+    description: SONAR_TOKEN
+    required: true
+  organization:
+    description: SONAR_ORG
+    required: true
+  # A UNIT THAT PUBLISHES NO IMAGE NAMES ITSELF. components.sh answers "what
+  # publishes", and the one thing analysed here that does not — the workflow's
+  # own scripts — must not be taught to it: a directory it lists is a
+  # directory the release tags. So the exception is stated at the call site,
+  # and the lookup below is skipped only where a name was given.
+  name:
+    description: Project name for a unit components.sh does not list; leave unset for a component
+    required: false
+    default: ""
+  sources:
+    description: sonar.sources, relative to dir
+    required: false
+    default: "."
+  tests:
+    description: sonar.tests, relative to dir
+    required: false
+    default: "."
+  test-inclusions:
+    description: sonar.test.inclusions — what inside the test directories is a test
+    required: false
+    default: "**/*_test.go,**/*.test.ts,**/*.test.tsx,**/*.test.js"
+  pr:
+    description: >-
+      The pull request a hand run stands in for. On a `pull_request` event the
+      scanner reads the pull request from the event; a `workflow_dispatch` run
+      has none, and without this it would submit a BRANCH analysis under the
+      pull request's branch name — decorating nothing, gating nothing.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    # THE COMPONENT NAME IS DERIVED FROM THE DIRECTORY, by the one program that
+    # names images — never typed at a call site. A directory components.sh does
+    # not list is a failure here, not an analysis under a made-up name.
+    - id: component
+      shell: bash
+      env:
+        NAMED: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        if [ -n "$NAMED" ]; then
+          echo "name=$NAMED" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        name=$("$GITHUB_WORKSPACE"/.github/components.sh images | jq -r --arg c "./${{ inputs.dir }}" '.[] | select(.context == $c) | .component')
+        [ -n "$name" ] || { echo "::error::${{ inputs.dir }} is not a component components.sh lists"; exit 1; }
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+    # A MISSING PROJECT IS CREATED INSIDE THE MONOREPO BINDING, NEVER BY THE
+    # SCANNER. Left to itself the scanner auto-provisions any key it cannot
+    # find, and a project created that way is bound to no repository — no
+    # pull request decoration, no monorepo membership — while looking exactly
+    # like one that was set up. Fifteen of those were created, deleted, and
+    # created again by the next push before this step existed. So the project
+    # is looked up first, and when absent it is provisioned through
+    # .github/scripts/sonar-provision.sh — the monorepo wizard's own call,
+    # with this job's token — and looked up again before the scan runs.
+    - name: The SonarCloud project exists
+      shell: bash
+      env:
+        SONAR_TOKEN: ${{ inputs.token }}
+        SONAR_ORG: ${{ inputs.organization }}
+        NAME: ${{ steps.component.outputs.name }}
+      run: |
+        set -euo pipefail
+        # A lookup that FAILED is not a project that is ABSENT. The two are
+        # separated so a rejected token or an unreachable service fails here,
+        # naming the lookup, rather than reading as "no project" and starting
+        # a provisioning call with the same token.
+        #
+        # RETRIED, AND THE DIAGNOSTICS GO TO STDERR — both measured on #269.
+        # A single un-retried call turned one transient service error into a
+        # red required check, freezing the fixing loop for hours. And the
+        # `::error` used to go to stdout INSIDE `n=$(count)`: the command
+        # substitution captured it, `set -e` killed the step, and the log
+        # showed nothing at all — three runs were diagnosed blind because
+        # the one line naming the cause was swallowed by the capture.
+        count() {
+          local out code attempt
+          for attempt in 1 2 3 4 5; do
+            if out=$(curl -s -w '\n%{http_code}' -u "$SONAR_TOKEN:" \
+                "https://sonarcloud.io/api/projects/search?organization=$SONAR_ORG&projects=${SONAR_ORG}_agent-ops-operator_$NAME"); then
+              code=${out##*$'\n'}
+              # ONLY THE TRANSIENT CLASSES RETRY. 2xx answers (an ABSENT
+              # project is 200 with an empty list on this route, never 404),
+              # 5xx and 429 are the service's own trouble and worth the wait,
+              # a transport error likewise. Any other 4xx is deterministic —
+              # a dead token, a wrong organisation — and retrying it burns
+              # the full backoff in every job of the run before saying the
+              # same thing.
+              case "$code" in
+                2??) printf '%s' "${out%$'\n'*}" | jq '.components | length'; return 0 ;;
+                5??|429) code="HTTP $code" ;;
+                *)   echo "::error::the SonarCloud project lookup for $NAME answered HTTP $code — not retryable (token, organisation or permissions)" >&2
+                     return 1 ;;
+              esac
+            else
+              code="curl exit $?"
+            fi
+            echo "::warning::the SonarCloud project lookup for $NAME answered $code (attempt $attempt of 5)" >&2
+            [ "$attempt" = 5 ] || sleep $((attempt * 10))
+          done
+          echo "::error::the SonarCloud project lookup for $NAME failed 5 times, last answer: $code (service)" >&2
+          return 1
+        }
+        n=$(count)
+        if [ "$n" != "1" ]; then
+          echo "::notice::no SonarCloud project for $NAME yet; provisioning it inside the monorepo binding"
+          "$GITHUB_WORKSPACE"/.github/scripts/sonar-provision.sh "$NAME"
+          n=$(count)
+          [ "$n" = "1" ] || { echo "::error::provisioning $NAME reported success and the project is still absent — run .github/scripts/sonar-provision.sh by hand (CONTRIBUTING.md, Code analysis)"; exit 1; }
+        fi
+    # THE PULL REQUEST, NAMED EXPLICITLY WHEN THE EVENT DOES NOT NAME IT. The
+    # branches come from the pull request itself, never from an input a caller
+    # could mistype.
+    - id: pr
+      if: inputs.pr != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR: ${{ inputs.pr }}
+      run: |
+        set -euo pipefail
+        read -r head base < <(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefName,baseRefName --jq '"\(.headRefName) \(.baseRefName)"')
+        echo "args=-Dsonar.pullrequest.key=$PR -Dsonar.pullrequest.branch=$head -Dsonar.pullrequest.base=$base" >> "$GITHUB_OUTPUT"
+        echo "analysing as pull request #$PR ($head -> $base)"
+    # PROPERTIES ARE ARGUMENTS, NOT FIFTEEN PROPERTIES FILES. Test files are
+    # DECLARED as tests rather than excluded, so test rules apply and test code
+    # is not counted as uncovered source; a component takes the defaults, and
+    # the scripts unit narrows sources to the scripts and names its shell tests.
+    # Coverage paths name every shape a unit can produce — Go profile,
+    # node --test lcov, the console UI's lcov, the scripts' Cobertura XML —
+    # and a report that is not there is a scanner INFO, never an error.
+    #
+    # test/system/** and test/conformance/** are EXCLUDED FROM COVERAGE, not
+    # from analysis — build-tag-gated (`system`, `conformance`), so `coverage.out`
+    # from the plain `go test ./...` this job already ran has no data for
+    # them at all: not "0% covered", ABSENT. Any diff touching cluster.go,
+    # install.go, wiring.go or runner.go there read as new-code coverage in
+    # the single digits regardless of what tests exist, since none of the
+    # tools that could exercise them (the conformance suite, a live k3d
+    # cluster) run in this job. Sonar still scores bugs/vulnerabilities/
+    # smells in these files exactly as before — only the coverage metric is
+    # exempted.
+    # THE QUALITY GATE IS WAITED ON, AND ITS VERDICT FAILS THIS STEP. The
+    # first change that submitted analyses measured before it gated; the gate
+    # is required now because it is the automatic fixing loop's termination
+    # signal for the analysis half. Waiting here, rather than naming
+    # SonarCloud's own check in branch protection, is what makes the verdict
+    # reach `ci-green` on a hand run too — a `workflow_dispatch` analysis
+    # attaches no check of the service's own to the pull request.
+    #
+    # `ui/e2e-live/**` gets the SAME exclusion as `ui/e2e/**`: Playwright
+    # specs against a real backend, with no vitest coverage by design and
+    # no match for `sonar.test.inclusions` (`*.test.ts`, not `*.spec.ts`).
+    # Missing it once left ~2,000 "new, uncovered" lines dragging the
+    # console's new-code coverage down regardless of how well-tested the
+    # actual production diff was (#298).
+    - uses: SonarSource/sonarqube-scan-action@v8.2.1
+      env:
+        SONAR_TOKEN: ${{ inputs.token }}
+      with:
+        projectBaseDir: ${{ inputs.dir }}
+        args: >-
+          -Dsonar.organization=${{ inputs.organization }}
+          -Dsonar.projectKey=${{ inputs.organization }}_agent-ops-operator_${{ steps.component.outputs.name }}
+          -Dsonar.projectName=agentops-${{ steps.component.outputs.name }}
+          -Dsonar.sources=${{ inputs.sources }}
+          -Dsonar.exclusions=**/zz_generated.deepcopy.go,**/node_modules/**,**/dist/**,**/coverage/**,ui/e2e/**,ui/e2e-live/**,ui/screenshots/**,ui/demo/**
+          -Dsonar.coverage.exclusions=test/system/**,test/conformance/**
+          -Dsonar.tests=${{ inputs.tests }}
+          -Dsonar.test.inclusions=${{ inputs.test-inclusions }}
+          -Dsonar.go.coverage.reportPaths=coverage.out
+          -Dsonar.python.coverage.reportPaths=coverage.xml
+          -Dsonar.javascript.lcov.reportPaths=coverage.lcov,ui/coverage/lcov.info
+          -Dsonar.typescript.lcov.reportPaths=ui/coverage/lcov.info
+          -Dsonar.qualitygate.wait=true
+          -Dsonar.qualitygate.timeout=600
+          ${{ steps.pr.outputs.args }}

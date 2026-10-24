@@ -1,0 +1,36 @@
+%% The conveyor line as openspec/specs/conveyor-lifecycle designs it: one
+%% standing instruction on the issue, three stations, a person deciding only
+%% at the merge. Render with any mermaid viewer.
+flowchart TD
+  classDef person fill:#fff3cd,stroke:#b8860b,color:#000
+  classDef auto fill:#e7f0ff,stroke:#3b6fd6,color:#000
+  classDef stop fill:#eeeeee,stroke:#333,color:#000,stroke-dasharray:4 3
+
+  START(["A person puts conveyor:run on an issue"]):::person
+
+  subgraph S1["1 · Implement"]
+    IMPL["A session implements the issue<br/>and opens a pull request"]:::auto
+  end
+
+  subgraph S2["2 · Fix, until mergeable"]
+    CHECK["CI and the review run"]:::auto
+    LOOP["The fixer fixes or disputes<br/>every finding, analysis issue<br/>and failed check, and pushes"]:::auto
+    CHECK --> LOOP --> CHECK
+    OK(["Pull request is mergeable"]):::stop
+    HOLD(["Stopped: every item disputed,<br/>or the round cap reached"]):::stop
+    LOOP --> OK
+    LOOP --> HOLD
+  end
+
+  ANSWER(["A person answers the disputes<br/>or grants more rounds"]):::person
+  HOLD --> ANSWER --> CHECK
+
+  MERGE(["A person merges"]):::person
+  OK --> MERGE
+
+  subgraph S3["3 · Archive (openspec lane only)"]
+    ARCH["The change is archived<br/>and the issue closed"]:::auto
+  end
+
+  START --> IMPL --> CHECK
+  MERGE --> ARCH

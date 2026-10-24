@@ -20,6 +20,8 @@ package metrics
 
 import (
 	"encoding/json"
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -71,6 +73,10 @@ type Collector struct {
 	channelOpLatency *prometheus.HistogramVec
 	contextOps       *prometheus.CounterVec
 	contextBytes     *prometheus.HistogramVec
+	modelCalls       *prometheus.CounterVec
+	modelTokens      *prometheus.HistogramVec
+	toolCalls        *prometheus.CounterVec
+	toolDuration     *prometheus.HistogramVec
 
 	sample SampleFunc
 
@@ -130,6 +136,28 @@ func New(sample SampleFunc) *Collector {
 			// visible, which would mean the hardlink path had stopped working.
 			Buckets: []float64{0, 1 << 10, 1 << 14, 1 << 18, 1 << 20, 1 << 22, 1 << 24, 1 << 26},
 		}, []string{"trigger"}),
+		// The model and tool hops are labelled by pipeline and by the bounded
+		// target class, NEVER by the model or tool name: both are reported by
+		// the runtime rather than declared by a CR, so neither is bounded by
+		// CR count. The names live in the events.
+		modelCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentops_model_calls_total",
+			Help: "Model calls the runtimes reported, by pipeline and outcome.",
+		}, []string{"pipeline", "status"}),
+		modelTokens: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agentops_model_call_tokens",
+			Help:    "Tokens per reported model call, by pipeline and direction (in, out, cache-read).",
+			Buckets: []float64{100, 1000, 5000, 10000, 25000, 50000, 100000, 200000},
+		}, []string{"pipeline", "direction"}),
+		toolCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentops_tool_calls_total",
+			Help: "Tool calls the runtimes reported, by pipeline, target (builtin or mcp) and outcome.",
+		}, []string{"pipeline", "target", "status"}),
+		toolDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agentops_tool_call_duration_seconds",
+			Help:    "Wall time of a reported tool call, by pipeline and target.",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1, 5, 15, 60, 300},
+		}, []string{"pipeline", "target"}),
 		channelOps: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "agentops_channel_ops_total",
 			Help: "Channel operations completed, by adapter, op kind and outcome.",
@@ -178,7 +206,8 @@ func (c *Collector) Register(r prometheus.Registerer) {
 	r.MustRegister(
 		c.signalsReceived, c.signalsDropped, c.conversations, c.runs,
 		c.runDuration, c.channelOps, c.channelOpLatency,
-		c.contextOps, c.contextBytes, c,
+		c.contextOps, c.contextBytes,
+		c.modelCalls, c.modelTokens, c.toolCalls, c.toolDuration, c,
 	)
 }
 
@@ -252,6 +281,22 @@ func (c *Collector) Observe(e activity.Event) {
 		if e.Kind == activity.KindContextCheckpoint {
 			c.contextBytes.WithLabelValues(e.Code).Observe(float64(contextBytes(e)))
 		}
+	case activity.KindModelCall:
+		c.modelCalls.WithLabelValues(e.Pipeline, e.Status).Inc()
+		for key, direction := range tokenDirections {
+			if n, err := strconv.ParseFloat(e.Data[key], 64); err == nil {
+				c.modelTokens.WithLabelValues(e.Pipeline, direction).Observe(n)
+			}
+		}
+	case activity.KindToolCall:
+		target := "builtin"
+		if e.To != nil {
+			target = "mcp"
+		}
+		c.toolCalls.WithLabelValues(e.Pipeline, target, e.Status).Inc()
+		if e.LatencyMs > 0 {
+			c.toolDuration.WithLabelValues(e.Pipeline, target).Observe(float64(e.LatencyMs) / 1000)
+		}
 	case activity.KindChannelOpCompleted:
 		adapter := nodeName(e.From)
 		c.channelOps.WithLabelValues(adapter, e.Code, e.Status).Inc()
@@ -259,6 +304,13 @@ func (c *Collector) Observe(e activity.Event) {
 			c.channelOpLatency.WithLabelValues(adapter, e.Code).Observe(float64(e.LatencyMs) / 1000)
 		}
 	}
+}
+
+// tokenDirections maps a model call's data keys to the direction label.
+var tokenDirections = map[string]string{
+	"tokensIn":        "in",
+	"tokensOut":       "out",
+	"cacheReadTokens": "cache-read",
 }
 
 func nodeName(n *activity.NodeRef) string {

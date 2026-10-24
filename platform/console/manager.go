@@ -54,6 +54,13 @@ type Op struct {
 // wire, so there is nothing to version.
 const ContractVersion = "2"
 
+// VocabularyRevisionHeader carries the current vocabulary revision on every
+// /channel/ops long-poll response — the 200 that delivers an op, the 204 and
+// the 503 alike (ADA-6). A command-menu surface learns of a vocabulary change
+// from THIS, never a timer: the manager has no other way to dial an otherwise
+// idle adapter.
+const VocabularyRevisionHeader = "X-Agentops-Vocabulary-Revision"
+
 // OpMessage is one SEMANTIC outbound message: the manager composes meaning, each
 // adapter composes presentation. The console renders in the browser, so it
 // keeps the fields STRUCTURED all the way to the transcript rather than
@@ -66,7 +73,22 @@ type OpMessage struct {
 	Source   string            `json:"source,omitempty"`
 	Title    string            `json:"title,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
-	InputRef string            `json:"inputRef,omitempty"`
+	// Severity is a SIGNAL's optional urgency rating — closed vocabulary
+	// (critical/error/warning/info), carried next to Labels exactly the way
+	// the manager's own internal/chat/message.go composes it. Read through
+	// SignalSeverity, which gates it to the "signal" kind the same way
+	// SignalPayload does.
+	Severity string `json:"severity,omitempty"`
+	InputRef string `json:"inputRef,omitempty"`
+	// OriginKind is this signal's v1alpha1.OriginKind ("signal" | "channel" |
+	// "member"), matching the manager's own OpMessage.OriginKind field name
+	// exactly (internal/chat/message.go). "member" is the one value this
+	// console acts on: a member's result bubbling to its parent
+	// (coordination-loop), already shown in full by the invoke card
+	// console-conversation-tree builds straight from that member's own
+	// conversation — rendering it again as a generic card duplicated a
+	// member's result on the page it was invoked from (item #15 QA, bug 2).
+	OriginKind string `json:"originKind,omitempty"`
 
 	Origin string `json:"origin,omitempty"`
 	Sender string `json:"sender,omitempty"`
@@ -213,18 +235,57 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 }
 
 // NextOp long-polls for the next outbound op; nil when none arrived in time.
-func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (*Op, error) {
-	var op Op
-	code, err := m.do(ctx, "GET",
-		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
-			url.QueryEscape(adapter), ContractVersion, waitSeconds), nil, &op)
+//
+// Also returns the vocabulary revision the response carried — read directly
+// off the HTTP response rather than through `do`, because it rides every
+// status this endpoint can answer (200, 204, 503 alike) and `do` discards
+// headers once it has decoded a body.
+func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (*Op, string, error) {
+	path := fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
+		url.QueryEscape(adapter), ContractVersion, waitSeconds)
+	req, err := http.NewRequestWithContext(ctx, "GET", m.BaseURL+path, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if code == 204 {
-		return nil, nil
+	req.Header.Set("Authorization", "Bearer "+m.Token)
+	resp, err := m.HTTP.Do(req)
+	if err != nil {
+		return nil, "", err
 	}
-	return &op, nil
+	defer resp.Body.Close()
+	revision := resp.Header.Get(VocabularyRevisionHeader)
+	// durable-chat-ops-broker: 503 means the replica that answered is not the
+	// current leader and cannot safely claim an op on this adapter's behalf —
+	// never a failure to surface or back off from, exactly like an ordinary
+	// 204 except the caller should retry at once rather than pacing itself as
+	// it would after a genuine error.
+	//
+	// "Retry at once" only reaches a different replica if the retry actually
+	// dials one: a Kubernetes Service picks a backend per TCP CONNECTION, not
+	// per request, so an HTTP/1.1 keep-alive connection that happened to land
+	// on a non-leader stays pinned to it — every subsequent poll on that same
+	// connection gets the same non-leader's 503, forever, with no error ever
+	// surfacing. Measured live: a long-poll loop pinned this way never
+	// completed a single op across several minutes and a pod restart, despite
+	// the leader's queue holding one the whole time. Closing the idle
+	// connection here is what makes the NEXT poll dial fresh and gives it a
+	// new chance to land on the leader.
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		m.HTTP.CloseIdleConnections()
+		return nil, revision, nil
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, revision, nil
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, revision, fmt.Errorf("GET %s: %d %s", path, resp.StatusCode, bytes.TrimSpace(b))
+	}
+	var op Op
+	if err := json.NewDecoder(resp.Body).Decode(&op); err != nil {
+		return nil, revision, err
+	}
+	return &op, revision, nil
 }
 
 // CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).
@@ -316,6 +377,11 @@ type ReadEntry struct {
 	// identity. Empty reports the channel-wide mark, which is what a console
 	// with no salt projected falls back to.
 	Reader string `json:"reader,omitempty"`
+	// Rewind asks "mark unread" rather than the ordinary monotonic advance:
+	// the named Reader's own watermark is set to ReadAt even where that is
+	// earlier than what is stored. Always sent with a non-empty Reader — the
+	// manager refuses a rewind naming none.
+	Rewind bool `json:"rewind,omitempty"`
 }
 
 // ReadOutcome is the manager's per-thread verdict on a read report.
@@ -507,4 +573,15 @@ func (m *OpMessage) SignalPayload() string {
 		return ""
 	}
 	return strings.TrimSpace(m.Body)
+}
+
+// SignalSeverity is the raw severity rating of a `signal`, for a surface
+// that can tint it. Empty for every other kind, mirroring SignalPayload —
+// and empty whenever the originating signal carried none, matching the
+// wire's own `omitempty`.
+func (m *OpMessage) SignalSeverity() string {
+	if m == nil || m.Kind != "signal" {
+		return ""
+	}
+	return m.Severity
 }

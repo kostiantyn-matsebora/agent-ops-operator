@@ -39,9 +39,9 @@ func mcpServer(t *testing.T, reply string) (net.Conn, chan *http.Request) {
 			seen <- req
 			resp := &http.Response{
 				StatusCode: 200, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
-				Request: req,
-				Header:  http.Header{"Content-Type": []string{"application/json"}},
-				Body:    io.NopCloser(strings.NewReader(reply)),
+				Request:       req,
+				Header:        http.Header{"Content-Type": []string{"application/json"}},
+				Body:          io.NopCloser(strings.NewReader(reply)),
 				ContentLength: int64(len(reply)),
 			}
 			_ = resp.Write(srv)

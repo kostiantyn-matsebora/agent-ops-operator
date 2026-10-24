@@ -73,8 +73,8 @@ func mergeTranscript(thread, ownChannel string, live []Message, runs []Run, conv
 
 	for _, r := range runs {
 		for _, in := range r.Inputs {
-			if in.Text == "" || liveInputs[in.ID] {
-				continue
+			if in.Text == "" || liveInputs[in.ID] || in.Origin == originMember {
+				continue // coordination plumbing — the invoke card already shows it
 			}
 			out = append(out, recordedMessage(thread, ownChannel, in, conv))
 		}
@@ -96,11 +96,48 @@ func mergeTranscript(thread, ownChannel string, live []Message, runs []Run, conv
 			Kind:   MsgAgent,
 			Text:   r.Result,
 			At:     at,
+			runID:  r.RunID,
 		})
 	}
 
+	markInternalRounds(out, runs)
 	sortByTime(out)
 	return out
+}
+
+// markInternalRounds flags, on every message in out, the run whose entire
+// durable Inputs are a causedBy member reaching back up (coordination-loop)
+// — nothing a human or an external signal triggered. Matched by runID so a
+// message still sitting in the live buffer is flagged exactly like one
+// reconstructed here, instead of reading as unread until the buffer evicts
+// it: a coordinator conversation with one real exchange and a dozen
+// internal member round-trips must not count as a dozen unread messages
+// (countUnread skips InternalRound the same way it already skips an ack).
+func markInternalRounds(out []Message, runs []Run) {
+	internalRound := map[string]bool{}
+	for _, r := range runs {
+		if len(r.Inputs) == 0 {
+			continue // predates recorded Inputs — never flagged, never hidden
+		}
+		allMember := true
+		for _, in := range r.Inputs {
+			if in.Origin != originMember {
+				allMember = false
+				break
+			}
+		}
+		if allMember {
+			internalRound[r.RunID] = true
+		}
+	}
+	if len(internalRound) == 0 {
+		return
+	}
+	for i := range out {
+		if out[i].runID != "" && internalRound[out[i].runID] {
+			out[i].InternalRound = true
+		}
+	}
 }
 
 // recordedMessage renders one recorded input as a transcript line.
@@ -132,6 +169,12 @@ func recordedMessage(thread, ownChannel string, in RecordedInput, conv Conversat
 		// source that opened it — rebuilds the head, and the payload moves into
 		// the field the browser already folds.
 		msg.Text, msg.Payload = recordedSignalCard(conv), signalPayload(in)
+		// Same limitation recordedSignalCard's labels already carry: this is
+		// the OPENING signal's severity, not this specific recurrence's own —
+		// RecordedInput (status.runs[].inputs[]) keeps no per-input severity,
+		// same as it keeps no per-input labels. A card rebuilt after a
+		// restart can show a stale rating for a recurrence that escalated.
+		msg.Severity = conv.SignalSeverity
 	case ownChannel != "" && in.Surface == ownChannel:
 		msg.Kind, msg.Sender = MsgLocal, in.Sender
 	default:
@@ -189,6 +232,9 @@ func recordedSignalCard(conv ConversationSummary) string {
 	}
 	if conv.Pipeline != "" {
 		from = append(from, "**Pipeline** `"+conv.Pipeline+"`")
+	}
+	if conv.Coordinator != "" {
+		from = append(from, "**Coordinator** `"+conv.Coordinator+"`")
 	}
 	if len(from) > 0 {
 		parts = append(parts, strings.Join(from, " · "))

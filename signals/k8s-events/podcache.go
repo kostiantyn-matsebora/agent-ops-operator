@@ -8,19 +8,22 @@ import (
 	"sync"
 )
 
-// The object cache: a trimmed, read-only list/watch view of pods and
-// replicasets. It exists to answer three questions the Events stream cannot:
+// The object cache: a trimmed, read-only list/watch view of pods, replicasets
+// and nodes. It exists to answer four questions the Events stream cannot:
 //
 //	workload    which controller owns this pod (Pod -> ReplicaSet -> Deployment)
 //	health      is this object still unhealthy at the end of a dwell window
 //	ownership   is this object agent-ops' own machinery
+//	draining    is the node this object runs on being taken out of service
 //
 // It caches FIELDS, not objects: a large cluster's pod list is mostly spec, and
 // none of it is needed here. Whole-object caching is what makes an informer
 // expensive, and this adapter has no reason to pay that.
 //
 // Replicasets are cached for the SECOND owner hop only, so nothing but their
-// owner references and identity is kept.
+// owner references and identity is kept. Nodes are cached for drain awareness
+// only, so nothing but `spec.unschedulable` and taints is kept — no status, no
+// conditions: see drain.go for why conditions are deliberately never read here.
 
 // ownerRef is the slice of ownerReferences that matters: who controls this.
 type ownerRef struct {
@@ -42,6 +45,10 @@ type objectInfo struct {
 	Phase          string
 	Ready          bool
 	WaitingReasons []string
+
+	// drain state, meaningful for nodes only — see drain.go.
+	Unschedulable bool
+	Taints        []nodeTaint
 }
 
 // podObject is the subset of a core/v1 Pod that is decoded. Anything absent
@@ -127,6 +134,33 @@ func (r *replicaSetObject) info() *objectInfo {
 	}
 }
 
+// nodeObject is the subset of a core/v1 Node this adapter reads: enough to
+// decide whether it is DRAINING, and nothing about its status. Conditions are
+// what the drain predicate deliberately ignores (see drain.go), so they are
+// never decoded here at all.
+type nodeObject struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		Unschedulable bool        `json:"unschedulable"`
+		Taints        []nodeTaint `json:"taints"`
+	} `json:"spec"`
+}
+
+func (n *nodeObject) info() *objectInfo {
+	return &objectInfo{
+		Kind: "Node",
+		Name: n.Metadata.Name,
+		// A Node event's own involved object IS the node, so recording it here
+		// too lets every caller read "which node is this about" the same way
+		// for a Pod-kind event and a Node-kind event alike: enrichment.Node.
+		Node:          n.Metadata.Name,
+		Unschedulable: n.Spec.Unschedulable,
+		Taints:        n.Spec.Taints,
+	}
+}
+
 // controllerOf returns the CONTROLLING owner reference. A pod may carry several
 // ownerReferences; only the controller determines the workload.
 func controllerOf(refs []ownerRef) *ownerRef {
@@ -143,18 +177,37 @@ func controllerOf(refs []ownerRef) *ownerRef {
 type objectCache struct {
 	mu      sync.RWMutex
 	objects map[string]*objectInfo
-	// synced reports whether at least one successful list has landed. Before
-	// that, "unknown" means "not loaded yet", which callers must not read as
-	// "does not exist".
-	synced bool
+	// listed records which (kind, scope) pairs have completed at least one
+	// list, keyed listedKey. Before that, "unknown" means "not loaded yet",
+	// which callers must not read as "does not exist".
+	//
+	// Per kind AND scope, never one flag: three watchers per scope fill one
+	// cache, and the small node list landing first must not make a pod list
+	// that has not landed — or keeps failing — read as "every pod is gone".
+	listed map[string]bool
 }
 
 func newObjectCache() *objectCache {
-	return &objectCache{objects: map[string]*objectInfo{}}
+	return &objectCache{objects: map[string]*objectInfo{}, listed: map[string]bool{}}
+}
+
+// clusterScoped reports whether a kind has no namespace. A cluster-scoped
+// object is keyed under the empty namespace whatever namespace a caller
+// passes: a Node event's own namespace is "default", and an owner hop carries
+// the referring pod's namespace, but neither is where a Node lives.
+func clusterScoped(kind string) bool {
+	return kind == "Node"
 }
 
 func cacheKey(namespace, kind, name string) string {
+	if clusterScoped(kind) {
+		namespace = ""
+	}
 	return namespace + "/" + kind + "/" + name
+}
+
+func listedKey(kind, scope string) string {
+	return kind + "@" + scope
 }
 
 func (c *objectCache) put(oi *objectInfo) {
@@ -169,40 +222,59 @@ func (c *objectCache) drop(namespace, kind, name string) {
 	delete(c.objects, cacheKey(namespace, kind, name))
 }
 
-func (c *objectCache) markSynced() {
+// markListed records that one watcher's list of kind in scope has landed.
+func (c *objectCache) markListed(kind, scope string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.synced = true
+	c.listed[listedKey(kind, scope)] = true
 }
 
-// Synced reports whether the cache has completed at least one list.
-func (c *objectCache) Synced() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.synced
+// canSpeak reports whether a list covering this kind in this namespace has
+// landed: the cluster-wide scope, or the namespace's own. Called with mu held.
+func (c *objectCache) canSpeak(namespace, kind string) bool {
+	if c.listed[listedKey(kind, "")] {
+		return true
+	}
+	return !clusterScoped(kind) && c.listed[listedKey(kind, namespace)]
 }
 
 // Get returns the cached object, and whether the cache can speak to it at all.
-// The second return is false before the first list completes, so an unsynced
-// cache never reports an object as absent.
+// The second return is false until a list covering that kind in that
+// namespace completes, so an unlisted kind or scope never reports an object as
+// absent. An untracked kind is never listed, so it is never known either.
 func (c *objectCache) Get(namespace, kind, name string) (*objectInfo, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if !c.synced {
+	if !c.canSpeak(namespace, kind) {
 		return nil, false
 	}
 	oi, ok := c.objects[cacheKey(namespace, kind, name)]
 	if !ok {
-		// Synced and absent IS an answer for the kinds we track: the object is
-		// gone. For kinds we do not track we cannot say.
-		return nil, c.tracks(kind)
+		// Listed and absent IS an answer: the object is gone.
+		return nil, true
 	}
 	return oi, true
 }
 
 // tracks reports whether this cache holds the given kind at all.
 func (c *objectCache) tracks(kind string) bool {
-	return kind == "Pod" || kind == "ReplicaSet"
+	return kind == "Pod" || kind == "ReplicaSet" || kind == "Node"
+}
+
+// NodeDraining reports whether a node is currently draining, and whether the
+// cache can answer at all. An unsynced cache, or a node access grant that was
+// never made, both answer false,false — which callers must read as "not
+// suppressed", never as "not draining": failing toward REPORTING is the safe
+// direction here, exactly as an unknown object's node is never suppressed.
+func (c *objectCache) NodeDraining(name string) (draining bool, known bool) {
+	oi, known := c.Get("", "Node", name)
+	if !known {
+		return false, false
+	}
+	if oi == nil {
+		return false, true // the node is gone, which is a definite "not draining"
+	}
+	return nodeDraining(oi.Unschedulable, oi.Taints), true
 }
 
 // OwnedByAgentOps implements self-exclusion mechanism 2: an agent-ops label on
@@ -262,13 +334,43 @@ func (c *objectCache) Workload(namespace, kind, name string) (string, string, bo
 	return curKind, curName, true
 }
 
+// Settled reports whether Workload's answer for this object is final: the
+// object is in the cache and its owner chain ends at an object with no
+// controller, at a controller kind this cache does not track (Deployment,
+// StatefulSet, DaemonSet, Job, a Conversation), or at a Node. It is false
+// while the object itself, or any tracked hop of its chain, is still missing —
+// the cache has not caught up, and Workload would answer with a per-object or
+// half-walked key.
+//
+// A Node owner — a static pod's mirror — ends the chain without a lookup: a
+// Node carries no controller, so Workload names it whether or not the node
+// cache can answer, and a namespaced install never lists nodes at all.
+func (c *objectCache) Settled(namespace, kind, name string) bool {
+	oi, known := c.Get(namespace, kind, name)
+	if !known || oi == nil {
+		return false
+	}
+	for hop := 0; hop < 3 && oi.Owner != nil; hop++ {
+		if !c.tracks(oi.Owner.Kind) || clusterScoped(oi.Owner.Kind) {
+			return true
+		}
+		next, ok := c.Get(namespace, oi.Owner.Kind, oi.Owner.Name)
+		if !ok || next == nil {
+			return false
+		}
+		oi = next
+	}
+	return true
+}
+
 // ---- the watcher ------------------------------------------------------------
 
 // cacheWatcher keeps an objectCache current for one resource in one scope.
 type cacheWatcher struct {
 	kube  *Kube
 	cache *objectCache
-	// kind is the object kind stored ("Pod", "ReplicaSet").
+	// kind is the object kind stored ("Pod", "ReplicaSet", "Node"), and the
+	// kind a landed list is recorded under (markListed).
 	kind string
 	// pathFor builds the collection path for a namespace scope.
 	pathFor func(namespace string) string
@@ -293,6 +395,13 @@ func replicaSetsPath(namespace string) string {
 	return "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/replicasets"
 }
 
+// nodesPath ignores its argument: nodes are CLUSTER-scoped, so there is no
+// namespaced form. It takes one for the same signature as podsPath and
+// replicaSetsPath, which is what lets cacheWatcher stay generic over all three.
+func nodesPath(string) string {
+	return "/api/v1/nodes"
+}
+
 func decodePod(raw json.RawMessage) (*objectInfo, error) {
 	var p podObject
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -309,15 +418,52 @@ func decodeReplicaSet(raw json.RawMessage) (*objectInfo, error) {
 	return r.info(), nil
 }
 
+func decodeNode(raw json.RawMessage) (*objectInfo, error) {
+	var n nodeObject
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, err
+	}
+	return n.info(), nil
+}
+
+// list fills the cache from one list of the scope and returns its
+// resourceVersion for the watch that follows.
+func (w *cacheWatcher) list(ctx context.Context, scope string) (string, error) {
+	var list struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	rv, err := w.kube.ListInto(ctx, w.pathFor(scope), &list)
+	if err != nil {
+		return "", err
+	}
+	for _, raw := range list.Items {
+		if oi, err := w.decode(raw); err == nil {
+			w.cache.put(oi)
+		}
+	}
+	w.cache.markListed(w.kind, scope)
+	return rv, nil
+}
+
+// applyFrame folds one watch frame into the cache.
+func (w *cacheWatcher) applyFrame(frameType string, obj json.RawMessage) {
+	oi, err := w.decode(obj)
+	if err != nil {
+		return
+	}
+	if frameType == "DELETED" {
+		w.cache.drop(oi.Namespace, oi.Kind, oi.Name)
+		return
+	}
+	w.cache.put(oi)
+}
+
 // run keeps one scope current: list, then watch, relisting on expiry. It
 // mirrors watchScope's shape deliberately — same relist contract, same
 // cancellation semantics.
 func (w *cacheWatcher) run(ctx context.Context, scope string) {
 	for ctx.Err() == nil {
-		var list struct {
-			Items []json.RawMessage `json:"items"`
-		}
-		rv, err := w.kube.ListInto(ctx, w.pathFor(scope), &list)
+		rv, err := w.list(ctx, scope)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -329,24 +475,8 @@ func (w *cacheWatcher) run(ctx context.Context, scope string) {
 			sleepCtx(ctx, relistBackoff)
 			continue
 		}
-		for _, raw := range list.Items {
-			if oi, err := w.decode(raw); err == nil {
-				w.cache.put(oi)
-			}
-		}
-		w.cache.markSynced()
 
-		err = w.kube.WatchFrames(ctx, w.pathFor(scope), rv, func(frameType string, obj json.RawMessage) {
-			oi, decErr := w.decode(obj)
-			if decErr != nil {
-				return
-			}
-			if frameType == "DELETED" {
-				w.cache.drop(oi.Namespace, oi.Kind, oi.Name)
-				return
-			}
-			w.cache.put(oi)
-		})
+		err = w.kube.WatchFrames(ctx, w.pathFor(scope), rv, w.applyFrame)
 		switch {
 		case ctx.Err() != nil:
 			return

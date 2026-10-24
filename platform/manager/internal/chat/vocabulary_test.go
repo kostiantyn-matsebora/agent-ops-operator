@@ -12,7 +12,7 @@ import (
 func pipeline(name, profile string, ready bool) *agentopsv1alpha1.Pipeline {
 	p := &agentopsv1alpha1.Pipeline{}
 	p.Namespace, p.Name = testNS, name
-	p.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
+	p.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile}
 	status := metav1.ConditionFalse
 	if ready {
 		status = metav1.ConditionTrue
@@ -21,6 +21,20 @@ func pipeline(name, profile string, ready bool) *agentopsv1alpha1.Pipeline {
 		Type: "Ready", Status: status, Reason: "T", LastTransitionTime: metav1.Now(),
 	}}
 	return p
+}
+
+func coordinator(name, profile string, ready bool) *agentopsv1alpha1.Coordinator {
+	co := &agentopsv1alpha1.Coordinator{}
+	co.Namespace, co.Name = testNS, name
+	co.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile}
+	status := metav1.ConditionFalse
+	if ready {
+		status = metav1.ConditionTrue
+	}
+	co.Status.Conditions = []metav1.Condition{{
+		Type: "Ready", Status: status, Reason: "T", LastTransitionTime: metav1.Now(),
+	}}
+	return co
 }
 
 func find(v Vocabulary, name string) (Entry, bool) {
@@ -85,6 +99,61 @@ func TestVocabularyPublishesOnlyReadyPipelines(t *testing.T) {
 	}
 	if _, ok := find(v, "half-wired"); ok {
 		t.Fatal("unready pipeline offered — it names wiring that does not resolve")
+	}
+}
+
+// A Coordinator is addressable exactly as a Pipeline is (design D-B,
+// chat-addressing-discovery), and only while Ready.
+func TestVocabularyPublishesOnlyReadyCoordinators(t *testing.T) {
+	r, _, _ := closeFixture(t,
+		coordinator("incident-coordinator", "responder", true),
+		coordinator("co-half-wired", "nobody", false),
+	)
+	v := r.Vocabulary(context.Background())
+
+	e, ok := find(v, "incident-coordinator")
+	if !ok {
+		t.Fatal("ready coordinator missing")
+	}
+	if e.Kind != KindCoordinator || e.Position != PositionGeneral {
+		t.Fatalf("coordinator entry: kind=%q position=%q", e.Kind, e.Position)
+	}
+	if e.Profile != "responder" || e.Description != "responder" {
+		t.Fatalf("profile/description derived wrong: %+v", e)
+	}
+	if _, ok := find(v, "co-half-wired"); ok {
+		t.Fatal("unready coordinator offered — it names wiring that does not resolve")
+	}
+}
+
+// A Pipeline and a Coordinator share ONE name space (design D-B): both appear,
+// sorted together by name, and an AgentCapability is never offered at all
+// (chat-addressing-discovery).
+func TestVocabularyMergesPipelinesAndCoordinatorsByName(t *testing.T) {
+	r, _, _ := closeFixture(t,
+		pipeline("z-pipe", "p", true),
+		coordinator("a-coord", "c", true),
+	)
+	v := r.Vocabulary(context.Background())
+	pipe, ok := find(v, "z-pipe")
+	if !ok || pipe.Kind != KindPipeline {
+		t.Fatalf("pipeline entry missing or wrong kind: %+v", pipe)
+	}
+	co, ok := find(v, "a-coord")
+	if !ok || co.Kind != KindCoordinator {
+		t.Fatalf("coordinator entry missing or wrong kind: %+v", co)
+	}
+	var pipeIdx, coIdx int
+	for i, e := range v.Entries {
+		if e.Name == "z-pipe" {
+			pipeIdx = i
+		}
+		if e.Name == "a-coord" {
+			coIdx = i
+		}
+	}
+	if coIdx > pipeIdx {
+		t.Fatalf("entries must sort by NAME across kinds, not by kind: coord at %d, pipeline at %d", coIdx, pipeIdx)
 	}
 }
 

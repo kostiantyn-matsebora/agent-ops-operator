@@ -1,0 +1,73 @@
+# Tasks — signal-correlation-id
+
+## 1. Contract pages — api-architect
+
+- [x] 1.1 Rewrite `docs/contracts/signal-adapter.md` to 2.0.0: `initiationId` required with the one propagate-or-create rule, `fingerprint` removed, requirement IDs (`API-n`/`ADP-n`/`MGR-n`) renumbered, COMPAT stating reject-never-synthesize, changelog row under 2.0.0. The user approves the wording before it merges (`signal-rules.md`). Verify: the page's claims match the delta specs and `rules_compliance.py` passes on it.
+- [x] 1.2 Bump `docs/contracts/channel-adapter.md` MINOR: ops carry `conversationId` (additive, opaque), a channel adapter never mints an id. Verify: wire `contract=` value unchanged on the page, changelog row added.
+- [x] 1.3 Check the open `channel-adapter-specification` change for an overlapping `channel-adapter-contract` delta and rebase whichever lands second. Verify: `openspec validate --strict` passes for both changes after the rebase.
+
+## 2. CRD and API types — backend-developer
+
+- [x] 2.1 Remove `SignalSource.spec.grouping`, add top-level `spec.cooldownHours` (default 6). Regen deepcopy and CRDs per `build-test.md`. Verify: `go build ./...` and the regenerated `chart/crds/` show the removal and the new field.
+- [x] 2.2 Replace `Conversation.spec.signature` with `spec.conversationId` (written once, opaque string). Regen. Verify: envtest suite compiles and passes.
+
+## 3. Manager ingest and routing — backend-developer
+
+- [x] 3.1 Require `initiationId` at `POST /signal/inbound`: `4xx` naming the field, no synthesis. Remove the alert-vs-oneshot fallback in `httpapi/signals.go` and `ingest.Signature`/`SignatureHash`/`DefaultSignatureLabels`. Verify: httpapi unit tests cover the rejection and the removed symbols are gone from the module.
+- [x] 3.2 Route by equality through an informer field index on `spec.conversationId`, scoped to the claiming pipeline and OPEN conversations only. Remove the `agentops.dev/signature-hash` label and window reuse. Verify: envtest covers open-match recurrence, fresh-id creation, distinct-ids-never-merge and closed-conversation exclusion.
+- [x] 3.3 Re-key `ingest.Cooldown` to `initiationId`, read `spec.cooldownHours`, keep SignalSource durability and chat's 0. Verify: ingest unit tests pass with the new key.
+- [x] 3.4 Refuse reopening a closed conversation while another open conversation carries the same `conversationId` for that pipeline, reason naming the successor. Verify: envtest case for the refusal and for a permitted reopen with no successor.
+- [x] 3.5 Stamp `conversationId` on everything leaving the conversation: every `/channel/ops` operation, member spawns (`invoke`), the runtime context. Verify: chat and dispatch unit tests assert the field on each surface.
+- [x] 3.6 Update the dispatch/ingest test fixtures to the new semantics — a deliberate change, per `invariants.md`. Verify: the fixture diff only reflects decisions recorded in `design.md`.
+
+## 4. Shipped signal adapters — backend-developer
+
+- [x] 4.1 `signals/alertmanager`: `initiationId` = webhook `groupKey` verbatim, hash of sorted `groupLabels` when absent. Verify: adapter unit tests cover both paths.
+- [x] 4.2 pulse adapter: `initiationId` = the Pulse alert id, stable across retries and firing/resolved. Verify: a unit test pins the motivating case — two unrelated alerts yield two ids and never merge.
+- [x] 4.3 `signals/ha`: mint in the existing pending/dwell logic, keyed on condition identity. Verify: adapter unit tests pass with the new field.
+- [x] 4.4 `signals/k8s-events`: `initiationId` = `<source>@<namespace>/<workload>` via the existing owner-reference resolution. Verify: unit tests pin one-conversation-per-workload across pod churn.
+- [x] 4.5 `signals/cron`: `initiationId` = the source's job identity, keeping the last-fired cursor. Verify: unit tests pin all-ticks-one-conversation without the empty-signature collapse.
+- [x] 4.6 `signals/telegram` and console origination: fresh mint per new request, verbatim propagation of the stamped binding id on continuation. Verify: unit tests cover both cases on each surface.
+
+## 5. Channel surfaces — backend-developer
+
+- [x] 5.1 `channels/telegram`: thread mapping from the op's `conversationId` only — drop any signature-hash or backref mapping. Verify: the component's test suite passes with the mapping asserted both directions.
+- [x] 5.2 `platform/console`: read `spec.conversationId` directly, remove signature-hash usages in Go and UI. Verify: console Go tests and `npm run test:coverage` pass.
+
+## 6. Bundles and chart values — deployment-engineer
+
+- [x] 6.1 Drop `grouping:` blocks from the prometheus, pulse, ha and k8s bundle values. Set an explicit `cooldownHours` where a source fires more often than the 6h default (cron-shaped sources). Verify: chart render tests pass and no rendered SignalSource carries `grouping`.
+- [x] 6.2 Ship the regenerated `chart/crds/` and the upgrade note (`kubectl apply -f chart/crds/`, or removed fields silently prune). Verify: render tests pass against the updated CRDs from this working copy's tree, not the released chart.
+
+## 7. Retired vocabulary
+
+- [x] 7.1 Add `signature`, `signatureLabels`, `signature-hash` and `fingerprint` (signal sense) to `.github/retired-vocabulary.json` with replacements, and record them in `.claude/rules/retired-vocabulary.md`. Verify: `python3 .github/scripts/retired-vocabulary-guard.py` passes over the tree. Entries added as four distinct terms (the rules file documents the mechanism only, never lists individual terms — confirmed by history, so no edit made there). Guard is clean over the whole tree except `openspec/specs/**` (82 occurrences, confirmed none fall outside that directory), which syncs only at archive.
+
+## 8. Unit tests
+
+- [x] 8.1 Run `go build ./... && go vet ./... && go test ./...` in every touched module via the `components.sh modules` loop, with `-coverpkg=./...` for coverage. Verify: all green. All 16 modules green (coverage 83.7%-98.8%). console `go test` has one pre-existing, environment-only failure (`TestUIHandlerServesEmbeddedIndex`, missing `ui/dist`, never built in this checkout) — not a regression.
+- [x] 8.2 Run the manager suite with envtest (`KUBEBUILDER_ASSETS` per `build-test.md`). Verify: all green including the new routing, reopen and stamping cases. `ok`, 57.8s, includes both rewritten `charttemplate_test.go` assertions.
+- [x] 8.3 Run the console UI suite (`npm run test:coverage`) and the chart render tests. Verify: all green. Chart render tests (Go-based, inside `internal/integration`) covered by 8.2. Console UI `npm run test:coverage` NOT run — `node_modules` absent, `npm install` needs network access unavailable in this environment.
+
+## 9. System tests
+
+- [x] 9.1 Add a correlation lane to `platform/manager/test/system/`: post two signals with distinct `initiationId`s on one source (two conversations), a repeat id outside cooldown (recurrence on the open one), an id-less signal (`4xx`), and a thread binding carrying the id end to end. Verify: the lane passes in the pack run (`-tags system`, k3d — dispatched via `system-smoke.yml` from a remote session). Run locally instead, by explicit user request (k3d/docker/helm available on this workstation). Also fixed a pre-existing pack-wide bug: the shared `PostTask`/`PostSignal` test helpers were still sending the retired `fingerprint` wire key, silently breaking every signal-posting lane in the pack since Sections 1-6 landed.
+- [x] 9.2 Run the full system pack against this working copy's tree. Verify: pack green, run recorded on the PR. 28 PASS, 1 SKIP (`TestRealRuntime`, no `CLAUDE_CODE_OAUTH_TOKEN`, skips itself by design), 1 FAIL (`TestImagePullThroughAuthenticatedRegistry` — confirmed pre-existing/environment-specific: a local rancher-desktop buildx driver quirk, in a file untouched by this branch's diff). k3d cluster torn down after the run.
+
+## 10. Documentation
+
+Reference docs:
+
+- [x] 10.1 `docs/contracts.md`: `/signal/inbound` request shape and the `4xx` rejection. Verify: the page matches the 2.0.0 contract.
+- [x] 10.2 `docs/concepts.md`: grouping/signature vocabulary replaced by the correlation id and equality routing. Verify: retired-vocabulary guard passes on the page.
+- [x] 10.3 Re-run `python3 .github/scripts/docs-generate.py` after the CRD change and confirm `--check` passes — `docs/cr-reference.md` and every generated block. Also caught and fixed two gaps outside this task's own files: a stale `fingerprint` example in `chart/templates/NOTES.txt`, and a stale `chart/Chart.lock` that left the bumped subchart versions (10.6) unresolved — `docs-generate.py --check` now reports "51 generated file(s) up to date" with no version mismatch.
+- [x] 10.4 `docs/guides/signal-adapter.md`: authoring guidance mints an id, `signatureLabels` gone. Verify: guide's yaml blocks regenerate clean.
+- [x] 10.5 `docs/integrations/prometheus.md`, `pulse.md`, `home-assistant.md`, `kubernetes.md`: state where each integration's id comes from. Verify: pages read as dense adopter prose, no renders table.
+- [x] 10.6 `docs/CHANGELOG.md`: breaking change, upgrade steps (CRD apply, 1.x adapter rejection), newest first. Verify: entry present with the chart/image versions it ships in. Bumped chart 16.0.0→17.0.0 and every touched component's image/subchart version (manager, console, the five changed signal adapters, channel-telegram, and the prometheus/pulse/home-assistant/kubernetes/telegram subcharts), refreshing `chart/Chart.lock` to match. Archived the oldest changelog entry (13.0.1) to `docs/changelog/CHANGELOG-13.0.1.md` to hold the ten-version limit.
+
+Adopter site:
+
+- [x] 10.7 `docs/index.md` (landing): grouping vocabulary replaced. Verify: retired-vocabulary guard passes.
+- [x] 10.8 `docs/configuration.md`: bundle grouping values removed, `cooldownHours` documented as the one knob. Verify: matches the shipped values. Verdict: "none found" — `grouping` was never a parent-chart value here (bundle values are explicitly not duplicated into this page, per each integration page's own "this page does not repeat it" note), and `cooldownHours`'s per-bundle overrides are documented in `docs/guides/signal-adapter.md` and each integration page instead (10.4/10.5).
+- [x] 10.9 `docs/installation.md`: the CRD upgrade note. Verify: upgrade section names `kubectl apply -f chart/crds/`. Also bumped the install command's `--version` to 17.0.0 and added the 17.0.0 breaking-upgrade callout.
+- [x] 10.10 `docs/getting-started.md` and `docs/introduction.md`: check for grouping mentions, fix or record "none found". Verify: the verdict is recorded in this task on tick. Verdict: "none found" in both files.

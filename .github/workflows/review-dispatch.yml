@@ -1,0 +1,726 @@
+# ACT ON THE REVIEW'S FINDINGS FROM THE PULL REQUEST.
+#
+# `claude-review.yml` reads and comments, and there the loop ended: every fix
+# was somebody opening an editor. This is the other half. A maintainer accepts a
+# finding by replying `fix it` in its thread, then posts ONE dispatch comment on
+# the pull request; everything accepted is fixed in one commit, each fixed
+# thread is answered with the sha and closed, and everything nobody accepted
+# stays open — and, since branch protection requires conversation resolution,
+# keeps the merge blocked until a person deals with it. That is the feature.
+#
+# OR THE WHOLE PULL REQUEST IS APPROVED AT ONCE. The `conveyor:fix` label
+# (`.github/review-triage.json`, `approve_label`, renamed from `autofix`) is
+# change-level consent, placed by a person with write access — directly, or
+# CARRIED forward by `.github/scripts/carry.py` relaying a person's
+# standing instruction on the tracking issue (`conveyor:run`); a program may
+# only carry or consume a grant, never mint one, and a carried label is
+# re-checked against the grant it claims rather than trusted: every open
+# finding of the review's and every open issue the analysis service reports
+# are on the work list, each is FIXED or DISPUTED (a dispute is a reply that
+# stays open and names the approver), the landed commit is pushed so that CI
+# and the review run on it, and the review's completion starts the next round
+# — bounded by `max_rounds` (`.github/review-triage.json`),
+# every ending summarised in ONE comment, and
+# `conveyor:keep-going` grants another set, consumed as it is taken. Without
+# the label, nothing here changes.
+#
+# FOUR JOBS, AND THE SPLITS ARE THE POINT:
+#
+#   gate     who sent this, and may they?         pull-requests: write (to refuse visibly)
+#   collect  what is accepted, read from threads  contents: read   -- and, labelled, the
+#            (and the analysis service)                              service; NO model
+#   fix      a PATCH, from a model                contents: read   -- it CANNOT push
+#   land     apply, push, reply, resolve          contents: write  -- it runs NO model
+#            and, labelled, the push credential   AUTOFIX_DEPLOY_KEY
+#
+# The vocabulary — what counts as an acceptance, what the dispatch form is, the
+# label, the markers — lives in `.github/review-triage.json`, read by the
+# programs and quoted by the docs. Nothing here interprets a sentence.
+#
+# NEVER `pull_request_target`. It is the convenient trigger for "run with write
+# access on a pull request", and that convenience is exactly the hole: it runs
+# with the base repository's secrets and a writable token against a head a
+# stranger controls. Everything here that needs a privilege gets it from an
+# ordinary event on THIS repository, gated on who sent it, and the model never
+# holds the privilege at all. A CI assertion pins the trigger set.
+#
+# A RED `ci-green` IS THE LOOP'S TOO, AND IT IS A WORK ITEM LIKE ANY OTHER. The
+# review posts threads, the analysis service posts issues, and CI posts a
+# verdict; all three hold the merge, so a loop that fixed two of them would end
+# with the pull request still blocked and nobody told why. Under the label
+# `collect` also reads the head's failed required checks (`failed-checks.py`,
+# under `actions: read` — that job only, where no model runs), each carrying its
+# job name, its run and a bounded tail of the failed steps' log, and a `ci` run
+# completing -- `success` or `failure` -- starts a round beside the review's
+# completion. A ROUND STARTS ONLY ONCE BOTH RUNS HAVE CONCLUDED ON THE HEAD
+# (`conveyor.round_may_start`), so whichever concludes second starts it, and one
+# head produces one round over the whole picture (#259: a round read the checks
+# 38 seconds into a ten-minute CI run and said "0 failures"). A check is
+# FIXED only after the fixer reproduced it with the job's own command, or
+# DISPUTED with the log's reason — a runner outage and a rate limit are not
+# things the tree can fix.
+#
+# A PUSH MADE WITH `GITHUB_TOKEN` STARTS NO WORKFLOW. GitHub withholds
+# `pull_request: synchronize` from commits the workflow token pushes, so an
+# UNLABELLED dispatch's commit gets neither `ci-green` nor a review until
+# somebody pushes again, and the landing comment says so. A LABELLED one is
+# pushed through a WRITE DEPLOY KEY (`AUTOFIX_DEPLOY_KEY`, repository-scoped,
+# contents only, read by `land` alone): an ordinary push, so CI and the review
+# run on it and the review's completion is the next round. Self-dispatching
+# `ci.yml` was measured first and rejected — a `workflow_dispatch` run's check
+# runs attach to the sha and never reach the merge box (#131, gotchas.md).
+name: review-dispatch
+
+# The run's name carries the pull request, so a listing — and the archive
+# guard, which asks whether a round is still running — can tell which one a
+# run concerns. A review-completion run's own branch is the default branch,
+# so its name is the only place the number appears.
+run-name: >-
+  ${{ github.event_name == 'workflow_run'
+      && format('review-dispatch after {0}', github.event.workflow_run.display_title)
+      || format('review-dispatch #{0}', github.event.issue.number || github.event.pull_request.number || inputs.pr) }}
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  # THE LABEL: round one over whatever is open. The `labeled` event carries
+  # the sender, and the gate asks whether that person may push here.
+  pull_request:
+    types: [labeled]
+  # THE REVIEW FINISHED: on a labelled pull request, the next round. This
+  # trigger runs the DEFAULT branch's copy of this file, whatever the pull
+  # request holds — the same property the review has — and it keeps the
+  # review's own jobs free of any write.
+  # A CI RUN CONCLUDING is the other start, on a labelled pull request --
+  # red, the merge is blocked by something the loop can act on; green with
+  # review threads open, the threads are the work. `claude-review` completing
+  # is unchanged, and the gate waits for whichever of the two is still running.
+  workflow_run:
+    workflows: [claude-review, ci]
+    types: [completed]
+  # A hand-run for verifying THIS file before it is on the default branch —
+  # `issue_comment` runs the default branch's copy, so a branch's edit is
+  # otherwise unreachable until merged. Whoever can dispatch a workflow here
+  # has write access by construction.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: pull request number
+        required: true
+        type: number
+      mode:
+        description: "threads: what was accepted per thread; all: everything open (the pull request must carry the label)"
+        required: false
+        type: choice
+        options: [threads, all]
+        default: threads
+
+# One dispatch at a time per pull request. A second one QUEUES rather than
+# racing the first on the same branch; `cancel-in-progress` is deliberately
+# absent, because cancelling `land` between its push and its replies would
+# leave a fixed finding open. A review-completion run knows its pull request
+# only by name, so it serialises on the reviewed run's branch instead.
+concurrency:
+  group: review-dispatch-${{ github.event.issue.number || github.event.pull_request.number || inputs.pr || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch }}
+
+permissions: {}
+
+# THE BOUND IS READ, NOT DECLARED HERE. This used to be a static `env:` entry
+# (`MAX_ROUNDS: 3`); a workflow's `env:` block cannot read a file, so the
+# number is now read once, in the gate job, from `.github/review-triage.json`'s
+# `max_rounds` — the same file that names the label — and passed down as
+# `needs.gate.outputs.max_rounds`. Stated once,
+# where the rest of this vocabulary already lives.
+
+jobs:
+  gate:
+    # THE PREFILTER. A comment that does not start with the dispatch form, a
+    # label that is neither the approval label NOR the extending label, a
+    # review that did not complete — none starts anything beyond this
+    # expression; the run appears skipped in the list. The exact match
+    # against the vocabulary file happens one step down, for `conveyor:fix`
+    # (read as `approve_label` from .github/review-triage.json, in the `who`
+    # step below) — `conveyor:keep-going` is never looked up by name past
+    # this point, since the step below reads the EVENT's own label
+    # (`THIS_LABEL`) and only ever compares it against `approve_label`,
+    # falling through to an ordinary write-access check otherwise. This
+    # expression must still AGREE with both literal names, and is the one
+    # place either is repeated, because a job's `if:` is evaluated before any
+    # checkout and cannot read a file.
+    # `conveyor:keep-going` is here because placing it must RE-TRIGGER a
+    # round on a pull request whose loop already ended on the cap — the same
+    # structural constraint as `conveyor:fix` right beside it.
+    #
+    # MATCHED ON `.path`, NEVER `.name`. `workflow_run.name` is the RUN's own
+    # display name, which `claude-review.yml`'s `run-name: "Review of #<n>"`
+    # overrides on every run -- so a literal `'claude-review'` here matched
+    # NOTHING, ever, since that field was added. Measured live on #233: two
+    # rounds landed, a clean review completed after the second, and this
+    # condition silently stayed false -- the loop label stuck at `running`
+    # with three fresh findings sitting unanswered and no further round ever
+    # starting. `.path` is the workflow FILE's path and carries no per-run
+    # wording, so a `run-name` change elsewhere can never repeat this.
+    #
+    # A PERSON'S COMMENT PASSES, WHATEVER IT SAYS. It is the dispatch form, or it
+    # is the answer a WAITING loop was owed (#259): the gate program tells the
+    # two apart and starts a round only on a pull request whose loop label says
+    # waiting. A bot's comment -- the loop's own replies and summaries arrive on
+    # this event too -- never passes.
+    #
+    # A CI RUN THAT CONCLUDED STARTS A ROUND, WHATEVER IT CONCLUDED. The gate
+    # starts a round only once BOTH the head's CI run and its review run have
+    # concluded, so whichever concludes second is the one that starts it: a
+    # green CI with review threads open is a round over those threads, and a
+    # green CI with nothing open ends mergeable (which is what `open` records
+    # too). A cancelled run -- superseded by a push -- reaches the gate too, and
+    # the gate defers because the NEW head's runs are still in progress; the
+    # conclusion is not filtered here so a timed-out run cannot leave a head
+    # with no start at all.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot') ||
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type != 'Bot') ||
+      (github.event_name == 'pull_request' && (github.event.label.name == 'conveyor:fix' || github.event.label.name == 'conveyor:keep-going')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/ci.yml')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      # READ, for `gh run list` on the head: a round starts only once the head's
+      # CI and review runs have concluded (`conveyor.round_may_start`).
+      actions: read
+    outputs:
+      pr: ${{ steps.who.outputs.pr }}
+      branch: ${{ steps.who.outputs.branch }}
+      dispatcher: ${{ steps.who.outputs.dispatcher }}
+      # threads | all | none. `none` is a review completing on an unlabelled
+      # pull request: nothing to do, said visibly, and every later job skips.
+      mode: ${{ steps.who.outputs.mode }}
+      approver: ${{ steps.who.outputs.approver }}
+      since: ${{ steps.who.outputs.since }}
+      head: ${{ steps.who.outputs.head }}
+      max_rounds: ${{ steps.who.outputs.max_rounds }}
+    steps:
+      # THE TRUSTED COPY, NOT THE PULL REQUEST'S. On `pull_request_review_comment`
+      # and on `pull_request: labeled` `github.ref` is the pull request's MERGE
+      # ref, so a bare checkout would read the vocabulary file the pull request
+      # itself may be editing. The default branch on every event but the hand
+      # run, which is a maintainer dispatching a ref on purpose. `land` reads
+      # its programs from the same place.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
+      - id: who
+        name: Who sent this, and may they
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          BODY: ${{ github.event.comment.body }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          SENDER: ${{ github.event.comment.user.login || github.event.sender.login || github.actor }}
+          SENDER_TYPE: ${{ github.event.comment.user.type }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number || inputs.pr }}
+          REVIEW_TITLE: ${{ github.event.workflow_run.display_title }}
+          WORKFLOW_RUN_PATH: ${{ github.event.workflow_run.path }}
+          REVIEW_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+          INPUT_MODE: ${{ inputs.mode }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+        run: python3 .github/scripts/dispatch-gate.py
+
+  collect:
+    needs: gate
+    if: needs.gate.outputs.mode != 'none'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      # THE ONLY JOB THAT MAY READ A RUN'S LOG, and no model runs in it. A
+      # failed check's log tail is a work item's text, so the permission that
+      # fetches it stays where the programs are.
+      actions: read
+    outputs:
+      accepted: ${{ steps.list.outputs.accepted }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
+      # THE WORK LIST IS DERIVED FROM THE THREADS — and, on a labelled pull
+      # request, from the analysis service — by programs. The model never sees
+      # the dispatch comment, the label event or either API; a person cannot
+      # direct work through any of them.
+      - id: list
+        name: What is accepted, read from the threads, the analysis and the checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ needs.gate.outputs.mode }}
+          APPROVER: ${{ needs.gate.outputs.approver }}
+          HEAD: ${{ needs.gate.outputs.head }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORG: ${{ secrets.SONAR_ORG }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dispatch"
+          python3 .github/scripts/accepted-findings.py \
+            --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
+            --mode "$MODE" --approver "${APPROVER:-the label}" \
+            --out "$RUNNER_TEMP/dispatch/threads.json"
+          if [ "$MODE" = "all" ]; then
+            python3 .github/scripts/sonar-issues.py \
+              --organization "$SONAR_ORG" --pr "${{ needs.gate.outputs.pr }}" --head "$HEAD" \
+              --out "$RUNNER_TEMP/dispatch/sonar.json"
+            # THE THIRD SOURCE: what is red on the head. Under the label only,
+            # because a per-thread dispatch acts on the threads a person named.
+            # --since: a dispute posted under a REMOVED label must not hold a
+            # check awaiting — re-placing the label is a fresh start, and the
+            # round and grant counters already read the same bound (#269).
+            python3 .github/scripts/failed-checks.py \
+              --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" --sha "$HEAD" \
+              --since "${{ needs.gate.outputs.since }}" \
+              --out "$RUNNER_TEMP/dispatch/checks.json"
+          else
+            echo '{"consulted":false,"issues":[],"projects":[]}' > "$RUNNER_TEMP/dispatch/sonar.json"
+            echo '{"consulted":false,"checks":[],"items":[]}' > "$RUNNER_TEMP/dispatch/checks.json"
+          fi
+          # THE ORDER IS THE READING ORDER: what the reviewers said, then what
+          # the analysis found, then what is red. Stable, so a report naming an
+          # id is read the same way every round.
+          python3 -c '
+          import json, sys
+          threads = json.load(open(sys.argv[1])); sonar = json.load(open(sys.argv[2]))
+          checks = json.load(open(sys.argv[3]))
+          sonar_issues = sonar.get("issues") or []
+          check_items = checks.get("items") or []
+          work = threads + sonar_issues + check_items
+          json.dump(work, open(sys.argv[4], "w"), indent=2)
+          print(f"{len(threads)} review finding(s) + {len(sonar_issues)} analysis issue(s)"
+                f" + {len(check_items)} failed check(s) = {len(work)} item(s)")
+          ' "$RUNNER_TEMP/dispatch/threads.json" "$RUNNER_TEMP/dispatch/sonar.json" "$RUNNER_TEMP/dispatch/checks.json" "$RUNNER_TEMP/dispatch/work-list.json"
+          echo "accepted=$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))))' "$RUNNER_TEMP/dispatch/work-list.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-work-list
+          path: |
+            ${{ runner.temp }}/dispatch/work-list.json
+            ${{ runner.temp }}/dispatch/sonar.json
+            ${{ runner.temp }}/dispatch/checks.json
+          retention-days: 1
+          if-no-files-found: error
+
+  # THE MODEL RUNS HERE, AND HERE IT CAN ONLY READ. Its output is a patch and a
+  # report, both uploaded; nothing in this job can push, comment, or resolve —
+  # and it holds no secret but its own credential, in either mode.
+  fix:
+    needs: [gate, collect]
+    if: needs.collect.outputs.accepted != '0'
+    runs-on: ubuntu-latest
+    # BOUNDED, SO A DEAD FIXER BECOMES `failure` RATHER THAN NEVER FINISHING.
+    # `land`'s `if:` already accepts `needs.fix.result == 'failure'` and posts
+    # "fixing job failed" through `--fix-failed` -- that path was ADDED for
+    # exactly this case (see the comment on `land`, below) but never fires
+    # without a bound, because GitHub's un-timed default is 360 minutes and
+    # `claude-code-action` can also simply hang inside that window with no
+    # step-level timeout of its own. Measured live on #243: the `fix` job's
+    # model step sat `in_progress` for 15+ hours, `land` never ran (it
+    # `needs: [... , fix]`, and a job with no result is not one of the three
+    # `fix.result` values `land` matches on), and `loop:running` stayed
+    # posted with nothing behind it. 30 minutes is generous for one round's
+    # worth of fixes -- multi-file, may run a build or reproduce a check --
+    # while being far short of "indefinite". Revise the number if a
+    # legitimate round is ever cut short by it; do not remove the bound.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.branch }}
+          fetch-depth: 0
+      # THE ACTION VALIDATES THE CHECKED-OUT COPY OF THIS WORKFLOW against the
+      # default branch's, and refuses to run on any difference ("The workflow
+      # file must exist and have identical content to the version on the
+      # repository's default branch"). A branch cut BEFORE this file last
+      # changed on master differs without editing it, so every fixing round on
+      # such a branch was refused -- measured on #259 the night the loop's own
+      # change merged: the fallback below then called the head's one red check
+      # "disputed", with a reason blaming a branch that edited nothing. The
+      # default branch's copy is put in place for the action, and the branch's
+      # own copy is put back before the patch is cut, so a fix carries no
+      # workflow edit it did not make.
+      - name: The loop's own workflow, from the default branch, for the action's validation
+        env:
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$DEFAULT"
+          git checkout -q "origin/$DEFAULT" -- .github/workflows/review-dispatch.yml
+      - uses: actions/download-artifact@v4
+        with:
+          name: dispatch-work-list
+          path: ${{ runner.temp }}/dispatch
+      # THE MODEL'S INPUTS, OUTPUT AND SCRATCH ALL SIT OUTSIDE THE CHECKOUT, and
+      # the prompt names them by their real paths. It used to hand the model
+      # `$WORK_LIST` and `$REPORT` -- env names it cannot expand with the tools
+      # it holds (no shell, no `cat`) -- so it wrote helper scripts INTO the
+      # checkout to find its own inputs, and `git add -N .` landed them
+      # (`.tmp_getenv.py`, `.tmp_read_worklist.sh`, ... on #243, six rounds
+      # running). The scratch directory is where anything temporary goes, and
+      # dispatch-patch.py below is what makes the checkout's copy not land
+      # anyway.
+      - run: mkdir -p "$RUNNER_TEMP/dispatch/scratch"
+      - id: model
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # THE ONE BOT THAT MAY START THIS STEP, AND WHY IT IS NOT `*`. Every
+          # CARRIED `conveyor:fix` round is started by `remote-implement.yml`'s
+          # `open` job through `gh workflow run`, so the run's actor is
+          # `github-actions[bot]` -- and the action's default (no bot at all)
+          # refused every such round before a model ran: "Workflow initiated
+          # by non-human actor: github-actions (type: Bot)", measured on #220,
+          # where the carried label then sat for three days with nothing
+          # posted. The gate above has already re-read the pull request's
+          # `Refs #<n>` issue and refused a bot dispatch that carries no
+          # standing `conveyor:run`, so this names the platform's own bot and
+          # nothing wider: on a public repository `*` would let an external
+          # App start this step with a prompt it controls (the action's own
+          # warning).
+          allowed_bots: github-actions
+          prompt: |
+            You are fixing findings on a pull request of this repository that
+            a maintainer ACCEPTED — per thread, or by approving the whole pull
+            request for automatic fixing. The branch is checked out in the
+            working directory.
+
+            THE WORK LIST is the JSON file at ${{ runner.temp }}/dispatch/work-list.json — one item per
+            accepted finding, each with an `id` and a `source`:
+            - `source: review` — a review thread: `path`, `line`, `finding`
+              (the review's text), `acceptedBy` and `reply` (the maintainer's
+              words, which may say which part of the finding is agreed; empty
+              when the whole pull request was approved).
+            - `source: sonar` — an open issue from the code-analysis service:
+              `path`, `line`, `rule`, `severity`, `message`. Fix it IN THE CODE
+              only; you cannot reach the service, and nothing you write may
+              claim to have marked, closed or dismissed an issue there.
+            - `source: check` — a REQUIRED CI CHECK THAT FAILED on this head:
+              `job`, `run_url` and `tail`, the tail being the failed steps' own
+              log. REPRODUCE IT FIRST: find that job in
+              `.github/workflows/ci.yml`, run its own command in this checkout,
+              and see the failure yourself. Then fix it, and RE-RUN that command
+              before you finish — a check you did not re-run is a check you did
+              not fix. If the tree is not the cause (a runner outage, a rate
+              limit, a flaky download, a network 5xx), DISPUTE it and name what
+              the log said; a false fix for a flake is worse than the flake.
+              THE ONE FAILURE THAT IS ALWAYS THE TREE'S AND NEVER DISPUTABLE
+              AS NOT-THE-TREE: a `gate` field on the item means the failed
+              step was the analysis service's QUALITY GATE judging this tree,
+              and `gate.failing` names the conditions. `new_coverage` below
+              its threshold means WRITE TESTS for that component's new code
+              until it clears (run that module's own test command with
+              coverage to see what is uncovered); an issue-rating condition
+              means fix the issues the sonar items already list. The
+              reproduce-first rule does not apply — the gate has no local
+              command and re-evaluates when your fix lands.
+            Read it first.
+
+            Address EVERY item, and nothing else:
+            - Fix each item in place, minimally, in the style of the
+              surrounding code. Read CLAUDE.md and the relevant rule under
+              .claude/rules/ before editing — this project records decisions
+              that were reverted before, and a fix that reintroduces one is
+              worse than no fix.
+            - If a finding makes a document untrue, fix the document too; this
+              project treats documentation as part of the change.
+            - Do NOT do work no item asks for. A cleanup nobody accepted is a
+              change nobody reviewed.
+            - Do NOT commit, push, or run any `gh` command. A separate step
+              lands what you produce.
+            - NOTHING TEMPORARY GOES IN THE CHECKOUT. Every untracked file you
+              leave under the working directory is either a new file of the
+              fix, DECLARED in the report's `created` list, or scratch — and
+              scratch is DELETED before the patch is cut and named on the pull
+              request as not landed. Anything temporary (a script, a note, a
+              copy of an input) goes under ${{ runner.temp }}/dispatch/scratch/
+              instead. You need no helper to read your inputs: the work list
+              and the report are the files named above and below, readable
+              and writable as they are.
+
+            FIX OR DISPUTE, NEVER SKIP. An item you judge wrong — the finding
+            misreads the code, the rule does not apply here, the fix would
+            need a decision that is a person's to make — is DISPUTED with a
+            reason a maintainer can act on in one reading. A dispute leaves
+            the code untouched and the thread open; it is not a failure, it
+            is the honest answer. An item you neither fixed nor disputed is a
+            defect in your report.
+
+            A DISPUTE'S "reason" IS POSTED VERBATIM TO GITHUB, so it follows
+            this repository's own `.claude/rules/answering.md` and
+            `writing.md`: AT MOST 40 WORDS, ONE OR TWO SENTENCES, NO
+            SEMICOLON, NO TIMELINE, NO LOG EXCERPT, NO QUOTED FILE CONTENT.
+            State the conclusion a maintainer needs to answer `fix it` or
+            leave it — not the investigation that reached it. Name the file
+            or command where one is needed; do not narrate reading it. If
+            the reasoning genuinely needs more than that, the excess belongs
+            in a code comment beside the fix, or is left out — never appended
+            to "reason".
+
+            When done, write the report to ${{ runner.temp }}/dispatch/report.json
+            as JSON:
+              {"items": [{"id": "<id>", "action": "fixed", "reason": ""},
+                         {"id": "<id>", "action": "disputed", "reason": "<why>"}],
+               "created": ["<path of a NEW file the fix adds>", ...]}
+            Every `id` from the work list appears exactly once, with `action`
+            `fixed` or `disputed`. `created` lists every file the fix ADDED,
+            relative to the repository root — an empty list when none. A new
+            file it does not name is not landed. Return nothing else.
+          claude_args: |
+            # THE REPRODUCE GRANT IS THE TEST RUNNERS, NOT A SHELL. A check
+            # item is reproduced by running the job's own command, so the
+            # toolchains are here — and `Bash(bash:*)` is NOT, because it grants
+            # every command there is and would make this list decoration. The
+            # suite has its own entry rather than arriving through `bash`.
+            --allowedTools "Read,Edit,MultiEdit,Write,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(go:*),Bash(npm:*),Bash(node:*),Bash(helm:*),Bash(python3 .github/scripts/:*),Bash(.github/tests/run.sh:*)"
+            # THE INPUTS, THE REPORT AND THE SCRATCH DIRECTORY, reachable without
+            # a permission prompt -- which in a pod-shaped run is a hang.
+            --add-dir "${{ runner.temp }}/dispatch"
+
+      # A MODEL THAT DID NOT RUN MUST NOT READ AS A MODEL THAT FIXED NOTHING.
+      # The action skips itself, successfully, whenever this workflow file
+      # differs from the default branch's copy — on EVERY trigger, the hand
+      # run included, which is how the first live dispatch of this workflow
+      # reported "not addressed by the fixing step" for a finding no model ever
+      # saw. `execution_file` is set only once Claude actually ran. Where the
+      # skip is the legitimate one, the report says so in every thread; where
+      # it is not, the job fails rather than landing a silence.
+      - name: The fixing step actually ran
+        env:
+          EXECUTION_FILE: ${{ steps.model.outputs.execution_file }}
+          REPORT: ${{ runner.temp }}/dispatch/report.json
+          WORK_LIST: ${{ runner.temp }}/dispatch/work-list.json
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [ -z "$EXECUTION_FILE" ] || { echo "the fixing step ran"; exit 0; }
+          git fetch -q origin "$DEFAULT"
+          if ! git diff --quiet "origin/$DEFAULT" -- .github/workflows/review-dispatch.yml; then
+            # The restore step above should have made this impossible; if the copy still
+            # differs, the action refused it, and the round says so rather than blaming
+            # the branch for an edit it may never have made.
+            echo "::notice::The checked-out .github/workflows/review-dispatch.yml still differs from the default branch's copy, so the action refused to run. Nothing was fixed this round."
+            python3 -c '
+          import json, sys
+          work = json.load(open(sys.argv[1]))
+          json.dump({"items": [{"id": i.get("id") or i["threadId"], "action": "disputed", "reason": "the fixing step did not run: the action refused this checkout, whose copy of review-dispatch.yml differs from the default branch's"} for i in work]}, open(sys.argv[2], "w"))
+          ' "$WORK_LIST" "$REPORT"
+            exit 0
+          fi
+          echo "::error::The fixing step reported success without running: no execution file, and this workflow file matches the default branch."
+          exit 1
+
+      # THE PATCH IS THE WHOLE OF WHAT CROSSES, and dispatch-patch.py cuts it:
+      # every change to a tracked file, plus the NEW files the report DECLARES
+      # under `created` -- an undeclared new file is the fixer's scratch, and
+      # is deleted before the cut and recorded in dropped.json for the landing
+      # summary to name. `git add -N . && git diff` was the cut before, and it
+      # landed six helper scripts on one pull request (#243). The program is
+      # read from the branch the WORKFLOW came from, as the landing programs
+      # are, so a pull request cannot rewrite what decides what crosses.
+      #
+      # `--binary` so a changed image survives. A missing report
+      # is substituted with an empty one so the lander always has a file to
+      # read -- but SILENCE AND REFUSAL ARE DIFFERENT FACTS: a `no-report`
+      # sentinel rides beside it, so land-dispatch.py can tell "the fixing step
+      # ran and disputed nothing" from "the fixing step wrote nothing at all"
+      # rather than reading the second as three phantom disputes (measured
+      # while this very change was under review: three findings on a
+      # proposal-only pull request came back "disputed... not addressed",
+      # and no model had spoken).
+      # THE BRANCH'S OWN COPY GOES BACK before the cut, so the patch never carries
+      # the workflow file the restore step put in place for the action.
+      - name: The branch's own workflow, back before the patch is cut
+        run: git checkout -q HEAD -- .github/workflows/review-dispatch.yml
+      - name: The patch program, from the branch the workflow came from
+        env:
+          SOURCE: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$SOURCE"
+          git show "origin/$SOURCE:.github/scripts/dispatch-patch.py" > "$RUNNER_TEMP/dispatch-patch.py"
+      - name: The patch, and the report
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/dispatch/report.json" ]; then
+            rm -f "$RUNNER_TEMP/dispatch/report.no-report"
+          else
+            echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+            : > "$RUNNER_TEMP/dispatch/report.no-report"
+          fi
+          python3 "$RUNNER_TEMP/dispatch-patch.py" \
+            --report "$RUNNER_TEMP/dispatch/report.json" \
+            --out "$RUNNER_TEMP/dispatch/fix.patch" \
+            --dropped "$RUNNER_TEMP/dispatch/dropped.json"
+          cat "$RUNNER_TEMP/dispatch/report.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-fix
+          # `report.no-report` is OPTIONAL -- present only when the report was
+          # missing and substituted above. `fix.patch`, `report.json` and
+          # `dropped.json` are written unconditionally, so the overall match is
+          # never empty and `if-no-files-found: error` still catches a
+          # genuinely broken step.
+          path: |
+            ${{ runner.temp }}/dispatch/fix.patch
+            ${{ runner.temp }}/dispatch/report.json
+            ${{ runner.temp }}/dispatch/report.no-report
+            ${{ runner.temp }}/dispatch/dropped.json
+          retention-days: 1
+          # The dotfile trap that made `.resolve-threads` a no-op for a day:
+          # upload-artifact v4 excludes hidden files by default. Nothing here
+          # is a dotfile, and the flag is set anyway so a rename cannot
+          # reintroduce it.
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # THE PRIVILEGE LIVES HERE, AND NO MODEL DOES. One program: apply, commit,
+  # push, reply, then resolve through the resolver that already refuses any
+  # thread the review did not author — and, labelled, push through the one
+  # credential that makes the next round start.
+  land:
+    needs: [gate, collect, fix]
+    # AND ON A FAILED `fix` -- a round whose fixer never ran, or died, is a
+    # round too. Measured on #220: the fixing step was refused before any
+    # model ran, this job was skipped, and nothing at all reached the pull
+    # request -- the label sat there for three days reading as ignored. The
+    # failure is landed as its own ending (`fixing step failed`), distinct
+    # from `no report` (the model ran and wrote nothing), with the run linked
+    # and the loop state set to stalled.
+    #
+    # `cancelled` IS A THIRD SHAPE OF DEAD, NOT A VARIANT OF `failure`. A job
+    # that hits `timeout-minutes` reports `cancelled`, never `failure` --
+    # GitHub's own distinction, not this workflow's. `fix` gained a timeout
+    # after #243 sat with its model step `in_progress` for 15+ hours: no
+    # bound meant no terminal result, `land` never ran (none of its three
+    # matched values fire on a job with no result at all), and `loop:running`
+    # stayed posted over nothing. Without this line the bound alone would
+    # have swapped one silent hang for a different silent stop.
+    if: >-
+      always() && needs.gate.result == 'success' && needs.gate.outputs.mode != 'none' &&
+      needs.collect.result == 'success' &&
+      (needs.fix.result == 'success' || needs.fix.result == 'skipped' || needs.fix.result == 'failure' || needs.fix.result == 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      # WRITE, for ONE dispatch: a round that landed nothing while items are
+      # still eligible starts the next round itself (`review-dispatch.yml`,
+      # mode=all), since no push will. Never `ci.yml`: a dispatched run's
+      # checks never reach the merge box (#131). The machine says when
+      # (`conveyor.ending`, `dispatch_round`), and the bound still holds.
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.branch }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dispatch-work-list
+          path: ${{ runner.temp }}/dispatch
+      - uses: actions/download-artifact@v4
+        if: needs.fix.result == 'success'
+        with:
+          name: dispatch-fix
+          path: ${{ runner.temp }}/dispatch
+      # Nothing accepted means `fix` never ran; the lander is handed an empty
+      # patch and an empty report, and reports "nothing accepted" itself — or,
+      # labelled, that the pull request is clean.
+      - if: needs.fix.result == 'skipped' || needs.fix.result == 'failure' || needs.fix.result == 'cancelled'
+        run: |
+          : > "$RUNNER_TEMP/dispatch/fix.patch"
+          echo '{"items":[]}' > "$RUNNER_TEMP/dispatch/report.json"
+          [ -f "$RUNNER_TEMP/dispatch/checks.json" ] || echo '{"consulted":false,"checks":[],"items":[]}' > "$RUNNER_TEMP/dispatch/checks.json"
+      # THE PROGRAMS THIS JOB RUNS ARE NOT THE PULL REQUEST'S. The checkout
+      # above is the branch being fixed, and a pull request that could rewrite
+      # the lander — or the resolver it delegates to — could resolve a person's
+      # thread on itself under this job's token. So both are read from the
+      # branch the WORKFLOW came from: the default branch on every event but
+      # the ref a maintainer dispatched by hand.
+      - name: The landing programs, from the branch the workflow came from
+        env:
+          SOURCE: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$SOURCE"
+          for s in land-dispatch.py resolve-review-threads.py conveyor-state.py conveyor.py review-not-clean.py; do
+            git show "origin/$SOURCE:.github/scripts/$s" > "$RUNNER_TEMP/$s"
+          done
+          git show "origin/$SOURCE:.github/review-triage.json" > "$RUNNER_TEMP/review-triage.json"
+      # THE PUSH CREDENTIAL, ON A LABELLED PULL REQUEST ONLY. A write deploy
+      # key for this repository, stored as `AUTOFIX_DEPLOY_KEY`: pushed
+      # through it, the commit is an ordinary push and every trigger fires —
+      # `ci-green` on the head, the review, and so the next round. The key
+      # reaches this job and no other; the model's job cannot name it. Absent,
+      # the token pushes as before and the lander says the loop cannot go on.
+      - id: cred
+        name: The push credential
+        if: needs.gate.outputs.mode == 'all'
+        env:
+          KEY: ${{ secrets.AUTOFIX_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo "::warning::AUTOFIX_DEPLOY_KEY is not set; the round lands with the workflow token and the loop stops after it"
+            echo "starts=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/autofix && chmod 600 ~/.ssh/autofix
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git remote set-url --push origin "git@github.com:$GITHUB_REPOSITORY.git"
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/autofix -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+          echo "starts=true" >> "$GITHUB_OUTPUT"
+      - name: Apply, push, reply, resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ needs.gate.outputs.mode }}
+          APPROVER: ${{ needs.gate.outputs.approver }}
+          SINCE: ${{ needs.gate.outputs.since }}
+          STARTS: ${{ steps.cred.outputs.starts == 'true' && '--push-starts-workflows' || '' }}
+          FIX_FAILED: ${{ needs.fix.result == 'failure' && '--fix-failed' || '' }}
+          # `cancelled` IS `timeout-minutes` FIRING, NEVER A CRASH. GitHub
+          # reports the two differently, and the posted ending says which one
+          # happened -- see the note on `fix`'s own `timeout-minutes`, above.
+          FIX_TIMED_OUT: ${{ needs.fix.result == 'cancelled' && '--fix-timed-out' || '' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A MISSING REPORT AND AN EMPTY ONE ARE DIFFERENT FACTS. The sentinel
+          # rides beside report.json only when the fixing step wrote nothing at
+          # all; its presence is what tells the lander to end the round as
+          # `no report` rather than inventing a dispute for every work item.
+          REPORT_MISSING=""
+          [ -f "$RUNNER_TEMP/dispatch/report.no-report" ] && REPORT_MISSING="--report-missing"
+          # shellcheck disable=SC2086 -- each of these is one flag or nothing
+          python3 "$RUNNER_TEMP/land-dispatch.py" $STARTS $REPORT_MISSING $FIX_FAILED $FIX_TIMED_OUT \
+            --repo "$GITHUB_REPOSITORY" --pr "${{ needs.gate.outputs.pr }}" \
+            --branch "${{ needs.gate.outputs.branch }}" \
+            --work-list "$RUNNER_TEMP/dispatch/work-list.json" \
+            --patch "$RUNNER_TEMP/dispatch/fix.patch" \
+            --report "$RUNNER_TEMP/dispatch/report.json" \
+            --dropped "$RUNNER_TEMP/dispatch/dropped.json" \
+            --resolver "$RUNNER_TEMP/resolve-review-threads.py" \
+            --state-script "$RUNNER_TEMP/conveyor-state.py" \
+            --thread-check-script "$RUNNER_TEMP/review-not-clean.py" \
+            --vocabulary "$RUNNER_TEMP/review-triage.json" \
+            --dispatched-by "${{ needs.gate.outputs.dispatcher }}" \
+            --mode "$MODE" --approver "$APPROVER" --since "$SINCE" \
+            --max-rounds "${{ needs.gate.outputs.max_rounds }}" --sonar "$RUNNER_TEMP/dispatch/sonar.json" \
+            --checks "$RUNNER_TEMP/dispatch/checks.json" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

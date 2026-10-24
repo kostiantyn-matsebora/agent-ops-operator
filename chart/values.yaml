@@ -1,6 +1,24 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.57.1
+  tag: 0.60.0
+
+# How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
+# the Conversation reconciler claims an ensure-topic op on the Conversation CR
+# itself before dispatching it, so a crashed leader's in-flight claim recovers
+# through the SAME leader-election Lease failover that already gates every
+# reconciler, and a poll that lands on a non-leader rejects (503, retried at
+# once) instead of answering from an OpQueue that replica's reconciler never
+# populated. Two is the default rather than one: the whole point of the
+# resilience this release adds is that a second pod is there to take over.
+replicas: 2
+
+# How long an ensure-topic claim may sit with no thread yet before the current
+# leader treats it as abandoned and dispatches the op again — never while the
+# SAME leader that wrote it still holds the Lease and the op is merely slow to
+# come back from an adapter. Sized with margin over a measured ensure-topic
+# round-trip against the slowest shipped adapter (Telegram, forum-topic
+# creation). Raise it for a slower transport.
+claimStalenessSeconds: 90
 
 # How many conversations may be ACTIVE at once. A conversation is active while
 # it holds a runtime pod; one that finished and let its pod exit costs nothing
@@ -155,6 +173,31 @@ claude:
   credentialsSecret:
     token: ""
 
+# The SECOND vendor this chart ships: a local-model runtime over an Ollama
+# endpoint you already run (chart/charts/ollama/values.yaml). OFF by default,
+# and it deploys no model server — `endpoint` and `model` are yours to set.
+# A route selects it with `pipelines[].runtimeRef: ollama`.
+#
+#   ollama:
+#     enabled: true
+#     endpoint: http://ollama.ollama.svc:11434
+#     model: qwen2.5:14b
+ollama:
+  enabled: false
+
+# The THIRD vendor this chart ships: GitHub Copilot, driven through its SDK
+# (chart/charts/copilot/values.yaml). OFF by default. It needs ONE value, a
+# GitHub token with Copilot access; the model and a credit ceiling are optional.
+# A route selects it with `pipelines[].runtimeRef: copilot`.
+#
+#   copilot:
+#     enabled: true
+#     credentialsSecret:
+#       token: ghp_placeholder
+#     model: gpt-5
+copilot:
+  enabled: false
+
 # THE RUNTIMES THIS INSTALL DECLARES — the second of the two runtime blocks.
 #
 # THE RULE SEPARATING THEM, in one line each:
@@ -163,12 +206,17 @@ claude:
 #                                     only what DIFFERS from those defaults
 #
 # `default` is the name a Pipeline declaring no `runtimeRef` resolves to, and
-# THE RENDER FAILS when nothing answers to it while a route still resolves to
-# it. That check replaced the old guarantee that this chart always rendered one:
-# a runtime may now come from a bundle, and a bundle can be turned off.
+# THE CHART RENDERS IT as a copy of one declared runtime: the one flagged
+# `default: true` (here, or on a bundle), or the FIRST configured when none is —
+# `runtimes:` entries in order, then the bundles. One runtime alone is always
+# the default. Every runtime is optional. THE RENDER FAILS when NO runtime is
+# declared while a route still resolves to `default`, or when two are flagged.
+# That check replaced the old guarantee that this chart always rendered one: a
+# runtime may now come from a bundle, and a bundle can be turned off.
 #
 #   runtimes:
-#     - name: default              # inherits every default; states its own image
+#     - name: mine                 # inherits every default; states its own image
+#       default: true              # the one a route naming no runtimeRef runs on
 #     - name: ollama               # a second VENDOR, stating only its difference
 #       image: ghcr.io/example/agentops-runtime-ollama:0.1.0
 #       contextStorage: external   # keeps context at its own API, needs no disk
@@ -215,6 +263,29 @@ runtimes: []
 global:
   demo:
     enabled: false
+
+    # THE DEMO-ONLY SHOWCASE PIPELINE (demo-dual-wiring-showcase): whether the
+    # kubernetes bundle renders its own observing route a SECOND time, as a
+    # plain Pipeline, alongside whatever `global.agentops.wiringMode` already
+    # renders for that bundle — so a demo install exhibits BOTH wiring
+    # primitives (Pipeline and Coordinator) at once, not the Coordinator alone.
+    # See the kubernetes bundle's k8s-bundle capability spec:
+    # openspec/changes/demo-dual-wiring-showcase/specs/k8s-bundle/spec.md.
+    #
+    # `null` — DEFAULT, nullable for the SAME reason `wiringMode` below is: left
+    # unset, the render FOLLOWS `demo.enabled` AND the resolved `wiringMode` —
+    # it defaults to rendering the showcase Pipeline ONLY where `demo.enabled`
+    # is true AND `wiringMode` resolves "coordinator" (demo mode's own default).
+    # An EXPLICIT value here is absolute in BOTH directions — `true` renders it
+    # even where some future default would not, and `false` declines it even
+    # under demo mode, which is the one case a plain (non-nullable) value could
+    # not express.
+    #
+    # Outside `demo.enabled: true`, or wherever the resolved `wiringMode` is
+    # "pipelines", it has NO EFFECT: the bundle's ordinary `pipelines`-mode
+    # route already supplies the Pipeline primitive, and a second one would
+    # duplicate it for no reason.
+    wiringShowcase: null
 
   # The release-wide facts declared in the ONE scope a subchart can read.
   # kubernetes's MCP server derives its own identity and posture from the
@@ -459,7 +530,7 @@ global:
         retain: 3
         # The sidecar image. RELEASE-WIDE rather than per runtime: it implements
         # a contract, and the manager reads it once as bootstrap configuration.
-        image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.2
+        image: ghcr.io/kostiantyn-matsebora/agentops-context-sync:0.2.5
         # Bounds the pod-local live context. In this mode the WHOLE context tree
         # is ephemeral — caches and tool state included — so it must be
         # generous. Empty leaves it unbounded, which is Kubernetes' own default.
@@ -488,7 +559,7 @@ global:
         enabled: true
         # The proxy image. Release-wide like the sidecar above: a contract, not
         # a backend choice.
-        image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.3
+        image: ghcr.io/kostiantyn-matsebora/agentops-egress-proxy:0.2.6
         # The image that installs the redirect. Empty uses the proxy image,
         # which ships both. Point it elsewhere only to keep the privileged image
         # minimal.
@@ -516,6 +587,28 @@ global:
     console:
       signalSource: console
       channel: console
+
+    # THE RELEASE-WIDE WIRING POSTURE (coordinator-deployment-mode): whether an
+    # enabled bundle renders an inline Pipeline per route ("pipelines") or a
+    # standalone AgentCapability gathered under one chart-rendered Coordinator
+    # ("coordinator"). CHART RENDERING ONLY — it introduces no CRD validation
+    # or CEL rule making a Pipeline and a Coordinator mutually exclusive, on
+    # one object, one release or one cluster. See
+    # openspec/changes/coordinator-deployment-mode/specs/wiring-mode/spec.md.
+    #
+    # `null` — DEFAULT, and this is the load-bearing reason it is nullable
+    # rather than the plain string "pipelines", same reason
+    # `kubernetes.wiringEnabled` is: left unset, the render FOLLOWS
+    # `global.demo.enabled` — off, the DEFAULT BEHAVIOUR is "pipelines"
+    # (today's posture, rendered byte-identical); true selects "coordinator",
+    # so a turnkey install exercises the Coordinator model out of the box. An
+    # EXPLICIT value here is absolute in both directions —
+    # `wiringMode: pipelines` under demo mode keeps today's single-Pipeline
+    # demo, and that is the one case a plain (non-nullable) value could not
+    # express.
+    #
+    # An unrecognized value fails the render naming both accepted ones.
+    wiringMode: null
 
   # The built-in tool vocabulary as MCPToolset CRs, so profiles and pipelines can
   # NAME tools instead of inlining comma strings. Split by risk on purpose — that
@@ -545,6 +638,20 @@ global:
     edit:
       name: agentops-edit
       tools: [Edit, Write]
+    websearch:
+      name: agentops-websearch
+      tools: [WebSearch]
+    # The whole MCP tool namespace the aops server registers (design
+    # coordinated-agents D-F) — invoke, close, escalate, read and the four
+    # list/get tools. A WILDCARD, unlike the risk-split bundle toolsets,
+    # because reach is bounded by the MANAGER per verb from the caller's own
+    # token (wiring.md), not by which tool NAMES a Pipeline happens to grant.
+    # Rendered whether or not coordination.enabled is set — inert, same as
+    # every builtin toolset naming a server this release does not deploy,
+    # until a Coordinator binds it AND the server is on.
+    coordinate:
+      name: agentops-coordinate
+      tools: ["mcp__aops__*"]
 
 # Wiring — the ONLY place Pipelines are declared. No bundle ships one: a
 # Pipeline names a profile, sources and channels that routinely come from
@@ -556,7 +663,7 @@ global:
 #       profile: k8s-engineer         # REQUIRED
 #       signalSources: [cluster-events, k8s-ops-chat, home-ops]
 #       channels: [k8s-ops]
-#       toolsets: [agentops-observe, agentops-shell, k8s-observability]
+#       toolsets: [agentops-observe, agentops-shell, agentops-websearch, k8s-observability]
 #       toolsetsMode: merge           # optional: merge (default) | overwrite
 #       mcpConfigs: [k8s-api]
 #       runtimeRef: default           # optional: what EXECUTES this route
@@ -625,6 +732,20 @@ adapterAuth:
   # Use an existing Secret (key: token) instead of generating one.
   existingSecret: ""
   # Pin the master token; changing it 401s EVERY adapter until its pod restarts.
+  token: ""
+
+# Auth for the manager's own /control-plane/* surface — a SEPARATE,
+# dedicated credential from adapterAuth above. A caller holding the adapter
+# token or the coordinator token must not reach this surface, and a caller
+# holding THIS token must not reach theirs, so this value is never derived
+# from or compared against adapterAuth.token. Same three-source shape:
+# explicit value, then an existing Secret, then generation at install.
+controlPlaneAuth:
+  # Name of the token Secret (key: token). Generated at install, then unmanaged.
+  secretName: agentops-control-plane-token
+  # Use an existing Secret (key: token) instead of generating one.
+  existingSecret: ""
+  # Pin the token; changing it 503/401s /control-plane/* until the pod restarts.
   token: ""
 
 # Scrape configuration for the manager's `agentops_*` metrics.
@@ -729,7 +850,7 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.38.1
+    tag: 0.39.1
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -1050,8 +1171,8 @@ resources:
 #     backend: http://<prometheus-or-vmsingle>:9090
 #   # The bundle's own route — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     channels: [<your-channel>]        # optional; omitted when unset
 # MIGRATION: the retired `vm-bundle:` key — every value must be restated under
 # the new one, and the render FAILS while the old key is present. See docs/CHANGELOG.md.
@@ -1072,14 +1193,47 @@ resources:
 #                                      # an ask-only house
 #   # The bundle's own routes — OFF by default, the one component that spends
 #   # money and acts on its own:
+#   wiringEnabled: true
 #   pipelines:
-#     enabled: true
 #     chatSources: [<your-chat-source>] # claimed by ha-control only
 #     channels: [<your-channel>]        # optional; omitted when unset
 # The Secrets are referenced by name and never created here:
 #   kubectl -n <ns> create secret generic ha-admin \
 #     --from-literal=token="$TOKEN" --from-literal=authorization="Bearer $TOKEN"
 home-assistant:
+  enabled: false
+
+# Pulse bundle (embedded subchart, OFF by default; never enabled by demo
+# mode — it needs your own Pulse (rcourtman/pulse) instance and API tokens).
+# Ships a Community-edition-framed privilege split: pulse-observer
+# investigates alerts read-only, pulse-operator additionally records
+# operator-state annotations (maintenance windows, criticality tags) — Pulse's
+# governed plan/approve/execute flow stays Pro-gated and out of reach for
+# both. See chart/charts/pulse/values.yaml for the full surface and
+# docs/integrations/pulse.md. Typical enablement:
+# pulse:
+#   enabled: true
+#   signal:
+#     defaultSource:
+#       enabled: true                     # SignalSource (INERT until claimed)
+#       baseUrl: https://pulse.example.org
+#     credentials:
+#       token: <pulse-api-token>           # or existingSecret
+#   mcpServer:
+#     enabled: true                        # deploys mcp-pulse in-cluster
+#   mcp:
+#     observer:
+#       credentials:
+#         token: <read-scoped-pulse-token>
+#     operator:
+#       credentials:
+#         token: <write-scoped-pulse-token>
+#   # The bundle's own routes — OFF by default, the one component that spends
+#   # money and acts on its own:
+#   wiringEnabled: true
+#   pipelines:
+#     channels: [<your-channel>]           # optional; omitted when unset
+pulse:
   enabled: false
 
 # CRD management (cert-manager pattern): templated, so upgrades work.
@@ -1135,7 +1289,7 @@ housekeeping:
   schedule: "17 3 * * *"
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-housekeeping
-    tag: 0.2.2
+    tag: 0.2.5
   # Reports what it would remove and removes nothing. Take it off only after a
   # run has named no directory belonging to a conversation you are keeping.
   dryRun: true
@@ -1152,6 +1306,120 @@ housekeeping:
   serviceAccountName: agentops-housekeeping
   resources: {}
   nodeSelector: {}
+
+# The aops MCP server (design coordinated-agents D-F): the verb surface a
+# Coordinator's own conversation reaches through global.builtinToolsets.coordinate (name: agentops-coordinate).
+# OFF by default — it renders nothing until a Coordinator is actually in use.
+#
+# A THIN CLIENT of the manager, so it needs NO Kubernetes access at all: no
+# ServiceAccount token, no RBAC. Every reach decision is the manager's, from
+# the bearer token each caller presents.
+coordination:
+  enabled: false
+  # MCPConfig CR name (what a Coordinator's toolsets/mcpConfigs name). The
+  # server KEY inside it is FIXED at "aops" — the manager derives
+  # AOPS_MCP_TOKEN only for a conversation whose bound MCP servers include
+  # that exact key, so a values-driven key could silently strip a
+  # Coordinator's own tooling.
+  name: aops-coordinate
+  image:
+    repository: ghcr.io/kostiantyn-matsebora/agentops-mcp-aops
+    tag: 0.1.0
+  port: 8080
+  resources: {}
+  nodeSelector: {}
+
+# THE CHART-RENDERED Coordinator (coordinator-deployment-mode) — rendered
+# exactly once, ONLY under `global.agentops.wiringMode: coordinator`. It claims
+# every enabled bundle's source (the same sources those bundles' `pipelines`
+# mode routes claim today) plus the reaper's own scheduled `signals/cron`
+# claim, and lists every enabled bundle's AgentCapability plus the reaper's in
+# its own `agents[]` — see `agentops.coordinatorContributions` and
+# `chart/templates/coordinator.yaml`.
+#
+# This is the COORDINATING agent's OWN capability and profile — the agent that
+# reads what started a conversation and decides which `agents[]` entry to
+# invoke. It is never a domain agent itself: every domain decision is
+# delegated to the bundle capability (or the reaper) whose description best
+# matches.
+coordinator:
+  # Coordinator CR name.
+  name: agentops-coordinator
+  # Its own AgentProfile name.
+  profileName: agentops-coordinator
+  maxTurns: 20
+  # WHAT EXECUTES it, and UNDER WHOSE IDENTITY — same meaning as a Pipeline's
+  # own `runtimeRef` / `serviceAccountName`. Unset resolves the AgentRuntime
+  # named `default` and the floor account.
+  runtimeRef: ""
+  serviceAccountName: ""
+  # REQUIRED on the rendered AgentProfile, with no default on purpose — see
+  # every bundle profile's own `outputFormat` comment.
+  outputFormat: blocks
+  # Prepended to the generated routing instructions below (empty by default).
+  # Use it to add install-specific guidance — a severity scale, an on-call
+  # convention — without rewriting the generated routing text.
+  systemPromptPrefix: ""
+  # Channels an ESCALATION may open — never bound at creation (coordinator-model).
+  channels: []
+  # Bounds this Coordinator's own conversation tree. Empty renders no `limits`
+  # stanza at all: a zero field there means unset, not zero, so an install that
+  # wants one states it (`maxAgents`, `maxTurns`, `deadline`).
+  limits: {}
+  # REPLACES the contributions-derived roster outright when set (never
+  # merged with it) — empty (default) renders today's byte-identical
+  # derived roster. Each entry: `name`, `description`, and either
+  # `capability` (-> capabilityRef) or `coordinator` (-> coordinatorRef),
+  # exactly one of the two.
+  agents: []
+
+# THE SELF-HEAL REAPER (coordinator-self-heal) — an ORDINARY AgentProfile /
+# AgentCapability pair, rendered under `coordinator` mode ALONE (no separate
+# flag). Addressed on its own schedule through the chart-rendered
+# Coordinator's own coordinating agent, which recognises the cron signal and
+# invokes it exactly as it invokes a domain entry for a domain signal.
+#
+# IT BINDS NO DOMAIN TOOLSET — only the coordination reach
+# (list_open_roots / invoke / close) through `global.builtinToolsets.coordinate`
+# and the `coordination` MCPConfig above. No new CRD: this is one more
+# AgentCapability, one more `agents[]` entry.
+reaper:
+  # OFF by default. It is an extra LLM conversation every hour for every
+  # install running coordinator mode, whether or not anything is actually
+  # stuck open — real token cost for a feature most installs will never
+  # need to lean on. An operator who wants self-healing turns it on.
+  enabled: false
+  # Its own AgentCapability / agents[] entry name.
+  name: reaper
+  # Its own AgentProfile name.
+  profileName: reaper
+  # Five-field cron schedule (minute hour dom month dow) served by
+  # `signals/cron` — see reaper.cronAdapter below. Four times a day by
+  # default. Never hardcoded elsewhere: the prompt text below describes the
+  # sweep without naming a cadence, so changing this needs no other edit.
+  schedule: "0 */6 * * *"
+  maxTurns: 20
+  runtimeRef: ""
+  serviceAccountName: ""
+  outputFormat: none
+  # Prepended to the generated survey instructions below (empty by default).
+  systemPromptPrefix: ""
+  # The `signals/cron` SignalAdapter this chart deploys to serve the reaper's
+  # scheduled SignalSource — the one implementation shipping the reaper's
+  # trigger needs, since no bundle owns a cron lane. `servedBy` is not an
+  # option here: nothing else in a coordinator-mode install already runs
+  # this process.
+  cronAdapter:
+    name: reaper-cron
+    image:
+      repository: ghcr.io/kostiantyn-matsebora/agentops-signal-cron
+      tag: 0.2.1
+    resources: {}
+  # The SignalSource the scheduled tick posts to — claimed on the
+  # chart-rendered Coordinator's own signalSourceRefs (design D-E), never on
+  # a per-entry trigger field.
+  source:
+    name: reaper-sweep
 
 # CRDs ARE NOT VALUES ANY MORE. They live in `chart/crds/`, which Helm applies
 # out-of-band BEFORE it builds the rest of the manifest — the only thing that

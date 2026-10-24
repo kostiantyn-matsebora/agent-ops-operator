@@ -30,7 +30,8 @@ different signals, has two different reaches.
 
 ## Understand the concepts
 
-Seven kinds. Each card links to the guide that teaches it.
+Nine kinds. Each card links to the guide that teaches it, except Conversation
+and AgentCapability, which have no guide and link to the reference.
 
 {: .ao-cards}
 - [AgentProfile]({{ '/guides/agent-profile/' | relative_url }})
@@ -75,10 +76,27 @@ Seven kinds. Each card links to the guide that teaches it.
 - [Pipeline]({{ '/guides/pipeline/' | relative_url }})
   {: .ao-icon-pipeline}
 
-  **The wiring, and the only object that carries any** — the sources it listens
-  on, the profile that answers, the tools that answer may use, the channels it
-  answers on. To learn what an agent can do, read its Pipeline. There is nowhere
-  else to look.
+  **The wiring for one agent** — the sources it listens on, the profile that
+  answers, the tools that answer may use, the channels it answers on. To learn
+  what one agent can do, read its Pipeline.
+
+- [AgentCapability](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#agentcapability)
+  {: .ao-icon-capability}
+
+  **A named capability, declared once.** A Pipeline or a Coordinator
+  references it by name instead of inlining the same fields. Carries no
+  wiring of its own.
+
+- [Coordinator]({{ '/guides/coordinate-agents/' | relative_url }})
+  {: .ao-icon-coordinator}
+
+  **Wiring for a composition of agents, not one** — a root conversation that
+  reads what started it, invokes named members by purpose, reads what each
+  returns, and escalates to a human only when it decides to. The other
+  wiring kind, beside Pipeline.
+
+**Pipeline and Coordinator share one capability shape** — the same six
+fields, inline on either or factored out as an AgentCapability.
 
 ## Follow the guides
 
@@ -99,7 +117,12 @@ mistake costs, and the earliest one is not the smallest.
 6. **[Talk to agents from your own chat]({{ '/guides/channel-adapter/' | relative_url }})**
    — the same, for the surface people type on.
 7. **[Run agents on your own backend]({{ '/guides/agent-runtime/' | relative_url }})**
-   — another vendor, a local model, your own harness.
+   — another vendor, your own harness. Two are already shipped:
+   [Ollama]({{ '/runtimes/ollama/' | relative_url }}) and
+   [GitHub Copilot]({{ '/runtimes/copilot/' | relative_url }}).
+8. **[Compose agents]({{ '/guides/coordinate-agents/' | relative_url }})** —
+   once one agent isn't enough. A `Coordinator` delegates to several, by
+   purpose rather than by trigger.
 
 Past what a guide needs:
 [concepts.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)

@@ -135,7 +135,7 @@ func TestDeliverEmitsNothingForRuntimePodEvents(t *testing.T) {
 	ordinary := evt("Warning", "prod", "Pod", "api-xk2p9", "BackOff")
 	ordinary.LastTimestamp = "2026-08-08T13:00:00Z"
 
-	a.deliver(context.Background(), []Event{own, ordinary}, false)
+	a.deliver(context.Background(), []Event{own, ordinary}, pass{})
 
 	got := mgr.signalsFor("src")
 	if len(got) != 1 {
@@ -147,8 +147,8 @@ func TestDeliverEmitsNothingForRuntimePodEvents(t *testing.T) {
 }
 
 // The failing-pod loop, exercised as the sequence that produces it: successive
-// pod names, each of which would otherwise be a fresh fingerprint AND a fresh
-// signature, so nothing downstream could collapse them.
+// pod names, each of which would otherwise be a fresh initiationId, so
+// nothing downstream could collapse them.
 func TestSuccessiveRuntimePodNamesAllExcluded(t *testing.T) {
 	mgr := newFakeManager()
 	a := newTestAdapter(mgr.start(t), nil, "src", mustFilter(t, `{}`))
@@ -159,7 +159,7 @@ func TestSuccessiveRuntimePodNamesAllExcluded(t *testing.T) {
 		e.LastTimestamp = "2026-08-08T13:00:00Z"
 		events = append(events, e)
 	}
-	a.deliver(context.Background(), events, false)
+	a.deliver(context.Background(), events, pass{})
 
 	if got := mgr.signalsFor("src"); len(got) != 0 {
 		t.Fatalf("no runtime pod event may produce a signal, whatever its name: %+v", got)

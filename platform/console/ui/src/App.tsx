@@ -2,22 +2,28 @@ import { Component, type ReactNode, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   Alert, Badge, Button, Nav, NavItem, NavList, Masthead, MastheadBrand, MastheadContent,
-  MastheadMain, Page, PageSidebar, PageSidebarBody, Label, Popover, Toolbar, ToolbarContent,
-  ToolbarGroup, ToolbarItem, PageSection,
+  MastheadMain, MastheadToggle, Page, PageSidebar, PageSidebarBody, PageToggleButton, Label, Popover,
+  Toolbar, ToolbarContent, ToolbarGroup, ToolbarItem, PageSection,
 } from '@patternfly/react-core'
+import {
+  AngleDoubleLeftIcon, AngleDoubleRightIcon, BarsIcon, CogIcon, CommentsIcon, ListIcon, TachometerAltIcon,
+  TopologyIcon,
+} from '@patternfly/react-icons'
+import globalBreakpointXl from '@patternfly/react-tokens/dist/esm/t_global_breakpoint_xl'
 import { useLiveStream, useSession, useUnreadCount } from './api/hooks'
 import { api } from './api/client'
 import { Logo } from './components/Logo'
 import { Empty, Loading } from './components/States'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
+import { useShell } from './shell'
 import { NewConversation } from './pages/NewConversation'
 import { LoginPage } from './pages/Login'
 import { OverviewPage } from './pages/Overview'
 import { QueuesPage } from './pages/Queues'
 import { ConfigPage, ConfigDetailPage, ConfigKindPage } from './pages/Config'
 import { TopologyPage } from './pages/Topology'
-import { ConversationsPage } from './pages/Conversations'
-import { ConversationPage } from './pages/Conversation'
+import { ChatView } from './pages/chat/ChatView'
+import { readLayout } from './pages/chat/layout'
 
 /**
  * An error boundary per route. A large graph or a malformed object must degrade
@@ -51,22 +57,37 @@ class Boundary extends Component<{ children: ReactNode }, { error?: Error }> {
 }
 
 const NAV = [
-  { to: '/overview', label: 'Overview' },
-  { to: '/queues', label: 'Queues' },
-  { to: '/config', label: 'Configuration' },
-  { to: '/topology', label: 'Topology' },
-  { to: '/conversations', label: 'Conversations' },
+  { to: '/overview', label: 'Overview', icon: <TachometerAltIcon /> },
+  { to: '/queues', label: 'Queues', icon: <ListIcon /> },
+  { to: '/config', label: 'Configuration', icon: <CogIcon /> },
+  { to: '/topology', label: 'Topology', icon: <TopologyIcon /> },
+  { to: '/conversations', label: 'Conversations', icon: <CommentsIcon /> },
 ]
 
 export function App() {
   const session = useSession()
   const connected = useLiveStream()
-  // The badge is the count-only form of the list query: it is computed
-  // server-side BEFORE any filter, so it says the same thing wherever you are
-  // and whatever the list page happens to be showing.
-  const unread = useUnreadCount()
+  // The badge is the count-only form of the list query: computed server-side
+  // before any filter except the chat page's own "Show closed" preference,
+  // which this nav lives outside of — read directly from storage so the
+  // rail's badge matches the in-page Unread one rather than promising a
+  // closed row the chat page itself is hiding.
+  const unread = useUnreadCount(readLayout().showClosed)
   const location = useLocation()
-  const [navOpen, setNavOpen] = useState(true)
+  // Mirrors PatternFly's OWN mobile breakpoint (`Page`'s `isMobile()`), since
+  // `onPageResize` fires only on an actual resize EVENT, never at mount — an
+  // initial `true` here left the nav sidebar open and `pf-m-expanded` on a
+  // page loaded directly at a narrow width, overlapping the content and
+  // intercepting its clicks (measured live at 375px: a button behind it was
+  // unclickable until the window was first resized).
+  const isMobileWidth = () =>
+    typeof window !== 'undefined' && window.innerWidth < Number.parseInt(globalBreakpointXl.value, 10) * 16
+  const [navOpen, setNavOpen] = useState(() => !isMobileWidth())
+  // Folded to its icons, and kept so across reloads: a wide view, the
+  // topology first of all, is what the width is wanted for, and a choice made
+  // for it should not need making again on every visit.
+  const navCollapsed = useShell((s) => s.navCollapsed)
+  const toggleNav = () => useShell.getState().setNavCollapsed(!navCollapsed)
 
   if (session.isLoading) return <Loading />
   // A console that authenticates nobody itself reports every request as
@@ -80,18 +101,44 @@ export function App() {
   const masthead = (
     <Masthead>
       <MastheadMain>
+        {/* Hidden by PatternFly's own CSS above the mobile breakpoint, same as
+            the `Page`'s built-in example — the nav is reached by clicking it
+            and nothing else at a width this narrow, now that it no longer
+            opens itself. */}
+        <MastheadToggle>
+          <PageToggleButton
+            id="nav-toggle"
+            variant="plain"
+            aria-label="Conversations and other sections"
+            isSidebarOpen={navOpen}
+            onSidebarToggle={() => setNavOpen((v) => !v)}
+            icon={<BarsIcon />}
+          />
+        </MastheadToggle>
         <MastheadBrand>
           {/* Inline SVG, not <Brand src="">: an empty src renders the browser's
               broken-image glyph, which is exactly what the masthead was showing. */}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <Logo />
-            <span style={{ fontWeight: 600 }}>agent-ops console</span>
+            {/* Folded, the masthead's brand column is as narrow as the icon
+                strip under it, so the name would spill under the toolbar.
+                The mark alone stands for it then, as the icons stand for the
+                links. */}
+            {!navCollapsed && <span style={{ fontWeight: 600 }}>agent-ops console</span>}
           </span>
         </MastheadBrand>
       </MastheadMain>
       <MastheadContent>
-        <Toolbar isStatic isFullHeight>
-          <ToolbarContent>
+        {/* `Toolbar`'s own `nowrap` is deliberate PatternFly chrome — it
+            expects an overflow MENU via each `ToolbarItem`'s `visibility`
+            prop, never a second line — but this bar carries no item that is
+            safe to simply hide (every one states a fact the identity label,
+            the live/read-only state, the theme). Wrapping onto a second line
+            keeps all of it reachable at a phone width instead (measured
+            live at 375px: the bar ran the page 254px past the viewport,
+            unscrollable, before this). */}
+        <Toolbar isStatic isFullHeight style={{ flexWrap: 'wrap', rowGap: 8 }}>
+          <ToolbarContent style={{ flexWrap: 'wrap', rowGap: 8 }}>
             {/* Starting work is a GLOBAL action — you decide to ask an agent
                 something while looking at whatever made you want to. Living in
                 the masthead means it is one click from every page instead of
@@ -100,7 +147,7 @@ export function App() {
               <NewConversation />
             </ToolbarItem>
 
-            <ToolbarGroup align={{ default: 'alignEnd' }}>
+            <ToolbarGroup align={{ default: 'alignEnd' }} style={{ flexWrap: 'wrap', rowGap: 8 }}>
               <ToolbarItem>
                 {/* A stream that is down and a system that is idle look
                     identical on a graph. Saying which is the difference between
@@ -149,9 +196,8 @@ export function App() {
                 <ToolbarItem>
                   <Button
                     variant="secondary"
-                    onClick={async () => {
-                      await api.logout()
-                      session.refetch()
+                    onClick={() => {
+                      void api.logout().then(() => session.refetch())
                     }}
                   >
                     Sign out
@@ -167,29 +213,67 @@ export function App() {
 
   const sidebar = (
     <PageSidebar isSidebarOpen={navOpen}>
-      <PageSidebarBody>
-        <Nav>
-          <NavList>
-            {NAV.map((item) => (
-              <NavItem key={item.to} isActive={location.pathname.startsWith(item.to)}>
-                <NavLink to={item.to}>
-                  {item.label}
-                  {item.to === '/conversations' && (unread.data?.unreadTotal ?? 0) > 0 && (
-                    <Badge isRead={false} data-testid="unread-badge" style={{ marginLeft: 8 }}>
-                      {unread.data?.unreadTotal}
-                    </Badge>
-                  )}
-                </NavLink>
-              </NavItem>
-            ))}
-          </NavList>
-        </Nav>
+      <PageSidebarBody isFilled>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Nav aria-label="console">
+            <NavList>
+              {NAV.map((item) => (
+                <NavItem key={item.to} isActive={location.pathname.startsWith(item.to)}>
+                  <NavLink to={item.to} aria-label={item.label} title={navCollapsed ? item.label : undefined}>
+                    <span className="pf-v6-c-nav__link-icon" aria-hidden="true">{item.icon}</span>
+                    {!navCollapsed && <span className="pf-v6-c-nav__link-text">{item.label}</span>}
+                    {item.to === '/conversations' && (unread.data?.unreadTotal ?? 0) > 0 && (
+                      <Badge
+                        isRead={false}
+                        data-testid="unread-badge"
+                        style={
+                          navCollapsed
+                            ? { position: 'absolute', top: 2, right: 6, fontSize: 10, minWidth: 16, height: 16, lineHeight: '16px', padding: '0 4px' }
+                            : { marginLeft: 8 }
+                        }
+                      >
+                        {unread.data?.unreadTotal}
+                      </Badge>
+                    )}
+                  </NavLink>
+                </NavItem>
+              ))}
+            </NavList>
+          </Nav>
+          <div style={{ marginTop: 'auto', padding: 8, textAlign: navCollapsed ? 'center' : 'right' }}>
+            <Button
+              variant="plain"
+              aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+              aria-expanded={!navCollapsed}
+              onClick={toggleNav}
+              icon={navCollapsed ? <AngleDoubleRightIcon /> : <AngleDoubleLeftIcon />}
+            />
+          </div>
+        </div>
       </PageSidebarBody>
     </PageSidebar>
   )
 
   return (
-    <Page masthead={masthead} sidebar={sidebar} onPageResize={() => setNavOpen(true)}>
+    <Page
+      masthead={masthead}
+      sidebar={sidebar}
+      className={navCollapsed ? 'ao-nav-collapsed' : undefined}
+      // `mobileView` is PatternFly's own computed verdict for the resize that
+      // just happened — honoured here rather than overwritten, since always
+      // forcing the nav back OPEN is what left it `pf-m-expanded` over the
+      // content at any narrow width, permanently.
+      onPageResize={(_e, { mobileView }: { mobileView: boolean }) => setNavOpen(!mobileView)}
+      // Without this, PatternFly's `.pf-v6-c-page__main-container` keeps its
+      // default `align-self: start` and sizes to its CHILDREN's content
+      // height instead of stretching to the grid row PatternFly already sized
+      // to the full viewport height below the masthead — which is what let
+      // the chat view's content area stop partway down the screen with empty
+      // space below it, or visibly resize as its own content changed, instead
+      // of staying pinned to the viewport the way `ChatView`'s `flex: 1,
+      // minHeight: 0` chain assumes its ancestors already are.
+      isContentFilled
+    >
       <Boundary>
         <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />
@@ -199,8 +283,11 @@ export function App() {
           <Route path="/config/:kind" element={<ConfigKindPage />} />
           <Route path="/config/:kind/:name" element={<ConfigDetailPage />} />
           <Route path="/topology" element={<TopologyPage />} />
-          <Route path="/conversations" element={<ConversationsPage />} />
-          <Route path="/conversations/:name" element={<ConversationPage />} />
+          {/* One view for both routes (design D-A) — `ChatView` reads the
+              optional `:name` param itself and renders the thread beside the
+              list rather than leaving for a second page. */}
+          <Route path="/conversations" element={<ChatView />} />
+          <Route path="/conversations/:name" element={<ChatView />} />
           <Route
             path="*"
             element={<Empty title="Not found">That page does not exist.</Empty>}
