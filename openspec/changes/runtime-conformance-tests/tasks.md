@@ -29,8 +29,9 @@
       (`//go:build conformance`). Build `runtimes/ollama` with the
       existing `build()` helper, start it against `FakeManager` and the
       fake Ollama double, and assert `API-1` (long-poll, `204` is not an
-      error) and `LC-1` (one inflight unit — a second poll while Working
-      gets nothing).
+      error), `LC-1` (one inflight unit — a second poll while Working gets
+      nothing) and `RT-2` (the subprocess's captured stdout is non-empty
+      once a run completes).
 - [ ] 3.2 Assert `API-2` (exactly one of `promptFile`/`promptText` in the
       served unit), `API-7` (a fact the runtime cannot determine is
       omitted, never zero) and `API-9` (neither `turns[]` nor

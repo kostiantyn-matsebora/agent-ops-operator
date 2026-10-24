@@ -50,11 +50,21 @@ in-package precedent.
 receives and scripts its response from a small, purpose-built vocabulary —
 only what the asserted requirement IDs need:
 
-| Directive | Double's response | Exercises |
-|---|---|---|
-| (default) | a short, fixed completion | the ordinary path |
-| `slow` | holds the response past one poll cycle | `API-1` long-poll, `LC-1` one inflight unit |
-| `unparsable` | a response the runtime cannot parse | `API-7` omit what cannot be determined |
+| Directive | Double's response |
+|---|---|
+| (default) | a short, fixed completion |
+| `slow` | holds the response past one poll cycle |
+| `unparsable` | a response the runtime cannot parse |
+
+Every requirement ID the suite asserts, and which path exercises it:
+
+| Requirement ID(s) | Exercised by |
+|---|---|
+| `API-1`, `LC-1` | the `slow` directive. The double holds its response past one poll cycle, proving the runtime keeps polling and a second poll while Working gets nothing |
+| `API-7` | the `unparsable` directive. A response the runtime cannot parse proves the undetermined fact is omitted, never reported as zero |
+| `API-2`, `API-3`, `API-4`, `API-5`, `API-8`, `API-9`, `RT-1`, `RT-2`, `RT-3` and its sub-items, `SEC-1`–`SEC-3`, `COMPAT-1` | the default path. One ordinary successful run, against a served unit and a repository fixture the test controls directly |
+| `LC-2` | a short `RUNTIME_IDLE_TTL_M`, no directive. The double is never reached once the TTL elapses |
+| `LC-3` | an `/exit` call sent mid-run, no directive. The double is still mid-response when it arrives |
 
 **Why:** `test/stubruntime`'s vocabulary (`echo`/`fail`/`stale-context`/
 `no-context`/`die`/`stall`/`storage-outage`/`calls`) exists for manager-side

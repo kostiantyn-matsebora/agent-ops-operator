@@ -22,7 +22,7 @@ idle-TTL exit today ships green.
   convention `test/stubruntime` already uses, scoped narrowly to what these
   assertions need rather than cloned in full.
 - Asserts `docs/contracts/runtime.md` IDs `API-1,2,3,4,5,7,8,9`, `LC-1,2,3`,
-  `RT-1`, `RT-3`/`3.1`–`3.4`, `SEC-1,2,3`, `COMPAT-1` behaviorally, the same
+  `RT-1`, `RT-2`, `RT-3`/`3.1`–`3.4`, `SEC-1,2,3`, `COMPAT-1` behaviorally, the same
   way `channel_test.go`/`signal_test.go` assert their contract IDs. `API-6`
   and every `MGR-n` row are the manager's own obligations and stay owned by
   envtest/system — not asserted here.

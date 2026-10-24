@@ -14,7 +14,7 @@ existing `/channel/ops` and `/channel/ops/{id}/done` pair.
 The suite SHALL cover `runtimes/ollama`. It asserts these requirement IDs
 from `docs/contracts/runtime.md` behaviorally: `API-1`, `API-2`, `API-3`,
 `API-4`, `API-5`, `API-7`, `API-8`, `API-9`, `LC-1`, `LC-2`, `LC-3`, `RT-1`,
-`RT-3` and its sub-items, `SEC-1`, `SEC-2`, `SEC-3`, `COMPAT-1`.
+`RT-2`, `RT-3` and its sub-items, `SEC-1`, `SEC-2`, `SEC-3`, `COMPAT-1`.
 
 It SHALL NOT assert `API-6` or any `MGR-n` requirement. Those are the
 manager's own obligations, already covered by envtest and the system tier.
