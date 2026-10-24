@@ -212,19 +212,39 @@ forward only Pulse's `"alert"` (firing) events as normalized signals.
 `"resolved"` events SHALL be accepted, so Pulse sees a 2xx and does not
 retry, but SHALL produce no signal.
 
-The `initiationId` SHALL be the Pulse alert id carried in the registered
-template's fields — the resource identity joined with the alert identity.
-That is Pulse's own incident model doing the grouping, so two unrelated
-alerts never share an id.
+The `initiationId` SHALL be derived from the Pulse alert id carried in the
+registered template's fields — the resource identity joined with the alert
+identity — using one of two strategies selected by the served source's
+`spec.config.correlationStrategy`:
 
-The same underlying Pulse alert occurrence SHALL always yield the same id,
-across retries and across a firing/resolved pair.
+- `"id+startTime"` (the default, used when the field is absent, empty, or
+  any value other than `"id"`): the resource, the alert id, AND the
+  alert's start time. Pulse's own alert id can be reused when the same
+  condition fires again later as a new occurrence, so start time SHALL be
+  included to keep a later re-fire from colliding with an earlier,
+  unrelated occurrence that happened to reuse the same alert id.
+- `"id"`: the resource and the alert id alone, with no time component —
+  today's behavior, kept for a source that needs to opt back into it.
 
-Cooldown and routing stay manager-side, keyed on that id.
+Either strategy SHALL yield distinct ids for two unrelated alerts (never
+sharing an id), and SHALL yield the SAME id for retries and for a
+firing/resolved pair of one occurrence.
+
+The no-ID fallback — used only when Pulse sends no alert id at all, a hash
+of resource/type/severity/message — is unaffected by `correlationStrategy`
+and SHALL continue to omit any time component.
+
+The registered template's `startsAt` field SHALL render the alert's
+occurrence start time (`{{.StartTime}}`), which stays the same across one
+occurrence's firing and resolved events. It SHALL NOT render a per-reading
+timestamp, since that would give one occurrence a different id on every
+event.
+
+Cooldown and routing stay manager-side, keyed on the resulting id.
 
 #### Scenario: A firing event produces one signal
 - **WHEN** a webhook body carries an `"alert"` event
-- **THEN** exactly one normalized signal is pushed, its `initiationId` the Pulse alert id from the resource and alert identity
+- **THEN** exactly one normalized signal is pushed, its `initiationId` derived from the resource and alert identity per the source's `correlationStrategy`
 
 #### Scenario: A resolved event produces no signal
 - **WHEN** a webhook body carries a `"resolved"` event
@@ -233,3 +253,23 @@ Cooldown and routing stay manager-side, keyed on that id.
 #### Scenario: Unrelated Pulse alerts never merge
 - **WHEN** a node-memory threshold alert and an unreachable-device incident both fire
 - **THEN** their signals carry distinct `initiationId` values and open distinct conversations
+
+#### Scenario: Default strategy distinguishes a re-fire from a continuation
+- **WHEN** a source sets no `correlationStrategy`, and the same Pulse alert id fires, resolves, and later fires again with a new start time
+- **THEN** the firing/resolved pair shares one `initiationId`, and the later re-fire carries a different `initiationId` that opens a new conversation
+
+#### Scenario: Explicit "id" strategy keeps today's collapsing behavior
+- **WHEN** a source sets `spec.config.correlationStrategy: "id"`, and the same Pulse alert id fires, resolves, and later fires again with a new start time
+- **THEN** every one of those signals carries the same `initiationId`
+
+#### Scenario: An unrecognized strategy value falls back to the default
+- **WHEN** a source sets `spec.config.correlationStrategy` to a value other than `"id"` or `"id+startTime"`
+- **THEN** the adapter derives `initiationId` as if `"id+startTime"` had been set
+
+#### Scenario: The no-ID fallback ignores correlationStrategy
+- **WHEN** a webhook body carries no Pulse alert id, regardless of the source's `correlationStrategy`
+- **THEN** `initiationId` is the existing hash of resource/type/severity/message, with no start time included
+
+#### Scenario: The registered template carries the occurrence start time
+- **WHEN** the adapter registers its webhook template with Pulse
+- **THEN** the template's `startsAt` field renders `{{.StartTime}}`, not a per-reading timestamp
