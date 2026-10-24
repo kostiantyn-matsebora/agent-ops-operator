@@ -20,7 +20,10 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 
 - [ ] 2.1 In `.github/workflows/system.yml`'s `pack` job, set
   `SYSTEM_REUSE=1` on the `go test` step only `if: inputs.tier == 'full'`,
-  and give that step an `id` so a later step can read its outcome.
+  and give that step an `id` so a later step can read its outcome. Here
+  `SYSTEM_REUSE=1` only defers the Go binary's own teardown to task 2.5's
+  explicit step — unlike its local-dev use, it does NOT leave the cluster
+  running once this job ends.
 - [ ] 2.2 Add Node 22 setup, `npm ci`, and `npx playwright install
   --with-deps chromium` steps under `platform/console/ui`, gated
   `if: inputs.tier == 'full'`.
@@ -32,8 +35,10 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 - [ ] 2.4 Add `actions/upload-artifact` of `e2e-live`'s report and
   `test-results`, `if: failure() && inputs.tier == 'full'`.
 - [ ] 2.5 Add a teardown step, `if: always() && inputs.tier == 'full'`,
-  running `k3d cluster delete agentops-e2e || true`. Verify every added
-  step's YAML with the same `yaml.safe_load` check as task 1.2.
+  running `k3d cluster delete agentops-e2e || true` — the cleanup task
+  2.1's `SYSTEM_REUSE=1` deferred to here, since no human is present in
+  CI to delete it later by hand. Verify every added step's YAML with the
+  same `yaml.safe_load` check as task 1.2.
 
 ## 3. Unit tests
 
