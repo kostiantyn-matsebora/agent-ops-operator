@@ -33,7 +33,7 @@ All of 4.1–4.4 apply to `driver-sdk.js` only — `driver-cli.js` opens a fresh
 
 - [x] 5.1 In `driver-sdk.js`, move the composed allowlist from `--allowedTools` into a `canUseTool` callback, deny-by-default, reusing `tools.js` composition unchanged. Leave `driver-cli.js` passing the composed list as `--allowedTools` with `--permission-mode dontAsk`, exactly as today
 - [x] 5.2 In `driver-sdk.js`, pass NO `allowedTools` and keep `permissionMode: 'default'`. Assert in a test that neither is reintroduced
-- [x] 5.3 In `driver-sdk.js`'s callback, preserve the existing pattern semantics (bare names and scoped forms), so a bound toolset means what it meant under `driver-cli.js` — base-name/server-name matching only (same granularity `tools.js`'s `logUngrantedTools` already uses), NOT the CLI's own sub-command glob parser for a scoped form like `Bash(git *)`: that form is matched at the base tool name here. Flagged for review — see the PR description
+- [ ] 5.3 In `driver-sdk.js`'s callback, preserve the existing pattern semantics (bare names and scoped forms), so a bound toolset means what it meant under `driver-cli.js` — base-name/server-name matching only (same granularity `tools.js`'s `logUngrantedTools` already uses), NOT the CLI's own sub-command glob parser for a scoped form like `Bash(git *)`: that form is matched at the base tool name here. Flagged for review — see the PR description
 - [x] 5.4 In `driver-sdk.js`, log every denial with the pattern that failed to match, as `driver-cli.js`'s `dontAsk` denials were visible
 
 ## 6. Continuity

@@ -40,7 +40,7 @@
 //        reuses that exact function rather than reimplementing it.
 'use strict';
 
-const fs = require('fs');
+const fs = require('node:fs');
 const {
   syncRepo, checkContextPresence, contextIdOf, extractBrief, formatEvent,
   SESSIONS_DIR, WORKSPACE, pollNextUnit, reportDone,
@@ -93,7 +93,7 @@ function makeInputChannel() {
   const queue = [];
   async function* generator() {
     for (;;) {
-      const msg = queue.length ? queue.shift() : await new Promise((res) => { resolveNext = res; });
+      const msg = queue.length ? queue.shift() : await new Promise((res) => { resolveNext = res; }); // NOSONAR
       yield msg;
     }
   }
@@ -288,16 +288,27 @@ function openOrReuseSession(unit, fingerprint, allowed, mcpServers) {
 // "strictly serial per conversation" invariant is exactly what makes this
 // unambiguous, with no id correlation needed.
 // ---------------------------------------------------------------------------
+// findSpinVerdict scans one assistant message for a tool call the model could
+// not form (spin.js). Returns the first verdict, or null.
+function findSpinVerdict(ev, watch) {
+  for (const b of ev.message?.content || []) {
+    if (b.type !== 'tool_use') continue;
+    const verdict = noteToolUse(watch, b.name, b.input);
+    if (verdict) return verdict;
+  }
+  return null;
+}
+
 async function consumeTurn(sdkQuery, watch, calls) {
   let sessionId = null;
   let spinVerdict = null;
   let initTools = null;
   let initMcpServers = null;
   for (;;) {
-    const { value: ev, done } = await sdkQuery.next();
+    const { value: ev, done } = await sdkQuery.next(); // NOSONAR
     if (done) return { endedUnexpectedly: true, sessionId, initTools, initMcpServers };
-    if (ev && ev.session_id && !sessionId) sessionId = ev.session_id;
-    if (ev && ev.type === 'system' && ev.subtype === 'init') {
+    if (ev?.session_id && !sessionId) sessionId = ev.session_id;
+    if (ev?.type === 'system' && ev.subtype === 'init') {
       // The vendor's own account of what it actually has — cross-checked
       // against the grant once the turn completes, exactly as driver-cli.js
       // does it, the one point in this process that ever sees it.
@@ -307,15 +318,12 @@ async function consumeTurn(sdkQuery, watch, calls) {
     calls.note(ev);
     const txt = formatSdkEvent(ev);
     if (txt) process.stdout.write(txt);
-    if (ev && ev.type === 'assistant' && !spinVerdict) {
-      for (const b of ev.message?.content || []) {
-        if (b.type !== 'tool_use') continue;
-        const verdict = noteToolUse(watch, b.name, b.input);
-        if (!verdict) continue;
-        spinVerdict = verdict;
+    if (ev?.type === 'assistant' && !spinVerdict) {
+      spinVerdict = findSpinVerdict(ev, watch);
+      if (spinVerdict) {
         console.log(
-          `[runtime] ${verdict.name} called ${verdict.repeats}x with the same unparsable arguments — ` +
-            `nothing ran, ending the run: ${verdict.raw.slice(0, 160)}`,
+          `[runtime] ${spinVerdict.name} called ${spinVerdict.repeats}x with the same unparsable arguments — ` +
+            `nothing ran, ending the run: ${spinVerdict.raw.slice(0, 160)}`,
         );
         // The async equivalent of driver-cli.js's SIGTERM: abort generation
         // rather than let a loop that cannot end burn the turn budget. Keep
@@ -323,10 +331,9 @@ async function consumeTurn(sdkQuery, watch, calls) {
         // — the generator must reach a settled boundary before the next
         // unit can safely push into it.
         sdkQuery.interrupt().catch(() => {});
-        break;
       }
     }
-    if (ev && ev.type === 'result') return { result: ev, sessionId, spinVerdict, initTools, initMcpServers };
+    if (ev?.type === 'result') return { result: ev, sessionId, spinVerdict, initTools, initMcpServers };
   }
 }
 
@@ -378,6 +385,12 @@ async function runTurnOnLiveSession(prompt, allowed) {
     };
   }
 
+  return completedTurnReport(outcome, watch, calls);
+}
+
+// completedTurnReport turns a settled turn (one that reached its `result`)
+// into the driver-cli.js-shaped outcome.
+function completedTurnReport(outcome, watch, calls) {
   if (outcome.spinVerdict) {
     return {
       status: 'failed',
@@ -388,8 +401,8 @@ async function runTurnOnLiveSession(prompt, allowed) {
   }
 
   const r = outcome.result;
-  const isError = Boolean(r && r.is_error);
-  const extracted = extractBrief((r && r.result) || '');
+  const isError = Boolean(r?.is_error);
+  const extracted = extractBrief(r?.result || '');
   let resultText = extracted.text.slice(0, 2000);
   if (watch.total > 0) {
     // Recovered on its own, exactly as driver-cli.js observes — abandoning
@@ -429,7 +442,9 @@ function storageOutageReportSdk(first, reason, resultText) {
 // SAME continuity ladder driver-cli.js's cli driver uses for its resume
 // retry (D5/6.2), with the SAME user-facing failure text (6.3) on confirmed
 // absence.
-async function executeUnit(unit) {
+// readPrompt resolves the unit's prompt: inline text, else the templated
+// file under the workspace. Returns `{ prompt }` or `{ failure }`.
+function readPrompt(unit) {
   let prompt = unit.promptText || '';
   if (!prompt && unit.promptFile) {
     try {
@@ -440,10 +455,17 @@ async function executeUnit(unit) {
         prompt = prompt.replaceAll(`{{${k}}}`, v);
       }
     } catch (e) {
-      return { status: 'failed', result: `prompt read: ${e.message}` };
+      return { failure: { status: 'failed', result: `prompt read: ${e.message}` } };
     }
   }
-  if (!prompt) return { status: 'failed', result: 'empty prompt' };
+  if (!prompt) return { failure: { status: 'failed', result: 'empty prompt' } };
+  return { prompt };
+}
+
+async function executeUnit(unit) {
+  const read = readPrompt(unit);
+  if (read.failure) return read.failure;
+  const { prompt } = read;
 
   // The work unit carries the WIRING's tools and the mode; the agent's own
   // definition carries the rest. Re-read fresh every unit — NOT cached
@@ -458,7 +480,7 @@ async function executeUnit(unit) {
 
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextId ? ' continue=' + sanitizeLog(contextId) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
   console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
-  if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
+  if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${sanitizeLog(String(unit.systemPrompt.length))} chars)`);
 
   openOrReuseSession(unit, fingerprint, allowed, mcpServers);
 
@@ -546,9 +568,8 @@ async function runLoop() {
       idle = true;
       continue;
     }
-    const unit = await pollNextUnit();
+    const unit = await pollNextUnit(); // NOSONAR
     if (!unit) continue;
-    lastWork = Date.now();
     const out = await runUnit(unit); // NOSONAR
     lastWork = Date.now();
     await reportDone(unit, out); // NOSONAR

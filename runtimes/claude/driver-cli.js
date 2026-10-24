@@ -17,9 +17,9 @@
 
 'use strict';
 
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 const { newCallRecorder } = require('./report');
@@ -114,11 +114,15 @@ function extractBrief(text) {
   return { text: (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim(), brief };
 }
 
+function mcpSummary(servers) {
+  return (servers || []).map((s) => s.name + ':' + s.status).join(',');
+}
+
 // Turn one stream-json event into a compact human-readable log line.
 function formatEvent(ev, rawLine) {
   try {
     if (ev.type === 'system' && ev.subtype === 'init') {
-      return `[init] model=${ev.model} tools=${(ev.tools || []).length} mcp=${(ev.mcp_servers || []).map((s) => `${s.name}:${s.status}`).join(',')}\n`;
+      return `[init] model=${ev.model} tools=${(ev.tools || []).length} mcp=${mcpSummary(ev.mcp_servers)}\n`;
     }
     if (ev.type === 'assistant') {
       return (ev.message?.content || []).map((b) => {
@@ -188,7 +192,7 @@ function runClaude(unit) {
     });
     console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextIdOf(unit) ? ' continue=' + sanitizeLog(contextIdOf(unit)) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
     console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
-    if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
+    if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${sanitizeLog(String(unit.systemPrompt.length))} chars)`);
     resolve(spawnClaude(args, unit, Boolean(contextIdOf(unit)), allowed));
   });
 }
@@ -576,9 +580,8 @@ async function runLoop() {
       idle = true;
       continue;
     }
-    const unit = await pollNextUnit();
+    const unit = await pollNextUnit(); // NOSONAR
     if (!unit) continue;
-    lastWork = Date.now();
     // Strictly serial per conversation: one inflight unit, so the await in
     // the loop is the invariant, not an oversight.
     const out = await runUnit(unit); // NOSONAR
