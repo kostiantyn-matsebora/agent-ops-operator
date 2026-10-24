@@ -78,3 +78,4 @@ All of 4.1–4.4 apply to `driver-sdk.js` only — `driver-cli.js` opens a fresh
 
 - [ ] 11.1 `docs/contracts.md`: the allowlist may be enforced per invocation, and what that obliges — nothing shadows the decision point. This describes `driver-sdk.js` only, and does not touch `docs/contracts/runtime.md`
 - [ ] 11.2 `CLAUDE.md`: note that `runtime-claude` ships two drivers — `sdk` (default, holds a session per pod) and `cli` (today's per-unit spawn, kept as the selectable alternative via `RUNTIME_CLAUDE_DRIVER=cli`) — and that the allowlist is a callback rule set on the `sdk` driver only
+- [ ] 11.3 `docs/claude.md`: document `RUNTIME_CLAUDE_DRIVER` for adopters, alongside the existing `RUNTIME_UNPARSED_REPEAT_LIMIT` entry — both values, the `sdk` default, and the unrecognized-value fallback

@@ -16,6 +16,31 @@ requirement on the published specification.
 - **THEN** every requirement on `docs/contracts/runtime.md` that applied
   before still holds, unchanged
 
+### Requirement: The choice between drivers is explicit and defaults safely
+`runtime-claude` SHALL select which driver governs a pod through
+`RUNTIME_CLAUDE_DRIVER`, defaulting to the session-holding driver (`sdk`)
+when the variable is unset.
+
+The per-unit driver (`cli`) SHALL remain selectable by name as the
+alternative. An unrecognized value SHALL fall back to the default rather
+than failing the pod to start.
+
+#### Scenario: Unset selects the session-holding driver
+- **WHEN** `RUNTIME_CLAUDE_DRIVER` is unset
+- **THEN** the runtime opens one session per pod and reuses it across units,
+  per the requirements below
+
+#### Scenario: `cli` selects the per-unit driver
+- **WHEN** `RUNTIME_CLAUDE_DRIVER` is set to `cli`
+- **THEN** the runtime establishes a fresh session for every work unit, per
+  "A per-unit runtime is still correct" below
+
+#### Scenario: An unrecognized value falls back, loudly
+- **WHEN** `RUNTIME_CLAUDE_DRIVER` is set to a value that is neither `sdk`
+  nor `cli`
+- **THEN** the runtime logs a warning and starts under the default driver,
+  rather than failing to start
+
 ### Requirement: A runtime may hold a vendor session open across work units
 A runtime MAY keep its vendor session open between work units within one pod
 and deliver the next unit's prompt into it, rather than establishing a
