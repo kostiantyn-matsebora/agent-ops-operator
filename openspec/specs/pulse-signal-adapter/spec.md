@@ -217,8 +217,9 @@ registered template's fields — the resource identity joined with the alert
 identity — using one of two strategies selected by the served source's
 `spec.config.correlationStrategy`:
 
-- `"id+startTime"` (the default, used when the field is absent, empty, or
-  any value other than `"id"`, the last logged as a warning): the resource, the alert id, AND the
+- `"id+startTime"` (the default, used when the field is absent, empty,
+  explicitly `"id+startTime"`, or any other unrecognized value, with a
+  warning logged only for the unrecognized value): the resource, the alert id, AND the
   alert's start time. Pulse's own alert id can be reused when the same
   condition fires again later as a new occurrence, so start time SHALL be
   included to keep a later re-fire from colliding with an earlier,
