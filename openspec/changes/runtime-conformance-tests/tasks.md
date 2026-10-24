@@ -25,6 +25,11 @@
 
 ## 3. Runtime conformance assertions — testing-specialist
 
+`API-3` is not assigned a task below. It obligates whoever answers
+`GET /work` — the manager, not the runtime under test — so it joins the
+`API-6`/`MGR-n` exclusion `design.md` and the delta spec both state, and
+stays owned by envtest/system.
+
 - [ ] 3.1 New `platform/manager/test/conformance/runtime_test.go`
       (`//go:build conformance`). Build `runtimes/ollama` with the
       existing `build()` helper, start it against `FakeManager` and the
