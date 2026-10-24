@@ -47,12 +47,12 @@ RBAC grant here is chart-rendered from values, never hand-authored YAML.
 
 **Code**:
 - `chart/charts/kubernetes/templates/` (the MCP server's `ClusterRole`) —
-  compose the new values list onto the rendered rule set, with the verb
-  allowlist check.
+  compose the new values list onto the rendered rule set, with the five
+  refusal checks.
 - `chart/charts/kubernetes/values.yaml` — new `mcpServers.rbac.extraReadRules`
   key, default `[]`.
-- `chart/charts/kubernetes/` render tests — new cases for the extension, the
-  verb-allowlist failure, and the empty-default no-op.
+- `chart/charts/kubernetes/` render tests — new cases for the extension, each
+  of the five refusal shapes, and the empty-default no-op.
 
 **Reference docs** — made untrue by this change:
 - `docs/configuration.md` — new row(s) for
