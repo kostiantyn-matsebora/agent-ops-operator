@@ -7,7 +7,7 @@ import { Markdown } from '../../components/Markdown'
 import { Blocks, Fold, agentText } from '../../components/Blocks'
 import { parse } from '../../api/blocks'
 import { fence } from '../../api/fence'
-import type { ActivityEvent, Message } from '../../api/types'
+import type { ActivityEvent, Choice, Message } from '../../api/types'
 
 // Ported from `prototype/C-rail.html` and `States.html` ("In the thread") —
 // the divider, the jump pill and the run-event lines read from there.
@@ -94,6 +94,50 @@ function Avatar({ kind, icon }: Readonly<{ kind: string; icon?: string }>) {
   )
 }
 
+/**
+ * A message's own offered choices, rendered WITH it rather than only beside
+ * the composer (B2) — Telegram-style degrade: the LATEST message's choices
+ * stay real controls, any earlier message's degrade to a plain visible list,
+ * since acting on a superseded prompt would answer a question that moved on.
+ */
+function MessageChoices({ choices, interactive, onSelect }: Readonly<{
+  choices: Choice[]
+  interactive: boolean
+  onSelect?: (command: string) => void
+}>) {
+  if (interactive && onSelect) {
+    return (
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+        {choices.map((c) => (
+          <Button key={c.command} variant="secondary" size="sm" onClick={() => onSelect(`${c.command} `)}>
+            <PlainText>{c.label || c.command}</PlainText>
+          </Button>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <ul
+      aria-label="offered choices (no longer actionable)"
+      style={{
+        display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, padding: 0, listStyle: 'none',
+      }}
+    >
+      {choices.map((c) => (
+        <li
+          key={c.command}
+          style={{
+            fontSize: '0.82em', padding: '2px 8px', borderRadius: 10,
+            border: '1px solid var(--ao-border)', color: 'var(--ao-text-subtle)',
+          }}
+        >
+          <PlainText>{c.label || c.command}</PlainText>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** One run's events folded to a single summary line, expandable. */
 interface RunGroup {
   runId: string
@@ -166,12 +210,24 @@ export interface TimelineProps {
   /** A gap in the activity buffer — console-thread-live-cues: "Lost history is marked". */
   activityGap?: boolean
   extraItems?: TimelineExtraItem[]
+  /**
+   * Inserts a chosen offered choice's command, ready to send — wired only
+   * where a composer exists to insert it into. Absent (a read-only
+   * transcript, or the general feed) means every message's choices render,
+   * but none is ever interactive — B2's degrade applies to the WHOLE
+   * timeline, not just older messages, once there is nothing to act with.
+   */
+  onChoiceSelect?: (command: string) => void
 }
 
 export function Timeline({
-  messages, events, presence, readAt, pipelineIcon, pipelineName, activityGap, extraItems,
+  messages, events, presence, readAt, pipelineIcon, pipelineName, activityGap, extraItems, onChoiceSelect,
 }: Readonly<TimelineProps>) {
   const bodyMessages = messages.filter((m) => m.kind !== 'ack')
+  // The LATEST message overall (B2) — not the latest among those carrying
+  // choices. An older message's choices answer a prompt the conversation has
+  // moved past, so they degrade even if nothing newer offered any of its own.
+  const latestMessageId = messages.at(-1)?.id
   const runGroups = useMemo(() => groupRunEvents(events), [events])
   const watermark = readAt ? Date.parse(readAt) : undefined
   const firstUnreadId = useMemo(() => {
@@ -285,6 +341,13 @@ export function Timeline({
                   )}
                   {agentText(m.kind) ? <Blocks blocks={parse(m.text)} /> : <Markdown>{m.text}</Markdown>}
                   {m.payload && <Fold text={fence(m.payload)} label="Payload" />}
+                  {m.choices && m.choices.length > 0 && (
+                    <MessageChoices
+                      choices={m.choices}
+                      interactive={m.id === latestMessageId && Boolean(onChoiceSelect)}
+                      onSelect={onChoiceSelect}
+                    />
+                  )}
                 </div>
               </article>
             )

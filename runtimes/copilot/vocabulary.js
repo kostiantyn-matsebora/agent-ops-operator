@@ -27,7 +27,9 @@
 // The wire names are PINNED against SDK 1.0.11 / CLI 1.0.80 (2026-08-27) by
 // advertising `builtin:*` to a fake model and reading the request. They are a
 // vendor fact that moves, which is why the runtime also checks them against the
-// registered inventory at start and logs any target that is not there.
+// registered inventory, PER WORK UNIT, and logs any target that is not there.
+// An `mcp:` target is checked the same way, against the servers this run
+// actually connected — see `inventoryGaps` below.
 
 'use strict';
 
@@ -83,18 +85,22 @@ function parseMcpPattern(p) {
 // translate maps a composed allowlist into what the session is created with.
 //
 // Returns:
-//   available   — the `availableTools` filters, in first-seen order
-//   shell       — { all: true } | { prefixes: string[] } | null (no shell)
-//   builtins    — the agent-ops names that were granted (for the log line)
-//   mcpTools    — Set of `<server>-<tool>` wire names granted
-//   unmapped    — patterns nothing here understands (logged, withheld)
-//   refused     — per-server wildcards (logged, withheld, never widened)
+//   available     — the `availableTools` filters, in first-seen order
+//   shell         — { all: true } | { prefixes: string[] } | null (no shell)
+//   builtins      — the agent-ops names that were granted (for the log line)
+//   mcpTools      — Set of `<server>-<tool>` wire names granted
+//   mcpServerNames — Set of server names an `mcp:` grant named, read off the
+//                    parsed pattern rather than re-split from the wire name
+//                    (a tool name may itself contain a `-`)
+//   unmapped      — patterns nothing here understands (logged, withheld)
+//   refused       — per-server wildcards (logged, withheld, never widened)
 function translate(patterns) {
   const available = [];
   const seen = new Set();
   const add = (f) => { if (!seen.has(f)) { seen.add(f); available.push(f); } };
   const builtins = [];
   const mcpTools = new Set();
+  const mcpServerNames = new Set();
   const unmapped = [];
   const refused = [];
   let shell = null;
@@ -134,12 +140,27 @@ function translate(patterns) {
       const wire = `${mcp.server}-${mcp.tool}`;
       add(`mcp:${wire}`);
       mcpTools.add(wire);
+      mcpServerNames.add(mcp.server);
       continue;
     }
 
     unmapped.push(p);
   }
-  return { available, shell, builtins, mcpTools, unmapped, refused };
+  return { available, shell, builtins, mcpTools, mcpServerNames, unmapped, refused };
+}
+
+// inventoryGaps names a granted `mcp:` target whose server this run did not
+// actually connect to. A connected server is granted `tools: ['*']` in the
+// SDK's own MCP wire config (mcp.js), so per-TOOL existence is between the
+// server and the vendor — but a server that was never configured or failed
+// to translate can never provide what a grant names, and that gap must
+// surface rather than silently never calling the tool.
+function inventoryGaps(mcpServerNames, connectedServers) {
+  const gaps = [];
+  for (const name of mcpServerNames || []) {
+    if (!connectedServers.has(name)) gaps.push(`mcp server "${name}" named by a grant is not connected to this run`);
+  }
+  return gaps;
 }
 
 // commandAllowed decides one shell invocation against a shell grant.
@@ -191,4 +212,4 @@ function decide(grant, request) {
   }
 }
 
-module.exports = { BUILTIN, parseShellPattern, parseMcpPattern, translate, commandAllowed, decide };
+module.exports = { BUILTIN, parseShellPattern, parseMcpPattern, translate, commandAllowed, decide, inventoryGaps };

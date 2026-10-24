@@ -579,7 +579,13 @@ function ConversationThread({
     () => mergeEvents(detail.events ?? [], eventsFor(detail.conversation.name, live)),
     [detail.events, detail.conversation.name, live],
   )
-  const choices = messages.at(-1)?.choices
+  // The composer's own insert path — now ALSO how an interactive offered
+  // choice lands text, wired straight into `Timeline` (B2: a message's
+  // choices render WITH it, only the latest message's set interactive).
+  function insertIntoComposer(cmd: string) {
+    setText(cmd)
+    requestAnimationFrame(() => textRef.current?.focus())
+  }
 
   async function postMessage(toSend: string) {
     setBusy(true)
@@ -650,17 +656,13 @@ function ConversationThread({
         pipelineIcon={pipelineIcon}
         pipelineName={detail.conversation.pipeline}
         extraItems={extraItems}
+        onChoiceSelect={canWrite ? insertIntoComposer : undefined}
       />
       {canWrite && (
         <div style={{ padding: '10px 24px 14px', borderTop: '1px solid var(--ao-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <QuickChips
             canWrite={canWrite}
-            choices={choices}
             onRunCommand={(cmd) => void send(cmd)}
-            onInsertCommand={(cmd) => {
-              setText(cmd)
-              requestAnimationFrame(() => textRef.current?.focus())
-            }}
           />
           <div style={{ position: 'relative' }}>
             {commands && (

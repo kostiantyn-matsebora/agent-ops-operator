@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Badge, Tooltip } from '@patternfly/react-core'
 import {
-  ArchiveIcon, ExclamationCircleIcon, InProgressIcon, ListIcon, UserIcon,
+  ArchiveIcon, ExclamationCircleIcon, HashtagIcon, InProgressIcon, ListIcon, UserIcon,
 } from '@patternfly/react-icons'
 import { useInboxCounts, useVocabulary } from '../../api/hooks'
 import { Icon } from '../../components/Icon'
@@ -27,6 +27,11 @@ export type Scope =
   | { kind: 'errored' }
   | { kind: 'pipeline' | 'coordinator'; name: string }
   | { kind: 'closed' }
+  // Not a conversation filter — picking it navigates straight to the
+  // channel's general feed (GeneralFeedPane), same as clicking a row does
+  // for an ordinary conversation. ChatView.tsx intercepts it before it ever
+  // becomes the list's own query scope.
+  | { kind: 'general' }
 
 export function scopeKey(s: Scope): string {
   return 'name' in s ? `${s.kind}:${s.name}` : s.kind
@@ -134,6 +139,15 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
           alignItems: 'center', gap: 4, padding: '10px 0', overflowY: 'auto',
         }}
       >
+        <Tooltip content="General feed">
+          <IconButton
+            active={sameScope(activeScope, { kind: 'general' })}
+            onClick={() => onSelectScope({ kind: 'general' })}
+          >
+            <HashtagIcon />
+          </IconButton>
+        </Tooltip>
+        <Divider />
         {fixed.map((f) => (
           <Tooltip
             key={scopeKey(f.scope)}
@@ -187,6 +201,14 @@ export function Inbox({ activeScope, onSelectScope, collapsed, onToggleCollapsed
         overflowY: 'auto', height: '100%',
       }}
     >
+      <Section title="CHANNEL">
+        <Row
+          icon={<HashtagIcon />}
+          label="General feed"
+          active={sameScope(activeScope, { kind: 'general' })}
+          onClick={() => onSelectScope({ kind: 'general' })}
+        />
+      </Section>
       <Section title="INBOX">
         {fixed.map((f) => (
           <Row

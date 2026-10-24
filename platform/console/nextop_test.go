@@ -19,7 +19,7 @@ func TestNextOpTreats503AsNoOpRatherThanAnError(t *testing.T) {
 	t.Cleanup(srv.Close)
 	mgr := NewManager(srv.URL, "tok")
 
-	op, err := mgr.NextOp(context.Background(), "console", 0)
+	op, _, err := mgr.NextOp(context.Background(), "console", 0)
 	if err != nil {
 		t.Fatalf("503 must not surface as an error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestNextOpClosesTheConnectionOnANonLeaderAnswer(t *testing.T) {
 	t.Cleanup(srv.Close)
 	mgr := NewManager(srv.URL, "tok")
 
-	if _, err := mgr.NextOp(context.Background(), "console", 0); err != nil {
+	if _, _, err := mgr.NextOp(context.Background(), "console", 0); err != nil {
 		t.Fatalf("first poll: %v", err)
 	}
 
@@ -49,10 +49,46 @@ func TestNextOpClosesTheConnectionOnANonLeaderAnswer(t *testing.T) {
 		GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
 	}
 	ctx := httptrace.WithClientTrace(context.Background(), trace)
-	if _, err := mgr.NextOp(ctx, "console", 0); err != nil {
+	if _, _, err := mgr.NextOp(ctx, "console", 0); err != nil {
 		t.Fatalf("second poll: %v", err)
 	}
 	if reused {
 		t.Fatal("the poll after a 503 reused the same connection — a pin to a non-leader would never clear")
+	}
+}
+
+// ADA-6: the vocabulary revision rides every /channel/ops answer, 204 and 200
+// alike, because that is the only dial a manager has into an otherwise idle
+// adapter.
+func TestNextOpCarriesTheVocabularyRevisionOnEveryStatus(t *testing.T) {
+	status := http.StatusNoContent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(VocabularyRevisionHeader, "rev-7")
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	mgr := NewManager(srv.URL, "tok")
+
+	_, rev, err := mgr.NextOp(context.Background(), "console", 0)
+	if err != nil {
+		t.Fatalf("204 poll: %v", err)
+	}
+	if rev != "rev-7" {
+		t.Fatalf("revision not carried on 204: %q", rev)
+	}
+
+	status = http.StatusOK
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(VocabularyRevisionHeader, "rev-7")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"ensure-topic:1","channel":"console","kind":"ensure-topic"}`))
+	})
+	op, rev, err := mgr.NextOp(context.Background(), "console", 0)
+	if err != nil {
+		t.Fatalf("200 poll: %v", err)
+	}
+	if op == nil || rev != "rev-7" {
+		t.Fatalf("revision not carried on 200: op=%+v rev=%q", op, rev)
 	}
 }

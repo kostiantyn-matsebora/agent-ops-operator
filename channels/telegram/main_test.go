@@ -195,6 +195,49 @@ func TestAlreadyClosedTopicIsNotAFailure(t *testing.T) {
 	}
 }
 
+// TestThreadNotFoundIsNotAFailureForDelete pins the OTHER shape a redelivered
+// op gets: DeleteTopic's second call finds nothing left to delete at all,
+// since the first call already removed it — unlike CloseTopic, whose archived
+// topic still EXISTS (A10, A11).
+func TestThreadNotFoundIsNotAFailureForDelete(t *testing.T) {
+	if !threadNotFound(errors.New("telegram deleteForumTopic: Bad Request: message thread not found")) {
+		t.Fatal("a redelivered delete must tolerate the topic already being gone")
+	}
+	if threadNotFound(errors.New("telegram deleteForumTopic: Forbidden: bot is not a member")) {
+		t.Fatal("an unrelated failure must still be reported")
+	}
+}
+
+// TestCompletedCloseTopicIsNeverReplayed pins A9's second half: a COMPLETED
+// operation is answered again from memory on redelivery and never touches the
+// Bot API a second time — riding the retry rule is for calls an operation is
+// still MAKING, not for one the adapter already finished.
+func TestCompletedCloseTopicIsNeverReplayed(t *testing.T) {
+	var calls []string
+	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, strings.TrimPrefix(r.URL.Path, "/telegram/call/"))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer tg.Close()
+
+	tid := "42"
+	op := Op{ID: "close-1", Channel: "tg", Kind: "close-topic", ThreadID: &tid}
+	a := &adapter{
+		mgr: opAndFailingComplete(t, op), pace: newPacer(), completed: newCompletedOps(16),
+		channels: map[string]servedChannel{"tg": {
+			cfg: channelConfig{ChatID: "-100"}, gatewayURL: tg.URL, gatewayToken: "gw-token",
+		}},
+		reported: map[string]string{}, clients: map[string]*Telegram{},
+	}
+	a.completed.add("close-1", "") // already completed once
+
+	a.pollOnce(context.Background())
+
+	if len(calls) != 0 {
+		t.Fatalf("a completed close-topic must not touch the Bot API again, got %v", calls)
+	}
+}
+
 // delete-conversation: un-archive → post → re-archive.
 //
 // Every step is forced by the transport. A CLOSED forum topic refuses

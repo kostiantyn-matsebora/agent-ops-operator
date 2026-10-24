@@ -6,18 +6,18 @@ TBD - created by archiving change e2e-testing. Update Purpose after archive.
 ## Requirements
 
 ### Requirement: Adapter conformance is verified black-box, against the built binary
-A conformance suite SHALL exist that verifies an adapter implementation against
-the adapter contracts by running its **built binary** and speaking HTTP to it,
-with a fake manager standing in for the real one. The suite SHALL live in the
-manager's Go module (`platform/manager/`) — the one module with dependencies,
-so it adds none and is not discovered as a component.
+A conformance suite SHALL exist that verifies an adapter implementation
+against the adapter contracts by running its **built binary** and speaking
+HTTP to it, with a fake manager standing in for the real one.
 
-It SHALL NOT be a package that adapter modules import. Every adapter module is
-required to have no dependency outside its own directory, and a shared test
-package would put one into all of them. Driving the binary is also the more
-faithful form: it verifies the artifact that ships rather than a library the
-artifact happens to contain, which matches the fact that adapters are
-out-of-process by definition.
+- Lives in the manager's Go module (`platform/manager/`) — the one module
+  with dependencies, so it adds none and is not discovered as a component.
+- SHALL NOT be a package adapter modules import — every adapter module
+  requires no dependency outside its own directory, and a shared test
+  package would add one to all of them.
+- Drives the binary rather than a library — the more faithful form, since
+  it verifies the artifact that ships, matching that adapters are
+  out-of-process by definition.
 
 #### Scenario: No adapter module gains a dependency
 - **WHEN** the conformance suite is added and every adapter is covered by it
@@ -28,10 +28,12 @@ out-of-process by definition.
 - **THEN** it is covered by adding it to the suite's list of implementations under test, with no change to its own source
 
 ### Requirement: The suite needs no cluster, no network and no credentials
-The suite SHALL run with no Kubernetes cluster, no outbound network access and
-no third-party credentials, so that it can gate every pull request including
-those from forks. Adapters whose implementation reaches a third-party system
-SHALL be pointed at a local double through their configured endpoint.
+The suite SHALL run with no Kubernetes cluster, no outbound network access
+and no third-party credentials, so that it can gate every pull request
+including those from forks.
+
+Adapters whose implementation reaches a third-party system SHALL be pointed
+at a local double through their configured endpoint.
 
 #### Scenario: The suite gates a fork pull request
 - **WHEN** a pull request originates from a fork with no access to repository secrets
@@ -139,3 +141,74 @@ assumed.
   list omits
 - **THEN** the suite fails naming the module, rather than silently excluding
   it from the claim
+
+### Requirement: A thread-less send is visible or an explicit error
+
+The suite SHALL deliver a `send` operation carrying no `threadId` to each
+channel adapter under test, and SHALL accept exactly two outcomes:
+
+1. The message surfaces somewhere a person can see it, and the operation
+   completes successfully.
+2. The operation completes with an error naming why the adapter could not
+   present it.
+
+A success completion with NO externally observable effect SHALL fail the
+implementation. A message that nobody can see, reported as delivered, is the
+defect this assertion pins.
+
+#### Scenario: A visible fallback passes
+
+- **WHEN** an adapter presents the thread-less send on a general or fallback surface it exposes
+- **THEN** the suite observes the presentation and the successful completion, and the implementation passes
+
+#### Scenario: An invisible success fails
+
+- **WHEN** an adapter completes the thread-less send successfully with no observable effect
+- **THEN** the suite fails that implementation
+
+### Requirement: Delete-conversation semantics are exercised
+
+The suite SHALL deliver `delete-conversation` to each channel adapter under
+test, in both reachable states:
+
+| State | Expected completion |
+|---|---|
+| the operation names a thread the adapter holds | an observable transport effect, then completion |
+| the adapter cannot act — an unknown thread, or none | an ERROR completion, never silent success |
+
+The error branch pins the contract's rule that an adapter that cannot act
+SHALL complete the operation with an error.
+
+#### Scenario: A held thread is acted on
+
+- **WHEN** the fake manager delivers `delete-conversation` for a thread the adapter created earlier in the run
+- **THEN** the suite observes the adapter's transport effect and the operation's completion
+
+#### Scenario: Cannot act completes with an error
+
+- **WHEN** `delete-conversation` names a thread the adapter does not hold
+- **THEN** the adapter completes the operation with an error, and a silent success fails the implementation
+
+### Requirement: The retry budget is measured against the claim window
+
+The suite SHALL inject retryable backpressure — a `429` carrying a stated
+wait, and transient `5xx` responses — into one operation's transport calls,
+through the local double the adapter is already pointed at.
+
+It SHALL assert the adapter's total in-process time for that one operation
+stays strictly below the claim window, completing as success or failure before
+the window ends.
+
+The window judged against SHALL be the `reclaimAfterSeconds` the fake manager
+stated on the claim. An adapter that ignores the field SHALL be judged against
+the contract's documented default reclaim interval instead.
+
+#### Scenario: Absorbed backpressure completes inside the window
+
+- **WHEN** injected `429` and `5xx` responses clear after a few retries
+- **THEN** the operation completes successfully, and its total elapsed time is below the stated window
+
+#### Scenario: Unending backpressure is abandoned in time
+
+- **WHEN** the injected backpressure never clears
+- **THEN** the adapter reports the operation failed before the window ends, so a second claimant never overlaps the first

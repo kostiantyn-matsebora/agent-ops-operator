@@ -54,6 +54,13 @@ type Op struct {
 // wire, so there is nothing to version.
 const ContractVersion = "2"
 
+// VocabularyRevisionHeader carries the current vocabulary revision on every
+// /channel/ops long-poll response — the 200 that delivers an op, the 204 and
+// the 503 alike (ADA-6). A command-menu surface learns of a vocabulary change
+// from THIS, never a timer: the manager has no other way to dial an otherwise
+// idle adapter.
+const VocabularyRevisionHeader = "X-Agentops-Vocabulary-Revision"
+
 // OpMessage is one SEMANTIC outbound message: the manager composes meaning, each
 // adapter composes presentation. The console renders in the browser, so it
 // keeps the fields STRUCTURED all the way to the transcript rather than
@@ -228,11 +235,25 @@ func (m *Manager) do(ctx context.Context, method, path string, in, out any) (int
 }
 
 // NextOp long-polls for the next outbound op; nil when none arrived in time.
-func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (*Op, error) {
-	var op Op
-	code, err := m.do(ctx, "GET",
-		fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
-			url.QueryEscape(adapter), ContractVersion, waitSeconds), nil, &op)
+//
+// Also returns the vocabulary revision the response carried — read directly
+// off the HTTP response rather than through `do`, because it rides every
+// status this endpoint can answer (200, 204, 503 alike) and `do` discards
+// headers once it has decoded a body.
+func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (*Op, string, error) {
+	path := fmt.Sprintf("/channel/ops?adapter=%s&contract=%s&wait=%d",
+		url.QueryEscape(adapter), ContractVersion, waitSeconds)
+	req, err := http.NewRequestWithContext(ctx, "GET", m.BaseURL+path, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+m.Token)
+	resp, err := m.HTTP.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	revision := resp.Header.Get(VocabularyRevisionHeader)
 	// durable-chat-ops-broker: 503 means the replica that answered is not the
 	// current leader and cannot safely claim an op on this adapter's behalf —
 	// never a failure to surface or back off from, exactly like an ordinary
@@ -249,17 +270,22 @@ func (m *Manager) NextOp(ctx context.Context, adapter string, waitSeconds int) (
 	// the leader's queue holding one the whole time. Closing the idle
 	// connection here is what makes the NEXT poll dial fresh and gives it a
 	// new chance to land on the leader.
-	if code == http.StatusServiceUnavailable {
+	if resp.StatusCode == http.StatusServiceUnavailable {
 		m.HTTP.CloseIdleConnections()
-		return nil, nil
+		return nil, revision, nil
 	}
-	if err != nil {
-		return nil, err
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, revision, nil
 	}
-	if code == 204 {
-		return nil, nil
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, revision, fmt.Errorf("GET %s: %d %s", path, resp.StatusCode, bytes.TrimSpace(b))
 	}
-	return &op, nil
+	var op Op
+	if err := json.NewDecoder(resp.Body).Decode(&op); err != nil {
+		return nil, revision, err
+	}
+	return &op, revision, nil
 }
 
 // CompleteOp reports an op result (threadID for ensure-topic; opErr on failure).

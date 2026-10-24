@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -113,12 +115,23 @@ func (m *MCPClient) connectOne(ctx context.Context, name string, srv mcpServer) 
 	var transport mcp.Transport
 	switch {
 	case srv.URL != "":
-		transport = &mcp.StreamableClientTransport{Endpoint: srv.URL, HTTPClient: newHTTPClient(0)}
+		httpClient := newHTTPClient(0)
+		// The parsed Headers must actually reach the wire — an auth header
+		// that was read from mcp.json but never attached makes every
+		// authenticated HTTP server (aops included) fail opaquely.
+		if len(srv.Headers) > 0 {
+			httpClient.Transport = &headerRoundTripper{headers: srv.Headers, base: httpClient.Transport}
+		}
+		transport = &mcp.StreamableClientTransport{Endpoint: srv.URL, HTTPClient: httpClient}
 	case srv.Command != "":
 		cmd := exec.Command(srv.Command, srv.Args...)
 		cmd.Env = os.Environ()
 		for k, v := range srv.Env {
-			cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+			expanded, err := expandEnvStrict(v)
+			if err != nil {
+				return nil, fmt.Errorf("env %s: %w", k, err)
+			}
+			cmd.Env = append(cmd.Env, k+"="+expanded)
 		}
 		cmd.Stderr = os.Stderr
 		transport = &mcp.CommandTransport{Command: cmd}
@@ -126,6 +139,51 @@ func (m *MCPClient) connectOne(ctx context.Context, name string, srv mcpServer) 
 		return nil, fmt.Errorf("neither url nor command")
 	}
 	return client.Connect(ctx, transport, nil)
+}
+
+// headerRoundTripper attaches fixed headers to every request a session's
+// HTTP client makes — the only way to reach a StreamableClientTransport's
+// wire, since it takes an *http.Client, not a header map.
+type headerRoundTripper struct {
+	headers map[string]string
+	base    http.RoundTripper
+}
+
+func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	for k, v := range h.headers {
+		req.Header.Set(k, v)
+	}
+	base := h.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
+}
+
+// envVarRef matches exactly the ${VAR} form the mcp.json comment documents —
+// a bare $VAR is not expanded, matching the narrower, explicit form.
+var envVarRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandEnvStrict resolves every ${VAR} reference against the pod's own
+// environment, failing the WHOLE value — and so the one server using it —
+// the moment any referenced variable is unset. os.ExpandEnv's silent "" for
+// an unset variable would start that server on a wrong, unflagged value
+// (an empty token header, an empty argument) instead of refusing it (O8).
+func expandEnvStrict(s string) (string, error) {
+	var missing []string
+	out := envVarRef.ReplaceAllStringFunc(s, func(m string) string {
+		name := envVarRef.FindStringSubmatch(m)[1]
+		if v, ok := os.LookupEnv(name); ok {
+			return v
+		}
+		missing = append(missing, name)
+		return m
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("unset variable(s) referenced: %s", strings.Join(missing, ", "))
+	}
+	return out, nil
 }
 
 func (m *MCPClient) call(ctx context.Context, s *mcp.ClientSession, tool string, raw json.RawMessage) (string, bool, error) {

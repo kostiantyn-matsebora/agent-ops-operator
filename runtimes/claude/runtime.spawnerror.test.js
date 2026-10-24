@@ -27,6 +27,8 @@ const { runClaude } = require('./runtime');
 test('a CLI binary that cannot be resolved fails the run with the spawn error, rather than throwing', async () => {
   const out = await runClaude({ promptText: 'hi', runId: 'r1' });
   assert.strictEqual(out.status, 'failed');
-  assert.strictEqual(out.exitCode, -1);
   assert.match(out.result, /^spawn: /);
+  // C6: no process ever actually ran (the spawn itself failed before exec),
+  // so exitCode is OMITTED rather than reported as a stand-in like -1.
+  assert.strictEqual('exitCode' in out, false);
 });

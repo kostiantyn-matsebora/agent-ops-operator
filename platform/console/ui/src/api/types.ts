@@ -766,6 +766,22 @@ export interface Choice {
   command: string
 }
 
+/**
+ * The channel's general feed — `GET /api/channel/feed` — every thread-less
+ * send the adapter parked on the `channel:<name>` pseudo-thread (a manager
+ * notice with no conversation behind it, like an `/agents` reply). Mirrors
+ * Telegram's general topic: just another thread, read with the SAME
+ * `Message` shape and the SAME rendering components as a conversation's own
+ * transcript (B1, UI half).
+ */
+export interface ChannelFeed {
+  /** The served channel name, empty with none served yet (a fresh console
+   * before the first refresh) — the feed degrades to empty rather than
+   * erroring. */
+  channel: string
+  messages: Message[]
+}
+
 export interface ConversationDetail {
   conversation: ConversationSummary
   object: K8sObject

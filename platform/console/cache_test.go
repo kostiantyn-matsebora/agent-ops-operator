@@ -25,6 +25,11 @@ type fakeSource struct {
 	watches   []watchScript
 	listCalls int
 	watchArgs []string // resourceVersion passed to each Watch
+
+	// gets answers Get by "<kind>/<name>", for tests exercising a live
+	// cache-miss fetch. Anything not present answers a 404, matching the real
+	// client's apiError shape.
+	gets map[string]*Object
 }
 
 type listResult struct {
@@ -74,6 +79,15 @@ func (f *fakeSource) Watch(ctx context.Context, kind, rv string, fn func(string,
 		return ctx.Err()
 	}
 	return w.err
+}
+
+func (f *fakeSource) Get(ctx context.Context, kind, name string) (*Object, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if obj, ok := f.gets[kind+"/"+name]; ok {
+		return obj, nil
+	}
+	return nil, &apiError{Code: http.StatusNotFound, Body: kind + " " + name + " not found"}
 }
 
 func (f *fakeSource) watchStarts() []string {
