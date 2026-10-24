@@ -39,8 +39,9 @@ RBAC grant here is chart-rendered from values, never hand-authored YAML.
 ## Impact
 
 **Code**:
-- `chart/charts/kubernetes/templates/` (the MCP server's `Role`) — compose the
-  new values list onto the rendered rule set, with the verb allowlist check.
+- `chart/charts/kubernetes/templates/` (the MCP server's `ClusterRole`) —
+  compose the new values list onto the rendered rule set, with the verb
+  allowlist check.
 - `chart/charts/kubernetes/values.yaml` — new `mcpServers.rbac.extraReadRules`
   key, default `[]`.
 - `chart/charts/kubernetes/` render tests — new cases for the extension, the
