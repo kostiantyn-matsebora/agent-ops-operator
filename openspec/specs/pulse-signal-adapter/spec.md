@@ -218,7 +218,7 @@ identity — using one of two strategies selected by the served source's
 `spec.config.correlationStrategy`:
 
 - `"id+startTime"` (the default, used when the field is absent, empty, or
-  any value other than `"id"`): the resource, the alert id, AND the
+  any value other than `"id"`, the last logged as a warning): the resource, the alert id, AND the
   alert's start time. Pulse's own alert id can be reused when the same
   condition fires again later as a new occurrence, so start time SHALL be
   included to keep a later re-fire from colliding with an earlier,
@@ -264,7 +264,7 @@ Cooldown and routing stay manager-side, keyed on the resulting id.
 
 #### Scenario: An unrecognized strategy value falls back to the default
 - **WHEN** a source sets `spec.config.correlationStrategy` to a value other than `"id"` or `"id+startTime"`
-- **THEN** the adapter derives `initiationId` as if `"id+startTime"` had been set
+- **THEN** the adapter derives `initiationId` as if `"id+startTime"` had been set, and logs a warning naming the source and the unrecognized value
 
 #### Scenario: The no-ID fallback ignores correlationStrategy
 - **WHEN** a webhook body carries no Pulse alert id, regardless of the source's `correlationStrategy`

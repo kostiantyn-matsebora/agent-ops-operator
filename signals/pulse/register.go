@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -195,6 +196,10 @@ func (a *adapter) reconcileRegistration(ctx context.Context, info SourceInfo) (s
 		raw = cfg.CorrelationStrategy
 	}
 	correlationStrategy = normalizeCorrelationStrategy(raw)
+	if raw != "" && raw != correlationStrategyID && raw != correlationStrategyIDStartTime {
+		log.Printf("source %q: unrecognized correlationStrategy %q, using %q",
+			sanitizeLogText(info.Name), sanitizeLogText(raw), correlationStrategyIDStartTime)
+	}
 	if cfg == nil || cfg.BaseURL == "" || cfg.WebhookURL == "" {
 		a.report(ctx, info.Name, "RegistrationNotConfigured",
 			"served by signal-pulse — set spec.config.baseUrl and spec.config.webhookUrl (and a credentialsSecretRef "+
