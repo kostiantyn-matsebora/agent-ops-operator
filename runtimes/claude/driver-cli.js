@@ -295,7 +295,8 @@ function handleStreamLine(line, st, { p, calls, watch, allowed }) {
 async function spawnClaude(args, unit, isResume, allowed) {
   const attempt = (argv) =>
     new Promise((resolve) => {
-      const p = spawn(CLAUDE_BIN, argv, { cwd: WORKSPACE, env: unitEnv(unit), stdio: ['ignore', 'pipe', 'pipe'] });
+      // argv-array spawn, no shell: the unit's text is an argument VALUE, never a command.
+      const p = spawn(CLAUDE_BIN, argv, { cwd: WORKSPACE, env: unitEnv(unit), stdio: ['ignore', 'pipe', 'pipe'] }); // NOSONAR
       let buf = '', stderr = '';
       // Run state on one object so the line handler can sit outside this closure.
       const st = { sessionId: null, result: '', brief: '', spin: null, kill: null };

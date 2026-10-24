@@ -319,24 +319,26 @@ function abortSpinningTurn(sdkQuery, spinVerdict) {
   sdkQuery.interrupt().catch(() => {});
 }
 
+// foldTurnEvent folds one event into the turn's state `t`.
+function foldTurnEvent(ev, t, { sdkQuery, watch, calls }) {
+  if (ev?.session_id && !t.sessionId) t.sessionId = ev.session_id;
+  if (ev?.type === 'system' && ev.subtype === 'init') Object.assign(t, readInit(ev));
+  calls.note(ev);
+  const txt = formatSdkEvent(ev);
+  if (txt) process.stdout.write(txt);
+  if (ev?.type === 'assistant' && !t.spinVerdict) {
+    t.spinVerdict = findSpinVerdict(ev, watch);
+    if (t.spinVerdict) abortSpinningTurn(sdkQuery, t.spinVerdict);
+  }
+}
+
 async function consumeTurn(sdkQuery, watch, calls) {
-  let sessionId = null;
-  let spinVerdict = null;
-  let initTools = null;
-  let initMcpServers = null;
+  const t = { sessionId: null, spinVerdict: null, initTools: null, initMcpServers: null };
   for (;;) {
     const { value: ev, done } = await sdkQuery.next(); // NOSONAR
-    if (done) return { endedUnexpectedly: true, sessionId, initTools, initMcpServers };
-    if (ev?.session_id && !sessionId) sessionId = ev.session_id;
-    if (ev?.type === 'system' && ev.subtype === 'init') ({ initTools, initMcpServers } = readInit(ev));
-    calls.note(ev);
-    const txt = formatSdkEvent(ev);
-    if (txt) process.stdout.write(txt);
-    if (ev?.type === 'assistant' && !spinVerdict) {
-      spinVerdict = findSpinVerdict(ev, watch);
-      if (spinVerdict) abortSpinningTurn(sdkQuery, spinVerdict);
-    }
-    if (ev?.type === 'result') return { result: ev, sessionId, spinVerdict, initTools, initMcpServers };
+    if (done) return { endedUnexpectedly: true, sessionId: t.sessionId, initTools: t.initTools, initMcpServers: t.initMcpServers };
+    foldTurnEvent(ev, t, { sdkQuery, watch, calls });
+    if (ev?.type === 'result') return { result: ev, ...t };
   }
 }
 
