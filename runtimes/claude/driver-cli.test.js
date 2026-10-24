@@ -1,12 +1,13 @@
 // cd runtime-claude && node --test
 //
-// runtime.js self-executes its long-poll loop as a bottom-of-file IIFE and
-// exits the process when CONTROL_URL/CONVO_ID are unset — both guarded on
-// `require.main === module` (see runtime.js) so this suite can `require()`
-// the module for its pure/subprocess-driving pieces without either firing.
-// Every env var runtime.js reads is captured into a module-level const at
-// require time, so each distinct environment this suite needs gets its own
-// test FILE (node's test runner gives every file its own process).
+// driver-cli.js (the CLI driver, selected by RUNTIME_CLAUDE_DRIVER=cli — see
+// runtime.js, the thin entrypoint) exposes its long-poll loop and startup
+// validation through an exported start(), never run by requiring this
+// module — so this suite can `require()` it for its pure/subprocess-driving
+// pieces without either firing. Every env var driver-cli.js reads is
+// captured into a module-level const at require time, so each distinct
+// environment this suite needs gets its own test FILE (node's test runner
+// gives every file its own process).
 'use strict';
 
 const test = require('node:test');
@@ -29,7 +30,7 @@ const {
   gitEnv, repoURL, run, clearDir, syncRepo, formatEvent,
   checkContextPresence, sessionFileExists, contextIdOf, strip, extractBrief, SESSIONS_DIR,
   pollNextUnit, reportDone, isDefinitiveRejection,
-} = require('./runtime');
+} = require('./driver-cli');
 
 // Stubs the built-in global `fetch` for the duration of one test and
 // restores it after, even on failure -- the same shape `t.mock` would give,

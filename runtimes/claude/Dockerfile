@@ -73,7 +73,32 @@ RUN echo "apt refresh: ${APT_REFRESH}" && \
 # the same category error as bundling an MCP server. Need one? Derive an image
 # (three lines, and its own version pin becomes yours to own against your
 # cluster, same as this one) and point AgentRuntime.spec.image at it; see README.
-COPY runtime.js tools.js spin.js report.js /srv/
+COPY runtime.js driver-cli.js driver-sdk.js tools.js spin.js report.js /srv/
+
+# driver-sdk.js `require()`s the Agent SDK as an ordinary node module, unlike
+# claude-code above, which driver-cli.js only ever SPAWNS as a subprocess off
+# PATH. A global install (like the one above) is never on Node's require()
+# resolution path, so this one installs LOCALLY into /srv instead, where
+# Node's own node_modules walk finds it. No package.json exists here before
+# this runs -- npm creates a minimal one, which is fine: it is build output,
+# not a tracked file.
+#
+# --ignore-scripts is safe here too: the package ships no lifecycle scripts
+# to skip. The bundled claude-code binary driver-sdk.js never spawns
+# directly -- the SDK does, internally -- arrives via an ordinary
+# optionalDependency, which --ignore-scripts does not touch (it only skips
+# lifecycle SCRIPTS, never dependency resolution) -- verified locally: a
+# plain `npm install --ignore-scripts` of this package alone still pulls its
+# matching `@anthropic-ai/claude-agent-sdk-<platform>` optional dependency and
+# leaves a working `claude` binary inside it. The three peers
+# (`@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod`) are
+# `peerDependencies` the SDK itself declares -- installed explicitly here
+# because this directory has no root project to resolve them into otherwise.
+WORKDIR /srv
+RUN npm install --ignore-scripts --no-audit --no-fund \
+      @anthropic-ai/claude-agent-sdk@0.3.310 @anthropic-ai/sdk@1.3.0 \
+      @modelcontextprotocol/sdk@1.32.2 zod@4.6.7 && \
+    npm cache clean --force
 
 ENV HOME=/data/context
 USER node

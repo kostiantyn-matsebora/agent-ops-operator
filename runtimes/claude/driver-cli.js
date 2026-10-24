@@ -1,0 +1,616 @@
+// agentops claude agent runtime — the CLI driver: one `claude` CLI spawn per
+// work unit, implementing the AgentRuntime /work contract:
+//   1. long-poll  GET  $CONTROL_URL/work?convo=$CONVO_ID&pod=$POD_NAME&wait=25
+//   2. run claude against the profile's repo checkout, streaming a formatted
+//      transcript to STDOUT (pod logs / VictoriaLogs)
+//   3. report     POST $CONTROL_URL/work/done
+//   4. exit 0 after RUNTIME_IDLE_TTL_M minutes without work
+//
+// Selected by RUNTIME_CLAUDE_DRIVER=cli — runtime.js is the thin entrypoint
+// that reads that var and chooses between this driver and the `sdk` one
+// (driver-sdk.js, which holds a session open per pod instead). This file is
+// never the process entry point itself; runtime.js calls start() below.
+//
+// The repository is checked out at /data/workspace — the SAME path the
+// pre-operator claude-runner used, so Claude session files (keyed by cwd under
+// $HOME/.claude/projects/-data-workspace/) resume seamlessly across systems.
+
+'use strict';
+
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools } = require('./tools');
+const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
+const { newCallRecorder } = require('./report');
+
+const CONTROL_URL = process.env.CONTROL_URL || '';
+const CONVO_ID = process.env.CONVO_ID || '';
+const POD_NAME = process.env.POD_NAME || '';
+const REPO_URL = process.env.REPO_URL || '';
+const REPO_REF = process.env.REPO_REF || 'master';
+const GIT_AUTH_TYPE = process.env.GIT_AUTH_TYPE || '';
+const GIT_SSH_KEY = process.env.GIT_SSH_KEY || '';
+const GIT_TOKEN = process.env.GIT_TOKEN || '';
+const TTL_MS = (Number.parseInt(process.env.RUNTIME_IDLE_TTL_M || '10', 10)) * 60 * 1000;
+const WORKSPACE = process.env.WORKSPACE || '/data/workspace';
+const MCP_CONFIG = process.env.MCP_CONFIG || '/etc/agentops/mcp.json';
+// How many identical unparsable tool calls in a row end a run. 0 disables the
+// breaker entirely, which is a decision an install can make and this file will
+// not make for it.
+const SPIN_LIMIT = (() => {
+  const v = Number.parseInt(process.env.RUNTIME_UNPARSED_REPEAT_LIMIT || '', 10);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_LIMIT;
+})();
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const CLAUDE_BIN = resolveBin('claude');
+
+function gitEnv() {
+  const env = { ...process.env };
+  if (GIT_AUTH_TYPE === 'ssh' && GIT_SSH_KEY) {
+    env.GIT_SSH_COMMAND = `ssh -i ${GIT_SSH_KEY} -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=accept-new`;
+  }
+  return env;
+}
+
+function repoURL() {
+  if (GIT_AUTH_TYPE === 'https' && GIT_TOKEN && REPO_URL.startsWith('https://')) {
+    return REPO_URL.replace('https://', `https://x-access-token:${GIT_TOKEN}@`);
+  }
+  return REPO_URL;
+}
+
+function run(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    p.stdout.on('data', (c) => { out += c; });
+    p.stderr.on('data', (c) => { err += c; });
+    p.on('error', (e) => resolve({ code: -1, out, err: String(e.message) }));
+    p.on('close', (code) => resolve({ code, out, err }));
+  });
+}
+
+// WORKSPACE may itself be a volume mount point — never remove the directory,
+// only its contents.
+function clearDir(dir) {
+  for (const e of fs.readdirSync(dir)) {
+    fs.rmSync(path.join(dir, e), { recursive: true, force: true });
+  }
+}
+
+async function syncRepo() {
+  if (!REPO_URL) return;
+  if (!fs.existsSync(path.join(WORKSPACE, '.git'))) {
+    fs.mkdirSync(WORKSPACE, { recursive: true });
+    clearDir(WORKSPACE);
+    const r = await run('git', ['clone', '--depth', '1', '-b', REPO_REF, repoURL(), '.'], { cwd: WORKSPACE, env: gitEnv() });
+    if (r.code !== 0) throw new Error(`git clone: ${r.err.slice(-400)}`);
+  } else {
+    const f = await run('git', ['fetch', '--depth', '1', 'origin', REPO_REF], { cwd: WORKSPACE, env: gitEnv() });
+    if (f.code !== 0) throw new Error(`git fetch: ${f.err.slice(-400)}`);
+    const rs = await run('git', ['reset', '--hard', `origin/${REPO_REF}`], { cwd: WORKSPACE, env: gitEnv() });
+    if (rs.code !== 0) throw new Error(`git reset: ${rs.err.slice(-400)}`);
+  }
+}
+
+// MAX_BRIEF mirrors ConversationStatus.Brief's MaxLength — bounding here means
+// a value this runtime reports never gets silently truncated by the manager
+// mid-sentence.
+const MAX_BRIEF = 512;
+
+// extractBrief pulls a standalone `<brief>...</brief>` block (format.md) out of
+// the agent's final text, mirroring the block grammar's own recognition rule —
+// the tag alone on its own line — closely enough for this one tag, without
+// pulling in the full parser channels/telegram and the console each carry for
+// the tags a reader actually sees. `brief` is a CONTRACT FIELD, never a
+// displayed section, so it is removed from what becomes `result`.
+function extractBrief(text) {
+  const m = /^<brief>[ \t]*\r?\n([\s\S]*?)\r?\n^<\/brief>[ \t]*(?:\r?\n)*/m.exec(text);
+  if (!m) return { text, brief: '' };
+  const brief = m[1].trim().replace(/\s+/g, ' ').slice(0, MAX_BRIEF);
+  return { text: (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim(), brief };
+}
+
+// Turn one stream-json event into a compact human-readable log line.
+function formatEvent(ev, rawLine) {
+  try {
+    if (ev.type === 'system' && ev.subtype === 'init') {
+      return `[init] model=${ev.model} tools=${(ev.tools || []).length} mcp=${(ev.mcp_servers || []).map((s) => `${s.name}:${s.status}`).join(',')}\n`;
+    }
+    if (ev.type === 'assistant') {
+      return (ev.message?.content || []).map((b) => {
+        if (b.type === 'text') return `[claude] ${b.text}\n`;
+        if (b.type === 'tool_use') {
+          const input = JSON.stringify(b.input || {});
+          return `[tool] ${b.name} ${input.length > 160 ? input.slice(0, 160) + '…' : input}\n`;
+        }
+        return '';
+      }).join('');
+    }
+    if (ev.type === 'result') {
+      return `\n=== RESULT (${ev.subtype}, ${ev.num_turns} turns, ${Math.round((ev.duration_ms || 0) / 1000)}s) ===\n${ev.result || ''}\n`;
+    }
+    return '';
+  } catch {
+    return rawLine + '\n';
+  }
+}
+
+function runClaude(unit) {
+  return new Promise((resolve) => {
+    let prompt = unit.promptText || '';
+    if (!prompt && unit.promptFile) {
+      try {
+        const file = safeJoin(WORKSPACE, unit.promptFile);
+        if (!file) throw new Error('promptFile escapes the workspace');
+        prompt = fs.readFileSync(file, 'utf8');
+        for (const [k, v] of Object.entries(unit.promptVars || {})) {
+          prompt = prompt.replaceAll(`{{${k}}}`, v);
+        }
+      } catch (e) {
+        // No process ever ran — exitCode is OMITTED rather than a stand-in
+        // like -1, which would read as a real (if unusual) process exit.
+        return resolve({ status: 'failed', result: `prompt read: ${e.message}` });
+      }
+    }
+    if (!prompt) return resolve({ status: 'failed', result: 'empty prompt' });
+
+    // The work unit carries the WIRING's tools and the mode; the agent's own
+    // definition carries the rest, and only this process can read it.
+    const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
+    const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
+
+    // --allowedTools is passed ALWAYS, even empty: nothing is substituted for
+    // an allowlist nobody declared. --permission-mode dontAsk makes an
+    // unlisted tool a denial the model is told about, instead of a permission
+    // prompt — in a pod there is nobody to answer one, so it would hang until
+    // the idle TTL and report nothing.
+    //
+    // Note the composition happens HERE and not via --agent: passing --agent
+    // would re-apply the definition's list as an availability intersection,
+    // which silently defeats overwrite and drops any merged tool the agent did
+    // not declare. The lane templates name the agent in the prompt instead.
+    // Inline role text from a repo-less profile. APPENDED, so the runtime's own
+    // system prompt survives — and it says nothing about tools: the allowlist
+    // above is the only permission authority. Argv shape (including the
+    // jssecurity:S6350 fix) lives in tools.js's buildClaudeArgs, asserted
+    // directly there.
+    const args = buildClaudeArgs({
+      contextId: contextIdOf(unit),
+      systemPrompt: unit.systemPrompt,
+      allowed,
+      maxTurns: unit.maxTurns,
+      mcpConfig: MCP_CONFIG,
+      prompt,
+    });
+    console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextIdOf(unit) ? ' continue=' + sanitizeLog(contextIdOf(unit)) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
+    console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
+    if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
+    resolve(spawnClaude(args, unit, Boolean(contextIdOf(unit)), allowed));
+  });
+}
+
+// spawnClaude runs one `claude` invocation.
+//
+// A RESUME whose session no longer exists is retried ONCE without --resume.
+// Sessions live in $HOME/.claude/projects/-data-workspace/, so they vanish
+// whenever /data/context does not outlive the pod — an install without a context PVC,
+// an eviction, a node move. Losing the thread's context is a real cost; failing
+// the reply outright is a worse one, and it fails with an EMPTY result because
+// claude never reaches its result event, so the person who typed sees "failed"
+// and no reason at all.
+//
+// Only a resume is retried, and only once: an ordinary agent failure must not be
+// silently run twice, which would double the cost and could repeat a mutation.
+
+// resumeSucceeded decides whether one attempted resume actually recovered
+// the context — the vendor's own signal (a session id, any result text) or
+// at minimum no explicit "not found" on stderr. Shared between the first
+// attempt and the one retry, so each is judged by what it actually did,
+// never by which attempt number it was.
+function resumeSucceeded(out) {
+  if (out.status === 'succeeded') return true;
+  // A session that was found emits session_id early, even on a later
+  // failure. No session id AND no result is what a missing session looks
+  // like; the stderr text is the direct confirmation when the CLI gives one.
+  const lost = !out.sessionId && !out.result;
+  const saysSoOnStderr = /no conversation found|session .* not found|could not find session/i.test(out.stderr || '');
+  return !lost && !saysSoOnStderr;
+}
+
+// storageOutageReport is the shared shape of a resume failure the manager
+// must read as "no continuity", never as a quiet substitute for one — see
+// `continuity: 'unavailable'` in docs/contracts/runtime.md.
+function storageOutageReport(first, reason, resultText) {
+  return strip({
+    status: 'failed',
+    exitCode: first.exitCode ?? 1,
+    // The handle is still surrendered when the CLI produced one: continuing a
+    // partial context beats starting over.
+    sessionId: first.sessionId,
+    continuity: 'unavailable',
+    continuityReason: reason,
+    result: resultText,
+    stderr: first.stderr,
+  });
+}
+
+async function spawnClaude(args, unit, isResume, allowed) {
+  const attempt = (argv) =>
+    new Promise((resolve) => {
+      const p = spawn(CLAUDE_BIN, argv, {
+        cwd: WORKSPACE,
+        env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let buf = '', sessionId = null, result = '', brief = '', stderr = '';
+      const calls = newCallRecorder();
+      // Tool calls the model could not FORM. Nothing executes them, so a run
+      // that only makes those looks busy and answers from whatever it already
+      // had — see spin.js.
+      const watch = newSpinWatch(SPIN_LIMIT);
+      let spin = null, kill = null;
+      p.stdout.on('data', (c) => {
+        buf += c;
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          let ev;
+          try { ev = JSON.parse(line); } catch { console.log(line); continue; }
+          if (ev.session_id && !sessionId) sessionId = ev.session_id;
+          if (ev.type === 'result') {
+            // Extracted BEFORE the 2000-char cap: a brief written late in a
+            // long answer must not be sliced away with the rest.
+            const extracted = extractBrief(ev.result || '');
+            result = extracted.text.slice(0, 2000);
+            brief = extracted.brief;
+          }
+          if (ev.type === 'system' && ev.subtype === 'init') {
+            // The vendor's own account of what it actually has — cross-check
+            // it against what we asked it to grant, once, right here: it is
+            // the only point in this process that ever sees it.
+            logUngrantedTools(allowed, ev.tools, ev.mcp_servers, (m) => console.log(sanitizeLog(m)));
+          }
+          calls.note(ev);
+          const txt = formatEvent(ev, line);
+          if (txt) process.stdout.write(txt);
+          if (ev.type === 'assistant' && !spin) {
+            for (const b of ev.message?.content || []) {
+              if (b.type !== 'tool_use') continue;
+              const verdict = noteToolUse(watch, b.name, b.input);
+              if (!verdict) continue;
+              spin = verdict;
+              console.log(
+                `[runtime] ${verdict.name} called ${verdict.repeats}x with the same unparsable arguments — ` +
+                  `nothing ran, ending the run: ${verdict.raw.slice(0, 160)}`,
+              );
+              // TERM first, KILL only if it does not go: an outright kill is
+              // a last resort, and a CLI that ignores TERM must still not be
+              // able to hold the pod.
+              p.kill('SIGTERM');
+              kill = setTimeout(() => p.kill('SIGKILL'), 5000);
+              break;
+            }
+          }
+        }
+      });
+      p.stderr.on('data', (c) => {
+        stderr += c;
+        process.stderr.write(c);
+      });
+      // The process never started (ENOENT, EACCES before exec) — no
+      // exitCode, exactly like the prompt-read failures above: there is no
+      // process exit to report.
+      p.on('error', (e) => resolve({ status: 'failed', sessionId, result: `spawn: ${e.message}`, stderr, ...calls.report() }));
+      p.on('close', (code) => {
+        if (kill) clearTimeout(kill);
+        if (spin) {
+          // FAILED, and said plainly. The alternative is what happened before
+          // this existed: a run reported success while every tool call in it
+          // had been discarded unread.
+          return resolve({ status: 'failed', exitCode: code ?? -1, sessionId, result: spinMessage(spin), stderr, ...calls.report(), ...(brief ? { brief } : {}) });
+        }
+        if (watch.total > 0) {
+          // Recovered on its own, which is the common case — by ABANDONING the
+          // tool and answering from what the session already held, twice out of
+          // twice observed. The log line is for whoever operates this; the
+          // notice on the answer is for whoever asked, because the answer does
+          // not say it.
+          console.log(`[runtime] ${watch.total} tool call(s) never ran — the arguments were not valid JSON`);
+          const notice = discardedNotice(watch);
+          if (notice && result) result = `${result}\n\n${notice}`;
+        }
+        resolve({ status: code === 0 ? 'succeeded' : 'failed', exitCode: code, sessionId, result, stderr, ...calls.report(), ...(brief ? { brief } : {}) });
+      });
+    });
+
+  const first = await attempt(args);
+  if (!isResume) return strip({ ...first, continuity: 'new' });
+  if (resumeSucceeded(first)) return strip({ ...first, continuity: 'continued' });
+
+  // GONE, NOT ANSWERING, or UNREADABLE? The three look identical from one
+  // attempt and must not be treated alike: a shared filesystem can fail to
+  // answer for seconds — a restarting share-manager, a stale handle after
+  // this pod moved, a listing that has not yet seen a file another node
+  // wrote — and ending a conversation over a lag of that kind would turn a
+  // storage nicety into a correctness bug. An answer of "not there" is a
+  // loss; the store itself erroring is an OUTAGE and must never be read as
+  // either "not there" or "continued".
+  const contextId = contextIdOf(unit);
+  const presence = await checkContextPresence(contextId);
+
+  if (presence === 'unavailable') {
+    const reason =
+      `the stored context for this conversation could not be read under ${SESSIONS_DIR} — the store ` +
+      'itself errored rather than answering "not found" (a stale mount, a permission error, or a share ' +
+      'manager that has not come back)';
+    console.log(`[runtime] ${reason} — reporting an outage, not a loss`);
+    return storageOutageReport(
+      first,
+      reason,
+      '⚠️ **This conversation cannot be continued right now.**\n\n' +
+        'Its stored context could not be read — that looks like a storage outage, not a lost conversation. ' +
+        `Reason: ${reason}`,
+    );
+  }
+
+  if (presence === 'present') {
+    console.log('[runtime] context reappeared on re-check — the store was slow, not empty');
+    const retried = await attempt(args);
+    if (resumeSucceeded(retried)) return strip({ ...retried, continuity: 'continued' });
+    // The store answered present, yet the vendor still could not resume it —
+    // report exactly what happened, with no continuity claim of a recovery
+    // that did not occur. An absent `continuity` is a claim of nothing, never
+    // a lost context (docs/contracts/runtime.md).
+    return strip(retried);
+  }
+
+  // presence === 'missing': confirmed gone, not merely slow to answer.
+  // DO NOT answer without it: a conversation without its context is not that
+  // conversation, it is a new one wearing the same name and thread. Answering
+  // anyway presents the second as the first to the person replying, and an
+  // agent asked to undo something it has no memory of will guess. Fail, say
+  // why, and spend no second invocation on an answer that should not exist.
+  const reason =
+    'the stored context for this conversation could not be reached — no session files under ' +
+    `${SESSIONS_DIR} (is /data/context backed by a volume? without one it dies with the pod)`;
+  console.log(`[runtime] ${reason} — failing rather than answering without it`);
+  // NEVER an empty result. Failing with nothing to read is precisely why this
+  // path used to answer without context instead, and reintroducing it as the
+  // fix would be the same mistake wearing the opposite decision.
+  return storageOutageReport(
+    first,
+    reason,
+    '⚠️ **This conversation cannot be continued.**\n\n' +
+      'Its stored context is no longer available, so answering now would mean answering with no ' +
+      'memory of what came before — including anything already done. Start a new conversation to ' +
+      `continue.\n\nReason: ${reason}`,
+  );
+}
+
+/**
+ * checkContextPresence re-checks after short delays, distinguishing three
+ * outcomes that look identical from one failed resume attempt: the context
+ * REAPPEARING (`'present'`, the store was merely slow), confirmed absence
+ * after the full ladder (`'missing'`), and the store itself failing to
+ * answer at all (`'unavailable'`) — an I/O error is NOT a "not found", and
+ * reading it as one is exactly the conflation this exists to prevent.
+ *
+ * Bounded and short on purpose: a person is waiting on a chat reply, so the
+ * budget is seconds. Long enough for a share-manager restart or an attribute
+ * cache to settle; nowhere near long enough to read as a hung reply. An
+ * unreadable store fails this check immediately instead of walking the rest
+ * of the ladder — waiting out a fixed I/O error changes nothing about it.
+ */
+async function checkContextPresence(contextId) {
+  if (!contextId) return 'missing';
+  for (const waitMs of [500, 1500, 3000]) {
+    await new Promise((r) => setTimeout(r, waitMs));
+    try {
+      if (await sessionFileExists(SESSIONS_DIR, contextId)) return 'present';
+    } catch {
+      return 'unavailable';
+    }
+  }
+  return 'missing';
+}
+
+/**
+ * sessionFileExists looks for a context's transcript anywhere under dir.
+ *
+ * A directory that simply does not exist (ENOENT) reads as "not found" —
+ * legitimate when a context was never stored here. Any other error (EACCES,
+ * EIO, ESTALE, a stale NFS handle) is NOT "not found" and is left to
+ * propagate, so the caller can tell a store that answered "no" from one that
+ * could not answer at all.
+ */
+async function sessionFileExists(dir, contextId) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch (e) {
+    if (e.code === 'ENOENT') return false;
+    throw e;
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      if (await sessionFileExists(`${dir}/${e.name}`, contextId)) return true;
+    } else if (e.name.includes(contextId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// SESSIONS_DIR is where this runtime keeps conversation context. It is
+// claude-code's layout, and it is the ONLY component that knows it — the
+// manager stores an opaque handle and assumes nothing about where it points.
+const SESSIONS_DIR = `${process.env.HOME || '/data/context'}/.claude/projects`;
+
+// contextIdOf reads the handle the manager sent. Prefers the current name and
+// falls back to the retired one for one release, so this image works against a
+// manager on either side of the rename.
+function contextIdOf(unit) {
+  return unit.runtimeContextId || unit.resumeSessionId || '';
+}
+
+/** strip removes the internal stderr capture from what is reported. */
+function strip({ stderr, ...rest }) {
+  return rest
+}
+
+// module.exports precedes the main loop so a test can `require()` this file
+// for its pure/subprocess-driving pieces without start() ever running — that
+// only happens when runtime.js, the entrypoint, calls it.
+module.exports = {
+  gitEnv, repoURL, run, clearDir, syncRepo, formatEvent, runClaude, spawnClaude,
+  checkContextPresence, sessionFileExists, contextIdOf, strip, extractBrief,
+  SESSIONS_DIR, CLAUDE_BIN, WORKSPACE,
+};
+
+// Extracted to a NAMED top-level function rather than left as an inline
+// IIFE body: SonarCloud's javascript:S3776 (cognitive complexity) charges a
+// nested function literal's control flow to the ENCLOSING function, so
+// wrapping it in a closure (or `t.Run`-style callback) does not reset the
+// score. A plain call is not a nesting-increasing construct, so the guarded
+// `void runLoop()` below costs nothing -- MEASURED: adding `void` to the
+// previous inline IIFE (for javascript:S9383, above) touched this
+// function's first line and made SonarCloud count its PRE-EXISTING
+// complexity (30, against a limit of 15) as new code, failing
+// new_maintainability_rating on a change that added no control flow here.
+// A `fetch` that cannot reach $CONTROL_URL, or a long-poll that came back
+// empty, is ordinary — the caller just polls again. `undefined` means
+// "nothing to do this iteration", never an error.
+async function pollNextUnit() {
+  let res;
+  try {
+    res = await fetch(`${CONTROL_URL}/work?convo=${encodeURIComponent(CONVO_ID)}&pod=${encodeURIComponent(POD_NAME)}&wait=25`);
+  } catch { await sleep(5000); return undefined; }
+  if (res.status === 204) return undefined;
+  if (!res.ok) { await sleep(5000); return undefined; }
+  try { return await res.json(); } catch { return undefined; }
+}
+
+// isDefinitiveRejection names the one class of /work/done response a retry
+// cannot fix: the manager read the report and refused its content, so
+// resending the same bytes would get the same verdict. 408 (request
+// timeout) and 429 (rate limit) are excluded — those say "try again", not
+// "this is wrong" — and every 5xx/network failure is transient by
+// definition.
+function isDefinitiveRejection(status) {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+// Retries for up to ten minutes (60 * 10s) rather than failing the run: the
+// manager's own outage must not discard a result claude-code already
+// produced. `continuity` rides along from spawnClaude — the manager cannot
+// infer it, since it sends a handle and gets a handle back.
+//
+// A DEFINITIVE 4xx is the one outcome that ends the loop early: the manager
+// has already read and refused the report, so spending the rest of the
+// ten-minute budget resending identical bytes only delays the next poll. The
+// refusal is logged with its status and body — the one place a bad report is
+// diagnosable from the pod log — and the run is never retried, never dropped
+// silently.
+async function reportDone(unit, out) {
+  // Report the handle under BOTH names for one release: the current one,
+  // and the retired spelling so this image also works against an older
+  // manager.
+  const { sessionId, ...rest } = out;
+  const done = {
+    convo: CONVO_ID,
+    runId: unit.runId,
+    ...rest,
+    ...(sessionId ? { runtimeContextId: sessionId, sessionId } : {}),
+  };
+  let lastFailure = 'no attempt reached the manager';
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(`${CONTROL_URL}/work/done`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(done),
+      });
+      if (r.ok) return;
+      if (isDefinitiveRejection(r.status)) {
+        const body = await r.text().catch(() => '(body unreadable)');
+        console.error(`[runtime] /work/done refused run ${sanitizeLog(unit.runId)}: ${r.status} ${sanitizeLog(body).slice(0, 500)} — not retried, resuming polling`);
+        return;
+      }
+      lastFailure = `status ${r.status}`;
+    } catch (e) {
+      lastFailure = e.message;
+    }
+    await sleep(10000);
+  }
+  console.error(`[runtime] /work/done never delivered run ${sanitizeLog(unit.runId)} after 10 minutes of retries (${sanitizeLog(lastFailure)}) — giving up, resuming polling`);
+}
+
+// A sync failure here (a bad ref, an unreachable origin, a rejected
+// fetch/reset) must FAIL THIS RUN with that reason — proceeding to
+// runClaude anyway would run the agent against a missing or stale
+// checkout and report whatever confusion that produces, attributing
+// nothing to the real cause.
+async function runUnit(unit) {
+  try {
+    await syncRepo();
+    return await runClaude(unit);
+  } catch (e) {
+    console.error(`[runtime] sync: ${e.message}`);
+    return { status: 'failed', result: `workspace sync failed: ${e.message}` };
+  }
+}
+
+async function runLoop() {
+  console.log(`[runtime] claude runtime — convo=${CONVO_ID} pod=${POD_NAME} ttl=${TTL_MS / 60000}m workspace=${WORKSPACE}`);
+  try { await syncRepo(); } catch (e) { console.error(`[runtime] initial sync: ${e.message}`); }
+
+  let lastWork = Date.now();
+  let idle = false;
+  while (!idle) {
+    if (Date.now() - lastWork > TTL_MS) {
+      console.log('[runtime] idle TTL reached — exiting');
+      idle = true;
+      continue;
+    }
+    const unit = await pollNextUnit();
+    if (!unit) continue;
+    lastWork = Date.now();
+    // Strictly serial per conversation: one inflight unit, so the await in
+    // the loop is the invariant, not an oversight.
+    const out = await runUnit(unit); // NOSONAR
+    lastWork = Date.now();
+    await reportDone(unit, out); // NOSONAR
+  }
+  process.exit(0);
+}
+
+// start is what runtime.js (the entrypoint) calls once it has resolved
+// RUNTIME_CLAUDE_DRIVER to `cli` — the same check-and-exit this file used to
+// run unconditionally at require time when it was itself the process entry
+// point, now triggered explicitly instead of inferred from require.main.
+function start() {
+  if (!CONTROL_URL || !CONVO_ID) {
+    console.error('[runtime] CONTROL_URL and CONVO_ID are required');
+    process.exit(1);
+  }
+  // javascript:S7785 wants top-level `await` here instead. Real top-level
+  // await is an ESM feature and is a SyntaxError in a CommonJS module (this
+  // file has no package.json, so CommonJS is Node's default) -- converting
+  // this file and everything it requires to ESM is a far larger change than
+  // this line justifies. NOSONAR rather than a real fix.
+  return runLoop(); // NOSONAR
+}
+
+// Exported alongside the module.exports object above rather than folded
+// into it: all are declared below that object (function hoisting makes
+// either position work), and a second, small assignment here keeps them
+// visually beside the loop code they test.
+module.exports.pollNextUnit = pollNextUnit;
+module.exports.reportDone = reportDone;
+module.exports.isDefinitiveRejection = isDefinitiveRejection;
+module.exports.runLoop = runLoop;
+module.exports.start = start;

@@ -1,13 +1,14 @@
 // cd runtime-claude && node --test
 //
-// Exercises the bottom-of-file main loop itself — the one piece of runtime.js
-// that only runs when the file is the process entry point (`require.main ===
-// module`), so it cannot be reached by requiring the module like every other
-// test file here. Instead this spawns `node runtime.js` for real, against a
-// real local HTTP server standing in for the manager's /work + /work/done
-// long-poll contract, and a real fake `claude` binary on PATH — the actual
-// long-poll -> dispatch -> report cycle, end to end, no mocking of runtime.js
-// itself.
+// Exercises the main loop itself — the one piece of the CLI driver that only
+// runs once the process is actually started, so it cannot be reached by
+// requiring driver-cli.js like every other test file here. Instead this
+// spawns `node runtime.js` for real (the entrypoint, with
+// RUNTIME_CLAUDE_DRIVER=cli so it delegates to driver-cli.js without needing
+// driver-sdk.js to exist), against a real local HTTP server standing in for
+// the manager's /work + /work/done long-poll contract, and a real fake
+// `claude` binary on PATH — the actual long-poll -> dispatch -> report
+// cycle, end to end, no mocking of either runtime.js or driver-cli.js.
 'use strict';
 
 const test = require('node:test');
@@ -71,6 +72,7 @@ test('the main loop long-polls for work, runs it, and reports it back', async ()
     env: {
       ...process.env,
       PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+      RUNTIME_CLAUDE_DRIVER: 'cli',
       CONTROL_URL: `http://127.0.0.1:${port}`,
       CONVO_ID: 'conv-main',
       POD_NAME: 'pod-main',
@@ -103,7 +105,7 @@ test('the main loop long-polls for work, runs it, and reports it back', async ()
 test('run directly with CONTROL_URL and CONVO_ID unset, the process refuses to start', async () => {
   const child = spawn(process.execPath, [path.join(__dirname, 'runtime.js')], {
     cwd: __dirname,
-    env: { ...process.env, CONTROL_URL: '', CONVO_ID: '' },
+    env: { ...process.env, RUNTIME_CLAUDE_DRIVER: 'cli', CONTROL_URL: '', CONVO_ID: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
@@ -120,6 +122,7 @@ test('with RUNTIME_IDLE_TTL_M=0 the process exits immediately, before ever polli
     cwd: __dirname,
     env: {
       ...process.env,
+      RUNTIME_CLAUDE_DRIVER: 'cli',
       CONTROL_URL: 'http://127.0.0.1:1',
       CONVO_ID: 'conv-idle',
       POD_NAME: 'pod-idle',

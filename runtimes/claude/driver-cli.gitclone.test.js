@@ -38,7 +38,7 @@ process.env.REPO_URL = originDir;
 process.env.REPO_REF = 'master';
 process.env.WORKSPACE = workspace;
 
-const { syncRepo } = require('./runtime');
+const { syncRepo } = require('./driver-cli');
 
 test('syncRepo clones a fresh workspace when no checkout exists yet', async () => {
   await syncRepo();
@@ -64,8 +64,8 @@ test('syncRepo throws with the clone failure reason when the origin cannot be re
   const real = { REPO_URL: process.env.REPO_URL, WORKSPACE: process.env.WORKSPACE };
   process.env.REPO_URL = badOrigin;
   process.env.WORKSPACE = freshWorkspace;
-  delete require.cache[require.resolve('./runtime')];
-  const { syncRepo: freshSyncRepo } = require('./runtime');
+  delete require.cache[require.resolve('./driver-cli')];
+  const { syncRepo: freshSyncRepo } = require('./driver-cli');
   try {
     await assert.rejects(freshSyncRepo(), /git clone/);
   } finally {
@@ -87,8 +87,8 @@ test('syncRepo throws with the fetch failure reason when origin is unreachable o
   const real = { REPO_URL: process.env.REPO_URL, WORKSPACE: process.env.WORKSPACE };
   process.env.REPO_URL = goneOrigin;
   process.env.WORKSPACE = ws;
-  delete require.cache[require.resolve('./runtime')];
-  const { syncRepo: freshSyncRepo } = require('./runtime');
+  delete require.cache[require.resolve('./driver-cli')];
+  const { syncRepo: freshSyncRepo } = require('./driver-cli');
   try {
     await assert.rejects(freshSyncRepo(), /git fetch/);
   } finally {
@@ -109,8 +109,8 @@ test('syncRepo throws rather than resetting silently when the configured ref doe
   process.env.REPO_URL = originDir;
   process.env.REPO_REF = 'branch-that-does-not-exist';
   process.env.WORKSPACE = ws;
-  delete require.cache[require.resolve('./runtime')];
-  const { syncRepo: freshSyncRepo } = require('./runtime');
+  delete require.cache[require.resolve('./driver-cli')];
+  const { syncRepo: freshSyncRepo } = require('./driver-cli');
   try {
     await assert.rejects(freshSyncRepo(), /git (fetch|reset)/);
   } finally {

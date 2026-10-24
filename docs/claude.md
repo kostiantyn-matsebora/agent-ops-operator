@@ -4,7 +4,7 @@ The reference agent runtime, shipped as a bundle: `claude-code` implementing the
 operator's work contract.
 
 It conforms to the [runtime specification](contracts/runtime.md), version
-2.0.0.
+2.0.1.
 
 `chart/charts/claude/` renders exactly two objects — one `AgentRuntime` named
 `claude` and, when you supply a token, its credential `Secret`. The PARENT
@@ -101,6 +101,22 @@ anything — see
 
 Point `claude.image` at your derived image, or declare a second runtime beside
 this one under the parent's `runtimes:` and select it per route.
+
+## Two drivers, one image
+
+`runtime-claude` ships two ways of driving `claude-code`, selected by
+`RUNTIME_CLAUDE_DRIVER` on `AgentRuntime.spec.env` — no chart or CRD change
+needed to pick one.
+
+| `RUNTIME_CLAUDE_DRIVER` | Driver |
+|---|---|
+| `sdk` (default, and the fallback for an unrecognized value) | holds one live session open per pod across work units |
+| `cli` | spawns the `claude` CLI once per work unit, exactly as every release before this one |
+
+**`cli` is the rollback path that needs no image change.** Flipping the
+env var is enough — both drivers ship in the same `agentops-runtime-claude`
+image. An unrecognized value logs a warning and falls back to `sdk` rather
+than failing the pod.
 
 ## A tool call the model cannot FORM
 

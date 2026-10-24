@@ -2,7 +2,7 @@
 //
 // gitEnv()'s ssh branch reads GIT_AUTH_TYPE/GIT_SSH_KEY, both captured into
 // module-level consts at require time — a separate process/file from the
-// default-env suite in runtime.test.js, which exercises the false branch.
+// default-env suite in driver-cli.test.js, which exercises the false branch.
 'use strict';
 
 const test = require('node:test');
@@ -13,7 +13,7 @@ process.env.CONVO_ID = 'conv-ssh';
 process.env.GIT_AUTH_TYPE = 'ssh';
 process.env.GIT_SSH_KEY = '/tmp/agentops-fake-deploy-key';
 
-const { gitEnv } = require('./runtime');
+const { gitEnv } = require('./driver-cli');
 
 test('gitEnv sets GIT_SSH_COMMAND to the configured key with a lenient known_hosts policy', () => {
   const env = gitEnv();

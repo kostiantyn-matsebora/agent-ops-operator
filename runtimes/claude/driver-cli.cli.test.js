@@ -95,7 +95,7 @@ process.env.WORKSPACE = tmp('agentops-ws-');
 process.env.HOME = tmp('agentops-home-'); // controls SESSIONS_DIR
 process.env.RUNTIME_UNPARSED_REPEAT_LIMIT = '3'; // shrink the spin ladder for a fast test
 
-const { runClaude, CLAUDE_BIN } = require('./runtime');
+const { runClaude, CLAUDE_BIN } = require('./driver-cli');
 
 test('CLAUDE_BIN resolved to the fake script placed on PATH', () => {
   assert.strictEqual(CLAUDE_BIN, claudePath);
@@ -266,7 +266,7 @@ test('a grant naming no vendor tool and no connected MCP server is logged, not s
 // ---- C1 end to end: an unreadable store never reports continued or lost -------
 
 test('a resumed run whose session store cannot be read reports unavailable, not continued or lost', async (t) => {
-  const { SESSIONS_DIR } = require('./runtime');
+  const { SESSIONS_DIR } = require('./driver-cli');
   const real = fs.promises.readdir;
   fs.promises.readdir = (dir, opts) => (dir === SESSIONS_DIR ? Promise.reject(Object.assign(new Error('stale handle'), { code: 'ESTALE' })) : real(dir, opts));
   t.after(() => { fs.promises.readdir = real; });

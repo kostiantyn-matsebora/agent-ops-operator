@@ -1,7 +1,7 @@
 // cd runtime-claude && node --test
 //
 // A CLI binary that cannot be found at all: PATH is pointed at an empty
-// directory before requiring runtime.js, so resolveBin('claude') falls back
+// directory before requiring driver-cli.js, so resolveBin('claude') falls back
 // to the bare name and the real spawn() call ENOENTs — exercising
 // spawnClaude's `p.on('error', ...)` path with a genuine failed spawn, not a
 // mock standing in for one.
@@ -22,7 +22,7 @@ process.env.CONTROL_URL = 'http://127.0.0.1:1';
 process.env.CONVO_ID = 'conv-spawnerror';
 process.env.WORKSPACE = tmp('agentops-ws-');
 
-const { runClaude } = require('./runtime');
+const { runClaude } = require('./driver-cli');
 
 test('a CLI binary that cannot be resolved fails the run with the spawn error, rather than throwing', async () => {
   const out = await runClaude({ promptText: 'hi', runId: 'r1' });

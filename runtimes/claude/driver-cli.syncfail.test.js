@@ -4,10 +4,11 @@
 // cannot be reached) must fail the WORK UNIT with a reason attributing it to
 // the sync, not silently fall through to running the agent against a
 // missing or stale checkout. Exercised against the real main loop — a real
-// `node runtime.js` process, a real (deliberately unreachable) git origin,
-// and a stub manager standing in for /work + /work/done — so a regression
-// that reintroduces "log and continue anyway" is caught end to end, not only
-// at the syncRepo() unit level (see runtime.gitclone.test.js).
+// `node runtime.js` process (the entrypoint, with RUNTIME_CLAUDE_DRIVER=cli
+// so it delegates to driver-cli.js), a real (deliberately unreachable) git
+// origin, and a stub manager standing in for /work + /work/done — so a
+// regression that reintroduces "log and continue anyway" is caught end to
+// end, not only at the syncRepo() unit level (see driver-cli.gitclone.test.js).
 'use strict';
 
 const test = require('node:test');
@@ -73,6 +74,7 @@ test('a per-unit sync failure fails that run with a reason, never falling throug
     env: {
       ...process.env,
       PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+      RUNTIME_CLAUDE_DRIVER: 'cli',
       CONTROL_URL: `http://127.0.0.1:${port}`,
       CONVO_ID: 'conv-syncfail',
       POD_NAME: 'pod-syncfail',

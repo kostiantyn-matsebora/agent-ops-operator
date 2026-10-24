@@ -15,7 +15,7 @@ next:
   url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
 ---
 
-**Version 2.0.0**
+**Version 2.0.1**
 
 This specification gives everything necessary to build and maintain an
 `AgentRuntime` — a harness agent-ops does not ship.
@@ -222,6 +222,7 @@ the poll loop.
 | `RT-3.2` | An empty allowlist MUST stay empty. No tool substitutes for one nobody declared. |
 | `RT-3.3` | An absent or unreadable agent definition MUST contribute nothing, whatever a vendor default would be. |
 | `RT-3.4` | Definition path is runtime-specific: `runtimes/claude`/`runtimes/ollama` read `.claude/agents/<agent>.md`, `runtimes/copilot` reads `.github/agents/<agent>.agent.md`. |
+| `RT-3.5` | A per-invocation permission DECISION satisfies `RT-3` as well as passing the composed list as a flag, provided the decision point is reached for every governed call and denies by default. A vendor flag that shadows the decision for some calls (auto-approving before the decision runs) does not satisfy this for those calls. |
 
 ### Optional capabilities
 
@@ -349,21 +350,23 @@ verdict, never an impression of the whole:
 22. An empty allowlist stays empty — no tool substitutes for one nobody declared (`RT-3.2`).
 23. An absent or unreadable agent definition contributes nothing (`RT-3.3`).
 24. The definition path is runtime-specific, per vendor (`RT-3.4`).
-25. The manager never reads a secret — every credential compiles to `valueFrom`/`envFrom` (`SEC-1`).
-26. `AOPS_MCP_TOKEN` is derived, never stored (`SEC-2`).
-27. The operator grants the runtime no Kubernetes permissions of its own (`SEC-3`).
-28. One pod per conversation, created and owned by the manager (`MGR-1`).
-29. Context is checkpointed before `POST /work/done` reaches the manager (`MGR-2`).
-30. A pod that never reaches `Running` is reaped at a deadline (`MGR-3`).
-31. The manager supplies every variable in [Environment](#environment), and the profile's git credentials (`MGR-4`).
-32. An empty `REPO_URL` is never read as an error or as "clone the default" (`MGR-5`).
-33. A runtime ignores work-unit fields it does not know (`COMPAT-1`).
-34. The manager ignores report fields it does not know (`COMPAT-2`).
-35. A published section anchor is a stable name — renaming one is MAJOR (`COMPAT-3`).
+25. A per-invocation decision satisfies `RT-3` as well as a flag, reached for every governed call and denying by default (`RT-3.5`).
+26. The manager never reads a secret — every credential compiles to `valueFrom`/`envFrom` (`SEC-1`).
+27. `AOPS_MCP_TOKEN` is derived, never stored (`SEC-2`).
+28. The operator grants the runtime no Kubernetes permissions of its own (`SEC-3`).
+29. One pod per conversation, created and owned by the manager (`MGR-1`).
+30. Context is checkpointed before `POST /work/done` reaches the manager (`MGR-2`).
+31. A pod that never reaches `Running` is reaped at a deadline (`MGR-3`).
+32. The manager supplies every variable in [Environment](#environment), and the profile's git credentials (`MGR-4`).
+33. An empty `REPO_URL` is never read as an error or as "clone the default" (`MGR-5`).
+34. A runtime ignores work-unit fields it does not know (`COMPAT-1`).
+35. The manager ignores report fields it does not know (`COMPAT-2`).
+36. A published section anchor is a stable name — renaming one is MAJOR (`COMPAT-3`).
 
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.0.1 | 2026-10-24 | Clarified `RT-3` (`RT-3.5`): a per-invocation permission decision satisfies the allowlist obligation as well as passing it as a flag, provided every governed call reaches the decision point and it denies by default. No obligation changes — this names an enforcement mechanism an implementation already had to pick. |
 | 2.0.0 | 2026-10-22 | Added the startup-configuration-failure crash ruling (`LC-4`, `LC-5`) — missing or unusable required config before the first poll is a nonzero crash, not a lifecycle exit. Added the `/work/done` definitive-rejection table (`API-10`, `API-11`, `API-12`) — a definitive `4xx` is never retried, a transient failure keeps its bounded retry, and every undelivered report is logged. The work-unit and completion-report tables are now GENERATED from the manager's own Go structs, and [Conformance](#conformance) is now a numbered checklist reaching every requirement on this page. BREAKING: `API-10`/`11`/`12` constrain a `/work/done` 4xx response that 1.0.0 left unconstrained — a runtime that retried a definitive rejection forever was conformant with 1.0.0 and stops conforming here, per this page's own Compatibility rule. |
 | 1.0.0 | 2026-10-17 | Initial release. |
