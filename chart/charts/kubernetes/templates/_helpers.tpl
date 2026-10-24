@@ -281,8 +281,8 @@ rather than by documentation alone:
   1. verbs must be a subset of get/list/watch — this extension is READ-ONLY.
   2. no apiGroups/resources entry equal to "*".
   3. apiGroups [""] may never pair with resources ["secrets"].
-  4. apiGroups may never be exactly ["rbac.authorization.k8s.io"] or
-     ["agentops.dev"].
+  4. apiGroups may never include "rbac.authorization.k8s.io" or
+     "agentops.dev", alone or beside other groups.
 
 A rejected entry FAILS the render, naming the entry — an allowlist a
 reviewer cannot read off the failure is an allowlist nobody actually
@@ -302,11 +302,11 @@ reviews. */ -}}
 {{- if or (has "*" $rule.apiGroups) (has "*" $rule.resources) -}}
 {{- fail (printf "%s names \"*\" in apiGroups or resources — a wildcard reaches Secrets and every other resource without naming them, which is how a role passes review and fails its purpose. Name the resources this extension actually needs." $label) -}}
 {{- end -}}
-{{- if and (eq (len $rule.apiGroups) 1) (eq (first $rule.apiGroups) "rbac.authorization.k8s.io") -}}
-{{- fail (printf "%s sets apiGroups to [\"rbac.authorization.k8s.io\"] — reading Roles/ClusterRoles/bindings is how a role maps every identity in the install, and that group is never granted here." $label) -}}
+{{- if has "rbac.authorization.k8s.io" $rule.apiGroups -}}
+{{- fail (printf "%s lists apiGroup \"rbac.authorization.k8s.io\" — reading Roles/ClusterRoles/bindings is how a role maps every identity in the install, and that group is never granted here." $label) -}}
 {{- end -}}
-{{- if and (eq (len $rule.apiGroups) 1) (eq (first $rule.apiGroups) "agentops.dev") -}}
-{{- fail (printf "%s sets apiGroups to [\"agentops.dev\"] — Conversations, Pipelines and profiles are unreadable from every grant in this release, by invariant, and this extension does not reopen that." $label) -}}
+{{- if has "agentops.dev" $rule.apiGroups -}}
+{{- fail (printf "%s lists apiGroup \"agentops.dev\" — Conversations, Pipelines and profiles are unreadable from every grant in this release, by invariant, and this extension does not reopen that." $label) -}}
 {{- end -}}
 - apiGroups: {{ $rule.apiGroups | toJson }}
   resources: {{ $rule.resources | toJson }}

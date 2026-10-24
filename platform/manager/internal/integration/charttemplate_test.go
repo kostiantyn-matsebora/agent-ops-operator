@@ -1102,12 +1102,22 @@ func TestMCPServerExtraReadRulesRejectsEachGuardedShape(t *testing.T) {
 		{
 			name: "rbac.authorization.k8s.io",
 			rule: `[{"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterroles"],"verbs":["get"]}]`,
-			want: `sets apiGroups to ["rbac.authorization.k8s.io"]`,
+			want: `lists apiGroup "rbac.authorization.k8s.io"`,
+		},
+		{
+			name: "rbac.authorization.k8s.io beside another group",
+			rule: `[{"apiGroups":["apps","rbac.authorization.k8s.io"],"resources":["clusterroles"],"verbs":["get"]}]`,
+			want: `lists apiGroup "rbac.authorization.k8s.io"`,
 		},
 		{
 			name: "agentops.dev",
 			rule: `[{"apiGroups":["agentops.dev"],"resources":["pipelines"],"verbs":["get"]}]`,
-			want: `sets apiGroups to ["agentops.dev"]`,
+			want: `lists apiGroup "agentops.dev"`,
+		},
+		{
+			name: "agentops.dev beside another group",
+			rule: `[{"apiGroups":["apps","agentops.dev"],"resources":["pipelines"],"verbs":["get"]}]`,
+			want: `lists apiGroup "agentops.dev"`,
 		},
 	}
 	for _, tc := range cases {
