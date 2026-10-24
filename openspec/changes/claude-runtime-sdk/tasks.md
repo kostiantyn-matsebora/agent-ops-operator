@@ -76,6 +76,9 @@ All of 4.1–4.4 apply to `driver-sdk.js` only — `driver-cli.js` opens a fresh
 
 ## 11. Documentation
 
-- [ ] 11.1 `docs/contracts.md`: the allowlist may be enforced per invocation, and what that obliges — nothing shadows the decision point. This describes `driver-sdk.js` only, and does not touch `docs/contracts/runtime.md`
-- [ ] 11.2 `CLAUDE.md`: note that `runtime-claude` ships two drivers — `sdk` (default, holds a session per pod) and `cli` (today's per-unit spawn, kept as the selectable alternative via `RUNTIME_CLAUDE_DRIVER=cli`) — and that the allowlist is a callback rule set on the `sdk` driver only
-- [ ] 11.3 `docs/claude.md`: document `RUNTIME_CLAUDE_DRIVER` for adopters, alongside the existing `RUNTIME_UNPARSED_REPEAT_LIMIT` entry — both values, the `sdk` default, and the unrecognized-value fallback
+- [ ] 11.1 `docs/contracts/runtime.md`: amend RT-3 (Composing the allowlist) to state that a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Bump the version PATCH (clarifies an obligation, changes none) and add a changelog row
+- [ ] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match
+- [ ] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification
+- [ ] 11.4 Move `docs/runtimes/copilot.md`'s claimed runtime-specification version to match, even though `runtimes/copilot/` needs no code change for this clarification
+- [ ] 11.5 `.claude/rules/runtime-spec.md`: note that `runtime-claude` ships two drivers — `sdk` (default, holds a session per pod) and `cli` (today's per-unit spawn, kept as the selectable alternative via `RUNTIME_CLAUDE_DRIVER=cli`) — and that the allowlist is a callback rule set on the `sdk` driver only. Root `CLAUDE.md` stays an index and gets no new line for this
+- [ ] 11.6 `docs/claude.md`: document `RUNTIME_CLAUDE_DRIVER` for adopters, alongside the existing `RUNTIME_UNPARSED_REPEAT_LIMIT` entry — both values, the `sdk` default, and the unrecognized-value fallback

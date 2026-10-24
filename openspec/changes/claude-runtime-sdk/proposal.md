@@ -104,7 +104,14 @@ permission-callback shape.
   `tools.js` composition logic unchanged), `runtimes/claude/Dockerfile` (adds
   `@anthropic-ai/claude-agent-sdk` alongside the existing global
   `@anthropic-ai/claude-code` install — each driver needs its own binary path),
-  a new `agentops-runtime-claude` image tag, `docs/contracts.md`, `CLAUDE.md`.
+  a new `agentops-runtime-claude` image tag, `.claude/rules/runtime-spec.md`.
+- **Published spec amendment**: `docs/contracts/runtime.md`'s RT-3 gains a
+  PATCH clarification — a per-invocation decision satisfies it, not only a
+  flag — with a matching version move on `docs/claude.md`,
+  `docs/runtimes/ollama.md` and `docs/runtimes/copilot.md`, per
+  `runtime-spec.md`'s rule that every shipped runtime's claimed version moves
+  together. No obligation changes, and session reuse itself still does not
+  publish there — see design.md's Non-Goals.
 - **Dependencies**: `@anthropic-ai/claude-agent-sdk` (bundles the Claude Code
   binary, needs Node 18+ — the image is Node 22). Auth is unchanged for both
   drivers — the bundled binary reads `CLAUDE_CODE_OAUTH_TOKEN`, which is what

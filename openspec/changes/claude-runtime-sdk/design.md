@@ -51,6 +51,9 @@ Two things constrain any redesign, and they pull against session reuse:
 - No publication of session reuse as a new optional capability on
   `docs/contracts/runtime.md`. It stays `runtime-claude`'s own internal
   behaviour, not a contract promise to third-party runtime builders.
+- This excludes RT-3's own clarification (D3) — that one DOES amend the
+  published spec, since it tells every runtime builder which enforcement
+  mechanisms satisfy an existing obligation. The two are separate decisions.
 
 ## Decisions
 
@@ -60,6 +63,9 @@ Two things constrain any redesign, and they pull against session reuse:
 `RUNTIME_CLAUDE_DRIVER` (`sdk` default, `cli` the alternative). The env var is
 read through the existing `AgentRuntime.spec.env` field, already injected by
 `internal/runtimepod`. No CRD or chart change is needed to pick one.
+
+An unrecognized value logs a warning and falls back to `sdk` rather than
+failing the pod to start.
 
 **`driver-cli.js` is today's `runtime.js` logic, moved verbatim.** One
 `spawn('claude', …)` per work unit, `--resume`, `--allowedTools`,
