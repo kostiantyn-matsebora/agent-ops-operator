@@ -1,11 +1,41 @@
 ## ADDED Requirements
 
+### Requirement: Holding a session open never weakens conformance with the runtime specification
+A runtime taking any freedom this capability grants SHALL remain fully
+conformant with `docs/contracts/runtime.md`. Every `API-n`, `LC-n`, `RT-n`,
+`MGR-n` and `SEC-n` requirement on that page holds exactly as it does for a
+runtime that opens one session per unit.
+
+This capability describes an internal optimisation available to a runtime's
+implementation. It is not a change to what the runtime owes the manager, and
+SHALL NOT be read as superseding, relaxing, or adding an exception to any
+requirement on the published specification.
+
+#### Scenario: The published contract is unaffected
+- **WHEN** a runtime holds a vendor session open across work units
+- **THEN** every requirement on `docs/contracts/runtime.md` that applied
+  before still holds, unchanged
+
 ### Requirement: A runtime may hold a vendor session open across work units
-A runtime MAY keep its vendor session open between work units within one pod and deliver the next unit's prompt into it, rather than establishing a session per unit. This is an implementation freedom, not an obligation: a runtime that opens one session per unit remains correct, and SHALL NOT be treated as violating this capability.
+A runtime MAY keep its vendor session open between work units within one pod
+and deliver the next unit's prompt into it, rather than establishing a
+session per unit.
 
-A runtime that takes the freedom SHALL still honour the serial rule — one unit in flight per conversation — and SHALL satisfy every requirement below, which is the price of holding state the manager cannot see.
+This is an implementation freedom, not an obligation. A runtime that opens
+one session per unit remains correct, and SHALL NOT be treated as violating
+this capability.
 
-The reason it is worth taking is that a pod handles several units in its life — the serial rule is per conversation, not per pod — and re-establishing per unit re-reads the accumulated transcript and relaunches every bound MCP server. That cost grows with the conversation rather than staying constant, and an operator MAY raise `idleTtlMinutes` to hours, which turns several-units-per-pod from the exception into the normal case.
+A runtime that takes the freedom SHALL still honour the serial rule — one
+unit in flight per conversation — and SHALL satisfy every requirement below,
+which is the price of holding state the manager cannot see.
+
+The reason it is worth taking: a pod handles several units in its life, and
+the serial rule is per conversation, not per pod. Re-establishing per unit
+re-reads the accumulated transcript and relaunches every bound MCP server.
+
+That cost grows with the conversation rather than staying constant, and an
+operator MAY raise `idleTtlMinutes` to hours, which turns several-units-per-pod
+from the exception into the normal case.
 
 #### Scenario: A second unit lands in the open session
 - **WHEN** a pod receives a second work unit for the same conversation while its session is still open and the unit's configuration is unchanged
@@ -15,10 +45,20 @@ The reason it is worth taking is that a pod handles several units in its life �
 - **WHEN** a runtime establishes a fresh session for every work unit
 - **THEN** it satisfies the work contract, and nothing the manager sends or records differs
 
-### Requirement: A held session is a cache; the recorded handle stays authoritative
-A held session SHALL NOT become a second source of truth. `runtimeContextId` on the conversation SHALL remain the only continuity record that outlives the pod, and every completed unit SHALL report the handle its vendor established — including units served from an already-open session, so a vendor-side branch still reaches the manager's latest-wins rule.
+### Requirement: A held session is a cache, and the recorded handle stays authoritative
+A held session SHALL NOT become a second source of truth.
+`runtimeContextId` on the conversation SHALL remain the only continuity
+record that outlives the pod.
 
-A pod holding no session — freshly started, evicted, rescheduled, or one whose process died — SHALL resume from the recorded handle. The manager SHALL NOT be able to tell the two paths apart: nothing in the work contract describes whether a session was held or re-established.
+Every completed unit SHALL report the handle its vendor established,
+including units served from an already-open session, so a vendor-side
+branch still reaches the manager's latest-wins rule.
+
+A pod holding no session — freshly started, evicted, rescheduled, or one
+whose process died — SHALL resume from the recorded handle.
+
+The manager SHALL NOT be able to tell the two paths apart. Nothing in the
+work contract describes whether a session was held or re-established.
 
 #### Scenario: A cold pod is indistinguishable
 - **WHEN** a conversation's next unit is served by a pod with no open session
@@ -35,7 +75,12 @@ A pod holding no session — freshly started, evicted, rescheduled, or one whose
 ### Requirement: A session is reused only while the unit's configuration is unchanged
 A held session SHALL be reused ONLY when the incoming unit's session-affecting configuration is identical to the one the session was opened with. When it differs, the runtime SHALL close the session and establish a new one continuing the recorded context.
 
-This is what keeps reuse from silently defeating the rule that REFS are snapshotted while CONTENT is not: every use re-reads the referenced CRs, so an operator's edit is meant to heal a RUNNING conversation. A session pinned to the first unit's prompts, MCP servers or limits would keep applying superseded wiring while the CRs say otherwise.
+This is what keeps reuse from silently defeating the rule that REFS are
+snapshotted while CONTENT is not. Every use re-reads the referenced CRs, so
+an operator's edit is meant to heal a RUNNING conversation.
+
+A session pinned to the first unit's prompts, MCP servers or limits would
+keep applying superseded wiring while the CRs say otherwise.
 
 Configuration that the runtime evaluates per invocation rather than pinning at session open — a tool allowlist enforced through a permission callback, for instance — SHALL NOT force a re-open, because it already changes with each unit.
 
@@ -56,7 +101,15 @@ Configuration that the runtime evaluates per invocation rather than pinning at s
 - **THEN** it logs which part of the configuration changed, so the reason is visible in the pod log
 
 ### Requirement: A long-lived session owns what a short-lived one never faced
-A runtime holding sessions open SHALL bound what it keeps alive. It SHALL tear the session down — releasing the processes and connections it owns, including bound MCP servers — when the pod reaches its idle TTL, when the configuration changes, and when the session fails in a way the runtime cannot attribute to the individual unit.
+A runtime holding sessions open SHALL bound what it keeps alive.
+
+It SHALL tear the session down — releasing the processes and connections it
+owns, including bound MCP servers — on any of these:
+
+- the pod reaching its idle TTL
+- the configuration changing
+- the session failing in a way the runtime cannot attribute to the
+  individual unit
 
 A session SHALL NOT be held open across a failure the runtime does not understand: continuing to feed units into a session in an unknown state risks reporting outcomes produced under conditions nobody chose.
 
