@@ -14,54 +14,54 @@
 
 ## 3. The poll loop, the live session, and the driver split
 
-- [ ] 3.1 Split `runtime.js` into a thin entrypoint and two driver modules: `driver-cli.js` (today's spawn-per-unit logic, moved verbatim, no behaviour change) and `driver-sdk.js` (restructured around one `query()` per open session, fed by an async generator the poll loop pushes into)
-- [ ] 3.2 Add a `RUNTIME_CLAUDE_DRIVER` env var read by the entrypoint — `sdk` default, `cli` the alternative — and log the active driver on startup. An unrecognized value logs a warning and falls back to `sdk`
-- [ ] 3.3 In `driver-sdk.js`, read each unit's outcome by consuming until that turn's `result`. Keep the 2000-character cap and the existing `status`/`exitCode` meanings
-- [ ] 3.4 Keep the loop's existing shape otherwise, on both drivers — long-poll, report with bounded retry, idle-TTL exit `0`
-- [ ] 3.5 In `driver-sdk.js`, tear the session down on idle exit, on configuration change, and on unattributable session failure
+- [x] 3.1 Split `runtime.js` into a thin entrypoint and two driver modules: `driver-cli.js` (today's spawn-per-unit logic, moved verbatim, no behaviour change) and `driver-sdk.js` (restructured around one `query()` per open session, fed by an async generator the poll loop pushes into)
+- [x] 3.2 Add a `RUNTIME_CLAUDE_DRIVER` env var read by the entrypoint — `sdk` default, `cli` the alternative — and log the active driver on startup. An unrecognized value logs a warning and falls back to `sdk`
+- [x] 3.3 In `driver-sdk.js`, read each unit's outcome by consuming until that turn's `result`. Keep the 2000-character cap and the existing `status`/`exitCode` meanings (`exitCode` itself is omitted — no process exit to report, per `docs/contracts/runtime.md`'s API-7)
+- [x] 3.4 Keep the loop's existing shape otherwise, on both drivers — long-poll, report with bounded retry, idle-TTL exit `0`
+- [x] 3.5 In `driver-sdk.js`, tear the session down on idle exit, on configuration change, and on unattributable session failure
 
 ## 4. Configuration fingerprint
 
 All of 4.1–4.4 apply to `driver-sdk.js` only — `driver-cli.js` opens a fresh process per unit and has no live session to fingerprint.
 
-- [ ] 4.1 Fingerprint the session-affecting configuration of a unit: system prompt, MCP servers, `maxTurns`, cwd, agent
-- [ ] 4.2 Deliberately EXCLUDE the composed tool allowlist from the fingerprint — it lives in the callback and changes per unit with no re-open
-- [ ] 4.3 Re-open with `resume: <runtimeContextId>` on a fingerprint change, logging which field changed
-- [ ] 4.4 Unit-test the fingerprint field by field, including that an allowlist-only change does not trigger a re-open
+- [x] 4.1 Fingerprint the session-affecting configuration of a unit: system prompt, MCP servers, `maxTurns`, cwd, agent
+- [x] 4.2 Deliberately EXCLUDE the composed tool allowlist from the fingerprint — it lives in the callback and changes per unit with no re-open
+- [x] 4.3 Re-open with `resume: <runtimeContextId>` on a fingerprint change, logging which field changed
+- [x] 4.4 Unit-test the fingerprint field by field, including that an allowlist-only change does not trigger a re-open
 
 ## 5. Permissions
 
-- [ ] 5.1 In `driver-sdk.js`, move the composed allowlist from `--allowedTools` into a `canUseTool` callback, deny-by-default, reusing `tools.js` composition unchanged. Leave `driver-cli.js` passing the composed list as `--allowedTools` with `--permission-mode dontAsk`, exactly as today
-- [ ] 5.2 In `driver-sdk.js`, pass NO `allowedTools` and keep `permissionMode: 'default'`. Assert in a test that neither is reintroduced
-- [ ] 5.3 In `driver-sdk.js`'s callback, preserve the existing pattern semantics (bare names and scoped forms), so a bound toolset means what it meant under `driver-cli.js`
-- [ ] 5.4 In `driver-sdk.js`, log every denial with the pattern that failed to match, as `driver-cli.js`'s `dontAsk` denials were visible
+- [x] 5.1 In `driver-sdk.js`, move the composed allowlist from `--allowedTools` into a `canUseTool` callback, deny-by-default, reusing `tools.js` composition unchanged. Leave `driver-cli.js` passing the composed list as `--allowedTools` with `--permission-mode dontAsk`, exactly as today
+- [x] 5.2 In `driver-sdk.js`, pass NO `allowedTools` and keep `permissionMode: 'default'`. Assert in a test that neither is reintroduced
+- [x] 5.3 In `driver-sdk.js`'s callback, preserve the existing pattern semantics (bare names and scoped forms), so a bound toolset means what it meant under `driver-cli.js` — base-name/server-name matching only (same granularity `tools.js`'s `logUngrantedTools` already uses), NOT the CLI's own sub-command glob parser for a scoped form like `Bash(git *)`: that form is matched at the base tool name here. Flagged for review — see the PR description
+- [x] 5.4 In `driver-sdk.js`, log every denial with the pattern that failed to match, as `driver-cli.js`'s `dontAsk` denials were visible
 
 ## 6. Continuity
 
-- [ ] 6.1 Mint nothing: continue reporting the vendor's session id every unit on both drivers, including units `driver-sdk.js` served from an open session
-- [ ] 6.2 Port the missing-context ladder to `driver-sdk.js`'s re-open path — re-check at 500ms/1.5s/3s, unreadable is not absent, retry once. `driver-cli.js` already has it, unchanged by the move
-- [ ] 6.3 On confirmed absence, FAIL with the existing user-facing text and a non-empty result, on either driver
-- [ ] 6.4 Keep reading the retired `resumeSessionId` alongside `runtimeContextId` for one release, on both drivers
+- [x] 6.1 Mint nothing: continue reporting the vendor's session id every unit on both drivers, including units `driver-sdk.js` served from an open session
+- [x] 6.2 Port the missing-context ladder to `driver-sdk.js`'s re-open path — re-check at 500ms/1.5s/3s, unreadable is not absent, retry once. `driver-cli.js` already has it, unchanged by the move
+- [x] 6.3 On confirmed absence, FAIL with the existing user-facing text and a non-empty result, on either driver
+- [x] 6.4 Keep reading the retired `resumeSessionId` alongside `runtimeContextId` for one release, on both drivers (via `driver-cli.js`'s unchanged `contextIdOf`, reused by `driver-sdk.js`)
 
 ## 7. Transcript
 
-- [ ] 7.1 Render `driver-sdk.js`'s typed SDK messages to the existing `[init]` / `[claude]` / `[tool]` / `=== RESULT ===` lines, matching what `driver-cli.js` already prints
-- [ ] 7.2 In `driver-sdk.js`, log a session open, a session reuse and a session re-open distinctly, so a pod log shows which path a unit took
+- [x] 7.1 Render `driver-sdk.js`'s typed SDK messages to the existing `[init]` / `[claude]` / `[tool]` / `=== RESULT ===` lines, matching what `driver-cli.js` already prints (reuses `driver-cli.js`'s `formatEvent` directly — the field shapes line up)
+- [x] 7.2 In `driver-sdk.js`, log a session open, a session reuse and a session re-open distinctly, so a pod log shows which path a unit took
 
 ## 8. Image
 
-- [ ] 8.1 Update `runtimes/claude/Dockerfile`: keep the global `@anthropic-ai/claude-code` install, needed by `driver-cli.js`, and add `@anthropic-ai/claude-agent-sdk` with optional deps intact, needed by `driver-sdk.js`. Keep the no-domain-tooling comment, and verify both binaries are present in the built image
-- [ ] 8.2 Build and push a new `agentops-runtime-claude` tag carrying both drivers (never overwrite a pushed tag)
+- [x] 8.1 Update `runtimes/claude/Dockerfile`: keep the global `@anthropic-ai/claude-code` install, needed by `driver-cli.js`, and add `@anthropic-ai/claude-agent-sdk` with optional deps intact, needed by `driver-sdk.js`. Keep the no-domain-tooling comment, and verify both binaries are present in the built image (verified the npm mechanics locally — optional deps resolve and the bundled binary runs under `--ignore-scripts` — but NOT inside an actual built container image: no docker daemon in this remote session, see PR description)
+- [ ] 8.2 Build and push a new `agentops-runtime-claude` tag carrying both drivers (never overwrite a pushed tag) — WORKSTATION-ONLY, not performed in this remote session (no docker daemon)
 
 ## 9. Unit tests
 
-- [ ] 9.1 `tools.test.js` continues to pass untouched — composition is not what changed
-- [ ] 9.2 `driver-cli.js`'s existing test suite (today's `runtime.test.js`, moved alongside it) continues to pass untouched — the move must not change behaviour
-- [ ] 9.3 Permission-callback tests for `driver-sdk.js`: allow, deny, empty composition denies everything, scoped patterns
-- [ ] 9.4 Session-reuse tests for `driver-sdk.js`: identical fingerprint reuses, changed fingerprint re-opens with resume, allowlist-only change reuses
-- [ ] 9.5 Continuity tests over the ladder, on both drivers, as today
-- [ ] 9.6 A driver-selection test: `RUNTIME_CLAUDE_DRIVER=sdk`, `=cli`, unset, and an unrecognized value each wire the entrypoint to the right module
-- [ ] 9.7 `node --test` passes with no network access
+- [x] 9.1 `tools.test.js` continues to pass untouched — composition is not what changed
+- [x] 9.2 `driver-cli.js`'s existing test suite (today's `runtime.test.js`, moved alongside it) continues to pass untouched — the move must not change behaviour
+- [x] 9.3 Permission-callback tests for `driver-sdk.js`: allow, deny, empty composition denies everything, scoped patterns
+- [x] 9.4 Session-reuse tests for `driver-sdk.js`: identical fingerprint reuses, changed fingerprint re-opens with resume, allowlist-only change reuses
+- [x] 9.5 Continuity tests over the ladder, on both drivers, as today
+- [x] 9.6 A driver-selection test: `RUNTIME_CLAUDE_DRIVER=sdk`, `=cli`, unset, and an unrecognized value each wire the entrypoint to the right module
+- [x] 9.7 `node --test` passes with no network access (204/204, `runtimes/claude/`)
 
 ## 10. System tests
 
@@ -76,9 +76,9 @@ All of 4.1–4.4 apply to `driver-sdk.js` only — `driver-cli.js` opens a fresh
 
 ## 11. Documentation
 
-- [ ] 11.1 `docs/contracts/runtime.md`: amend RT-3 (Composing the allowlist) to state that a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Bump the version PATCH (clarifies an obligation, changes none) and add a changelog row
-- [ ] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match
-- [ ] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification
-- [ ] 11.4 Move `docs/runtimes/copilot.md`'s claimed runtime-specification version to match, even though `runtimes/copilot/` needs no code change for this clarification
+- [x] 11.1 `docs/contracts/runtime.md`: amend RT-3 (Composing the allowlist) to state that a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Bump the version PATCH (clarifies an obligation, changes none) and add a changelog row
+- [x] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match
+- [x] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification
+- [x] 11.4 Move `docs/runtimes/copilot.md`'s claimed runtime-specification version to match, even though `runtimes/copilot/` needs no code change for this clarification
 - [x] 11.5 `.claude/rules/runtime-spec.md`: note that `runtime-claude` ships two drivers — `sdk` (default, holds a session per pod) and `cli` (today's per-unit spawn, kept as the selectable alternative via `RUNTIME_CLAUDE_DRIVER=cli`) — and that the allowlist is a callback rule set on the `sdk` driver only. Root `CLAUDE.md` stays an index and gets no new line for this. Done in this PR, since it is a rules-file note, not code
-- [ ] 11.6 `docs/claude.md`: document `RUNTIME_CLAUDE_DRIVER` for adopters, alongside the existing `RUNTIME_UNPARSED_REPEAT_LIMIT` entry — both values, the `sdk` default, and the unrecognized-value fallback
+- [x] 11.6 `docs/claude.md`: document `RUNTIME_CLAUDE_DRIVER` for adopters, alongside the existing `RUNTIME_UNPARSED_REPEAT_LIMIT` entry — both values, the `sdk` default, and the unrecognized-value fallback
