@@ -164,8 +164,9 @@ from every green night.
 No data migration. Both workflow files are edited in place.
 
 Both suites' existing specs and configs stay unchanged, except the two
-additions named above: `retries` in `e2e/playwright.config.ts`, and the
-documented env usage in `e2e-live`.
+additions named above: `retries` in
+`platform/console/ui/playwright.config.ts`, and the documented env usage
+in `e2e-live`.
 
 Rollback is reverting the workflow edits. Neither suite's assertions
 depend on the new wiring to keep working by hand.
