@@ -299,6 +299,26 @@ function findSpinVerdict(ev, watch) {
   return null;
 }
 
+// readInit takes the vendor's own account of what it actually has —
+// cross-checked against the grant once the turn completes, exactly as
+// driver-cli.js does it, the one point in this process that ever sees it.
+function readInit(ev) {
+  return { initTools: ev.tools || [], initMcpServers: ev.mcp_servers || [] };
+}
+
+// abortSpinningTurn is the async equivalent of driver-cli.js's SIGTERM:
+// abort generation rather than let a loop that cannot end burn the turn
+// budget. The caller keeps draining to this turn's `result` rather than
+// returning — the generator must reach a settled boundary before the next
+// unit can safely push into it.
+function abortSpinningTurn(sdkQuery, spinVerdict) {
+  console.log(
+    `[runtime] ${spinVerdict.name} called ${spinVerdict.repeats}x with the same unparsable arguments — ` +
+      `nothing ran, ending the run: ${spinVerdict.raw.slice(0, 160)}`,
+  );
+  sdkQuery.interrupt().catch(() => {});
+}
+
 async function consumeTurn(sdkQuery, watch, calls) {
   let sessionId = null;
   let spinVerdict = null;
@@ -308,30 +328,13 @@ async function consumeTurn(sdkQuery, watch, calls) {
     const { value: ev, done } = await sdkQuery.next(); // NOSONAR
     if (done) return { endedUnexpectedly: true, sessionId, initTools, initMcpServers };
     if (ev?.session_id && !sessionId) sessionId = ev.session_id;
-    if (ev?.type === 'system' && ev.subtype === 'init') {
-      // The vendor's own account of what it actually has — cross-checked
-      // against the grant once the turn completes, exactly as driver-cli.js
-      // does it, the one point in this process that ever sees it.
-      initTools = ev.tools || [];
-      initMcpServers = ev.mcp_servers || [];
-    }
+    if (ev?.type === 'system' && ev.subtype === 'init') ({ initTools, initMcpServers } = readInit(ev));
     calls.note(ev);
     const txt = formatSdkEvent(ev);
     if (txt) process.stdout.write(txt);
     if (ev?.type === 'assistant' && !spinVerdict) {
       spinVerdict = findSpinVerdict(ev, watch);
-      if (spinVerdict) {
-        console.log(
-          `[runtime] ${spinVerdict.name} called ${spinVerdict.repeats}x with the same unparsable arguments — ` +
-            `nothing ran, ending the run: ${spinVerdict.raw.slice(0, 160)}`,
-        );
-        // The async equivalent of driver-cli.js's SIGTERM: abort generation
-        // rather than let a loop that cannot end burn the turn budget. Keep
-        // draining to this turn's `result` below rather than returning here
-        // — the generator must reach a settled boundary before the next
-        // unit can safely push into it.
-        sdkQuery.interrupt().catch(() => {});
-      }
+      if (spinVerdict) abortSpinningTurn(sdkQuery, spinVerdict);
     }
     if (ev?.type === 'result') return { result: ev, sessionId, spinVerdict, initTools, initMcpServers };
   }

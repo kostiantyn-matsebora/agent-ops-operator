@@ -242,65 +242,75 @@ function storageOutageReport(first, reason, resultText) {
   });
 }
 
+// unitEnv is the child's environment: the run and thread ids come from the
+// work unit, so control characters are dropped before they reach it.
+function unitEnv(unit) {
+  const clean = (v) => String(v).replaceAll(/[\u0000-\u001f\u007f]/g, '');
+  return { ...process.env, RUN_ID: clean(unit.runId), TG_THREAD_ID: unit.threadId != null ? clean(unit.threadId) : '' };
+}
+
+// noteSpin ends the run on the first unparsable tool call: TERM first, KILL
+// only if it does not go — an outright kill is a last resort, and a CLI that
+// ignores TERM must still not be able to hold the pod.
+function noteSpin(ev, st, { p, watch }) {
+  for (const b of ev.message?.content || []) {
+    if (b.type !== 'tool_use') continue;
+    const verdict = noteToolUse(watch, b.name, b.input);
+    if (!verdict) continue;
+    st.spin = verdict;
+    console.log(
+      `[runtime] ${verdict.name} called ${verdict.repeats}x with the same unparsable arguments — ` +
+        `nothing ran, ending the run: ${verdict.raw.slice(0, 160)}`,
+    );
+    p.kill('SIGTERM');
+    st.kill = setTimeout(() => p.kill('SIGKILL'), 5000);
+    return;
+  }
+}
+
+// handleStreamLine folds one stream-json line into the run's state.
+function handleStreamLine(line, st, { p, calls, watch, allowed }) {
+  let ev;
+  try { ev = JSON.parse(line); } catch { console.log(line); return; }
+  if (ev.session_id && !st.sessionId) st.sessionId = ev.session_id;
+  if (ev.type === 'result') {
+    // Extracted BEFORE the 2000-char cap: a brief written late in a
+    // long answer must not be sliced away with the rest.
+    const extracted = extractBrief(ev.result || '');
+    st.result = extracted.text.slice(0, 2000);
+    st.brief = extracted.brief;
+  }
+  if (ev.type === 'system' && ev.subtype === 'init') {
+    // The vendor's own account of what it actually has — cross-check
+    // it against what we asked it to grant, once, right here: it is
+    // the only point in this process that ever sees it.
+    logUngrantedTools(allowed, ev.tools, ev.mcp_servers, (m) => console.log(sanitizeLog(m)));
+  }
+  calls.note(ev);
+  const txt = formatEvent(ev, line);
+  if (txt) process.stdout.write(txt);
+  if (ev.type === 'assistant' && !st.spin) noteSpin(ev, st, { p, watch });
+}
+
 async function spawnClaude(args, unit, isResume, allowed) {
   const attempt = (argv) =>
     new Promise((resolve) => {
-      const p = spawn(CLAUDE_BIN, argv, {
-        cwd: WORKSPACE,
-        env: { ...process.env, RUN_ID: unit.runId, TG_THREAD_ID: unit.threadId != null ? String(unit.threadId) : '' },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let buf = '', sessionId = null, result = '', brief = '', stderr = '';
+      const p = spawn(CLAUDE_BIN, argv, { cwd: WORKSPACE, env: unitEnv(unit), stdio: ['ignore', 'pipe', 'pipe'] });
+      let buf = '', stderr = '';
+      // Run state on one object so the line handler can sit outside this closure.
+      const st = { sessionId: null, result: '', brief: '', spin: null, kill: null };
       const calls = newCallRecorder();
       // Tool calls the model could not FORM. Nothing executes them, so a run
       // that only makes those looks busy and answers from whatever it already
       // had — see spin.js.
       const watch = newSpinWatch(SPIN_LIMIT);
-      let spin = null, kill = null;
       p.stdout.on('data', (c) => {
         buf += c;
         let nl;
         while ((nl = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, nl);
           buf = buf.slice(nl + 1);
-          if (!line.trim()) continue;
-          let ev;
-          try { ev = JSON.parse(line); } catch { console.log(line); continue; }
-          if (ev.session_id && !sessionId) sessionId = ev.session_id;
-          if (ev.type === 'result') {
-            // Extracted BEFORE the 2000-char cap: a brief written late in a
-            // long answer must not be sliced away with the rest.
-            const extracted = extractBrief(ev.result || '');
-            result = extracted.text.slice(0, 2000);
-            brief = extracted.brief;
-          }
-          if (ev.type === 'system' && ev.subtype === 'init') {
-            // The vendor's own account of what it actually has — cross-check
-            // it against what we asked it to grant, once, right here: it is
-            // the only point in this process that ever sees it.
-            logUngrantedTools(allowed, ev.tools, ev.mcp_servers, (m) => console.log(sanitizeLog(m)));
-          }
-          calls.note(ev);
-          const txt = formatEvent(ev, line);
-          if (txt) process.stdout.write(txt);
-          if (ev.type === 'assistant' && !spin) {
-            for (const b of ev.message?.content || []) {
-              if (b.type !== 'tool_use') continue;
-              const verdict = noteToolUse(watch, b.name, b.input);
-              if (!verdict) continue;
-              spin = verdict;
-              console.log(
-                `[runtime] ${verdict.name} called ${verdict.repeats}x with the same unparsable arguments — ` +
-                  `nothing ran, ending the run: ${verdict.raw.slice(0, 160)}`,
-              );
-              // TERM first, KILL only if it does not go: an outright kill is
-              // a last resort, and a CLI that ignores TERM must still not be
-              // able to hold the pod.
-              p.kill('SIGTERM');
-              kill = setTimeout(() => p.kill('SIGKILL'), 5000);
-              break;
-            }
-          }
+          if (line.trim()) handleStreamLine(line, st, { p, calls, watch, allowed });
         }
       });
       p.stderr.on('data', (c) => {
@@ -310,9 +320,11 @@ async function spawnClaude(args, unit, isResume, allowed) {
       // The process never started (ENOENT, EACCES before exec) — no
       // exitCode, exactly like the prompt-read failures above: there is no
       // process exit to report.
-      p.on('error', (e) => resolve({ status: 'failed', sessionId, result: `spawn: ${e.message}`, stderr, ...calls.report() }));
+      p.on('error', (e) => resolve({ status: 'failed', sessionId: st.sessionId, result: `spawn: ${e.message}`, stderr, ...calls.report() }));
       p.on('close', (code) => {
-        if (kill) clearTimeout(kill);
+        if (st.kill) clearTimeout(st.kill);
+        const { sessionId, brief, spin } = st;
+        let { result } = st;
         if (spin) {
           // FAILED, and said plainly. The alternative is what happened before
           // this existed: a run reported success while every tool call in it
@@ -548,7 +560,7 @@ async function reportDone(unit, out) {
     } catch (e) {
       lastFailure = e.message;
     }
-    await sleep(10000);
+    await sleep(10000); // NOSONAR -- serial retry
   }
   console.error(`[runtime] /work/done never delivered run ${sanitizeLog(unit.runId)} after 10 minutes of retries (${sanitizeLog(lastFailure)}) — giving up, resuming polling`);
 }
