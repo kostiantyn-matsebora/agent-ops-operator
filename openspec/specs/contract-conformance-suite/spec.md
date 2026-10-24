@@ -6,18 +6,18 @@ TBD - created by archiving change e2e-testing. Update Purpose after archive.
 ## Requirements
 
 ### Requirement: Adapter conformance is verified black-box, against the built binary
-A conformance suite SHALL exist that verifies an adapter implementation against
-the adapter contracts by running its **built binary** and speaking HTTP to it,
-with a fake manager standing in for the real one. The suite SHALL live in the
-manager's Go module (`platform/manager/`) — the one module with dependencies,
-so it adds none and is not discovered as a component.
+A conformance suite SHALL exist that verifies an adapter implementation
+against the adapter contracts by running its **built binary** and speaking
+HTTP to it, with a fake manager standing in for the real one.
 
-It SHALL NOT be a package that adapter modules import. Every adapter module is
-required to have no dependency outside its own directory, and a shared test
-package would put one into all of them. Driving the binary is also the more
-faithful form: it verifies the artifact that ships rather than a library the
-artifact happens to contain, which matches the fact that adapters are
-out-of-process by definition.
+- Lives in the manager's Go module (`platform/manager/`) — the one module
+  with dependencies, so it adds none and is not discovered as a component.
+- SHALL NOT be a package adapter modules import — every adapter module
+  requires no dependency outside its own directory, and a shared test
+  package would add one to all of them.
+- Drives the binary rather than a library — the more faithful form, since
+  it verifies the artifact that ships, matching that adapters are
+  out-of-process by definition.
 
 #### Scenario: No adapter module gains a dependency
 - **WHEN** the conformance suite is added and every adapter is covered by it
@@ -28,10 +28,12 @@ out-of-process by definition.
 - **THEN** it is covered by adding it to the suite's list of implementations under test, with no change to its own source
 
 ### Requirement: The suite needs no cluster, no network and no credentials
-The suite SHALL run with no Kubernetes cluster, no outbound network access and
-no third-party credentials, so that it can gate every pull request including
-those from forks. Adapters whose implementation reaches a third-party system
-SHALL be pointed at a local double through their configured endpoint.
+The suite SHALL run with no Kubernetes cluster, no outbound network access
+and no third-party credentials, so that it can gate every pull request
+including those from forks.
+
+Adapters whose implementation reaches a third-party system SHALL be pointed
+at a local double through their configured endpoint.
 
 #### Scenario: The suite gates a fork pull request
 - **WHEN** a pull request originates from a fork with no access to repository secrets
@@ -82,10 +84,20 @@ A signal adapter under test SHALL demonstrate, against the fake manager:
 4. **Source scoping** — the signals it emits name the source it serves.
 5. **Failure handling** — a rejected or unavailable manager results in retry or
    a reported error, never in a silent drop with a healthy-looking process.
+6. **Explicit refusal** — a push-mode (webhook-receiving) adapter answers a
+   post for an unknown or unserved source with 404, the body naming the
+   source.
 
 A chat-originating signal adapter SHALL additionally demonstrate that every
 signal it emits carries the channel label, since the manager refuses a chat
 signal it could not answer.
+
+A behaviour a conformance fix pins SHALL live here whenever the fake manager
+can observe it — a refusal body, a repeated id, a clip reported through the
+status API.
+
+A behaviour only a real upstream can observe stays pinned by that adapter's
+own unit tests.
 
 #### Scenario: Correlation is minted where the events are understood
 - **WHEN** an adapter observes several upstream events it considers one problem
@@ -99,9 +111,36 @@ signal it could not answer.
 - **WHEN** the fake manager rejects a signal post
 - **THEN** the adapter retries or surfaces the failure, and the suite can observe that it did
 
+#### Scenario: An unknown source's refusal names it
+- **WHEN** the suite posts a webhook for a source the adapter under test does not serve
+- **THEN** the response is 404 and its body names the source
+
 #### Scenario: A chat signal always carries its channel
 - **WHEN** a chat-originating adapter emits a signal
 - **THEN** the channel label is present, so the manager can answer where the person typed
+
+### Requirement: Every shipped signal adapter's binary is under test
+
+The suite's list of signal implementations under test SHALL cover every
+adapter module under `signals/`, `signals/pulse` included.
+
+The suite SHALL assert that coverage itself, from the repository's own
+directory listing, so a new adapter module fails the suite until it is
+listed — the specification's every-shipped-adapter claim is checked, never
+assumed.
+
+#### Scenario: The pulse binary runs in the suite
+
+- **WHEN** the conformance suite runs
+- **THEN** `signals/pulse`'s built binary is exercised against the fake
+  manager exactly as the other shipped adapters are
+
+#### Scenario: An unlisted adapter module fails the suite
+
+- **WHEN** a module exists under `signals/` that the suite's implementation
+  list omits
+- **THEN** the suite fails naming the module, rather than silently excluding
+  it from the claim
 
 ### Requirement: A thread-less send is visible or an explicit error
 

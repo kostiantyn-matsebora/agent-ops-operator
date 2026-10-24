@@ -7,7 +7,12 @@ The SignalAdapter CRD and its reconciler: declaring a signal-type implementation
 ## Requirements
 
 ### Requirement: SignalAdapter CRD declares an implementation, never credentials
-The `SignalAdapter` CRD SHALL mirror `ChannelAdapter` as pure implementation: required `spec.image`, workload-run properties (`singleton` defaulting true, `resources`), an optional `spec.port` declaring the port the image's own HTTP surface listens on (webhook-receiving implementations), and an optional `spec.kubernetesAccess` (default false) declaring that the implementation talks to the Kubernetes API. It SHALL carry no `env`, no `type`, and no credentials. **The CR name IS the routing key**: SignalSources whose `spec.adapter` equals the adapter's name are served by it; one adapter per implementation holds by construction.
+
+The `SignalAdapter` CRD SHALL mirror `ChannelAdapter` as pure implementation: required `spec.image`, workload-run properties (`singleton` defaulting true, `resources`), and an optional `spec.port` declaring the port the image's own HTTP surface listens on (webhook-receiving implementations). It SHALL carry no `env`, no `type`, and no credentials.
+
+Kubernetes reach is `spec.serviceAccountName` alone. The retired `spec.kubernetesAccess` toggle is DELETED with no alias, per the requirement "An adapter's identity is a reference, and absent means the floor" in this capability's main spec — this spec SHALL state that nowhere else does it still exist.
+
+**The CR name IS the routing key**: SignalSources whose `spec.adapter` equals the adapter's name are served by it, and one adapter per implementation holds by construction.
 
 #### Scenario: Plug a new signal kind with CRs only
 - **WHEN** a `SignalAdapter` named `cron` naming an image is applied, followed by a `SignalSource` with `spec.adapter: cron`
