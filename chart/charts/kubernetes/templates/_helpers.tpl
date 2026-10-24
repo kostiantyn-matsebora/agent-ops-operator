@@ -266,3 +266,50 @@ sources:
 agents:
 {{ toYaml $agents | indent 2 }}
 {{- end -}}
+
+{{- /* OPERATOR-DECLARED EXTENSION to the server SA's read grant
+(mcp-k8s-extra-rbac). Renders right after agentops.runtimeReadRules, in BOTH
+the readonly and full branches of the ClusterRole in mcp-server.yaml — an
+extension granted under readonly is the same rule set it would be under
+full, matching how the two branches already share runtimeReadRules rather
+than factoring one read block out.
+
+Each entry is {apiGroups, resources, verbs}, checked against the same four
+guard rails `agentops.runtimeReadRules`'s own comment states, mechanically
+rather than by documentation alone:
+
+  1. verbs must be a subset of get/list/watch — this extension is READ-ONLY.
+  2. no apiGroups/resources entry equal to "*".
+  3. apiGroups [""] may never pair with resources ["secrets"].
+  4. apiGroups may never include "rbac.authorization.k8s.io" or
+     "agentops.dev", alone or beside other groups.
+
+A rejected entry FAILS the render, naming the entry — an allowlist a
+reviewer cannot read off the failure is an allowlist nobody actually
+reviews. */ -}}
+{{- define "kubernetes.mcpServerExtraReadRules" -}}
+{{- $allowedVerbs := list "get" "list" "watch" -}}
+{{- range $i, $rule := .Values.mcpServers.rbac.extraReadRules -}}
+{{- $label := printf "mcpServers.rbac.extraReadRules[%d] (apiGroups=%v resources=%v)" $i $rule.apiGroups $rule.resources -}}
+{{- range $v := $rule.verbs -}}
+{{- if not (has $v $allowedVerbs) -}}
+{{- fail (printf "%s sets verb %q, outside get/list/watch — this extension is read-only, same as the fixed runtimeReadRules list it rides beside. Write access goes through mcpServers.readOnly / the k8s-admin toolset, never here." $label $v) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (has "" $rule.apiGroups) (has "secrets" $rule.resources) -}}
+{{- fail (printf "%s pairs the core apiGroup with the \"secrets\" resource — no declared account in this release holds any verb on Secrets, by invariant, and this extension does not reopen that wall." $label) -}}
+{{- end -}}
+{{- if or (has "*" $rule.apiGroups) (has "*" $rule.resources) -}}
+{{- fail (printf "%s names \"*\" in apiGroups or resources — a wildcard reaches Secrets and every other resource without naming them, which is how a role passes review and fails its purpose. Name the resources this extension actually needs." $label) -}}
+{{- end -}}
+{{- if has "rbac.authorization.k8s.io" $rule.apiGroups -}}
+{{- fail (printf "%s lists apiGroup \"rbac.authorization.k8s.io\" — reading Roles/ClusterRoles/bindings is how a role maps every identity in the install, and that group is never granted here." $label) -}}
+{{- end -}}
+{{- if has "agentops.dev" $rule.apiGroups -}}
+{{- fail (printf "%s lists apiGroup \"agentops.dev\" — Conversations, Pipelines and profiles are unreadable from every grant in this release, by invariant, and this extension does not reopen that." $label) -}}
+{{- end -}}
+- apiGroups: {{ $rule.apiGroups | toJson }}
+  resources: {{ $rule.resources | toJson }}
+  verbs: {{ $rule.verbs | toJson }}
+{{- end -}}
+{{- end -}}
