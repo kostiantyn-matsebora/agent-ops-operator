@@ -52,8 +52,8 @@ When no controller owns the object, `workload` SHALL name the object itself.
 Resolution lag SHALL NOT re-mint per-object grouping. When a tracked kind's
 owning workload cannot yet be resolved because the adapter's own cache has
 not caught up, the adapter SHALL hold the event for a short bounded wait
-(one 30-second cache refresh tick, not configurable)
-rather than emit under the object's own name.
+of one 30-second cache refresh tick, which is not configurable.
+The adapter SHALL NOT emit under the object's own name during that wait.
 
 The object-keyed id applies only to an object confirmed unowned, or to one
 still unresolved when that wait expires — so a momentary cache lag delays the
@@ -78,6 +78,10 @@ role, and is distinct from correlation.
 #### Scenario: A cache catching up does not split a workload's conversation
 - **WHEN** a pod's event arrives before the adapter's cache holds its owning ReplicaSet, and the owner appears within the bounded wait
 - **THEN** the emitted signal carries the workload-keyed id, never a per-pod one
+
+#### Scenario: The wait expires without an owner
+- **WHEN** a pod's event arrives, and its owner is still unresolved after the 30-second wait
+- **THEN** the adapter emits the signal with the object-keyed id, so the signal is delayed and never lost
 
 #### Scenario: An unowned pod is its own workload
 - **WHEN** an event's involved object is a bare pod with no owner references
