@@ -98,20 +98,25 @@ permission-callback shape.
 
 ## Impact
 
-- **Changed**: `runtimes/claude/` (`runtime.js` split into a thin entrypoint plus
-  two driver modules — `driver-sdk.js`, newly written around `query()`, and
-  `driver-cli.js`, today's spawn-per-unit logic moved verbatim.
-  `tools.js` composition logic unchanged), `runtimes/claude/Dockerfile` (adds
-  `@anthropic-ai/claude-agent-sdk` alongside the existing global
-  `@anthropic-ai/claude-code` install — each driver needs its own binary path),
-  a new `agentops-runtime-claude` image tag, `.claude/rules/runtime-spec.md`.
+- **Changed**: `runtimes/claude/` and its Dockerfile, plus a rules file.
+  - `runtime.js` splits into a thin entrypoint plus two driver modules:
+    `driver-sdk.js` (new, built around `query()`) and `driver-cli.js`
+    (today's spawn-per-unit logic, moved verbatim). `tools.js` composition
+    logic is unchanged.
+  - The Dockerfile adds `@anthropic-ai/claude-agent-sdk` alongside the
+    existing global `@anthropic-ai/claude-code` install, since each driver
+    needs its own binary path.
+  - A new `agentops-runtime-claude` image tag, and
+    `.claude/rules/runtime-spec.md`.
 - **Published spec amendment**: `docs/contracts/runtime.md`'s RT-3 gains a
-  PATCH clarification — a per-invocation decision satisfies it, not only a
-  flag — with a matching version move on `docs/claude.md`,
-  `docs/runtimes/ollama.md` and `docs/runtimes/copilot.md`, per
-  `runtime-spec.md`'s rule that every shipped runtime's claimed version moves
-  together. No obligation changes, and session reuse itself still does not
-  publish there — see design.md's Non-Goals.
+  PATCH clarification.
+  - A per-invocation decision satisfies RT-3 as well as a flag does. No
+    obligation changes.
+  - `docs/claude.md`, `docs/runtimes/ollama.md` and `docs/runtimes/copilot.md`
+    move their claimed version to match, per `runtime-spec.md`'s rule that
+    every shipped runtime's version moves together.
+  - Session reuse itself still does NOT publish there — see design.md's
+    Non-Goals.
 - **Dependencies**: `@anthropic-ai/claude-agent-sdk` (bundles the Claude Code
   binary, needs Node 18+ — the image is Node 22). Auth is unchanged for both
   drivers — the bundled binary reads `CLAUDE_CODE_OAUTH_TOKEN`, which is what
