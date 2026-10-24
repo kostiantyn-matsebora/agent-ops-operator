@@ -60,6 +60,25 @@ Want the acting route without a server that can act? Set both independently:
 --set kubernetes.allowMutations=true --set kubernetes.mcpServers.readOnly=true
 ```
 
+Reads outside that fixed list — a third-party CRD the agent should look at,
+not just the built-in kinds — go through
+`kubernetes.mcpServers.rbac.extraReadRules`, additive and read-only. Running
+VictoriaMetrics' alerting operator and want the agent to read its `vmrules`?
+
+```yaml
+kubernetes:
+  mcpServers:
+    rbac:
+      extraReadRules:
+        - apiGroups: ["operator.victoriametrics.com"]
+          resources: ["vmrules"]
+          verbs: ["get", "list", "watch"]
+```
+
+See the [configuration
+reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/configuration.md#extending-the-mcp-servers-read-grant)
+for the shapes it refuses.
+
 ## Where it answers
 
 **It answers in the console already** — the route binds it and claims the
