@@ -75,7 +75,7 @@ stays owned by envtest/system.
 
 ## 5. System tests
 
-- [ ] 5.1 Not applicable — nothing a cluster decides changed. The suite
+- [x] 5.1 Not applicable — nothing a cluster decides changed. The suite
       added here runs entirely as built binaries against HTTP doubles, the
       same tier `channel_test.go`/`signal_test.go` already occupy, with no
       pod, no RBAC and no informer involved.
