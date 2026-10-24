@@ -211,14 +211,16 @@ active path is visible from the log alone.
 ## Risks / Trade-offs
 
 - **Subscription auth is inherited, not documented.** The SDK's quickstart
-  names `ANTHROPIC_API_KEY` and the cloud providers. `CLAUDE_CODE_OAUTH_TOKEN`
-  works because the bundled binary reads it, exactly as today. Anthropic also
-  states that third-party developers may not OFFER claude.ai login or rate
-  limits in their products, which reads as out of scope for an operator
-  running its own credential, since every adopter brings their own. → First
-  task is a smoke test on the subscription token before any rewrite. If it
-  fails, the change stops at that task rather than after the rewrite, and
-  `driver-cli.js` stays the only driver.
+  names `ANTHROPIC_API_KEY` and the cloud providers, not
+  `CLAUDE_CODE_OAUTH_TOKEN`.
+  - It works anyway, because the bundled binary reads it, exactly as today.
+  - Anthropic states that third-party developers may not OFFER claude.ai
+    login or rate limits in their products. That reads as out of scope here
+    — every adopter brings their own credential.
+  - → First task is a smoke test on the subscription token, before any
+    rewrite.
+  - If it fails, the change stops at that task. `driver-cli.js` stays the
+    only driver.
 - **The bundled binary ships via npm optional dependencies**, so an image
   built with `npm ci --omit=optional` silently has no Claude Code and fails at
   runtime. → The Dockerfile installs without omitting optionals and the build
