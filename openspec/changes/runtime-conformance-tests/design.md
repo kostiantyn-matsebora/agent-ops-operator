@@ -7,7 +7,7 @@ binary, because `gateways/telegram` needs a real network endpoint to dial
 and because the system pack deploys that same fake as a Service.
 
 `runtimes/ollama` talks to its vendor over plain HTTP at `OLLAMA_URL`
-(`runtimes/ollama/main.go`, `work.go`). No other test tier — the system pack
+(`runtimes/ollama/main.go`, `ollama.go`). No other test tier — the system pack
 included — exercises `runtimes/ollama` today, so nothing else needs its fake
 Ollama double to exist as a separate artifact.
 
@@ -62,9 +62,17 @@ Every requirement ID the suite asserts, and which path exercises it:
 |---|---|
 | `API-1`, `LC-1` | the `slow` directive. The double holds its response past one poll cycle, proving the runtime keeps polling and a second poll while Working gets nothing |
 | `API-7` | the `unparsable` directive. A response the runtime cannot parse proves the undetermined fact is omitted, never reported as zero |
-| `API-2`, `API-3`, `API-4`, `API-5`, `API-8`, `API-9`, `RT-1`, `RT-2`, `RT-3` and its sub-items, `SEC-1`–`SEC-3`, `COMPAT-1` | the default path. One ordinary successful run, against a served unit and a repository fixture the test controls directly |
+| `API-2`, `API-4`, `API-5`, `API-8`, `API-9`, `RT-1`, `RT-2`, `RT-3` and its sub-items, `SEC-1`–`SEC-3`, `COMPAT-1` | the default path. One ordinary successful run, against a served unit and a repository fixture the test controls directly |
 | `LC-2` | a short `RUNTIME_IDLE_TTL_M`, no directive. The double is never reached once the TTL elapses |
 | `LC-3` | an `/exit` call sent mid-run, no directive. The double is still mid-response when it arrives |
+
+`API-3` is excluded for the same reason as `API-6` and every `MGR-n` row.
+It obligates whoever ANSWERS `GET /work` — the manager — to have context
+already restored before replying.
+
+`FakeManager` trivially satisfies this by construction, so asserting it
+here would prove nothing about a real manager's behavior. It stays owned
+by envtest/system.
 
 **Why:** `test/stubruntime`'s vocabulary (`echo`/`fail`/`stale-context`/
 `no-context`/`die`/`stall`/`storage-outage`/`calls`) exists for manager-side

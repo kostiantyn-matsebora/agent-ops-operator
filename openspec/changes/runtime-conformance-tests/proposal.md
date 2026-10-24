@@ -21,11 +21,12 @@ idle-TTL exit today ships green.
   (`OLLAMA_URL`), scripted by a directive word in the task text — the same
   convention `test/stubruntime` already uses, scoped narrowly to what these
   assertions need rather than cloned in full.
-- Asserts `docs/contracts/runtime.md` IDs `API-1,2,3,4,5,7,8,9`, `LC-1,2,3`,
+- Asserts `docs/contracts/runtime.md` IDs `API-1,2,4,5,7,8,9`, `LC-1,2,3`,
   `RT-1`, `RT-2`, `RT-3`/`3.1`–`3.4`, `SEC-1,2,3`, `COMPAT-1` behaviorally, the same
-  way `channel_test.go`/`signal_test.go` assert their contract IDs. `API-6`
-  and every `MGR-n` row are the manager's own obligations and stay owned by
-  envtest/system — not asserted here.
+  way `channel_test.go`/`signal_test.go` assert their contract IDs. `API-3`,
+  `API-6` and every `MGR-n` row obligate whoever answers `GET /work` — the
+  manager, not the runtime — so they stay owned by envtest/system and are not
+  asserted here.
 - Runs inside the existing `conformance` job (`go test -tags conformance
   ./test/conformance/`) — no new CI job, no new toolchain. `runtimes/` is
   already a path-filtered component group, so the job already triggers on a
