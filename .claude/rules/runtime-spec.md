@@ -26,3 +26,8 @@ source.
 **Reaching for the specification itself without approval is a STOP, not an
 edit.** Approval is a conversation fact, not something a hook can read — stop,
 ask, and report the conflict instead of writing it.
+
+**`runtime-claude` ships two drivers, selected by `RUNTIME_CLAUDE_DRIVER`** —
+`sdk` (default, holds a session open per pod) and `cli` (per-unit spawn, the
+shipped alternative). The composed allowlist is enforced as a callback rule
+set on the `sdk` driver only.

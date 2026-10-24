@@ -6,33 +6,51 @@ now.
 
 **It re-establishes everything, every unit.** A runtime pod handles more than one
 work unit in its life — queued inputs, a fast back-and-forth, a burst on one
-conversation — and each of those spawns `claude` afresh with `--resume`, which
-replays the conversation transcript off disk and re-launches every bound MCP
-server. That cost is not constant: it grows with the conversation, so it is worst
-exactly where the conversation is most valuable. Nothing about the current design
-lets a second unit land in a session that is already open.
+conversation. Each of those spawns `claude` afresh with `--resume`.
+
+That replays the conversation transcript off disk and re-launches every bound
+MCP server. The cost grows with the conversation, so it is worst exactly where
+the conversation is most valuable.
+
+Nothing about the current design lets a second unit land in a session that is
+already open.
 
 **And the TTL is the adopter's dial, not ours.** The chart ships
-`runtimeIdleTtlMinutes: 1`, but `AgentRuntime.spec.idleTtlMinutes` is per-runtime,
-and a pod is cheap: an adopter may well run ten minutes, or hours, for an agent
-with expensive startup. At that end of the range a live session is not an
-optimisation — it is the normal path, and cold resume is the exception. The
-runtime should be built for both ends of that dial rather than for the one-minute
-end we happen to ship.
+`runtimeIdleTtlMinutes: 1`. But `AgentRuntime.spec.idleTtlMinutes` is
+per-runtime, and a pod is cheap.
 
-Separately, the CLI's permission surface is a set of flags with rules we have had
-to reverse-engineer and document (`--allowedTools` is the sole authority; never
-pass `--agent`; `--permission-mode dontAsk` because a prompt in a pod is a hang).
+An adopter may well run ten minutes, or hours, for an agent with expensive
+startup. At that end of the range a live session is not an optimisation — it
+is the normal path, and cold resume is the exception.
+
+The runtime should be built for both ends of that dial, not just the
+one-minute end we happen to ship.
+
+Separately, the CLI's permission surface is a set of flags with rules we have
+had to reverse-engineer and document:
+
+- `--allowedTools` is the sole authority.
+- Never pass `--agent`.
+- `--permission-mode dontAsk`, because a prompt in a pod is a hang.
+
 The SDK exposes the same decisions as a `canUseTool` callback — the same shape
-`runtime-copilot` needs, so the two reference runtimes end up with ONE permission
+`runtime-copilot` needs. The two reference runtimes end up with ONE permission
 story instead of two.
 
 ## What Changes
 
-- **`runtime-claude` drives `@anthropic-ai/claude-agent-sdk` in-process** instead
-  of spawning the `claude` CLI per work unit. The bundled binary is the same one
-  the CLI path used, so the vendor, its session files and its credential do not
-  change.
+- **`runtime-claude` ships two drivers behind one image and one entrypoint.** A
+  new `sdk` driver drives `@anthropic-ai/claude-agent-sdk` in-process. The
+  existing `cli` driver keeps spawning the `claude` CLI per work unit exactly as
+  today, moved verbatim rather than replaced. `RUNTIME_CLAUDE_DRIVER` — a new
+  env var read through the existing `AgentRuntime.spec.env` field, so no CRD or
+  chart change is needed to select one — chooses between them, defaulting to
+  `sdk`. The bundled binary either driver runs is the same one the CLI path
+  used today, so the vendor, its session files and its credential do not
+  change under either driver.
+- **Everything below describes the `sdk` driver.** The `cli` driver's
+  behaviour — one process per unit, `--allowedTools` flags, no session reuse —
+  is untouched and stays available via `RUNTIME_CLAUDE_DRIVER=cli`.
 - **A session is held open across work units within one pod**, via the SDK's
   streaming-input mode: the runtime pushes the next unit's prompt into the live
   session rather than starting a new process. Re-spawn and transcript re-replay
@@ -55,9 +73,12 @@ story instead of two.
   dies mid-session, which must fall back to disk resume without the manager
   seeing anything different.
 
-Not in scope: no CRD field, no manager change, no chart change, no change to the
-credential or to which vendor runs. `runtime-copilot` is a separate change; the
-only thing shared is the permission-callback shape.
+Not in scope: no CRD field, no manager change, no chart change, no change to
+the credential or to which vendor runs, and no removal of today's CLI-driven
+path — it ships alongside the new one as a selectable alternative.
+
+`runtime-copilot` is a separate change. The only thing shared is the
+permission-callback shape.
 
 ## Capabilities
 
@@ -77,13 +98,28 @@ only thing shared is the permission-callback shape.
 
 ## Impact
 
-- **Changed**: `runtimes/claude/` (`runtime.js` rewritten around `query()`;
-  `tools.js` composition logic unchanged), `runtimes/claude/Dockerfile`
-  (`@anthropic-ai/claude-agent-sdk` replaces the global `@anthropic-ai/claude-code`
-  install), a new `agentops-runtime-claude` image tag, `docs/contracts.md`,
-  `CLAUDE.md`.
+- **Changed**: `runtimes/claude/` and its Dockerfile, plus a rules file.
+  - `runtime.js` splits into a thin entrypoint plus two driver modules:
+    `driver-sdk.js` (new, built around `query()`) and `driver-cli.js`
+    (today's spawn-per-unit logic, moved verbatim). `tools.js` composition
+    logic is unchanged.
+  - The Dockerfile adds `@anthropic-ai/claude-agent-sdk` alongside the
+    existing global `@anthropic-ai/claude-code` install, since each driver
+    needs its own binary path.
+  - A new `agentops-runtime-claude` image tag, and
+    `.claude/rules/runtime-spec.md`.
+- **Published spec amendment**: `docs/contracts/runtime.md`'s RT-3 gains a
+  PATCH clarification.
+  - A per-invocation decision satisfies RT-3 as well as a flag does. No
+    obligation changes.
+  - `docs/claude.md`, `docs/runtimes/ollama.md` and `docs/runtimes/copilot.md`
+    move their claimed version to match, per `runtime-spec.md`'s rule that
+    every shipped runtime's version moves together.
+  - Session reuse itself still does NOT publish there — see design.md's
+    Non-Goals.
 - **Dependencies**: `@anthropic-ai/claude-agent-sdk` (bundles the Claude Code
-  binary; Node 18+, the image is Node 22). Auth is unchanged — the bundled binary
-  reads `CLAUDE_CODE_OAUTH_TOKEN`, which is what the chart already injects.
+  binary, needs Node 18+ — the image is Node 22). Auth is unchanged for both
+  drivers — the bundled binary reads `CLAUDE_CODE_OAUTH_TOKEN`, which is what
+  the chart already injects.
 - **Unchanged**: `api/v1alpha1/`, `internal/`, `chart/`, every adapter module,
   and the work contract itself.
