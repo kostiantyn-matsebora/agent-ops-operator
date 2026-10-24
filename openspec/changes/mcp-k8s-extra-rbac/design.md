@@ -16,8 +16,7 @@ rules they must keep:
 3. No `escalate`/`bind` on `rbac.authorization.k8s.io`.
 4. No write on RBAC/CRDs, and no read of `clusterroles`.
 
-See `proposal.md` for why a hand-applied `Role`/`RoleBinding` is the wrong
-fix.
+See `proposal.md` for why a hand-applied RBAC object is the wrong fix.
 
 ## Goals / Non-Goals
 

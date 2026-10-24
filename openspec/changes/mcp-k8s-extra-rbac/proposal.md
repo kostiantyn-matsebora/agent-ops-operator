@@ -6,8 +6,8 @@ It covers only core/apps/batch/networking/storage-style resources, so a read on
 any third-party CRD — VictoriaMetrics' `vmrules.operator.victoriametrics.com`
 hit this first — is Forbidden with no chart-driven way to grant it.
 
-The only fix on hand today is a hand-applied `Role`/`RoleBinding` against the
-live cluster. That is exactly the posture this repo's invariants forbid: every
+The only fix on hand today is a hand-applied RBAC object against the live
+cluster. That is exactly the posture this repo's invariants forbid: every
 RBAC grant here is chart-rendered from values, never hand-authored YAML.
 
 ## What Changes
@@ -16,8 +16,15 @@ RBAC grant here is chart-rendered from values, never hand-authored YAML.
   `k8s-bundle`'s MCP server ServiceAccount — a list of extra
   `{apiGroups, resources, verbs}` rules composed onto the existing fixed read
   rule set.
-- Verbs are restricted to `get`/`list`/`watch`. The render fails on any other
-  verb, so this knob cannot become a second way to grant mutation.
+- The render fails, naming the offending entry, on any of five shapes:
+  - a verb outside `get`/`list`/`watch`
+  - `resources: ["secrets"]` under `apiGroups: [""]`
+  - `apiGroups` or `resources` equal to `"*"`
+  - `apiGroups: ["rbac.authorization.k8s.io"]`
+  - `apiGroups: ["agentops.dev"]`
+
+  So this knob cannot become a second way to grant mutation, read secrets, or
+  escalate RBAC/CRD access.
 - Default: empty. No install's RBAC changes unless it opts in.
 - No new values path for the write-side rule set — mutations stay confined to
   the existing `mcpServers.readOnly`/toolset split, unchanged.
