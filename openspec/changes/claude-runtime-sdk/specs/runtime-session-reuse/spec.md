@@ -22,8 +22,8 @@ requirement on the published specification.
 when the variable is unset.
 
 The per-unit driver (`cli`) SHALL remain selectable by name as the
-alternative. An unrecognized value SHALL fall back to the default rather
-than failing the pod to start.
+alternative. An unrecognized value SHALL log a warning and fall back to the
+default, rather than failing the pod to start.
 
 #### Scenario: Unset selects the session-holding driver
 - **WHEN** `RUNTIME_CLAUDE_DRIVER` is unset
