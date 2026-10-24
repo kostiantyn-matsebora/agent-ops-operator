@@ -60,8 +60,13 @@ exist.
 ### Requirement: The registered delivery URL comes from the source, never the adapter
 The adapter is a dumb transport — the same posture as `channels/telegram`
 and `signals/ha`. It SHALL hold no connectivity information of its own.
+
 It SHALL register exactly the URL `spec.config.webhookUrl` carries,
 verbatim, never deriving one itself.
+
+The one exception is the
+`agentops_secret_digest` query parameter appended at registration, which
+carries a digest and does not change the configured address.
 
 A served source carrying `spec.config.baseUrl` but no `webhookUrl` SHALL be
 treated as not configured for registration. That is the same treatment a

@@ -52,6 +52,7 @@ When no controller owns the object, `workload` SHALL name the object itself.
 Resolution lag SHALL NOT re-mint per-object grouping. When a tracked kind's
 owning workload cannot yet be resolved because the adapter's own cache has
 not caught up, the adapter SHALL hold the event for a short bounded wait
+(one 30-second cache refresh tick, not configurable)
 rather than emit under the object's own name.
 
 The object-keyed id applies only to an object confirmed unowned, or to one

@@ -190,7 +190,7 @@ No chat-specific routing branch and no second addressing mode SHALL exist manage
 
 #### Scenario: A selection mints from its own delivery id
 
-- **WHEN** a person answers a surface's choice prompt and the transport delivers that answer as a selection carrying its own delivery id
+- **WHEN** a person answers a surface's choice prompt and the transport delivers that answer as a selection (a `chat` signal whose `initiationId` is minted by the adapter, per `signal-adapter-contract`) carrying its own transport-local delivery id
 - **THEN** the minted `initiationId` derives from the selection's id scoped to the source, so a re-delivered selection routes to the conversation the first delivery opened
 
 #### Scenario: Two sources never collide on the same bare delivery id

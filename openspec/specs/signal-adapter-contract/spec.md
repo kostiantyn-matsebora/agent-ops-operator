@@ -424,9 +424,9 @@ NEVER edited without the user's explicit approval.
 
 ### Requirement: A post-emit refractory window is the one named allowance in the no-dedup rule
 
-The no-dedup obligation stands: an adapter MUST NOT implement dedup, cooldown
-or recurrence. The manager's cooldown on `initiationId` is the one dedup
-authority.
+An adapter MUST NOT implement dedup, cooldown or recurrence. That is the
+no-dedup obligation, and it is stated here as a requirement of its own.
+The manager's cooldown on `initiationId` is the one dedup authority.
 
 The specification SHALL name ONE carve-out beside that obligation — the
 post-emit refractory window. It bounds an adapter's own re-post chatter, and
