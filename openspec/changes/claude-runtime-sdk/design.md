@@ -76,7 +76,7 @@ image swap. Flipping the env var is enough.
 **`driver-sdk.js` is the new code.** `@anthropic-ai/claude-agent-sdk`'s
 `query()` replaces `spawn('claude', …)`. The SDK bundles the same binary,
 writes the same session files under `$HOME/.claude/projects/<encoded-cwd>/`,
-and resolves auth the same way. `contextStorage: volume`, the home-volume
+and resolves auth the same way. `contextStorage: volume`, the context-volume
 requirement, and `CLAUDE_CODE_OAUTH_TOKEN` all carry over untouched for this
 driver too.
 
