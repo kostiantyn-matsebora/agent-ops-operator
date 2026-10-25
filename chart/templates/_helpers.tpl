@@ -663,6 +663,32 @@ silent guard there is correct.
 {{- end -}}
 
 {{- /*
+Tells a render with real cluster access apart from one without — the
+other half of the same problem `agentops.generatedSecretGuard` names.
+`lookup` of ANYTHING returns empty on a renderer with no cluster (`helm
+template`, CI, a GitOps repo-server that never holds credentials), so an
+empty result for the Secret itself never proves it is missing.
+
+PROBES `kube-system`, NEVER `.Release.Namespace`. Helm renders every
+template before it creates anything, so on a fresh `helm install
+--create-namespace` into a namespace that does not exist yet, THIS
+release's own namespace is not there yet either — `lookup` of it returns
+empty on a fully connected install, which would misread as "no cluster".
+Verified live: installing into a namespace created by that same command
+reports connected=false for the release's own namespace and connected=true
+for `kube-system`, every real cluster's one namespace guaranteed to exist
+independently of this release's lifecycle.
+
+This is what lets a generated-secret template mint on a REAL upgrade, not
+only a fresh install — closing the gap that otherwise makes every adopter
+retrofit a new generated credential by pinning one explicitly or
+reinstalling the release.
+*/ -}}
+{{- define "agentops.clusterConnected" -}}
+{{- if lookup "v1" "Namespace" "" "kube-system" -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /*
 THE STORAGE CLASS CONVENTION, implemented once for both claims.
 
 | Value | Renders |
