@@ -204,7 +204,7 @@ discover them: a bundle whose runtime this list missed would render a CR the
 default-runtime guard could not see, and the manager's bootstrap env would miss
 the sidecar and proxy images that runtime asked for. `ollama` proved the point:
 its first render passed every test but this guard, which reported "(none)". */ -}}
-{{- range $key := list "claude" "ollama" "copilot" -}}
+{{- range $key := list "claude" "ollama" "copilot" "claude-cli" -}}
 {{- $bv := index $root.Values $key -}}
 {{- if and $bv $bv.enabled -}}
 {{- $entry := omit $bv "enabled" "global" -}}

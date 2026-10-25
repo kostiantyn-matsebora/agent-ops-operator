@@ -40,8 +40,34 @@ for the source and the reference material beside this file.
   its no-dedup rule (`ADP-8`), and lists `signals/pulse` beside the other
   five shipped adapters. Additive — no adapter needs to change to stay
   conformant.
+- `chart/charts/claude-cli/`, a new optional bundle (off by default, like
+  `ollama`/`copilot`) running today's spawn-per-unit `claude` CLI — see
+  [runtimes/claude-cli](runtimes/claude-cli.md).
 
 ### Changed
+
+**BREAKING: `runtime-claude` (the chart's default-eligible runtime) now
+drives `@anthropic-ai/claude-agent-sdk` in-process instead of spawning the
+`claude` CLI.** Its image no longer carries the CLI binary.
+
+It holds one vendor session open across a pod's work units. It re-opens
+that session only when the session-affecting configuration changes —
+system prompt, MCP servers, `maxTurns`, cwd, or agent. See
+[the runtime contract](contracts/runtime.md).
+
+#### Upgrade
+
+An adopter who needs to keep running the CLI-spawning behavior must, in
+order:
+
+1. Enable the new bundle: `claude-cli.enabled=true`.
+2. Point every Pipeline or Coordinator that should keep running CLI-driven
+   `claude-code` at `runtimeRef: claude-cli`.
+3. Decide which bundle holds `default: true` for routes naming no
+   `runtimeRef` — the render fails unless exactly one does.
+
+Conversations in flight keep their handle regardless of which component
+serves them. Both resume from `runtimeContextId`.
 
 **BREAKING: the Pulse signal adapter's default `initiationId` now folds in
 the alert's start time, not just its Pulse-assigned id.** A `SignalSource`

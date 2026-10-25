@@ -46,6 +46,8 @@ groups:
         url: /integrations/telegram/
   - title: Runtimes
     entries:
+      - title: Claude CLI
+        url: /runtimes/claude-cli/
       - title: Ollama
         url: /runtimes/ollama/
       - title: GitHub Copilot
