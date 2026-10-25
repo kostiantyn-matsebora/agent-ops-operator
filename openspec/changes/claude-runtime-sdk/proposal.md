@@ -134,9 +134,8 @@ permission-callback shape.
   since the flag form already satisfies RT-3 as written.
   - `docs/claude.md`, `docs/runtimes/ollama.md` and `docs/runtimes/copilot.md`
     move their claimed version to match, per `runtime-spec.md`'s rule that
-    every shipped runtime's version moves together. `docs/claude-cli.md` is a
-    new page for the new component, alongside `docs/claude.md` rather than
-    under `docs/runtimes/` — a variant of the same vendor, not a third one.
+    every shipped runtime's version moves together. `docs/runtimes/claude-cli.md` is
+    a new page for the new component, beside `ollama.md` and `copilot.md`.
   - Session reuse itself still does NOT publish there — see design.md's
     Non-Goals.
 - **Dependencies**: `@anthropic-ai/claude-agent-sdk` (bundles the Claude Code
