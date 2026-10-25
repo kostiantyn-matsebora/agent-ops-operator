@@ -89,8 +89,9 @@ type CoordinatorSpec struct {
 	// the same source without conflict.
 	// +optional
 	SignalSourceRefs []ObjectRef `json:"signalSourceRefs,omitempty"`
-	// ChannelRefs are the surfaces a conversation this Coordinator opens
-	// binds at creation, unconditionally — see the type doc comment.
+	// ChannelRefs are the surfaces a ROOT conversation this Coordinator
+	// opens binds at creation — reached only when the root escalates, and
+	// never bound by a caused member.
 	// +optional
 	ChannelRefs []ObjectRef `json:"channelRefs,omitempty"`
 	// AgentCapabilitySpec is the CAPABILITY for the COORDINATING agent

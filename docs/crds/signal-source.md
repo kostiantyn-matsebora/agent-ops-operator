@@ -46,7 +46,7 @@ spec:
 | `cooldownHours` | `integer` |  | Suppress a repeat of the same initiationId within this window — a re-send, safe to drop under at-least-once delivery. Defaults to `6`. |
 | `credentialsSecretRef` | `object` |  | CredentialsSecretRef names the Secret holding this source's transport credentials (e.g. an API key). |
 | `credentialsSecretRef.name` | `string` |  | Name of the referent. |
-| `logFiltered` | `boolean` |  | LogFiltered governs whether a signal dropped by AttributeFilters is still recorded as a signal.dropped activity event. |
+| `logFiltered` | `boolean` |  | LogFiltered governs whether a signal dropped by AttributeFilters is still recorded as a signal.dropped activity event — unset means true. |
 
 <!-- /generated -->
 

@@ -148,8 +148,9 @@ spec:
                 type: object
               channelRefs:
                 description: |-
-                  ChannelRefs are the surfaces a conversation this Coordinator opens
-                  binds at creation, unconditionally — see the type doc comment.
+                  ChannelRefs are the surfaces a ROOT conversation this Coordinator
+                  opens binds at creation — reached only when the root escalates, and
+                  never bound by a caused member.
                 items:
                   description: ObjectRef references another object by name (same namespace).
                   properties:

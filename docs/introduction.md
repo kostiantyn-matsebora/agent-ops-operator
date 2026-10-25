@@ -36,7 +36,7 @@ drawn with the glyph the console uses for it.
 
 <figure class="ao-domain-model">
 {% include domain-model.svg %}
-<figcaption>The thirteen kinds, grouped so each cluster pair gets one
+<figcaption>Every kind, grouped so each cluster pair gets one
 connector — an arrowhead only where something flows or opens, a plain line
 where one kind merely references another.</figcaption>
 </figure>

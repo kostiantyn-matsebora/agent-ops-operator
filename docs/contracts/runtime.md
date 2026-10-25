@@ -10,8 +10,8 @@ next:
   eyebrow: Reference
   title: Every AgentRuntime field
   body: >-
-    The kind's own spec page — a commented example and every field, one of
-    thirteen in the sidebar's CRDs group.
+    The kind's own spec page — a commented example and every field, in the
+    sidebar's CRDs group.
   url: /agent-ops-operator/crds/agent-runtime/
 ---
 

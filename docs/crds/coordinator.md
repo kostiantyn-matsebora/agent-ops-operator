@@ -27,7 +27,7 @@ spec:
     name: <name>
   capabilityRef:                            # agentRef (`capabilityRef` in JSON) names an AgentCapability holding …
     name: <name>
-  channelRefs:                              # the surfaces a conversation this Coordinator opens binds at creation, …
+  channelRefs:                              # the surfaces a ROOT conversation this Coordinator opens binds at …
   - name: <name>
   limits:                                   # limits bounds this Coordinator's own conversation tree
     deadline: <deadline>
@@ -79,7 +79,7 @@ spec:
 | `agents[].coordinatorRef.name` | `string` | **yes** | Name of the referenced object. |
 | `capabilityRef` | `object` |  | AgentRef (`capabilityRef` in JSON) names an AgentCapability holding the coordinating agent's capability INSTEAD of inlining it above. |
 | `capabilityRef.name` | `string` | **yes** | Name of the referenced object. |
-| `channelRefs` | `[]object` |  | The surfaces a conversation this Coordinator opens binds at creation, unconditionally — see the type doc comment. |
+| `channelRefs` | `[]object` |  | The surfaces a ROOT conversation this Coordinator opens binds at creation — reached only when the root escalates, and never bound by a caused member. |
 | `channelRefs[].name` | `string` | **yes** | Name of the referenced object. |
 | `limits` | `object` |  | Limits bounds this Coordinator's own conversation tree. |
 | `limits.deadline` | `string` |  | How long after creation this Coordinator's own conversation may run before it is closed `budget-exceeded`. |
