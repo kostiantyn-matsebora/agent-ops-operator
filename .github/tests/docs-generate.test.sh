@@ -195,6 +195,9 @@ schemas = {
                 "PipelineRef names the Pipeline this widget serves; never blank."},
             "replicas": {"type": "integer", "description":
                 "Replicas is how many to run. A second sentence stays off the table."},
+            "agents": {"type": "array", "items": {"type": "object", "properties": {
+                "capabilityRef": {"type": "string", "description": "CapabilityRef names one."},
+            }}},
         },
     }}},
     "Gizmo": {"properties": {"spec": {
@@ -269,12 +272,16 @@ print("ok: a stale exclusion naming no CRD fails rather than rotting silently")
 svg = tmp / "domain-model.svg"
 mod.DOMAIN_MODEL = svg
 mod.REPO = tmp  # the check prints the path relative to the repo root
-svg.write_text('<svg><text data-field="pipelineRef">pipelineRef</text></svg>\n')
+svg.write_text('<svg><text data-field="pipelineRef">x</text>'
+               '<text data-field="agents[].capabilityRef">x</text></svg>\n')
 assert mod.check_diagram_fields(schemas) == [], mod.check_diagram_fields(schemas)
-svg.write_text('<svg><text data-field="renamedRef">renamedRef</text></svg>\n')
+svg.write_text('<svg><text data-field="renamedRef">x</text></svg>\n')
 probs = mod.check_diagram_fields(schemas)
 assert any("renamedRef" in p and "no CRD spec" in p for p in probs), probs
-print("ok: diagram edge labels pass on a real field and fail on a renamed one")
+svg.write_text('<svg><text data-field="pipelineRef.replicas">x</text></svg>\n')
+probs = mod.check_diagram_fields(schemas)
+assert probs, "a path stitched from real names of different fields must fail"
+print("ok: diagram edge labels pass on real paths and fail on renamed or stitched ones")
 PYEOF
 
 it "crd-example: kind, name, every top-level spec field, one comment per field, no semicolons"
@@ -304,7 +311,7 @@ it "page-set check: a stale exclusion fails loudly"
 assert_contains "$out" "a stale exclusion naming no CRD fails"
 
 it "diagram edge labels: real field passes, renamed field fails"
-assert_contains "$out" "pass on a real field and fail on a renamed one"
+assert_contains "$out" "pass on real paths and fail on renamed or stitched ones"
 
 rm -rf "$crdtmp"
 summary

@@ -997,29 +997,33 @@ def check_crd_pages(schemas: dict[str, dict]) -> list[str]:
 DATA_FIELD = re.compile(r'data-field="([^"]+)"')
 
 
-def spec_field_names(schemas: dict[str, dict]) -> set[str]:
-    """Every property name appearing anywhere under any kind's spec."""
-    names: set[str] = set()
-
-    def walk(node: dict) -> None:
-        if node.get("type") == "array":
-            node = node.get("items") or {}
-        inner = node.get("additionalProperties")
-        if isinstance(inner, dict):
-            walk(inner)
-        for name, child in (node.get("properties") or {}).items():
-            names.add(name)
-            walk(child)
-
-    for schema in schemas.values():
-        walk((schema.get("properties") or {}).get("spec") or {})
-    return names
+def _spec_path_resolves(spec: dict, parts: list[str]) -> bool:
+    """Whether a dotted field path walks this one spec schema, descending
+    through arrays and map values as the YAML an adopter writes would."""
+    node = spec
+    for part in parts:
+        while True:
+            if node.get("type") == "array" or "items" in node:
+                node = node.get("items") or {}
+                continue
+            inner = node.get("additionalProperties")
+            if isinstance(inner, dict) and part not in (node.get("properties") or {}):
+                node = inner
+                continue
+            break
+        props = node.get("properties") or {}
+        if part not in props:
+            return False
+        node = props[part]
+    return True
 
 
 def check_diagram_fields(schemas: dict[str, dict]) -> list[str]:
     """Every `data-field` the domain-model diagram labels an edge with must
-    name a field some CRD's spec actually has -- the Introduction keeps its
-    no-reference-detail rule only because the detail it does name is checked.
+    be a field path some ONE CRD's spec actually walks -- the Introduction
+    keeps its no-reference-detail rule only because the detail it does name
+    is checked. Segment-by-segment against a pooled name set was tried and
+    let a path no kind has (`pipelineRef.replicas`) pass.
 
     The diagram is repo-authored SVG, so a regex read is enough.
     """
@@ -1029,16 +1033,18 @@ def check_diagram_fields(schemas: dict[str, dict]) -> list[str]:
             f"edge-label check is skipped until the Introduction diagram lands"
         )
         return []
-    known = spec_field_names(schemas)
+    specs = {
+        kind: (schema.get("properties") or {}).get("spec") or {}
+        for kind, schema in schemas.items()
+    }
     problems: list[str] = []
     for value in DATA_FIELD.findall(DOMAIN_MODEL.read_text()):
         parts = value.replace("[]", "").split(".")
-        for part in parts:
-            if part not in known:
-                problems.append(
-                    f"{DOMAIN_MODEL.relative_to(REPO)}: data-field={value!r} "
-                    f"names {part!r}, which no CRD spec in chart/crds/ has"
-                )
+        if not any(_spec_path_resolves(spec, parts) for spec in specs.values()):
+            problems.append(
+                f"{DOMAIN_MODEL.relative_to(REPO)}: data-field={value!r} is a "
+                f"field path no CRD spec in chart/crds/ has"
+            )
     return problems
 
 
