@@ -84,7 +84,7 @@ runtime, and every route naming no `runtimeRef` keeps running there.
 
 The same credential as the `claude` bundle — a token for
 `CLAUDE_CODE_OAUTH_TOKEN`, with no default. See
-[installation]({{ '/installation/#the-model-credential' | relative_url }}).
+[installation]({{ '/installation/#install' | relative_url }}).
 
 ## The tools it gives
 

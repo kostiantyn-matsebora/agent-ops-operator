@@ -103,6 +103,9 @@ All of 4.1–4.4 apply to `runtimes/claude` only — `runtimes/claude-cli` opens
 Unavailable from this unattended session, so the RT-3.5 clarification and
 the three vendor-page version bumps it drives stay undone here.*
 
+*Until 11.1 lands, `specs/agent-definition-tools/spec.md` treats the RT-3
+amendment as granted, so that spec text is provisional on 11.1.*
+
 - [ ] 11.1 `docs/contracts/runtime.md`: amend RT-3 (Composing the allowlist) to state that a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Bump the version PATCH (clarifies an obligation, changes none) and add a changelog row
 - [ ] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match, and rewrite its Dockerfile description now that the CLI install is gone
 - [ ] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification

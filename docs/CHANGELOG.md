@@ -48,7 +48,7 @@ drives `@anthropic-ai/claude-agent-sdk` in-process instead of spawning the
 It holds one vendor session open across a pod's work units. It re-opens
 that session only when the session-affecting configuration changes —
 system prompt, MCP servers, `maxTurns`, cwd, or agent. See
-[runtime-session-reuse](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/openspec/changes/claude-runtime-sdk/specs/runtime-session-reuse/spec.md).
+[the runtime contract](contracts/runtime.md).
 
 #### Upgrade
 

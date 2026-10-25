@@ -59,7 +59,7 @@ RUN echo "apt refresh: ${APT_REFRESH}" && \
     node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" && \
     NPM_ROOT="$(npm root -g)/npm/node_modules" && \
     cd /tmp && \
-    for entry in brace-expansion@5.0.12 undici@6.28.1 tar@7.5.22 ip-address@10.7.2; do \
+    for entry in brace-expansion@5.0.12 undici@6.29.1 tar@7.5.22 ip-address@10.7.2; do \
       pkg="$(echo "$entry" | cut -d@ -f1)" && \
       tgz="$(npm pack --silent "$entry")" && \
       rm -rf "$NPM_ROOT/$pkg" && tar xzf "$tgz" && mv package "$NPM_ROOT/$pkg" && \
