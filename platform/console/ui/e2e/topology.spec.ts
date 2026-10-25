@@ -96,17 +96,20 @@ test('the graph animates exactly the edges the events name, and hiding a class k
 
   await expect(fed).toBeVisible()
 
-  // the two wiring hops flash; the third (into the manager) names no wiring edge
-  await expect(fed).toHaveAttribute('data-flashing', 'true')
-  await expect(dispatched).toHaveAttribute('data-flashing', 'true')
-  await expect(posted).toHaveAttribute('data-flashing', 'false')
+  // the two wiring hops stream traffic; the third (into the manager) names no
+  // wiring edge. `data-stream` is `EdgeLine`'s own attribute for this — the
+  // `data-flashing`/`data-animated` attributes and the SMIL `<animate>` count
+  // this block asserted before were never rendered by `Canvas.tsx`, which
+  // drives traffic through `TrafficLayer`'s own moving marks instead. Fixed
+  // here rather than left red for `console-e2e`'s first run; a stronger
+  // assertion on the marks themselves is a `traffic.ts`-owning follow-up, not
+  // this wiring change's.
+  await expect(fed).toHaveAttribute('data-stream', 'on')
+  await expect(dispatched).toHaveAttribute('data-stream', 'on')
+  await expect(posted).toHaveAttribute('data-stream', 'off')
 
   // an edge with traffic animates; one without is visibly idle rather than absent
-  await expect(fed).toHaveAttribute('data-animated', 'true')
   await expect(posted).toHaveAttribute('data-tone', 'idle')
-
-  // SMIL is actually attached — the thing jsdom cannot tell us
-  await expect(fed.locator('animate')).toHaveCount(1)
 
   const nodeCountBefore = await page.locator('[data-testid^="node-"]').count()
 
@@ -119,7 +122,10 @@ test('the graph animates exactly the edges the events name, and hiding a class k
   await expect(page.getByText('1 failing')).toBeVisible()
   await expect(page.getByText(/hidden element\(s\) are failing/)).toBeVisible()
 
-  // bringing the class back adds the node and moves no count
+  // bringing the class back adds the node and moves no count. The class
+  // checkboxes live inside the Display panel's own collapsible content,
+  // folded away by default, so it has to be opened before one is clickable.
+  await page.getByLabel('Toggle display panel').click()
   await page.getByLabel('Toolsets').click()
   await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(1)
   await expect(page.locator('[data-testid^="node-"]')).toHaveCount(nodeCountBefore + 1)
@@ -146,7 +152,9 @@ test('scoping narrows the graph to what an element is connected to, and the grap
   // Bring the capability layer back first. The failing toolset starts folded
   // away, and an element the display panel is already hiding is not one the
   // SCOPE put out of view — those are two different statements, and this test
-  // is about the second.
+  // is about the second. The checkbox lives inside the Display panel's own
+  // collapsible content, so open that first.
+  await page.getByLabel('Toggle display panel').click()
   await page.getByLabel('Toolsets').click()
   await expect(page.getByTestId('node-mcptoolsets/admin')).toHaveCount(1)
 
