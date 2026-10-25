@@ -372,6 +372,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Signal reconciler: every routing attempt AFTER ingest's own inline
+	// first one (design D-2/D-3), the retry deadline, the per-source live
+	// cap, and TTL GC. Runtime/MaxQueued are the SAME bootstrap config and
+	// backlog bound the reconciler above and ingest already resolve
+	// against — see internal/signalroute.Deps's own doc for why a retry
+	// must never disagree with the first attempt about either.
+	if err := (&controller.SignalReconciler{
+		Client:    mgr.GetClient(),
+		Activity:  acts,
+		Runtime:   reconciler.Runtime,
+		MaxQueued: envInt("MAX_QUEUED_CONVERSATIONS", 50),
+		// Chart-configurable; zero falls back to each DefaultSignal* constant.
+		RetryDeadline: envDurationOr("SIGNAL_RETRY_DEADLINE", controller.DefaultSignalRetryDeadline),
+		MaxPerSource:  envInt("MAX_SIGNALS_PER_SOURCE", controller.DefaultMaxSignalsPerSource),
+		TTLDropped:    envDurationOr("SIGNAL_TTL_DROPPED", controller.DefaultSignalTTLDropped),
+		TTLRouted:     envDurationOr("SIGNAL_TTL_ROUTED", controller.DefaultSignalTTLRouted),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "signal controller")
+		os.Exit(1)
+	}
+
 	api := &httpapi.Server{
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),

@@ -100,6 +100,16 @@ const (
 	// reports them with its work result, and the manager emits one hop each.
 	KindModelCall = "model.call" // runtime-image -> model
 	KindToolCall  = "tool.call"  // runtime-image -> mcp-server, or nothing for a built-in tool
+
+	// KindSignalFailed marks a Signal whose phase rolled up to Failed — every
+	// claimant resolved terminal and NONE routed it (retry-deadline
+	// exhaustion, the per-source overflow cap, or every claimant Skipped).
+	// Surfaced as loudly as KindSignalDropped: it is the signal-persistence
+	// change's own "Failed SHALL be surfaced as loudly as the unwired drop"
+	// requirement, and only the Signal reconciler (internal/controller)
+	// ever produces it — ingest's own first attempt cannot, since a
+	// freshly snapshotted claimant is live by construction.
+	KindSignalFailed = "signal.failed" // signal-source -> nothing
 )
 
 // Context checkpoint codes — BOUNDED, so they are safe as metric labels.
@@ -131,6 +141,14 @@ const (
 	// CodeFiltered: the signal failed the source's attributeFilters. Gated by
 	// SignalSource.Spec.LogFiltered — the only drop code any field silences.
 	CodeFiltered = "filtered"
+	// CodeOverflow: the Signal reconciler evicted the oldest live Signal on a
+	// source past MAX_SIGNALS_PER_SOURCE. Pre-fan-out it is this
+	// KindSignalDropped code; post-fan-out the same cause instead produces a
+	// KindSignalFailed event (Dropped stays strictly pre-fan-out).
+	CodeOverflow = "overflow"
+	// CodeRetryExhausted: every remaining Routing claimant hit
+	// SIGNAL_RETRY_DEADLINE with none routed — a KindSignalFailed code.
+	CodeRetryExhausted = "retry-exhausted"
 )
 
 // Status values. Failure is RECORDED, never omitted: an operations console that

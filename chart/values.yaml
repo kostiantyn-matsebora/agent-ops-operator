@@ -36,6 +36,27 @@ maxActiveConversations: 5
 # told on the surface they typed on, alerts are logged and counted.
 maxQueuedConversations: 50
 
+# How long a Signal's claimant may sit Routing, measured from its own first
+# routing attempt, before the Signal reconciler gives up on it and marks that
+# claimant Failed. "A partially routed signal exits" — PartiallyRouted never
+# sits non-terminal forever.
+signalRetryDeadline: 1h
+
+# Per-source cap on simultaneously NON-TERMINAL Signals. Over it, the Signal
+# reconciler evicts the OLDEST non-terminal Signal on that source — Dropped
+# (reason overflow) if it never reached a claimant snapshot, or every
+# still-Routing claimant Failed (reason overflow) if it already had.
+maxSignalsPerSource: 200
+
+# How long a Dropped Signal survives before the reconciler deletes it — short,
+# since a pre-fan-out drop carries no routing record worth keeping.
+signalTtlDropped: 4h
+
+# How long a Routed OR Failed Signal survives before the reconciler deletes
+# it. Failed shares this TTL rather than carrying its own: "nobody got it" is
+# exactly the record an operator investigates.
+signalTtlRouted: 72h
+
 # DEPRECATED alias for maxActiveConversations, honored for one release when the
 # new key is unset (the manager logs a deprecation line). Named after pods
 # rather than conversations, which is what made `maxRuntimes: 5` read as a limit
