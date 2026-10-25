@@ -18,156 +18,7 @@ you control and conversations you stay in.
   Two shapes of wiring, same install: a Coordinator that decides who
   answers, or a Pipeline that routes straight to one agent.
 
-  {: .ao-presentation}
-  1. Something happens — or someone just asks.
-
-     ```yaml
-     # nothing declared yet
-     ```
-
-  2. The same install can wire a Coordinator instead.
-
-     ```text
-     helm install agent-ops agentops/agent-ops
-     ```
-
-  3. You declare the route. One Coordinator.
-
-     ```yaml
-     kind: Coordinator
-     metadata:
-       name: k8s-triage
-     ```
-
-  4. What starts it — exactly like a Pipeline's signalSourceRefs.
-
-     ```yaml
-       signalSourceRefs:
-         - name: cluster-events
-     ```
-
-  5. Each agent it may invoke is listed by purpose.
-
-     ```yaml
-       agents:
-         - name: log-reader
-           description: Reads logs. Cannot change anything.
-           capabilityRef:
-             name: log-reader
-     ```
-
-  6. It reads what each one returns, then decides what is next.
-
-     ```yaml
-         - name: remediator
-           description: Restarts or scales. Needs a known cause.
-           capabilityRef:
-             name: remediator
-     ```
-
-  7. An entry can itself be a Coordinator, nested as deep as it needs.
-
-     ```yaml
-         - name: home-triage
-           coordinatorRef:
-             name: home-triage
-     ```
-
-  8. Only the root escalates — its own path, when it decides to.
-
-     ```yaml
-       channelRefs:
-         - name: telegram
-     ```
-
-  9. Then it runs. One root conversation, each member its own pod.
-
-     ```yaml
-     # one root Conversation, each invoked member its own pod
-     ```
-
-  10. Same install. A different shape of wiring.
-
-      ```text
-      $ kubectl get conversations
-      alert-cluster-events-2   Running   2m
-      k8s-observe-7f3a1        Running   1m
-      ```
-
-  The first story composed several agents under a Coordinator. The second
-  story, on the same install, is the simpler shape: a Pipeline routes
-  straight to one agent.
-
-  {: .ao-presentation}
-  1. Something happens.
-
-     ```yaml
-     # nothing declared yet
-     ```
-
-  2. One Helm install puts an agent in the path.
-
-     ```text
-     helm install agent-ops agentops/agent-ops
-     ```
-
-  3. You declare the route. One Pipeline.
-
-     ```yaml
-     kind: Pipeline
-     metadata:
-       name: k8s-ops
-     ```
-
-  4. What starts it.
-
-     ```yaml
-       signalSourceRefs:
-         - name: cluster-events
-     ```
-
-  5. What it should do.
-
-     ```yaml
-       profileRef:
-         name: k8s-engineer
-     ```
-
-  6. What it may touch — and nothing else.
-
-     ```yaml
-       toolsets:
-         refs:
-           - name: agentops-observe
-     ```
-
-  7. Which servers those tools come from.
-
-     ```yaml
-       mcpConfigs:
-         refs:
-           - name: k8s-api
-     ```
-
-  8. Where you talk to it.
-
-     ```yaml
-       channelRefs:
-         - name: telegram
-     ```
-
-  9. Then it runs. One conversation, its own pod.
-
-     ```yaml
-     # one Conversation, one pod, strictly serial
-     ```
-
-  10. Every part of it is a Kubernetes object.
-
-      ```text
-      $ kubectl get conversations
-      cluster-events-7c1d4e   Running   2m
-      ```
+  ![Left to right: something happens, you declare one Pipeline or one Coordinator, the operator runs it as a Conversation, you answer on your channels.]({{ '/assets/img/readme-flow-light.svg' | relative_url }})
 
 - **Watch it work** — One signal, start to finish, plus a Coordinator composing
   several agents. A minute, no sound.
@@ -307,10 +158,11 @@ already in it.
   what to decide first, what to configure, and how to wire your first route.
 - **[Security]({{ '/security/' | relative_url }})** — an agent runs model output
   in your cluster: what a default install grants, and what is still open.
-- **The reference** — every CRD in full in
+- **The reference** — a spec page per kind under the sidebar's CRDs group,
+  every CRD in full in
   [Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md),
   the manager's own surfaces in
   [Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md),
   and the runtime, channel and signal adapter contracts under
   [docs/contracts/](https://github.com/kostiantyn-matsebora/agent-ops-operator/tree/master/docs/contracts).
-  All are read on GitHub today.
+  Concepts and Contracts are read on GitHub.

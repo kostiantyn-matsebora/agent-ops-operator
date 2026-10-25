@@ -207,5 +207,5 @@ could not resume one.
 
 1. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})**
    — and see how `toolsMode` composes against the `tools:` line you just wrote.
-2. **[Every AgentProfile field](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#agentprofile)**
+2. **[Every AgentProfile field]({{ '/crds/agent-profile/' | relative_url }})**
    — environment for the agent process, resources, a runtime override.

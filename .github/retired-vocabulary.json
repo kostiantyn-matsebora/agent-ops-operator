@@ -1151,6 +1151,24 @@
       ]
     },
     {
+      "id": "ao-presentation",
+      "pattern": "ao-presentation",
+      "says": "the landing page shows the generated readme-flow picture (readme-flow-light.svg, theme-resolved); the .ao-presentation component left the theme",
+      "allow": [
+        "removed",
+        "retired",
+        "deleted",
+        "no longer",
+        "is gone",
+        "gone",
+        "replaced",
+        "is now",
+        "used to",
+        "left the theme",
+        "readme-flow"
+      ]
+    },
+    {
       "id": "shared-output-format",
       "pattern": "sharedOutputFormat",
       "says": "AgentProfile.spec.outputFormat is the field's name, a required enum (blocks/none) with no default",

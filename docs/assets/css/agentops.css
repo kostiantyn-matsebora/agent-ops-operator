@@ -574,13 +574,26 @@ a:hover {
   border-right: 1px solid var(--ao-border);
 }
 
+/* Nav groups — each sidebar group is a <details> rendered open (the
+   no-script state is everything open; nav-groups.js closes what the reader
+   closed before). The summary IS the group title: the native disclosure
+   marker is replaced by a chevron that rotates when the group opens, and
+   the global :focus-visible rule covers its keyboard focus. Look ported
+   from the approved crd-spec-pages mockup, tab 4. */
+
 .ao-nav-group + .ao-nav-group {
-  margin-top: 1.25rem;
+  margin-top: 0.15rem;
 }
 
 .ao-nav-title {
-  margin: 0 0 0.4rem;
-  padding: 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--ao-radius);
+  cursor: pointer;
+  list-style: none;
   font-family: var(--ao-font-display);
   font-size: 0.72rem;
   font-weight: 700;
@@ -589,15 +602,41 @@ a:hover {
   color: var(--ao-text-subtle);
 }
 
+.ao-nav-title::-webkit-details-marker {
+  display: none;
+}
+
+.ao-nav-title:hover {
+  background: var(--ao-surface);
+}
+
+.ao-nav-title::before {
+  content: '\25B8';
+  display: inline-block;
+  width: 0.6em;
+  font-size: 0.8em;
+  transition: transform 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ao-nav-title::before {
+    transition: none;
+  }
+}
+
+.ao-nav-group[open] > .ao-nav-title::before {
+  transform: rotate(90deg);
+}
+
 .ao-nav-list {
-  margin: 0;
+  margin: 0.1rem 0 0.6rem;
   padding: 0;
   list-style: none;
 }
 
 .ao-nav-link {
   display: block;
-  padding: 0.35rem 0.6rem;
+  padding: 0.35rem 0.6rem 0.35rem 1.4rem;
   border-radius: var(--ao-radius);
   border-left: 2px solid transparent;
   color: var(--ao-text);
@@ -803,6 +842,50 @@ a:hover {
 .ao-content p:has(> .ao-diagram) {
   margin: 0;
   overflow-x: auto;
+}
+
+/* --- domain-model figure ----------------------------------------------------
+   The Introduction's inlined domain-model diagram (_includes/domain-model.svg),
+   an SVG written into the page so its kind shapes can be real links — an
+   img-loaded export cannot carry them. It is capped at its authored width
+   (560 svg units = 35rem): the labels were drawn for that size, and blowing
+   the drawing up to the measure enlarges them for nothing. */
+.ao-content figure.ao-domain-model {
+  margin: 1.5rem 0;
+}
+
+.ao-content figure.ao-domain-model svg {
+  display: block;
+  width: 100%;
+  max-width: 35rem;
+  height: auto;
+  margin: 0 auto;
+}
+
+.ao-content figure.ao-domain-model figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--ao-text-subtle);
+}
+
+/* The links wrapping each kind shape. The site's own `a` rules set a colour,
+   and inside the SVG every currentColor stroke would take it — so the link
+   inherits the diagram's ink instead (hover included, since `a:hover` also
+   sets a colour), and the hover affordance is an underline on the kind's
+   name, the first text in the link. */
+.crd-link,
+.crd-link:hover {
+  cursor: pointer;
+  color: inherit;
+}
+
+.crd-link:hover text:first-of-type {
+  text-decoration: underline;
+}
+
+.crd-link:focus-visible {
+  outline: 2px solid var(--ao-brand);
+  outline-offset: 2px;
 }
 
 /* --- chip sets ------------------------------------------------------------
@@ -1174,400 +1257,6 @@ a:hover {
 .ao-content a.ao-demo {
   display: block;
   text-decoration: none;
-}
-
-/* --- the presentation ----------------------------------------------------
-   A drawing that accretes across an ordered set of beats. The page names it
-   with `{: .ao-presentation}` on an ordinary ordered list — one item per beat,
-   the item's text is that beat's caption, and a fenced block under it is the
-   manifest stanza that beat is about. `assets/js/presentation.js` reads the
-   list, builds the stage and the transport, and removes the list.
-
-   WITHOUT JAVASCRIPT THE LIST IS THE CONTENT: ten beats in order, each with
-   the lines it concerns. Nothing is hidden and no claim is lost — which is why
-   the beats are a list rather than a script's array. Two such lists under one
-   parent are two stories, read in order — see `presentation.js`.
-
-   THE STAGE IS AUTHORED AT ONE WIDTH AND SCALED. Connectors are drawn between
-   known points, so reflowing at narrow widths would mean re-authoring every
-   connector per breakpoint. The script sets the transform and the container's
-   height together: a `transform: scale()` does NOT reduce layout width, so
-   scaling without the height would leave the container tall and the overflow
-   showing — a scrollbar inside the explanation, which is the defect this
-   component exists to avoid. */
-.ao-content ol.ao-presentation {
-  margin: 0.75rem 0 0;
-  padding-left: 1.15rem;
-  font-size: 0.92rem;
-  color: var(--ao-text-subtle);
-}
-
-.ao-content ol.ao-presentation > li + li {
-  margin-top: 0.5rem;
-}
-
-/* The shell holds the (optional) story tablist and the figure beneath it.
-   Two or more `{: .ao-presentation}` lists sharing one parent become a
-   tablist plus one figure that switches STORIES; one list is still the
-   figure alone, with no tablist built at all. */
-.ao-pres-shell {
-  margin-top: 0.75rem;
-}
-
-.ao-pres-shell .ao-tablist {
-  margin-bottom: 0.6rem;
-}
-
-.ao-pres {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.ao-pres-viewport {
-  overflow: hidden;
-}
-
-/* The DRAWING's own box. The slack that keeps the install frame off the clip
-   edge is applied by the script, which owns the transform. */
-.ao-pres-stage {
-  position: relative;
-  width: 878px;
-  /* TRACKS `DRAW_H` IN `presentation.js`, and the SVG below carries it a third
-     time — a viewBox taller than the box it is drawn into does not overflow,
-     it SQUASHES, so a mismatch bends every connector rather than failing. */
-  height: 245px;
-  transform-origin: top left;
-}
-
-/* THE SKELETON IS ALWAYS THERE. Every element the presentation will ever show
-   is laid out before the first beat, dashed and faint, and a beat brings one
-   forward rather than dropping it into an empty field — which is what made the
-   first beat read as a caption hanging in the air. */
-.ao-pres-wire {
-  position: absolute;
-  inset: 0;
-  width: 660px;
-  height: 245px;
-  overflow: visible;
-}
-
-.ao-pres-wire path.ao-pres-track {
-  fill: none;
-  stroke: var(--ao-border);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  opacity: 0.55;
-}
-
-.ao-pres-wire path.ao-pres-draw {
-  fill: none;
-  stroke: var(--ao-edge-idle);
-  stroke-width: 1.5;
-  stroke-dasharray: var(--ao-pres-len) var(--ao-pres-len);
-  stroke-dashoffset: var(--ao-pres-len);
-  transition: stroke-dashoffset 0.5s ease, stroke 0.3s ease;
-}
-
-.ao-pres-wire path.ao-pres-draw.is-on {
-  stroke-dashoffset: 0;
-}
-
-.ao-pres-wire path.ao-pres-draw.is-lit {
-  stroke: var(--ao-brand);
-  stroke-width: 2;
-}
-
-/* A shaped node: an absolutely-positioned SVG outline (the console's own
-   per-kind silhouette — see the mirrored SHAPES in presentation.js — stretched
-   non-uniformly to the slot and kept at a constant stroke weight with
-   vector-effect) sitting BEHIND a centred text layer, rather than one dashed
-   rectangle for every kind. Position, width and height are set inline by the
-   script per NODE and per STORY — a hexagon and a diamond are not the same
-   box, and two stories do not share one layout.
-   `.ao-pres-conv` shares every one of these rules: the conversation is a
-   shaped node too (a "note"), dim and dashed until its own beat lights it,
-   exactly like every other declared object. */
-.ao-pres-node,
-.ao-pres-conv {
-  position: absolute;
-  opacity: 0.3;
-  transition: opacity 0.35s ease, left 0.4s ease, top 0.4s ease, width 0.4s ease,
-    height 0.4s ease;
-}
-
-.ao-pres-node.is-on,
-.ao-pres-conv.is-on {
-  opacity: 1;
-}
-
-.ao-pres-shape {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.ao-pres-shape path {
-  fill: transparent;
-  stroke: var(--ao-border);
-  stroke-width: 1.4;
-  stroke-dasharray: 3.5 3;
-  vector-effect: non-scaling-stroke;
-  transition: stroke 0.25s ease, fill 0.25s ease, stroke-dasharray 0.25s ease;
-}
-
-.ao-pres-node.is-on .ao-pres-shape path,
-.ao-pres-conv.is-on .ao-pres-shape path {
-  fill: var(--ao-surface-alt);
-  stroke-dasharray: none;
-}
-
-.ao-pres-node.is-lit .ao-pres-shape path,
-.ao-pres-conv.is-lit .ao-pres-shape path {
-  stroke: var(--ao-brand);
-  fill: var(--ao-surface);
-}
-
-.ao-pres-content {
-  position: relative;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.08rem;
-  padding: 0 16%;
-  text-align: center;
-}
-
-.ao-pres-head {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.26rem;
-}
-
-/* The small inline mark beside each kind label is the glyph ALONE, no
-   outline — the node's own shape (drawn by the shape layer above) is the
-   outline now, so repeating it at 12px would just be a second, illegible
-   copy. */
-.ao-pres-glyph {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
-  overflow: visible;
-  color: var(--ao-text-subtle);
-  transition: color 0.25s ease;
-  vertical-align: middle;
-}
-
-.ao-pres-glyph path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.ao-pres-node.is-lit .ao-pres-glyph,
-.ao-pres-conv.is-lit .ao-pres-glyph {
-  color: var(--ao-brand);
-}
-
-.ao-pres-kind {
-  display: block;
-  color: var(--ao-text-subtle);
-  font-family: var(--ao-font-mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.ao-pres-name {
-  display: block;
-  font-family: var(--ao-font-display);
-  font-size: 0.84rem;
-  font-weight: 700;
-  line-height: 1.18;
-}
-
-/* What the wiring granted, and what it did not. The denied chips are the half
-   that makes the granted ones a claim rather than a list. Position and width
-   are set inline, per story — a Pipeline's reach row and a Coordinator's sit
-   at different points in the drawing. */
-.ao-pres-reach {
-  position: absolute;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.28rem;
-  opacity: 0.28;
-  transition: opacity 0.35s ease, left 0.4s ease, top 0.4s ease, width 0.4s ease;
-}
-
-.ao-pres-reach.is-on {
-  opacity: 1;
-}
-
-.ao-pres-chip {
-  padding: 0.1rem 0.42rem;
-  background: var(--ao-surface);
-  border: 1px solid var(--ao-border);
-  border-radius: 999px;
-  color: var(--ao-text-subtle);
-  font-size: 0.72rem;
-  white-space: nowrap;
-}
-
-.ao-pres-chip.is-granted {
-  border-color: var(--ao-brand);
-  color: var(--ao-brand-strong);
-}
-
-.ao-pres-chip.is-denied {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-
-/* The frame CLEARS what it encloses on every side, rather than grazing it.
-   At 448 wide its right border landed on the Channel node's, and at top -6 its
-   LABEL cleared the Pipeline node by 0.8px across that node's whole width —
-   boxes that do not technically intersect and read as though they do. Two
-   borders on one pixel is a rendering accident to the eye, whatever the
-   geometry says. Position and size are set inline — both stories currently
-   share one frame, but neither is required to. */
-.ao-pres-frame {
-  position: absolute;
-  border: 1px dashed var(--ao-border-strong);
-  border-radius: 10px;
-  opacity: 0;
-  transition: opacity 0.45s ease, left 0.4s ease, top 0.4s ease, width 0.4s ease,
-    height 0.4s ease;
-  pointer-events: none;
-}
-
-.ao-pres-frame.is-on {
-  opacity: 1;
-}
-
-.ao-pres-frame > span {
-  position: absolute;
-  top: -0.6rem;
-  left: 0.8rem;
-  padding: 0 0.4rem;
-  background: var(--ao-surface);
-  color: var(--ao-text-subtle);
-  font-family: var(--ao-font-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-/* The conversation's own box is narrower than a declared object's, so its
-   content keeps a tighter side margin than `.ao-pres-content`'s default. */
-.ao-pres-conv .ao-pres-content {
-  padding: 0 14%;
-}
-
-.ao-pres-conv .ao-pres-kind {
-  color: var(--ao-text-subtle);
-}
-
-.ao-pres-conv.is-lit .ao-pres-kind {
-  color: var(--ao-brand-strong);
-}
-
-.ao-pres-conv .ao-pres-name {
-  font-size: 0.8rem;
-}
-
-.ao-pres-conv i {
-  display: block;
-  width: 55%;
-  height: 4px;
-  margin: 0.2rem auto 0;
-  background: var(--ao-border);
-  border-radius: 3px;
-}
-
-.ao-pres-conv i:first-of-type {
-  width: 72%;
-}
-
-.ao-pres-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 0.1rem;
-  background: var(--ao-success);
-  border-radius: 50%;
-}
-
-/* THE FIGURE IS THE CONTROL, so it takes the pointer and the focus ring, and
-   the transport that used to sit under it is gone: a play button, a beat
-   counter's box, ten scrub dots and a progress bar, in two bordered boxes.
-   See the head of `presentation.js`. */
-.ao-pres {
-  cursor: pointer;
-  border-radius: var(--ao-radius);
-}
-
-.ao-pres:focus-visible {
-  outline: 2px solid var(--ao-brand);
-  outline-offset: 4px;
-}
-
-/* THE CAPTION'S OWN LANE, to the right of the drawing and inside the stage,
-   so it is scaled and moved by the same transform as everything else. Only its
-   `top` is set per beat, by `presentation.js`, to the middle of whatever that
-   beat is lighting.
-
-   A RESERVED COLUMN RATHER THAN A SEARCH. Placing it near the anchor was tried
-   over ten candidate positions and collided on nearly every beat — the drawing
-   has six boxes, a chip row and seven connectors and no clear space between
-   them. See the head of `presentation.js`. */
-.ao-pres-caption {
-  position: absolute;
-  left: 688px;
-  width: 190px;
-  font-family: var(--ao-font-display);
-  font-size: 0.82rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--ao-text);
-  transition: top 0.35s ease;
-}
-
-/* PAUSED IS STATED, because a figure that has silently stopped reads as one
-   that has finished. */
-.ao-pres.is-paused .ao-pres-caption::after {
-  content: ' · paused';
-  color: var(--ao-text-subtle);
-  font-family: var(--ao-font-mono);
-  font-size: 0.68rem;
-  font-weight: 400;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-/* THE REDUCED-MOTION STILL IS STATED TOO, and it must win over `is-paused`
-   above: `presentation.js` sets both classes on the still (it IS paused, in
-   every sense the rest of the code cares about), and this rule is declared
-   AFTER that one so the cascade's source-order tie-break — both selectors
-   carry identical specificity — picks this message instead. This is the
-   ONLY visible sign the figure can be pressed; there is no separate play
-   control to draw. */
-.ao-pres.is-still .ao-pres-caption::after {
-  content: ' · press to play';
-  color: var(--ao-text-subtle);
-  font-family: var(--ao-font-mono);
-  font-size: 0.68rem;
-  font-weight: 400;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 /* --- tables --------------------------------------------------------------- */

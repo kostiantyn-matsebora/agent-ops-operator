@@ -196,10 +196,12 @@ decision.
 ### What the bundle renders
 
 <!-- generated: renders bundle=copilot -->
+
 ```text
 # Always
 AgentRuntime/copilot
 ```
+
 <!-- /generated -->
 
 One `AgentRuntime`, named `copilot`, through the parent chart's shared

@@ -193,10 +193,12 @@ local. Each Pipeline's `runtimeRef` is the whole decision.
 ### What the bundle renders
 
 <!-- generated: renders bundle=ollama -->
+
 ```text
 # Always
 AgentRuntime/ollama
 ```
+
 <!-- /generated -->
 
 One `AgentRuntime`, named `ollama`, through the parent chart's shared renderer.

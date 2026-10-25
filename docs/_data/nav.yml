@@ -76,3 +76,31 @@ groups:
         url: /contracts/channel-adapter/
       - title: SignalAdapter
         url: /contracts/signal-adapter/
+  - title: CRDs
+    entries:
+      - title: Pipeline
+        url: /crds/pipeline/
+      - title: Coordinator
+        url: /crds/coordinator/
+      - title: AgentCapability
+        url: /crds/agent-capability/
+      - title: AgentProfile
+        url: /crds/agent-profile/
+      - title: AgentRuntime
+        url: /crds/agent-runtime/
+      - title: SignalSource
+        url: /crds/signal-source/
+      - title: SignalAdapter
+        url: /crds/signal-adapter/
+      - title: Channel
+        url: /crds/channel/
+      - title: ChannelAdapter
+        url: /crds/channel-adapter/
+      - title: Conversation
+        url: /crds/conversation/
+      - title: ConversationInput
+        url: /crds/conversation-input/
+      - title: MCPToolset
+        url: /crds/mcp-toolset/
+      - title: MCPConfig
+        url: /crds/mcp-config/

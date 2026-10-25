@@ -366,4 +366,6 @@ signals land.
    reads a WebSocket.
 4. **[Talk to agents from your own chat]({{ '/guides/channel-adapter/' | relative_url }})**
    — the other half, for carrying the conversation.
-5. **[Every field of both kinds](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#signaladapter)**.
+5. **Every field of both kinds** —
+   [SignalAdapter]({{ '/crds/signal-adapter/' | relative_url }}) and
+   [SignalSource]({{ '/crds/signal-source/' | relative_url }}).

@@ -7,9 +7,15 @@ and the reference pages are not yet. Off-site paths belong in the body of a
 page, where the reader can see where they lead.
 {%- endcomment -%}
 <nav class="ao-sidebar" aria-label="Documentation">
+  {%- comment -%}
+  Every group renders OPEN: the no-script state is everything reachable.
+  nav-groups.js then closes the groups this reader closed before, always
+  leaving the current page's group open. <summary> is natively
+  keyboard-operable and states its own expanded state — no ARIA is added.
+  {%- endcomment -%}
   {%- for group in site.data.nav.groups %}
-  <div class="ao-nav-group">
-    <h2 class="ao-nav-title">{{ group.title }}</h2>
+  <details class="ao-nav-group" open>
+    <summary class="ao-nav-title">{{ group.title }}</summary>
     <ul class="ao-nav-list">
       {%- for entry in group.entries %}
       <li>
@@ -18,6 +24,6 @@ page, where the reader can see where they lead.
       </li>
       {%- endfor %}
     </ul>
-  </div>
+  </details>
   {%- endfor %}
 </nav>

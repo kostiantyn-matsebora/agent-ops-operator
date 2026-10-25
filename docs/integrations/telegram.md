@@ -237,6 +237,7 @@ Opt out per surface where a busy group would rather not keep them.
 ### What the bundle renders
 
 <!-- generated: renders bundle=telegram -->
+
 ```text
 # Always
 ChannelAdapter/telegram
@@ -250,6 +251,7 @@ Secret/k8s-ops-telegram
 Service/agentops-gateway-telegram
 SignalSource/k8s-ops
 ```
+
 <!-- /generated -->
 
 - **The gateway is not an adapter.** It speaks no agent-ops contract, emits no
