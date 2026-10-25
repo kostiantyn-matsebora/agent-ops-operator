@@ -1,6 +1,6 @@
 ## 1. Gate console pull requests with the mocked e2e tier — deployment-engineer
 
-- [ ] 1.1 Add `retries: process.env.CI ? 2 : 0` to
+- [x] 1.1 Add `retries: process.env.CI ? 2 : 0` to
   `platform/console/ui/playwright.config.ts` and verify `CI=1 npm run
   test:e2e` still passes against this working copy's tree.
 - [ ] 1.2 Add a `console-e2e` job to `.github/workflows/ci.yml`, gated on
@@ -18,23 +18,23 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 
 ## 2. Wire the live browser suite into the nightly full tier — deployment-engineer
 
-- [ ] 2.1 In `.github/workflows/system.yml`'s `pack` job, set
+- [x] 2.1 In `.github/workflows/system.yml`'s `pack` job, set
   `SYSTEM_REUSE=1` on the `go test` step only `if: inputs.tier == 'full'`,
   and give that step an `id` so a later step can read its outcome. Here
   `SYSTEM_REUSE=1` only defers the Go binary's own teardown to task 2.5's
   explicit step — unlike its local-dev use, it does NOT leave the cluster
   running once this job ends.
-- [ ] 2.2 Add Node 22 setup, `npm ci`, and `npx playwright install
+- [x] 2.2 Add Node 22 setup, `npm ci`, and `npx playwright install
   --with-deps chromium` steps under `platform/console/ui`, gated
   `if: inputs.tier == 'full'`.
-- [ ] 2.3 Add a step, `if: inputs.tier == 'full' && steps.<go-test-id>.outcome
+- [x] 2.3 Add a step, `if: inputs.tier == 'full' && steps.<go-test-id>.outcome
   == 'success'`, that opens `kubectl --context k3d-agentops-e2e
   port-forward svc/agentops-adapter-console 18099:8080 -n agent-ops &` and
   then runs `npx playwright test --config e2e-live/playwright.config.ts`
   from `platform/console/ui`.
-- [ ] 2.4 Add `actions/upload-artifact` of `e2e-live`'s report and
+- [x] 2.4 Add `actions/upload-artifact` of `e2e-live`'s report and
   `test-results`, `if: failure() && inputs.tier == 'full'`.
-- [ ] 2.5 Add a teardown step, `if: always() && inputs.tier == 'full'`,
+- [x] 2.5 Add a teardown step, `if: always() && inputs.tier == 'full'`,
   running `k3d cluster delete agentops-e2e || true` — the cleanup task
   2.1's `SYSTEM_REUSE=1` deferred to here, since no human is present in
   CI to delete it later by hand. Verify every added step's YAML with the
