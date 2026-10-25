@@ -49,13 +49,13 @@ read-only demo on your cluster in fifteen minutes.
    ```sh
    helm install agent-ops \
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator \
-     --version 17.0.0 -n agent-ops
+     --version 18.0.0 -n agent-ops
    ```
 
    ```powershell
    helm install agent-ops `
      oci://ghcr.io/kostiantyn-matsebora/charts/agent-ops-operator `
-     --version 17.0.0 -n agent-ops
+     --version 18.0.0 -n agent-ops
    ```
 
    **No registry credential.** The chart and every image it renders are public
@@ -230,9 +230,10 @@ Read [the changelog](https://github.com/kostiantyn-matsebora/agent-ops-operator/
 first, since it is the only place migration steps live, keyed by chart version
 and newest first.
 
-**17.0.0 is BREAKING**: a signal adapter still posting `fingerprint` instead
-of `initiationId` gets a `4xx`, not a silent drop. See the changelog entry
-before you upgrade a production install.
+**18.0.0 is BREAKING**: `runtime-claude` now drives the Claude Agent SDK
+in-process instead of spawning the `claude` CLI, and the Pulse signal
+adapter's default `correlationStrategy` changes what counts as a repeat
+alert. See the changelog entry before you upgrade a production install.
 
 `helm uninstall` removes the workloads but leaves the CRDs, every Conversation
 and the context claim, so reinstalling finds your data where it was.

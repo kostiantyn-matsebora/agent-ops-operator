@@ -14,7 +14,11 @@ alertmanager:
   name: alertmanager
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-alertmanager
-    tag: 0.8.0
+    # 0.8.1: a degraded registration now points at spec.serviceAccountName,
+    # not a field the CRD no longer has, and a malformed register: block
+    # degrades to a manual-registration message naming the parse problem
+    # instead of failing silently.
+    tag: 0.8.1
   resources: {}
   # Sender self-registration. VICTORIAMETRICS ONLY — it writes a
   # VMAlertmanagerConfig, and vanilla Alertmanager has no such object.
