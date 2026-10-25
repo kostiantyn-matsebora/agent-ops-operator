@@ -96,8 +96,8 @@ Every error response (400, 401, 404, 503) carries a JSON body with one
 
 #### Scenario: A body without a name uses the route name
 - **WHEN** a caller `PUT`s a body that omits `name`
-- **THEN** the manager stores the object under the route's `{name}` and
-  the response carries that name
+- **THEN** the manager stores the object under the route's `{name}`, and a
+  `GET` of that name returns it
 
 #### Scenario: Reading an unknown name fails explicitly
 - **WHEN** a caller reads a placeholder object by a name that was never
