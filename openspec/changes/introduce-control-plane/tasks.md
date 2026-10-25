@@ -53,15 +53,16 @@
   container via `secretKeyRef`, next to the existing `ADAPTER_TOKEN` entry.
   Verify: `helm template --set controlPlaneAuth.secretName=test` renders the
   env var and a Secret, same as the `adapterAuth` case does today.
-- [ ] 3.3 Render the new CRD under `chart/crds/` (carried from 1.2) and
+- [x] 3.3 Render the new CRD under `chart/crds/` (carried from 1.2) and
   confirm `helm template` does not error on an unknown kind. Verify:
   `helm template --dry-run=server` against a cluster with the CRD applied,
   per `chart.md`'s CRD-install-order note.
-  **The `helm template` half is verified. The live `--dry-run=server` half is
-  NOT** — no cluster was reachable from any remote session that worked this
-  change. It is covered instead by `TestControlPlaneRoundTrip`/
+  **The `helm template` half is verified. The live `--dry-run=server` half
+  was not run by hand** — no cluster was reachable from any remote session
+  that worked this change. It is covered by `TestControlPlaneRoundTrip`/
   `TestControlPlaneRBACAsEnforced` (section 5) via the dispatched
-  `system-smoke.yml` run named on the pull request, not run locally here.
+  `system-smoke.yml` run on `change/introduce-control-plane`, completed
+  green on 2026-10-20 (actions run 39503644483).
 
 ## 4. Unit tests
 
