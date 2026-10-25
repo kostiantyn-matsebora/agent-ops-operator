@@ -23,5 +23,8 @@ dependencies:
 - name: copilot
   repository: ""
   version: 0.1.0
-digest: sha256:22c50d9ffeecf3f757dfaef9c301d40eb1e4a6f9f00d90021dbf45477195e656
-generated: "2026-10-18T21:02:31.553011187+03:00"
+- name: claude-cli
+  repository: ""
+  version: 0.1.0
+digest: sha256:93031afd6e282d5bba83055550df94b9537fd6ced15fecf65dae6b3649fee32a
+generated: "2026-10-25T09:58:02.180929497Z"
