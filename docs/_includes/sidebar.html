@@ -15,7 +15,7 @@ page, where the reader can see where they lead.
   {%- endcomment -%}
   {%- for group in site.data.nav.groups %}
   <details class="ao-nav-group" open>
-    <summary class="ao-nav-title">{{ group.title }}</summary>
+    <summary class="ao-nav-title"><span class="ao-nav-chevron" aria-hidden="true"></span>{{ group.title }}</summary>
     <ul class="ao-nav-list">
       {%- comment -%}
       An entry may name an icon (nav.yml says which file). Alt is empty on

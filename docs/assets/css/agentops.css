@@ -610,10 +610,11 @@ a:hover {
   background: var(--ao-surface);
 }
 
-.ao-nav-title::before {
-  /* The slash gives the glyph EMPTY alternative text, so a screen reader
-     announces the group name alone — <summary> already states its state. */
-  content: '\25B8' / '';
+/* A real element carrying aria-hidden, not a pseudo-element on <summary> --
+   so every screen reader skips the glyph and announces the group name alone.
+   <summary> already states its own expanded state. */
+.ao-nav-chevron::before {
+  content: '\25B8';
   display: inline-block;
   width: 0.6em;
   font-size: 0.8em;
@@ -621,12 +622,12 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ao-nav-title::before {
+  .ao-nav-chevron::before {
     transition: none;
   }
 }
 
-.ao-nav-group[open] > .ao-nav-title::before {
+.ao-nav-group[open] > .ao-nav-title .ao-nav-chevron::before {
   transform: rotate(90deg);
 }
 
