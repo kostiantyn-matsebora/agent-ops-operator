@@ -13,7 +13,7 @@ What happens to the signal SHALL depend on its kind:
 
 | Origin | Full-backlog behaviour |
 |---|---|
-| machine (`alert`, `job`, `task`) | waits as a `Pending` `Signal` CR, routed once the backlog drains — never dropped |
+| machine (`alert`, `job`, `task`) | waits as a `Pending` `Signal` CR, routed once the backlog drains — never dropped for capacity alone, though the per-source overflow bound still applies |
 | person (`chat`) | declined immediately, told on the surface the message came from — a person is answered now, never left waiting silently |
 
 #### Scenario: A machine signal waits, never dropped

@@ -111,9 +111,13 @@ changes an in-flight signal's fan-out.
 
 Retries SHALL touch only non-terminal claimants.
 
-A retry SHALL be idempotent by equality reuse: an open conversation whose
-`conversationId` equals the signal's `initiationId` for that claimant means
-the earlier attempt landed, so the retry appends rather than duplicates.
+A retry SHALL be idempotent by equality reuse, scoped per claimant:
+
+- the match is an open conversation the claimant itself originated whose
+  `conversationId` equals the signal's `initiationId`
+- one claimant's conversation never satisfies another's lookup
+- a match means the earlier attempt landed, so the retry appends rather
+  than duplicates
 
 #### Scenario: A re-wire does not reach an in-flight signal
 
@@ -272,9 +276,16 @@ routing that already landed.
 
 - **WHEN** the manager crashes after creating a claimant's conversation
   but before writing that claimant's `Routed` entry
-- **THEN** the new leader's retry finds the open conversation whose
-  `conversationId` equals the `initiationId` for that claimant, appends
+- **THEN** the new leader's retry finds the open conversation that claimant
+  originated whose `conversationId` equals the `initiationId`, appends
   rather than creating a second conversation, and records `Routed`
+
+#### Scenario: One claimant's conversation never answers for another
+
+- **WHEN** two claimants share a signal and only the first has an open
+  conversation with the matching `conversationId`
+- **THEN** the second claimant's attempt creates its own conversation, and
+  the first's is left untouched
 
 ### Requirement: Cooldown suppression is recorded, never silent
 

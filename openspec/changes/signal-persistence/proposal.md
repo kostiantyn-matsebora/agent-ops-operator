@@ -80,7 +80,9 @@ objects first. This change is that enabler, and ONLY that enabler.
   inline first routing attempt extracted into the shared routing path.
 - `platform/manager/internal/controller/`: the new `Signal` reconciler —
   retries, phase roll-up, TTL GC, leader-change resume.
-- `platform/manager/internal/ingest/`: unchanged (cooldown stays as is).
+- `platform/manager/internal/ingest/`: the cooldown store itself does not
+  move, but a suppression is now recorded on the `Signal` as `Dropped`
+  (reason cooldown) by the routing path, never silent.
 - `chart/templates/rbac.yaml`: `signals` with full verbs on the manager's
   Role, read-only on the console's.
 - `platform/console/`: the new watched kind, the signals view, manager
