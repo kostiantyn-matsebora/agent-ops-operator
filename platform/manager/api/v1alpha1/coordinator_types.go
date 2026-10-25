@@ -101,7 +101,8 @@ type CoordinatorSpec struct {
 	// +optional
 	AgentCapabilitySpec `json:",inline"`
 	// AgentRef (`capabilityRef` in JSON) names an AgentCapability holding the
-	// coordinating agent's capability INSTEAD of inlining it above.
+	// coordinating agent's capability INSTEAD of inlining it above — mutually
+	// exclusive with the inline fields by CEL.
 	// +optional
 	AgentRef *ObjectRef `json:"capabilityRef,omitempty"`
 	// Agents this Coordinator's own conversation may invoke.

@@ -611,7 +611,9 @@ a:hover {
 }
 
 .ao-nav-title::before {
-  content: '\25B8';
+  /* The slash gives the glyph EMPTY alternative text, so a screen reader
+     announces the group name alone — <summary> already states its state. */
+  content: '\25B8' / '';
   display: inline-block;
   width: 0.6em;
   font-size: 0.8em;

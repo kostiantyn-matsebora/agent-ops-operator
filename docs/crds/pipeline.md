@@ -57,6 +57,10 @@ spec:
 ```
 <!-- /generated -->
 
+One shape or the other: `capabilityRef` and the inline capability fields
+are mutually exclusive by CEL. The sketch above shows both — a real CR
+carries one.
+
 ## Every field
 
 <!-- generated: crd-fields kind=Pipeline -->

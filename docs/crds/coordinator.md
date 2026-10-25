@@ -64,6 +64,10 @@ spec:
 ```
 <!-- /generated -->
 
+One shape or the other: `capabilityRef` and the inline capability fields
+are mutually exclusive by CEL. The sketch above shows both — a real CR
+carries one.
+
 ## Every field
 
 <!-- generated: crd-fields kind=Coordinator -->
@@ -77,7 +81,7 @@ spec:
 | `agents[].capabilityRef.name` | `string` | **yes** | Name of the referenced object. |
 | `agents[].coordinatorRef` | `object` |  | CoordinatorRef names another Coordinator this entry invokes AS A MEMBER. |
 | `agents[].coordinatorRef.name` | `string` | **yes** | Name of the referenced object. |
-| `capabilityRef` | `object` |  | AgentRef (`capabilityRef` in JSON) names an AgentCapability holding the coordinating agent's capability INSTEAD of inlining it above. |
+| `capabilityRef` | `object` |  | AgentRef (`capabilityRef` in JSON) names an AgentCapability holding the coordinating agent's capability INSTEAD of inlining it above — mutually exclusive with the inline fields by CEL. |
 | `capabilityRef.name` | `string` | **yes** | Name of the referenced object. |
 | `channelRefs` | `[]object` |  | The surfaces a ROOT conversation this Coordinator opens binds at creation — reached only when the root escalates, and never bound by a caused member. |
 | `channelRefs[].name` | `string` | **yes** | Name of the referenced object. |
