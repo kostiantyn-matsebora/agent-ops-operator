@@ -1,0 +1,594 @@
+<title>agent-ops docs mockups</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/*
+  Layout: the real site's own shell — fixed masthead, collapsible sidebar,
+  main column — reused across four tabbed panels, one per proposed change,
+  so each is judged inside the chrome it will actually live in.
+  Palette and type are COPIED from the live site's own tokens
+  (docs/assets/css/agentops.css), not reinvented, per that file's own rule.
+*/
+:root{
+  --ao-brand:#0d7d76; --ao-brand-strong:#0a615c; --ao-brand-soft:#d3ece9;
+  --ao-accent:#6b4bd6; --ao-accent-soft:#e9e3fb;
+  --ao-warning:#a86400;
+  --ao-surface:#ffffff; --ao-surface-alt:#f3f5f6; --ao-canvas:#eef1f2;
+  --ao-border:#cfd6da; --ao-border-strong:#9aa4ab;
+  --ao-text:#16191c; --ao-text-subtle:#5c656d;
+  --ao-code-bg:#f6f8f8;
+  --font-display:'Red Hat Display','Red Hat Text',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-text:'Red Hat Text',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'Red Hat Mono',ui-monospace,'SFMono-Regular',Consolas,monospace;
+  --radius:6px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ao-brand:#43c9bd; --ao-brand-strong:#7fded5; --ao-brand-soft:#123b39;
+    --ao-accent:#a996f5; --ao-accent-soft:#2a2350;
+    --ao-warning:#e0a63c;
+    --ao-surface:#1b1f22; --ao-surface-alt:#23282c; --ao-canvas:#14171a;
+    --ao-border:#3a4247; --ao-border-strong:#5c666d;
+    --ao-text:#e8ecee; --ao-text-subtle:#a5b0b7;
+    --ao-code-bg:#14181b;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ao-brand:#43c9bd; --ao-brand-strong:#7fded5; --ao-brand-soft:#123b39;
+  --ao-accent:#a996f5; --ao-accent-soft:#2a2350;
+  --ao-warning:#e0a63c;
+  --ao-surface:#1b1f22; --ao-surface-alt:#23282c; --ao-canvas:#14171a;
+  --ao-border:#3a4247; --ao-border-strong:#5c666d;
+  --ao-text:#e8ecee; --ao-text-subtle:#a5b0b7;
+  --ao-code-bg:#14181b;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;}
+body{
+  background:var(--ao-canvas);
+  color:var(--ao-text);
+  font-family:var(--font-text);
+  font-size:16px;
+  line-height:1.55;
+}
+h1,h2,h3{font-family:var(--font-display); text-wrap:balance; margin:0;}
+code{font-family:var(--font-mono); font-size:0.9em;}
+a{color:var(--ao-brand-strong); text-decoration:none;}
+a:hover{text-decoration:underline;}
+
+.mh{
+  position:sticky; top:0; z-index:5;
+  background:var(--ao-surface);
+  border-bottom:1px solid var(--ao-border);
+}
+.mh-inner{
+  display:flex; align-items:center; justify-content:space-between; gap:0.75rem;
+  height:3.5rem;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+.mh-brand{display:flex; align-items:center; gap:0.55rem; font-family:var(--font-display); font-weight:700; font-size:1.05rem;}
+.mh-brand img{width:1.6rem; height:1.6rem;}
+.mh-badge{
+  font-size:0.72rem; font-weight:700; letter-spacing:0.05em; text-transform:uppercase;
+  color:var(--ao-accent); background:var(--ao-accent-soft);
+  padding:0.3rem 0.6rem; border-radius:999px;
+}
+
+.shell{
+  display:grid;
+  grid-template-columns:18.75rem 1fr;
+  max-width:88rem;
+  margin:0 auto;
+}
+@media (max-width:760px){
+  .shell{grid-template-columns:1fr;}
+}
+
+.sidebar{
+  padding:1.25rem 0.75rem 2rem max(0.75rem, env(safe-area-inset-left,0px));
+  background:var(--ao-surface-alt);
+  border-right:1px solid var(--ao-border);
+}
+@media (max-width:760px){ .sidebar{border-right:none; border-bottom:1px solid var(--ao-border);} }
+
+.nav-group{margin-bottom:0.15rem;}
+.nav-group summary{
+  display:flex; align-items:center; gap:0.4rem; cursor:pointer; list-style:none;
+  padding:0.45rem 0.6rem; border-radius:var(--radius);
+  font-family:var(--font-display); font-size:0.72rem; font-weight:700;
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--ao-text-subtle);
+}
+.nav-group summary::-webkit-details-marker{display:none;}
+.nav-group summary:hover{background:var(--ao-surface);}
+.nav-group summary .chev{
+  display:inline-block; width:0.6em; transition:transform 0.15s ease;
+  font-size:0.8em;
+}
+.nav-group[open] summary .chev{transform:rotate(90deg);}
+.nav-group .new-chip{
+  font-size:0.6rem; font-weight:700; letter-spacing:0.02em; text-transform:none;
+  color:var(--ao-brand-strong); background:var(--ao-brand-soft);
+  padding:0.1rem 0.4rem; border-radius:999px; margin-left:auto;
+}
+.nav-list{margin:0.1rem 0 0.6rem; padding:0; list-style:none;}
+.nav-link{
+  display:block; padding:0.35rem 0.6rem 0.35rem 1.4rem; border-radius:var(--radius);
+  border-left:2px solid transparent; color:var(--ao-text); text-decoration:none; font-size:0.92rem;
+}
+.nav-link:hover{background:var(--ao-surface);}
+.nav-link[aria-current="page"]{
+  background:var(--ao-brand-soft); border-left-color:var(--ao-brand);
+  color:var(--ao-brand-strong); font-weight:500;
+}
+.sidebar-note{
+  margin:1rem 0.6rem 0; padding-top:0.75rem; border-top:1px dashed var(--ao-border-strong);
+  font-size:0.78rem; color:var(--ao-text-subtle);
+}
+
+.main{min-width:0; padding:1.75rem 1.5rem 4rem max(1.5rem, env(safe-area-inset-left,0px)); padding-right:max(1.5rem, env(safe-area-inset-right,0px));}
+
+.switch{display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1.5rem;}
+.switch input{position:absolute; opacity:0; pointer-events:none;}
+.switch label{
+  display:flex; flex-direction:column; cursor:pointer;
+  padding:0.5rem 0.9rem; border-radius:var(--radius);
+  border:1px solid var(--ao-border); background:var(--ao-surface);
+  font-size:0.86rem; font-weight:600; color:var(--ao-text-subtle);
+  line-height:1.3;
+}
+.switch label .n{font-size:0.68rem; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--ao-text-subtle);}
+.switch input:checked + label{
+  border-color:var(--ao-brand); background:var(--ao-brand-soft); color:var(--ao-brand-strong);
+}
+.switch input:checked + label .n{color:var(--ao-brand-strong);}
+.switch input:focus-visible + label{outline:2px solid var(--ao-brand); outline-offset:1px;}
+
+.panel{display:none;}
+#t1:checked ~ .panels #p1,
+#t2:checked ~ .panels #p2,
+#t3:checked ~ .panels #p3,
+#t4:checked ~ .panels #p4{display:block;}
+
+.mock-page{
+  background:var(--ao-surface); border:1px solid var(--ao-border); border-radius:12px;
+  padding:1.75rem; max-width:52rem;
+}
+.eyebrow{
+  margin:0 0 0.9rem; font-size:0.74rem; font-weight:700; letter-spacing:0.06em;
+  text-transform:uppercase; color:var(--ao-text-subtle); font-family:var(--font-mono);
+}
+.lede{color:var(--ao-text-subtle); max-width:40rem;}
+.actions{display:flex; gap:0.6rem; margin:1rem 0 0;}
+.btn-solid, .btn-quiet{
+  display:inline-block; padding:0.5rem 1rem; border-radius:var(--radius); font-weight:600; font-size:0.92rem;
+}
+.btn-solid{background:var(--ao-brand); color:#fff;}
+.btn-quiet{background:var(--ao-surface-alt); color:var(--ao-text); border:1px solid var(--ao-border);}
+
+.before-after{display:grid; grid-template-columns:1fr auto 1fr; gap:1rem; align-items:start; margin-top:1.5rem;}
+.before-after.stacked{grid-template-columns:1fr;}
+@media (max-width:640px){ .before-after{grid-template-columns:1fr;} .ba-arrow{transform:rotate(90deg); justify-self:center;} }
+.ba-block{min-width:0;}
+.ba-arrow{font-size:1.4rem; color:var(--ao-text-subtle); align-self:center;}
+.ba-label{
+  margin:0 0 0.5rem; font-size:0.72rem; font-weight:700; letter-spacing:0.04em;
+  text-transform:uppercase; color:var(--ao-text-subtle);
+}
+.ba-before .ba-label{color:var(--ao-warning);}
+.ba-after .ba-label{color:var(--ao-brand-strong);}
+.after-label{margin-top:1.5rem;}
+.tiny{font-size:0.8rem; color:var(--ao-text-subtle); margin:0.6rem 0 0;}
+
+.ghost-presentation{
+  border:1px dashed var(--ao-border-strong); border-radius:var(--radius);
+  background:repeating-linear-gradient(135deg, var(--ao-surface-alt) 0 10px, var(--ao-canvas) 10px 20px);
+  padding:1.5rem; text-align:center; color:var(--ao-text-subtle); font-size:0.88rem; min-height:9.5rem;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.4rem;
+}
+.flow-img{max-width:100%; display:block; border-radius:var(--radius); border:1px solid var(--ao-border);}
+
+.mini-cards{display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem;}
+@media (max-width:480px){ .mini-cards{grid-template-columns:repeat(2,1fr);} }
+.mini-card{
+  border:1px solid var(--ao-border); border-radius:var(--radius); background:var(--ao-surface-alt);
+  padding:0.6rem 0.5rem; font-size:0.78rem; font-weight:600; text-align:center; color:var(--ao-text-subtle);
+}
+
+.diagram-figure{margin:0.75rem 0 0; padding:0;}
+.diagram-figure svg{width:100%; max-width:36rem; height:auto; display:block; margin:0 auto;}
+.diagram-figure figcaption{margin-top:0.6rem; font-size:0.85rem; color:var(--ao-text-subtle);}
+.crd-link{cursor:pointer; color:inherit;}
+.crd-link:hover text:first-of-type{text-decoration:underline;}
+.crd-link:focus-visible{outline:2px solid var(--ao-brand); outline-offset:2px;}
+
+table.field-table{width:100%; border-collapse:collapse; font-size:0.84rem; margin-top:0.25rem;}
+table.field-table th, table.field-table td{
+  text-align:left; padding:0.4rem 0.55rem; border-bottom:1px solid var(--ao-border); vertical-align:top;
+}
+table.field-table th{color:var(--ao-text-subtle); font-size:0.72rem; letter-spacing:0.03em; text-transform:uppercase;}
+table.field-table td:first-child{font-family:var(--font-mono); white-space:nowrap; color:var(--ao-brand-strong);}
+.code-scroll{max-height:12.5rem; overflow:auto; border:1px solid var(--ao-border); border-radius:var(--radius);}
+.code-scroll table.field-table{margin:0;}
+.code-scroll td, .code-scroll th{font-size:0.76rem;}
+.fade-row td{color:var(--ao-text-subtle); font-style:italic;}
+.mock-page h3{font-size:1rem; margin:1.6rem 0 0.6rem; font-family:var(--font-display);}
+.yaml-block{
+  background:var(--ao-surface-alt); border:1px solid var(--ao-border); border-radius:var(--radius);
+  padding:0.9rem 1.1rem; font-family:var(--font-mono); font-size:0.78rem; line-height:1.6;
+  overflow-x:auto; margin:0; white-space:pre;
+}
+.yaml-block .c{color:var(--ao-text-subtle);}
+.yaml-block .k{color:var(--ao-brand-strong);}
+
+.mini-sidebar{
+  border:1px solid var(--ao-border); border-radius:var(--radius); background:var(--ao-surface-alt);
+  padding:0.75rem 0.6rem; font-size:0.82rem;
+}
+.mini-sidebar.tall{max-height:15rem; overflow:auto;}
+.mini-sidebar .g-title{
+  font-weight:700; font-size:0.68rem; letter-spacing:0.05em; text-transform:uppercase;
+  color:var(--ao-text-subtle); margin:0.7rem 0 0.25rem;
+}
+.mini-sidebar .g-title:first-child{margin-top:0;}
+.mini-sidebar .g-link{display:block; padding:0.18rem 0.3rem; color:var(--ao-text-subtle);}
+.mini-sidebar details{margin-bottom:0.1rem;}
+.mini-sidebar summary{font-weight:700; font-size:0.68rem; letter-spacing:0.05em; text-transform:uppercase; color:var(--ao-text-subtle); cursor:pointer; padding:0.2rem 0.3rem;}
+.mini-sidebar summary::-webkit-details-marker{display:none;}
+
+@media (max-width:480px){
+  .mh-brand span{display:none;}
+  .main{padding-left:max(1rem, env(safe-area-inset-left,0px)); padding-right:max(1rem, env(safe-area-inset-right,0px));}
+  .mock-page{padding:1.1rem;}
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700;900&family=Red+Hat+Text:wght@400;500;600;700&family=Red+Hat+Mono:wght@400;500&display=swap">
+
+<header class="mh">
+  <div class="mh-inner">
+    <div class="mh-brand"><img src="agent-ops-mark.svg" alt=""><span>agent-ops docs</span></div>
+    <span class="mh-badge">mockup · 4 proposed changes</span>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" aria-label="Documentation">
+    <details class="nav-group">
+      <summary><span class="chev">▸</span>Start here</summary>
+      <ul class="nav-list">
+        <li><a class="nav-link" href="#">Overview</a></li>
+        <li><a class="nav-link" href="#">Introduction</a></li>
+        <li><a class="nav-link" href="#">Getting started</a></li>
+        <li><a class="nav-link" href="#">The console</a></li>
+        <li><a class="nav-link" href="#">Security</a></li>
+        <li><a class="nav-link" href="#">Installation</a></li>
+      </ul>
+    </details>
+    <details class="nav-group">
+      <summary><span class="chev">▸</span>Integrations</summary>
+      <ul class="nav-list">
+        <li><a class="nav-link" href="#">Kubernetes</a></li>
+        <li><a class="nav-link" href="#">Prometheus</a></li>
+        <li><a class="nav-link" href="#">Home Assistant</a></li>
+        <li><a class="nav-link" href="#">Pulse</a></li>
+        <li><a class="nav-link" href="#">Telegram</a></li>
+      </ul>
+    </details>
+    <details class="nav-group">
+      <summary><span class="chev">▸</span>Runtimes</summary>
+      <ul class="nav-list">
+        <li><a class="nav-link" href="#">Ollama</a></li>
+        <li><a class="nav-link" href="#">GitHub Copilot</a></li>
+      </ul>
+    </details>
+    <details class="nav-group">
+      <summary><span class="chev">▸</span>Guides</summary>
+      <ul class="nav-list">
+        <li><a class="nav-link" href="#">Put an agent to work</a></li>
+        <li><a class="nav-link" href="#">Add your own agent</a></li>
+        <li><a class="nav-link" href="#">Give your agent tools</a></li>
+        <li><a class="nav-link" href="#">React to signals</a></li>
+        <li><a class="nav-link" href="#">Talk to agents from your own chat</a></li>
+        <li><a class="nav-link" href="#">Run agents on your own backend</a></li>
+        <li><a class="nav-link" href="#">Coordinate agents</a></li>
+      </ul>
+    </details>
+    <details class="nav-group">
+      <summary><span class="chev">▸</span>Specifications</summary>
+      <ul class="nav-list">
+        <li><a class="nav-link" href="#">AgentRuntime</a></li>
+        <li><a class="nav-link" href="#">ChannelAdapter</a></li>
+        <li><a class="nav-link" href="#">SignalAdapter</a></li>
+      </ul>
+    </details>
+    <details class="nav-group" open>
+      <summary><span class="chev">▸</span>CRD reference<span class="new-chip">new</span></summary>
+      <ul class="nav-list">
+        <li><a class="nav-link" aria-current="page" href="#">AgentProfile</a></li>
+        <li><a class="nav-link" href="#">Pipeline</a></li>
+        <li><a class="nav-link" href="#">Coordinator</a></li>
+        <li><a class="nav-link" href="#">SignalSource</a></li>
+        <li><a class="nav-link" href="#">Channel</a></li>
+        <li><a class="nav-link" href="#">MCPToolset &amp; MCPConfig</a></li>
+        <li><a class="nav-link" href="#">AgentRuntime</a></li>
+        <li><a class="nav-link" href="#">AgentCapability</a></li>
+      </ul>
+    </details>
+    <p class="sidebar-note">Only the group holding the open page starts expanded (here, "CRD reference" — try collapsing the others). No JavaScript, pure <code>&lt;details&gt;</code>.</p>
+  </nav>
+
+  <main class="main">
+    <div class="switch">
+      <input type="radio" name="tab" id="t1" checked><label for="t1"><span class="n">1</span>Landing hero</label>
+      <input type="radio" name="tab" id="t2"><label for="t2"><span class="n">2</span>Introduction</label>
+      <input type="radio" name="tab" id="t3"><label for="t3"><span class="n">3</span>CRD spec page</label>
+      <input type="radio" name="tab" id="t4"><label for="t4"><span class="n">4</span>Nav, before/after</label>
+      <div class="panels">
+
+        <!-- ============================= PANEL 1 ============================= -->
+        <section id="p1" class="panel">
+          <div class="mock-page">
+            <p class="eyebrow">index.md — hero, "How it works" tab</p>
+            <h1 style="font-size:1.9rem;">agent-ops</h1>
+            <p class="lede">A Kubernetes operator for LLM agents within boundaries you declare, cluster you control and conversations you stay in.</p>
+            <div class="actions">
+              <span class="btn-solid">Get started</span>
+              <span class="btn-quiet">Install it</span>
+            </div>
+
+            <div class="before-after">
+              <div class="ba-block ba-before">
+                <p class="ba-label">today — <code>.ao-presentation</code></p>
+                <div class="ghost-presentation">
+                  <strong>10-beat animated figure</strong>
+                  <span>play button · beat counter · scrub dots · growing YAML</span>
+                  <span style="font-size:0.78rem;">(placeholder — it's actually live and stepping)</span>
+                </div>
+              </div>
+              <div class="ba-arrow">→</div>
+              <div class="ba-block ba-after">
+                <p class="ba-label">proposed — static picture</p>
+                <picture>
+                  <source media="(prefers-color-scheme: dark)" srcset="readme-flow-dark.svg">
+                  <img class="flow-img" src="readme-flow-light.svg" alt="Left to right: something happens, you declare one Pipeline or one Coordinator, the operator runs it as a Conversation, you answer on your channels.">
+                </picture>
+                <p class="tiny"><code>docs/assets/img/readme-flow-{light,dark}.svg</code> — already built for <code>README.md</code>, reused as-is, no new export.</p>
+              </div>
+            </div>
+            <p class="tiny" style="margin-top:1.25rem;">⚠ reverses a recorded decision (<code>docs/.claude/site.md</code>) that rejected keeping a static picture alongside the presentation as "two statements of one model." The second beat sequence below it, and the "Watch it work" video tab, are untouched by this change.</p>
+          </div>
+        </section>
+
+        <!-- ============================= PANEL 2 ============================= -->
+        <section id="p2" class="panel">
+          <div class="mock-page">
+            <p class="eyebrow">introduction.md — "Understand the concepts"</p>
+            <div class="before-after stacked">
+              <div class="ba-block ba-before">
+                <p class="ba-label">today — nine cards, no shape between them</p>
+                <div class="mini-cards">
+                  <div class="mini-card">AgentProfile</div>
+                  <div class="mini-card">SignalSource</div>
+                  <div class="mini-card">MCPToolset / Config</div>
+                  <div class="mini-card">Channel</div>
+                  <div class="mini-card">AgentRuntime</div>
+                  <div class="mini-card">Conversation</div>
+                  <div class="mini-card">Pipeline</div>
+                  <div class="mini-card">AgentCapability</div>
+                  <div class="mini-card">Coordinator</div>
+                </div>
+              </div>
+            </div>
+
+            <p class="ba-label after-label">proposed — grouped, one connector per group pair</p>
+            <figure class="diagram-figure">
+              <svg viewBox="0 0 560 750" role="img" aria-label="All thirteen agent-ops kinds, grouped into four clusters: what starts it (SignalAdapter, SignalSource), the capability shape (AgentProfile, MCPToolset, MCPConfig, AgentRuntime, AgentCapability), the two wiring kinds Pipeline and Coordinator kept visibly apart, and what it produces (Conversation, ConversationInput, Channel, ChannelAdapter). Exactly one connector runs from each input cluster to Pipeline and one to Coordinator, and one connector runs from each wiring kind down to the output cluster. A Coordinator may also invoke another Coordinator as a nested member.">
+                <defs>
+                  <marker id="arrow" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+                  </marker>
+                </defs>
+
+                <g font-family="Red Hat Text, sans-serif" font-size="12" fill="currentColor">
+
+                  <!-- group brackets -->
+                  <rect x="20" y="16" width="350" height="78" rx="8" fill="none" stroke="currentColor" stroke-dasharray="3 3" stroke-width="1" opacity="0.55"/>
+                  <text x="195" y="10" text-anchor="middle" font-size="10" opacity="0.6">what starts it</text>
+
+                  <rect x="20" y="118" width="350" height="200" rx="8" fill="none" stroke="currentColor" stroke-dasharray="3 3" stroke-width="1" opacity="0.55"/>
+                  <text x="195" y="112" text-anchor="middle" font-size="10" opacity="0.6">the capability shape — inline, or factored out</text>
+
+                  <rect x="85" y="520" width="360" height="180" rx="8" fill="none" stroke="currentColor" stroke-dasharray="3 3" stroke-width="1" opacity="0.55"/>
+                  <text x="97" y="536" font-size="10" opacity="0.6">what it produces</text>
+
+                  <!-- group-to-group edges: exactly one per cluster pair -->
+                  <g fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.85">
+                    <path d="M370,55 H410 V365 H90 V380" marker-end="url(#arrow)"/>
+                    <path d="M370,55 H410 V365 H350 V380" marker-end="url(#arrow)"/>
+                    <path d="M195,318 V350 H160 V380" marker-end="url(#arrow)"/>
+                    <path d="M195,318 V350 H400 V380" marker-end="url(#arrow)" stroke-dasharray="5 4"/>
+                    <path d="M500,415 H525 V360 H460 V380" marker-end="url(#arrow)"/>
+                    <path d="M125,450 V490 H245 V520" marker-end="url(#arrow)"/>
+                    <path d="M395,450 V490 H285 V520" marker-end="url(#arrow)"/>
+                  </g>
+
+                  <!-- group labels -->
+                  <g font-size="10" opacity="0.8">
+                    <text x="415" y="112">signalSourceRefs</text>
+                    <text x="205" y="340">capabilityRef, or inline</text>
+                    <text x="529" y="351" text-anchor="end">coordinatorRef — nested</text>
+                    <text x="130" y="505">opens</text>
+                    <text x="330" y="505">opens, escalates</text>
+                  </g>
+
+                  <!-- what starts it -->
+                  <a class="crd-link" href="/crds/signaladapter/"><rect x="30" y="32" width="135" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-dasharray="4 3"/>
+                  <circle cx="53" cy="55" r="9" fill="currentColor" opacity="0.12"/><circle cx="53" cy="55" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-4 -6 v4 M4 -6 v4 M-6 -2 h12 v2 a6 6 0 0 1 -12 0 z M0 6 v3" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(53 55) scale(0.8)"/>
+                  <text x="71" y="59" font-weight="700" font-size="11.5">SignalAdapter</text></a>
+                  <path d="M165,55 H214" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow)"/>
+                  <a class="crd-link" href="/crds/signalsource/"><rect x="215" y="32" width="135" height="46" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="241" cy="55" r="9" fill="currentColor" opacity="0.12"/><circle cx="241" cy="55" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M2 -7 L-4 1 h4 l-1 6 6 -8 h-4 z" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(241 55) scale(0.8)"/>
+                  <text x="259" y="51" font-weight="700" font-size="11.5">SignalSource</text>
+                  <text x="259" y="67" font-size="9.5" opacity="0.65">an ingest lane</text></a>
+
+                  <!-- the capability shape -->
+                  <a class="crd-link" href="/crds/agentprofile/"><rect x="36" y="134" width="158" height="52" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="75" cy="160" r="9" fill="currentColor" opacity="0.12"/><circle cx="75" cy="160" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M0 -6 a3 3 0 1 1 0 6 a3 3 0 0 1 0 -6 M-6 7 a6 6 0 0 1 12 0 z" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(75 160) scale(0.8)"/>
+                  <text x="93" y="164" font-weight="700" font-size="11.5">AgentProfile</text></a>
+
+                  <a class="crd-link" href="/crds/mcptoolset/"><rect x="204" y="134" width="158" height="52" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="244" cy="160" r="9" fill="currentColor" opacity="0.12"/><circle cx="244" cy="160" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M5 -5 a3 3 0 0 1 -4 4 l-5 5 -1 -1 5 -5 a3 3 0 0 1 4 -4 z" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(244 160) scale(0.8)"/>
+                  <text x="262" y="164" font-weight="700" font-size="11.5">MCPToolset</text></a>
+
+                  <a class="crd-link" href="/crds/mcpconfig/"><rect x="36" y="194" width="158" height="52" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="79" cy="220" r="9" fill="currentColor" opacity="0.12"/><circle cx="79" cy="220" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-6 -5 h12 v4 h-12 z M-6 1 h12 v4 h-12 z" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(79 220) scale(0.8)"/>
+                  <text x="97" y="224" font-weight="700" font-size="11.5">MCPConfig</text></a>
+
+                  <a class="crd-link" href="/crds/agentruntime/"><rect x="204" y="194" width="158" height="52" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="238" cy="220" r="9" fill="currentColor" opacity="0.12"/><circle cx="238" cy="220" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-5 -5 h10 v10 h-10 z M-2 -2 h4 v4 h-4 z" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(238 220) scale(0.8)"/>
+                  <text x="256" y="224" font-weight="700" font-size="11.5">AgentRuntime</text></a>
+
+                  <a class="crd-link" href="/crds/agentcapability/"><polygon points="105,280 145,256 245,256 285,280 245,304 145,304" fill="var(--ao-accent-soft)" stroke="var(--ao-accent)" stroke-width="1.4"/>
+                  <circle cx="145" cy="280" r="9" fill="var(--ao-accent)" opacity="0.18"/><circle cx="145" cy="280" r="9" fill="none" stroke="var(--ao-accent)" stroke-width="1"/><path d="M-3 -7 a2 2 0 1 0 0.01 0 M-3 -5 v9 M-3 2 h3 M-3 5 h2" fill="none" stroke="var(--ao-accent)" stroke-width="1.2" transform="translate(145 280) scale(0.8)"/>
+                  <text x="163" y="284" font-weight="700" font-size="11.5" fill="var(--ao-accent)">AgentCapability</text></a>
+
+                  <!-- wiring, kept visibly apart -->
+                  <a class="crd-link" href="/crds/pipeline/"><rect x="20" y="380" width="210" height="70" rx="35" fill="var(--ao-brand-soft)" stroke="var(--ao-brand)" stroke-width="2"/>
+                  <circle cx="74" cy="415" r="9" fill="var(--ao-brand-strong)" opacity="0.15"/><circle cx="74" cy="415" r="9" fill="none" stroke="var(--ao-brand-strong)" stroke-width="1"/><path d="M-8 -4 h5 a3 3 0 0 1 3 3 v2 a3 3 0 0 0 3 3 h5 M6 2 l2 2 -2 2" fill="none" stroke="var(--ao-brand-strong)" stroke-width="1.2" transform="translate(74 415) scale(0.8)"/>
+                  <text x="92" y="411" font-weight="700" fill="var(--ao-brand-strong)">Pipeline</text>
+                  <text x="92" y="427" font-size="10" fill="var(--ao-brand-strong)" opacity="0.85">the wiring, one agent</text></a>
+
+                  <a class="crd-link" href="/crds/coordinator/"><rect x="290" y="380" width="210" height="70" rx="35" fill="var(--ao-brand-soft)" stroke="var(--ao-brand)" stroke-width="2"/>
+                  <circle cx="343" cy="415" r="9" fill="var(--ao-brand-strong)" opacity="0.15"/><circle cx="343" cy="415" r="9" fill="none" stroke="var(--ao-brand-strong)" stroke-width="1"/><path d="M-7 0 h4 M-3 0 l5 -6 M-3 0 l5 0 M-3 0 l5 6" fill="none" stroke="var(--ao-brand-strong)" stroke-width="1.2" transform="translate(343 415) scale(0.8)"/>
+                  <text x="361" y="411" font-weight="700" fill="var(--ao-brand-strong)">Coordinator</text>
+                  <text x="361" y="427" font-size="10" fill="var(--ao-brand-strong)" opacity="0.85">wiring, a composition</text></a>
+
+                  <!-- what it produces -->
+                  <a class="crd-link" href="/crds/conversation/"><ellipse cx="175" cy="572" rx="80" ry="32" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="133" cy="572" r="9" fill="currentColor" opacity="0.12"/><circle cx="133" cy="572" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-5 -2 h10 M-5 2 h6" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(133 572) scale(0.8)"/>
+                  <text x="151" y="576" font-weight="700" font-size="11.5">Conversation</text></a>
+
+                  <a class="crd-link" href="/crds/channel/"><rect x="265" y="540" width="170" height="64" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+                  <circle cx="318" cy="572" r="9" fill="currentColor" opacity="0.12"/><circle cx="318" cy="572" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-6 -3 h12 v8 h-6 l-3 3 v-3 h-3 z" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(318 572) scale(0.8)"/>
+                  <text x="336" y="568" font-weight="700" font-size="11.5">Channel</text>
+                  <text x="336" y="584" font-size="9.5" opacity="0.65">a chat surface</text></a>
+
+                  <path d="M175,620 V605" fill="none" stroke="currentColor" stroke-width="1.1" marker-end="url(#arrow)"/>
+                  <a class="crd-link" href="/crds/conversationinput/"><rect x="95" y="620" width="160" height="52" rx="5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-dasharray="4 3"/>
+                  <circle cx="118" cy="646" r="9" fill="currentColor" opacity="0.12"/><circle cx="118" cy="646" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-4 -4 h8 v8 h-8 z M-4 -1 h8" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(118 646) scale(0.8)"/>
+                  <text x="136" y="650" font-weight="700" font-size="11.5">ConversationInput</text></a>
+
+                  <path d="M350,604 V620" fill="none" stroke="currentColor" stroke-width="1.1"/>
+                  <a class="crd-link" href="/crds/channeladapter/"><rect x="270" y="620" width="160" height="52" rx="5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-dasharray="4 3"/>
+                  <circle cx="300" cy="646" r="9" fill="currentColor" opacity="0.12"/><circle cx="300" cy="646" r="9" fill="none" stroke="currentColor" stroke-width="1"/><path d="M-4 -6 v4 M4 -6 v4 M-6 -2 h12 v2 a6 6 0 0 1 -12 0 z M0 6 v3" fill="none" stroke="currentColor" stroke-width="1.2" transform="translate(300 646) scale(0.8)"/>
+                  <text x="318" y="650" font-weight="700" font-size="11.5">ChannelAdapter</text></a>
+                </g>
+              </svg>
+              <figcaption>All thirteen kinds, grouped into four clusters so each pair gets exactly one connector — not one per field. Every shape is a link to that kind's spec page — in this mockup, clicking any of them opens the spec-page example (tab 3).</figcaption>
+            </figure>
+            <script>
+              document.querySelectorAll('a.crd-link').forEach(function (a) {
+                a.addEventListener('click', function (e) {
+                  e.preventDefault();
+                  document.getElementById('t3').checked = true;
+                  document.getElementById('t3').dispatchEvent(new Event('change', { bubbles: true }));
+                  window.scrollTo({ top: 0 });
+                });
+              });
+            </script>
+            <p class="tiny">Hand-drawn, same tool as every other diagram on the site (<code>agent-ops.drawio</code> + <code>export.py</code>), content checked against <code>chart/crds/</code> and <code>README.md</code>'s own kind table — not the simplified story <a href="#t1">tab 1</a>'s picture tells, which stays merged and abstract on purpose.</p>
+          </div>
+        </section>
+
+        <!-- ============================= PANEL 3 ============================= -->
+        <section id="p3" class="panel">
+          <div class="mock-page">
+            <p class="eyebrow">new — /contracts/agent-profile/ (CRD reference)</p>
+            <h2 style="font-size:1.5rem;">AgentProfile specification</h2>
+            <p class="lede">Who the agent is and how it behaves — identity, never reach. Tools, MCP servers and channels come from the Pipeline routing it, never from here.</p>
+
+            <h3>spec, at a glance</h3>
+            <pre class="yaml-block"><code>apiVersion: agentops.dev/v1alpha1
+kind: AgentProfile
+metadata:
+  name: k8s-engineer
+spec:
+  agent: k8s-engineer          <span class="c"># the agent definition to adopt, from .claude/agents/</span>
+  repository:                  <span class="c"># omit this block to run as a pure advisor, no checkout</span>
+    url: https://github.com/org/ops-agents
+    ref: main
+  env:                         <span class="c"># standard Kubernetes env vars, passed through as-is</span>
+    - name: LOG_LEVEL
+      value: info
+  maxTurns: 40                 <span class="c"># turn budget for one work unit, a runaway bound</span>
+  outputFormat: blocks         <span class="c"># required, no default — see Concepts for why</span>
+  prompt: prompts/first.md     <span class="c"># repo-relative template for the first unit</span>
+  systemPrompt: |              <span class="c"># inline role text, for a profile with no repository</span>
+    You are a careful Kubernetes operator…</code></pre>
+
+            <h3>Every field</h3>
+            <table class="field-table">
+              <tr><th>Field</th><th>Type</th><th>Req.</th><th>Meaning</th></tr>
+              <tr><td>agent</td><td>string</td><td></td><td>The agent definition to adopt, from <code>.claude/agents/&lt;agent&gt;.md</code>.</td></tr>
+              <tr><td>repository</td><td>object</td><td></td><td>Git repo the agent runs from. Omit it to run as a pure advisor.</td></tr>
+              <tr><td>env[]</td><td>[]EnvVar</td><td></td><td>Extra environment for the agent process — standard Kubernetes env var, <a href="#">Kubernetes docs ↗</a>.</td></tr>
+              <tr><td>maxTurns</td><td>integer</td><td></td><td>Turn budget for one work unit. A runaway bound, not a conversation budget.</td></tr>
+              <tr><td>outputFormat</td><td>string</td><td><strong>yes</strong></td><td>The agent's output contract, <code>blocks</code> or <code>none</code>. No default — see <a href="#">why in Concepts →</a>.</td></tr>
+              <tr><td>prompt / replyPrompt</td><td>string</td><td></td><td>Repo-relative templates for the first unit / a follow-up.</td></tr>
+              <tr><td>systemPrompt</td><td>string</td><td></td><td>Inline role text, for a profile with no repository.</td></tr>
+            </table>
+            <p class="tiny">7 fields, 7 comments, one table — the whole kind on one screen. Today's <code>cr-reference.md</code> gives this same kind 34 rows, 24 of them Kubernetes' own <code>EnvVar</code> internals, and a 9-sentence description on <code>outputFormat</code> alone. A well-known Kubernetes type gets one row and a link here, never unrolled — and <code>outputFormat</code>'s full rationale stays in Concepts, quoted there already rather than invented for this page.</p>
+          </div>
+        </section>
+
+        <!-- ============================= PANEL 4 ============================= -->
+        <section id="p4" class="panel">
+          <div class="mock-page">
+            <p class="eyebrow">_includes/sidebar.html — the left menu</p>
+            <p class="lede">The sidebar framing every tab of this mockup is already the proposed version — try collapsing a group on the left. Below is what changes underneath it.</p>
+            <div class="before-after">
+              <div class="ba-block ba-before">
+                <p class="ba-label">today — flat, every group always open</p>
+                <div class="mini-sidebar tall">
+                  <p class="g-title">Start here</p>
+                  <span class="g-link">Overview</span><span class="g-link">Introduction</span><span class="g-link">Getting started</span><span class="g-link">The console</span><span class="g-link">Security</span><span class="g-link">Installation</span>
+                  <p class="g-title">Integrations</p>
+                  <span class="g-link">Kubernetes</span><span class="g-link">Prometheus</span><span class="g-link">Home Assistant</span><span class="g-link">Pulse</span><span class="g-link">Telegram</span>
+                  <p class="g-title">Runtimes</p>
+                  <span class="g-link">Ollama</span><span class="g-link">GitHub Copilot</span>
+                  <p class="g-title">Guides</p>
+                  <span class="g-link">Put an agent to work</span><span class="g-link">Add your own agent</span><span class="g-link">Give your agent tools</span><span class="g-link">React to signals</span><span class="g-link">Talk to agents from your own chat</span><span class="g-link">Run agents on your own backend</span><span class="g-link">Coordinate agents</span>
+                  <p class="g-title">Specifications</p>
+                  <span class="g-link">AgentRuntime</span><span class="g-link">ChannelAdapter</span><span class="g-link">SignalAdapter</span>
+                  <p class="g-title">CRD reference</p>
+                  <span class="g-link">AgentProfile</span><span class="g-link">Pipeline</span><span class="g-link">Coordinator</span><span class="g-link">SignalSource</span><span class="g-link">Channel</span><span class="g-link">MCPToolset &amp; MCPConfig</span><span class="g-link">AgentRuntime</span><span class="g-link">AgentCapability</span>
+                </div>
+                <p class="tiny">29 links visible at once. Reaching "AgentProfile" on a phone means scrolling past everything above it.</p>
+              </div>
+              <div class="ba-arrow">→</div>
+              <div class="ba-block ba-after">
+                <p class="ba-label">proposed — &lt;details&gt; per group, no JS</p>
+                <div class="mini-sidebar">
+                  <details><summary>Start here</summary></details>
+                  <details><summary>Integrations</summary></details>
+                  <details><summary>Runtimes</summary></details>
+                  <details><summary>Guides</summary></details>
+                  <details><summary>Specifications</summary></details>
+                  <details open><summary>CRD reference</summary>
+                    <span class="g-link" style="color:var(--ao-brand-strong); font-weight:600;">AgentProfile</span>
+                    <span class="g-link">Pipeline</span><span class="g-link">Coordinator</span><span class="g-link">SignalSource</span><span class="g-link">Channel</span>
+                  </details>
+                </div>
+                <p class="tiny">Only the current page's group opens — computed from the page URL at build time, not stored per visitor. 6 lines visible instead of 29.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+</div>
