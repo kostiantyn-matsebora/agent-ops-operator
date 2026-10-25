@@ -30,6 +30,20 @@ test('allowlistMatch denies an MCP tool on a different server than the one grant
   assert.strictEqual(allowlistMatch(['mcp__kubernetes'], 'mcp__prometheus__query'), null);
 });
 
+// Every shipped MCPToolset (chart/values.yaml's `aops-coordinate` among them)
+// authors a whole-server grant as `mcp__<server>__*`, never the bare
+// `mcp__<server>` form above — measured live: a real coordinator conversation
+// had every mcp__aops__* call denied until allowlistMatch stripped this
+// trailing glob before comparing (PR #426 round 2).
+test('allowlistMatch allows a server-wide MCP grant authored with the trailing __* glob chart values actually use', () => {
+  assert.strictEqual(allowlistMatch(['mcp__aops__*'], 'mcp__aops__list_agents'), 'mcp__aops__*');
+  assert.strictEqual(allowlistMatch(['mcp__aops__*'], 'mcp__aops__invoke'), 'mcp__aops__*');
+});
+
+test('allowlistMatch denies an MCP tool on a different server than a __* grant names', () => {
+  assert.strictEqual(allowlistMatch(['mcp__aops__*'], 'mcp__prometheus__query'), null);
+});
+
 // A scoped CLI-style entry like `Bash(git *)` is matched (and therefore
 // granted) at BASE TOOL NAME granularity only — not the real CLI's own
 // sub-command glob. That is a deliberate, narrower guarantee documented on

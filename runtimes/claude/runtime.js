@@ -333,15 +333,24 @@ function fingerprintsEqual(prev, next) {
 // same granularity as that cross-check. This is a deliberate, narrower
 // guarantee than the real CLI's `--allowedTools` parser enforces for that one
 // scoped form — flagged for review, see the hand-back report.
+//
+// A whole-server MCP grant is authored chart-wide as `mcp__<server>__*`
+// (MCPToolset.spec.tools, e.g. chart/values.yaml's `aops-coordinate` ->
+// `mcp__aops__*`) — the bare `mcp__<server>` form below is kept too since
+// nothing stops a hand-written grant from using it, but it is not what any
+// shipped toolset actually composes. Measured live: every coordination call
+// was denied against a real `mcp__aops__*` grant until this stripped the
+// trailing glob before comparing.
 // ---------------------------------------------------------------------------
 function allowlistMatch(allowed, toolName) {
   for (const entry of allowed || []) {
     const base = String(entry).split('(')[0].trim();
     if (!base) continue;
     if (base.startsWith('mcp__')) {
-      // A server-wide grant (`mcp__<server>`) matches any tool on that
-      // server; otherwise the match must be exact.
-      if (toolName === base || toolName.startsWith(`${base}__`)) return entry;
+      // A server-wide grant (`mcp__<server>` or `mcp__<server>__*`) matches
+      // any tool on that server; otherwise the match must be exact.
+      const serverWide = base.endsWith('__*') ? base.slice(0, -'__*'.length) : base;
+      if (toolName === serverWide || toolName.startsWith(`${serverWide}__`)) return entry;
       continue;
     }
     if (base === toolName) return entry;
