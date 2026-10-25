@@ -17,8 +17,8 @@ replay grows with the conversation.
 minutes or hours turns "several units per pod" into the normal case.
 
 And an image carrying both the CLI's global install and the SDK's bundled
-binary is as heavy as the heavier of the two, for every adopter, regardless
-of which one a given pod ever spawns.
+binary is as heavy as the SUM of the two, for every adopter, regardless of
+which one a given pod ever spawns.
 
 **This change was first built, and a PR opened, as a single image with two
 drivers selected by an env var (PR #424, now closed).** That design is
