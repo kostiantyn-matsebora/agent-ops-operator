@@ -635,13 +635,23 @@ a:hover {
 }
 
 .ao-nav-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
   padding: 0.35rem 0.6rem 0.35rem 1.4rem;
   border-radius: var(--ao-radius);
   border-left: 2px solid transparent;
   color: var(--ao-text);
   text-decoration: none;
   font-size: 0.94rem;
+}
+
+/* The mark an entry may carry (nav.yml names the file). Sized like a glyph so
+   a group with icons and a group without keep the same row height. */
+.ao-nav-icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
 }
 
 .ao-nav-link:hover {

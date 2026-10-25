@@ -71,6 +71,23 @@ spec-page shape, tab 4 the nav — rather than re-deriving the design.
       open the current page's group — and verify the choice survives
       navigation and that a no-script render shows every group open
 
+## 5a. The Claude runtime page, and nav icons — frontend-developer
+
+In-session scope additions, both user-driven while reviewing the built site.
+
+- [x] 5a.1 `docs/runtimes/claude.md` — a published page for the reference
+      runtime, first in the Runtimes nav group, with its generated
+      `renders bundle=claude` block and its `RUNTIME_DIAGRAMS` drawing.
+      State the two shipped images: this SDK bundle (the default) and
+      `claude-cli`, the spawn-per-unit one kept for compatibility
+- [x] 5a.2 Delete `docs/claude.md` — the page above is the single statement
+      now — and repoint every live reference (the two runtime-page footers,
+      `README.md`'s reference row, `docs/CLAUDE.md`)
+- [x] 5a.3 Nav icons — an entry in `_data/nav.yml` may name an `icon:` from
+      `assets/img/logos/`, the sidebar renders it at `1em` with empty alt,
+      and the Integrations and Runtimes groups carry their marks (themed
+      pairs named by the `-light` file, resolved by `themed.js`)
+
 ## 6. Unit tests
 
 - [x] 6.1 Extend the docs-generate self-tests (or add them where the script

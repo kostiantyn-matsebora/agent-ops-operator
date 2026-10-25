@@ -17,10 +17,16 @@ page, where the reader can see where they lead.
   <details class="ao-nav-group" open>
     <summary class="ao-nav-title">{{ group.title }}</summary>
     <ul class="ao-nav-list">
+      {%- comment -%}
+      An entry may name an icon (nav.yml says which file). Alt is empty on
+      purpose: the mark sits beside the title it belongs to, so announcing it
+      again is noise to a screen reader — the same rule the chip sets follow.
+      {%- endcomment -%}
       {%- for entry in group.entries %}
       <li>
         <a class="ao-nav-link" href="{{ entry.url | relative_url }}"
-           {% if page.url == entry.url %}aria-current="page"{% endif %}>{{ entry.title }}</a>
+           {% if page.url == entry.url %}aria-current="page"{% endif %}>
+          {%- if entry.icon %}<img class="ao-nav-icon" src="{{ entry.icon | relative_url }}" alt="" width="16" height="16">{% endif %}{{ entry.title }}</a>
       </li>
       {%- endfor %}
     </ul>

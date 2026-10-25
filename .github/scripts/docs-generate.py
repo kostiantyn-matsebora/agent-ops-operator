@@ -355,6 +355,14 @@ BUNDLES = {
         "enable": {},
         "components": {},
     },
+    # The reference runtime, ON by default -- the render-off side of the diff
+    # disables it explicitly, and the parent's `default` copy moves with it,
+    # so the Always row carries both CRs. The token is optional at render
+    # time, so the conditional Secret is not in it.
+    "claude": {
+        "enable": {},
+        "components": {},
+    },
     # Same shape as copilot: the token is optional at render time, so the
     # "Always" row is the CR alone.
     "claude-cli": {

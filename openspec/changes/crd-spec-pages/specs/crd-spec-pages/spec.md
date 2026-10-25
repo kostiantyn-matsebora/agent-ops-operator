@@ -114,3 +114,37 @@ Introduction's domain-model diagram SHALL link to that kind's page.
 - **WHEN** a reader clicks any kind on the Introduction's domain-model
   diagram
 - **THEN** they land on that kind's spec page
+
+### Requirement: Every shipped runtime has a published page, the reference runtime first
+
+The Runtimes nav group SHALL list one page per shipped runtime bundle, and
+the reference runtime's page SHALL come first.
+
+`docs/runtimes/claude.md` SHALL state that the vendor ships as two images —
+the SDK bundle (the default) and `claude-cli`, the spawn-per-unit bundle
+kept for compatibility — and link the comparison.
+
+`docs/claude.md` SHALL be deleted, every live pointer repointed at the
+published page. An archived changelog entry is left verbatim.
+
+#### Scenario: An adopter looks for the default runtime
+
+- **WHEN** an adopter opens the Runtimes nav group
+- **THEN** the first entry is the reference runtime's page, and the page
+  says what it executes, what it needs, where its context lives and what it
+  costs
+
+### Requirement: A nav entry may carry its mark
+
+A `_data/nav.yml` entry MAY name an `icon:` file from `assets/img/logos/`,
+and the sidebar SHALL render it beside the title with an empty `alt`. The
+Integrations and Runtimes entries SHALL carry their marks.
+
+A themed pair is named by its `-light` file, resolved by the site's one
+theme resolver.
+
+#### Scenario: A reader scans the sidebar
+
+- **WHEN** a reader opens any page in either theme
+- **THEN** every Integrations and Runtimes entry shows its mark beside its
+  title, legible on that theme's ground

@@ -66,6 +66,10 @@ Reference docs:
 
 Adopter site:
 
+- `docs/runtimes/claude.md` — new page for the reference runtime, first in
+  the Runtimes group, replacing the `docs/claude.md` reference page (deleted)
+- `docs/_includes/sidebar.html`, `docs/_data/nav.yml` — nav entries may name
+  an icon, and the Integrations and Runtimes groups do
 - `docs/index.md` — presentation beats replaced by the picture
 - `docs/introduction.md` — cards replaced by the diagram plus short
   descriptions

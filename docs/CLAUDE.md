@@ -73,8 +73,10 @@ path. Plugins are limited to the set Pages enables by default.
     not a seam a Pipeline wires, and three of the four questions would be
     blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
     Runtimes nav group, answering its own four: what it executes, what it
-    needs, where its context lives, what it costs. `runtimes/ollama.md` is the
-    first, `runtimes/copilot.md` the second. `docs/claude.md` stays a reference page until a change moves it.
+    needs, where its context lives, what it costs. Every shipped runtime has
+    one — `claude` (the reference runtime, first in the group), `claude-cli`,
+    `ollama`, `copilot`. `docs/claude.md` is deleted — `runtimes/claude.md`
+    took its content, exactly as the spec pages took `cr-reference.md`'s.
   - **The `renders` marker applies to a runtime bundle too.** It has no
     sub-components, so the whole of it is the generator's "Always" row.
   - **A page states no exhaustive values.** `helm show values` is the list, and

@@ -32,26 +32,40 @@ groups:
         url: /security/
       - title: Installation
         url: /installation/
+  # An entry may name an icon — the mark beside the title, from
+  # assets/img/logos/, named here exactly as a page names one. A themed pair
+  # is named by its -light file and assets/js/themed.js resolves the variant.
   - title: Integrations
     entries:
       - title: Kubernetes
         url: /integrations/kubernetes/
+        icon: /assets/img/logos/kubernetes.svg
       - title: Prometheus
         url: /integrations/prometheus/
+        icon: /assets/img/logos/prometheus.svg
       - title: Home Assistant
         url: /integrations/home-assistant/
+        icon: /assets/img/logos/home-assistant.svg
       - title: Pulse
         url: /integrations/pulse/
+        icon: /assets/img/logos/pulse.svg
       - title: Telegram
         url: /integrations/telegram/
+        icon: /assets/img/logos/telegram.svg
   - title: Runtimes
     entries:
+      - title: Claude
+        url: /runtimes/claude/
+        icon: /assets/img/logos/claude.svg
       - title: Claude CLI
         url: /runtimes/claude-cli/
+        icon: /assets/img/logos/claude.svg
       - title: Ollama
         url: /runtimes/ollama/
+        icon: /assets/img/logos/ollama-light.svg
       - title: GitHub Copilot
         url: /runtimes/copilot/
+        icon: /assets/img/logos/github-light.svg
   - title: Guides
     entries:
       - title: "Put an agent to work"

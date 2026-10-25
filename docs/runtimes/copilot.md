@@ -15,7 +15,8 @@ next:
 ---
 
 **This is a runtime, not an integration.** It starts no work and answers on no
-surface. It is what EXECUTES an agent — and the third one this chart ships.
+surface. It is what EXECUTES an agent — one of the runtimes this chart
+ships.
 
 It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
 2.0.0.
@@ -220,5 +221,5 @@ was supplied.
   runtime, for the lanes that must not leave the cluster.
 - [Installation]({{ '/installation/' | relative_url }}) — the runtime defaults
   every runtime inherits, and the storage they share.
-- [`docs/claude.md`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/claude.md)
-  — the reference runtime's page.
+- [Claude]({{ '/runtimes/claude/' | relative_url }}) — the reference
+  runtime, and the one a fresh install runs on.

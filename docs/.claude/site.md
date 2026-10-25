@@ -112,6 +112,14 @@ strip, and it is deleted along with its two exports.
 
 ### The site shell
 
+**A nav entry may carry an icon** — today the Integrations and Runtimes
+groups do.
+
+- `_data/nav.yml` names the file from `assets/img/logos/`, never the
+  stylesheet — same rule as the chip sets.
+- The sidebar renders it at `1em` with an empty `alt`, and a themed pair is
+  named by its `-light` file for `themed.js` to resolve.
+
 **Astro Starlight's geometry**, read off that site's own stylesheet and verified
 against it live: BOTH rails 18.75rem, and the leftover SPLIT EVENLY between the
 left gutter and the right container.
