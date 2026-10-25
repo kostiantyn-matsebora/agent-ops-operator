@@ -52,7 +52,8 @@ story instead of two.
   (`agentops-runtime-claude`), and its place as the chart's default-eligible
   bundle — but it now drives `@anthropic-ai/claude-agent-sdk` in-process and
   drops the CLI install from its Dockerfile entirely. A new `runtimes/claude-cli/`
-  component carries today's spawn-per-unit logic, moved verbatim, as its own
+  component carries today's spawn-per-unit logic, copied verbatim (the
+  originals stay at `runtimes/claude/`, rewritten in place), as its own
   image (`agentops-runtime-claude-cli`) and its own chart bundle
   (`chart/charts/claude-cli/`), off by default — the same pattern
   `runtimes/ollama` and `runtimes/copilot` already use.
@@ -119,8 +120,9 @@ permission-callback shape.
   - `Dockerfile` drops the global `@anthropic-ai/claude-code` install and
     adds `@anthropic-ai/claude-agent-sdk`.
 - **New**: `runtimes/claude-cli/` — today's `runtime.js`, `tools.js`,
-  `spin.js`, `report.js` and their tests, moved verbatim into a new directory
-  with its own `Dockerfile` (today's `runtimes/claude/Dockerfile`, unchanged).
+  `spin.js`, `report.js` and their tests, copied verbatim into a new
+  directory, originals left in place for `runtimes/claude`'s own rewrite.
+  Its own `Dockerfile` (today's `runtimes/claude/Dockerfile`, unchanged).
   `chart/charts/claude-cli/` — a new bundle (`Chart.yaml`, `values.yaml`,
   `templates/runtime.yaml`), off by default, mirroring
   `chart/charts/ollama/`.

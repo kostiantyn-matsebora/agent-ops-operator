@@ -27,7 +27,9 @@ source.
 edit.** Approval is a conversation fact, not something a hook can read — stop,
 ask, and report the conflict instead of writing it.
 
-**`runtime-claude` ships two drivers, selected by `RUNTIME_CLAUDE_DRIVER`** —
-`sdk` (default, holds a session open per pod) and `cli` (per-unit spawn, the
-shipped alternative). The composed allowlist is enforced as a callback rule
-set on the `sdk` driver only.
+**`runtime-claude` and `runtime-claude-cli` are two separate runtimes, not one
+image with a switch.** `runtimes/claude` drives the SDK in-process and holds a
+session open per pod, default-eligible. `runtimes/claude-cli` spawns the CLI
+per unit, off by default. The composed allowlist is a `canUseTool` callback
+rule set on `runtimes/claude` only — `runtimes/claude-cli` keeps
+`--allowedTools`/`--permission-mode dontAsk`.

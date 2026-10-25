@@ -95,8 +95,9 @@ The SDK writes the same session files under
 `CLAUDE_CODE_OAUTH_TOKEN` all carry over untouched.
 
 **`runtimes/claude-cli/` is a new directory.** Today's `runtime.js`,
-`tools.js`, `spin.js`, `report.js` and their tests move into it VERBATIM,
-with today's exact Dockerfile — no rewrite.
+`tools.js`, `spin.js`, `report.js` and their tests are COPIED into it
+VERBATIM, with today's exact Dockerfile — no rewrite. The originals stay at
+`runtimes/claude/`, where the SDK rewrite above happens in place.
 
 No shared import exists between the two directories. `structure.md`'s
 "BUILD CONTEXT IS THE DIRECTORY" rule applies here exactly as it does to

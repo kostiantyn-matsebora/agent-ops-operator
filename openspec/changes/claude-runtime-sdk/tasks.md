@@ -14,7 +14,7 @@
 
 ## 3. Split into two components
 
-- [ ] 3.1 Create `runtimes/claude-cli/` as a new directory. Move today's `runtime.js`, `tools.js`, `spin.js`, `report.js` and every one of their test files into it VERBATIM — no behaviour change. Copy today's `runtimes/claude/Dockerfile` unchanged as `runtimes/claude-cli/Dockerfile`
+- [ ] 3.1 Create `runtimes/claude-cli/` as a new directory. COPY today's `runtime.js`, `tools.js`, `spin.js`, `report.js` and every one of their test files into it VERBATIM — no behaviour change. The originals stay in place at `runtimes/claude/`, for 3.3 below to rewrite. Copy today's `runtimes/claude/Dockerfile` unchanged as `runtimes/claude-cli/Dockerfile`
 - [ ] 3.2 Add `runtimes/claude-cli` to `.github/components.sh`'s component map (`runtimes/claude-cli` → `runtime-claude-cli` → `agentops-runtime-claude-cli`) and confirm `.github/components.sh images`/`modules` picks it up
 - [ ] 3.3 In `runtimes/claude/runtime.js`, replace `spawn('claude', …)` with `@anthropic-ai/claude-agent-sdk`'s `query({ prompt: <async generator>, options })`, held open across the pod's work units
 - [ ] 3.4 Read each unit's outcome by consuming the message stream until that turn's `result`. Keep the 2000-character cap and the existing `status`/`exitCode` meanings
@@ -59,7 +59,7 @@ All of 4.1–4.4 apply to `runtimes/claude` only — `runtimes/claude-cli` opens
 ## 9. Unit tests
 
 - [ ] 9.1 `tools.test.js` passes unchanged in BOTH `runtimes/claude/` and `runtimes/claude-cli/` — composition is not what changed in either copy
-- [ ] 9.2 `runtimes/claude-cli/`'s moved test suite (today's `runtime.test.js` and siblings) passes unchanged — the move must not change behaviour
+- [ ] 9.2 `runtimes/claude-cli/`'s copied test suite (today's `runtime.test.js` and siblings) passes unchanged — the copy must not change behaviour
 - [ ] 9.3 Permission-callback tests for `runtimes/claude`: allow, deny, empty composition denies everything, scoped patterns
 - [ ] 9.4 Session-reuse tests for `runtimes/claude`: identical fingerprint reuses, changed fingerprint re-opens with resume, allowlist-only change reuses
 - [ ] 9.5 Continuity tests over the ladder, on both components, as today
