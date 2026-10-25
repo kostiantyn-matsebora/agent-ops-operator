@@ -1,7 +1,9 @@
 # runtime-session-reuse Specification
 
 ## Purpose
-TBD - created by archiving change claude-runtime-sdk. Update Purpose after archive.
+The freedom a runtime has to hold one vendor session open across a pod's work
+units instead of spawning per unit — what reuse may assume, what it must
+re-check, and why conformance with the runtime specification never weakens.
 
 ## Requirements
 
