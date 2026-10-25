@@ -1,19 +1,19 @@
 dependencies:
 - name: prometheus
   repository: ""
-  version: 0.2.1
+  version: 0.2.2
 - name: kubernetes
   repository: ""
-  version: 0.4.0
+  version: 0.4.1
 - name: telegram
   repository: ""
-  version: 0.5.1
+  version: 0.5.2
 - name: home-assistant
   repository: ""
-  version: 0.2.1
+  version: 0.2.2
 - name: pulse
   repository: ""
-  version: 0.1.1
+  version: 0.2.0
 - name: claude
   repository: ""
   version: 0.1.0
@@ -26,5 +26,5 @@ dependencies:
 - name: claude-cli
   repository: ""
   version: 0.1.0
-digest: sha256:93031afd6e282d5bba83055550df94b9537fd6ced15fecf65dae6b3649fee32a
-generated: "2026-10-25T09:58:02.180929497Z"
+digest: sha256:c9a7757b3acd80bd6d090e055b12d6b365f54ed3a07d2032db1a9a53ffe49f3c
+generated: "2026-10-25T19:53:23.804509611+02:00"

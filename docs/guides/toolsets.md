@@ -177,7 +177,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   tools:
     - mcp__homeassistant__GetLiveContext
@@ -206,7 +206,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   tools:
     - mcp__homeassistant__HassTurnOn
@@ -250,7 +250,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   servers:
     homeassistant:
@@ -277,7 +277,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -309,7 +309,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.

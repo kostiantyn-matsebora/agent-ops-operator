@@ -66,7 +66,12 @@ eventsAdapter:
     # 0.5.0 mints initiationId from the owning workload's identity instead of
     # sending a fingerprint for the manager to group — an earlier image still
     # posts the retired field and the manager rejects it 4xx.
-    tag: 0.5.0
+    # 0.5.1 brings the adapter to signal-adapter contract 2.2.0: a relist pass
+    # that hits its batch cap, a suppression rule shadowed by an earlier one,
+    # and a mute window closing all now report on the source's Ready
+    # condition, and an unreadable object cache fails OPEN (emitted,
+    # unverified) instead of being dropped.
+    tag: 0.5.1
   resources: {}
   # Events access for the adapter's ServiceAccount (agentops-signal-<name>).
   # The OPERATOR never grants adapters anything — this is the chart binding
