@@ -4,16 +4,28 @@
 `claude -p … --resume <contextId>` with a set of flags, parsing `stream-json` off
 stdout. One process per work unit.
 
-That shape has two costs the current chart defaults hide.
+That shape has three costs the current chart defaults, and the current
+single-image shape, hide.
 
 A pod handles several units in its life. The serial rule is per conversation,
 not per pod. Every one of them pays process start, transcript replay from
 `$HOME/.claude/projects/`, and a fresh launch of every bound MCP server. The
 replay grows with the conversation.
 
-And `runtimeIdleTtlMinutes: 1` is only the value we ship.
+`runtimeIdleTtlMinutes: 1` is only the value we ship.
 `AgentRuntime.spec.idleTtlMinutes` is per-runtime, so an adopter running ten
 minutes or hours turns "several units per pod" into the normal case.
+
+And an image carrying both the CLI's global install and the SDK's bundled
+binary is as heavy as the SUM of the two, for every adopter, regardless of
+which one a given pod ever spawns.
+
+**This change was first built, and a PR opened, as a single image with two
+drivers selected by an env var (PR #424, now closed).** That design is
+preserved almost intact below — D2 through D7 barely change.
+
+D1 changes completely: the CLI and SDK become two separate `runtimes/`
+components, not two code paths behind one Dockerfile.
 
 Two things constrain any redesign, and they pull against session reuse:
 
@@ -30,67 +42,87 @@ Two things constrain any redesign, and they pull against session reuse:
 
 **Goals:**
 - Remove per-unit re-spawn and transcript re-replay for every unit after the
-  first in a pod's life.
-- Keep MCP servers connected across units instead of relaunching them per unit.
+  first in `runtimes/claude`'s pod life.
+- Keep MCP servers connected across units in `runtimes/claude`, instead of
+  relaunching them per unit.
 - One permission model across reference runtimes: a per-invocation callback,
   deny-by-default, that cannot prompt.
-- Behave correctly at both ends of the TTL dial — a one-minute pod and an
-  hours-long one.
-- Keep today's CLI-driven behaviour fully available as a selectable
-  alternative, not replace it.
+- `runtimes/claude` behaves correctly at both ends of the TTL dial — a
+  one-minute pod and an hours-long one.
+- Keep today's CLI-driven behaviour fully available, as its own component
+  (`runtimes/claude-cli`), not folded into the SDK image.
+- `runtimes/claude`'s image is measurably lighter once the CLI install is
+  gone — no global `@anthropic-ai/claude-code`, no installer step.
 - Stay fully conformant with `docs/contracts/runtime.md` throughout, on both
-  drivers — every `API-n`, `LC-n`, `RT-n`, `MGR-n` and `SEC-n` requirement
+  components — every `API-n`, `LC-n`, `RT-n`, `MGR-n` and `SEC-n` requirement
   holds exactly as it does today.
 
 **Non-Goals:**
-- No change to the work contract, the manager, any CRD, or the chart.
+- No change to the work contract, the manager, or any CRD.
 - No change of vendor, credential, or session-file location. The SDK bundles
   the same Claude Code binary the CLI path ran.
 - Not a performance project. The win is per-unit setup, not model latency, and
   the design is judged on continuity correctness first.
 - No publication of session reuse as a new optional capability on
-  `docs/contracts/runtime.md`. It stays `runtime-claude`'s own internal
+  `docs/contracts/runtime.md`. It stays `runtimes/claude`'s own internal
   behaviour, not a contract promise to third-party runtime builders.
 - This excludes RT-3's own clarification (D3) — that one DOES amend the
   published spec, since it tells every runtime builder which enforcement
   mechanisms satisfy an existing obligation. The two are separate decisions.
+- Not a change to which bundle is chart-default. `runtimes/claude` stays the
+  on-by-default, default-eligible bundle. `runtimes/claude-cli` ships off,
+  the same as `ollama` and `copilot`.
 
 ## Decisions
 
-### D1 — A new SDK driver, with the CLI driver kept shipped as the alternative
+### D1 — Two components, not two drivers behind one image
 
-`runtime.js` splits into a thin entrypoint and two driver modules, selected by
-`RUNTIME_CLAUDE_DRIVER` (`sdk` default, `cli` the alternative). The env var is
-read through the existing `AgentRuntime.spec.env` field, already injected by
-`internal/runtimepod`. No CRD or chart change is needed to pick one.
+The earlier shape of this change built both drivers into `runtimes/claude/`'s
+single image, selected by `RUNTIME_CLAUDE_DRIVER` on `AgentRuntime.spec.env`.
+That kept the choice reversible with no image swap, at the cost of every
+pulled image carrying both vendors' weight.
 
-An unrecognized value logs a warning and falls back to `sdk` rather than
-failing the pod to start.
+This redesign drops that trade. Two separate, self-contained components:
 
-**`driver-cli.js` is today's `runtime.js` logic, moved verbatim.** One
-`spawn('claude', …)` per work unit, `--resume`, `--allowedTools`,
-`--permission-mode dontAsk`. It is not rewritten, only relocated, and its own
-existing tests keep passing unchanged. It is the rollback path that needs no
-image swap. Flipping the env var is enough.
+**`runtimes/claude/` becomes SDK-only.** `runtime.js` is rewritten around
+`@anthropic-ai/claude-agent-sdk`'s `query()`, replacing `spawn('claude', …)`.
+The Dockerfile drops the global `@anthropic-ai/claude-code` install and its
+installer step, keeping only the SDK and the binary it bundles.
 
-**`driver-sdk.js` is the new code.** `@anthropic-ai/claude-agent-sdk`'s
-`query()` replaces `spawn('claude', …)`. The SDK bundles the same binary,
-writes the same session files under `$HOME/.claude/projects/<encoded-cwd>/`,
-and resolves auth the same way. `contextStorage: volume`, the context-volume
-requirement, and `CLAUDE_CODE_OAUTH_TOKEN` all carry over untouched for this
-driver too.
+The SDK writes the same session files under
+`$HOME/.claude/projects/<encoded-cwd>/`, and resolves auth the same way.
+`contextStorage: volume`, the context-volume requirement, and
+`CLAUDE_CODE_OAUTH_TOKEN` all carry over untouched.
 
-What the new driver stops doing is parsing `stream-json` and encoding
+**`runtimes/claude-cli/` is a new directory.** Today's `runtime.js`,
+`tools.js`, `spin.js`, `report.js` and their tests are COPIED into it
+VERBATIM, with today's exact Dockerfile — no rewrite. The originals stay at
+`runtimes/claude/`, where the SDK rewrite above happens in place.
+
+No shared import exists between the two directories. `structure.md`'s
+"BUILD CONTEXT IS THE DIRECTORY" rule applies here exactly as it does to
+`runtimes/ollama` and `runtimes/copilot` already duplicating their own
+tool-composition logic rather than sharing it.
+
+Choosing one means choosing which `AgentRuntime` (and which chart bundle) a
+Pipeline's `runtimeRef` names. There is no in-image switch.
+
+What the SDK component stops doing is parsing `stream-json` and encoding
 permission semantics as flags. What it gains is `canUseTool` (D3) and
 streaming input (D2). Every decision from here on (D2–D7) describes
-`driver-sdk.js` only, unless a decision says otherwise.
+`runtimes/claude` only, unless a decision says otherwise.
+
+*Alternative considered:* keep the single-image, env-var-selected shape (this
+change's original PR #424). Rejected on the author's explicit direction — a
+shared image cannot be light for an SDK-only adopter while it still carries
+the CLI's install, whatever selects between them at runtime.
 
 *Alternative considered:* keep only the CLI and reuse its process by feeding
 it successive prompts. Rejected — the CLI's `-p` mode is one prompt per
 invocation, and there is nothing to feed.
 
-That is exactly why a second driver is needed, rather than a change to the
-existing one.
+That is exactly why a second component is needed, rather than a change to
+the existing one.
 
 ### D2 — One live session per pod, fed by streaming input
 
@@ -124,7 +156,7 @@ rather than an `allowedTools` array. Three consequences, each load-bearing:
 This is the shape `runtime-copilot` needs for its own per-invocation matching,
 so the two reference runtimes converge on one permission story.
 
-**The `cli` driver is unaffected and already compliant.** It keeps
+**`runtimes/claude-cli` is unaffected and already compliant.** It keeps
 `--allowedTools` plus `--permission-mode dontAsk`, satisfying the same
 requirement in its original flag form.
 
@@ -136,8 +168,8 @@ revisiting if shadowing ever bites.
 ### D4 — The session is reused ONLY when the unit's configuration is identical
 
 This is the decision that keeps session reuse from becoming a correctness
-bug. It applies to `driver-sdk.js` only — `driver-cli.js` opens a fresh
-process per unit, so it has no live session to reuse or misapply.
+bug. It applies to `runtimes/claude` only — `runtimes/claude-cli` opens a
+fresh process per unit, so it has no live session to reuse or misapply.
 
 A live session pins `systemPrompt`, `mcpServers`, `maxTurns`, `cwd` and the
 agent at open time. A conversation's next unit may legitimately carry
@@ -168,15 +200,16 @@ A pod with no live session (fresh, evicted, rescheduled, or one whose process
 died) resumes from `runtimeContextId`. The manager cannot tell the two apart,
 and nothing in the work contract describes which happened.
 
-The continuity ladder from `runtime-claude` today is unchanged and applies to
-the re-open path: re-check the session file, unreadable is not absent,
-confirmed absence FAILS the run with a non-empty explanation. This applies
-equally to `driver-cli.js`, which always takes the re-open path.
+The continuity ladder from `runtimes/claude` today is unchanged and applies
+to the re-open path: re-check the session file, unreadable is not absent,
+confirmed absence FAILS the run with a non-empty explanation.
+`runtimes/claude-cli` already has this ladder, untouched by this change,
+since it always takes the re-open path.
 
 ### D6 — Long-lived sessions own two things short-lived ones never did
 
-This is `driver-sdk.js` only. A one-minute-TTL `cli` process never lives long
-enough to face either.
+This is `runtimes/claude` only. A one-minute-TTL `runtimes/claude-cli`
+process never lives long enough to face either.
 
 - **MCP servers stay up for the pod's life.** Under a one-minute TTL nothing
   had time to expire or leak. Under hours, credentials expire and child
@@ -190,23 +223,22 @@ enough to face either.
 
 Conversation context is NOT one of these. `--resume` replays the whole
 transcript, so context grows identically whether the session was held open
-or re-opened. Nothing about context differs between the two designs, or
-between the two drivers.
+or re-opened. Nothing about context differs between the two components.
 
-### D7 — The transcript keeps its lines, on both drivers
+### D7 — The transcript keeps its lines, on both components
 
-Typed SDK messages replace hand-parsed `stream-json` in `driver-sdk.js`, but
-the rendering does not change: `[init]`, `[claude]`, `[tool]`,
+Typed SDK messages replace hand-parsed `stream-json` in `runtimes/claude`,
+but the rendering does not change: `[init]`, `[claude]`, `[tool]`,
 `=== RESULT ===`. Those lines are what a human reads in VictoriaLogs, and a
-new driver is not a reason to relearn them.
+new component is not a reason to relearn them.
 
-`driver-sdk.js`'s rendering must match what `driver-cli.js` already prints,
-so a pod log reads the same whichever driver served it. The reported
+`runtimes/claude`'s rendering must match what `runtimes/claude-cli` already
+prints, so a pod log reads the same whichever one served it. The reported
 `result` keeps its 2000-character cap and the same
-`status`/`exitCode`/`continuity` meanings on both drivers.
+`status`/`exitCode`/`continuity` meanings on both components.
 
-A driver-open, driver-reuse and driver-re-open each log distinctly, so the
-active path is visible from the log alone.
+A session-open, session-reuse and session-re-open each log distinctly in
+`runtimes/claude`, so the active path is visible from the log alone.
 
 ## Risks / Trade-offs
 
@@ -219,12 +251,12 @@ active path is visible from the log alone.
     — every adopter brings their own credential.
   - → First task is a smoke test on the subscription token, before any
     rewrite.
-  - If it fails, the change stops at that task. `driver-cli.js` stays the
-    only driver.
+  - If it fails, the change stops at that task. `runtimes/claude-cli` stays
+    the only way to run claude-code.
 - **The bundled binary ships via npm optional dependencies**, so an image
   built with `npm ci --omit=optional` silently has no Claude Code and fails at
-  runtime. → The Dockerfile installs without omitting optionals and the build
-  verifies the binary is present for both drivers.
+  runtime. → `runtimes/claude`'s Dockerfile installs without omitting
+  optionals and the build verifies the binary is present.
 - **A wrong fingerprint (D4) is a silent capability bug**, not a crash — the
   conversation would keep running under superseded wiring. → The fingerprint
   is unit-tested field by field, and a re-open is logged with the field that
@@ -234,30 +266,48 @@ active path is visible from the log alone.
   see. → Every unit reports the id the SDK gives it, so divergence surfaces
   as a changed handle rather than as silence.
 - **Two vendors, one permission shape, different enforcement points.**
-  Copilot matches per invocation in its own callback. `driver-sdk.js` does it
-  in `canUseTool`. The shared thing is the rule set, not the code — resist
-  extracting a shared module across modules that are deliberately
+  Copilot matches per invocation in its own callback. `runtimes/claude` does
+  it in `canUseTool`. The shared thing is the rule set, not the code — resist
+  extracting a shared module across components that are deliberately
   dependency-free.
-- **Two drivers double the surface kept green.** Every behavioural test —
+- **Two components share no code.** `tools.js`'s composition logic now lives
+  in both `runtimes/claude/` and `runtimes/claude-cli/`, fork-and-diverge by
+  construction. → Each directory keeps its own `tools.test.js`, and a future
+  change to the composition rule (`agent-definition-tools`) needs a task
+  against both, the same discipline `ollama`/`copilot` already follow for
+  their own tool logic.
+- **A derived image built FROM today's `runtimes/claude/Dockerfile` loses the
+  CLI binary.** `docs/concepts.md#runtime-images-are-generic` tells adopters
+  to derive their own image from a shipped one. Anyone who derived from
+  `runtimes/claude` for its CLI binary must re-derive from
+  `runtimes/claude-cli` instead. → Named explicitly in `docs/CHANGELOG.md` as
+  a breaking change, not folded into a patch note.
+- **Two components double the surface kept green.** Every behavioural test —
   permissions, continuity ladder, transcript rendering — now needs a pass for
-  each driver, not one. → `driver-cli.js` keeps its existing, untouched test
-  suite, `driver-sdk.js` gets its own alongside it, and a small
-  driver-selection test covers the entrypoint itself.
+  each component, not one. → `runtimes/claude-cli` keeps the existing,
+  untouched test suite it inherits, `runtimes/claude` gets its own alongside
+  it.
 
 ## Migration Plan
 
-Selecting a driver is an env var, not an image swap. `RUNTIME_CLAUDE_DRIVER=cli`
-on an `AgentRuntime.spec.env` falls back to today's exact behaviour with no
-image pointer change.
+This is a real migration, not a reversible env var flip. `runtimes/claude`
+changes default behaviour (SDK instead of CLI) AND loses the CLI binary from
+its image, in the same release.
 
-The image is still a real migration surface. A new `agentops-runtime-claude`
-tag ships both drivers, and `AgentRuntime.spec.image` still has to move to it
-once before the env var has anything to select between. Once that tag is
-live, moving between drivers is reversible without touching `spec.image`
-again.
+An adopter who needs to keep running the CLI must, in order:
 
-Conversations in flight keep their handle regardless of which driver serves
-them. Both resume from `runtimeContextId`.
+1. Enable the new bundle: `chart/charts/claude-cli/`'s `enabled: true`.
+2. Point every Pipeline or Coordinator that should keep running CLI-driven
+   claude-code at `runtimeRef: claude-cli`.
+3. Decide which bundle holds `default: true` for routes naming no
+   `runtimeRef`. `defaultRuntimeGuard` still fails the render unless exactly
+   one answers `default`.
+
+State these three steps in `docs/CHANGELOG.md` as the upgrade note for a
+breaking change, per `documentation.md`.
+
+Conversations in flight keep their handle regardless of which component
+serves them. Both resume from `runtimeContextId`.
 
 ## Open Questions
 
@@ -268,7 +318,7 @@ them. Both resume from `runtimeContextId`.
   here.
 - Is `PreToolUse` (D3's rejected alternative) worth adopting later as a
   belt-and-braces layer that cannot be shadowed?
-- Should the chart-shipped default ever flip back to `cli`, if the
-  subscription-auth proof or the long-session MCP-leak check above turns up a
-  real problem after rollout? Flipping the default is a one-line change. No
-  image rebuild is needed either way.
+- Should `runtimes/claude-cli` ever become the chart's `default: true`
+  bundle instead of `runtimes/claude`? That is now a chart-values change —
+  moving which bundle carries the flag — not the one-line env var flip the
+  single-image design would have allowed.
