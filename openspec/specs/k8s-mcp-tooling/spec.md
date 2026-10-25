@@ -177,7 +177,7 @@ The render SHALL FAIL, naming the offending entry, when an entry:
 - **THEN** the rendered `agentops-mcp-k8s` ClusterRole carries that rule
   alongside the fixed read rules
 
-#### Scenario: The extension moves with both RBAC modes
+#### Scenario: The extension moves with both `mcpServers.rbac.mode` settings
 
 - **WHEN** the same extra rule is set and `mcpServers.rbac.mode` is
   `readonly` in one render and `full` in another
