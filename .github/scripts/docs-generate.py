@@ -932,26 +932,77 @@ def build_crd_example(schemas: dict[str, dict], kind: str, name: str) -> str:
     return "\n".join(lines)
 
 
+def _field_meaning(name: str, node: dict) -> str:
+    """One cell carrying everything the schema knows about a field's values:
+    the description's first sentence, then the enum's choices and the
+    default, so the page alone is enough to write the CR."""
+    meaning = one_line(_strip_lead(name, first_sentence(node.get("description") or "")))
+    if meaning:
+        meaning = meaning[0].upper() + meaning[1:]
+        if not meaning.endswith((".", "!", "?")):
+            meaning += "."
+    enum = node.get("enum") or (node.get("items") or {}).get("enum")
+    if enum:
+        meaning += f" One of {', '.join(f'`{e}`' for e in enum)}."
+    if node.get("default") not in (None, "", [], {}):
+        default = yaml.safe_dump(
+            node["default"], default_flow_style=True, width=10_000
+        ).strip().rstrip("\n.")
+        meaning += f" Defaults to `{default}`."
+    return meaning.lstrip()
+
+
+# Embedded core-Kubernetes shapes, recognized by their property signature.
+# Unrolling one buries a kind's own fields under upstream boilerplate, so the
+# row states the choices itself and the walk stops there.
+CORE_SHAPES: dict[tuple[str, ...], str] = {
+    ("configMapKeyRef", "fieldRef", "resourceFieldRef", "secretKeyRef"): (
+        "The standard Kubernetes `EnvVarSource` -- set exactly one of "
+        "`configMapKeyRef`, `secretKeyRef`, `fieldRef` or `resourceFieldRef`, "
+        "each naming its source object and key."
+    ),
+}
+
+
 def build_crd_fields(schemas: dict[str, dict], kind: str) -> str:
-    """A kind's top-level spec fields as one short table -- name, the type the
-    API server enforces, whether it is required, and the description's first
-    sentence. Nothing unrolled: a nested shape gets one row and the page's own
-    prose, never its every leaf."""
+    """Every spec field of a kind as one table -- nested shapes unrolled as
+    dotted paths (`attributeFilters[].key`, `servers.<name>.command`), each
+    row carrying the type the API server enforces, whether it is required
+    WITHIN ITS PARENT, and the description's first sentence with the
+    schema's own enum and default appended. The page alone must be enough
+    to write the CR."""
     spec = _crd_spec(schemas, kind)
-    props = spec.get("properties") or {}
-    req = set(spec.get("required") or [])
-    if not props:
+    if not (spec.get("properties") or {}):
         return "This kind has no spec fields of its own.\n"
     out = ["| Field | Type | Required | Meaning |", "|---|---|---|---|"]
-    for name in sorted(props, key=_field_rank(req)):
-        child = props[name]
-        meaning = one_line(_strip_lead(name, first_sentence(child.get("description") or "")))
-        if meaning:
-            meaning = meaning[0].upper() + meaning[1:]
-            if not meaning.endswith((".", "!", "?")):
-                meaning += "."
-        required = "**yes**" if name in req else ""
-        out.append(f"| `{name}` | `{type_of(child)}` | {required} | {meaning} |")
+
+    def walk(node: dict, prefix: str) -> None:
+        props = node.get("properties") or {}
+        req = set(node.get("required") or [])
+        for name in sorted(props, key=_field_rank(req)):
+            child = props[name]
+            path = f"{prefix}{name}"
+            required = "**yes**" if name in req else ""
+            items = child.get("items") or {}
+            inner = child.get("additionalProperties")
+            if child.get("type") == "object" and isinstance(inner, dict) and inner.get("type") == "object":
+                sub, sub_prefix = inner, f"{path}.<name>."
+            elif child.get("type") == "object":
+                sub, sub_prefix = child, f"{path}."
+            elif child.get("type") == "array" and items.get("type") == "object":
+                sub, sub_prefix = items, f"{path}[]."
+            else:
+                sub, sub_prefix = None, ""
+            meaning = _field_meaning(name, child)
+            core = sub and CORE_SHAPES.get(tuple(sorted(sub.get("properties") or {})))
+            if core:
+                meaning = f"{meaning} {core}".lstrip()
+                sub = None
+            out.append(f"| `{path}` | `{type_of(child)}` | {required} | {meaning} |")
+            if sub:
+                walk(sub, sub_prefix)
+
+    walk(spec, "")
     return "\n".join(out) + "\n"
 
 

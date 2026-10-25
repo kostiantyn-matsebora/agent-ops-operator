@@ -193,11 +193,22 @@ schemas = {
         "properties": {
             "pipelineRef": {"type": "string", "description":
                 "PipelineRef names the Pipeline this widget serves; never blank."},
-            "replicas": {"type": "integer", "description":
+            "replicas": {"type": "integer", "default": 1, "description":
                 "Replicas is how many to run. A second sentence stays off the table."},
-            "agents": {"type": "array", "items": {"type": "object", "properties": {
-                "capabilityRef": {"type": "string", "description": "CapabilityRef names one."},
-            }}},
+            "agents": {"type": "array", "items": {
+                "type": "object",
+                "required": ["capabilityRef"],
+                "properties": {
+                    "capabilityRef": {"type": "string", "description": "CapabilityRef names one."},
+                    "mode": {"type": "string", "enum": ["fan", "serial"],
+                             "description": "Mode picks the dispatch shape."},
+                },
+            }},
+            "tokenFrom": {"type": "object", "description":
+                "TokenFrom resolves the credential.", "properties": {
+                "configMapKeyRef": {"type": "object"}, "fieldRef": {"type": "object"},
+                "resourceFieldRef": {"type": "object"}, "secretKeyRef": {"type": "object"},
+            }},
         },
     }}},
     "Gizmo": {"properties": {"spec": {
@@ -218,10 +229,20 @@ table = mod.build_crd_fields(schemas, "Widget")
 assert table.splitlines()[0] == "| Field | Type | Required | Meaning |", table
 assert "| `pipelineRef` | `string` | **yes** |" in table, table
 assert "names the Pipeline this widget serves." in table, table
-assert "| `replicas` | `integer` |  | How many to run. |" in table, table
+assert "| `replicas` | `integer` |  | How many to run. Defaults to `1`. |" in table, table
 assert "never blank" not in table, f"the semicolon tail reached the cell: {table}"
 assert mod.build_crd_fields(schemas, "Gizmo"), "an excluded kind's builder still works"
 print("ok: crd-fields emits the header, required mark and the semicolon-trimmed first sentence")
+
+assert "| `agents[].capabilityRef` | `string` | **yes** | CapabilityRef names one. |" in table, table
+assert "One of `fan`, `serial`." in table, table
+print("ok: crd-fields unrolls a nested shape as dotted paths, enums and defaults on the row")
+
+assert "`configMapKeyRef`, `secretKeyRef`, `fieldRef` or `resourceFieldRef`" in table, table
+assert "tokenFrom.configMapKeyRef" not in table, (
+    f"a recognized core-Kubernetes shape must stop the walk: {table}"
+)
+print("ok: crd-fields states a core-Kubernetes shape's choices on one row instead of unrolling it")
 
 doc = tmp / "widget.md"
 doc.write_text(
@@ -291,6 +312,12 @@ assert_contains "$out" "crd-example emits the kind, the name, every top-level sp
 
 it "crd-fields: header, required mark, semicolon-trimmed first sentence"
 assert_contains "$out" "crd-fields emits the header, required mark and the semicolon-trimmed first sentence"
+
+it "crd-fields: nested shapes unroll as dotted paths with enums and defaults"
+assert_contains "$out" "unrolls a nested shape as dotted paths"
+
+it "crd-fields: a core-Kubernetes shape is one row stating its choices, not a subtree"
+assert_contains "$out" "states a core-Kubernetes shape's choices on one row"
 
 it "the dispatcher blank-lines the table away from both markers, idempotently"
 assert_contains "$out" "blank-lines the table away from both markers, idempotently"

@@ -117,6 +117,13 @@ path. Plugins are limited to the set Pages enables by default.
   `.github/scripts/docs-generate.py` writes from `chart/crds/`. The page set
   is CHECKED both directions, `ControlPlaneProbe` excluded by name as
   scaffolding. `cr-reference.md` is deleted — these pages replaced it.
+  - **The page alone must be enough to write the CR.** `crd-fields` unrolls
+    nested shapes as dotted paths, each enum and default on its row, and a
+    value vocabulary the schema cannot state (filterable labels, an opaque
+    `config`'s shape) is said in the page's hand prose.
+  - **The spec page is the single source of truth for a kind's fields.**
+    Another page needing field detail references `crds/<kind>.md` rather
+    than restating it — `concepts.md` keeps the model, never the field list.
   - **The `yaml` blocks in `guides/` come from the same run** — the resource
     templates from the CRDs, the worked examples from `helm template`.
   - **What a BUNDLE RENDERS comes from the same run** —

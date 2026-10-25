@@ -101,6 +101,16 @@ statements of every field.
 resource templates `docs-generate.py` already derives from the CRDs, trimmed
 to one realistic instance per kind with one comment per top-level field.
 
+**The field table unrolls nested shapes as dotted paths** — enum choices
+and defaults on the row, a recognized `EnvVarSource` collapsed to one row.
+
+User iteration on the first build, which kept one row per top-level field
+and left a nested filter's grammar unstated.
+
+**The spec pages are the single source of truth for a kind's fields.**
+`concepts.md` dropped its field-level blocks — the signal-label vocabulary
+moved onto the SignalSource page — and references `/crds/<kind>/` instead.
+
 **Collapsible nav is `<details>`/`<summary>` per group.** The sidebar
 include wraps each group, rendered `open` for every group.
 

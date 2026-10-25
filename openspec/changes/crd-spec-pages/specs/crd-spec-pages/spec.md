@@ -28,8 +28,21 @@ Each page SHALL carry, in this order:
    it
 2. **spec, at a glance** — one realistic example instance as a fenced YAML
    block, each top-level field carrying a short trailing comment
-3. **every field** — a table of the kind's spec fields: name, type, required
-   or optional, and one sentence of meaning
+3. **every field** — a table of the kind's spec fields with nested shapes
+   unrolled as dotted paths (`attributeFilters[].key`): name, type, required
+   or optional, and one sentence of meaning carrying the schema's own enum
+   choices and default
+
+**The page alone SHALL be enough to write the CR.**
+
+- A recognized embedded core-Kubernetes shape (`EnvVarSource`) is one row
+  stating its choices, never an unrolled subtree.
+- A value vocabulary the schema cannot state — the filterable signal
+  labels, an opaque `config`'s shape — is said in the page's hand prose.
+
+**The spec page SHALL be the single source of truth for a kind's fields.**
+Another page needing field detail references `/crds/<kind>/` rather than
+restating it — `concepts.md` keeps the model.
 
 The pages SHALL use the model's own vocabulary: a Pipeline is wiring, a
 profile is behaviour, a signal STARTS a conversation.
@@ -37,8 +50,15 @@ profile is behaviour, a signal STARTS a conversation.
 #### Scenario: An adopter looks up a field
 
 - **WHEN** an adopter writing a `Pipeline` opens `/crds/pipeline/`
-- **THEN** every `spec` field of the CRD is on the page, each with its type
-  and one sentence of meaning
+- **THEN** every `spec` field of the CRD is on the page, nested ones
+  included, each with its type, its enum and default where the schema has
+  one, and one sentence of meaning
+
+#### Scenario: An adopter writes a filter
+
+- **WHEN** an adopter writing a `SignalSource` opens `/crds/signal-source/`
+- **THEN** the page itself says the operators a requirement takes and which
+  label keys the shipped adapters send, with no second page required
 
 #### Scenario: A kind is added
 

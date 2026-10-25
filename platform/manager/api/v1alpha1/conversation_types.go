@@ -180,9 +180,13 @@ const LabelNameBase = "agentops.dev/name-base"
 // InputItem is one queued work unit. Payload is inline OR referenced via
 // PayloadRef (a ConversationInput object) for large payloads.
 type InputItem struct {
+	// ID identifies this input within the conversation — the id
+	// status.runs[].inputIds echoes once the input is worked.
 	// +kubebuilder:validation:MinLength=1
 	ID   string    `json:"id"`
 	Type InputType `json:"type"`
+	// Payload is the input's text, inline. Empty when PayloadRef carries it
+	// out-of-line instead.
 	// +optional
 	Payload string `json:"payload,omitempty"`
 	// +optional
@@ -206,6 +210,7 @@ type InputItem struct {
 	// channels, so upgrading cannot fill open threads with history.
 	// +optional
 	Origin *InputOrigin `json:"origin,omitempty"`
+	// ReceivedAt is when the manager accepted this input into the queue.
 	// +optional
 	ReceivedAt metav1.Time `json:"receivedAt,omitempty"`
 }
@@ -468,6 +473,10 @@ type ConversationSpec struct {
 	// the `default` runtime, exactly as it did before.
 	// +optional
 	RuntimeRef *ObjectRef `json:"runtimeRef,omitempty"`
+	// ServiceAccountName is the resolved identity this conversation's runtime
+	// pods run as, snapshotted at creation exactly as RuntimeRef is — never
+	// hand-set. Empty falls through to the runtime's own account, then the
+	// release floor.
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
@@ -491,9 +500,14 @@ type ConversationSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	ContextClaimName string `json:"contextClaimName,omitempty"`
+	// WorkspaceClaimName is the resolved workspace claim, materialized at
+	// creation exactly as ContextClaimName is — never hand-set, empty means
+	// ephemeral.
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	WorkspaceClaimName string `json:"workspaceClaimName,omitempty"`
+	// Inputs is the serial work queue — one inflight unit at a time, each
+	// entry pruned once status.runs[].inputs[] records it.
 	// +optional
 	Inputs []InputItem `json:"inputs,omitempty"`
 }
@@ -699,8 +713,11 @@ type InflightRun struct {
 // surface salts its own — so the channel is not decoration: stamping this key
 // on another channel's binding would record a reader nothing can match.
 type OriginReader struct {
+	// Channel names the bound channel whose key space Key belongs to.
 	Channel string `json:"channel"`
-	Key     string `json:"key"`
+	// Key is the reporting adapter's opaque reader key, matched only within
+	// Channel's own key space.
+	Key string `json:"key"`
 }
 
 // ThreadBinding pins one bound channel to its conversation thread.

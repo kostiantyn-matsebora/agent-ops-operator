@@ -35,8 +35,14 @@ spec:
 | `adapter` | `string` | **yes** | Adapter names the ChannelAdapter serving this surface — a REFERENCE, not an attribute: the named adapter's implementation is what defines and validates Config's schema. |
 | `config` | `free-form` |  | Config carries whatever the channel type needs. |
 | `credentialsSecretRef` | `object` |  | CredentialsSecretRef names the Secret holding this surface's transport credentials (e.g. a bot token) — credentials are per-surface usage, never per-implementation. |
+| `credentialsSecretRef.name` | `string` |  | Name of the referent. |
 
 <!-- /generated -->
+
+`config`'s shape and the Secret keys `credentialsSecretRef` must hold both
+come from the named adapter — its
+[`ChannelAdapter`]({{ '/crds/channel-adapter/' | relative_url }}) publishes
+them as `spec.configSchema` and `spec.credentialKeys`.
 
 Three fields, the rest the adapter's — wiring a surface up end to end is the
 [Talk to agents from your own chat]({{ '/guides/channel-adapter/' | relative_url }})

@@ -38,10 +38,11 @@ spec:
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `conversationRef` | `object` | **yes** | ConversationRef names the Conversation this input queues into. |
+| `conversationRef.name` | `string` | **yes** | Name of the referenced object. |
 | `payload` | `string` | **yes** | The input's full text, out-of-line so a bulky work unit never bloats the Conversation object itself. |
-| `type` | `string` | **yes** | Type says what kind of input this is, which decides how it is dispatched. |
+| `type` | `string` | **yes** | Type says what kind of input this is, which decides how it is dispatched. One of `task`, `alert`, `reply`, `recurrence`, `job`. |
 | `labels` | `map[string]string` |  | The originating signal's labels, kept per-input beside the payload. |
-| `severity` | `string` |  | The originating signal's own severity rating for this occurrence. |
+| `severity` | `string` |  | The originating signal's own severity rating for this occurrence. One of `critical`, `error`, `warning`, `info`. |
 
 <!-- /generated -->
 

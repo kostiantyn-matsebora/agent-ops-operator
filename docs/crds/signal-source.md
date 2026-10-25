@@ -39,12 +39,41 @@ spec:
 |---|---|---|---|
 | `adapter` | `string` | **yes** | Adapter names the SignalAdapter serving this source — a REFERENCE, not an attribute: the named adapter's implementation defines and validates Config's schema. |
 | `attributeFilters` | `[]object` |  | AttributeFilters narrows which signals this source admits, evaluated against the normalized signal's labels with Kubernetes label-selector semantics. |
+| `attributeFilters[].key` | `string` | **yes** | The attribute label name to test. |
+| `attributeFilters[].operator` | `string` | **yes** | Operator selects the test. One of `In`, `NotIn`, `Exists`, `DoesNotExist`. |
+| `attributeFilters[].values` | `[]string` |  | The comparison set for In/NotIn, and must be empty for Exists/DoesNotExist. |
 | `config` | `free-form` |  | Config carries whatever the signal type needs. |
-| `cooldownHours` | `integer` |  | Suppress a repeat of the same initiationId within this window — a re-send, safe to drop under at-least-once delivery. |
+| `cooldownHours` | `integer` |  | Suppress a repeat of the same initiationId within this window — a re-send, safe to drop under at-least-once delivery. Defaults to `6`. |
 | `credentialsSecretRef` | `object` |  | CredentialsSecretRef names the Secret holding this source's transport credentials (e.g. an API key). |
+| `credentialsSecretRef.name` | `string` |  | Name of the referent. |
 | `logFiltered` | `boolean` |  | LogFiltered governs whether a signal dropped by AttributeFilters is still recorded as a signal.dropped activity event. |
 
 <!-- /generated -->
+
+What `attributeFilters[].key` can name is the signal's `labels` — the map
+the serving adapter sends with every signal, so a key no signal carries
+never matches.
+
+- A signal must satisfy EVERY requirement to be admitted.
+- A filtered signal is dropped before cooldown and before any pipeline
+  sees it.
+
+The shipped adapters' label vocabulary:
+
+| Vocabulary | Keys |
+|---|---|
+| Shared | `alertgroup`, `alertname`, `namespace`, `severity`, `source` |
+| Kubernetes events adapter adds | `kind`, `name`, **`workload`** (the owning controller, e.g. `Deployment/api`, resolved through owner references), `node`, plus the involved pod's own labels |
+
+**Adapter-defined keys are reserved.** A pod label named `name` or
+`workload` is never allowed to overwrite one, so a signal's own identifying
+context stays legible regardless of what the underlying object carries.
+
+The same deference holds for `config`: its shape is whatever the named
+adapter declares as
+[`SignalAdapter`]({{ '/crds/signal-adapter/' | relative_url }})
+`spec.configSchema`, and each integration page shows the values its adapter
+takes.
 
 One example, one table — a lane of your own, filters and cooldown included,
 is the [React to signals]({{ '/guides/signal-adapter/' | relative_url }})
