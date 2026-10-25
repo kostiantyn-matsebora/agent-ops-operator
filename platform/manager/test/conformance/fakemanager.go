@@ -30,6 +30,11 @@ import (
 	"time"
 )
 
+const (
+	headerContentType = "Content-Type"
+	errRejected       = "rejected by the conformance fake"
+)
+
 // ChannelInfo is one served channel, as GET /channel/channels lists it.
 type ChannelInfo struct {
 	Name                string          `json:"name"`
@@ -237,7 +242,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 		writeJSON(w, 200, map[string]any{"events": []any{}, "next": 0})
 	}))
 	mux.HandleFunc("GET /activity/stream", auth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set(headerContentType, "text/event-stream")
 		w.WriteHeader(200)
 		<-r.Context().Done()
 	}))
@@ -512,7 +517,7 @@ func (f *FakeManager) handleWork(w http.ResponseWriter, r *http.Request) {
 	raw := f.workQueue[0]
 	f.workQueue = f.workQueue[1:]
 	f.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(200)
 	_, _ = w.Write(raw)
 }
@@ -542,7 +547,7 @@ func (f *FakeManager) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	if reject != 0 {
-		writeJSON(w, reject, map[string]string{"error": "rejected by the conformance fake"})
+		writeJSON(w, reject, map[string]string{"error": errRejected})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -558,7 +563,7 @@ func (f *FakeManager) handleInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	if reject != 0 {
-		writeJSON(w, reject, map[string]string{"error": "rejected by the conformance fake"})
+		writeJSON(w, reject, map[string]string{"error": errRejected})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"accepted": true})
@@ -575,7 +580,7 @@ func (f *FakeManager) handleSignalInbound(w http.ResponseWriter, r *http.Request
 	reject := f.rejectSignals
 	f.mu.Unlock()
 	if reject != 0 {
-		writeJSON(w, reject, map[string]string{"error": "rejected by the conformance fake"})
+		writeJSON(w, reject, map[string]string{"error": errRejected})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"queued": len(post.Signals), "conversations": len(post.Signals)})
@@ -625,7 +630,7 @@ func (f *FakeManager) statePut(kind string) http.HandlerFunc {
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }

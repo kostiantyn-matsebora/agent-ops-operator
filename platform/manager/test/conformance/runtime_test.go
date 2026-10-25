@@ -235,86 +235,59 @@ func runtimeOllamaAssertAPI5AndAPI9(t *testing.T, mgr *FakeManager, convo string
 // report never carries it.
 func runtimeOllamaAssertRT3AllowlistComposition(t *testing.T, mgr *FakeManager, p *Process, convo string) {
 	t.Helper()
-	outputSince := func(before int, run func()) string {
-		run()
+	cases := []struct {
+		id, agent, allowed, mode string
+		want, unwanted           []string
+		why                      string
+	}{
+		// merge: the union, the agent's own tools keeping position.
+		{"rt3-merge", "merge-agent", "Bash,Read", "merge",
+			[]string{"-> Grep,Write,Bash,Read"}, nil,
+			"merge must union with the agent's own tools kept first"},
+		// overwrite: allowedTools alone, the agent's own declared tools dropped.
+		{"rt3-overwrite", "merge-agent", "Bash,Read", "overwrite",
+			[]string{"-> Bash,Read"}, []string{"Grep", "Write"},
+			"overwrite must use allowedTools alone, never the agent's own tools"},
+		// RT-3.2: an empty allowlist stays empty, even against an agent that
+		// declares tools of its own.
+		{"rt3-empty", "merge-agent", "", "overwrite",
+			[]string{"-> (none)"}, nil,
+			"an empty allowlist must stay empty, no tool substitutes for one nobody declared"},
+		// RT-3.1/RT-3.3: an agent name this fixture never defines contributes
+		// nothing -- the same silent "declares nothing" path a from a checkout
+		// that cannot be seen at all takes.
+		{"rt3-absent", "no-such-agent", "Read", "merge",
+			[]string{"declared=0 wiring=1 mode=merge -> Read"}, nil,
+			"an absent agent definition must contribute nothing"},
+		// RT-3.3, the "unreadable" half: frontmatter that opened but never
+		// closed is logged by name and, like the absent case, contributes
+		// nothing.
+		{"rt3-broken", "broken-agent", "Read", "merge",
+			[]string{"broken-agent.md", "never closed", "declared=0 wiring=1 mode=merge -> Read"}, nil,
+			"an unreadable agent definition must be logged naming why and still contribute nothing"},
+	}
+	for _, tc := range cases {
+		before := len(p.Output())
+		c := runtimeOllamaRun(t, mgr, runtimeOllamaUnit(tc.id, convo, tc.id+" case",
+			map[string]any{"agent": tc.agent, "allowedTools": tc.allowed, "toolsMode": tc.mode}))
+		if c.Raw["status"] != "succeeded" {
+			t.Fatalf("%s: %+v", tc.id, c.Raw)
+		}
 		full := p.Output()
 		if before > len(full) {
 			t.Fatalf("output shrank, impossible for an append-only buffer")
 		}
-		return full[before:]
-	}
-
-	// merge: the union, the agent's own tools keeping position (RT-3).
-	before := len(p.Output())
-	out := outputSince(before, func() {
-		c := runtimeOllamaRun(t, mgr, runtimeOllamaUnit("rt3-merge", convo, "merge case",
-			map[string]any{"agent": "merge-agent", "allowedTools": "Bash,Read", "toolsMode": "merge"}))
-		if c.Raw["status"] != "succeeded" {
-			t.Fatalf("rt3-merge: %+v", c.Raw)
+		out := full[before:]
+		for _, w := range tc.want {
+			if !strings.Contains(out, w) {
+				t.Fatalf("%s: %s: %s", tc.id, tc.why, out)
+			}
 		}
-	})
-	if !strings.Contains(out, "-> Grep,Write,Bash,Read") {
-		t.Fatalf("merge must union with the agent's own tools kept first: %s", out)
-	}
-
-	// overwrite: allowedTools alone, the agent's own declared tools dropped.
-	before = len(p.Output())
-	out = outputSince(before, func() {
-		c := runtimeOllamaRun(t, mgr, runtimeOllamaUnit("rt3-overwrite", convo, "overwrite case",
-			map[string]any{"agent": "merge-agent", "allowedTools": "Bash,Read", "toolsMode": "overwrite"}))
-		if c.Raw["status"] != "succeeded" {
-			t.Fatalf("rt3-overwrite: %+v", c.Raw)
+		for _, u := range tc.unwanted {
+			if strings.Contains(out, u) {
+				t.Fatalf("%s: %s: %s", tc.id, tc.why, out)
+			}
 		}
-	})
-	if !strings.Contains(out, "-> Bash,Read") || strings.Contains(out, "Grep") || strings.Contains(out, "Write") {
-		t.Fatalf("overwrite must use allowedTools alone, never the agent's own tools: %s", out)
-	}
-
-	// RT-3.2: an empty allowlist stays empty, even against an agent that
-	// declares tools of its own.
-	before = len(p.Output())
-	out = outputSince(before, func() {
-		c := runtimeOllamaRun(t, mgr, runtimeOllamaUnit("rt3-empty", convo, "empty case",
-			map[string]any{"agent": "merge-agent", "allowedTools": "", "toolsMode": "overwrite"}))
-		if c.Raw["status"] != "succeeded" {
-			t.Fatalf("rt3-empty: %+v", c.Raw)
-		}
-	})
-	if !strings.Contains(out, "-> (none)") {
-		t.Fatalf("an empty allowlist must stay empty, no tool substitutes for one nobody declared: %s", out)
-	}
-
-	// RT-3.1/RT-3.3: an agent name this fixture never defines contributes
-	// nothing -- the same silent "declares nothing" path a from a checkout
-	// that cannot be seen at all takes.
-	before = len(p.Output())
-	out = outputSince(before, func() {
-		c := runtimeOllamaRun(t, mgr, runtimeOllamaUnit("rt3-absent", convo, "absent case",
-			map[string]any{"agent": "no-such-agent", "allowedTools": "Read", "toolsMode": "merge"}))
-		if c.Raw["status"] != "succeeded" {
-			t.Fatalf("rt3-absent: %+v", c.Raw)
-		}
-	})
-	if !strings.Contains(out, "declared=0 wiring=1 mode=merge -> Read") {
-		t.Fatalf("an absent agent definition must contribute nothing: %s", out)
-	}
-
-	// RT-3.3, the "unreadable" half: frontmatter that opened but never
-	// closed is logged by name and, like the absent case, contributes
-	// nothing.
-	before = len(p.Output())
-	out = outputSince(before, func() {
-		c := runtimeOllamaRun(t, mgr, runtimeOllamaUnit("rt3-broken", convo, "broken case",
-			map[string]any{"agent": "broken-agent", "allowedTools": "Read", "toolsMode": "merge"}))
-		if c.Raw["status"] != "succeeded" {
-			t.Fatalf("rt3-broken: %+v", c.Raw)
-		}
-	})
-	if !strings.Contains(out, "broken-agent.md") || !strings.Contains(out, "never closed") {
-		t.Fatalf("an unreadable agent definition must be logged naming why: %s", out)
-	}
-	if !strings.Contains(out, "declared=0 wiring=1 mode=merge -> Read") {
-		t.Fatalf("an unreadable agent definition must still contribute nothing: %s", out)
 	}
 }
 
