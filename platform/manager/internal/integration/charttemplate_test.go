@@ -1044,6 +1044,96 @@ func TestMCPServerRefusesTheRuntimeIdentity(t *testing.T) {
 	}
 }
 
+// Purely additive, default []. A release setting nothing must render exactly
+// today's ClusterRole — no extension marker anywhere in it.
+func TestMCPServerExtraReadRulesDefaultRendersNothingExtra(t *testing.T) {
+	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
+	if strings.Contains(out, "example.com") || strings.Contains(out, "vmrules") {
+		t.Error("default extraReadRules must render no extra rule")
+	}
+}
+
+// One valid entry must render under BOTH rbac modes, identically — an
+// extension granted under readonly is the same rule set it would be under
+// full, matching how the two branches already share runtimeReadRules.
+func TestMCPServerExtraReadRulesRenderedUnderBothRbacModes(t *testing.T) {
+	extra := `--set-json=kubernetes.mcpServers.rbac.extraReadRules=[{"apiGroups":["operator.victoriametrics.com"],"resources":["vmrules"],"verbs":["get","list","watch"]}]`
+
+	readonly := helmTemplate(t, "--set", "kubernetes.enabled=true", extra)
+	if !strings.Contains(readonly, `apiGroups: ["operator.victoriametrics.com"]`) {
+		t.Error("the extra rule must render under the readonly ClusterRole")
+	}
+
+	full := helmTemplate(t, "--set", "kubernetes.enabled=true",
+		"--set", "kubernetes.allowMutations=true", extra)
+	if !strings.Contains(full, `apiGroups: ["operator.victoriametrics.com"]`) {
+		t.Error("the extra rule must render under the full ClusterRole too")
+	}
+}
+
+// The five rejected shapes design.md names, each FAILING the render and
+// naming the offending entry — mechanical, not documentation alone.
+func TestMCPServerExtraReadRulesRejectsEachGuardedShape(t *testing.T) {
+	cases := []struct {
+		name string
+		rule string
+		want string
+	}{
+		{
+			name: "verb outside get/list/watch",
+			rule: `[{"apiGroups":["apps"],"resources":["deployments"],"verbs":["patch"]}]`,
+			want: `sets verb "patch", outside get/list/watch`,
+		},
+		{
+			name: "core group's secrets",
+			rule: `[{"apiGroups":[""],"resources":["secrets"],"verbs":["get"]}]`,
+			want: `pairs the core apiGroup with the "secrets" resource`,
+		},
+		{
+			name: "wildcard apiGroups",
+			rule: `[{"apiGroups":["*"],"resources":["pods"],"verbs":["get"]}]`,
+			want: `names "*" in apiGroups or resources`,
+		},
+		{
+			name: "wildcard resources",
+			rule: `[{"apiGroups":["apps"],"resources":["*"],"verbs":["get"]}]`,
+			want: `names "*" in apiGroups or resources`,
+		},
+		{
+			name: "rbac.authorization.k8s.io",
+			rule: `[{"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterroles"],"verbs":["get"]}]`,
+			want: `lists apiGroup "rbac.authorization.k8s.io"`,
+		},
+		{
+			name: "rbac.authorization.k8s.io beside another group",
+			rule: `[{"apiGroups":["apps","rbac.authorization.k8s.io"],"resources":["clusterroles"],"verbs":["get"]}]`,
+			want: `lists apiGroup "rbac.authorization.k8s.io"`,
+		},
+		{
+			name: "agentops.dev",
+			rule: `[{"apiGroups":["agentops.dev"],"resources":["pipelines"],"verbs":["get"]}]`,
+			want: `lists apiGroup "agentops.dev"`,
+		},
+		{
+			name: "agentops.dev beside another group",
+			rule: `[{"apiGroups":["apps","agentops.dev"],"resources":["pipelines"],"verbs":["get"]}]`,
+			want: `lists apiGroup "agentops.dev"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := helmTemplateErr(t, "--set", "kubernetes.enabled=true",
+				"--set-json=kubernetes.mcpServers.rbac.extraReadRules="+tc.rule)
+			if !strings.Contains(msg, "mcpServers.rbac.extraReadRules[0]") {
+				t.Errorf("the failure must name the entry:\n%s", msg)
+			}
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("want error containing %q, got:\n%s", tc.want, msg)
+			}
+		})
+	}
+}
+
 // ---- kubernetes wiring ------------------------------------------------------
 
 // bundlePipelines returns the Pipelines the BUNDLE rendered, by name. Anchored
