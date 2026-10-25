@@ -82,13 +82,13 @@ stays owned by envtest/system.
 
 ## 6. Documentation
 
-- [ ] 6.1 Reference docs: update `docs/testing.md`'s "Contract
+- [x] 6.1 Reference docs: update `docs/testing.md`'s "Contract
       conformance" tier row so it names runtimes alongside adapters, and
       update its "Run it yourself" section if the command changes.
-- [ ] 6.2 Reference docs: none of `docs/contracts/runtime.md`'s
+- [x] 6.2 Reference docs: none of `docs/contracts/runtime.md`'s
       obligations change, so it is not edited and its version stays
       `1.0.0` — confirm this stays true at review.
-- [ ] 6.3 Adopter site: none. This is contributor-facing test
+- [x] 6.3 Adopter site: none. This is contributor-facing test
       infrastructure with no adopter-facing behavior, so no page under
       `docs/` needs a change — state this explicitly rather than leaving
       the subsection silently empty.
