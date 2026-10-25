@@ -73,13 +73,13 @@ All of 4.1–4.4 apply to `runtimes/claude` only — `runtimes/claude-cli` opens
 
 ## 9. Unit tests
 
-- [ ] 9.1 `tools.test.js` passes unchanged in BOTH `runtimes/claude/` and `runtimes/claude-cli/` — composition is not what changed in either copy
-- [ ] 9.2 `runtimes/claude-cli/`'s copied test suite (today's `runtime.test.js` and siblings) passes unchanged — the copy must not change behaviour
-- [ ] 9.3 Permission-callback tests for `runtimes/claude`: allow, deny, empty composition denies everything, scoped patterns
-- [ ] 9.4 Session-reuse tests for `runtimes/claude`: identical fingerprint reuses, changed fingerprint re-opens with resume, allowlist-only change reuses
-- [ ] 9.5 Continuity tests over the ladder, on both components, as today
-- [ ] 9.6 `node --test` passes with no network access, in both `runtimes/claude/` and `runtimes/claude-cli/`
-- [ ] 9.7 The chart's render tests cover `chart/charts/claude-cli/` — `helm template` with it enabled and with it off, and with both `claude` and `claude-cli` enabled together with explicit `default:` flags
+- [x] 9.1 `tools.test.js` passes unchanged in BOTH `runtimes/claude/` and `runtimes/claude-cli/` — composition is not what changed in either copy
+- [x] 9.2 `runtimes/claude-cli/`'s copied test suite (today's `runtime.test.js` and siblings) passes unchanged — the copy must not change behaviour
+- [x] 9.3 Permission-callback tests for `runtimes/claude`: allow, deny, empty composition denies everything, scoped patterns
+- [x] 9.4 Session-reuse tests for `runtimes/claude`: identical fingerprint reuses, changed fingerprint re-opens with resume, allowlist-only change reuses
+- [x] 9.5 Continuity tests over the ladder, on both components, as today
+- [x] 9.6 `node --test` passes with no network access, in both `runtimes/claude/` and `runtimes/claude-cli/`
+- [x] 9.7 The chart's render tests cover `chart/charts/claude-cli/` — `helm template` with it enabled and with it off, and with both `claude` and `claude-cli` enabled together with explicit `default:` flags
 
 ## 10. System tests
 
