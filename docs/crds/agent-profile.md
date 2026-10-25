@@ -40,7 +40,7 @@ spec:
       cpu: "100m"
     requests:
       cpu: "100m"
-  runtimeRef:                   # runtimeRef selects the AgentRuntime (execution backend) for this profile
+  runtimeRef:                   # runtimeRef selects the AgentRuntime (execution backend) for this …
     name: <name>
   systemPrompt: <systemPrompt>  # INLINE role text appended to the agent's system prompt, for profiles …
 ```
@@ -60,7 +60,7 @@ spec:
 | `replyPrompt` | `string` |  | ReplyPrompt wraps a follow-up in an existing conversation, where Prompt wraps the first unit. |
 | `repository` | `object` |  | RepositorySpec identifies the git repository an agent runs from. |
 | `resources` | `object` |  | Resources for the runtime pod running this profile. |
-| `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime (execution backend) for this profile. |
+| `runtimeRef` | `object` |  | RuntimeRef selects the AgentRuntime (execution backend) for this profile — deprecated, use `Pipeline.spec.runtimeRef`. |
 | `systemPrompt` | `string` |  | INLINE role text appended to the agent's system prompt, for profiles with no repository — where `agent` can name no `.claude/agents/<agent>.md` because nothing is checked out. |
 
 <!-- /generated -->

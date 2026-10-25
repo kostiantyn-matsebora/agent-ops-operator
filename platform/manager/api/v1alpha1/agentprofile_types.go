@@ -125,7 +125,7 @@ type AgentProfileSpec struct {
 	OutputFormat OutputFormat `json:"outputFormat"`
 
 	// RuntimeRef selects the AgentRuntime (execution backend) for this
-	// profile.
+	// profile — deprecated, use `Pipeline.spec.runtimeRef`.
 	//
 	// Deprecated: moved to `Pipeline.spec.runtimeRef` and REMOVED IN THE NEXT
 	// CHART MAJOR. It is read for one release only, below the Pipeline's own

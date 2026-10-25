@@ -21,12 +21,12 @@ kind: ConversationInput
 metadata:
   name: disk-pressure-input-1
 spec:
-  conversationRef:  # objectRef references another object by name (same namespace)
+  conversationRef:    # conversationRef names the Conversation this input queues into
     name: <name>
-  payload: <payload>
+  payload: <payload>  # the input's full text, out-of-line so a bulky work unit never bloats …
   type: task   # task | alert | reply | recurrence | job
-  labels:           # the originating signal's labels, kept beside the payload rather than …
-    <label>: <label>
+  labels:             # the originating signal's labels, kept per-input beside the payload
+    <label>: <value>
   severity: critical   # critical | error | warning | info
 ```
 <!-- /generated -->
@@ -37,11 +37,11 @@ spec:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `conversationRef` | `object` | **yes** | ObjectRef references another object by name (same namespace). |
-| `payload` | `string` | **yes** |  |
-| `type` | `string` | **yes** | InputType classifies a work unit. |
-| `labels` | `map[string]string` |  | The originating signal's labels, kept beside the payload rather than on the Conversation: they are per-input, they can be numerous, and this object exists precisely to hold the bulky half of an input. |
-| `severity` | `string` |  | The originating signal's own severity rating for this occurrence, kept per-input the same way Labels is — each recurrence keeps its own, never retroactively rewriting the provenance. |
+| `conversationRef` | `object` | **yes** | ConversationRef names the Conversation this input queues into. |
+| `payload` | `string` | **yes** | The input's full text, out-of-line so a bulky work unit never bloats the Conversation object itself. |
+| `type` | `string` | **yes** | Type says what kind of input this is, which decides how it is dispatched. |
+| `labels` | `map[string]string` |  | The originating signal's labels, kept per-input beside the payload. |
+| `severity` | `string` |  | The originating signal's own severity rating for this occurrence. |
 
 <!-- /generated -->
 

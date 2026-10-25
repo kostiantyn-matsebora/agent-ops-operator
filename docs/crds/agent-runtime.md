@@ -45,8 +45,8 @@ spec:
   env:                                      # extra environment for every runtime pod of this runtime
   - name: <name>
   idleTtlMinutes: 10                        # idleTTLMinutes before an idle runtime pod exits (respawned on demand)
-  nodeSelector:                             # nodeSelector placing runtime pods, applied with Tolerations and …
-    <nodeSelector>: <nodeSelector>
+  nodeSelector:                             # nodeSelector placing runtime pods
+    <nodeSelector>: <value>
   resources:                                # resources default for runtime pods (AgentProfile.resources overrides)
     claims:
     - name: <name>
@@ -72,7 +72,7 @@ spec:
 | `egressMediation` | `object` |  | EgressMediation interposes a proxy in the runtime pod that the agent's traffic cannot route around, so the tool access its wiring granted is enforced somewhere the agent does not control. |
 | `env` | `[]object` |  | Extra environment for every runtime pod of this runtime. |
 | `idleTtlMinutes` | `integer` |  | IdleTTLMinutes before an idle runtime pod exits (respawned on demand). |
-| `nodeSelector` | `map[string]string` |  | NodeSelector placing runtime pods, applied with Tolerations and Affinity below. |
+| `nodeSelector` | `map[string]string` |  | NodeSelector placing runtime pods. |
 | `resources` | `object` |  | Resources default for runtime pods (AgentProfile.resources overrides). |
 | `serviceAccountName` | `string` |  | This runtime's security identity: its RBAC defines exactly what agents executing on this runtime may do in the cluster. |
 

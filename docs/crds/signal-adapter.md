@@ -11,6 +11,9 @@ only, pushing normalized signals to `/signal/inbound`, with no ops queue.
 
 Its name is the routing key every `SignalSource.spec.adapter` references.
 
+An instance sets exactly one of `image` (the operator runs the workload) or
+`servedBy` (something else already runs it). The example shows both shapes.
+
 ## Spec, at a glance
 
 <!-- generated: crd-example kind=SignalAdapter name=cron -->

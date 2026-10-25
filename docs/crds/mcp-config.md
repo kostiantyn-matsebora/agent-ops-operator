@@ -12,6 +12,9 @@ the runtime's `mcp.json`, or a complete hand-written one mounted raw.
 Wiring binds it through `mcpConfigs` on `Pipeline`, `Coordinator` or
 `AgentCapability`, applied in order with a later server key winning.
 
+An instance sets exactly one of `servers`, `configMapRef` or `secretRef`.
+The example below shows all three shapes side by side.
+
 ## Spec, at a glance
 
 <!-- generated: crd-example kind=MCPConfig name=ha-api -->

@@ -524,12 +524,16 @@ def render_node(node: dict, name: str, wanted: set[str], base: str, indent: int,
         return lines
     if isinstance(inner, dict):
         # A map of scalars. One example entry keeps the object shape a
-        # validator expects -- a bare placeholder string failed it. A
-        # resource map gets a real key, since its quantity pattern would
-        # refuse an angle-bracket placeholder as the value.
-        key = "cpu" if name in ("limits", "requests") else f"<{name.rstrip('s') or 'key'}>"
+        # validator expects -- a bare placeholder string failed it. The
+        # value constraint comes off the VALUE schema, not the field name:
+        # a quantity-shaped value gets a real resource entry, since its
+        # pattern would refuse an angle-bracket placeholder.
+        if inner.get("x-kubernetes-int-or-string") or inner.get("format") == "quantity":
+            key, value = "cpu", '"100m"'
+        else:
+            key, value = f"<{name.rstrip('s') or 'key'}>", placeholder(inner, "value")
         lines.append(f"{pad}{name}:")
-        lines.append(f"{pad}  {key}: {placeholder(inner, key.strip('<>'))}")
+        lines.append(f"{pad}  {key}: {value}")
         return lines
     if node.get("x-kubernetes-preserve-unknown-fields") and node.get("type") != "string":
         # Schema-less on purpose. The serving implementation defines the shape,
