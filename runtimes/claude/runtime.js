@@ -199,8 +199,9 @@ function formatEvent(ev, rawLine) {
 // module is supported in Node 22 (the image's base), confirmed directly:
 // `require('@anthropic-ai/claude-agent-sdk')` resolves and returns the
 // module's named exports on Node 22.22. Kept as a plain `require()` rather
-// than a dynamic `import()` so this file stays CommonJS throughout — no
-// package.json exists in this directory, so CommonJS is Node's default.
+// than a dynamic `import()` so this file stays CommonJS throughout, matching
+// this directory's package.json (`"type": "commonjs"`, added for this
+// dependency).
 // ---------------------------------------------------------------------------
 let _query = null;
 function getQuery() {
@@ -960,8 +961,9 @@ async function runLoop() {
 if (require.main === module) {
   // javascript:S7785 wants top-level `await` here instead. Real top-level
   // await is an ESM feature and is a SyntaxError in a CommonJS module (this
-  // file has no package.json, so CommonJS is Node's default) -- converting
-  // this file and everything it requires to ESM is a far larger change than
-  // this line justifies. NOSONAR rather than a real fix.
+  // directory's package.json declares `"type": "commonjs"` explicitly, added
+  // for the SDK dependency below, but this file stayed CommonJS either way)
+  // -- converting this file and everything it requires to ESM is a far
+  // larger change than this line justifies. NOSONAR rather than a real fix.
   void runLoop(); // NOSONAR
 }

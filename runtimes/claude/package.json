@@ -1,0 +1,17 @@
+{
+  "name": "agentops-runtime-claude",
+  "version": "0.1.0",
+  "private": true,
+  "description": "agent-ops AgentRuntime image driving claude-code through the Claude Agent SDK in-process, with one session held open per pod — implements the /work contract, nothing else.",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.310"
+  }
+}
