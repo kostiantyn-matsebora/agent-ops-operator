@@ -343,6 +343,12 @@ BUNDLES = {
         "enable": {},
         "components": {},
     },
+    # Same shape as copilot: the token is optional at render time, so the
+    # "Always" row is the CR alone.
+    "claude-cli": {
+        "enable": {},
+        "components": {},
+    },
     "telegram": {
         "enable": {
             "surface.chatId": "-1001234567890",
