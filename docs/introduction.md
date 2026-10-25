@@ -30,9 +30,9 @@ different signals, has two different reaches.
 
 ## Understand the concepts
 
-Every kind, four clusters — what starts it, the capability shape, the two
-wiring kinds, what it produces. Every shape is a link to that kind's spec page,
-drawn with the glyph the console uses for it.
+A signal starts a conversation, the wiring decides which agent answers and
+what it may reach, and a runtime executes it — every kind below plays one
+part in that sentence, and links to its spec page.
 
 <figure class="ao-domain-model">
 {% include domain-model.svg %}
