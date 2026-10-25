@@ -10,8 +10,10 @@ shape the approach:
   committed file with a CI check behind it (`docs-generate.py --check`).
 - An `<img>`-loaded SVG is inert — links inside it do not work, so a
   clickable diagram must be inlined into the page.
-- `chart/crds/` holds exactly thirteen kinds, and the diagram shows exactly
-  those thirteen.
+- `chart/crds/` holds fourteen kinds. `ControlPlaneProbe` declares itself
+  disposable scaffolding, so the pages, the diagram and the nav carry the
+  thirteen adopter-facing kinds, and the generator excludes the fourteenth
+  by name — with a check that the exclusion dies with the kind.
 
 **The approved mockup is committed at `mockups/index.html`** in this change
 (also published in-session at

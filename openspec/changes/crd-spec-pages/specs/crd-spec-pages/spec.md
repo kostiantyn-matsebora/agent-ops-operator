@@ -15,6 +15,13 @@ The site SHALL carry one page per CRD under `docs/crds/`, published the same
 way the three adapter contracts were promoted: front matter, a declared
 permalink (`/crds/<kind>/`, lowercase kind), and a nav entry.
 
+**A kind whose CRD declares itself scaffolding is excluded by name** — today
+`ControlPlaneProbe`, which carries no business meaning an adopter could act
+on.
+
+The exclusion SHALL live in the generator, and the check SHALL fail when an
+excluded name matches no CRD, so the exclusion dies with the kind.
+
 Each page SHALL carry, in this order:
 
 1. one or two sentences saying what the kind is for and which kinds reference
@@ -38,6 +45,11 @@ profile is behaviour, a signal STARTS a conversation.
 - **WHEN** a CRD is added to `chart/crds/`
 - **THEN** the change that adds it also adds its page and nav entry, and CI
   fails while the page set and the CRD set disagree
+
+#### Scenario: A scaffolding kind is retired
+
+- **WHEN** an excluded kind is removed from `chart/crds/`
+- **THEN** the check fails until its exclusion entry is removed too
 
 ### Requirement: Field tables are generated, prose is written
 

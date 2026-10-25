@@ -21,7 +21,8 @@ Mockups for all four parts were built and approved in-session:
 
 - **A concise spec page per CRD** on the adopter site, one per kind, each the
   same promotion the three adapter contracts received: front matter, its own
-  permalink, a nav entry. Shape per the approved mockup (tab 3): a commented
+  permalink, a nav entry. `ControlPlaneProbe` is excluded by name — its CRD
+  declares itself disposable scaffolding with no adopter meaning. Shape per the approved mockup (tab 3): a commented
   "spec, at a glance" YAML instance, an "Every field" table, a closing stat
   line. Field tables are generated from `chart/crds/`, prose is hand-written.
 - **`cr-reference.md` is replaced by those pages** and deleted, with its

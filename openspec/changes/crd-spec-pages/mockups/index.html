@@ -518,8 +518,8 @@ metadata:
 spec:
   agent: k8s-engineer          <span class="c"># the agent definition to adopt, from .claude/agents/</span>
   repository:                  <span class="c"># omit this block to run as a pure advisor, no checkout</span>
-    url: https://github.com/org/ops-agents
-    ref: main
+    url: git@example.com:ops/home-lab.git
+    ref: main    
   env:                         <span class="c"># standard Kubernetes env vars, passed through as-is</span>
     - name: LOG_LEVEL
       value: info
