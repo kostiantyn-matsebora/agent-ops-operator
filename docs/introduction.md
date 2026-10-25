@@ -30,7 +30,7 @@ different signals, has two different reaches.
 
 ## Understand the concepts
 
-Thirteen kinds, four clusters — what starts it, the capability shape, the two
+Every kind, four clusters — what starts it, the capability shape, the two
 wiring kinds, what it produces. Every shape is a link to that kind's spec page,
 drawn with the glyph the console uses for it.
 
