@@ -26,9 +26,20 @@ region beneath it:
 
     <!-- generated: example preset=tier1 kind=Pipeline name=k8s-observe -->
 
+A spec page under docs/crds/ carries two more block kinds: its "at a glance"
+instance (every top-level spec field, each with a trailing comment from its
+own CRD description) and its field table (one row per top-level spec field):
+
+    <!-- generated: crd-example kind=Pipeline name=k8s-observe -->
+    <!-- generated: crd-fields kind=Pipeline -->
+
 CI runs this with --check. A rename, a description edit or a chart value change
 fails the build until the pages are regenerated, which is the whole reason to
-generate rather than write.
+generate rather than write. --check also holds the per-CRD spec pages to the
+CRD set itself -- `docs/crds/` must carry exactly one page per kind in
+`chart/crds/` -- and holds the Introduction's domain-model diagram to the
+schemas: every `data-field` an edge label declares must name a field some
+CRD's spec actually has.
 
 Usage:
     python3 .github/scripts/docs-generate.py            # write
@@ -53,7 +64,8 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 CRD_DIR = REPO / "chart" / "crds"
 DOCS = REPO / "docs"
 CHART = REPO / "chart"
-REFERENCE = DOCS / "cr-reference.md"
+CRD_PAGES = DOCS / "crds"
+DOMAIN_MODEL = DOCS / "_includes" / "domain-model.svg"
 STYLESHEET = DOCS / "assets" / "css" / "agentops.css"
 DIAGRAM_DIR = DOCS / "assets" / "img" / "guides"
 COMMAND = "python3 .github/scripts/docs-generate.py"
@@ -354,25 +366,6 @@ BUNDLES = {
     },
 }
 
-# Kinds an adopter writes, in the order the guides teach them. The reference
-# lists these and nothing else -- Conversation and ConversationInput are
-# materialized by the operator, and a reference that invites someone to write
-# one teaches them to fight the reconciler.
-AUTHORED_KINDS = [
-    "AgentProfile",
-    "AgentCapability",
-    "Pipeline",
-    "MCPToolset",
-    "MCPConfig",
-    "SignalSource",
-    "SignalAdapter",
-    "Channel",
-    "ChannelAdapter",
-    "AgentRuntime",
-]
-OPERATOR_KINDS = ["Conversation", "ConversationInput"]
-
-
 # --------------------------------------------------------------------------
 # CRDs
 # --------------------------------------------------------------------------
@@ -444,31 +437,6 @@ def one_line(text: str | None) -> str:
     return collapsed.replace("|", "\\|")
 
 
-def flatten(node: dict, prefix: str = "", required: bool = False) -> list[dict]:
-    """Every field under a schema node, as dotted paths."""
-    rows: list[dict] = []
-    if node.get("type") == "array":
-        node = node.get("items", {})
-        prefix = prefix + "[]"
-    props = node.get("properties") or {}
-    req = set(node.get("required") or [])
-    for name in sorted(props):
-        child = props[name]
-        path = f"{prefix}.{name}" if prefix else name
-        rows.append(
-            {
-                "path": path,
-                "type": type_of(child),
-                "required": name in req,
-                "description": one_line(child.get("description")),
-            }
-        )
-        target = child.get("items", {}) if child.get("type") == "array" else child
-        if (target.get("properties") or {}):
-            rows.extend(flatten(child, prefix=path))
-    return rows
-
-
 # --------------------------------------------------------------------------
 # Templates
 # --------------------------------------------------------------------------
@@ -481,6 +449,9 @@ def first_sentence(text: str) -> str:
     """
     collapsed = " ".join(text.split())
     cut = re.split(r"(?<=[.!?]) +(?=[A-Z(])", collapsed, maxsplit=1)[0]
+    # A semicolon ends the thought too -- the site's writing rules ban them,
+    # and a doc comment's tail clause is detail the first half already carries.
+    cut = cut.split(";", 1)[0].rstrip()
     return cut.rstrip(".")
 
 
@@ -868,59 +839,207 @@ def build_renders(bundle: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# The reference
+# The per-CRD spec pages (the `crd-example` and `crd-fields` markers)
 # --------------------------------------------------------------------------
+#
+# One concise page per kind under docs/crds/, each carrying hand prose and two
+# generated blocks. These replaced cr-reference.md -- a flattened dump of every
+# nested field of every kind, 24 of an AgentProfile's 34 rows being Kubernetes'
+# own EnvVar internals. A spec page shows the TOP-LEVEL spec fields only: the
+# shape an adopter actually types, with the nesting the template renderer
+# already knows how to sketch, and everything deeper left to the page's prose.
 
-def build_reference(schemas: dict[str, dict]) -> str:
-    out: list[str] = []
-    out.append("# Custom resource reference")
-    out.append("")
-    out.append(
-        f"**Generated from `chart/crds/` by `{COMMAND}`. Do not edit.**"
-    )
-    out.append("")
-    out.append(
-        "Every field of every kind, with the type the API server enforces. "
-        "What a field MEANS beyond its own sentence is in "
-        "[concepts.md](concepts.md), and the contracts the adapter and runtime "
-        "kinds serve are in [contracts.md](contracts.md)."
-    )
-    out.append("")
-    out.append(f"API group: `{API_VERSION}`. Every kind is namespaced.")
-    out.append("")
-    out.append("## Kinds")
-    out.append("")
-    out.append("| Kind | You write it | Fields |")
-    out.append("|---|---|---|")
-    for kind in AUTHORED_KINDS + OPERATOR_KINDS:
-        rows = flatten((schemas[kind].get("properties") or {}).get("spec") or {})
-        written = "yes" if kind in AUTHORED_KINDS else "no — the operator does"
-        anchor = kind.lower()
-        out.append(f"| [{kind}](#{anchor}) | {written} | {len(rows)} |")
-    out.append("")
-    for kind in AUTHORED_KINDS + OPERATOR_KINDS:
-        schema = schemas[kind]
-        out.append(f"## {kind}")
-        out.append("")
-        spec = (schema.get("properties") or {}).get("spec") or {}
-        summary = one_line(spec.get("description"))
-        if summary:
-            out.append(summary)
-            out.append("")
-        out.append("### spec")
-        out.append("")
-        out.extend(field_table(flatten(spec)))
-        out.append("")
-        status = (schema.get("properties") or {}).get("status") or {}
-        status_rows = flatten(status)
-        if status_rows:
-            out.append("### status")
-            out.append("")
-            out.append("Written by the operator. Read it, never set it.")
-            out.append("")
-            out.extend(field_table(status_rows))
-            out.append("")
-    return "\n".join(out).rstrip() + "\n"
+def _crd_spec(schemas: dict[str, dict], kind: str | None) -> dict:
+    """One kind's spec schema, or a loud list of the kinds that exist."""
+    if kind not in schemas:
+        known = ", ".join(sorted(schemas))
+        raise SystemExit(f"no CRD kind {kind!r}. In chart/crds/: {known}")
+    return (schemas[kind].get("properties") or {}).get("spec") or {}
+
+
+def _field_rank(req: set[str]):
+    """Required fields first, then alphabetical -- the order a reader fills
+    them in, same as the template renderer's required-first rule."""
+    return lambda name: (name not in req, name)
+
+
+def _strip_lead(name: str, text: str) -> str:
+    """Drop a description's own-field lead (`agent is the agent to adopt`) --
+    the same trim the struct-table rows get, because a comment or a cell that
+    opens by naming the field it sits on says the name twice."""
+    for lead in (f"{name} is ", f"{name} are ", f"{name}: "):
+        if text.lower().startswith(lead.lower()):
+            return text[len(lead):]
+    return text
+
+
+def short_comment(name: str, desc: str | None) -> str:
+    """A description's first sentence as one trailing YAML comment --
+    lowercased like a remark, and cut at a width a code block can carry."""
+    if not desc:
+        return ""
+    s = _strip_lead(name, first_sentence(desc))
+    if len(s) >= 2 and s[0].isupper() and s[1].islower():
+        s = s[0].lower() + s[1:]
+    if len(s) > 72:
+        s = textwrap.shorten(s, width=72, placeholder=" …")
+    return s
+
+
+def build_crd_example(schemas: dict[str, dict], kind: str, name: str) -> str:
+    """One realistic instance of a kind: every top-level spec field, each
+    carrying its own description as a trailing comment, nested shapes sketched
+    by the same renderer the guide templates use."""
+    spec = _crd_spec(schemas, kind)
+    props = spec.get("properties") or {}
+    req = set(spec.get("required") or [])
+    lines = [
+        f"apiVersion: {API_VERSION}",
+        f"kind: {kind}",
+        "metadata:",
+        f"  name: {name}",
+    ]
+    if not props:
+        lines.append("spec: {}")
+        return "\n".join(lines)
+    lines.append("spec:")
+    fields: list[tuple[list[str], str]] = []
+    for fname in sorted(props, key=_field_rank(req)):
+        body = render_node(props[fname], fname, set(props), fname, 2, [], comments=False)
+        # An enum field's placeholder already carries its choices as a trailing
+        # comment -- the choices are what a reader needs there, so the
+        # description yields rather than stacking two comments on one line.
+        comment = "" if "#" in body[0] else short_comment(fname, props[fname].get("description"))
+        fields.append((body, comment))
+    column = min(max((len(b[0]) for b, c in fields if c), default=0) + 2, 44)
+    for body, comment in fields:
+        if comment:
+            body[0] = body[0] + " " * max(column - len(body[0]), 2) + f"# {comment}"
+        lines.extend(body)
+    return "\n".join(lines)
+
+
+def build_crd_fields(schemas: dict[str, dict], kind: str) -> str:
+    """A kind's top-level spec fields as one short table -- name, the type the
+    API server enforces, whether it is required, and the description's first
+    sentence. Nothing unrolled: a nested shape gets one row and the page's own
+    prose, never its every leaf."""
+    spec = _crd_spec(schemas, kind)
+    props = spec.get("properties") or {}
+    req = set(spec.get("required") or [])
+    if not props:
+        return "This kind has no spec fields of its own.\n"
+    out = ["| Field | Type | Required | Meaning |", "|---|---|---|---|"]
+    for name in sorted(props, key=_field_rank(req)):
+        child = props[name]
+        meaning = one_line(_strip_lead(name, first_sentence(child.get("description") or "")))
+        if meaning:
+            meaning = meaning[0].upper() + meaning[1:]
+            if not meaning.endswith((".", "!", "?")):
+                meaning += "."
+        required = "**yes**" if name in req else ""
+        out.append(f"| `{name}` | `{type_of(child)}` | {required} | {meaning} |")
+    return "\n".join(out) + "\n"
+
+
+def kind_slug(kind: str) -> str:
+    """A kind's page name: kebab-case, acronym runs kept whole -- the naming
+    the contract pages already use (`MCPConfig` -> `mcp-config`, beside
+    `channel-adapter.md`)."""
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "-", kind).lower()
+
+
+# Self-declared scaffolding, no adopter meaning -- see the CRD's own
+# description. Excluded from the OWED page set only; the example/field
+# builders still serve the kind if a marker asks.
+SCAFFOLDING_KINDS = {"ControlPlaneProbe"}
+
+
+def check_crd_pages(schemas: dict[str, dict]) -> list[str]:
+    """docs/crds/ and chart/crds/ must name the same adopter-facing kinds,
+    both directions.
+
+    A kind with no page is a kind the site cannot explain, and a page with no
+    kind is a spec for something the API server does not serve. A scaffolding
+    kind is owed NO page, and its exclusion entry must die with the kind.
+    """
+    problems: list[str] = [
+        f"{kind} is excluded but no such CRD exists -- remove it from SCAFFOLDING_KINDS"
+        for kind in sorted(SCAFFOLDING_KINDS - set(schemas))
+    ]
+    owed = {kind_slug(kind): kind for kind in schemas if kind not in SCAFFOLDING_KINDS}
+    if not CRD_PAGES.is_dir():
+        problems.append(
+            f"docs/crds/ does not exist -- every adopter-facing kind in chart/crds/ "
+            f"is owed a spec page there ({len(owed)} kind(s): "
+            f"{', '.join(sorted(owed.values()))})"
+        )
+        return problems
+    pages = {p.stem for p in CRD_PAGES.glob("*.md")}
+    excluded = {kind_slug(kind): kind for kind in SCAFFOLDING_KINDS & set(schemas)}
+    for slug, kind in sorted(owed.items()):
+        if slug not in pages:
+            problems.append(f"kind {kind} has no page -- docs/crds/{slug}.md is missing")
+    for slug in sorted(pages - set(owed)):
+        if slug in excluded:
+            problems.append(
+                f"docs/crds/{slug}.md documents {excluded[slug]}, scaffolding the "
+                f"site excludes -- delete the page"
+            )
+        else:
+            problems.append(
+                f"docs/crds/{slug}.md matches no kind in chart/crds/ -- "
+                f"delete the page, or it describes a kind that is not served"
+            )
+    return problems
+
+
+DATA_FIELD = re.compile(r'data-field="([^"]+)"')
+
+
+def spec_field_names(schemas: dict[str, dict]) -> set[str]:
+    """Every property name appearing anywhere under any kind's spec."""
+    names: set[str] = set()
+
+    def walk(node: dict) -> None:
+        if node.get("type") == "array":
+            node = node.get("items") or {}
+        inner = node.get("additionalProperties")
+        if isinstance(inner, dict):
+            walk(inner)
+        for name, child in (node.get("properties") or {}).items():
+            names.add(name)
+            walk(child)
+
+    for schema in schemas.values():
+        walk((schema.get("properties") or {}).get("spec") or {})
+    return names
+
+
+def check_diagram_fields(schemas: dict[str, dict]) -> list[str]:
+    """Every `data-field` the domain-model diagram labels an edge with must
+    name a field some CRD's spec actually has -- the Introduction keeps its
+    no-reference-detail rule only because the detail it does name is checked.
+
+    The diagram is repo-authored SVG, so a regex read is enough.
+    """
+    if not DOMAIN_MODEL.is_file():
+        print(
+            f"note: {DOMAIN_MODEL.relative_to(REPO)} is absent -- the diagram "
+            f"edge-label check is skipped until the Introduction diagram lands"
+        )
+        return []
+    known = spec_field_names(schemas)
+    problems: list[str] = []
+    for value in DATA_FIELD.findall(DOMAIN_MODEL.read_text()):
+        parts = value.replace("[]", "").split(".")
+        for part in parts:
+            if part not in known:
+                problems.append(
+                    f"{DOMAIN_MODEL.relative_to(REPO)}: data-field={value!r} "
+                    f"names {part!r}, which no CRD spec in chart/crds/ has"
+                )
+    return problems
 
 
 def field_table(rows: list[dict]) -> list[str]:
@@ -1115,18 +1234,31 @@ def generate_block(attrs: dict[str, str], schemas: dict[str, dict]) -> str:
         _emitted.append(yaml_text)
     elif "example" in attrs:
         yaml_text = build_example(attrs["preset"], kind, attrs["name"])
+    elif "crd-example" in attrs:
+        yaml_text = build_crd_example(schemas, kind, attrs.get("name", f"my-{kind.lower() if kind else 'resource'}"))
+        _emitted.append(yaml_text)
+    elif "crd-fields" in attrs:
+        # Table-shaped like `renders` and `struct-table`, so the dispatcher
+        # returns the whole block rather than text to fence as yaml. BOTH
+        # blank lines are load-bearing: kramdown paragraphs the pipes when
+        # the table touches either marker comment -- measured, the closing
+        # comment alone is enough to break it.
+        return "\n" + build_crd_fields(schemas, kind) + "\n"
     elif "renders" in attrs:
         # The one marker whose block is NOT a yaml fence. Everything else here
         # emits a resource; this emits a table, which is why the dispatcher
-        # returns the whole block rather than the text to wrap in one.
-        return build_renders(attrs["bundle"])
+        # returns the whole block rather than the text to wrap in one. Blank
+        # lines for the same kramdown table-adjacency reason as crd-fields.
+        return "\n" + build_renders(attrs["bundle"]) + "\n"
     elif "struct-table" in attrs:
-        # A second table-shaped marker, same reason: it emits a `| Field | ...`
-        # block, not a resource to fence as yaml.
-        return build_struct_table(attrs["file"], attrs["struct"])
+        # A second table-shaped marker, same reasons: it emits a `| Field |`
+        # block, not a resource to fence as yaml, and kramdown needs the
+        # blank lines around it.
+        return "\n" + build_struct_table(attrs["file"], attrs["struct"]) + "\n"
     else:
         raise SystemExit(
-            f"marker declares none of template, example, renders or struct-table: {attrs}"
+            f"marker declares none of template, example, crd-example, "
+            f"crd-fields, renders or struct-table: {attrs}"
         )
     return f"```yaml\n{yaml_text}\n```\n"
 
@@ -1223,7 +1355,7 @@ def main() -> int:
         return 1
 
     schemas = load_crds()
-    produced: dict[pathlib.Path, str] = {REFERENCE: build_reference(schemas)}
+    produced: dict[pathlib.Path, str] = {}
 
     # The guide diagrams, both themes, coloured from the stylesheet's own tokens.
     light, dark = docs_diagrams.palette(STYLESHEET)
@@ -1238,7 +1370,7 @@ def main() -> int:
         produced[out / f"{slug}-light.svg"] = docs_diagrams.render(spec, light)
         produced[out / f"{slug}-dark.svg"] = docs_diagrams.render(spec, dark)
     for path in sorted(DOCS.rglob("*.md")):
-        if "_site" in path.parts or path == REFERENCE:
+        if "_site" in path.parts:
             continue
         text = path.read_text()
         if "<!-- generated:" not in text:
@@ -1274,6 +1406,20 @@ def main() -> int:
         return 1
 
     if args.check:
+        # The spec-page set and the diagram's edge labels are --check-only:
+        # neither is content this script writes, so write mode has nothing to
+        # regenerate for them -- they are owed by hand, and CI is where an
+        # unpaid debt must be named.
+        if page_problems := check_crd_pages(schemas):
+            print("The per-CRD spec pages disagree with chart/crds/:", file=sys.stderr)
+            for problem in page_problems:
+                print(f"  {problem}", file=sys.stderr)
+            return 1
+        if edge_problems := check_diagram_fields(schemas):
+            print("The domain-model diagram names fields no CRD has:", file=sys.stderr)
+            for problem in edge_problems:
+                print(f"  {problem}", file=sys.stderr)
+            return 1
         if stale:
             print("Generated documentation is stale:", file=sys.stderr)
             for path in stale:

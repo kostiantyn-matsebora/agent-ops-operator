@@ -69,7 +69,6 @@ Makefile      text eol=lf
 package-lock.json  text eol=lf linguist-generated=true -diff
 go.sum             text eol=lf linguist-generated=true
 *.tsbuildinfo      text eol=lf linguist-generated=true -diff
-docs/cr-reference.md          text eol=lf linguist-generated=true
 platform/manager/api/v1alpha1/zz_generated.deepcopy.go  text eol=lf linguist-generated=true
 chart/files/crds/*.yaml       text eol=lf linguist-generated=true
 
