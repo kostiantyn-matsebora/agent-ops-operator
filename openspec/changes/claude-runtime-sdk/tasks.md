@@ -14,7 +14,7 @@
 
 ## 3. Split into two components
 
-- [ ] 3.1 Create `runtimes/claude-cli/` as a new directory. Move today's `runtime.js`, `tools.js`, `spin.js`, `report.js` and every one of their test files into it VERBATIM — no behaviour change. Copy today's `runtimes/claude/Dockerfile` unchanged as `runtimes/claude-cli/Dockerfile`
+- [ ] 3.1 Create `runtimes/claude-cli/` as a new directory. COPY today's `runtime.js`, `tools.js`, `spin.js`, `report.js` and every one of their test files into it VERBATIM — no behaviour change. The originals stay in `runtimes/claude/` as the base 3.3 rewrites. Copy today's `runtimes/claude/Dockerfile` unchanged as `runtimes/claude-cli/Dockerfile`
 - [ ] 3.2 Add `runtimes/claude-cli` to `.github/components.sh`'s component map (`runtimes/claude-cli` → `runtime-claude-cli` → `agentops-runtime-claude-cli`) and confirm `.github/components.sh images`/`modules` picks it up
 - [ ] 3.3 In `runtimes/claude/runtime.js`, replace `spawn('claude', …)` with `@anthropic-ai/claude-agent-sdk`'s `query({ prompt: <async generator>, options })`, held open across the pod's work units
 - [ ] 3.4 Read each unit's outcome by consuming the message stream until that turn's `result`. Keep the 2000-character cap and the existing `status`/`exitCode` meanings
