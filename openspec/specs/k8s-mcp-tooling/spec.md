@@ -151,6 +151,11 @@ ClusterRole's read rules, in BOTH `mcpServers.rbac.mode` settings
 (`readonly` and `full`), so the extension does not depend on which mode an
 install runs.
 
+`mcpServers.rbac.mode` is the existing posture of the server's ServiceAccount.
+`mcpServers.readOnly` is the existing flag of the server process. They are
+separate settings and the extension follows neither, so no new mode setting is
+introduced.
+
 Each entry SHALL carry `apiGroups`, `resources`, and `verbs`, in the same
 shape as the chart's existing fixed RBAC rules. The extension SHALL NOT
 apply to any other ServiceAccount this chart renders — it is scoped to this
@@ -159,7 +164,7 @@ one bundle's MCP server identity.
 The render SHALL FAIL, naming the offending entry, when an entry:
 - names a verb outside `get`/`list`/`watch`
 - names `resources: ["secrets"]` under `apiGroups: [""]`
-- names `apiGroups` or `resources` equal to `"*"`
+- has an `apiGroups` or `resources` list that contains `"*"`
 - names `apiGroups: ["rbac.authorization.k8s.io"]`
 - names `apiGroups: ["agentops.dev"]`
 
