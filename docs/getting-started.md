@@ -211,5 +211,6 @@ exits on the idle TTL.
   [Telegram]({{ '/integrations/telegram/' | relative_url }}),
   [Home Assistant]({{ '/integrations/home-assistant/' | relative_url }}).
 - **[Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)**
-  and **[the CR reference](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md)**
+  and **the [per-kind spec pages]({{ '/introduction/' | relative_url }})
+  in the sidebar's CRDs group**
   — every kind, every field, and how tool access resolves.

@@ -80,6 +80,7 @@ spec:
                     to.
                   properties:
                     args:
+                      description: Args are the command's arguments (stdio transport).
                       items:
                         type: string
                       type: array
@@ -216,8 +217,12 @@ spec:
                           ConfigMap key (the env valueFrom idiom). Used for MCP server headers etc.
                         properties:
                           name:
+                            description: Name is the header or variable name the pair
+                              sets.
                             type: string
                           value:
+                            description: Value is the literal value. Set this or ValueFrom,
+                              not both.
                             type: string
                           valueFrom:
                             description: EnvVarSource represents a source for the

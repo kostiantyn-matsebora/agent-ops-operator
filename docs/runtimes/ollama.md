@@ -15,7 +15,8 @@ next:
 ---
 
 **This is a runtime, not an integration.** It starts no work and answers on no
-surface. It is what EXECUTES an agent — and the second one this chart ships.
+surface. It is what EXECUTES an agent — one of the runtimes this chart
+ships.
 
 It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
 2.0.0.
@@ -193,10 +194,12 @@ local. Each Pipeline's `runtimeRef` is the whole decision.
 ### What the bundle renders
 
 <!-- generated: renders bundle=ollama -->
+
 ```text
 # Always
 AgentRuntime/ollama
 ```
+
 <!-- /generated -->
 
 One `AgentRuntime`, named `ollama`, through the parent chart's shared renderer.
@@ -212,5 +215,5 @@ paths. No ServiceAccount, no volume, no credential.
   runtime, for the lanes a vendor's agent suits.
 - [Installation]({{ '/installation/' | relative_url }}) — the runtime defaults
   every runtime inherits, and the storage they share.
-- [`docs/claude.md`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/claude.md)
-  — the reference runtime's page.
+- [Claude]({{ '/runtimes/claude/' | relative_url }}) — the reference
+  runtime, and the one a fresh install runs on.

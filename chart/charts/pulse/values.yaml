@@ -37,7 +37,14 @@ signal:
   name: pulse
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-pulse
-    tag: "0.1.1"
+    # 0.2.0 is BREAKING: the default correlationStrategy folds in the alert's
+    # start time (id+startTime), not just its Pulse-assigned id, so a re-fired
+    # alert id opens a fresh conversation instead of continuing an old one —
+    # see signal.defaultSource.correlationStrategy. Also: a rotated signing
+    # secret now heals the registered webhook on its own, a configured
+    # signingSecret is enforced on every delivery whether or not the adapter
+    # registered the webhook itself, and an unmatched source's 404 names it.
+    tag: "0.2.0"
   resources: {}
   # WHO MAY POST WEBHOOKS HERE, when global.agentops.networkPolicy is on.
   # Raw NetworkPolicyPeer entries, exactly like the parent chart's

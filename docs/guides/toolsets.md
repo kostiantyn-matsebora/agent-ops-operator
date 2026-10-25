@@ -177,7 +177,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   tools:
     - mcp__homeassistant__GetLiveContext
@@ -206,7 +206,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   tools:
     - mcp__homeassistant__HassTurnOn
@@ -250,7 +250,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   servers:
     homeassistant:
@@ -277,7 +277,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -309,7 +309,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-home-assistant
-    helm.sh/chart: "home-assistant-0.2.1"
+    helm.sh/chart: "home-assistant-0.2.2"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -343,7 +343,8 @@ typed by name. `ha-control` has no shell and claims nothing.
 
 1. **[React to signals]({{ '/guides/signal-adapter/' | relative_url }})**
    — originate conversations from a transport nothing here serves yet.
-2. **[MCPToolset and MCPConfig fields](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#mcptoolset)**
+2. **[MCPToolset]({{ '/crds/mcp-toolset/' | relative_url }})
+   and [MCPConfig]({{ '/crds/mcp-config/' | relative_url }}) fields**
    — the full surface of both kinds.
 3. **[Mediate the agent's egress](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/adr/0001-bound-component-reach.md)**
    — when the allowlist is not enough of a wall.

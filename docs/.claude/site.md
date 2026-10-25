@@ -28,7 +28,7 @@ exported diagrams, the console screenshots and the landing recording).
     `eyebrows:` and `stats:` — so a section now renders where the page wrote it,
     and the page can put its own chips between its sentence and its panel set.
   - **There is no diagram block in the layout and no `diagram:` front matter.**
-    The strip is page content, which is what lets the presentation's beats and
+    The strip is page content, which is what lets the picture's alt text and
     the manifest be the page's own words.
 - **`introduction.md` carries no sentence a field rename would break.** That
   belongs in `concepts.md`.
@@ -60,7 +60,7 @@ interchangeable.**
 | Source | Writes | For |
 |---|---|---|
 | `agent-ops.drawio` + `export.py` | `assets/img/agent-ops-{light,dark}.svg` | the page-scale picture the landing page links |
-| `readme-flow.py` | `assets/img/readme-flow-{light,dark}.svg` | the README column |
+| `readme-flow.py` | `assets/img/readme-flow-{light,dark}.svg` | the README column and the landing page's first tab |
 | `threat-model.py` | `assets/img/security/threat-model-{light,dark}.svg` | the security page's trust boundaries |
 
 - **The GUIDE, INTEGRATION, RUNTIME and SECURITY diagrams are not here.** They
@@ -98,34 +98,27 @@ TWO drawio pages, and only one is exported:
 **There WAS a third**, `landing`, compressed to 950px for the landing page's own
 strip, and it is deleted along with its two exports.
 
-- **The landing page carries a DRAWING now** — the same argument built one beat
-  at a time, in real text, scaled to whatever width it is given.
-  - **IT IS ONE FIGURE, AND THE FIGURE IS THE CONTROL.** It had a transport —
-    play button, beat counter, ten scrub dots, progress bar, and a box showing
-    each beat's manifest lines, in two bordered boxes under the picture. That
-    was MORE MACHINERY THAN THE THING IT EXPLAINED. Clicking the drawing pauses
-    it, and nothing else sits below it.
-  - **A REDUCED-MOTION READER GETS THE SAME FIGURE, STILL FROM THE START**,
-    with a `· press to play` caption cue and a matching `aria-label` as the
-    only sign it can be pressed. It never gets a second control and never a
-    second copy of the beats reinserted below it — the reduced-motion branch
-    used to reinsert that list, back when a rail's play button sat beside it
-    as the still's only control. Once the rail was deleted, the reinsertion
-    became a duplicate account of the whole model sitting under a picture
-    that already showed it, with nothing marking either as clickable.
-  - **The caption is IN the drawing**, in a lane reserved to the right of it,
-    vertically tracking whatever the beat lights. Placing it beside the anchor
-    was tried over ten candidate positions and collided on nearly every beat —
-    six boxes, a chip row and seven connectors leave no clear space. Reserving
-    the room is the fix a cost function cannot be, and it costs picture width.
-- **The still had a ceiling the presentation does not.** 950 because the content
-  column is 720 and there is no breakout, so making it fit meant REMOVING
-  ELEMENTS rather than shrinking type, and every attempt to add detail had to
-  pay for it that way.
-- **Keeping it as well would be two statements of one model** that have to
-  agree, one of which nobody would remember to re-export.
+- **The landing page shows the readme-flow PICTURE now** — the same generated
+  drawing the README carries, named once (`readme-flow-light.svg`) and
+  theme-resolved.
+  - **The animated presentation that preceded it is DELETED**, component and
+    all — it restated the drawing one beat at a time, which was a second
+    statement of one model, kept in step by hand.
+  - **Its history is the `landing-presentation` spec's archive**, not this
+    file. The term `ao-presentation` is in the retired vocabulary.
+- **One statement of the model, generated.** A wording change is an edit to
+  `readme-flow.py` and a re-run, and both the README and the landing page
+  pick it up.
 
 ### The site shell
+
+**A nav entry may carry an icon** — today the Integrations and Runtimes
+groups do.
+
+- `_data/nav.yml` names the file from `assets/img/logos/`, never the
+  stylesheet — same rule as the chip sets.
+- The sidebar renders it at `1em` with an empty `alt`, and a themed pair is
+  named by its `-light` file for `themed.js` to resolve.
 
 **Astro Starlight's geometry**, read off that site's own stylesheet and verified
 against it live: BOTH rails 18.75rem, and the leftover SPLIT EVENLY between the

@@ -7,11 +7,11 @@ description: >-
 
 next:
   eyebrow: Reference
-  title: Every field of every kind
+  title: Every AgentRuntime field
   body: >-
-    The generated custom resource reference, and the contracts the adapter and
-    runtime kinds serve.
-  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
+    The kind's own spec page — a commented example and every field, in the
+    sidebar's CRDs group.
+  url: /agent-ops-operator/crds/agent-runtime/
 ---
 
 An **agent runtime** is what actually executes an agent. It is a container image

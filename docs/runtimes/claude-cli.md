@@ -32,7 +32,8 @@ open instead.
 
 ## Why you would pick this over the default
 
-`runtimes/claude` holds one `@anthropic-ai/claude-agent-sdk` session open
+[Claude]({{ '/runtimes/claude/' | relative_url }}) holds one
+`@anthropic-ai/claude-agent-sdk` session open
 in-process across a pod's work units, re-opening it only when the
 session-affecting configuration changes. That is the normal path now.
 
@@ -110,8 +111,10 @@ there on every unit, since no live session is kept.
 ### What the bundle renders
 
 <!-- generated: renders bundle=claude-cli -->
+
 ```text
 # Always
 AgentRuntime/claude-cli
 ```
+
 <!-- /generated -->

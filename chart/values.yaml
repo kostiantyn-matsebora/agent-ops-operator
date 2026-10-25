@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/kostiantyn-matsebora/agentops-manager
-  tag: 0.60.0
+  tag: 0.61.0
 
 # How many manager pods run at once. Safe above 1 now (durable-chat-ops-broker):
 # the Conversation reconciler claims an ensure-topic op on the Conversation CR
@@ -850,7 +850,9 @@ console:
     # The corner: a graph inside an inactive tab measured a 0x0 host, fitted to
     # it, and clamped to minimum zoom for good. The fit now waits for a host
     # with a size, so it works in a tab, a drawer, or wherever one lands next.
-    tag: 0.39.1
+    # 0.40.0: a send carrying no thread id now surfaces on the channel's
+    # general feed instead of completing as success with nothing to show.
+    tag: 0.40.0
   # Browser-facing port; the reconciler owns the Service and injects LISTEN_ADDR.
   port: 8080
   write:
@@ -1413,7 +1415,7 @@ reaper:
     name: reaper-cron
     image:
       repository: ghcr.io/kostiantyn-matsebora/agentops-signal-cron
-      tag: 0.2.1
+      tag: 0.2.2
     resources: {}
   # The SignalSource the scheduled tick posts to — claimed on the
   # chart-rendered Coordinator's own signalSourceRefs (design D-E), never on

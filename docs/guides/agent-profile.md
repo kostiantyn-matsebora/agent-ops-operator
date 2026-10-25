@@ -173,7 +173,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-kubernetes
-    helm.sh/chart: "kubernetes-0.4.0"
+    helm.sh/chart: "kubernetes-0.4.1"
 spec:
   # Behaviour only — no repository, and no capabilities. What this agent may DO
   # comes from the Pipelines routing it: the bundle's own wiring component when
@@ -257,5 +257,5 @@ one of those is on the Pipeline that routes to it.
    and get the deploy key right.
 2. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})**
    — so it can do more than talk.
-3. **[Every AgentProfile field](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#agentprofile)**
+3. **[Every AgentProfile field]({{ '/crds/agent-profile/' | relative_url }})**
    — environment for the agent process, prompts, resources.

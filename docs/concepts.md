@@ -1,6 +1,9 @@
 # Concepts
 
-The full CRD reference, and how an agent's capabilities are resolved.
+The model behind the kinds, and how an agent's capabilities are resolved.
+Field-by-field, every kind's single source of truth is its own
+[spec page](crds/pipeline.md) under CRDs — this chapter says how the kinds
+work together.
 
 ## The kinds
 
@@ -108,7 +111,7 @@ just stops being a second door to the API.
 exists so the runtime is swappable. Derive one:
 
 ```dockerfile
-FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.11.0
+FROM ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.12.0
 USER root
 RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/<ver>/bin/linux/amd64/kubectl \
  && chmod 0755 /usr/local/bin/kubectl
@@ -299,37 +302,17 @@ bounded.
 - **Only an admitted `initiationId` writes.** A suppressed re-delivery — the
   high-volume case cooldown exists for — writes nothing.
 
-**`spec.attributeFilters` narrows which signals this source admits**, a list
-of `key`/`operator`/`values` requirements shaped like a Kubernetes
-`matchExpressions` entry (`In`, `NotIn`, `Exists`, `DoesNotExist`), evaluated
-against the normalized signal's `labels`.
-
-- A signal must satisfy EVERY requirement to be admitted. Failing any one
-  drops it before cooldown is consulted and before any pipeline sees it — a
-  filtered signal spends no cooldown state and is never counted received.
-- Empty or unset admits everything, identical to today's behavior.
-- An unknown `operator` is rejected by the API server at creation, not
-  silently ignored at ingest.
-
-**`spec.logFiltered`** (nullable, default `true`) governs only whether a
-filtered-out signal is still recorded as a `signal.dropped` activity event.
-Set `false` to silence a known-noisy filter — every other drop reason keeps
-logging regardless of this field.
+**`spec.attributeFilters` narrows which signals this source admits** —
+requirements shaped like a Kubernetes `matchExpressions` entry, evaluated
+against the signal's `labels`. The filter grammar, the shipped adapters'
+label vocabulary and `spec.logFiltered` are the
+[SignalSource spec page](crds/signal-source.md)'s.
 
 **Signal labels are opaque context, carried onto the conversation and its
 topic descriptor** — never a correlation key. What an adapter emits shapes
 display, not routing.
 
-| Vocabulary | Keys |
-|---|---|
-| Shared | `alertgroup`, `alertname`, `namespace`, `severity`, `source` |
-| Kubernetes events adapter adds | `kind`, `name`, **`workload`** (the owning controller, e.g. `Deployment/api`, resolved through owner references), `node`, plus the involved pod's own labels |
-
-**Adapter-defined keys are reserved.** A pod label named `name` or `workload`
-is never allowed to overwrite one, so a signal's own identifying context stays
-legible regardless of what the underlying object happens to carry.
-
-**`severity` here is a LABEL, unrelated to the normalized signal's own
+**A `severity` LABEL is unrelated to the normalized signal's own
 `severity` FIELD.** A posted signal may additionally carry a `severity`
 field, one of exactly `critical`, `error`, `warning`, `info`.
 
@@ -342,8 +325,8 @@ conversation's `SignalProvenance` at creation, and again on each
 the provenance.
 
 No shipped adapter populates it. `signals/k8s-events` and `signals/ha` keep
-writing their own `severity` **label**, shown in the table above, exactly
-as before.
+writing their own `severity` **label**, part of the vocabulary the
+[SignalSource spec page](crds/signal-source.md) lists, exactly as before.
 
 **Suppression is the adapter's job, and is distinct from correlation.** It
 decides whether a signal is emitted at all — see
@@ -432,16 +415,11 @@ them is configuration, and none grants anything.
 | `spec.credentialKeys[]` | the Secret keys it expects in a served CR's `credentialsSecretRef` | people. The manager reads no Secrets, so it can never verify them |
 | `spec.externals[]` | each system outside the install the implementation faces, as a `name` and a `kind` | the console's topology, which draws each one beside the adapter, verbatim |
 
-**`externals[].kind` is a closed set**, enforced by the API server:
-
-| `kind` | The adapter meets it as |
-|---|---|
-| `sender` | a system that pushes to the adapter — Alertmanager, a browser |
-| `api` | a system the adapter calls — the Telegram Bot API |
-| `kubernetes` | the cluster's own API |
-
-`name` is the system as a reader knows it, 1 to 63 characters, and unique
-within the list.
+**`externals[].kind` is a closed set**, enforced by the API server — the
+three values and each field's meaning are the
+[ChannelAdapter](crds/channel-adapter.md) and
+[SignalAdapter](crds/signal-adapter.md) spec pages'. `name` is the system
+as a reader knows it, unique within the list.
 
 **`externals` is metadata only, and nothing verifies it.**
 
@@ -560,16 +538,9 @@ before the upgrade still reaches the agent it was parsed with.
 ### AgentCapability
 
 **A named capability, declared once.** A Pipeline or a Coordinator references
-it with `capabilityRef` instead of inlining the same six fields.
-
-| Field | Selects |
-|---|---|
-| `profileRef` | the agent it answers as |
-| `runtimeRef` | the `AgentRuntime` that executes it |
-| `serviceAccountName` | the identity the runtime runs under |
-| `toolsets` | `MCPToolset` refs and the `merge` or `overwrite` mode |
-| `mcpConfigs` | `MCPConfig` refs, later wins per server key |
-| `persistence` | where its conversations keep context and workspace |
+it with `capabilityRef` instead of inlining the same six fields — profile,
+runtime, identity, toolsets, MCP configs and persistence, each row of which
+is the [AgentCapability spec page](crds/agent-capability.md)'s.
 
 - **It carries no wiring.** No signal sources and no channels, so one nothing
   references is inert.
@@ -670,7 +641,7 @@ nothing" a claim no single file checks.
 global:
   agentops:
     runtimeDefaults:
-      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.11.0
+      image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.12.0
       contextStorage: volume      # does this backend use a disk at all
       idleTtlMinutes: 1
       nodeSelector: {}

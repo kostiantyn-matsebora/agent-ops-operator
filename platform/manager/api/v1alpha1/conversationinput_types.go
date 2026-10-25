@@ -6,11 +6,16 @@ import (
 
 // ConversationInputSpec carries a large out-of-line work-unit payload.
 type ConversationInputSpec struct {
+	// ConversationRef names the Conversation this input queues into.
 	ConversationRef ObjectRef `json:"conversationRef"`
-	Type            InputType `json:"type"`
-	Payload         string    `json:"payload"`
-	// Labels are the originating signal's labels, kept beside the payload
-	// rather than on the Conversation: they are per-input, they can be numerous,
+	// Type says what kind of input this is, which decides how it is
+	// dispatched.
+	Type InputType `json:"type"`
+	// Payload is the input's full text, out-of-line so a bulky work unit
+	// never bloats the Conversation object itself.
+	Payload string `json:"payload"`
+	// Labels are the originating signal's labels, kept per-input beside
+	// the payload. They are not on the Conversation: they can be numerous,
 	// and this object exists precisely to hold the bulky half of an input.
 	//
 	// They travel so an adapter can RENDER them — a label table, a chip row, or
@@ -20,7 +25,7 @@ type ConversationInputSpec struct {
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 	// Severity is the originating signal's own severity rating for this
-	// occurrence, kept per-input the same way Labels is — each recurrence
+	// occurrence. Kept per-input the same way Labels is: each recurrence
 	// keeps its own, never retroactively rewriting the provenance. Omitted
 	// wherever the originating signal carried none.
 	// +optional

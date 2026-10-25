@@ -34,7 +34,10 @@ channelAdapter:
     # gateway): every Bot API call is relayed through gateway-telegram's
     # POST /telegram/call/{method} instead, authenticated with the
     # gatewayUrl/gatewayToken binding rather than a bot token.
-    tag: 0.26.1
+    # 0.26.2: the in-process retry budget is now per OPERATION, not per
+    # transport call, so a chunked or multi-call send can no longer exceed
+    # the manager's reclaim window and double-post.
+    tag: 0.26.2
   # Port the router pushes topic updates to. The reconciler owns Service
   # agentops-adapter-<name> and injects LISTEN_ADDR.
   port: 8080
@@ -47,7 +50,7 @@ signalAdapter:
   name: telegram
   image:
     repository: ghcr.io/kostiantyn-matsebora/agentops-signal-telegram
-    tag: 0.6.6
+    tag: 0.6.7
   # Port the router pushes general-surface updates to.
   port: 8080
   resources: {}

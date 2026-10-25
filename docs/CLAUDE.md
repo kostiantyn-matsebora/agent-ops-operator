@@ -13,8 +13,9 @@ path. Plugins are limited to the set Pages enables by default.
 
 | Page | Owns |
 |---|---|
-| `index.md` | the name, the essence sentence, two actions, the tab strip (the drawing, the recording, the manifest), `What agent-ops is` and `What it gives you` as tile sets, the console strip, paths onward |
-| `introduction.md` | the model — two sections, concepts and guides, no reference detail |
+| `index.md` | the name, the essence sentence, two actions, the tab strip (the flow picture, the recording, the manifest), `What agent-ops is` and `What it gives you` as tile sets, the console strip, paths onward |
+| `introduction.md` | the model — two sections, concepts and guides, no reference detail. Concepts is the domain-model diagram, every kind linking its spec page |
+| `crds/<kind>.md` | one CRD each: hand prose around the generated `crd-example` and `crd-fields` blocks, permalink `/crds/<kind>/` |
 | `getting-started.md` | the read-only DEMO walkthrough, console-first |
 | `console-guide.md` | what the console is FOR: its views, and the authentication decision |
 | `security.md` | the THREAT MODEL — trust boundaries, the flows that cross them, the control on each, the platform's own posture and the residual risk. **No values table, no default, no control YAML**: those are `installation.md`'s |
@@ -66,14 +67,16 @@ path. Plugins are limited to the set Pages enables by default.
     prose, and points everything else at the chart's own `values.yaml`.
     `kubernetes`/`prometheus`/`home-assistant`/`pulse` all carried both once
     and were cut to the same shape `installation.md` was (775 lines to 204).
-    The `renders` marker stays for `cr-reference.md`, `guides/` and
+    The generated blocks stay for `guides/`, `crds/` and
     `runtimes/<vendor>.md` — pages that ARE reference pages.
   - **A RUNTIME IS NOT AN INTEGRATION.** A runtime is what EXECUTES an agent,
     not a seam a Pipeline wires, and three of the four questions would be
     blank. It has a page KIND of its own, `runtimes/<vendor>.md`, in the
     Runtimes nav group, answering its own four: what it executes, what it
-    needs, where its context lives, what it costs. `runtimes/ollama.md` is the
-    first, `runtimes/copilot.md` the second. `docs/claude.md` stays a reference page until a change moves it.
+    needs, where its context lives, what it costs. Every shipped runtime has
+    one — `claude` (the reference runtime, first in the group), `claude-cli`,
+    `ollama`, `copilot`. `docs/claude.md` is deleted — `runtimes/claude.md`
+    took its content, exactly as the spec pages took `cr-reference.md`'s.
   - **The `renders` marker applies to a runtime bundle too.** It has no
     sub-components, so the whole of it is the generator's "Always" row.
   - **A page states no exhaustive values.** `helm show values` is the list, and
@@ -111,9 +114,18 @@ path. Plugins are limited to the set Pages enables by default.
     per-extension-point contract rewritten to a versioned spec, so each
     carries front matter and a "Specifications" nav entry — see
     `.claude/site.md`.
-- **`cr-reference.md` is GENERATED and is one of those reference pages.** Every
-  field of every kind, written by `.github/scripts/docs-generate.py` from
-  `chart/crds/`. Never edit it, and never give it a nav entry.
+- **`crds/<kind>.md` is one page per CRD, its blocks GENERATED.** Hand prose
+  around `crd-example` and `crd-fields` blocks that
+  `.github/scripts/docs-generate.py` writes from `chart/crds/`. The page set
+  is CHECKED both directions, `ControlPlaneProbe` excluded by name as
+  scaffolding. `cr-reference.md` is deleted — these pages replaced it.
+  - **The page alone must be enough to write the CR.** `crd-fields` unrolls
+    nested shapes as dotted paths, each enum and default on its row, and a
+    value vocabulary the schema cannot state (filterable labels, an opaque
+    `config`'s shape) is said in the page's hand prose.
+  - **The spec page is the single source of truth for a kind's fields.**
+    Another page needing field detail references `crds/<kind>.md` rather
+    than restating it — `concepts.md` keeps the model, never the field list.
   - **The `yaml` blocks in `guides/` come from the same run** — the resource
     templates from the CRDs, the worked examples from `helm template`.
   - **What a BUNDLE RENDERS comes from the same run** —
@@ -262,12 +274,11 @@ style, no script in a page.
 | `{: .ao-callout}` | a blockquote that EMPHASISES. The plain one is an ASIDE in `--ao-text-subtle`, so rendering a load-bearing claim in it puts a footnote where the weight belongs |
 | `{: .ao-tabs}` | a list becomes tabbed panels, each item's leading bold phrase the label. With no script it stays the labelled list, so every word and image lives in the page |
 | `{: .ao-icon-*}` | a kind glyph on a card title, copied from the console |
-| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the drawing `{: .ao-presentation}` builds |
+| `{: .ao-diagram}` | an exported drawing inside a panel. Below the measure it scrolls in its own frame rather than shrinking its labels. The landing page shows none — its model is the readme-flow picture in the tab strip |
 | `{: .ao-demo}` | on a LINK whose target is a recording and whose content is the poster image, it becomes a player. With no script it stays the poster, linking to the file |
 | `{: .ao-chipsets}` | a list of GROUPS becomes labelled chip rows — each item's leading bold phrase is the label, its nested list the chips. A chip may carry an ordinary markdown image, and the PAGE names that file. With no CSS it stays a labelled list of names |
 | `{: .ao-actions}` | a list of LINKS becomes the hero's actions, under the page's opening sentence. Two at most — what a convinced reader does next, and what a nearly-convinced one does. The first is solid, the second quiet |
 | `{: .ao-claims}` | a list becomes claim chips under the page's opening sentence. A claim may carry a mark the PAGE names. **THE LANDING PAGE USES NONE** — six of them bracketed the drawing and were what a reader met before the product |
-| `{: .ao-presentation}` | an ORDERED list becomes the drawing: one item per beat, the item's text its caption. The THEME supplies the drawing, the timing and the caption's lane, and it names no integration mark. **THE FIGURE IS THE CONTROL** — clicking it pauses, and there is no transport: the play button, beat counter, ten scrub dots, progress bar and per-beat manifest box are DELETED, having been more machinery than the drawing they explained. The caption sits in a reserved lane inside the stage, tracking whatever the beat lights. **A REDUCED-MOTION READER GETS THE SAME FIGURE, PAUSED FROM THE START**, with a `· press to play` caption cue and a matching `aria-label` as the only sign it can be pressed — never a second control, and never the beat list duplicated below it. With no script it stays the beats in order, each with its own lines |
 | `{: .ao-areas}` | a two-column table of areas of use, the left column a name and its mark, the right what happens there. Below the measure the two columns become two lines |
 | `{: .ao-console-strip}` | a blockquote becomes the full-width strip under that table — a mark, one lead line, one paragraph and a list of tags |
 | `next:` in front matter | the what-next card (eyebrow / title / body / url) at the foot of the on-this-page rail. A page declaring none gets no card |
@@ -339,12 +350,12 @@ awk 'FNR==1{fm=0;b=0;n=0}
       if (t ~ /;/) printf "%s:%d SEMICOLON\n", FILENAME, FNR}
      /^\|/||/^[0-9]+\./||/^[-*] /||/^ /||/^>/{next}
      /^$/{if(n>45)printf "%s:%d LONG PARAGRAPH (%d words)\n",FILENAME,s,n;n=0;next}
-     {if(n==0)s=FNR;n+=NF}' $(ls docs/*.md docs/guides/*.md | grep -v cr-reference)
+     {if(n==0)s=FNR;n+=NF}' $(ls docs/*.md docs/crds/*.md docs/guides/*.md)
 ```
 
-**`cr-reference.md` is excluded, and it is the only exclusion.** Its prose is
-CRD doc comments, so a semicolon there is a Go source file's and the fix belongs
-in `platform/manager/api/v1alpha1/`, not in a generated page.
+**No page is excluded.** A generated table cell trims its sentence at the
+first semicolon, so a CRD doc comment's `;` never reaches a page — the full
+sentence stays in `platform/manager/api/v1alpha1/` where it is Go's.
 
 **This file is the only place it is written out.** The root `CLAUDE.md` used to
 carry a second copy, and the two drifted — one was fixed and the other was not.

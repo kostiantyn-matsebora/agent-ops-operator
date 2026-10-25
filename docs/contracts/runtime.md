@@ -8,11 +8,11 @@ description: >-
 
 next:
   eyebrow: Reference
-  title: Every field of every kind
+  title: Every AgentRuntime field
   body: >-
-    The generated custom resource reference, and the contracts the adapter and
-    runtime kinds serve.
-  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
+    The kind's own spec page — a commented example and every field, in the
+    sidebar's CRDs group.
+  url: /agent-ops-operator/crds/agent-runtime/
 ---
 
 **Version 2.0.0**
@@ -62,6 +62,7 @@ Long-polls for this conversation's next work unit.
 ### Work unit
 
 <!-- generated: struct-table file=platform/manager/internal/dispatch/dispatch.go struct=WorkUnit -->
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `runId` | `string` | **yes** | A unique id for this unit, echoed back in the completion report. |
@@ -77,6 +78,7 @@ Long-polls for this conversation's next work unit.
 | `allowedTools` | `string` |  | The wiring's half of the tool allowlist, comma-separated. |
 | `toolsMode` | `string` |  | "merge" or "overwrite", directing how `allowedTools` composes with the agent definition's own declared tools. |
 | `maxTurns` | `integer` |  | The profile's turn budget for this run, when set. |
+
 <!-- /generated -->
 
 `resumeSessionId` is **deprecated** — the former name of `runtimeContextId`,
@@ -113,6 +115,7 @@ Reports a run's outcome and closes out the inflight unit.
 ### Completion report
 
 <!-- generated: struct-table file=platform/manager/internal/httpapi/server.go struct=workDone -->
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `convo` | `string` | **yes** | The Conversation this report is for. |
@@ -127,6 +130,7 @@ Reports a run's outcome and closes out the inflight unit.
 | `brief` | `string` |  | What the runtime extracted as this conversation's one- or two-sentence description (design D-I) — a contract field, never a parsed section of `result`. |
 | `turns` | `[]Turn` |  | One entry per model call this run made, bounded in count and field size (workreport.go). |
 | `toolCalls` | `[]ToolCall` |  | One entry per tool call this run made, bounded in count and field size (workreport.go). |
+
 <!-- /generated -->
 
 `sessionId` is **deprecated** — the former spelling of `runtimeContextId`,
@@ -135,6 +139,7 @@ accepted for one release.
 #### Turns
 
 <!-- generated: struct-table file=platform/manager/internal/httpapi/workreport.go struct=Turn -->
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `model` | `string` |  | The model the call went to, as the runtime names it. |
@@ -143,17 +148,20 @@ accepted for one release.
 | `cacheReadTokens` | `integer` |  | The part of `tokensIn` served from the provider's prompt cache. |
 | `cacheCreationTokens` | `integer` |  | The part of `tokensIn` written INTO the provider's prompt cache by this call — where a cache a later turn reads was made. |
 | `stopReason` | `string` |  | Why the model stopped: end of turn, tool use, max tokens. |
+
 <!-- /generated -->
 
 #### Tool calls
 
 <!-- generated: struct-table file=platform/manager/internal/httpapi/workreport.go struct=ToolCall -->
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `tool` | `string` | **yes** | The tool's name in the agent-ops vocabulary: `Bash`, `Read`, or `mcp__<server>__<tool>`. |
 | `server` | `string` |  | The MCP server the call reached. |
 | `durationMs` | `integer` |  | The wall time from the call to its result. |
 | `resultBytes` | `integer` |  | The size of the result the tool returned. |
+
 <!-- /generated -->
 
 | ID | Requirement |

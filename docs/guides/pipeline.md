@@ -320,7 +320,7 @@ metadata:
   namespace: agent-ops
   labels:
     app.kubernetes.io/name: agentops-kubernetes
-    helm.sh/chart: "kubernetes-0.4.0"
+    helm.sh/chart: "kubernetes-0.4.1"
 spec:
   # Display only: how this route is recognised in a chat command menu or the
   # console's typeahead. Nothing routes on it.
@@ -360,5 +360,5 @@ do.
    — when none of the installed agents is the one you want.
 2. **[Give your agent tools]({{ '/guides/toolsets/' | relative_url }})**
    — declare new toolsets and MCP servers to bind here.
-3. **[Every Pipeline field](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#pipeline)**
+3. **[Every Pipeline field]({{ '/crds/pipeline/' | relative_url }})**
    — the icon, and the full shape of each ref stanza.

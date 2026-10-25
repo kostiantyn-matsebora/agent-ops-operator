@@ -137,7 +137,8 @@ spec:
               capabilityRef:
                 description: |-
                   AgentRef (`capabilityRef` in JSON) names an AgentCapability holding the
-                  coordinating agent's capability INSTEAD of inlining it above.
+                  coordinating agent's capability INSTEAD of inlining it above — mutually
+                  exclusive with the inline fields by CEL.
                 properties:
                   name:
                     description: Name of the referenced object.
@@ -148,8 +149,9 @@ spec:
                 type: object
               channelRefs:
                 description: |-
-                  ChannelRefs are the surfaces a conversation this Coordinator opens
-                  binds at creation, unconditionally — see the type doc comment.
+                  ChannelRefs are the surfaces a ROOT conversation this Coordinator
+                  opens binds at creation — reached only when the root escalates, and
+                  never bound by a caused member.
                 items:
                   description: ObjectRef references another object by name (same namespace).
                   properties:

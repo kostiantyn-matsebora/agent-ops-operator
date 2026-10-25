@@ -8,10 +8,30 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
-## [Unreleased]
+## [18.0.0] — 2026-10-25
+
+- `manager` 0.61.0, `console` 0.40.0, `runtime-claude` 0.12.0,
+  `runtime-claude-cli` 0.1.0 (new), `runtime-copilot` 0.2.1,
+  `runtime-ollama` 0.1.3.
+- `signal-alertmanager` 0.8.1, `signal-pulse` 0.2.0, `signal-ha` 0.4.3,
+  `signal-k8s-events` 0.5.1, `signal-cron` 0.2.2, `signal-telegram` 0.6.7,
+  `channel-telegram` 0.26.2.
+- Bundles `prometheus` 0.2.2, `pulse` 0.2.0, `home-assistant` 0.2.2,
+  `kubernetes` 0.4.1, `telegram` 0.5.2 — each ships the signal adapter it
+  embeds, above. `claude-cli` 0.1.0 joins `claude`/`ollama`/`copilot` as a
+  fourth optional runtime bundle.
 
 ### Added
 
+- The adopter site carries a spec page per CRD under `/crds/<kind>/` — hand
+  prose around a generated example instance and field table, with a CRDs
+  sidebar group. The Introduction presents the model as a domain-model
+  diagram, every kind on it linking its spec page. Sidebar groups are
+  collapsible, the current page's group open.
+- A published page for the reference runtime at `/runtimes/claude/`, first
+  in the Runtimes sidebar group — the SDK bundle a fresh install runs on,
+  beside the `claude-cli` compatibility bundle's page. The Integrations and
+  Runtimes sidebar entries carry their marks.
 - A normalized signal may carry an optional `severity` field — one of
   `critical`, `error`, `warning`, `info`. `POST /signal/inbound` validates
   it and refuses an unknown value with a `400` naming the four accepted
@@ -72,6 +92,16 @@ served by `signal-pulse` gains `spec.config.correlationStrategy`, `"id"` or
 Pulse can reuse an alert id for what it calls a new occurrence. The new
 default, `"id+startTime"`, opens a fresh conversation for that re-fire
 instead of continuing an old one.
+
+### Removed
+
+- `docs/cr-reference.md` — the per-kind spec pages under `/crds/` replaced
+  it. Every in-repo pointer moved with it.
+- `docs/claude.md` — the published page at `/runtimes/claude/` replaced it.
+  Every in-repo pointer moved with it.
+- The landing page's animated presentation and its `ao-presentation` theme
+  component. The "How it works" tab shows the generated readme-flow picture
+  the README already carries.
 
 ### Fixed
 
@@ -857,50 +887,11 @@ Twelve components moved to versions built from that tree:
 **No behaviour changes.** `runtime-ollama` 0.1.0 was already built on Go 1.25
 and scanned clean, so it is unchanged.
 
-## [13.1.0] — 2026-08-26
-
-**A second runtime: `agentops-runtime-ollama` 0.1.0, shipped as the `ollama`
-bundle.** A local-model runtime over an Ollama endpoint you already run.
-
-The RUNTIME is the harness here — the agent loop, tool dispatch, the
-transcript and the context handle are its own. Ollama is called only for
-the next message.
-
-Building it needed no manager, CRD or work-contract change, which is the
-finding: the contract is vendor-neutral.
-
-### Added
-
-- `chart/charts/ollama/` — OFF by default. `ollama.enabled: true` with
-  `ollama.endpoint` and `ollama.model` renders one `AgentRuntime` named
-  `ollama` through the parent's shared renderer, inheriting
-  `global.agentops.runtimeDefaults`. A route selects it with
-  `pipelines[].runtimeRef: ollama`. The bundle deploys no model server, and
-  the render FAILS naming the key when the endpoint is missing. The model is
-  optional while the server has exactly one pulled.
-- The runtime implements the six built-in tools natively — `Read`, `Grep`,
-  `Glob`, `Edit`, `Write`, `Bash` — so `agentops-observe` / `-shell` / `-edit`
-  mean the same thing on both runtimes, connects the bound MCP servers from the
-  same `mcp.json`, and keeps context as one transcript per conversation under
-  `$HOME/.agentops/contexts/`, declared to `context-sync` by the bundle.
-- `docs/runtimes/ollama.md`, and the Ollama chip on the landing page.
-
-- **Every runtime has its own name, and `default` is a copy.** The claude
-  bundle's CR is now named `claude`, the ollama one `ollama`, and the parent
-  renders one more `AgentRuntime` named `default` — a copy of the runtime
-  flagged `default: true` (`claude.default`, `ollama.default`,
-  `runtimes[].default`), or of the first configured when none is. So a fresh
-  install is unchanged (`default` is claude's copy), turning claude off and
-  ollama on needs no rename, and `runtimeRef: claude` now works. Two flags fail
-  the render. A `Pipeline` naming `runtimeRef: default` keeps resolving.
-
-**Nothing changes for an install that does not enable the bundle.** The
-rendered manifest is identical.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-13.1.0.md](changelog/CHANGELOG-13.1.0.md) | chart 13.1.0 |
 | [CHANGELOG-13.0.1.md](changelog/CHANGELOG-13.0.1.md) | chart 13.0.1 |
 | [CHANGELOG-13.0.md](changelog/CHANGELOG-13.0.md) | chart 13.0.0 |
 | [CHANGELOG-11.0-12.0.md](changelog/CHANGELOG-11.0-12.0.md) | chart 11.0.0 through 12.0.0 |
