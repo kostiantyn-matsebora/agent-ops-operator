@@ -399,6 +399,51 @@ export interface Detail {
   resolvedError?: string
 }
 
+// ---- signals -------------------------------------------------------------
+//
+// The console's read of Signal.spec/.status (platform/manager/api/v1alpha1/
+// signal_types.go), verbatim — there is no BFF projection for this kind's
+// own shape, unlike Detail's generic fields above. A Signal's `object.spec`
+// and `object.status` on a Detail carry exactly these, passed through by the
+// kube API untouched, so this file's job is only to NAME the shape the
+// generic `K8sObject.spec`/`.status` (typed `unknown`) actually holds here.
+
+export type SignalPhase = 'Pending' | 'Routed' | 'PartiallyRouted' | 'Dropped' | 'Failed'
+export type SignalDropReason = 'unclaimed' | 'cooldown' | 'overflow' | 'capacity'
+export type ClaimantKind = 'Pipeline' | 'Coordinator'
+export type ClaimantState = 'Routing' | 'Routed' | 'Failed' | 'Skipped'
+
+export interface SignalClaimant {
+  ref: { kind: ClaimantKind; name: string }
+  state: ClaimantState
+  /** Set once `state` is `Routed`. */
+  conversationRef?: { name: string }
+  /** Set for `Failed`/`Skipped`, verbatim from the manager — never paraphrased. */
+  reason?: string
+}
+
+export interface SignalSpecWire {
+  sourceRef: { name: string }
+  adapter: string
+  initiationId: string
+  kind?: string
+  title?: string
+  severity?: string
+  labels?: Record<string, string>
+  reader?: string
+  payload?: string
+  occurrences?: number
+}
+
+export interface SignalStatusWire {
+  phase?: SignalPhase
+  /** Set only alongside `phase: 'Dropped'`. */
+  reason?: SignalDropReason
+  /** Snapshotted once at the first routing attempt — empty while Pending or Dropped. */
+  claimants?: SignalClaimant[]
+  firstAttemptAt?: string
+}
+
 // ---- conversations -----------------------------------------------------------
 
 export interface ThreadBinding {

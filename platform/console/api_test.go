@@ -487,7 +487,10 @@ func TestInventoryColumnsCoverEveryKind(t *testing.T) {
 	toolset := obj("mcptoolsets", "ts", "1", `{"tools":["Read","Bash(git:*)"]}`, "{}")
 	mcpConfig := obj("mcpconfigs", "mc", "1", `{"servers":{"z-server":{},"a-server":{}}}`, "{}")
 	convo := obj("conversations", "c", "1", `{"profileRef":{"name":"prof"}}`, `{"phase":"Working"}`)
-	api, _, _ := apiUnderTest(t, "tok", pipeline, profile, channelAdapter, runtime, toolset, mcpConfig, convo)
+	signal := obj("signals", "sig1", "1",
+		`{"sourceRef":{"name":"cluster-events"},"adapter":"k8s-events","initiationId":"abc-123","occurrences":3}`,
+		`{"phase":"PartiallyRouted"}`)
+	api, _, _ := apiUnderTest(t, "tok", pipeline, profile, channelAdapter, runtime, toolset, mcpConfig, convo, signal)
 	h := api.Handler(http.NotFoundHandler())
 
 	columns := func(kind string) map[string]string {
@@ -520,6 +523,10 @@ func TestInventoryColumnsCoverEveryKind(t *testing.T) {
 	}
 	if c := columns("conversations"); c["phase"] != "Working" || c["profile"] != "prof" {
 		t.Fatalf("conversations columns: %+v", c)
+	}
+	if c := columns("signals"); c["source"] != "cluster-events" || c["initiationId"] != "abc-123" ||
+		c["phase"] != "PartiallyRouted" || c["occurrences"] != "3" || c["reason"] != "" {
+		t.Fatalf("signals columns: %+v", c)
 	}
 }
 

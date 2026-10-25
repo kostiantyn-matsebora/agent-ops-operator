@@ -356,6 +356,9 @@ func TestSummaryLinePerKind(t *testing.T) {
 		{"agentcapabilities", `{"profileRef":{"name":"ops"}}`, "", "profile ops"},
 		{"agentcapabilities", `{}`, "", ""},
 		{"coordinators", `{"agents":[{"name":"a"},{"name":"b"}]}`, "", "2 agents"},
+		{"signals", `{}`, `{"phase":"PartiallyRouted"}`, "partiallyrouted"},
+		{"signals", `{}`, `{"phase":"Dropped","reason":"cooldown"}`, "dropped (cooldown)"},
+		{"signals", `{}`, `{}`, ""},
 		{"unknown", `{}`, "", ""},
 	}
 	for _, c := range cases {

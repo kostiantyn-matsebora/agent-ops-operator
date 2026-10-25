@@ -16,6 +16,8 @@ import { Yaml } from '../components/Yaml'
 import { ConditionChips, HealthChip, KeyValueChips, MetadataCard, age } from '../components/Metadata'
 import { styleFor } from '../graph/shapes'
 import type { InventoryRow } from '../api/types'
+import { SignalFilters, SignalPhaseLabel, SignalRoutingCard } from './SignalRouting'
+import { FILTER_ALL, SIGNAL_PHASES, asSignalStatus, filterSignalRows, signalFilterOptions } from './signals'
 
 // Per-kind inventory → detail. Read-only, and that is a position rather than a
 // gap: Pipelines are the wiring, the wiring is GitOps-managed, and a console
@@ -112,6 +114,10 @@ function columnsFor(kind: string): string[] {
       return ['servers']
     case 'conversations':
       return ['phase', 'profile', 'coordinator', 'causedBy']
+    case 'signals':
+      // console-signals: "source, initiationId, phase, occurrence count, age"
+      // — age is the generic column every kind already gets.
+      return ['source', 'initiationId', 'phase', 'occurrences']
     default:
       return []
   }
@@ -125,6 +131,9 @@ const STATUS_COLUMNS = new Set(['served', 'wired'])
 
 function ColumnValue({ name, value }: { name: string; value?: string }) {
   if (!value) return <small>—</small>
+  if (name === 'phase' && SIGNAL_PHASES.has(value)) {
+    return <SignalPhaseLabel phase={value} />
+  }
   if (STATUS_COLUMNS.has(name)) {
     return (
       <Label isCompact status={value === 'True' ? 'success' : 'danger'}>
@@ -157,8 +166,19 @@ export function ConfigKindPage() {
   const { kind = '' } = useParams()
   const { data, isLoading, error } = useInventory(kind)
   const cols = columnsFor(kind)
+  // console-signals: "filterable by source and by phase" — this kind's own
+  // addition, kept LOCAL to this page (no global store for a filter nobody
+  // else reads). Client-side, over the inventory the kind already fetched
+  // whole: a signals backlog is bounded by the manager's own per-source cap
+  // and TTL GC (design D-6), never a page worth paginating server-side.
+  const [sourceFilter, setSourceFilter] = useState(FILTER_ALL)
+  const [phaseFilter, setPhaseFilter] = useState(FILTER_ALL)
   if (isLoading) return <Loading />
   if (error || !data) return <ErrorState title={`Could not load ${kind}`}>{String(error)}</ErrorState>
+
+  const isSignals = kind === 'signals'
+  const { sources, phases } = isSignals ? signalFilterOptions(data) : { sources: [], phases: [] }
+  const rows = isSignals ? filterSignalRows(data, sourceFilter, phaseFilter) : data
 
   return (
     <>
@@ -173,9 +193,23 @@ export function ConfigKindPage() {
               </span>
             </Title>
           </StackItem>
+          {isSignals && data.length > 0 && (
+            <StackItem>
+              <SignalFilters
+                sources={sources}
+                phases={phases}
+                source={sourceFilter}
+                phase={phaseFilter}
+                onSourceChange={setSourceFilter}
+                onPhaseChange={setPhaseFilter}
+              />
+            </StackItem>
+          )}
           <StackItem>
             {data.length === 0 ? (
               <Empty title={`No ${kind}`}>Nothing of this kind exists in the namespace.</Empty>
+            ) : rows.length === 0 ? (
+              <Empty title="No signal matches these filters">Clear a filter to see more.</Empty>
             ) : (
               <Table variant="compact" aria-label={kind}>
                 <Thead>
@@ -190,7 +224,7 @@ export function ConfigKindPage() {
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {data.map((row: InventoryRow) => (
+                  {rows.map((row: InventoryRow) => (
                     <Tr key={row.name}>
                       <Td dataLabel="Name">
                         <Link to={`/config/${kind}/${row.name}`}>
@@ -263,6 +297,14 @@ export function ConfigDetailPage() {
               </span>
             </Title>
           </StackItem>
+          {kind === 'signals' && (
+            // console-signals: the per-claimant routing record, and a dropped
+            // or failed signal's terminal reason "as loudly as the phase" —
+            // ahead of the tabs, not folded one click away inside them.
+            <StackItem>
+              <SignalRoutingCard status={asSignalStatus(data.object.status)} />
+            </StackItem>
+          )}
           <StackItem>
             <Tabs activeKey={tab} onSelect={(_e, k) => setTab(k)}>
               <Tab eventKey={0} title={<TabTitleText>Overview</TabTitleText>}>

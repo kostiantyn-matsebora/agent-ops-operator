@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -508,6 +509,16 @@ func kindColumns(o *Object) map[string]string {
 		}
 		sort.Strings(keys)
 		cols["servers"] = strings.Join(keys, ", ")
+	case "signals":
+		spec := decodeSpec[signalSpec](o.Spec)
+		status := decodeSpec[signalStatus](o.Status)
+		cols["source"] = spec.SourceRef.Name
+		cols["initiationId"] = spec.InitiationID
+		cols["phase"] = status.Phase
+		cols["occurrences"] = strconv.Itoa(int(spec.Occurrences))
+		if status.Reason != "" {
+			cols["reason"] = status.Reason
+		}
 	case "conversations":
 		v := conversationView(o)
 		cols["phase"] = v.Status.Phase
@@ -661,6 +672,14 @@ func summaryLine(o *Object) string {
 	case "channels", "signalsources":
 		if adapter := decodeSpec[servedSpec](o.Spec).Adapter; adapter != "" {
 			return "adapter " + adapter
+		}
+	case "signals":
+		status := decodeSpec[signalStatus](o.Status)
+		if status.Reason != "" {
+			return strings.ToLower(status.Phase) + " (" + status.Reason + ")"
+		}
+		if status.Phase != "" {
+			return strings.ToLower(status.Phase)
 		}
 	case "agentprofiles":
 		spec := decodeSpec[profileSpec](o.Spec)

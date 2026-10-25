@@ -117,6 +117,23 @@ type runtimeSpec struct {
 	Image string `json:"image,omitempty"`
 }
 
+// signalSpec is the console's read of Signal.spec — the listing columns only.
+// The per-claimant detail is rendered client-side from the full object the
+// detail view already carries (`Detail.Object.Status`, passed through
+// verbatim), never recomputed here.
+type signalSpec struct {
+	SourceRef    Ref    `json:"sourceRef"`
+	InitiationID string `json:"initiationId"`
+	Occurrences  int32  `json:"occurrences,omitempty"`
+}
+
+// signalStatus is the console's read of Signal.status — the roll-up phase and
+// its drop reason, for the listing column and the summary line.
+type signalStatus struct {
+	Phase  string `json:"phase,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // profileSpec is the console's read of AgentProfile.spec (identity only —
 // profiles carry no capabilities, so there is nothing else here to draw).
 type profileSpec struct {
