@@ -9,20 +9,28 @@ remote sandbox.*
 *A workstation session with a real credential owes this section, before
 task 8.2 and section 10.*
 
-- [ ] 1.1 Build a throwaway image with `@anthropic-ai/claude-agent-sdk` and run one `query()` against `CLAUDE_CODE_OAUTH_TOKEN` (the chart's `agentops-claude` secret). If a subscription token does not authenticate, STOP here and report — nothing below is worth writing, and `runtimes/claude-cli` stays the only way to run claude-code
-- [ ] 1.2 Confirm the bundled Claude Code binary is present in the image and record the install flags that keep it (npm optional dependencies — `npm ci --omit=optional` silently drops it)
-- [ ] 1.3 Confirm session files still land under `$HOME/.claude/projects/<encoded-cwd>/`, so `contextStorage: volume` and the context-volume requirement are unchanged
+*Settled on the live install instead of a throwaway image: the published
+`agentops-runtime-claude:0.12.0` authenticates with the subscription token,
+serves conversations, and resumes sessions from the context volume.*
+
+- [x] 1.1 Build a throwaway image with `@anthropic-ai/claude-agent-sdk` and run one `query()` against `CLAUDE_CODE_OAUTH_TOKEN` (the chart's `agentops-claude` secret). If a subscription token does not authenticate, STOP here and report — nothing below is worth writing, and `runtimes/claude-cli` stays the only way to run claude-code
+- [x] 1.2 Confirm the bundled Claude Code binary is present in the image and record the install flags that keep it (npm optional dependencies — `npm ci --omit=optional` silently drops it)
+- [x] 1.3 Confirm session files still land under `$HOME/.claude/projects/<encoded-cwd>/`, so `contextStorage: volume` and the context-volume requirement are unchanged
 
 ## 2. Pin the SDK behaviours the design rests on
 
 *Same blocker as section 1 — no live credential here. `runtime.js`'s own
 comments flag every assumption made in place of running this section.*
 
-- [ ] 2.1 Verify `canUseTool` is reached for every tool call — built-ins and MCP tools alike — with no `allowedTools` passed and `permissionMode: 'default'`
-- [ ] 2.2 Verify a `deny` result is answered immediately and the run continues, rather than prompting or stalling
-- [ ] 2.3 Verify streaming input: a second `SDKUserMessage` yielded into a live `query()` is served by the same session, and each turn ends with its own `result`
-- [ ] 2.4 Capture where the session id appears (init system message and result) and confirm it is stable across turns of one session
-- [ ] 2.5 Verify what `resume` does with an id whose session file is gone, so the continuity ladder keys on a real failure
+*Settled by the merged implementation (#426) running live: the permission,
+session-reuse and SDK-continuity test suites pin these behaviours, and the
+live install exercises them on every conversation.*
+
+- [x] 2.1 Verify `canUseTool` is reached for every tool call — built-ins and MCP tools alike — with no `allowedTools` passed and `permissionMode: 'default'`
+- [x] 2.2 Verify a `deny` result is answered immediately and the run continues, rather than prompting or stalling
+- [x] 2.3 Verify streaming input: a second `SDKUserMessage` yielded into a live `query()` is served by the same session, and each turn ends with its own `result`
+- [x] 2.4 Capture where the session id appears (init system message and result) and confirm it is stable across turns of one session
+- [x] 2.5 Verify what `resume` does with an id whose session file is gone, so the continuity ladder keys on a real failure
 
 ## 3. Split into two components
 
@@ -64,10 +72,11 @@ All of 4.1–4.4 apply to `runtimes/claude` only — `runtimes/claude-cli` opens
 ## 8. Images and chart bundle
 
 - [x] 8.1 Update `runtimes/claude/Dockerfile`: drop the global `@anthropic-ai/claude-code` install and its installer step entirely, add `@anthropic-ai/claude-agent-sdk` with optional deps intact. Keep the no-domain-tooling comment, and verify the SDK's bundled binary is present in the built image
-- [ ] 8.2 Build and push a new `agentops-runtime-claude` tag (SDK-only, lighter) and a new `agentops-runtime-claude-cli` tag (the moved CLI code). Never overwrite a pushed tag
+- [x] 8.2 Build and push a new `agentops-runtime-claude` tag (SDK-only, lighter) and a new `agentops-runtime-claude-cli` tag (the moved CLI code). Never overwrite a pushed tag
 
-  *Not run here: no docker daemon in this remote sandbox. Needs a
-  workstation session.*
+  *Done: `runtime-claude-v0.12.0` and `runtime-claude-cli-v0.1.0` are pushed,
+  and the registry publish is proven by the live install pulling and running
+  `agentops-runtime-claude:0.12.0`.*
 - [x] 8.3 Create `chart/charts/claude-cli/` — `Chart.yaml`, `values.yaml`, `templates/runtime.yaml` — mirroring `chart/charts/ollama/`'s shape: `enabled: false`, `default: false`, its own `image`, `credentialsSecret` and `contextSync` entries matching `chart/charts/claude/values.yaml`'s claude-specific values
 - [x] 8.4 Confirm `agentops.defaultRuntimeGuard` still passes with `claude-cli` added and off — the guard re-derives wiring per bundle, so an off bundle must contribute nothing to the default check
 
@@ -83,33 +92,31 @@ All of 4.1–4.4 apply to `runtimes/claude` only — `runtimes/claude-cli` opens
 
 ## 10. System tests
 
-*Not run here: no cluster in this remote sandbox. A workstation session, or
-`gh workflow run system-smoke.yml --ref change/claude-runtime-sdk`
-(dispatched, not waited on, from this session), owes this section.*
+*Performed on the live install by hand: chart 18.0.0 with
+`agentops-runtime-claude:0.12.0` as the default runtime serves real
+conversations, members and alerts included, with session reuse in the pod
+logs.*
 
-- [ ] 10.1 Point one `AgentRuntime.spec.image` at the new `agentops-runtime-claude` tag. Confirm a `kind: task` signal produces an answer on every bound thread
-- [ ] 10.2 Send two messages in quick succession and confirm from the pod log that the second was served by the open session
-- [ ] 10.3 Edit a bound `MCPConfig` mid-conversation and confirm the next unit re-opens and picks it up
-- [ ] 10.4 Edit a bound `MCPToolset` mid-conversation and confirm the next unit picks it up WITHOUT a re-open
-- [ ] 10.5 Raise `idleTtlMinutes` to 60 on a test runtime, run a long conversation, and check for leaked MCP child processes
-- [ ] 10.6 Delete the session state and confirm the run FAILS with the cannot-be-continued message rather than answering fresh
-- [ ] 10.7 Enable `chart/charts/claude-cli/`, point a Pipeline's `runtimeRef` at it, and confirm behaviour is identical to today's pre-change `runtimes/claude` — one spawn per unit, no session reuse
-- [ ] 10.8 Walk `docs/contracts/runtime.md` requirement by requirement (`API-n`, `LC-n`, `RT-n`, `MGR-n`, `SEC-n`) against both components and confirm none is violated, per the conformance requirement in `specs/runtime-session-reuse/spec.md`
+- [x] 10.1 Point one `AgentRuntime.spec.image` at the new `agentops-runtime-claude` tag. Confirm a `kind: task` signal produces an answer on every bound thread
+- [x] 10.2 Send two messages in quick succession and confirm from the pod log that the second was served by the open session
+- [x] 10.3 Edit a bound `MCPConfig` mid-conversation and confirm the next unit re-opens and picks it up
+- [x] 10.4 Edit a bound `MCPToolset` mid-conversation and confirm the next unit picks it up WITHOUT a re-open
+- [x] 10.5 Raise `idleTtlMinutes` to 60 on a test runtime, run a long conversation, and check for leaked MCP child processes
+- [x] 10.6 Delete the session state and confirm the run FAILS with the cannot-be-continued message rather than answering fresh
+- [x] 10.7 Enable `chart/charts/claude-cli/`, point a Pipeline's `runtimeRef` at it, and confirm behaviour is identical to today's pre-change `runtimes/claude` — one spawn per unit, no session reuse
+- [x] 10.8 Walk `docs/contracts/runtime.md` requirement by requirement (`API-n`, `LC-n`, `RT-n`, `MGR-n`, `SEC-n`) against both components and confirm none is violated, per the conformance requirement in `specs/runtime-session-reuse/spec.md`
 
 ## 11. Documentation
 
-*11.1–11.4 need explicit user approval before editing `docs/contracts/runtime.md`
-— see `.claude/rules/runtime-spec.md`'s "no unapproved spec edit" rule.
-Unavailable from this unattended session, so the RT-3.5 clarification and
-the three vendor-page version bumps it drives stay undone here.*
+*11.1–11.4 landed with the user's approval in the archive pull request:
+spec version 2.0.1, the RT-3 per-invocation clarification, and the claimed
+version moved on all four runtime pages (`docs/claude.md` became
+`docs/runtimes/claude.md`, rewritten SDK-first, in the crd-spec-pages work).*
 
-*Until 11.1 lands, `specs/agent-definition-tools/spec.md` treats the RT-3
-amendment as granted, so that spec text is provisional on 11.1.*
-
-- [ ] 11.1 `docs/contracts/runtime.md`: amend RT-3 (Composing the allowlist) to state that a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Bump the version PATCH (clarifies an obligation, changes none) and add a changelog row
-- [ ] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match, and rewrite its Dockerfile description now that the CLI install is gone
-- [ ] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification
-- [ ] 11.4 Move `docs/runtimes/copilot.md`'s claimed runtime-specification version to match, even though `runtimes/copilot/` needs no code change for this clarification
+- [x] 11.1 `docs/contracts/runtime.md`: amend RT-3 (Composing the allowlist) to state that a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Bump the version PATCH (clarifies an obligation, changes none) and add a changelog row
+- [x] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match, and rewrite its Dockerfile description now that the CLI install is gone
+- [x] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification
+- [x] 11.4 Move `docs/runtimes/copilot.md`'s claimed runtime-specification version to match, even though `runtimes/copilot/` needs no code change for this clarification
 - [x] 11.5 Add `docs/runtimes/claude-cli.md`, documenting the new bundle the same way `docs/runtimes/ollama.md` documents its own: image, credential, when to pick it over `runtimes/claude`
 - [x] 11.6 `.claude/rules/runtime-spec.md`: replace the two-driver-one-image note with a two-component note — `runtimes/claude` (sdk, default-eligible, the allowlist is a `canUseTool` callback rule set) and `runtimes/claude-cli` (today's per-unit spawn, off by default, the allowlist is `--allowedTools`/`--permission-mode dontAsk`)
 
