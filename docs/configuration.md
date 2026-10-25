@@ -334,6 +334,46 @@ kubectl auth can-i get secrets --as=system:serviceaccount:agent-ops:agentops-run
 It must answer `no`. For a subresource use `--subresource=`, never the slash
 form — `kubectl auth can-i` misparses `pods/eviction`.
 
+### Extending the MCP server's read grant
+
+`kubernetes.mcpServers.rbac.extraReadRules` adds read-only rules to the
+`agentops-mcp-k8s` ClusterRole, additive to `runtimeReadRules` above.
+Default `[]` — a release setting nothing renders exactly today's role.
+
+Reach for it when the fixed read list above doesn't cover a resource the
+MCP server needs to read — a third-party CRD is the common case. See
+[the Kubernetes integration page](/agent-ops-operator/integrations/kubernetes/)
+for a worked example.
+
+Each entry is `{apiGroups, resources, verbs}`, rendered under both
+`mcpServers.rbac.mode: readonly` and `full` — the same ClusterRole, so an
+extension granted under one mode is the same rule set under the other.
+
+```yaml
+kubernetes:
+  mcpServers:
+    rbac:
+      extraReadRules:
+        - apiGroups: ["operator.victoriametrics.com"]
+          resources: ["vmrules"]
+          verbs: ["get", "list", "watch"]
+```
+
+The render `fail`s an entry matching any of these shapes, naming the entry:
+
+| Rejected shape | Mirrors |
+|---|---|
+| a verb outside `get`/`list`/`watch` | this extension is read-only, not a second write path |
+| `apiGroups: [""]` with `resources` containing `secrets` | no verb on Secrets, anywhere in this release |
+| `apiGroups` or `resources` containing `"*"` | no wildcard in resources or apiGroups |
+| `apiGroups: ["rbac.authorization.k8s.io"]` | no RBAC read, which is how a role maps every identity in the install |
+| `apiGroups: ["agentops.dev"]` | Conversations, Pipelines and profiles are unreadable from every grant |
+
+Helm cannot check whether the resource is actually installed in the target
+cluster. A rule naming a CRD that isn't there renders a ClusterRole granting
+nothing reachable, same as any other RBAC rule naming a CRD that hasn't
+landed yet.
+
 ### Adding a grant the acting role omits
 
 **Do not widen the shipped role.** Add your own, and attach it to the route that

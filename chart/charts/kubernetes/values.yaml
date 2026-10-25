@@ -553,6 +553,23 @@ mcpServers:
     # readonly does NOT grant (it is a large privilege). Those two tools are
     # registered and fail with a readable Forbidden; widen deliberately.
     mode: null
+    # Extra read-only RBAC rules for the server's own ClusterRole, additive to
+    # agentops.runtimeReadRules and rendered under BOTH readonly and full —
+    # an install reaching a third-party CRD the fixed read list doesn't cover
+    # (VictoriaMetrics' vmrules, say) adds an entry here instead of hand-
+    # applying a ClusterRole Helm cannot track. Default [], so a release
+    # setting nothing renders exactly today's ClusterRole.
+    # Each entry: {apiGroups: [...], resources: [...], verbs: [...]}.
+    # verbs MUST be a subset of [get, list, watch] — this is READ-only, same
+    # as the list it rides beside. The render FAILS an entry naming "*" in
+    # apiGroups/resources, the core group's "secrets", apiGroups
+    # ["rbac.authorization.k8s.io"], or apiGroups ["agentops.dev"].
+    # Example:
+    #   extraReadRules:
+    #     - apiGroups: ["operator.victoriametrics.com"]
+    #       resources: ["vmrules"]
+    #       verbs: ["get", "list", "watch"]
+    extraReadRules: []
   # Extra env passthrough (the flags above are passed as args, not env).
   env: []
   resources: {}
