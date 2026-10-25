@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/agent-runtime/
 ---
 
-**Version 2.0.0**
+**Version 2.0.1**
 
 This specification gives everything necessary to build and maintain an
 `AgentRuntime` — a harness agent-ops does not ship.
@@ -231,6 +231,13 @@ the poll loop.
 | `RT-3.3` | An absent or unreadable agent definition MUST contribute nothing, whatever a vendor default would be. |
 | `RT-3.4` | Definition path is runtime-specific: `runtimes/claude`/`runtimes/ollama` read `.claude/agents/<agent>.md`, `runtimes/copilot` reads `.github/agents/<agent>.agent.md`. |
 
+How the composed allowlist is enforced is the runtime's choice. Passing it to
+the vendor as a flag satisfies `RT-3`, and so does a per-invocation decision —
+a callback answering each governed call against the composed list.
+
+A per-invocation decision conforms only while the callback is reached for
+every governed call, built-ins and MCP tools alike, and denies by default.
+
 ### Optional capabilities
 
 | Capability | A runtime may | Trigger |
@@ -373,5 +380,6 @@ verdict, never an impression of the whole:
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.0.1 | 2026-10-25 | Clarified `RT-3` (Composing the allowlist): a per-invocation decision satisfies it as well as passing a flag, provided the callback is reached for every governed call and denies by default. Clarifies an obligation, changes none. |
 | 2.0.0 | 2026-10-22 | Added the startup-configuration-failure crash ruling (`LC-4`, `LC-5`) — missing or unusable required config before the first poll is a nonzero crash, not a lifecycle exit. Added the `/work/done` definitive-rejection table (`API-10`, `API-11`, `API-12`) — a definitive `4xx` is never retried, a transient failure keeps its bounded retry, and every undelivered report is logged. The work-unit and completion-report tables are now GENERATED from the manager's own Go structs, and [Conformance](#conformance) is now a numbered checklist reaching every requirement on this page. BREAKING: `API-10`/`11`/`12` constrain a `/work/done` 4xx response that 1.0.0 left unconstrained — a runtime that retried a definitive rejection forever was conformant with 1.0.0 and stops conforming here, per this page's own Compatibility rule. |
 | 1.0.0 | 2026-10-17 | Initial release. |

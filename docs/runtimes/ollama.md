@@ -19,7 +19,7 @@ surface. It is what EXECUTES an agent — one of the runtimes this chart
 ships.
 
 It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
-2.0.0.
+2.0.1.
 
 **With this bundle, agent-ops runs a route on a model your own Ollama serves.**
 Each conversation gets a `runtime-ollama` pod, and the manager hands it work.
