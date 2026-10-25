@@ -1153,7 +1153,7 @@
     {
       "id": "ao-presentation",
       "pattern": "ao-presentation",
-      "says": "the landing page shows the generated readme-flow picture (readme-flow-light.svg, theme-resolved); the .ao-presentation component left the theme",
+      "says": "the landing page shows the generated readme-flow picture (readme-flow-{light,dark}.svg, theme-resolved); the .ao-presentation component left the theme",
       "allow": [
         "removed",
         "retired",

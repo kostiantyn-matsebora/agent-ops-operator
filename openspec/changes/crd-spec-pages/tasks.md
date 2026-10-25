@@ -74,8 +74,9 @@ spec-page shape, tab 4 the nav — rather than re-deriving the design.
 ## 6. Unit tests
 
 - [x] 6.1 Extend the docs-generate self-tests (or add them where the script
-      has none) to cover the two new block kinds, the page-set check and the
-      edge-label check, and verify the suite passes
+      has none) to cover the two new block kinds, the page-set check (the
+      stale-exclusion failure included) and the edge-label check, and
+      verify the suite passes
 - [x] 6.2 Run the site build and the docs lint from `docs/CLAUDE.md`
       (semicolon/paragraph awk, `docs-generate.py --check`) over the new and
       changed pages, all green

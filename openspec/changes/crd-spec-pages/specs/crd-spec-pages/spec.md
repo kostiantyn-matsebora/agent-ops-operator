@@ -105,7 +105,8 @@ at it for CRD fields SHALL point at the per-kind pages instead.
 
 ### Requirement: The spec pages are reachable from the navigation and the diagram
 
-The nav SHALL carry a group listing the thirteen pages, and every kind on the
+The nav SHALL carry a group listing every adopter-facing kind's page — the
+set derived from `chart/crds/`, never a fixed count — and every kind on the
 Introduction's domain-model diagram SHALL link to that kind's page.
 
 #### Scenario: A reader clicks a kind on the diagram

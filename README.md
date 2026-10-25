@@ -16,7 +16,7 @@ can reply to.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
-[![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](https://kostiantyn-matsebora.github.io/agent-ops-operator/crds/pipeline/)
+[![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/)
 [![Chart](https://img.shields.io/github/v/tag/kostiantyn-matsebora/agent-ops-operator?filter=chart-v*&label=chart)](docs/CHANGELOG.md)
 [![CI](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml)
 [![Published images](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml)
@@ -183,7 +183,7 @@ in learning order. The reference pages are read here:
 | | |
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, capacity and queueing, and how a route's tools resolve |
-| [The CRD spec pages](https://kostiantyn-matsebora.github.io/agent-ops-operator/crds/pipeline/) | A concise spec page per kind — commented example, every field — thirteen pages in the site's CRDs nav group |
+| [The CRD spec pages](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/) | A concise spec page per kind — commented example, every field — reached from the domain model and the site's CRDs nav group |
 | [docs/contracts.md](docs/contracts.md) | The manager's own surfaces: the aops MCP server, activity, introspection, metrics, and the HTTP API |
 | [docs/contracts/runtime.md](docs/contracts/runtime.md) | The runtime contract: the work unit, the report, and the lifecycle |
 | [docs/contracts/channel-adapter.md](docs/contracts/channel-adapter.md) | The channel adapter contract: long-poll, push, and the body grammar |

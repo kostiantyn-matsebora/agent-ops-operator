@@ -158,8 +158,8 @@ already in it.
   what to decide first, what to configure, and how to wire your first route.
 - **[Security]({{ '/security/' | relative_url }})** — an agent runs model output
   in your cluster: what a default install grants, and what is still open.
-- **The reference** — a spec page per kind under the sidebar's CRDs group,
-  every CRD in full in
+- **The reference** — every CRD's fields on its spec page under the
+  sidebar's CRDs group, the model behind them in
   [Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md),
   the manager's own surfaces in
   [Contracts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/contracts.md),
