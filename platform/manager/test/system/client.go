@@ -122,6 +122,25 @@ func (k *Kube) Conversations(ctx context.Context) ([]agentopsv1alpha1.Conversati
 	return list.Items, nil
 }
 
+// Signal reads one Signal — the persist-then-ack record signal-persistence
+// adds, mirrored off Conversation's own shape above.
+func (k *Kube) Signal(ctx context.Context, name string) (*agentopsv1alpha1.Signal, error) {
+	var s agentopsv1alpha1.Signal
+	if err := k.Get(ctx, types.NamespacedName{Namespace: k.Namespace, Name: name}, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// Signals lists them all.
+func (k *Kube) Signals(ctx context.Context) ([]agentopsv1alpha1.Signal, error) {
+	var list agentopsv1alpha1.SignalList
+	if err := k.List(ctx, &list, client.InNamespace(k.Namespace)); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 // waitFor polls until cond holds, failing the test with `what` otherwise.
 func waitFor(t *testing.T, what string, timeout time.Duration, cond func() (bool, error)) {
 	t.Helper()
