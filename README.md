@@ -16,7 +16,7 @@ can reply to.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-agent--ops-informational)](https://kostiantyn-matsebora.github.io/agent-ops-operator/)
-[![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](docs/cr-reference.md)
+[![API](https://img.shields.io/badge/API-v1alpha1-blueviolet)](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/)
 [![Chart](https://img.shields.io/github/v/tag/kostiantyn-matsebora/agent-ops-operator?filter=chart-v*&label=chart)](docs/CHANGELOG.md)
 [![CI](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/ci.yml)
 [![Published images](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml/badge.svg?branch=master)](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/workflows/image-scan.yml)
@@ -183,13 +183,13 @@ in learning order. The reference pages are read here:
 | | |
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Every CRD in full, capacity and queueing, and how a route's tools resolve |
-| [docs/cr-reference.md](docs/cr-reference.md) | Every field of every kind, generated from the CRDs the chart ships |
+| [The CRD spec pages](https://kostiantyn-matsebora.github.io/agent-ops-operator/introduction/) | A concise spec page per kind — commented example, every field — reached from the domain model and the site's CRDs nav group |
 | [docs/contracts.md](docs/contracts.md) | The manager's own surfaces: the aops MCP server, activity, introspection, metrics, and the HTTP API |
 | [docs/contracts/runtime.md](docs/contracts/runtime.md) | The runtime contract: the work unit, the report, and the lifecycle |
 | [docs/contracts/channel-adapter.md](docs/contracts/channel-adapter.md) | The channel adapter contract: long-poll, push, and the body grammar |
 | [docs/contracts/signal-adapter.md](docs/contracts/signal-adapter.md) | The signal adapter contract: normalize, push, and the lane rules |
 | [docs/console.md](docs/console.md) | Console reference: its endpoints, RBAC grant, values and internals |
-| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](docs/claude.md) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the three runtimes |
+| [kubernetes](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/kubernetes/) · [prometheus](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/prometheus/) · [home-assistant](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/home-assistant/) · [pulse](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/pulse/) · [telegram](https://kostiantyn-matsebora.github.io/agent-ops-operator/integrations/telegram/) · [claude](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude/) · [claude-cli](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude-cli/) · [ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) · [copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) | Each integration: configure it, tune it, and bind its parts into your own pipelines — and the runtimes |
 | [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/) | What a default install grants, what each of the three walls bounds, what is not addressed |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) · [docs/adr/](docs/adr/) | Upgrade guides newest first, and decisions with the alternatives that were built |
 
@@ -204,14 +204,12 @@ and documentation is part of a change rather than a follow-up.
 `gateways/` — and the path is the published image name. The operator is
 `platform/manager/`.
 
-[SECURITY.md](SECURITY.md): report privately, never in an issue.
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): the Contributor Covenant.
+[SECURITY.md](SECURITY.md): report privately, never in an issue. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): the Contributor Covenant.
 
 ## Status
 
-**`v1alpha1` — young, and running in production for its author.** The API group is
-provisional and may be renamed before 1.0. Breaking chart changes carry an upgrade
-entry in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+**`v1alpha1` — young, and running in production for its author.** The API group
+may be renamed before 1.0. Breaking chart changes carry an upgrade entry in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 © 2026 [kostiantyn-matsebora](https://github.com/kostiantyn-matsebora). Licensed
 under the [Apache License 2.0](LICENSE).

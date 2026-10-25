@@ -26,8 +26,9 @@ import (
 //
 // +kubebuilder:validation:XValidation:rule="!(has(self.capabilityRef) && (has(self.profileRef) || has(self.runtimeRef) || has(self.serviceAccountName) || has(self.toolsets) || has(self.mcpConfigs) || has(self.persistence)))",message="capabilityRef and the inline capability fields (profileRef, runtimeRef, serviceAccountName, toolsets, mcpConfigs, persistence) are mutually exclusive"
 type PipelineSpec struct {
-	// Icon is how this Pipeline is RECOGNISED in a list of them. Optional, and
-	// purely how the name is presented.
+	// Icon is how this Pipeline is RECOGNISED in a list of them — one of
+	// `aops:<name>` (the built-in set), `mdi:<name>` (a public icon set), an
+	// image URL or an emoji. Optional, and purely how the name is presented.
 	//
 	// A REFERENCE, not an image. Four forms, and the manager tells them apart
 	// not at all — it publishes the string and interprets it no further:

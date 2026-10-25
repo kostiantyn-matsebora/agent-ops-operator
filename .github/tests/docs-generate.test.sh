@@ -10,7 +10,7 @@
 # checkout: `--check` (the exact command CI runs, and the one the project's
 # own docs already pass) and `--emit-templates` to a scratch file (which,
 # because nothing is stale, still writes no repository file — see the `not
-# stale` branch of main()). Together they walk load_crds, build_reference,
+# stale` branch of main()). Together they walk load_crds, the CRD page set,
 # every guide/integration/runtime/security diagram through
 # docs_diagrams.palette()/render() (all four dicts, both themes, the
 # back-path arrows, every box `kind`), rewrite() over every generated block
@@ -29,7 +29,7 @@ GEN="$ROOT/.github/scripts/docs-generate.py"
 # its own.
 before=$(cd "$ROOT" && git status --porcelain -- docs | sort)
 
-it "--check reports the generated docs, CRD reference and every diagram as up to date against this checkout"
+it "--check reports the generated docs, CRD pages and every diagram as up to date against this checkout"
 out=$(cd "$ROOT" && python3 "$GEN" --check 2>&1)
 assert_status 0 "$?"
 assert_contains "$out" "generated file(s) up to date"
@@ -110,8 +110,11 @@ print("ok: a field with no struct tag at all is skipped, not a parse error")
 
 doc = tmp / "runtime-test.md"
 marker = f"<!-- generated: struct-table file={go_file} struct=Sample -->\n"
-body = mod.build_struct_table(str(go_file), "Sample")
-doc.write_text(marker + body + "<!-- /generated -->\n")
+# The dispatcher owns the block's exact shape (it inserts a blank line so
+# kramdown sees a table), so the canonical text comes from rewrite() itself,
+# never from hand-assembling marker + body.
+doc.write_text(marker + "<!-- /generated -->\n")
+doc.write_text(mod.rewrite(doc, {}))
 
 fresh = mod.rewrite(doc, {})
 assert fresh == doc.read_text(), "freshly generated content must already be up to date"
@@ -161,4 +164,181 @@ it "struct-table: --check's own staleness comparison catches a renamed field"
 assert_contains "$out" "catches a field's wire name renamed with no regeneration"
 
 rm -rf "$pytmp"
+
+# The per-CRD page machinery: the two block kinds the spec pages carry
+# (`crd-example`, `crd-fields`), the page-set check (docs/crds/ and
+# chart/crds/ must agree, scaffolding excluded by name, a stale exclusion
+# loud) and the diagram edge-label check. All against a FAKE schema dict and
+# throwaway dirs -- the real pages are covered by --check at the top.
+crdtmp=$(mktemp -d)
+cat > "$crdtmp/check_crd_blocks.py" <<'PYEOF'
+import importlib.util
+import pathlib
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    "docs_generate", repo / ".github/scripts/docs-generate.py"
+)
+mod = importlib.util.module_from_spec(spec)
+sys.modules["docs_generate"] = mod
+spec.loader.exec_module(mod)
+
+tmp = pathlib.Path(sys.argv[2])
+
+schemas = {
+    "Widget": {"properties": {"spec": {
+        "type": "object",
+        "required": ["pipelineRef"],
+        "properties": {
+            "pipelineRef": {"type": "string", "description":
+                "PipelineRef names the Pipeline this widget serves; never blank."},
+            "replicas": {"type": "integer", "default": 1, "description":
+                "Replicas is how many to run. A second sentence stays off the table."},
+            "agents": {"type": "array", "items": {
+                "type": "object",
+                "required": ["capabilityRef"],
+                "properties": {
+                    "capabilityRef": {"type": "string", "description": "CapabilityRef names one."},
+                    "mode": {"type": "string", "enum": ["fan", "serial"],
+                             "description": "Mode picks the dispatch shape."},
+                },
+            }},
+            "tokenFrom": {"type": "object", "description":
+                "TokenFrom resolves the credential.", "properties": {
+                "configMapKeyRef": {"type": "object"}, "fieldRef": {"type": "object"},
+                "resourceFieldRef": {"type": "object"}, "secretKeyRef": {"type": "object"},
+            }},
+        },
+    }}},
+    "Gizmo": {"properties": {"spec": {
+        "type": "object",
+        "properties": {"key": {"type": "string", "description": "Key is scaffolding."}},
+    }}},
+}
+
+example = mod.build_crd_example(schemas, "Widget", "my-widget")
+assert "kind: Widget" in example, example
+assert "name: my-widget" in example, example
+assert "pipelineRef" in example and "replicas" in example, example
+assert "#" in example, f"no trailing comments: {example}"
+assert ";" not in example, f"a doc comment's semicolon reached the example: {example}"
+print("ok: crd-example emits the kind, the name, every top-level spec field and a comment per field")
+
+table = mod.build_crd_fields(schemas, "Widget")
+assert table.splitlines()[0] == "| Field | Type | Required | Meaning |", table
+assert "| `pipelineRef` | `string` | **yes** |" in table, table
+assert "names the Pipeline this widget serves." in table, table
+assert "| `replicas` | `integer` |  | How many to run. Defaults to `1`. |" in table, table
+assert "never blank" not in table, f"the semicolon tail reached the cell: {table}"
+assert mod.build_crd_fields(schemas, "Gizmo"), "an excluded kind's builder still works"
+print("ok: crd-fields emits the header, required mark and the semicolon-trimmed first sentence")
+
+assert "| `agents[].capabilityRef` | `string` | **yes** | CapabilityRef names one. |" in table, table
+assert "One of `fan`, `serial`." in table, table
+print("ok: crd-fields unrolls a nested shape as dotted paths, enums and defaults on the row")
+
+assert "`configMapKeyRef`, `secretKeyRef`, `fieldRef` or `resourceFieldRef`" in table, table
+assert "tokenFrom.configMapKeyRef" not in table, (
+    f"a recognized core-Kubernetes shape must stop the walk: {table}"
+)
+print("ok: crd-fields states a core-Kubernetes shape's choices on one row instead of unrolling it")
+
+doc = tmp / "widget.md"
+doc.write_text(
+    "<!-- generated: crd-fields kind=Widget -->\n<!-- /generated -->\n"
+)
+doc.write_text(mod.rewrite(doc, schemas))
+text = doc.read_text()
+assert "-->\n\n| Field" in text, f"no blank line after the marker, kramdown sees a paragraph: {text}"
+assert "|\n\n<!-- /generated -->" in text, (
+    f"no blank line before the close marker, kramdown paragraphs the table: {text}"
+)
+assert mod.rewrite(doc, schemas) == text, "a second rewrite must be a no-op"
+print("ok: the dispatcher blank-lines the table away from both markers, idempotently")
+
+pages = tmp / "crds"
+pages.mkdir()
+mod.CRD_PAGES = pages
+mod.SCAFFOLDING_KINDS = {"Gizmo"}
+
+(pages / "widget.md").write_text("x\n")
+assert mod.check_crd_pages(schemas) == [], mod.check_crd_pages(schemas)
+print("ok: page-set check passes when every adopter-facing kind has its page and no more")
+
+(pages / "widget.md").unlink()
+probs = mod.check_crd_pages(schemas)
+assert any("Widget has no page" in p for p in probs), probs
+print("ok: page-set check fails on a kind with no page")
+
+(pages / "widget.md").write_text("x\n")
+(pages / "gizmo.md").write_text("x\n")
+probs = mod.check_crd_pages(schemas)
+assert any("scaffolding the site excludes" in p for p in probs), probs
+(pages / "gizmo.md").unlink()
+print("ok: page-set check fails on a page for a kind the site excludes")
+
+(pages / "doodad.md").write_text("x\n")
+probs = mod.check_crd_pages(schemas)
+assert any("matches no kind" in p for p in probs), probs
+(pages / "doodad.md").unlink()
+print("ok: page-set check fails on a page matching no kind at all")
+
+mod.SCAFFOLDING_KINDS = {"Ghost"}
+probs = mod.check_crd_pages(schemas)
+assert any("remove it from SCAFFOLDING_KINDS" in p for p in probs), probs
+mod.SCAFFOLDING_KINDS = {"Gizmo"}
+print("ok: a stale exclusion naming no CRD fails rather than rotting silently")
+
+svg = tmp / "domain-model.svg"
+mod.DOMAIN_MODEL = svg
+mod.REPO = tmp  # the check prints the path relative to the repo root
+svg.write_text('<svg><text data-field="pipelineRef">x</text>'
+               '<text data-field="agents[].capabilityRef">x</text></svg>\n')
+assert mod.check_diagram_fields(schemas) == [], mod.check_diagram_fields(schemas)
+svg.write_text('<svg><text data-field="renamedRef">x</text></svg>\n')
+probs = mod.check_diagram_fields(schemas)
+assert any("renamedRef" in p and "no CRD spec" in p for p in probs), probs
+svg.write_text('<svg><text data-field="pipelineRef.replicas">x</text></svg>\n')
+probs = mod.check_diagram_fields(schemas)
+assert probs, "a path stitched from real names of different fields must fail"
+print("ok: diagram edge labels pass on real paths and fail on renamed or stitched ones")
+PYEOF
+
+it "crd-example: kind, name, every top-level spec field, one comment per field, no semicolons"
+out=$(python3 "$crdtmp/check_crd_blocks.py" "$ROOT" "$crdtmp" 2>&1)
+assert_status 0 "$?"
+assert_contains "$out" "crd-example emits the kind, the name, every top-level spec field"
+
+it "crd-fields: header, required mark, semicolon-trimmed first sentence"
+assert_contains "$out" "crd-fields emits the header, required mark and the semicolon-trimmed first sentence"
+
+it "crd-fields: nested shapes unroll as dotted paths with enums and defaults"
+assert_contains "$out" "unrolls a nested shape as dotted paths"
+
+it "crd-fields: a core-Kubernetes shape is one row stating its choices, not a subtree"
+assert_contains "$out" "states a core-Kubernetes shape's choices on one row"
+
+it "the dispatcher blank-lines the table away from both markers, idempotently"
+assert_contains "$out" "blank-lines the table away from both markers, idempotently"
+
+it "page-set check: passes when docs/crds/ and chart/crds/ agree"
+assert_contains "$out" "passes when every adopter-facing kind has its page"
+
+it "page-set check: a kind with no page fails"
+assert_contains "$out" "fails on a kind with no page"
+
+it "page-set check: a page for an excluded scaffolding kind fails"
+assert_contains "$out" "fails on a page for a kind the site excludes"
+
+it "page-set check: a page matching no kind fails"
+assert_contains "$out" "fails on a page matching no kind at all"
+
+it "page-set check: a stale exclusion fails loudly"
+assert_contains "$out" "a stale exclusion naming no CRD fails"
+
+it "diagram edge labels: real field passes, renamed field fails"
+assert_contains "$out" "pass on real paths and fail on renamed or stitched ones"
+
+rm -rf "$crdtmp"
 summary

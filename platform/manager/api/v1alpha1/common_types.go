@@ -76,7 +76,9 @@ const (
 // NamedValue is a name/value pair where the value may come from a Secret or
 // ConfigMap key (the env valueFrom idiom). Used for MCP server headers etc.
 type NamedValue struct {
+	// Name is the header or variable name the pair sets.
 	Name string `json:"name"`
+	// Value is the literal value. Set this or ValueFrom, not both.
 	// +optional
 	Value string `json:"value,omitempty"`
 	// +optional
@@ -94,6 +96,7 @@ type MCPServer struct {
 	// Command and Args for stdio transport.
 	// +optional
 	Command string `json:"command,omitempty"`
+	// Args are the command's arguments (stdio transport).
 	// +optional
 	Args []string `json:"args,omitempty"`
 	// Headers to send (sse/http). Values may reference Secrets — the manager

@@ -30,70 +30,70 @@ different signals, has two different reaches.
 
 ## Understand the concepts
 
-Nine kinds. Each card links to the guide that teaches it, except Conversation
-and AgentCapability, which have no guide and link to the reference.
+A signal starts a conversation, the wiring decides which agent answers and
+what it may reach, and a runtime executes it — every kind below plays one
+part in that sentence, and links to its spec page.
 
-{: .ao-cards}
-- [AgentProfile]({{ '/guides/agent-profile/' | relative_url }})
-  {: .ao-icon-profile}
+<figure class="ao-domain-model">
+{% include domain-model.svg %}
+<figcaption>Every kind, grouped so each cluster pair gets one
+connector — an arrowhead only where something flows or opens, a plain line
+where one kind merely references another.</figcaption>
+</figure>
 
-  Who the agent is and how it decides — the repository it works from, its role,
-  its prompts, its limits. **No tools and no permissions**: an agent cannot
-  grant itself reach.
+- **[SignalAdapter]({{ '/crds/signal-adapter/' | relative_url }})** — the
+  workload serving a SignalSource. It watches one transport — a webhook, a
+  poll, a schedule — and normalises what arrives into signals.
 
-- [SignalSource]({{ '/guides/signal-adapter/' | relative_url }})
-  {: .ao-icon-source}
+- **[SignalSource]({{ '/crds/signal-source/' | relative_url }})** — **what
+  starts a conversation** — an alert receiver, a schedule, cluster events, a
+  chat surface. One ingest lane, served by a SignalAdapter.
 
-  **What starts a conversation** — an alert receiver, a schedule, cluster
-  events, a chat surface. A SignalAdapter serves it and normalises what it
-  watches.
+- **[AgentProfile]({{ '/crds/agent-profile/' | relative_url }})** — who the
+  agent is and how it decides — the repository it works from, its role, its
+  prompts, its limits. **No tools and no permissions**: an agent cannot grant
+  itself reach.
 
-- [MCPToolset and MCPConfig]({{ '/guides/toolsets/' | relative_url }})
-  {: .ao-icon-toolset}
+- **[MCPToolset]({{ '/crds/mcp-toolset/' | relative_url }})** — the tools an
+  agent may use, a named allowlist. One of the two walls around what an agent
+  may touch.
 
-  **What an agent may touch** — the tools it may use, and the servers behind
-  them. Two walls: the server's own credentials, and the allowlist on top.
+- **[MCPConfig]({{ '/crds/mcp-config/' | relative_url }})** — the MCP servers
+  behind those tools, each with its own credentials. The other wall.
 
-- [Channel]({{ '/guides/channel-adapter/' | relative_url }})
-  {: .ao-icon-channel}
+- **[AgentRuntime]({{ '/crds/agent-runtime/' | relative_url }})** — **what
+  executes an agent** — the image, the credential it uses, the identity it
+  runs as. One per vendor and trust level, shared by every route.
 
-  **Where an agent answers** — Telegram, the console, anything you write a
-  ChannelAdapter for. Channels carry conversations. They never start one.
+- **[AgentCapability]({{ '/crds/agent-capability/' | relative_url }})** — **a
+  named capability, declared once.** A Pipeline or a Coordinator references it
+  by name instead of inlining the same fields. Carries no wiring of its own.
 
-- [AgentRuntime]({{ '/guides/agent-runtime/' | relative_url }})
-  {: .ao-icon-runtime}
+- **[Pipeline]({{ '/crds/pipeline/' | relative_url }})** — **the wiring for
+  one agent** — the sources it listens on, the profile that answers, the tools
+  that answer may use, the channels it answers on. To learn what one agent can
+  do, read its Pipeline.
 
-  **What executes an agent** — the image, the credential it uses, the identity
-  it runs as. One per vendor and trust level, shared by every route.
+- **[Coordinator]({{ '/crds/coordinator/' | relative_url }})** — **wiring for
+  a composition of agents, not one** — a root conversation that invokes named
+  members by purpose, reads what each returns, and escalates to a human only
+  when it decides to. A member may itself be a Coordinator.
 
-- [Conversation](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#conversation)
-  {: .ao-icon-conversation}
+- **[Conversation]({{ '/crds/conversation/' | relative_url }})** — **the
+  running thing** — one incident, one task, one question. It holds the thread
+  and the pod. The operator creates it. Look here to see what happened.
 
-  **The running thing** — one incident, one task, one question. It holds the
-  thread and the pod. The operator creates it, so there is no guide to writing
-  one. Look here to see what happened.
+- **[ConversationInput]({{ '/crds/conversation-input/' | relative_url }})** —
+  one large payload — a full alert, say — carried out of line, so the
+  Conversation itself stays small.
 
-- [Pipeline]({{ '/guides/pipeline/' | relative_url }})
-  {: .ao-icon-pipeline}
+- **[Channel]({{ '/crds/channel/' | relative_url }})** — **where an agent
+  answers** — Telegram, the console, anything you write a ChannelAdapter for.
+  Channels carry conversations. They never start one.
 
-  **The wiring for one agent** — the sources it listens on, the profile that
-  answers, the tools that answer may use, the channels it answers on. To learn
-  what one agent can do, read its Pipeline.
-
-- [AgentCapability](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md#agentcapability)
-  {: .ao-icon-capability}
-
-  **A named capability, declared once.** A Pipeline or a Coordinator
-  references it by name instead of inlining the same fields. Carries no
-  wiring of its own.
-
-- [Coordinator]({{ '/guides/coordinate-agents/' | relative_url }})
-  {: .ao-icon-coordinator}
-
-  **Wiring for a composition of agents, not one** — a root conversation that
-  reads what started it, invokes named members by purpose, reads what each
-  returns, and escalates to a human only when it decides to. The other
-  wiring kind, beside Pipeline.
+- **[ChannelAdapter]({{ '/crds/channel-adapter/' | relative_url }})** — the
+  workload serving a Channel. It renders answers on its surface and carries
+  what people reply back in.
 
 **Pipeline and Coordinator share one capability shape** — the same six
 fields, inline on either or factored out as an AgentCapability.
@@ -126,6 +126,5 @@ mistake costs, and the earliest one is not the smallest.
 
 Past what a guide needs:
 [concepts.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)
-holds every kind in full, and
-[cr-reference.md](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md)
-holds every field of every kind, generated from the CRDs the chart ships.
+holds every kind in full, and each kind's spec page — every shape on the
+diagram above — holds every field, generated from the CRDs the chart ships.

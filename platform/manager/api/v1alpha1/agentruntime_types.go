@@ -78,8 +78,7 @@ type AgentRuntimeSpec struct {
 	// runtime SA when empty.
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
-	// NodeSelector placing runtime pods, applied with Tolerations and
-	// Affinity below.
+	// NodeSelector placing runtime pods.
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// IdleTTLMinutes before an idle runtime pod exits (respawned on demand).

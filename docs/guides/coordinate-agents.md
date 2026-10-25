@@ -8,11 +8,11 @@ description: >-
 
 next:
   eyebrow: Reference
-  title: Every field of every kind
+  title: Every Coordinator field
   body: >-
-    The generated custom resource reference, and the contracts the adapter and
-    runtime kinds serve.
-  url: https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md
+    The kind's own spec page — a commented example and every field, in the
+    sidebar's CRDs group.
+  url: /agent-ops-operator/crds/coordinator/
 ---
 
 A `Coordinator` is **the second wiring kind, for a composition of agents
@@ -390,5 +390,6 @@ for the exact bound.
    — bind toolsets and MCP servers on each member's `AgentCapability`.
 2. **[Put an agent to work]({{ '/guides/pipeline/' | relative_url }})**
    — the single-agent wiring kind this one composes.
-3. **[Every Coordinator and AgentCapability field](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/cr-reference.md#coordinator)**
+3. **[Every Coordinator]({{ '/crds/coordinator/' | relative_url }})
+   and [AgentCapability]({{ '/crds/agent-capability/' | relative_url }}) field**
    — the full shape of both kinds.

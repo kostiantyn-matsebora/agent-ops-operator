@@ -201,6 +201,9 @@ spec:
                   type: object
                 type: array
               inputs:
+                description: |-
+                  Inputs is the serial work queue — one inflight unit at a time, each
+                  entry pruned once status.runs[].inputs[] records it.
                 items:
                   description: |-
                     InputItem is one queued work unit. Payload is inline OR referenced via
@@ -222,6 +225,9 @@ spec:
                         Deprecated: nothing sets this. Do not add a writer.
                       type: string
                     id:
+                      description: |-
+                        ID identifies this input within the conversation — the id
+                        status.runs[].inputIds echoes once the input is worked.
                       minLength: 1
                       type: string
                     origin:
@@ -280,6 +286,9 @@ spec:
                       - kind
                       type: object
                     payload:
+                      description: |-
+                        Payload is the input's text, inline. Empty when PayloadRef carries it
+                        out-of-line instead.
                       type: string
                     payloadRef:
                       description: ObjectRef references another object by name (same
@@ -293,6 +302,8 @@ spec:
                       - name
                       type: object
                     receivedAt:
+                      description: ReceivedAt is when the manager accepted this input
+                        into the queue.
                       format: date-time
                       type: string
                     type:
@@ -358,8 +369,13 @@ spec:
                   identity is stored, here or anywhere else on this object.
                 properties:
                   channel:
+                    description: Channel names the bound channel whose key space Key
+                      belongs to.
                     type: string
                   key:
+                    description: |-
+                      Key is the reporting adapter's opaque reader key, matched only within
+                      Channel's own key space.
                     type: string
                 required:
                 - channel
@@ -436,6 +452,11 @@ spec:
                 - name
                 type: object
               serviceAccountName:
+                description: |-
+                  ServiceAccountName is the resolved identity this conversation's runtime
+                  pods run as, snapshotted at creation exactly as RuntimeRef is — never
+                  hand-set. Empty falls through to the runtime's own account, then the
+                  release floor.
                 maxLength: 253
                 type: string
               signal:
@@ -552,6 +573,10 @@ spec:
                 - refs
                 type: object
               workspaceClaimName:
+                description: |-
+                  WorkspaceClaimName is the resolved workspace claim, materialized at
+                  creation exactly as ContextClaimName is — never hand-set, empty means
+                  ephemeral.
                 maxLength: 253
                 type: string
             required:

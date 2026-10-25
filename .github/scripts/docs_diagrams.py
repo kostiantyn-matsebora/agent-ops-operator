@@ -354,6 +354,23 @@ SECURITY_DIAGRAMS: dict[str, dict] = {
 # sits in that box: the loop, the tools and the transcript are the runtime's,
 # and the model server is asked for one thing.
 RUNTIME_DIAGRAMS: dict[str, dict] = {
+    # For runtime-claude the point is the SESSION: claude-code runs the loop
+    # and the tools in the pod, and the SDK session is held open across a
+    # pod's work units rather than re-established on each one.
+    "claude": {
+        "dir": "runtimes",
+        "alt": "The manager hands a work unit to runtime-claude, which drives "
+               "claude-code through the Agent SDK in one session held open "
+               "across units, keeps one transcript per conversation, and asks "
+               "Claude only for the next message.",
+        "cols": [
+            [("the manager", "one unit at a time", "plain")],
+            [("runtime-claude", "one session, held open", "yours")],
+            [("Claude", "the next message only", "subject"),
+             ("the context", "one transcript each", "plain")],
+        ],
+        "arrows": ["GET /work", "asks / keeps"],
+    },
     "ollama": {
         "dir": "runtimes",
         "alt": "The manager hands a work unit to runtime-ollama, which runs the "

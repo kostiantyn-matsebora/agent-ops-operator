@@ -83,9 +83,9 @@ type SignalSourceSpec struct {
 	// +optional
 	AttributeFilters []AttributeFilterRequirement `json:"attributeFilters,omitempty"`
 	// LogFiltered governs whether a signal dropped by AttributeFilters is
-	// still recorded as a signal.dropped activity event. Nullable, default
-	// true when unset — set false to silence a known-noisy filter. Has no
-	// effect on any other drop reason, which always logs.
+	// still recorded as a signal.dropped activity event — unset means true.
+	// Set false to silence a known-noisy filter. Has no effect on any other
+	// drop reason, which always logs.
 	// +optional
 	LogFiltered *bool `json:"logFiltered,omitempty"`
 }

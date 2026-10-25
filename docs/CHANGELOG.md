@@ -12,6 +12,15 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- The adopter site carries a spec page per CRD under `/crds/<kind>/` — hand
+  prose around a generated example instance and field table, with a CRDs
+  sidebar group. The Introduction presents the model as a domain-model
+  diagram, every kind on it linking its spec page. Sidebar groups are
+  collapsible, the current page's group open.
+- A published page for the reference runtime at `/runtimes/claude/`, first
+  in the Runtimes sidebar group — the SDK bundle a fresh install runs on,
+  beside the `claude-cli` compatibility bundle's page. The Integrations and
+  Runtimes sidebar entries carry their marks.
 - A normalized signal may carry an optional `severity` field — one of
   `critical`, `error`, `warning`, `info`. `POST /signal/inbound` validates
   it and refuses an unknown value with a `400` naming the four accepted
@@ -72,6 +81,16 @@ served by `signal-pulse` gains `spec.config.correlationStrategy`, `"id"` or
 Pulse can reuse an alert id for what it calls a new occurrence. The new
 default, `"id+startTime"`, opens a fresh conversation for that re-fire
 instead of continuing an old one.
+
+### Removed
+
+- `docs/cr-reference.md` — the per-kind spec pages under `/crds/` replaced
+  it. Every in-repo pointer moved with it.
+- `docs/claude.md` — the published page at `/runtimes/claude/` replaced it.
+  Every in-repo pointer moved with it.
+- The landing page's animated presentation and its `ao-presentation` theme
+  component. The "How it works" tab shows the generated readme-flow picture
+  the README already carries.
 
 ### Fixed
 

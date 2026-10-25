@@ -54,7 +54,8 @@ spec:
               payload.
             properties:
               conversationRef:
-                description: ObjectRef references another object by name (same namespace).
+                description: ConversationRef names the Conversation this input queues
+                  into.
                 properties:
                   name:
                     description: Name of the referenced object.
@@ -67,8 +68,8 @@ spec:
                 additionalProperties:
                   type: string
                 description: |-
-                  Labels are the originating signal's labels, kept beside the payload
-                  rather than on the Conversation: they are per-input, they can be numerous,
+                  Labels are the originating signal's labels, kept per-input beside
+                  the payload. They are not on the Conversation: they can be numerous,
                   and this object exists precisely to hold the bulky half of an input.
 
                   They travel so an adapter can RENDER them — a label table, a chip row, or
@@ -77,11 +78,14 @@ spec:
                   decide how much of it a surface shows.
                 type: object
               payload:
+                description: |-
+                  Payload is the input's full text, out-of-line so a bulky work unit
+                  never bloats the Conversation object itself.
                 type: string
               severity:
                 description: |-
                   Severity is the originating signal's own severity rating for this
-                  occurrence, kept per-input the same way Labels is — each recurrence
+                  occurrence. Kept per-input the same way Labels is: each recurrence
                   keeps its own, never retroactively rewriting the provenance. Omitted
                   wherever the originating signal carried none.
                 enum:
@@ -91,7 +95,9 @@ spec:
                 - info
                 type: string
               type:
-                description: InputType classifies a work unit.
+                description: |-
+                  Type says what kind of input this is, which decides how it is
+                  dispatched.
                 enum:
                 - task
                 - alert

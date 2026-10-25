@@ -7,17 +7,29 @@ and the reference pages are not yet. Off-site paths belong in the body of a
 page, where the reader can see where they lead.
 {%- endcomment -%}
 <nav class="ao-sidebar" aria-label="Documentation">
+  {%- comment -%}
+  Every group renders OPEN: the no-script state is everything reachable.
+  nav-groups.js then closes the groups this reader closed before, always
+  leaving the current page's group open. <summary> is natively
+  keyboard-operable and states its own expanded state — no ARIA is added.
+  {%- endcomment -%}
   {%- for group in site.data.nav.groups %}
-  <div class="ao-nav-group">
-    <h2 class="ao-nav-title">{{ group.title }}</h2>
+  <details class="ao-nav-group" open>
+    <summary class="ao-nav-title"><span class="ao-nav-chevron" aria-hidden="true"></span>{{ group.title }}</summary>
     <ul class="ao-nav-list">
+      {%- comment -%}
+      An entry may name an icon (nav.yml says which file). Alt is empty on
+      purpose: the mark sits beside the title it belongs to, so announcing it
+      again is noise to a screen reader — the same rule the chip sets follow.
+      {%- endcomment -%}
       {%- for entry in group.entries %}
       <li>
         <a class="ao-nav-link" href="{{ entry.url | relative_url }}"
-           {% if page.url == entry.url %}aria-current="page"{% endif %}>{{ entry.title }}</a>
+           {% if page.url == entry.url %}aria-current="page"{% endif %}>
+          {%- if entry.icon %}<img class="ao-nav-icon" src="{{ entry.icon | relative_url }}" alt="" width="16" height="16">{% endif %}{{ entry.title }}</a>
       </li>
       {%- endfor %}
     </ul>
-  </div>
+  </details>
   {%- endfor %}
 </nav>
