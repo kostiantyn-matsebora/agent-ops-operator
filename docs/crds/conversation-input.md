@@ -25,7 +25,8 @@ spec:
     name: <name>
   payload: <payload>
   type: task   # task | alert | reply | recurrence | job
-  labels: <labels>  # the originating signal's labels, kept beside the payload rather than …
+  labels:           # the originating signal's labels, kept beside the payload rather than …
+    <label>: <label>
   severity: critical   # critical | error | warning | info
 ```
 <!-- /generated -->

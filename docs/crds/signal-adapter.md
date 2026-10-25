@@ -31,8 +31,10 @@ spec:
   resources:                                # resourceRequirements describes the compute resource requirements
     claims:
     - name: <name>
-    limits: <limits>
-    requests: <requests>
+    limits:
+      cpu: "100m"
+    requests:
+      cpu: "100m"
   servedBy:                                 # servedBy declares this adapter EXTERNALLY SERVED: another adapter's …
     kind: ChannelAdapter
     name: <name>

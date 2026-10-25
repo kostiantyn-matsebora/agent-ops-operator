@@ -38,17 +38,22 @@ spec:
     resources:
       claims:
       - name: <name>
-      limits: <limits>
-      requests: <requests>
+      limits:
+        cpu: "100m"
+      requests:
+        cpu: "100m"
   env:                                      # extra environment for every runtime pod of this runtime
   - name: <name>
   idleTtlMinutes: 10                        # idleTTLMinutes before an idle runtime pod exits (respawned on demand)
-  nodeSelector: <nodeSelector>              # nodeSelector placing runtime pods, applied with Tolerations and …
+  nodeSelector:                             # nodeSelector placing runtime pods, applied with Tolerations and …
+    <nodeSelector>: <nodeSelector>
   resources:                                # resources default for runtime pods (AgentProfile.resources overrides)
     claims:
     - name: <name>
-    limits: <limits>
-    requests: <requests>
+    limits:
+      cpu: "100m"
+    requests:
+      cpu: "100m"
   serviceAccountName: <serviceAccountName>  # this runtime's security identity: its RBAC defines exactly what agents …
 ```
 <!-- /generated -->

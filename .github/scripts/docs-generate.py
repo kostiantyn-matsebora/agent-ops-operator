@@ -522,6 +522,15 @@ def render_node(node: dict, name: str, wanted: set[str], base: str, indent: int,
         lines.append(f"{pad}  <{name.rstrip('s') or 'key'}>:")
         lines.extend(render_object(inner, wanted, f"{base}.*", indent + 4, order, comments))
         return lines
+    if isinstance(inner, dict):
+        # A map of scalars. One example entry keeps the object shape a
+        # validator expects -- a bare placeholder string failed it. A
+        # resource map gets a real key, since its quantity pattern would
+        # refuse an angle-bracket placeholder as the value.
+        key = "cpu" if name in ("limits", "requests") else f"<{name.rstrip('s') or 'key'}>"
+        lines.append(f"{pad}{name}:")
+        lines.append(f"{pad}  {key}: {placeholder(inner, key.strip('<>'))}")
+        return lines
     if node.get("x-kubernetes-preserve-unknown-fields") and node.get("type") != "string":
         # Schema-less on purpose. The serving implementation defines the shape,
         # so inventing keys here would put one adapter's config in every guide.

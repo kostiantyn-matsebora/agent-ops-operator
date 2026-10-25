@@ -34,8 +34,10 @@ spec:
   resources:                                # resourceRequirements describes the compute resource requirements
     claims:
     - name: <name>
-    limits: <limits>
-    requests: <requests>
+    limits:
+      cpu: "100m"
+    requests:
+      cpu: "100m"
   serviceAccountName: <serviceAccountName>  # the identity this adapter's workload runs as, with its token mounted
   singleton: true                           # singleton runs the workload as replicas 1 + strategy Recreate so no …
 ```

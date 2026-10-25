@@ -50,7 +50,8 @@ spec:
     name: <name>
   serviceAccountName: <serviceAccountName>
   signal:                               # what the ORIGINATING SIGNAL was, for attribution
-    labels: <labels>
+    labels:
+      <label>: <label>
     severity: critical   # critical | error | warning | info
     sourceRef:
       name: <name>

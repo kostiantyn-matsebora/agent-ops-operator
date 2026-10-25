@@ -36,8 +36,10 @@ spec:
   resources:                    # resources for the runtime pod running this profile
     claims:
     - name: <name>
-    limits: <limits>
-    requests: <requests>
+    limits:
+      cpu: "100m"
+    requests:
+      cpu: "100m"
   runtimeRef:                   # runtimeRef selects the AgentRuntime (execution backend) for this profile
     name: <name>
   systemPrompt: <systemPrompt>  # INLINE role text appended to the agent's system prompt, for profiles …
