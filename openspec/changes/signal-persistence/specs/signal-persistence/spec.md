@@ -224,10 +224,13 @@ bounded cooldown record already does:
   `Failed` with reason overflow, and the phase rolls up from the claimants
   as always — `Dropped` stays a strictly pre-fan-out phase
 
-Terminal `Signal` CRs SHALL be garbage-collected after a TTL. The TTL for
-`Dropped` SHALL be shorter than the TTL for `Routed`, because the routed
-record is the audit trail. `Failed` SHALL use the `Routed` TTL — a signal
-nobody routed is exactly the record an operator investigates.
+Terminal `Signal` CRs SHALL be garbage-collected after a per-phase TTL:
+
+- `Dropped`: `SIGNAL_TTL_DROPPED` (chart `signalTtlDropped`), default **4h**
+- `Routed`: `SIGNAL_TTL_ROUTED` (chart `signalTtlRouted`), default **72h** —
+  longer, because the routed record is the audit trail
+- `Failed` SHALL use the `Routed` TTL — a signal nobody routed is exactly
+  the record an operator investigates
 
 Deleting a `SignalSource` SHALL garbage-collect its `Signal` CRs through the
 ownerRef, whatever phase each is in.

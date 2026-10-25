@@ -134,10 +134,10 @@ last records a chat signal declined at a full backlog (D-8).
   enforcement. Overflow evicts the OLDEST as `Dropped` (reason overflow),
   counted and logged — the `MaxCooldownEntries` degrade-gracefully
   precedent.
-- TTL GC after a terminal phase, in the reconciler via requeue. `Dropped`
-  short, `Routed` longer — the routed record is the audit trail — and
-  `Failed` on the `Routed` TTL, since nobody-got-it is what an operator
-  investigates.
+- TTL GC after a terminal phase, in the reconciler via requeue.
+  `SIGNAL_TTL_DROPPED` (default 4h) short, `SIGNAL_TTL_ROUTED` (default
+  72h) longer — the routed record is the audit trail — and `Failed` on the
+  `Routed` TTL, since nobody-got-it is what an operator investigates.
 - `ownerRef` to the `SignalSource`: a deleted source takes its signals from
   any phase, consistent with the unwired-drop posture.
 
@@ -197,8 +197,7 @@ Additive. New CRD only.
 
 ## Open Questions
 
-- Exact TTL defaults for `Dropped` vs `Routed` (chart-tunable, defaults
-  decided at implementation against the housekeeping cadence).
+
 
 - Whether the console signals view lives as its own page or as a tab on the
   SignalSource detail — settled by the frontend task against the existing
