@@ -2,7 +2,7 @@
 
 ## 1. The Signal CRD
 
-- [ ] 1.1 Add the `Signal` type to `platform/manager/api/v1alpha1/` — spec (source-derived fields, correlation id, payload record, occurrence count), `status.claimants[]` (ref, state, conversation, reason), derived phase — and verify `go build ./...` passes
+- [ ] 1.1 Add the `Signal` type to `platform/manager/api/v1alpha1/` — spec (source-derived fields, `initiationId`, payload record, occurrence count), `status.claimants[]` (ref, state, conversation, reason), derived phase — and verify `go build ./...` passes
 - [ ] 1.2 Regenerate deepcopy and the CRD YAML into `chart/crds/` with controller-gen (pinned version from `build-test.md`) and verify the generated files are in the diff
 - [ ] 1.3 Add `signals` (lowercase plural) with full verbs to the manager's Role and `get`/`list`/`watch` to the console's in `chart/templates/rbac.yaml`, and verify the chart render tests pass
 
@@ -17,13 +17,13 @@
 
 - [ ] 3.1 Implement the reconciler routing non-terminal Signals through the shared routing path — claimant snapshot at first routing attempt, retries touching only non-terminal claimants, retry budget flipping exhausted ones to `Failed` — and verify envtest covers each transition
 - [ ] 3.2 Implement the phase roll-up recomputed on every status write (`Pending`/`Routed`/`PartiallyRouted`/`Dropped`/`Failed`) and verify a table test walks every claimant-state combination
-- [ ] 3.3 Implement bounds: per-source live cap with oldest-eviction as `Dropped` (overflow), TTL GC after terminal phases via requeue, `ownerRef` to the SignalSource — and verify envtest covers cap eviction and GC timing
+- [ ] 3.3 Implement bounds: per-source live cap with oldest-eviction (pre-fan-out as `Dropped` reason overflow, post-fan-out by flipping non-terminal claimants to `Failed`), TTL GC after terminal phases via requeue with `Dropped` shorter than `Routed` and `Failed` on the `Routed` TTL, `ownerRef` to the SignalSource — and verify envtest covers both eviction shapes and GC ordering
 - [ ] 3.4 Emit the `Failed` phase as loudly as the unwired drop (activity event, logged, counted) and verify a unit test asserts the event
 
 ## 4. Console signals view
 
 - [ ] 4.1 Add the `Signal` watch to the console's read-only informer set and verify the console builds with the kind in its cache
-- [ ] 4.2 Build the signals inventory (source, correlation id, phase, count, age, filter by source/phase) and the detail view with per-claimant state and conversation links, and verify vitest covers both
+- [ ] 4.2 Build the signals inventory (source, `initiationId`, phase, count, age, filter by source/phase) and the detail view with per-claimant state and conversation links, and verify vitest covers both
 - [ ] 4.3 Take the visual check screenshots against the dev server per `visual-check.md` and verify the rendered view matches the spec's content requirements
 
 ## 5. Unit tests

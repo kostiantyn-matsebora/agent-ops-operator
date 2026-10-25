@@ -197,12 +197,18 @@ The manager SHALL cap the non-terminal `Signal` CRs per source. Absorb by
 CR however often it fires.
 
 When the cap is still exceeded, the manager SHALL evict the OLDEST
-non-terminal `Signal` as `Dropped` with reason overflow, counted and logged
-— degrading gracefully, as the bounded cooldown record already does.
+non-terminal `Signal`, counted and logged — degrading gracefully, as the
+bounded cooldown record already does:
+
+- a `Signal` that has not fanned out becomes `Dropped` with reason overflow
+- a `Signal` that has fanned out has each non-terminal claimant flipped to
+  `Failed` with reason overflow, and the phase rolls up from the claimants
+  as always — `Dropped` stays a strictly pre-fan-out phase
 
 Terminal `Signal` CRs SHALL be garbage-collected after a TTL. The TTL for
 `Dropped` SHALL be shorter than the TTL for `Routed`, because the routed
-record is the audit trail.
+record is the audit trail. `Failed` SHALL use the `Routed` TTL — a signal
+nobody routed is exactly the record an operator investigates.
 
 Deleting a `SignalSource` SHALL garbage-collect its `Signal` CRs through the
 ownerRef, whatever phase each is in.
@@ -211,8 +217,21 @@ ownerRef, whatever phase each is in.
 
 - **WHEN** a fresh signal would exceed its source's cap on non-terminal
   `Signal` CRs
-- **THEN** the oldest non-terminal `Signal` becomes `Dropped` with reason
-  overflow, and the eviction is counted and logged
+- **THEN** the oldest non-terminal `Signal` is evicted, counted and logged
+  — `Dropped` with reason overflow, since it never fanned out
+
+#### Scenario: Overflow after fan-out exhausts claimants, never re-drops
+
+- **WHEN** the eviction candidate is `PartiallyRouted`, one claimant `Routed`
+  and one `Routing`
+- **THEN** the `Routing` claimant becomes `Failed` with reason overflow and
+  the phase rolls up to `Routed`, never to `Dropped`
+
+#### Scenario: Failed is collected on the audit TTL
+
+- **WHEN** a `Failed` and a `Dropped` `Signal` go terminal at the same moment
+- **THEN** the `Dropped` one is collected first, and the `Failed` one on the
+  `Routed` TTL
 
 #### Scenario: The audit trail outlives the drop record
 

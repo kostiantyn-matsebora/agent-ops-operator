@@ -134,7 +134,9 @@ last records a chat signal declined at a full backlog (D-8).
   counted and logged — the `MaxCooldownEntries` degrade-gracefully
   precedent.
 - TTL GC after a terminal phase, in the reconciler via requeue. `Dropped`
-  short, `Routed` longer — the routed record is the audit trail.
+  short, `Routed` longer — the routed record is the audit trail — and
+  `Failed` on the `Routed` TTL, since nobody-got-it is what an operator
+  investigates.
 - `ownerRef` to the `SignalSource`: a deleted source takes its signals from
   any phase, consistent with the unwired-drop posture.
 
@@ -159,10 +161,12 @@ Pending is no longer forced.
 - **A persist failure is unacked** → the response reports it, and safety
   rests on the adapter contract's existing at-least-once posture: the
   sender re-sends with the same `initiationId`.
-- **Overflow can evict a Signal with a `Routing` claimant mid-retry**
-  → accepted, deliberately. The cap protects etcd, and the eviction is a
-  counted, logged `Dropped` (reason overflow) — the degrade-gracefully
-  precedent, never an unbounded object set.
+- **Overflow can evict a Signal with a `Routing` claimant mid-retry** →
+  accepted, deliberately. The cap protects etcd. Pre-fan-out the eviction is
+  a counted, logged `Dropped` (reason overflow). Post-fan-out it flips the
+  non-terminal claimants to `Failed` (reason overflow) and the phase rolls
+  up — `Dropped` stays strictly pre-fan-out, and the object set stays
+  bounded either way.
 - **etcd churn from a flapping source** → absorb collapses repeats into one
   object update, the per-source cap bounds the worst case, and cooldown
   still suppresses inside its window.
