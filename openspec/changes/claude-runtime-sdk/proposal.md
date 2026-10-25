@@ -134,7 +134,7 @@ permission-callback shape.
   since the flag form already satisfies RT-3 as written.
   - `docs/claude.md`, `docs/runtimes/ollama.md` and `docs/runtimes/copilot.md`
     move their claimed version to match, per `runtime-spec.md`'s rule that
-    every shipped runtime's version moves together. `docs/runtimes/claude-cli.md`
+    every shipped runtime's version moves together. `docs/claude-cli.md`
     is a new page for the new component.
   - Session reuse itself still does NOT publish there — see design.md's
     Non-Goals.

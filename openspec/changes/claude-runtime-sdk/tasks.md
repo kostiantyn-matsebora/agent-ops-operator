@@ -83,7 +83,7 @@ All of 4.1–4.4 apply to `runtimes/claude` only — `runtimes/claude-cli` opens
 - [ ] 11.2 Move `docs/claude.md`'s claimed runtime-specification version to match, and rewrite its Dockerfile description now that the CLI install is gone
 - [ ] 11.3 Move `docs/runtimes/ollama.md`'s claimed runtime-specification version to match, even though `runtimes/ollama/` needs no code change for this clarification
 - [ ] 11.4 Move `docs/runtimes/copilot.md`'s claimed runtime-specification version to match, even though `runtimes/copilot/` needs no code change for this clarification
-- [ ] 11.5 Add `docs/runtimes/claude-cli.md`, documenting the new bundle the same way `docs/runtimes/ollama.md` documents its own: image, credential, when to pick it over `runtimes/claude`
+- [ ] 11.5 Add `docs/claude-cli.md`, beside `docs/claude.md`, documenting the new bundle: image, credential, when to pick it over `runtimes/claude`
 - [ ] 11.6 `.claude/rules/runtime-spec.md`: replace the two-driver-one-image note with a two-component note — `runtimes/claude` (sdk, default-eligible, the allowlist is a `canUseTool` callback rule set) and `runtimes/claude-cli` (today's per-unit spawn, off by default, the allowlist is `--allowedTools`/`--permission-mode dontAsk`)
 - [ ] 11.7 `.claude/rules/structure.md`: add a `runtimes/claude-cli` row to the runtimes table, and `.claude/rules/chart.md` if the bundle's shape needs a note beside `ollama`'s
 - [ ] 11.8 `docs/CHANGELOG.md`: a breaking-change entry naming the default-behaviour change in `runtimes/claude`, the loss of the CLI binary from its image, and the three-step upgrade path (enable `claude-cli`, re-point `runtimeRef`, choose which bundle is `default`) from design.md's Migration Plan
