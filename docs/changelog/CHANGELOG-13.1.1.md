@@ -11,7 +11,6 @@ published images had not.
 
 ### Changed
 
-
 Twelve components moved to versions built from that tree:
 `channel-telegram` 0.24.4, `console` 0.38.2, `context-sync` 0.2.3,
 `egress-proxy` 0.2.4, `gateway-telegram` 0.5.3, `housekeeping` 0.2.3,
