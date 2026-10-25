@@ -93,7 +93,8 @@ authored independently.
   signal's fan-out.
 - Retries touch only non-terminal claimants. The record is the
   idempotency guard.
-- A bounded retry budget flips exhausted claimants to `Failed`, so
+- A retry deadline (`SIGNAL_RETRY_DEADLINE`, default 1h) flips exhausted
+  claimants to `Failed`, so
   `PartiallyRouted` always exits.
 
 **Alternative considered:** a single phase field written by the route
@@ -174,7 +175,7 @@ Pending is no longer forced.
   retries)** → ingest writes through the leader today
   (`leaderProxyMiddleware`), and the reconciler is leader-only. Optimistic
   concurrency on the status write settles any race the proxy misses.
-- **A signal squatting non-terminal forever** → the retry budget flips
+- **A signal squatting non-terminal forever** → the retry deadline flips
   claimants to `Failed`, the phase roll-up then terminates it, TTL GC
   removes it.
 - **Console screenshot/demo drift** → the UI change re-runs the
@@ -198,9 +199,7 @@ Additive. New CRD only.
 
 - Exact TTL defaults for `Dropped` vs `Routed` (chart-tunable, defaults
   decided at implementation against the housekeeping cadence).
-- The retry budget's value and home (chart value vs fixed). The spec only
-  requires the bound to exist and exhaustion to record as the `Failed`
-  reason.
+
 - Whether the console signals view lives as its own page or as a tab on the
   SignalSource detail — settled by the frontend task against the existing
   navigation, the spec constrains content, not placement.

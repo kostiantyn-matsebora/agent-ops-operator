@@ -19,8 +19,8 @@ What happens to the signal SHALL depend on its kind:
 #### Scenario: A machine signal waits, never dropped
 
 - **WHEN** 50 conversations are `Pending` and another alert signal arrives
-- **THEN** no conversation is created, and the signal waits as a `Pending`
-  `Signal` recording that it is waiting on capacity
+- **THEN** no conversation is created, and the signal waits in the `Pending`
+  phase — capacity-wait is that phase, not a field of its own
 
 #### Scenario: A waiting signal is routed when the backlog drains
 

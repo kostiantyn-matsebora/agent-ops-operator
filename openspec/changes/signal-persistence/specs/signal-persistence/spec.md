@@ -185,31 +185,35 @@ and a log line, never a silent status.
 
 ### Requirement: A partially routed signal exits
 
-Retries against a non-terminal claimant SHALL be bounded by a retry
-budget or deadline. When the bound is exhausted, the manager SHALL flip that
-claimant to `Failed` with the exhaustion recorded as its reason.
+Retries against a non-terminal claimant SHALL be bounded by a deadline
+measured from the signal's first routing attempt: `SIGNAL_RETRY_DEADLINE`
+(chart `signalRetryDeadline`), default **1h**. When the deadline passes, the
+manager SHALL flip that claimant to `Failed` with the exhaustion recorded as
+its reason.
 
 No `Signal` SHALL sit in a non-terminal phase indefinitely.
 
 #### Scenario: An exhausted claimant goes terminal
 
-- **WHEN** a `Routing` claimant exhausts its retry budget while another
+- **WHEN** a `Routing` claimant passes the retry deadline while another
   claimant is already `Routed`
 - **THEN** the exhausted claimant becomes `Failed` with the reason
   recorded, and the phase rolls up to `Routed`
 
 #### Scenario: Exhaustion with nothing routed fails the signal
 
-- **WHEN** every claimant exhausts its retry budget and none is
+- **WHEN** every claimant passes the retry deadline and none is
   `Routed`
 - **THEN** the `Signal` reports phase `Failed`, with the loud surfacing that
   phase requires
 
 ### Requirement: Live signals are bounded and terminal ones are collected
 
-The manager SHALL cap the non-terminal `Signal` CRs per source. Absorb by
-`initiationId` is the primary enforcement — a recurring problem occupies one
-CR however often it fires.
+The manager SHALL cap the non-terminal `Signal` CRs per source at
+`MAX_SIGNALS_PER_SOURCE` (chart `maxSignalsPerSource`), default **200** —
+mirroring the bounded cooldown record. Absorb by `initiationId` is the
+primary enforcement — a recurring problem occupies one CR however often it
+fires.
 
 When the cap is still exceeded, the manager SHALL evict the OLDEST
 non-terminal `Signal`, counted and logged — degrading gracefully, as the
