@@ -68,7 +68,11 @@ default: false
 # 0.11.0 reports cache-write tokens separately from input tokens, so the
 # console's Runs table can show Cached/Written/Fresh instead of folding a
 # cache write into In unexplained.
-image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.11.0
+# 0.12.0 is BREAKING: the image drives @anthropic-ai/claude-agent-sdk
+# in-process instead of spawning the claude CLI, and no longer carries the
+# CLI binary at all. runtimes/claude-cli (chart/charts/claude-cli) ships
+# today's CLI-spawn-per-unit behavior as its own off-by-default bundle.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude:0.12.0
 
 # WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
 # the declaration that turns context synchronisation ON.
