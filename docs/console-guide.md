@@ -142,6 +142,12 @@ Five views, one question each.
 
   ![Three pipelines, each showing its profile, the sources it claims, the channels it posts to, its toolsets, tools mode, MCP configs and Ready status.]({{ '/assets/img/console/configuration-light.png' | relative_url }})
 
+  **Signals** are the one kind with no write path anywhere, ever — the
+  durable record of what arrived and whether it reached an agent. The list
+  shows source, phase and occurrence count, filterable by either. Opening
+  one shows every claimant's state, a routed one linked to its conversation,
+  and a failed or dropped signal's reason verbatim.
+
 ## What it does for you
 
 {: .ao-cards}

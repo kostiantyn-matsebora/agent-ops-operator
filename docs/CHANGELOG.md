@@ -8,6 +8,19 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+### Added
+
+- A new `Signal` CRD: the durable, persist-then-ack record of one inbound
+  signal arrival and its per-claimant routing workflow. `/signal/inbound`
+  creates the CR before writing the response, and a repeat `initiationId`
+  on a still-open `Signal` is absorbed into it rather than posted twice.
+- The console's read-only signals view — list, filters and the per-claimant
+  routing detail — reached from the existing Configuration pages.
+- Not breaking. Upgrading runs `kubectl apply -f chart/crds/` as every
+  CRD-adding release already does.
+
 ## [18.0.0] — 2026-10-25
 
 - `manager` 0.61.0, `console` 0.40.0, `runtime-claude` 0.12.0,

@@ -106,6 +106,8 @@ groups:
         url: /crds/agent-runtime/
       - title: SignalSource
         url: /crds/signal-source/
+      - title: Signal
+        url: /crds/signal/
       - title: SignalAdapter
         url: /crds/signal-adapter/
       - title: Channel

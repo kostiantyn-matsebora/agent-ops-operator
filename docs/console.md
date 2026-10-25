@@ -172,6 +172,19 @@ composed tool allowlist, the composition mode, effective toolsets, MCP configs
 and servers, and the resolving runtime — fetched from the manager and rendered
 verbatim.
 
+**`Signal` rides this same inventory, read-only like every other kind.**
+
+- **The list** shows source, `initiationId`, phase and occurrence count.
+  Filterable by source and by phase.
+- **The detail** renders the full routing record: every claimant's kind,
+  name and state, a routed one linked to its conversation, a failed or
+  skipped one's reason verbatim.
+- **A dropped or failed signal** shows its terminal reason as loudly as its
+  phase.
+
+No control mutates a `Signal`. The kind carries no write path, console or
+otherwise.
+
 The console does not recompute composition. A second implementation would
 eventually disagree with the one that runs.
 
@@ -194,6 +207,10 @@ feed**, each a layer of the architecture with its own node identity.
 | **Model** | the declared objects: SignalSources, SignalAdapters, Pipelines, Coordinators, AgentProfiles, AgentCapabilities, AgentRuntimes, MCPToolsets, MCPConfigs, Channels, ChannelAdapters, Conversations | pipelines |
 | **Components** | one node per component the repository builds — each adapter, the gateway, the manager, each runtime image, context-sync, egress-proxy, housekeeping — plus the systems outside: models, MCP servers, repositories, the externals an adapter declares, the Kubernetes API | the manager |
 | **Infrastructure** | every pod, plus the models, MCP servers, repositories and externals outside the cluster. Nothing from the model is a node | the manager's pod |
+
+`Signal` carries no wiring edge, so it is not a Model node. It is watched
+like every other kind and shown on the [Configuration](#configuration)
+inventory instead.
 
 **A hop is mapped onto every view.** The hop feed, the content panel and both
 replays are identical on all three. One `run.dispatched` moves:
@@ -1194,7 +1211,7 @@ Role is the chart's grant.
 
 | Group | Resources | Verbs |
 |---|---|---|
-| `agentops.dev` | all twelve kinds, `AgentCapability` and `Coordinator` included | get, list, watch |
+| `agentops.dev` | all thirteen kinds, `AgentCapability`, `Coordinator` and `Signal` included | get, list, watch |
 | `apps` | deployments | get, list, watch |
 | (core) | pods | get, list, watch |
 | `batch` | cronjobs | get, list, watch |

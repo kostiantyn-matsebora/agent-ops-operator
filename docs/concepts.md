@@ -332,6 +332,67 @@ writing their own `severity` **label**, part of the vocabulary the
 decides whether a signal is emitted at all — see
 [kubernetes](integrations/kubernetes.md#tune-what-reaches-you).
 
+### Signal
+
+**The durable, persist-then-ack record of one signal arrival.**
+`/signal/inbound` creates it before writing the response, and every later
+routing decision — a retry, a crash recovery, a leader change — reads it
+back rather than trusting memory.
+
+**Absorbed, not duplicated.** A repeat whose `initiationId` matches a
+still-open `Signal` of the same source appends its payload and bumps
+`occurrences`, rather than creating a second CR.
+
+A repeat matching only a terminal `Signal` creates a fresh one instead — a
+terminal record is an audit entry, never reopened.
+
+**`status.claimants[]` is the per-claimant routing workflow**, snapshotted
+once at the first routing attempt and never resized after. A re-wire of who
+serves the source never reaches an in-flight signal's own fan-out.
+
+| State | Means |
+|---|---|
+| `Routing` | not yet terminal — never attempted, or owed a retry |
+| `Routed` | terminal. Carries the conversation it routed to |
+| `Failed` | terminal. Retry budget exhausted, or evicted after fan-out |
+| `Skipped` | terminal. The snapshotted claimant no longer exists |
+
+Retries touch only non-terminal claimants, bounded by
+`SIGNAL_RETRY_DEADLINE` (chart `signalRetryDeadline`, default `1h`). Past
+the deadline an exhausted claimant flips to `Failed`, so a signal never
+sits `PartiallyRouted` forever.
+
+**`status.phase` is a roll-up, recomputed on every status write and never
+authored on its own:**
+
+| Phase | Means |
+|---|---|
+| `Pending` | no claimant has routed yet, and nothing has dropped it |
+| `Routed` | every claimant terminal, at least one `Routed` |
+| `PartiallyRouted` | at least one `Routed`, at least one still `Routing` |
+| `Dropped` | terminal before any claimant was snapshotted — unclaimed, cooldown, overflow or capacity, with the reason recorded |
+| `Failed` | every claimant terminal, none `Routed` — surfaced as loudly as the unwired drop |
+
+**Bounds keep the object count flat.** A per-source cap on non-terminal
+`Signal` CRs — `MAX_SIGNALS_PER_SOURCE` (chart `maxSignalsPerSource`,
+default `200`) — evicts the OLDEST as `Dropped` (reason `overflow`) once
+absorb alone cannot hold the count down.
+
+**Terminal `Signal` CRs are garbage-collected on a per-phase TTL:**
+
+| Phase | Chart value | Default |
+|---|---|---|
+| `Dropped` | `signalTtlDropped` | `4h` |
+| `Routed` | `signalTtlRouted` | `72h` |
+| `Failed` | shares the `Routed` TTL | `72h` |
+
+`Routed` outlives `Dropped` because it is the audit trail. `Failed` shares
+that TTL because "nobody got it" is exactly the record an operator
+investigates.
+
+**Owned by its `SignalSource`.** Deleting the source garbage-collects every
+`Signal` it owns, from any phase.
+
 ### SignalAdapter
 
 **A signal implementation, nothing more.** The inbound-only sibling of
@@ -1758,6 +1819,7 @@ a second source of truth beside the CRs.
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
 | Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
 | Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
+| Manager — Signal routing | per-claimant routing state | `Signal.status.claimants[]`, Kubernetes-API state surviving every restart and leader change | no accepted signal: routing resumes from the recorded per-claimant state alone |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |

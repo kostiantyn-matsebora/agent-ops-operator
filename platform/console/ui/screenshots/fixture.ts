@@ -148,6 +148,7 @@ const kinds: KindInfo[] = [
   { kind: 'agentruntimes', title: 'Agent runtimes', count: 2, synced: true },
   { kind: 'signalsources', title: 'Signal sources', count: 5, synced: true },
   { kind: 'signaladapters', title: 'Signal adapters', count: 3, synced: true },
+  { kind: 'signals', title: 'Signals', count: 1, synced: true },
   { kind: 'channels', title: 'Channels', count: 2, synced: true },
   { kind: 'channeladapters', title: 'Channel adapters', count: 2, synced: true },
   { kind: 'mcptoolsets', title: 'MCP toolsets', count: 4, synced: true },
@@ -233,6 +234,16 @@ const inventory: Record<string, InventoryRow[]> = {
       name: 'bench-sensors', created: ago(5400), health: 'bad', findings: 1,
       conditions: [{ type: 'Wired', status: 'False', reason: 'NoPipeline', message: 'no Ready Pipeline lists this source' }],
       columns: { adapter: 'cron', served: 'true', wired: 'false' },
+    },
+  ],
+  // signal-persistence: one representative Signal — the durable, persist-then-ack
+  // record a SignalSource's admitted arrival becomes. Routed rather than one of
+  // the other four phases, so the inventory's default row reads as the ordinary
+  // case rather than a fault.
+  signals: [
+    {
+      name: 'cluster-events-sig-7f2a1', created: ago(96), health: 'ok', findings: 0,
+      columns: { source: 'cluster-events', initiationId: 'k8s-events-7f2a1', phase: 'Routed', occurrences: '1' },
     },
   ],
 }

@@ -581,3 +581,12 @@ curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
   -d '{"source":"<source>","signals":[{"initiationId":"ci-'"$BUILD_ID"'",
        "kind":"task","payload":"why is the api pod crashlooping?"}]}'
 ```
+
+**The manager persists before it answers.** Every accepted signal becomes a
+`Signal` CR before the response is written, and a repeat `initiationId`
+matching a still-open `Signal` is absorbed into it rather than posted
+twice.
+
+Every documented request and response field is unchanged — see
+`docs/concepts.md`'s `Signal` section for the CRD this adds, and
+`docs/contracts/signal-adapter.md` for the untouched adapter contract.
