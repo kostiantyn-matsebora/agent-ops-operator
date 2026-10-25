@@ -363,6 +363,7 @@ rules:
       - mcptoolsets
       - pipelines
       - signaladapters
+      - signals
       - signalsources
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
