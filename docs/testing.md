@@ -11,10 +11,12 @@ that chain — see below.
 | **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
 | **Console browser e2e** (`e2e-live`, nightly) | Playwright driving a real browser against the full tier's own cluster and console — or any already-running install, by hand | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
 
-A fifth check gates every console pull request alongside the first three: the
-mocked-API browser smoke, `platform/console/ui/e2e/`, run as the `console-e2e`
-job in `ci.yml`. A real browser, but no cluster and no secret — the same
-gating posture as contract conformance.
+The mocked-API browser smoke, `platform/console/ui/e2e/`, gates every console
+pull request alongside contract conformance. It runs as the `console-e2e` job
+in `ci.yml`.
+
+It uses a real browser but no cluster and no secret, the same gating posture as
+contract conformance. The system tier does not gate pull requests.
 
 It is a different suite from `e2e-live` below. A rendering check against a
 mocked backend, not a behavior proof against a real one.

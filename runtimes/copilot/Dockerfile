@@ -76,7 +76,7 @@ RUN npm install -g --ignore-scripts npm@12.0.2 && \
     rm -rf /srv/node_modules/@github/copilot-linux-*/foundry-local-sdk && \
     NPM_ROOT="$(npm root -g)/npm/node_modules" && \
     cd /tmp && \
-    for entry in brace-expansion@5.0.12 undici@6.28.1 tar@7.5.22 ip-address@10.7.2; do \
+    for entry in brace-expansion@5.0.12 undici@6.29.1tar@7.5.22 ip-address@10.7.2; do \
       pkg="$(echo "$entry" | cut -d@ -f1)" && \
       tgz="$(npm pack --silent "$entry")" && \
       rm -rf "$NPM_ROOT/$pkg" && tar xzf "$tgz" && mv package "$NPM_ROOT/$pkg" && \

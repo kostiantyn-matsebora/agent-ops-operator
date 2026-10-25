@@ -84,11 +84,11 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 
 ## 5. Documentation
 
-- [x] 5.1 Reference docs: rewrite `docs/testing.md`'s `e2e-live` section —
+- [ ] 5.1 Reference docs: rewrite `docs/testing.md`'s `e2e-live` section —
   remove the "NOT CI-gated, and no workflow dispatches it" claim and state
   the actual nightly wiring into the full tier. Update `CONTRIBUTING.md`'s
   CI section to name the `console-e2e` job and the full tier's browser
   pass.
-- [x] 5.2 Adopter site: none. This change is internal verification process,
+- [ ] 5.2 Adopter site: none. This change is internal verification process,
   not a product capability, an install/upgrade step, or a claim the
   landing page or guides make — ticked as not applicable.
