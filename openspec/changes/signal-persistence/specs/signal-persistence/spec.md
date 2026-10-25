@@ -104,7 +104,11 @@ At first routing attempt the manager SHALL snapshot the claimant set into
 | `Routing` | the initial, non-terminal state |
 | `Routed` | terminal — the entry records the conversation name |
 | `Failed` | terminal — the entry records the failure reason verbatim |
-| `Skipped` | terminal — routing was deliberately not attempted |
+| `Skipped` | terminal — routing was deliberately not attempted, with the reason recorded |
+
+In this change exactly one condition SHALL produce `Skipped`: the
+snapshotted claimant no longer exists when an attempt would run. A later
+change may add conditions (a per-binding filter is the anticipated one).
 
 The snapshot SHALL never grow or shrink after first routing attempt. A re-wire never
 changes an in-flight signal's fan-out.
@@ -137,6 +141,13 @@ A retry SHALL be idempotent by equality reuse, scoped per claimant:
 - **WHEN** a claimant reaches a terminal state
 - **THEN** its entry names the conversation it routed to, or carries the failure
   reason verbatim
+
+#### Scenario: A deleted claimant is skipped, never failed
+
+- **WHEN** a snapshotted Pipeline is deleted before a non-terminal
+  claimant's next attempt
+- **THEN** that claimant becomes `Skipped` with the reason recorded, and the
+  phase rolls up from the remaining entries
 
 ### Requirement: The phase is a roll-up derived from the claimants
 
