@@ -1,0 +1,8 @@
+apiVersion: v2
+name: claude-cli
+description: >-
+  claude-code driven by spawning the CLI once per work unit — today's
+  runtimes/claude behaviour, kept as its own bundle once runtimes/claude
+  moves to the SDK, off by default.
+type: application
+version: 0.1.0

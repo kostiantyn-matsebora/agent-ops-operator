@@ -6,7 +6,7 @@ container, one directory, grouped by runtime role.
 | Group | Holds | Type |
 |---|---|---|
 | `platform/` | `manager` `console` `housekeeping` `context-sync` `egress-proxy` `mcp-aops` | product components |
-| `runtimes/` | `claude` `ollama` `copilot` | client side of the work contract |
+| `runtimes/` | `claude` `claude-cli` `ollama` `copilot` | client side of the work contract |
 | `signals/` | `cron` `alertmanager` `k8s-events` `ha` `pulse` `telegram` | push to `/signal/inbound` |
 | `channels/` | `telegram` | serve `/channel/*` |
 | `gateways/` | `telegram` | no agent-ops contract |
@@ -52,11 +52,13 @@ Own Go module, the only one with dependencies.
 
 | Runtime | Is | Key fact |
 |---|---|---|
-| `runtimes/claude/` | reference `AgentRuntime`, Node + claude-code | GENERIC — no domain tooling, what an agent reaches is WIRING |
+| `runtimes/claude/` | reference `AgentRuntime`, Node + `@anthropic-ai/claude-agent-sdk`, in-process | GENERIC — no domain tooling, what an agent reaches is WIRING. Holds one vendor session open across a pod's work units, the only shipped runtime taking `runtime-session-reuse`'s freedom |
+| `runtimes/claude-cli/` | today's per-unit `claude` CLI spawn, moved verbatim out of `runtimes/claude/` | off by default, same pattern as `ollama`/`copilot`. No live session — `--allowedTools`/`--permission-mode dontAsk`, unchanged |
 | `runtimes/ollama/` | the harness IS the runtime, Go, own loop/tools/transcript | `ollama.go` is the only vendor-aware file. Gate applies ONCE before the request — `Bash(kubectl:*)` grants nothing, never widens |
 | `runtimes/copilot/` | vendor owns tool vocabulary, Node + copilot-sdk | `vocabulary.js` is the boundary — `Bash(kubectl:*)` ENFORCED per call (opposite of ollama, each enforces what it can) |
 
-All three are optional bundles under `chart/charts/<name>/`, off by default.
+`runtimes/claude` is ON by default, the chart's default-eligible bundle. The
+other three are optional bundles under `chart/charts/<name>/`, off by default.
 
 ### Signals and channels
 

@@ -132,11 +132,12 @@ substrate they run on comes from this chart.
 | Prometheus alerts | `prometheus.enabled` | [prometheus]({{ '/integrations/prometheus/' | relative_url }}) |
 | Telegram | `telegram.enabled` | [telegram]({{ '/integrations/telegram/' | relative_url }}) |
 | Home Assistant | `home-assistant.enabled` | [home-assistant]({{ '/integrations/home-assistant/' | relative_url }}) |
+| Claude CLI runtime | `claude-cli.enabled` | [claude-cli]({{ '/runtimes/claude-cli/' | relative_url }}) |
 | Ollama runtime | `ollama.enabled` | [ollama]({{ '/runtimes/ollama/' | relative_url }}) |
 | GitHub Copilot runtime | `copilot.enabled` | [copilot]({{ '/runtimes/copilot/' | relative_url }}) |
 | Coordination (`agentops-mcp-aops`) | `coordination.enabled` | [coordinate agents]({{ '/guides/coordinate-agents/' | relative_url }}) |
 
-All seven are off by default. Each bundle's own page owns its values — this
+All eight are off by default. Each bundle's own page owns its values — this
 page does not repeat them.
 
 The last three start no work of their own. The runtimes execute. Coordination

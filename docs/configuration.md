@@ -423,11 +423,18 @@ image:
 **The defaults are SUFFICIENT.** The model credential is the only value with no
 defensible default, and therefore the only thing you must supply.
 
-**Another vendor is a bundle, or an entry stating only its difference.** The
-chart ships [Ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) and
+**Another vendor, or the same vendor run a different way, is a bundle, or an
+entry stating only its difference.** The chart ships
+[Claude CLI](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude-cli/),
+[Ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/) and
 [GitHub Copilot](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/copilot/) as bundles:
 
 ```yaml
+claude-cli:
+  enabled: true
+  credentialsSecret:
+    token: placeholder-token                  # the same token the claude bundle takes
+
 ollama:
   enabled: true
   endpoint: http://ollama.ollama.svc:11434   # a server you already run
@@ -440,8 +447,10 @@ copilot:
 
 pipelines:
   - name: house-ops
-    runtimeRef: ollama            # the route selects it
+    runtimeRef: claude-cli        # spawns the CLI per unit instead of the default's held-open session
   - name: k8s-observe
+    runtimeRef: ollama
+  - name: on-call
     runtimeRef: copilot
 ```
 
@@ -541,9 +550,10 @@ global:
 
 ### Enforcing the toolset
 
-A route's toolsets reach the agent as `--allowedTools`, applied by the CLI in
-the runtime pod. That configures a **cooperating** agent. What that leaves open
-is on
+A route's toolsets reach the agent in the runtime pod, as `--allowedTools` on
+`runtime-claude-cli` and `runtime-ollama`, and as a per-invocation callback on
+`runtime-claude` and `runtime-copilot`. Either shape configures a
+**cooperating** agent. What that leaves open is on
 [Security](https://kostiantyn-matsebora.github.io/agent-ops-operator/security/#egress-control).
 
 An agent that can run commands reaches a bound MCP server directly and calls

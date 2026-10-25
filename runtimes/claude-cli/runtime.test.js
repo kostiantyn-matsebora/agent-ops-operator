@@ -1,0 +1,417 @@
+// cd runtime-claude && node --test
+//
+// runtime.js self-executes its long-poll loop as a bottom-of-file IIFE and
+// exits the process when CONTROL_URL/CONVO_ID are unset — both guarded on
+// `require.main === module` (see runtime.js) so this suite can `require()`
+// the module for its pure/subprocess-driving pieces without either firing.
+// Every env var runtime.js reads is captured into a module-level const at
+// require time, so each distinct environment this suite needs gets its own
+// test FILE (node's test runner gives every file its own process).
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function tmp(prefix) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+process.env.CONTROL_URL = 'http://127.0.0.1:1';
+process.env.CONVO_ID = 'conv-test';
+process.env.REPO_URL = ''; // exercises syncRepo's early no-op branch
+const HOME = tmp('agentops-home-');
+process.env.HOME = HOME; // controls SESSIONS_DIR
+
+const {
+  gitEnv, repoURL, run, clearDir, syncRepo, formatEvent,
+  checkContextPresence, sessionFileExists, contextIdOf, strip, extractBrief, SESSIONS_DIR,
+  pollNextUnit, reportDone, isDefinitiveRejection,
+} = require('./runtime');
+
+// Stubs the built-in global `fetch` for the duration of one test and
+// restores it after, even on failure -- the same shape `t.mock` would give,
+// written by hand since none of this file's existing tests mock anything.
+function withFetch(t, impl) {
+  const real = global.fetch;
+  global.fetch = impl;
+  t.after(() => { global.fetch = real; });
+}
+
+// Captures console.error lines for the duration of one test, restoring the
+// real one after — used to assert a refused /work/done report is logged
+// rather than dropped silently.
+function withConsoleError(t) {
+  const lines = [];
+  const real = console.error;
+  console.error = (...args) => lines.push(args.join(' '));
+  t.after(() => { console.error = real; });
+  return lines;
+}
+
+// ---- gitEnv / repoURL, default (no auth configured) ---------------------------
+
+test('gitEnv with no GIT_AUTH_TYPE adds no SSH command, and passes process.env through', () => {
+  const env = gitEnv();
+  assert.strictEqual(env.GIT_SSH_COMMAND, undefined);
+  assert.strictEqual(env.PATH, process.env.PATH);
+});
+
+test('repoURL with no https auth type returns the configured URL unchanged', () => {
+  // REPO_URL is '' in this process — the branch under test is the `&&` chain
+  // being false because GIT_AUTH_TYPE !== 'https', not because REPO_URL is empty.
+  assert.strictEqual(repoURL(), '');
+});
+
+// ---- syncRepo: no REPO_URL configured -----------------------------------------
+
+test('syncRepo is a no-op when no REPO_URL is configured', async () => {
+  // Must not throw and must not touch the filesystem.
+  await assert.doesNotReject(syncRepo());
+});
+
+// ---- run(): a real subprocess, both success and failure -----------------------
+
+test('run() captures stdout and a zero exit code from a real subprocess', async () => {
+  const r = await run(process.execPath, ['-e', "process.stdout.write('run-ok')"]);
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.out, 'run-ok');
+});
+
+test('run() captures stderr and a non-zero exit code', async () => {
+  const r = await run(process.execPath, ['-e', "process.stderr.write('run-err'); process.exit(3)"]);
+  assert.strictEqual(r.code, 3);
+  assert.strictEqual(r.err, 'run-err');
+});
+
+test('run() resolves rather than throwing when the binary does not exist', async () => {
+  const r = await run('agentops-definitely-not-a-real-binary', []);
+  assert.strictEqual(r.code, -1);
+  assert.ok(r.err.length > 0, 'the spawn error message is surfaced');
+});
+
+// ---- clearDir -------------------------------------------------------------------
+
+test('clearDir empties a directory recursively without removing the directory itself', () => {
+  const dir = tmp('agentops-cleardir-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
+  fs.mkdirSync(path.join(dir, 'sub'));
+  fs.writeFileSync(path.join(dir, 'sub', 'b.txt'), 'y');
+  clearDir(dir);
+  assert.deepStrictEqual(fs.readdirSync(dir), []);
+  assert.ok(fs.existsSync(dir), 'the mount point itself must survive');
+});
+
+// ---- formatEvent ------------------------------------------------------------------
+
+test('formatEvent renders an init event with model, tool count and mcp status', () => {
+  const line = formatEvent({
+    type: 'system', subtype: 'init', model: 'claude-x',
+    tools: ['Read', 'Bash'], mcp_servers: [{ name: 'k8s', status: 'connected' }],
+  });
+  assert.match(line, /\[init\] model=claude-x tools=2 mcp=k8s:connected/);
+});
+
+test('formatEvent renders assistant text blocks', () => {
+  const line = formatEvent({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi there' }] } });
+  assert.strictEqual(line, '[claude] hi there\n');
+});
+
+test('formatEvent renders a tool_use block, truncating long input at 160 chars', () => {
+  const bigInput = { path: 'x'.repeat(300) };
+  const line = formatEvent({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: bigInput }] } });
+  assert.match(line, /^\[tool\] Read /);
+  assert.match(line, /…\n$/, 'a long argument blob is truncated with an ellipsis');
+});
+
+test('formatEvent ignores a content block of an unrecognised type', () => {
+  const line = formatEvent({ type: 'assistant', message: { content: [{ type: 'thinking', text: 'internal' }] } });
+  assert.strictEqual(line, '');
+});
+
+test('formatEvent handles an assistant event with no content at all', () => {
+  assert.strictEqual(formatEvent({ type: 'assistant' }), '');
+});
+
+test('formatEvent renders a result event with subtype, turns and duration', () => {
+  const line = formatEvent({ type: 'result', subtype: 'success', num_turns: 3, duration_ms: 4500, result: 'the answer' });
+  assert.match(line, /=== RESULT \(success, 3 turns, 5s\) ===/);
+  assert.match(line, /the answer/);
+});
+
+test('formatEvent returns empty string for an event type it does not know', () => {
+  assert.strictEqual(formatEvent({ type: 'stream_event' }), '');
+});
+
+test('formatEvent falls back to the raw line when the event throws while being read', () => {
+  // A null event makes `ev.type` throw — this is the one path that reaches
+  // the catch block, and it must reproduce the line rather than crash the
+  // stdout parser for one bad line.
+  assert.strictEqual(formatEvent(null, 'the raw text'), 'the raw text\n');
+});
+
+// ---- contextIdOf / strip -----------------------------------------------------------
+
+test('contextIdOf prefers runtimeContextId over the retired resumeSessionId', () => {
+  assert.strictEqual(contextIdOf({ runtimeContextId: 'new-id', resumeSessionId: 'old-id' }), 'new-id');
+});
+
+test('contextIdOf falls back to resumeSessionId for one release', () => {
+  assert.strictEqual(contextIdOf({ resumeSessionId: 'old-id' }), 'old-id');
+});
+
+test('contextIdOf is empty when the work unit carries neither', () => {
+  assert.strictEqual(contextIdOf({}), '');
+});
+
+test('strip removes only the internal stderr capture', () => {
+  const out = strip({ status: 'succeeded', result: 'ok', stderr: 'internal noise' });
+  assert.deepStrictEqual(out, { status: 'succeeded', result: 'ok' });
+  assert.ok(!('stderr' in out));
+});
+
+// ---- extractBrief: the `<brief>` contract field (design D-I) -----------------
+
+test('extractBrief pulls a standalone brief tag out and removes it from the text', () => {
+  const { text, brief } = extractBrief('the disk is fine\n\n<brief>\nthe api pod restart loop\n</brief>\n\nnothing else to do');
+  assert.strictEqual(brief, 'the api pod restart loop');
+  assert.ok(!text.includes('<brief>'));
+  assert.strictEqual(text, 'the disk is fine\n\nnothing else to do');
+});
+
+test('extractBrief joins a multi-line brief into one line', () => {
+  const { brief } = extractBrief('<brief>\nthe api pod,\nrestarting every few minutes\n</brief>');
+  assert.strictEqual(brief, 'the api pod, restarting every few minutes');
+});
+
+test('extractBrief reports empty when no tag is present', () => {
+  const { text, brief } = extractBrief('just an ordinary answer');
+  assert.strictEqual(brief, '');
+  assert.strictEqual(text, 'just an ordinary answer');
+});
+
+test('extractBrief ignores a brief-shaped mention that is not a standalone tag', () => {
+  const { text, brief } = extractBrief('say `<brief>` on its own line to set one');
+  assert.strictEqual(brief, '');
+  assert.strictEqual(text, 'say `<brief>` on its own line to set one');
+});
+
+test('extractBrief bounds the reported brief to MaxBrief', () => {
+  const long = 'x'.repeat(600);
+  const { brief } = extractBrief(`<brief>\n${long}\n</brief>`);
+  assert.strictEqual(brief.length, 512);
+});
+
+// ---- sessionFileExists: real filesystem, recursive ---------------------------------
+
+test('sessionFileExists finds a match nested under a subdirectory', async () => {
+  const dir = tmp('agentops-sessions-');
+  fs.mkdirSync(path.join(dir, 'proj1'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'proj1', 'sess-abc123.jsonl'), '{}');
+  assert.strictEqual(await sessionFileExists(dir, 'abc123'), true);
+});
+
+test('sessionFileExists returns false when nothing matches', async () => {
+  const dir = tmp('agentops-sessions-');
+  fs.mkdirSync(path.join(dir, 'proj1'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'proj1', 'sess-zzz.jsonl'), '{}');
+  assert.strictEqual(await sessionFileExists(dir, 'not-there'), false);
+});
+
+test('sessionFileExists returns false rather than throwing for a directory that does not exist', async () => {
+  assert.strictEqual(await sessionFileExists(path.join(os.tmpdir(), 'agentops-never-created'), 'x'), false);
+});
+
+// C1: a readdir error that is NOT "the directory does not exist" must
+// propagate rather than read as "not found" — simulated here with ENOTDIR,
+// a real fs error raised by calling readdir on a plain file.
+test('sessionFileExists propagates a non-ENOENT fs error instead of swallowing it as not-found', async () => {
+  const file = path.join(tmp('agentops-notadir-'), 'plain-file');
+  fs.writeFileSync(file, 'x');
+  await assert.rejects(sessionFileExists(file, 'x'), /ENOTDIR/);
+});
+
+// ---- checkContextPresence: real timers, real filesystem ---------------------------
+
+test('checkContextPresence returns missing immediately for an empty context id', async () => {
+  const start = Date.now();
+  assert.strictEqual(await checkContextPresence(''), 'missing');
+  assert.ok(Date.now() - start < 100, 'no ladder is walked for an id that was never set');
+});
+
+test('checkContextPresence finds a reappearing file on its first check', async () => {
+  const projDir = path.join(SESSIONS_DIR, 'proj-reappear');
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(path.join(projDir, 'sess-here-now.jsonl'), '{}');
+  const start = Date.now();
+  const presence = await checkContextPresence('here-now');
+  assert.strictEqual(presence, 'present');
+  assert.ok(Date.now() - start < 3000, 'found on the first check, so the full ladder is not walked');
+});
+
+test('checkContextPresence walks the full ladder and confirms loss when nothing ever appears', async () => {
+  const start = Date.now();
+  const presence = await checkContextPresence('genuinely-nowhere');
+  assert.strictEqual(presence, 'missing');
+  assert.ok(Date.now() - start >= 5000, 'all three waits (500+1500+3000ms) must be spent before concluding loss');
+});
+
+// C1: an unreadable store (ENOTDIR, not ENOENT) must report 'unavailable'
+// and must not walk the rest of the ladder — an I/O error does not clear up
+// by waiting.
+test('checkContextPresence reports unavailable fast when the store itself cannot be read', async () => {
+  const real = fs.promises.readdir;
+  fs.promises.readdir = (dir, opts) => (dir === SESSIONS_DIR ? Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })) : real(dir, opts));
+  try {
+    const start = Date.now();
+    const presence = await checkContextPresence('whatever');
+    assert.strictEqual(presence, 'unavailable');
+    assert.ok(Date.now() - start < 3000, 'an unreadable store fails fast, not after the full ladder');
+  } finally {
+    fs.promises.readdir = real;
+  }
+});
+
+// ---- pollNextUnit --------------------------------------------------------------
+
+test('pollNextUnit returns the parsed work unit on a 200 with a JSON body', async (t) => {
+  withFetch(t, async (url) => {
+    assert.ok(String(url).startsWith('http://127.0.0.1:1/work?convo=conv-test'));
+    return { status: 200, ok: true, json: async () => ({ runId: 'r1', prompt: 'hi' }) };
+  });
+  assert.deepStrictEqual(await pollNextUnit(), { runId: 'r1', prompt: 'hi' });
+});
+
+test('pollNextUnit returns undefined on a 204 (long-poll came back with nothing)', async (t) => {
+  withFetch(t, async () => ({ status: 204, ok: true, json: async () => { throw new Error('must not be read'); } }));
+  assert.strictEqual(await pollNextUnit(), undefined);
+});
+
+test('pollNextUnit returns undefined and does not throw on an unparsable body', async (t) => {
+  withFetch(t, async () => ({ status: 200, ok: true, json: async () => { throw new Error('bad json'); } }));
+  assert.strictEqual(await pollNextUnit(), undefined);
+});
+
+test('pollNextUnit returns undefined on a non-ok status, after the retry wait', async (t) => {
+  withFetch(t, async () => ({ status: 500, ok: false, json: async () => { throw new Error('must not be read'); } }));
+  const start = Date.now();
+  assert.strictEqual(await pollNextUnit(), undefined);
+  assert.ok(Date.now() - start >= 5000, 'a non-ok status is treated as transient and waits before the caller polls again');
+});
+
+test('pollNextUnit returns undefined and waits out a network error', async (t) => {
+  withFetch(t, async () => { throw new Error('ECONNREFUSED'); });
+  const start = Date.now();
+  assert.strictEqual(await pollNextUnit(), undefined);
+  assert.ok(Date.now() - start >= 5000);
+});
+
+// ---- reportDone -----------------------------------------------------------------
+
+test('reportDone posts the result and returns on the first ok response', async (t) => {
+  let calls = 0;
+  let body;
+  withFetch(t, async (url, init) => {
+    calls += 1;
+    body = JSON.parse(init.body);
+    assert.strictEqual(String(url), 'http://127.0.0.1:1/work/done');
+    return { ok: true };
+  });
+  await reportDone({ runId: 'r1' }, { result: 'ok', sessionId: 'sid-1' });
+  assert.strictEqual(calls, 1, 'a first-try ok response must not retry');
+  assert.strictEqual(body.convo, 'conv-test');
+  assert.strictEqual(body.runId, 'r1');
+  assert.strictEqual(body.result, 'ok');
+  assert.strictEqual(body.runtimeContextId, 'sid-1', 'the handle is reported under the current name');
+  assert.strictEqual(body.sessionId, 'sid-1', 'and the retired spelling, for one release');
+});
+
+test('reportDone omits runtimeContextId/sessionId when the run reported no handle', async (t) => {
+  let body;
+  withFetch(t, async (_url, init) => { body = JSON.parse(init.body); return { ok: true }; });
+  await reportDone({ runId: 'r2' }, { result: 'ok' });
+  assert.strictEqual('runtimeContextId' in body, false);
+  assert.strictEqual('sessionId' in body, false);
+});
+
+test('reportDone retries on a non-ok response until one succeeds', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2 };
+  });
+  const start = Date.now();
+  await reportDone({ runId: 'r3' }, { result: 'ok' });
+  assert.strictEqual(calls, 2);
+  assert.ok(Date.now() - start >= 10000, 'one retry spends the full 10s wait before trying again');
+});
+
+test('reportDone retries past a thrown network error, not just a non-ok response', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('ECONNRESET');
+    return { ok: true };
+  });
+  await reportDone({ runId: 'r4' }, { result: 'ok' });
+  assert.strictEqual(calls, 2);
+});
+
+// ---- isDefinitiveRejection (1.5) -------------------------------------------------
+
+test('isDefinitiveRejection is true for an ordinary 4xx', () => {
+  assert.strictEqual(isDefinitiveRejection(400), true);
+  assert.strictEqual(isDefinitiveRejection(404), true);
+  assert.strictEqual(isDefinitiveRejection(422), true);
+  assert.strictEqual(isDefinitiveRejection(499), true);
+});
+
+test('isDefinitiveRejection excludes 408 and 429, the two "try again" 4xxs', () => {
+  assert.strictEqual(isDefinitiveRejection(408), false);
+  assert.strictEqual(isDefinitiveRejection(429), false);
+});
+
+test('isDefinitiveRejection is false outside the 4xx range', () => {
+  assert.strictEqual(isDefinitiveRejection(500), false);
+  assert.strictEqual(isDefinitiveRejection(200), false);
+  assert.strictEqual(isDefinitiveRejection(399), false);
+});
+
+// 1.5: a definitive 4xx (not 408/429) must never be retried — it is logged
+// with status and body, and the loop returns to let the caller resume
+// polling for the next work unit.
+test('reportDone does not retry a definitive 400, and logs the status and body', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: false, status: 400, text: async () => 'runId must not be empty' };
+  });
+  const logged = withConsoleError(t);
+  const start = Date.now();
+  await reportDone({ runId: 'r5' }, { result: 'ok' });
+  assert.strictEqual(calls, 1, 'a definitive rejection is not retried');
+  assert.ok(Date.now() - start < 2000, 'no retry wait is spent on a definitive rejection');
+  assert.ok(logged.some((l) => l.includes('400') && l.includes('runId must not be empty')), `expected the status and body logged, got: ${logged.join(' | ')}`);
+});
+
+test('reportDone keeps retrying a 429 (rate limit), unlike a definitive 4xx', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2, status: 429, text: async () => 'slow down' };
+  });
+  await reportDone({ runId: 'r6' }, { result: 'ok' });
+  assert.strictEqual(calls, 2, 'a 429 is transient and keeps the bounded retry');
+});
+
+test('reportDone keeps retrying a 500, unlike a definitive 4xx', async (t) => {
+  let calls = 0;
+  withFetch(t, async () => {
+    calls += 1;
+    return { ok: calls >= 2, status: 500, text: async () => 'internal error' };
+  });
+  await reportDone({ runId: 'r7' }, { result: 'ok' });
+  assert.strictEqual(calls, 2, 'a 5xx is transient and keeps the bounded retry');
+});
