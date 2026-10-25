@@ -1,0 +1,15 @@
+{{- /*
+This bundle's ONE runtime, rendered through the PARENT's shared renderer so its
+CR cannot drift from a runtime the install declares itself — the exact shape
+of chart/charts/claude/templates/runtime.yaml, which this bundle's values
+shape matches field-for-field (no endpoint/model translation the way
+chart/charts/ollama/templates/runtime.yaml needs). Every bundle ends at the
+same `agentops.renderRuntime` call, producing one AgentRuntime CR.
+
+IT RENDERS NO SUBSTRATE. No floor ServiceAccount, no runtime defaults, no
+context volume: a bundle contributes domain, and a vendor's runtime is domain.
+*/ -}}
+{{- if .Values.enabled }}
+{{- $entry := omit .Values "enabled" "global" }}
+{{- include "agentops.renderRuntime" (dict "root" $ "entry" $entry) }}
+{{- end }}

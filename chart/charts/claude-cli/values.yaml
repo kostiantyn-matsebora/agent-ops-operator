@@ -1,0 +1,76 @@
+# The CLI-driven claude-code agent runtime, as a bundle.
+#
+# OFF BY DEFAULT. `runtimes/claude` is the SDK-only reference runtime and what a
+# fresh install executes on; this bundle is where today's spawn-per-unit
+# behaviour went to keep running, for whoever still wants it — a route selects
+# it with `pipelines[].runtimeRef: claude-cli`. Any number run on one install.
+#
+# WHAT IS DIFFERENT ABOUT THIS BUNDLE, and why none of it reaches a CRD: this
+# runtime spawns the `claude` CLI once per work unit, re-establishing the
+# session and re-launching every bound MCP server every time — no session held
+# open across units, unlike runtimes/claude. The permission story is
+# `--allowedTools`/`--permission-mode dontAsk`, not a canUseTool callback. See
+# docs/runtimes/claude-cli.md.
+#
+# WHAT IT DOES NOT SHIP, because that IS the substrate and stays the parent's:
+# the runtime DEFAULTS every runtime inherits, the FLOOR ServiceAccount, and the
+# context volume. This bundle declares one runtime and inherits the rest.
+enabled: false
+
+# The AgentRuntime CR name, what a Pipeline's `runtimeRef` selects.
+name: claude-cli
+
+# Make THIS the runtime a Pipeline naming no `runtimeRef` runs on. The parent
+# renders the CR named `default` as a copy of the flagged runtime — or of the
+# first configured when none is flagged, so with `claude` off and this bundle
+# alone it is the default without the flag. Every runtime is optional.
+default: false
+
+# The runtime image, and the one place its tag is written. NO domain tooling in
+# it: what an agent may reach is wiring — see docs/concepts.md#runtime-images-are-generic.
+#
+# A fresh component, starting at 0.1.0 — today's runtimes/claude code (spawn
+# per unit) moved here verbatim, published under its own name rather than
+# overwriting a tag runtimes/claude had already pushed.
+image: ghcr.io/kostiantyn-matsebora/agentops-runtime-claude-cli:0.1.0
+
+# WHERE THIS RUNTIME KEEPS ITS CONTEXT — include globs relative to $HOME, and
+# the declaration that turns context synchronisation ON.
+#
+# SAME LAYOUT AS `claude`'s: this bundle still drives claude-code, only through
+# the CLI rather than the SDK, and the CLI writes its transcript to the same
+# path either way. Clearing it mounts the context volume directly, with no
+# sidecar.
+#
+# It also needs a durable context volume to snapshot to. With
+# `persistence.context` off there is nothing to snapshot to, and the pod falls
+# back to the unsynchronised one — ephemeral context, no sidecar, and the
+# conversation told its context is not promised.
+contextSync:
+  paths:
+    - ".claude/projects/-data-workspace/**"
+
+# ONE secret with the model credential — a `claude setup-token` output or an
+# Anthropic API key. Projected as env via valueFrom; the manager reads no
+# Secrets.
+#
+# Supply `token` and this bundle CREATES the Secret, release-managed. Leave it
+# empty to reference a Secret you manage yourself.
+#
+# A DIFFERENT SECRET NAME FROM `claude`'s ON PURPOSE: the same vendor, the same
+# key and env var shape, but its own Secret — so an install running both
+# bundles at once (one claude-code variant per route) renders two Secrets
+# rather than one bundle's `token` silently overwriting the other's in the same
+# object.
+#
+# THE KEY AND THE ENV VAR NAME THIS VENDOR, which is why they are here and not
+# in the release-wide defaults. Another backend states its own on its own entry.
+credentialsSecret:
+  name: agentops-claude-cli
+  key: oauthToken
+  envName: CLAUDE_CODE_OAUTH_TOKEN
+  token: ""
+
+# Any key `global.agentops.runtimeDefaults` accepts is accepted here too, and
+# overrides it for THIS runtime only — `idleTtlMinutes`, `nodeSelector`,
+# `resources`, `egressMediation`, `contextStorage`.

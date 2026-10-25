@@ -12,8 +12,12 @@ renders the `AgentRuntime` named `default` as a copy of it, unless another
 runtime is flagged `default: true`.
 
 **ON by default**, unlike every other bundle here. It is what a fresh install
-executes on. The other runtime bundles:
+executes on. It drives `@anthropic-ai/claude-agent-sdk` in-process, holding one
+session open across a pod's work units. The other runtime bundles:
 
+- `chart/charts/claude-cli/`, the same vendor spawned as a CLI process per
+  work unit instead — see
+  [runtimes/claude-cli](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/claude-cli/).
 - `chart/charts/ollama/`, the local-model one — see
   [runtimes/ollama](https://kostiantyn-matsebora.github.io/agent-ops-operator/runtimes/ollama/).
 - `chart/charts/copilot/`, GitHub Copilot through its SDK — see

@@ -69,3 +69,10 @@ dependencies:
     version: 0.1.0
     repository: ""
     condition: copilot.enabled
+  # embedded subchart (chart/charts/claude-cli) — today's spawn-per-unit
+  # claude-code runtime, kept running once `claude` moves to the SDK. OFF by
+  # default; a route selects it with `runtimeRef: claude-cli`.
+  - name: claude-cli
+    version: 0.1.0
+    repository: ""
+    condition: claude-cli.enabled
