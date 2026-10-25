@@ -172,6 +172,12 @@ func main() {
 		setupLog.Error(err, "conversation indexes")
 		os.Exit(1)
 	}
+	// Absorb-by-initiationId (internal/httpapi's persist-then-ack step) reads
+	// this one, same registration rule as the conversation index above.
+	if err := controller.SetupSignalIndexes(mgr.GetFieldIndexer()); err != nil {
+		setupLog.Error(err, "signal indexes")
+		os.Exit(1)
+	}
 
 	// Channel plumbing: built-in channel types register in-process providers
 	// here; every other type is served by an external adapter consuming the op

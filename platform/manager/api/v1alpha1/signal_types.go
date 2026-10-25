@@ -4,6 +4,27 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// IndexSignalInitiationID is the informer field index absorb-by-initiationId
+// (design D-5) reads: internal/httpapi's persist-then-ack step, and (once it
+// exists) the Signal reconciler's own lookups. Keyed on
+// SignalInitiationIndexKey(sourceRef.Name, initiationId) rather than
+// initiationId alone — an initiationId is only unique WITHIN one source
+// (two sources may mint the same id independently), mirroring why
+// ClaimantRef names Kind explicitly. Registered by
+// internal/controller.SetupSignalIndexes; defined here, not there, so a
+// package with no reason to import internal/controller (internal/httpapi,
+// which internal/controller itself is imported BY) can still build the same
+// client.MatchingFields query — the same layering IndexConversationID's own
+// comment explains.
+const IndexSignalInitiationID = "spec.sourceInitiationId"
+
+// SignalInitiationIndexKey renders the composite key IndexSignalInitiationID
+// is keyed on, so the indexer and every query site build the identical
+// string rather than risk two hand-written joins drifting apart.
+func SignalInitiationIndexKey(sourceName, initiationID string) string {
+	return sourceName + "/" + initiationID
+}
+
 // SignalSpec is everything about one signal arrival that a routing attempt —
 // the inline first try at ingest, or a later retry in the reconciler — needs
 // to act, with no other in-memory state (design D-3: "no in-memory routing

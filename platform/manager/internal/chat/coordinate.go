@@ -485,7 +485,7 @@ func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, 
 
 // createMember opens a new member conversation for one `agents[]` entry,
 // resolving its capability whether the entry names an AgentCapability or nests
-// another Coordinator — mirroring httpapi.createConversationForGroup's
+// another Coordinator — mirroring internal/signalroute's own createConversation
 // wiring-snapshot shape, with CausedBy in place of Signal/PipelineRef and no
 // channels bound (coordination-loop: "a caused conversation binds no
 // channel").

@@ -370,8 +370,8 @@ type ConversationSpec struct {
 	//
 	// Absent on conversations predating the field. Nothing backfills it —
 	// inference is what it replaces — so an empty ref is read conservatively
-	// (see routeSignalGroup: reusable only while ONE Ready Pipeline serves the
-	// source).
+	// (see internal/signalroute's reusableBy: reusable only while ONE Ready
+	// Pipeline serves the source).
 	// +optional
 	PipelineRef *ObjectRef `json:"pipelineRef,omitempty"`
 

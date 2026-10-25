@@ -21,13 +21,15 @@ import (
 const sigTestNamespace = "agent-ops"
 
 // sigServer builds a Server wired for /signal/inbound: a fake client seeded
-// with the given objects, indexed on spec.conversationId exactly as the real
-// manager's cache is (routeSignalGroup's equality routing depends on it).
+// with the given objects, indexed on spec.conversationId (equality routing)
+// and spec.sourceInitiationId (absorb) exactly as the real manager's cache
+// is.
 func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
-		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.Signal{}).
 		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, controller.ConversationIDIndexer).
+		WithIndex(&agentopsv1alpha1.Signal{}, agentopsv1alpha1.IndexSignalInitiationID, controller.SignalInitiationIDIndexer).
 		WithObjects(objs...).Build()
 	return &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
 		Activity: activity.New(64)}, c

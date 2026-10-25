@@ -92,6 +92,9 @@ func TestMain(m *testing.M) {
 	if err := controller.SetupConversationIndexes(routingCache); err != nil {
 		panic(err)
 	}
+	if err := controller.SetupSignalIndexes(routingCache); err != nil {
+		panic(err)
+	}
 	go func() {
 		if err := routingCache.Start(routingCacheCtx); err != nil && routingCacheCtx.Err() == nil {
 			panic(err)

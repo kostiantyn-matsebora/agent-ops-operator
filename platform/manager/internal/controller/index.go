@@ -38,3 +38,29 @@ func ConversationIDIndexer(obj client.Object) []string {
 	}
 	return []string{conv.Spec.ConversationID}
 }
+
+// SetupSignalIndexes registers the informer field index absorb-by-
+// initiationId (internal/httpapi's persist-then-ack step, and the Signal
+// reconciler's own lookups) reads: agentopsv1alpha1.IndexSignalInitiationID
+// on a composite source+initiationId key.
+//
+// MUST run before the manager's cache starts serving reads, exactly like
+// SetupConversationIndexes above.
+func SetupSignalIndexes(idx client.FieldIndexer) error {
+	return idx.IndexField(context.Background(), &agentopsv1alpha1.Signal{},
+		agentopsv1alpha1.IndexSignalInitiationID, SignalInitiationIDIndexer)
+}
+
+// SignalInitiationIDIndexer extracts the index key: the composite
+// source+initiationId key every Signal carries from creation (both fields
+// are required, so there is no "legacy object carries neither" case the way
+// ConversationIDIndexer has to allow for). Exported so a fake.ClientBuilder
+// in a test that cannot run an informer cache can register the identical
+// extractor.
+func SignalInitiationIDIndexer(obj client.Object) []string {
+	sig := obj.(*agentopsv1alpha1.Signal)
+	if sig.Spec.InitiationID == "" || sig.Spec.SourceRef.Name == "" {
+		return nil
+	}
+	return []string{agentopsv1alpha1.SignalInitiationIndexKey(sig.Spec.SourceRef.Name, sig.Spec.InitiationID)}
+}
