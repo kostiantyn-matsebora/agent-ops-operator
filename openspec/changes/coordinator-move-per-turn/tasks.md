@@ -56,7 +56,7 @@
 
 ## 4. Manager: children-first close cascade — backend-developer
 
-- [ ] 4.1 Reorder `closeWithCascade` in
+- [x] 4.1 Reorder `closeWithCascade` in
       `platform/manager/internal/chat/coordinate.go` to walk children
       (recursively, children-first) before closing the conversation itself,
       returning on the first failure so the ancestor stays open (design

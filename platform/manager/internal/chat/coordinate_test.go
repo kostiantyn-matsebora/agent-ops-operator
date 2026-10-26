@@ -2,12 +2,14 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 )
@@ -29,12 +31,85 @@ func indexConversationIDForTest(obj client.Object) []string {
 
 func coordFixture(t *testing.T, objs ...client.Object) (*Router, client.Client) {
 	t.Helper()
+	return coordFixtureIntercepting(t, interceptor.Funcs{}, objs...)
+}
+
+// coordFixtureIntercepting is coordFixture with the fake client's calls
+// routed through funcs — a nil entry falls through to the fake unchanged.
+func coordFixtureIntercepting(t *testing.T, funcs interceptor.Funcs, objs ...client.Object) (*Router, client.Client) {
+	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, indexConversationIDForTest).
-		WithObjects(objs...).Build()
+		WithObjects(objs...).
+		WithInterceptorFuncs(funcs).Build()
 	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
 	return &Router{Client: c, Reader: c, Namespace: testNS, Ops: q}, c
+}
+
+// statusPatchRecorder is a SubResourcePatch interceptor that records the name
+// of every object whose status is patched, in call order, and refuses the
+// patch for failOn while it is set — the close cascade's only status write is
+// closeConversationReason's, so the recorded order IS the close order.
+type statusPatchRecorder struct {
+	order  []string
+	failOn string
+	err    error
+}
+
+func (rec *statusPatchRecorder) patch(ctx context.Context, cli client.Client, subResourceName string,
+	obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	if rec.failOn != "" && obj.GetName() == rec.failOn {
+		return rec.err
+	}
+	rec.order = append(rec.order, obj.GetName())
+	return cli.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+}
+
+func (rec *statusPatchRecorder) funcs() interceptor.Funcs {
+	return interceptor.Funcs{SubResourcePatch: rec.patch}
+}
+
+// causedMember is a LIVE member conversation of parent, labelled and
+// provenance-stamped the way createMember produces one.
+func causedMember(name, parent, entry string) *agentopsv1alpha1.Conversation {
+	m := &agentopsv1alpha1.Conversation{}
+	m.Name, m.Namespace = name, testNS
+	m.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: parent, Entry: entry}
+	m.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: parent}
+	return m
+}
+
+// closedConversation fetches name's current state from c, failing the test on
+// a missing object.
+func closedConversation(t *testing.T, c client.Client, name string) agentopsv1alpha1.Conversation {
+	t.Helper()
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, &got); err != nil {
+		t.Fatalf("get %s: %v", name, err)
+	}
+	return got
+}
+
+// assertClosedWith fails unless every name is Closed carrying exactly reason.
+func assertClosedWith(t *testing.T, c client.Client, reason string, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		got := closedConversation(t, c, name)
+		if got.Status.Phase != agentopsv1alpha1.ConversationClosed || got.Status.CloseReason != reason {
+			t.Fatalf("%s must be Closed with reason %q, got %+v", name, reason, got.Status)
+		}
+	}
+}
+
+// assertOpen fails if any name has reached Closed.
+func assertOpen(t *testing.T, c client.Client, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if got := closedConversation(t, c, name); got.Status.Phase == agentopsv1alpha1.ConversationClosed {
+			t.Fatalf("%s must still be open, got %+v", name, got.Status)
+		}
+	}
 }
 
 func testProfile(name string) *agentopsv1alpha1.AgentProfile {
@@ -380,6 +455,61 @@ func TestCloseCoordinatedDirectMemberCascadesToGrandchildren(t *testing.T) {
 	}
 	if gotGrandchild.Status.Phase != agentopsv1alpha1.ConversationClosed || gotGrandchild.Status.CloseReason != "budget-exceeded" {
 		t.Fatalf("closing a member must cascade to ITS member with the same reason, got %+v", gotGrandchild.Status)
+	}
+}
+
+// conversation-close, "Children first": a root's cascade closes the
+// grandchild, then its parent, then the sibling, and the root LAST — every one
+// with the same reason verbatim. The fake client lists members sorted by
+// name, so member-1 (with the grandchild) is walked before member-2.
+func TestCloseCoordinatedCascadeClosesChildrenBeforeAncestors(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	member := causedMember("member-1", root.Name, "worker")
+	grandchild := causedMember("grandchild-1", member.Name, "helper")
+	sibling := causedMember("member-2", root.Name, "reviewer")
+	rec := &statusPatchRecorder{}
+	r, c := coordFixtureIntercepting(t, rec.funcs(), testCoordinator("co-a"), root, member, grandchild, sibling)
+
+	if err := r.CloseCoordinated(context.Background(), root, root.Name, "resolved: done"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{grandchild.Name, member.Name, sibling.Name, root.Name}
+	if strings.Join(rec.order, ",") != strings.Join(want, ",") {
+		t.Fatalf("close order = %v, want children before every ancestor: %v", rec.order, want)
+	}
+	assertClosedWith(t, c, "resolved: done", want...)
+}
+
+// conversation-close, "A failure leaves the root open": a member's close
+// failing part-way through leaves the root OPEN over the members already
+// walked, and a second close resumes from the open ones — never a closed root
+// over members nothing can reach.
+func TestCloseCoordinatedCascadeFailureLeavesTheRootOpenAndResumes(t *testing.T) {
+	root := coordinatorRoot("root-1", "co-a")
+	member := causedMember("member-1", root.Name, "worker")
+	grandchild := causedMember("grandchild-1", member.Name, "helper")
+	sibling := causedMember("member-2", root.Name, "reviewer")
+	boom := errors.New("boom")
+	rec := &statusPatchRecorder{failOn: sibling.Name, err: boom}
+	r, c := coordFixtureIntercepting(t, rec.funcs(), testCoordinator("co-a"), root, member, grandchild, sibling)
+
+	err := r.CloseCoordinated(context.Background(), root, root.Name, "resolved: done")
+	if !errors.Is(err, boom) {
+		t.Fatalf("the member's failure must surface, got %v", err)
+	}
+	assertClosedWith(t, c, "resolved: done", grandchild.Name, member.Name)
+	assertOpen(t, c, sibling.Name, root.Name)
+
+	rec.failOn = ""
+	if err := r.CloseCoordinated(context.Background(), root, root.Name, "resolved: done"); err != nil {
+		t.Fatalf("a repeated close must resume from the open members, got %v", err)
+	}
+	assertClosedWith(t, c, "resolved: done", grandchild.Name, member.Name, sibling.Name, root.Name)
+	// The resumed walk skips the two already closed: only the sibling and
+	// the root are patched the second time, in that order.
+	want := []string{grandchild.Name, member.Name, sibling.Name, root.Name}
+	if strings.Join(rec.order, ",") != strings.Join(want, ",") {
+		t.Fatalf("status patches = %v, want %v (no re-close of an already-Closed member)", rec.order, want)
 	}
 }
 
