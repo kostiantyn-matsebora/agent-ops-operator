@@ -35,8 +35,8 @@ for the source and the reference material beside this file.
 
 ### Upgrade
 
-Two additive CRD fields. Helm never upgrades CRDs, so apply them with the
-chart:
+One additive CRD field and one enum value. Helm never upgrades CRDs, so
+apply them with the chart:
 
 ```sh
 kubectl apply -f chart/crds/

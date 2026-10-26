@@ -445,17 +445,14 @@ func TestCoordinatorRootWithNoMoveIsHandedBackOnceThenEscalated(t *testing.T) {
 		c, err := e.K.Conversation(ctx, root.Name)
 		return err == nil && len(managerInputs(c)) == 1, err
 	})
-	c, err := e.K.Conversation(ctx, root.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Status.EscalatedAt != nil {
-		t.Fatalf("one miss must not escalate, got escalatedAt %v", c.Status.EscalatedAt)
-	}
-
 	// The corrective input is dispatched as the next run, and is all that run
-	// consumes (the second miss in a row).
-	c = e.WaitRun(t, root.Name, 2, 3*time.Minute)
+	// consumes (the second miss in a row). The stub answers in seconds, so the
+	// second run can finish before this test looks: what is asserted is what
+	// each run consumed, never the instant between them.
+	c := e.WaitRun(t, root.Name, 2, 3*time.Minute)
+	if got := c.Status.Runs[0].Inputs; len(got) != 1 || got[0].Origin == agentopsv1alpha1.OriginManager {
+		t.Fatalf("the first run must consume the signal and not a corrective input, got %+v", got)
+	}
 	if got := len(c.Status.Runs[1].Inputs); got != 1 || c.Status.Runs[1].Inputs[0].Origin != agentopsv1alpha1.OriginManager {
 		t.Fatalf("the second run must consume exactly the manager-origin corrective input, got %+v", c.Status.Runs[1].Inputs)
 	}
@@ -465,7 +462,7 @@ func TestCoordinatorRootWithNoMoveIsHandedBackOnceThenEscalated(t *testing.T) {
 		c, err := e.K.Conversation(ctx, root.Name)
 		return err == nil && c.Status.EscalatedAt != nil, err
 	})
-	c, err = e.K.Conversation(ctx, root.Name)
+	c, err := e.K.Conversation(ctx, root.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,9 +503,13 @@ func TestCoordinatorRootThatInvokesGetsNoCorrectiveInput(t *testing.T) {
 	})
 	e.invokeMember(t, coordName, root.Name, "domain", "echo moved-member-"+stamp)
 
-	c := e.WaitRun(t, root.Name, 1, 3*time.Minute)
-	if n := len(managerInputs(c)); n != 0 {
-		t.Fatalf("a turn that invoked must append no corrective input, got %d", n)
+	// Run 1 invoked, so it is not handed back. The member's result then reaches
+	// the root as run 2, and THAT run (the stub makes no move on it) is the one
+	// that is judged. What proves run 1 was not judged is that run 2 consumed
+	// the member's result and not a corrective input.
+	c := e.WaitRun(t, root.Name, 2, 3*time.Minute)
+	if got := c.Status.Runs[1].Inputs; len(got) != 1 || got[0].Origin != agentopsv1alpha1.OriginMember {
+		t.Fatalf("the turn that invoked must not be handed back: run 2 should consume the member's result, got %+v", got)
 	}
 	if c.Status.Inflight != nil && c.Status.Inflight.RunID == runID {
 		t.Fatalf("the finished run's inflight entry must be cleared, got %+v", c.Status.Inflight)

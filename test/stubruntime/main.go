@@ -333,6 +333,10 @@ func run(control, convo, pod string, ttl time.Duration, exit func(int)) error {
 		if err := post(client, control+"/work/done", r); err != nil {
 			return fmt.Errorf("report %s: %w", u.RunID, err)
 		}
+		// The idle clock measures time WAITING for work, so it restarts when
+		// the report lands. A `hold` longer than the TTL would otherwise end
+		// the pod the moment it reported.
+		idleSince = time.Now()
 	}
 }
 

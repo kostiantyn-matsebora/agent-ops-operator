@@ -90,6 +90,14 @@ move.
 - **WHEN** a root's run reports `succeeded` with continuity `unavailable` and made no move
 - **THEN** no corrective input is appended
 
+#### Scenario: A held input is not judged
+- **WHEN** a root's run reports `succeeded`, made no move, and its input was held because contexts are unreachable across the install
+- **THEN** no corrective input is appended, and the input is dispatched again once contexts are reachable
+
+#### Scenario: A closed root is not judged
+- **WHEN** a root's run made no move and the root is already `Closed` when the run reports
+- **THEN** no corrective input is appended and the root stays closed
+
 #### Scenario: A member is not judged
 - **WHEN** a member conversation's run calls no verb and reports `succeeded`
 - **THEN** its result is routed to its parent as today, and no corrective input is appended to the member

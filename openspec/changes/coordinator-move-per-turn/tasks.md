@@ -114,14 +114,14 @@
 
 ## 9. System tests
 
-- [ ] 9.1 Extend the coordinator lane in `platform/manager/test/system/`
+- [x] 9.1 Extend the coordinator lane in `platform/manager/test/system/`
       (`coordinator_test.go`) with a scripted stub-runtime root that calls
       no verb twice: assert one `manager`-origin input is appended after the
       first run, and `escalatedAt` is set after the second, with the digest
       delivered to the bound console thread. Build the test binary in the
       build container from THIS WORKTREE's tree and run it on the host, as
       `build-test.md` describes.
-- [ ] 9.2 Extend the same lane with a root whose run calls `invoke`: assert
+- [x] 9.2 Extend the same lane with a root whose run calls `invoke`: assert
       no corrective input is appended and `inflight.moved` is consumed by
       completion.
 - [ ] 9.3 Run the full system pack against THIS WORKTREE's chart
