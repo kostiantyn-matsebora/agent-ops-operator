@@ -14,14 +14,14 @@
 
 ## 2. Manager: the verbs stamp, `/work/done` judges — backend-developer
 
-- [ ] 2.1 In `platform/manager/internal/httpapi/coordinate.go`, after
+- [x] 2.1 In `platform/manager/internal/httpapi/coordinate.go`, after
       `InvokeMember`, `CloseCoordinated` and `Escalate` return success, stamp
       the CALLER's `status.inflight.moved` with an optimistic-locked status
       patch retried on conflict (design D-A). A caller with no inflight run
       stamps nothing. A refused verb stamps nothing. Verify: a unit test per
       verb in `coordinate_test.go` asserts the stamp, plus one for attached
       invoke, one for a refused invoke, one for `list_agents`.
-- [ ] 2.2 In `handleWorkDone` (`server.go`), add the judgement for a
+- [x] 2.2 In `handleWorkDone` (`server.go`), add the judgement for a
       conversation with `spec.coordinatorRef` set, in the order design D-B
       gives: succeeded, not moved, no consumed input of origin `channel`.
       First miss appends the corrective input (D-C). Second miss (the run's
@@ -30,10 +30,10 @@
       and a Closed conversation are never judged. Verify: table-driven tests
       in `workreport_coordinate_test.go` covering every scenario in the
       `coordination-loop` delta spec.
-- [ ] 2.3 Build the corrective payload from the Coordinator's `agents[]`
+- [x] 2.3 Build the corrective payload from the Coordinator's `agents[]`
       names read at the miss, bounded, with the fixed rule text. Verify: a
       test asserts the roster names appear and the text names the rule.
-- [ ] 2.4 Confirm the corrective input is delivered to bound threads by the
+- [x] 2.4 Confirm the corrective input is delivered to bound threads by the
       existing per-destination rule, attributed to the manager, with no
       new clause. Verify: an envtest in `internal/integration/` shows a
       `manager`-origin input on a channel-bound root produces one send op

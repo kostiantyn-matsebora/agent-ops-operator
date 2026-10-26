@@ -646,6 +646,9 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// (item #15 QA) and needs a real StartedAt to do it, not the run's own
 	// finish time standing in for both ends.
 	var startedAt *metav1.Time
+	// The move stamp (design D-A) is consumed with the rest of the inflight
+	// entry — read here, judged below, surviving nowhere else.
+	var turn turnEvidence
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
 		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
 		startedAt = &conv.Status.Inflight.DispatchedAt
@@ -653,6 +656,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
 			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
 		}
+		turn = turnEvidence{Dispatched: !hold, Moved: conv.Status.Inflight.Moved}
 		conv.Status.Inflight = nil
 	}
 	// LATEST-WINS, and recorded on a FAILED run too.
@@ -756,6 +760,14 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if err := s.Client.Status().Patch(ctx, &conv, patch); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	// A Coordinator root's turn is judged AFTER the record and BEFORE the phase
+	// (design D-B, moveperturn.go): a corrective input appended here is pending,
+	// so the phase lands Queued and the next dispatch is the ordinary one. The
+	// phase write below still re-reads and refuses to un-close, so a late
+	// report on a conversation closed meanwhile changes nothing.
+	if s.Router != nil && s.actOnMiss(ctx, &conv, d.RunID, result, judgeRootTurn(&conv, d.Status, turn, recorded)) {
+		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
 	// Phase moves in its OWN optimistic-locked patch, never folded into the
 	// one above: a run that was still in flight when /close landed reports

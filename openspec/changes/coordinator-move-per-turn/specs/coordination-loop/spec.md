@@ -7,8 +7,16 @@ one of the coordination verbs the run called: `invoke`, `escalate` or
 `close` on the aops server. Reads (`list_agents`, `read`, `get_tree`,
 `list_conversations`, `get_conversation`, `list_open_roots`) are not moves.
 
-A turn SHALL count as answered when any input the run consumed carries
-origin `channel`. A person asked, and the run's text is the answer.
+A turn SHALL count as answered when any input the run consumed was a
+person's message. A person asked, and the run's text is the answer.
+
+An input is a person's message in two cases:
+
+- it carries origin `channel`
+- it carries any origin AND records the surface it was typed on, which a chat
+  signal from a chat origination adapter does
+
+An alert, a job tick and a posted task record no surface and are not.
 
 When a run reports `succeeded`, made no move, and answered no person, the
 manager SHALL treat the turn as a MISS and act on the conversation itself:
@@ -55,6 +63,10 @@ move.
 #### Scenario: Reads alone are not a move
 - **WHEN** a root's run calls `list_agents` and `read`, calls no verb, answers no person, and reports `succeeded`
 - **THEN** a corrective input is appended
+
+#### Scenario: A chat-signal root is answered by prose
+- **WHEN** a root opened by a person's message through a chat origination adapter runs, answers with prose, calls no verb, and reports `succeeded`
+- **THEN** no corrective input is appended, because the input recorded the surface the person typed on
 
 #### Scenario: A person's reply resets the count
 - **WHEN** a first miss is followed by a person's reply, and the run answering that reply calls no verb
