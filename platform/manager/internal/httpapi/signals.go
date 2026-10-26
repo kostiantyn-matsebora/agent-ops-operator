@@ -236,21 +236,9 @@ func (s *Server) routeSignalsCore(ctx context.Context, source *agentopsv1alpha1.
 
 	// Persist or absorb EVERY group first — the CR exists before any
 	// decision is made about it (design D-2).
-	type persisted struct {
-		sig      *agentopsv1alpha1.Signal
-		absorbed bool
-	}
-	byID := make(map[string]persisted, len(ids))
-	var freshIDs []string
-	for _, id := range ids {
-		sig, absorbed, err := s.persistOrAbsorbSignal(ctx, source, id, groups[id], combine)
-		if err != nil {
-			return 0, 0, "", err
-		}
-		byID[id] = persisted{sig, absorbed}
-		if !absorbed {
-			freshIDs = append(freshIDs, id)
-		}
+	byID, freshIDs, err := s.persistGroups(ctx, source, ids, groups, combine)
+	if err != nil {
+		return 0, 0, "", err
 	}
 
 	// Cooldown is consulted ONLY for FRESH signals — an absorbed one already
@@ -262,34 +250,69 @@ func (s *Server) routeSignalsCore(ctx context.Context, source *agentopsv1alpha1.
 
 	landed, touched, reason := 0, 0, ""
 	for _, id := range ids {
-		p := byID[id]
-		group := groups[id]
-
-		if !p.absorbed {
-			dropped, responseReason, err := s.decidePreFanOut(ctx, source, p.sig, group, unclaimed, cooldownPassed[id], chatLane)
-			if err != nil {
-				return 0, 0, "", err
-			}
-			if responseReason != "" {
-				reason = responseReason
-			}
-			if dropped {
-				continue
-			}
-		}
-
-		before := claimantStates(p.sig)
-		if err := signalroute.RouteClaimants(ctx, s.signalRouteDeps(), p.sig); err != nil {
+		l, t, r, err := s.routeOneGroup(ctx, source, byID[id], groups[id], unclaimed, cooldownPassed[id], chatLane)
+		if err != nil {
 			return 0, 0, "", err
 		}
-		if newly := countNewlyRouted(before, p.sig); newly > 0 {
-			touched += newly
-			landed += len(group)
+		landed += l
+		touched += t
+		if r != "" {
+			reason = r
 		}
 	}
 
 	s.bumpReceived(ctx, source, landed)
 	return landed, touched, reason, nil
+}
+
+// persistedSignal is a group's Signal CR and whether it was folded into an
+// already non-terminal one.
+type persistedSignal struct {
+	sig      *agentopsv1alpha1.Signal
+	absorbed bool
+}
+
+// persistGroups persists or absorbs a Signal CR per initiationId group,
+// returning them by id and the ids that were FRESH (not absorbed).
+func (s *Server) persistGroups(ctx context.Context, source *agentopsv1alpha1.SignalSource, ids []string, groups map[string][]NormalizedSignal, combine combineFunc) (map[string]persistedSignal, []string, error) {
+	byID := make(map[string]persistedSignal, len(ids))
+	var freshIDs []string
+	for _, id := range ids {
+		sig, absorbed, err := s.persistOrAbsorbSignal(ctx, source, id, groups[id], combine)
+		if err != nil {
+			return nil, nil, err
+		}
+		byID[id] = persistedSignal{sig, absorbed}
+		if !absorbed {
+			freshIDs = append(freshIDs, id)
+		}
+	}
+	return byID, freshIDs, nil
+}
+
+// routeOneGroup makes the pre-fan-out decision for a fresh group, then
+// routes its claimants. It returns the landed and touched counts and any
+// response reason the decision set.
+func (s *Server) routeOneGroup(ctx context.Context, source *agentopsv1alpha1.SignalSource, p persistedSignal, group []NormalizedSignal, unclaimed, cooldownPassed, chatLane bool) (int, int, string, error) {
+	reason := ""
+	if !p.absorbed {
+		dropped, responseReason, err := s.decidePreFanOut(ctx, source, p.sig, group, unclaimed, cooldownPassed, chatLane)
+		if err != nil {
+			return 0, 0, "", err
+		}
+		reason = responseReason
+		if dropped {
+			return 0, 0, reason, nil
+		}
+	}
+	before := claimantStates(p.sig)
+	if err := signalroute.RouteClaimants(ctx, s.signalRouteDeps(), p.sig); err != nil {
+		return 0, 0, "", err
+	}
+	if newly := countNewlyRouted(before, p.sig); newly > 0 {
+		return len(group), newly, reason, nil
+	}
+	return 0, 0, reason, nil
 }
 
 // emitClaims records the claim — a decision about the BATCH, before any
