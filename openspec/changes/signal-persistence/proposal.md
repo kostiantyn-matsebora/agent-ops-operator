@@ -130,7 +130,8 @@ This change is that enabler, and ONLY that enabler.
   it is spent by the consumer under optimistic concurrency, and a suppression
   is recorded as `Dropped` (reason cooldown).
 - `signals/{cron,alertmanager,k8s-events,ha,pulse,telegram}/`: each sends a
-  stable `signalId`.
+  stable `signalId`. `signals/telegram` has no capability of its own, so its
+  `signalId` is specified under `chat-signal-origination`.
 - `chart/templates/` and `chart/values.yaml`: `signals` RBAC (full on the
   manager, read-only on the console), and the settings `signalTtlRouted`,
   `signalTtlDropped`, `signalTtlFailed`, `signalRetryDeadline`,

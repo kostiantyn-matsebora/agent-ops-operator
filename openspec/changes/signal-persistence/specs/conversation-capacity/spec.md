@@ -8,9 +8,11 @@ The manager SHALL cap pending conversations at `MAX_QUEUED_CONVERSATIONS`
 (chart `maxQueuedConversations`), default **50** — the FIFO-admitted cap on
 `Pending` conversations is unchanged. When the backlog is full, the signal
 CONSUMER SHALL NOT create a conversation. Publication at `/signal/inbound`
-checks no capacity, and stores the signal whatever the backlog.
+performs no capacity check, and stores the signal whatever the backlog.
 
-What happens to the signal SHALL depend on its kind:
+A Signal's claimant is one Pipeline or Coordinator snapshotted for it, each
+with its own routing state (`Routing`, `Routed`, `Dropped`, `Failed`) in
+`status.claimants[]`. What happens to the signal SHALL depend on its kind:
 
 | Origin | Full-backlog behaviour at consumption |
 |---|---|

@@ -11,7 +11,7 @@ The matrix SHALL name the `Signal` record — its spec, its claimants and its pr
 
 - Kubernetes-API state, surviving every restart and leader change
 - a leader change costs no accepted signal
-- the new leader resumes every non-terminal `Signal` from the CRs, repeating any interrupted pass idempotently
+- the new leader resumes every non-terminal `Signal` from the CRs, re-running any interrupted pass idempotently, so no routed work is replayed
 
 #### Scenario: Guarantee is checkable
 - **WHEN** an operator asks what restarting a given component loses

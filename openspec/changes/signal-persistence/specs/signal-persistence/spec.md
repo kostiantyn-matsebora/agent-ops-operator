@@ -7,7 +7,7 @@ broker with the Kubernetes API as its only store:
   signal and acknowledges, and decides nothing else
 - CONSUME — on the leader, a pool of concurrent workers routes each
   `Signal`, one worker per `Signal` at a time
-- HOUSEKEEPING — the leader alone bounds, dead-letters and collects
+- HOUSEKEEPING — the leader alone bounds, fails (after the retry deadline) and collects
 
 Publication and consumption share nothing but the CRs, so consumption can
 stop while publication keeps storing.

@@ -53,7 +53,7 @@ manager mounts nothing, and an accepted signal is neither derivable nor
 declared-lossy, because the adapter will not resend.
 
 Volumes are post-dedup ops signals, tens per hour. The per-source cap and the
-TTLs keep the object count bounded (D-6).
+TTLs keep the object count bounded (D-11).
 
 **Alternative considered:** an external broker (NATS, Redis Streams).
 Rejected. It adds a stateful component, a trust boundary and a credential
@@ -106,7 +106,7 @@ default 4) sets how many run.
 
 A leader change needs no recovery step. The new leader's consumer reconciles
 every non-terminal `Signal`, and idempotency (D-5) makes a redo safe. A
-poison message ends at the retry deadline (D-6), never in a loop.
+poison message ends at the retry deadline (D-11), never in a loop.
 
 The pool and housekeeping start only on the leader. Pausing consumption later
 means the pool stops taking `Signal`s while publish keeps storing.
