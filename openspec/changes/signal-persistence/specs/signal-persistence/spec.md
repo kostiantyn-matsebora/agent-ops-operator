@@ -636,7 +636,7 @@ code.
 | Failed TTL | `signalTtlFailed` | `SIGNAL_TTL_FAILED` | `72h` |
 | retry deadline | `signalRetryDeadline` | `SIGNAL_RETRY_DEADLINE` | `1h` |
 | live signals per source | `maxSignalsPerSource` | `MAX_SIGNALS_PER_SOURCE` | `200` |
-| consumer consumers | `signalConsumerConcurrency` | `SIGNAL_CONSUMER_CONCURRENCY` | `4` |
+| consumer concurrency | `signalConsumerConcurrency` | `SIGNAL_CONSUMER_CONCURRENCY` | `4` |
 
 - The keys sit beside `signalTtlDropped`, `signalTtlRouted`,
   `signalRetryDeadline` and `maxSignalsPerSource` in the chart's values.
