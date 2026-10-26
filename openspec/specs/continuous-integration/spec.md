@@ -399,9 +399,9 @@ cannot be skipped.
   test rather than a pull request
 
 ### Requirement: Contract conformance reports through the always-present check, and the cluster jobs live elsewhere
-Contract conformance — every adapter's built binary against a fake manager —
-SHALL be a job of the `ci` workflow and SHALL be listed in `ci-green`'s
-`needs:`.
+Contract conformance — every adapter's and runtime's built binary against a
+fake manager — SHALL be a job of the `ci` workflow and SHALL be listed in
+`ci-green`'s `needs:`.
 
 It SHALL NOT be a separately required status check: branch protection names
 one check, and adding a gate is a line in that job's `needs:`.
