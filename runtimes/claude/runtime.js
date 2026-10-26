@@ -18,12 +18,20 @@
 //        instead of a fresh subprocess per unit.
 //   D3 — canUseTool decides every call. No `allowedTools` (it would shadow
 //        the callback), `permissionMode: 'default'` (NOT `dontAsk`, which
-//        skips the callback entirely).
+//        skips the callback entirely). The SDK's `tools` option — the
+//        built-ins the model is OFFERED — is derived from the same composed
+//        allowlist (tools.js offeredBuiltins, coordinator-move-per-turn
+//        D-F): a built-in the wiring never granted is not shown at all, a
+//        stricter form of the per-call denial, and the callback still
+//        decides every call to one that is. Offered and allowed stay two
+//        decisions; nothing here pre-approves.
 //   D4 — the session is reused ONLY when a unit's session-affecting
-//        configuration (systemPrompt/mcpServers/maxTurns/cwd/agent) is
-//        identical to the one the open session was built from. The tool
-//        allowlist is deliberately excluded — it lives in the callback and
-//        is re-read fresh every unit, open/reuse/re-open alike.
+//        configuration (systemPrompt/mcpServers/maxTurns/cwd/agent/
+//        offeredTools) is identical to the one the open session was built
+//        from. The allowlist itself is still re-read fresh every unit and
+//        lives in the callback, open/reuse/re-open alike — only the
+//        built-in set it OFFERS joins the fingerprint, since `tools` is a
+//        query()-wide option a reused session cannot change under the model.
 //   D5 — the live session is a cache. Every unit reports the vendor's own
 //        session id, and the continuity ladder (verbatim from the pre-SDK
 //        shape, still shared with runtimes/claude-cli's own copy) governs
@@ -46,7 +54,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { agentDeclaredTools, composeAllowedTools, safeJoin, sanitizeLog, logUngrantedTools } = require('./tools');
+const { agentDeclaredTools, composeAllowedTools, offeredBuiltins, safeJoin, sanitizeLog, logUngrantedTools } = require('./tools');
 const { DEFAULT_LIMIT, newSpinWatch, noteToolUse, spinMessage, discardedNotice } = require('./spin');
 const { newCallRecorder } = require('./report');
 
@@ -293,23 +301,29 @@ function readMcpServers(mcpConfigPath, log = () => {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Configuration fingerprint (D4). Deliberately excludes the tool allowlist —
-// that lives in the canUseTool callback (D3) and is re-read fresh every
-// unit, whatever the session decision below turns out to be.
+// Configuration fingerprint (D4). The tool allowlist itself is deliberately
+// NOT a field — it lives in the canUseTool callback (D3) and is re-read
+// fresh every unit, whatever the session decision below turns out to be.
+// What IS a field is the built-in set that allowlist OFFERS (`offeredTools`,
+// D-F): it is handed to query() once as the `tools` option, so a unit whose
+// allowlist offers a different built-in set has to re-open — a changed
+// scope (`Bash(git *)` -> `Bash(ls *)`) or a changed MCP grant offers the
+// same built-ins and still reuses, reaching the callback alone.
 // ---------------------------------------------------------------------------
-const FINGERPRINT_FIELDS = ['systemPrompt', 'mcpServers', 'maxTurns', 'cwd', 'agent'];
+const FINGERPRINT_FIELDS = ['systemPrompt', 'mcpServers', 'maxTurns', 'cwd', 'agent', 'offeredTools'];
 
 function normalizedMaxTurns(unit) {
   return unit.maxTurns || DEFAULT_MAX_TURNS;
 }
 
-function computeFingerprint(unit, mcpServers) {
+function computeFingerprint(unit, mcpServers, allowed) {
   return {
     systemPrompt: unit.systemPrompt || '',
     mcpServers: mcpServers || {},
     maxTurns: normalizedMaxTurns(unit),
     cwd: WORKSPACE,
     agent: unit.agent || '',
+    offeredTools: offeredBuiltins(allowed),
   };
 }
 
@@ -360,11 +374,12 @@ function allowlistMatch(allowed, toolName) {
 
 // createCanUseTool returns the per-call decision canUseTool implements.
 // `allowedHolder` is a MUTABLE box (`{ current: [...] }`), never the array
-// itself — the allowlist is excluded from the fingerprint specifically so it
-// can change between units with no session re-open (D4), and a callback
-// bound once at session-open time must still see the CURRENT unit's
-// composition, not the one open() saw. The caller updates `.current` on
-// every unit, reused or not.
+// itself — the allowlist is kept out of the fingerprint specifically so it
+// can change between units with no session re-open (D4, only the built-in
+// set it offers is fingerprinted), and a callback bound once at
+// session-open time must still see the CURRENT unit's composition, not the
+// one open() saw. The caller updates `.current` on every unit, reused or
+// not.
 function createCanUseTool(allowedHolder, log = () => {}) {
   return async function canUseTool(toolName) {
     const matched = allowlistMatch(allowedHolder.current, toolName);
@@ -390,6 +405,18 @@ function openSession(unit, fingerprint, allowed, mcpServers) {
     // callback always answering, never from the mode).
     canUseTool: createCanUseTool(allowedHolder, (m) => console.log(sanitizeLog(m))),
     permissionMode: 'default',
+    // D-F: the built-ins the model is OFFERED, derived from the same composed
+    // allowlist the callback enforces — `[]` means "no built-in" (sdk.d.ts,
+    // Options.tools: "Specify the base set of available built-in tools",
+    // "`[]` (empty array) - Disable all built-in tools", verified against
+    // @anthropic-ai/claude-agent-sdk@0.3.310). This is NOT `allowedTools`
+    // (D3 still holds — nothing is pre-approved, canUseTool runs for every
+    // call to an offered tool) and it narrows only what is SEEN, never what
+    // is allowed. Design D-F names `disallowedTools` as the fallback for an
+    // SDK version lacking `tools`; the pinned version has `tools`, and the
+    // fallback would need the vendor's full built-in list to subtract from,
+    // so it is not wired here.
+    tools: offeredBuiltins(allowed),
     cwd: WORKSPACE,
     mcpServers,
     // Matches the CLI shape's `--strict-mcp-config`: only the servers named
@@ -458,8 +485,9 @@ function openOrReuseSession(unit, fingerprint, allowed, mcpServers) {
     return;
   }
   console.log(`[runtime] session reuse (${runTag})`);
-  // The allowlist is excluded from the fingerprint on purpose (D4) — it
-  // still has to reach the live callback every unit, reused or not.
+  // The allowlist itself is kept out of the fingerprint on purpose (D4) — it
+  // still has to reach the live callback every unit, reused or not. Its
+  // offered built-in set is equal here, or this would have been a re-open.
   liveSession.allowedHolder.current = allowed;
 }
 
@@ -728,17 +756,18 @@ async function executeUnit(unit) {
 
   // The work unit carries the WIRING's tools and the mode; the agent's own
   // definition carries the rest. Re-read fresh every unit — NOT cached
-  // across a reused session — since the allowlist is excluded from the
+  // across a reused session — since the allowlist is kept out of the
   // fingerprint precisely so a wiring edit heals without a re-open (D4).
+  // The built-in set it OFFERS is the one part that does fingerprint (D-F).
   const declared = agentDeclaredTools(WORKSPACE, unit.agent, (m) => console.log(sanitizeLog(m)));
   const allowed = composeAllowedTools(declared, unit.allowedTools, unit.toolsMode);
   const mcpServers = readMcpServers(MCP_CONFIG, (m) => console.log(sanitizeLog(m)));
-  const fingerprint = computeFingerprint(unit, mcpServers);
+  const fingerprint = computeFingerprint(unit, mcpServers, allowed);
   const contextId = contextIdOf(unit);
   const isResumeAttempt = Boolean(contextId);
 
   console.log(`\n[runtime] run ${sanitizeLog(unit.runId)}${contextId ? ' continue=' + sanitizeLog(contextId) : ''} thread=${sanitizeLog(unit.threadId ?? 'general')}`);
-  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')}`);
+  console.log(`[runtime] tools agent=${sanitizeLog(unit.agent || '-')} declared=${declared.length} wiring=${(unit.allowedTools || '').split(',').filter(Boolean).length} mode=${sanitizeLog(unit.toolsMode || 'merge')} -> ${sanitizeLog(allowed.length ? allowed.join(',') : '(none)')} offered=${sanitizeLog(fingerprint.offeredTools.length ? fingerprint.offeredTools.join(',') : '(no built-in)')}`);
   if (unit.systemPrompt) console.log(`[runtime] appending system prompt (${unit.systemPrompt.length} chars)`);
 
   openOrReuseSession(unit, fingerprint, allowed, mcpServers);

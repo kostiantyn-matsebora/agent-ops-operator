@@ -21,8 +21,11 @@ const {
 
 // ---- the fingerprint, field by field ---------------------------------------
 
-test('FINGERPRINT_FIELDS is exactly the five session-affecting fields, excluding the tool allowlist', () => {
-  assert.deepStrictEqual([...FINGERPRINT_FIELDS].sort(), ['agent', 'cwd', 'maxTurns', 'mcpServers', 'systemPrompt'].sort());
+// The allowlist ITSELF is not a field (it lives in the canUseTool callback,
+// D3). The built-in set it OFFERS is (coordinator-move-per-turn D-F): the
+// SDK's `tools` option is set once per query(), so it is session-affecting.
+test('FINGERPRINT_FIELDS is exactly the six session-affecting fields: the allowlist is not one, the built-ins it offers is', () => {
+  assert.deepStrictEqual([...FINGERPRINT_FIELDS].sort(), ['agent', 'cwd', 'maxTurns', 'mcpServers', 'systemPrompt', 'offeredTools'].sort());
 });
 
 test('computeFingerprint reads systemPrompt, maxTurns and agent from the unit, and mcpServers/cwd independently', () => {
@@ -32,6 +35,12 @@ test('computeFingerprint reads systemPrompt, maxTurns and agent from the unit, a
   assert.strictEqual(fp.maxTurns, 12);
   assert.strictEqual(fp.cwd, WORKSPACE);
   assert.strictEqual(fp.agent, 'k8s-ops');
+  assert.deepStrictEqual(fp.offeredTools, [], 'no composed allowlist offers no built-in');
+});
+
+test('computeFingerprint derives offeredTools from the composed allowlist: built-in base names only, MCP grants excluded', () => {
+  const fp = computeFingerprint({}, {}, ['mcp__aops__*', 'Read', 'Bash(git *)']);
+  assert.deepStrictEqual(fp.offeredTools, ['Read', 'Bash']);
 });
 
 test('computeFingerprint normalizes an absent maxTurns to the same floor normalizedMaxTurns applies', () => {
@@ -42,13 +51,14 @@ test('computeFingerprint normalizes an absent maxTurns to the same floor normali
 });
 
 test('changedFingerprintFields names exactly the one field that changed, for each field in turn', () => {
-  const base = { systemPrompt: 'a', mcpServers: { x: {} }, maxTurns: 10, cwd: '/w', agent: 'ag' };
+  const base = { systemPrompt: 'a', mcpServers: { x: {} }, maxTurns: 10, cwd: '/w', agent: 'ag', offeredTools: ['Read'] };
   const changes = [
     ['systemPrompt', 'b'],
     ['mcpServers', { y: {} }],
     ['maxTurns', 20],
     ['cwd', '/other'],
     ['agent', 'different-agent'],
+    ['offeredTools', ['Read', 'Bash']],
   ];
   for (const [field, changedValue] of changes) {
     const next = { ...base, [field]: changedValue };
@@ -65,15 +75,25 @@ test('fingerprintsEqual is true, and changedFingerprintFields empty, for two ide
 
 // The decision D4 exists to protect: the tool allowlist is composed per
 // unit and lives in the canUseTool callback (D3), not in the fingerprint —
-// computeFingerprint never reads unit.allowedTools/unit.toolsMode at all.
-test('an allowlist-only change between two units does not register as a fingerprint change', () => {
+// computeFingerprint never reads unit.allowedTools/unit.toolsMode at all,
+// only the COMPOSED list's offered built-ins. An allowlist change that
+// offers the same built-ins (a scope, an MCP grant) is still no change.
+test('an allowlist change offering the same built-ins does not register as a fingerprint change', () => {
   const mcpServers = { srv: {} };
-  const unit1 = { systemPrompt: 'be nice', agent: 'k8s-ops', allowedTools: 'Read', toolsMode: 'merge' };
-  const unit2 = { systemPrompt: 'be nice', agent: 'k8s-ops', allowedTools: 'Read,Bash,Edit', toolsMode: 'overwrite' };
-  const fp1 = computeFingerprint(unit1, mcpServers);
-  const fp2 = computeFingerprint(unit2, mcpServers);
+  const unit = { systemPrompt: 'be nice', agent: 'k8s-ops', allowedTools: 'Read', toolsMode: 'merge' };
+  const fp1 = computeFingerprint(unit, mcpServers, ['Read', 'Bash(git *)', 'mcp__aops__*']);
+  const fp2 = computeFingerprint({ ...unit, allowedTools: 'Read,Bash,Edit', toolsMode: 'overwrite' }, mcpServers, ['Read', 'Bash(kubectl *)', 'mcp__kubernetes__*']);
   assert.deepStrictEqual(changedFingerprintFields(fp1, fp2), []);
   assert.strictEqual(fingerprintsEqual(fp1, fp2), true);
+});
+
+// D-F: the `tools` option is query()-wide, so a different offered set is a
+// different session.
+test('an allowlist change that offers a different built-in set registers as an offeredTools change', () => {
+  const fp1 = computeFingerprint({}, {}, ['Read']);
+  const fp2 = computeFingerprint({}, {}, ['Read', 'Bash']);
+  assert.deepStrictEqual(changedFingerprintFields(fp1, fp2), ['offeredTools']);
+  assert.strictEqual(fingerprintsEqual(fp1, fp2), false);
 });
 
 // ---- a scripted fake query(), modelled on the SDK's typed messages --------
@@ -85,8 +105,8 @@ test('an allowlist-only change between two units does not register as a fingerpr
 // see opened, and what each one says.
 function makeFakeQuery(sessionsScript) {
   const sessions = [];
-  function fakeQuery() {
-    const session = { events: (sessionsScript[sessions.length] || []).slice(), closed: false, interrupted: false };
+  function fakeQuery({ options } = {}) {
+    const session = { events: (sessionsScript[sessions.length] || []).slice(), closed: false, interrupted: false, options };
     sessions.push(session);
     return {
       async next() {
@@ -185,17 +205,42 @@ test('a changed fingerprint on the second unit closes the session and opens a se
   );
 });
 
-test('an allowlist-only change between two units reuses the open session with no re-open', async (t) => {
+test('an allowlist change offering the same built-ins reuses the open session, the live callback seeing the new list', async (t) => {
   freshSession(t);
   const fakeQuery = makeFakeQuery([[resultEvent('sess-1', 'first'), resultEvent('sess-1', 'second')]]);
   __setQueryForTest(fakeQuery);
 
-  await executeUnit({ runId: 'r1', promptText: 'hi', allowedTools: 'Read', toolsMode: 'merge' });
+  await executeUnit({ runId: 'r1', promptText: 'hi', allowedTools: 'Read,Bash(git *),mcp__aops__*', toolsMode: 'overwrite' });
   assert.strictEqual(fakeQuery.sessions.length, 1);
 
-  const out2 = await executeUnit({ runId: 'r2', promptText: 'hi', allowedTools: 'Read,Bash,Edit', toolsMode: 'overwrite' });
-  assert.strictEqual(fakeQuery.sessions.length, 1, 'the allowlist is excluded from the fingerprint and must not force a re-open');
+  const out2 = await executeUnit({ runId: 'r2', promptText: 'hi', allowedTools: 'Read,Bash(kubectl *),mcp__kubernetes__*', toolsMode: 'overwrite' });
+  assert.strictEqual(fakeQuery.sessions.length, 1, 'the same offered built-ins must not force a re-open — the allowlist itself is not fingerprinted');
   assert.strictEqual(out2.sessionId, 'sess-1');
   // the live callback must see the NEW allowlist on the reused session (D4)
-  assert.deepStrictEqual(__getLiveSessionForTest().allowedHolder.current, ['Read', 'Bash', 'Edit']);
+  assert.deepStrictEqual(__getLiveSessionForTest().allowedHolder.current, ['Read', 'Bash(kubectl *)', 'mcp__kubernetes__*']);
+});
+
+// coordinator-move-per-turn 6.2 (design D-F): the offered built-in set is a
+// query()-wide option, so a unit whose allowlist offers a different set
+// re-opens the session, and the fresh query() is handed the new set.
+test('a unit whose allowlist offers a different built-in set re-opens the session, logging offeredTools as the changed field', async (t) => {
+  freshSession(t);
+  const fakeQuery = makeFakeQuery([[resultEvent('sess-A', 'first')], [resultEvent('sess-B', 'second')]]);
+  __setQueryForTest(fakeQuery);
+  const logged = withConsoleLog(t);
+
+  const out1 = await executeUnit({ runId: 'r1', promptText: 'hi', allowedTools: 'mcp__aops__*', toolsMode: 'overwrite' });
+  assert.strictEqual(out1.sessionId, 'sess-A');
+  assert.strictEqual(fakeQuery.sessions.length, 1);
+  assert.deepStrictEqual(fakeQuery.sessions[0].options.tools, [], 'an aops-only allowlist offers no built-in');
+
+  const out2 = await executeUnit({ runId: 'r2', promptText: 'hi', allowedTools: 'Read,Grep', toolsMode: 'overwrite' });
+  assert.strictEqual(out2.sessionId, 'sess-B');
+  assert.strictEqual(fakeQuery.sessions.length, 2, 'a different offered built-in set must open a SECOND vendor session');
+  assert.strictEqual(fakeQuery.sessions[0].closed, true, 'the superseded session must be closed before the replacement opens');
+  assert.deepStrictEqual(fakeQuery.sessions[1].options.tools, ['Read', 'Grep'], 'the fresh query() is offered the new set');
+  assert.ok(
+    logged.some((l) => l.includes('[runtime] session re-open') && l.includes('offeredTools')),
+    `expected the re-open logged naming offeredTools, got: ${logged.join(' | ')}`,
+  );
 });

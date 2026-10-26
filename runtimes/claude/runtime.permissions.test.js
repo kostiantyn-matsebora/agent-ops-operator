@@ -5,12 +5,19 @@
 // `allowedTools`, no `dontAsk`, deny by default, the composed allowlist
 // (tools.js, unchanged) as the callback's own rule set. Pure functions and a
 // bound callback, no SDK import reached — require() alone proves that.
+//
+// coordinator-move-per-turn 6.2 (design D-F) adds the OFFERED side: the
+// SDK's `tools` option, derived from the same allowlist, asserted at the end
+// against a fake query() that records the options it is handed.
 'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { allowlistMatch, createCanUseTool } = require('./runtime');
+const {
+  allowlistMatch, createCanUseTool, openSession, computeFingerprint,
+  __setQueryForTest, __resetLiveSessionForTest,
+} = require('./runtime');
 
 // ---- allowlistMatch ---------------------------------------------------------
 
@@ -94,7 +101,7 @@ test('canUseTool logs the denial with the tool name and the allowlist it failed 
   );
 });
 
-// allowedHolder is a MUTABLE box specifically so the allowlist excluded from
+// allowedHolder is a MUTABLE box specifically so the allowlist kept out of
 // the fingerprint (D4) still reaches a callback already bound at session
 // open — this is the property that makes that exclusion safe.
 test('canUseTool reads the CURRENT allowlist from the mutable holder, not the one bound at creation', async () => {
@@ -103,4 +110,58 @@ test('canUseTool reads the CURRENT allowlist from the mutable holder, not the on
   assert.strictEqual((await canUseTool('Bash')).behavior, 'deny');
   holder.current = ['Bash']; // a later unit updates allowedHolder.current with no re-open
   assert.strictEqual((await canUseTool('Bash')).behavior, 'allow');
+});
+
+// ---- the offered built-ins: the SDK's `tools` option (D-F) -----------------
+
+// recordingQuery substitutes query() with one that only records the options
+// it was handed — the real SDK is never require()'d here.
+function recordingQuery(t) {
+  const calls = [];
+  __setQueryForTest(({ options }) => {
+    calls.push(options);
+    return { async next() { return { value: undefined, done: true }; }, async close() {}, async interrupt() {} };
+  });
+  t.after(() => { __setQueryForTest(null); __resetLiveSessionForTest(); });
+  return calls;
+}
+
+function optionsFor(t, allowed) {
+  const calls = recordingQuery(t);
+  const unit = { runId: 'r1' };
+  openSession(unit, computeFingerprint(unit, {}, allowed), allowed, {});
+  assert.strictEqual(calls.length, 1, 'openSession calls query() exactly once');
+  return calls[0];
+}
+
+// The coordinator's shape: `mcp__aops__*` alone. No Bash/Read/Glob/Edit/
+// Write/web tool is offered — `[]` is the SDK's "disable all built-in tools"
+// (sdk.d.ts, Options.tools) — while the aops server stays bound as before.
+test('openSession offers no built-in for an aops-only allowlist: `tools` is the empty list', (t) => {
+  const options = optionsFor(t, ['mcp__aops__*']);
+  assert.deepStrictEqual(options.tools, []);
+});
+
+test('openSession offers exactly the granted built-ins for a Read,Grep allowlist', (t) => {
+  const options = optionsFor(t, ['Read', 'Grep']);
+  assert.deepStrictEqual(options.tools, ['Read', 'Grep']);
+});
+
+// Offered and allowed are two decisions. Setting `tools` must not have
+// turned into `allowedTools` (which would auto-approve before the callback,
+// D3) or moved the permission mode, and the MCP binding is untouched.
+test('openSession keeps canUseTool, permissionMode default, mcpServers and strictMcpConfig exactly as before, with no allowedTools', (t) => {
+  const calls = recordingQuery(t);
+  const mcpServers = { aops: { type: 'http', url: 'http://aops' } };
+  const allowed = ['mcp__aops__*', 'Read'];
+  const unit = { runId: 'r1' };
+  openSession(unit, computeFingerprint(unit, mcpServers, allowed), allowed, mcpServers);
+  const options = calls[0];
+  assert.strictEqual(typeof options.canUseTool, 'function');
+  assert.strictEqual(options.permissionMode, 'default');
+  assert.strictEqual(options.allowedTools, undefined, 'D3: nothing pre-approves, `tools` is not `allowedTools`');
+  assert.strictEqual(options.disallowedTools, undefined, 'the pinned SDK has `tools`; the disallowedTools fallback is not wired');
+  assert.deepStrictEqual(options.mcpServers, mcpServers);
+  assert.strictEqual(options.strictMcpConfig, true);
+  assert.deepStrictEqual(options.tools, ['Read']);
 });

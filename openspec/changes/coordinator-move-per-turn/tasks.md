@@ -75,19 +75,19 @@
 
 ## 6. Runtime claude: offered built-ins follow the allowlist — backend-developer
 
-- [ ] 6.1 In `runtimes/claude/tools.js`, add a pure function deriving the
+- [x] 6.1 In `runtimes/claude/tools.js`, add a pure function deriving the
       built-in base names from a composed allowlist (every non-`mcp__*`
       entry, scope stripped, deduplicated). Verify: `tools.test.js` covers
       `[]`, `mcp__aops__*` alone, `Read,Grep`, `Bash(git *)`, and a mixed
       list.
-- [ ] 6.2 In `runtimes/claude/runtime.js` `openSession`, pass that set to
+- [x] 6.2 In `runtimes/claude/runtime.js` `openSession`, pass that set to
       the SDK as the built-in tools to offer (`tools` option, falling back
       to `disallowedTools` if the pinned SDK lacks it, design D-F), and add
       it to the session fingerprint. `canUseTool` and `mcpServers` are
       unchanged. Verify: `runtime.permissions.test.js` asserts the option
       is passed as derived, and `runtime.sessionreuse.test.js` asserts a
       changed allowlist re-opens the session.
-- [ ] 6.3 Bump `runtimes/claude`'s version and confirm the SDK option
+- [x] 6.3 Bump `runtimes/claude`'s version and confirm the SDK option
       name against the pinned `@anthropic-ai/claude-agent-sdk` in
       `package.json`. Verify: `cd runtimes/claude && npm ci && node --test`
       passes.

@@ -181,6 +181,28 @@ function dedup(list) {
   return out;
 }
 
+// offeredBuiltins derives, from a composed allowlist, the BUILT-IN base
+// names the model should be OFFERED at all (coordinator-move-per-turn,
+// design D-F): every entry that is not an `mcp__*` pattern, with a trailing
+// `(...)` scope stripped (`Bash(git *)` -> `Bash`), trimmed, deduplicated,
+// order preserved. MCP tools are offered by binding their servers, never
+// through this list, so an allowlist of `mcp__aops__*` alone yields [] —
+// which the SDK reads as "offer no built-in" (sdk.d.ts, Options.tools).
+//
+// Offered and allowed stay two decisions: this narrows what the model can
+// SEE, canUseTool (runtime.js) still decides every call, and a scoped entry
+// is widened to its base name here exactly as allowlistMatch already grants
+// it — nothing is offered that the callback would not also allow.
+function offeredBuiltins(allowed) {
+  const bases = [];
+  for (const entry of allowed || []) {
+    const base = String(entry).split('(')[0].trim();
+    if (!base || base.startsWith('mcp__')) continue;
+    bases.push(base);
+  }
+  return dedup(bases);
+}
+
 // buildClaudeArgs is the CLI invocation's argv, pulled out of runtime.js so
 // its exact shape -- in particular the jssecurity:S6350 fix -- is asserted
 // directly rather than only exercised end to end. `contextId` and `prompt`
@@ -243,6 +265,6 @@ function buildClaudeArgs({ contextId, systemPrompt, allowed, maxTurns, mcpConfig
 
 module.exports = {
   MODE_MERGE, MODE_OVERWRITE,
-  splitList, parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
+  splitList, parseFrontmatterTools, agentDeclaredTools, composeAllowedTools, offeredBuiltins,
   safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools,
 };
