@@ -89,7 +89,7 @@ spec:
 | `inputs[].origin` | `object` |  | Where this input came from. |
 | `inputs[].origin.kind` | `string` | **yes** | OriginKind says HOW an input reached the manager. One of `signal`, `channel`, `member`, `manager`. |
 | `inputs[].origin.entry` | `string` |  | The parent Coordinator's `agents[]` entry name the edge was invoked through. |
-| `inputs[].origin.name` | `string` |  | The SignalSource or Channel the input came from, or — for OriginMember — the conversation on the other side of the `causedBy` edge this input crossed. |
+| `inputs[].origin.name` | `string` |  | The SignalSource or Channel the input came from, or — for OriginMember — the conversation on the other side of the `causedBy` edge this input crossed, or — for OriginManager — the rule that wrote it (`move-per-turn`). |
 | `inputs[].origin.sender` | `string` |  | The transport-side identity that typed this input, when the serving adapter supplied one. |
 | `inputs[].origin.signalKind` | `string` |  | The originating signal's lane (alert \| job \| task \| chat) for `signal` origins, empty otherwise. |
 | `inputs[].payload` | `string` |  | The input's text, inline. |

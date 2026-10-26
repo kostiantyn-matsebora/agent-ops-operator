@@ -10,6 +10,14 @@ for the source and the reference material beside this file.
 
 ## [Unreleased]
 
+### Added
+
+- Input origin `manager`, for an input the manager appends under a rule of its
+  own. Today only the corrective input, named `move-per-turn`. The console
+  attributes it to the manager.
+- `status.inflight.moved` on a Conversation, written by the manager's own
+  verb handlers and read when a run completes.
+
 ### Changed
 
 - A Coordinator root's turn must end in a move: `invoke`, `escalate`, `close`
@@ -24,14 +32,6 @@ for the source and the reference material beside this file.
   A route granting none sees none. Per-call enforcement is unchanged.
 - The `aops` tool descriptions say which tools are moves and which are reads.
 - A cascading close closes descendants before the ancestor.
-
-### Added
-
-- Input origin `manager`, for an input the manager appends under a rule of its
-  own. Today only the corrective input, named `move-per-turn`. The console
-  attributes it to the manager.
-- `status.inflight.moved` on a Conversation, written by the manager's own
-  verb handlers and read when a run completes.
 
 ### Upgrade
 

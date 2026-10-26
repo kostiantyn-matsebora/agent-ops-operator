@@ -113,7 +113,8 @@ type InputOrigin struct {
 	Kind OriginKind `json:"kind"`
 	// Name is the SignalSource or Channel the input came from, or — for
 	// OriginMember — the conversation on the other side of the `causedBy`
-	// edge this input crossed.
+	// edge this input crossed, or — for OriginManager — the rule that wrote
+	// it (`move-per-turn`).
 	// +optional
 	Name string `json:"name,omitempty"`
 	// Entry is the parent Coordinator's `agents[]` entry name the edge was

@@ -21,6 +21,10 @@ A Closed conversation SHALL be refused when it calls `invoke`. Closed is
 inert, so nothing can be created under it after the close lands, and the
 second sweep is the last word. No third sweep is needed.
 
+The same holds at every level. Each member's own close repeats the walk and
+the refusal, so a grandchild invoked by a member that is being closed is
+found by that member's second sweep, and not after it.
+
 #### Scenario: Children first
 - **WHEN** a root with two open members, one of which has an open member of its own, is closed with a reason
 - **THEN** the grandchild closes first, then its parent, then the sibling, and the root last, all with that reason
