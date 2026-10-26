@@ -106,7 +106,7 @@ default 4) sets how many run.
 
 A leader change needs no recovery step. The new leader's consumer reconciles
 every non-terminal `Signal`, and idempotency (D-5) makes a redo safe. A
-poison message ends at the retry deadline (D-6), never in a loop.
+poison message ends at the retry deadline (D-11), never in a loop.
 
 The pool and housekeeping start only on the leader. Pausing consumption later
 means the pool stops taking `Signal`s while publish keeps storing.
