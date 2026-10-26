@@ -244,14 +244,16 @@ spec:
                           type: string
                         kind:
                           description: |-
-                            OriginKind says HOW an input reached the manager. There are three doors: a
+                            OriginKind says HOW an input reached the manager. There are four doors: a
                             signal through a claimed SignalSource, a channel the user is already looking
-                            at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
-                            was a fourth once; it is gone.)
+                            at, a coordinated conversation crossing a `causedBy` edge, or the manager
+                            itself appending one under a rule of its own. (`POST /task` was a door once;
+                            it is gone.)
                           enum:
                           - signal
                           - channel
                           - member
+                          - manager
                           type: string
                         name:
                           description: |-
@@ -810,6 +812,18 @@ spec:
                     items:
                       type: string
                     type: array
+                  moved:
+                    description: |-
+                      Moved records that this run made a MOVE: the manager's own
+                      /coordinate/invoke, /escalate and /close handlers set it when the verb is
+                      ACCEPTED for a caller with an inflight run — an attached invoke counts, an
+                      escalate on an already-escalated root counts, a refused verb and a read
+                      set nothing. /work/done reads it to judge a Coordinator root's turn
+                      (coordination-loop: every root turn ends in a move) and consumes it with
+                      the rest of the inflight entry, so it survives nowhere else. The evidence
+                      is the manager's own — a runtime's report never sets it, whatever
+                      `toolCalls[]` says.
+                    type: boolean
                   runId:
                     type: string
                 required:
@@ -932,6 +946,7 @@ spec:
                             - signal
                             - channel
                             - member
+                            - manager
                             type: string
                           payloadRef:
                             description: |-

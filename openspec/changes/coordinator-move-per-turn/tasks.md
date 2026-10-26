@@ -1,13 +1,13 @@
 ## 1. API: the move mark and the manager origin — api-architect
 
-- [ ] 1.1 Add `Moved bool` to `InflightRun` in
+- [x] 1.1 Add `Moved bool` to `InflightRun` in
       `platform/manager/api/v1alpha1/conversation_types.go`, documented as
       design D-A states (set by an accepted verb, consumed at completion).
       Verify: the field renders in `chart/crds/` after regeneration.
-- [ ] 1.2 Add `OriginManager OriginKind = "manager"` with the enum marker
+- [x] 1.2 Add `OriginManager OriginKind = "manager"` with the enum marker
       widened to `signal;channel;member;manager`, and update the "three
       doors" doc comment to four. Verify: the CRD enum lists four values.
-- [ ] 1.3 Regenerate deepcopy and CRDs with the two `controller-gen` lines in
+- [x] 1.3 Regenerate deepcopy and CRDs with the two `controller-gen` lines in
       `.claude/rules/build-test.md`. Verify: `git diff chart/crds/` shows
       only the two additions, and `go build ./...` passes in
       `platform/manager`.
