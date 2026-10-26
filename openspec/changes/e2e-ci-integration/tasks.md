@@ -1,23 +1,24 @@
 ## 1. Gate console pull requests with the mocked e2e tier — deployment-engineer
 
-- [ ] 1.1 Add `retries: process.env.CI ? 2 : 0` to
+- [x] 1.1 Add `retries: process.env.CI ? 2 : 0` to
   `platform/console/ui/playwright.config.ts` and verify `CI=1 npm run
   test:e2e` still passes against this working copy's tree.
-  **The `retries` config landed, but the suite does not pass**: two of four
-  `e2e/topology.spec.ts` specs were already failing against an unmodified
-  `master`, for reasons unrelated to this change. Fixed in place: a stale
-  `data-flashing`/`data-animated`/SMIL `<animate>` assertion (`Canvas.tsx`
-  animates traffic through `TrafficLayer`'s own marks now, not those
-  attributes) and a missing "open the collapsible Display panel" click
-  before the `Toolsets` checkbox inside it. NOT fixed: both specs also
-  assume the `mcptoolsets` class starts hidden (`display.ts`'s
-  `VIEW_DEFAULTS.model.hidden` is `[]` — nothing is hidden by default), so
-  both still fail at that assertion. Proposed patch: have the spec hide the
-  class itself (open the panel, uncheck `Toolsets`) before asserting
-  concealment, rather than assuming the app starts that way — a
-  self-contained test fix, not a `platform/console/ui/src` change. Left
-  for review rather than guessed at further: redesigning what this spec
-  asserts is this change's own stated non-goal (`design.md`).
+  **Passes, 4 of 4, three consecutive runs.** Two of four
+  `e2e/topology.spec.ts` specs were already failing on an unmodified
+  `master`, the spec having drifted from the UI it pins — corrected as test
+  content only, no `platform/console/ui/src` change: traffic is asserted
+  through `data-stream` (`Canvas.tsx` never rendered the
+  `data-flashing`/`data-animated`/SMIL `<animate>` it checked); the spec
+  hides `Toolsets` itself before asserting concealment
+  (`VIEW_DEFAULTS.model.hidden` is `[]`); `1 failing` is read from
+  `health-summary` (three elements now carry the text); scoping is a
+  double-click, and the out-of-scope notice is the `failing-hidden` alert;
+  the node count excludes `node-panel`; and the fit is measured against
+  `pictureBounds`' own margins rather than the painted box, whose labels
+  sit off-centre by design — confirmed still failing on a 50px shift of
+  `fit()`. The webServer also binds `--host 127.0.0.1`: on the runner
+  `localhost` resolves to `::1`, so the probe at `127.0.0.1:4173` timed
+  out after a clean build.
 - [x] 1.2 Add a `console-e2e` job to `.github/workflows/ci.yml`, gated on
   `contains(needs.discover.outputs.modules, 'platform/console')`: checkout,
   Node 22 setup, `npm ci`, a Playwright-browser cache keyed on
@@ -29,9 +30,8 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 - [x] 1.3 Add `console-e2e` to `ci-green`'s `needs:` list in `ci.yml`.
   Verify by pushing this branch and running `gh workflow run ci.yml -f
   pr=<n>`, confirming the dispatched run shows `console-e2e` and that
-  `ci-green` reads its result. **Pushed.** It will show red until 1.1's
-  remaining finding is resolved. No `gh` auth here to dispatch a
-  stand-alone run ahead of the pull request's own CI.
+  `ci-green` reads its result. **Pushed** — the pull request's own CI
+  shows `console-e2e` under `ci-green`'s `needs:`.
 
 ## 2. Wire the live browser suite into the nightly full tier — deployment-engineer
 
@@ -59,10 +59,9 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 
 ## 3. Unit tests
 
-- [ ] 3.1 Run `CI=1 npm run test:e2e` in `platform/console/ui` against
+- [x] 3.1 Run `CI=1 npm run test:e2e` in `platform/console/ui` against
   this working copy's tree and confirm it passes with the new `retries`
-  setting in place. Same finding as 1.1 — ran, two specs still fail on the
-  pre-existing, out-of-scope mismatch documented there.
+  setting in place. 4 of 4 pass — see 1.1.
 - [x] 3.2 Validate both edited workflow files parse, for example with
   `python3 -c "import yaml, sys
 [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/ci.yml .github/workflows/system.yml`.
