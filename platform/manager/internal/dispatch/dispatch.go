@@ -170,11 +170,14 @@ func singleThread(c *agentopsv1alpha1.Conversation) *string {
 }
 
 func render(tpl string, vars map[string]string) string {
-	out := tpl
+	// ONE pass over the template. A value is never rescanned, so a payload that
+	// contains another placeholder (a member's result quoting `{{FROM}}`, an alert
+	// naming `{{DELIVERY_INSTRUCTIONS}}`) stays literal text whatever the map order.
+	pairs := make([]string, 0, 2*len(vars))
 	for k, v := range vars {
-		out = strings.ReplaceAll(out, "{{"+k+"}}", v)
+		pairs = append(pairs, "{{"+k+"}}", v)
 	}
-	return out
+	return strings.NewReplacer(pairs...).Replace(tpl)
 }
 
 // isRoot reports whether a conversation is a Coordinator's own — the one

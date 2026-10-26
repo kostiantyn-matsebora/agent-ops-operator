@@ -323,7 +323,7 @@ function computeFingerprint(unit, mcpServers, allowed) {
     maxTurns: normalizedMaxTurns(unit),
     cwd: WORKSPACE,
     agent: unit.agent || '',
-    offeredTools: offeredBuiltins(allowed),
+    offeredTools: [...offeredBuiltins(allowed)].sort(),
   };
 }
 

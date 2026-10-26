@@ -714,7 +714,13 @@ func (r *Router) closeWithCascade(ctx context.Context, conv *agentopsv1alpha1.Co
 	if err := r.cascadeCloseMembers(ctx, conv.Name, reason); err != nil {
 		return err
 	}
-	return r.closeConversationReason(ctx, conv, reason)
+	if err := r.closeConversationReason(ctx, conv, reason); err != nil {
+		return err
+	}
+	// A run on the still-open ancestor may have invoked a member after the walk
+	// listed. A closed conversation can invoke nothing more, so this second
+	// sweep is the last word and finds only stragglers.
+	return r.cascadeCloseMembers(ctx, conv.Name, reason)
 }
 
 // cascadeCloseMembers closes every LIVE direct member of parentName, same

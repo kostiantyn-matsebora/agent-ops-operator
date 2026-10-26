@@ -109,7 +109,10 @@ func (s *Server) actOnMiss(ctx context.Context, conv *agentopsv1alpha1.Conversat
 	case turnFirstMiss:
 		return s.appendCorrectiveInput(ctx, conv, runID)
 	case turnSecondMiss:
-		s.escalateSecondMiss(ctx, conv, result)
+		// A COPY: Escalate patches the object it is handed and the API's reply
+		// overwrites it, which would discard the run record /work/done is still
+		// holding in memory for its own status write.
+		s.escalateSecondMiss(ctx, conv.DeepCopy(), result)
 	}
 	return false
 }

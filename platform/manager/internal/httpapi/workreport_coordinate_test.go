@@ -277,7 +277,7 @@ func TestHandleWorkDoneFirstMissAppendsTheCorrectiveInput(t *testing.T) {
 		t.Fatalf("want exactly one corrective input, got %+v", got.Spec.Inputs)
 	}
 	in := appended[0]
-	if in.Type != agentopsv1alpha1.InputTask || in.Origin.Name != chat.MoveRuleName || in.ID != chat.MoveInputID("root-1", "r1") {
+	if in.Type != agentopsv1alpha1.InputReply || in.Origin.Name != chat.MoveRuleName || in.ID != chat.MoveInputID("root-1", "r1") {
 		t.Fatalf("the corrective input is an ordinary task of origin {manager, move-per-turn}, idempotent per run: %+v", in)
 	}
 	for _, want := range []string{"without a move", "invoke", "escalate", "close", "triage, fixer"} {
@@ -478,5 +478,38 @@ func TestAnsweredAPersonCountsAChatSignalByItsSurface(t *testing.T) {
 		if got := answeredAPerson(tc.recorded); got != tc.want {
 			t.Errorf("%s: answeredAPerson = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A run that reaches maxTurns closes the root on that edge. A hand-back into a
+// thread about to close helps nobody, so it is not judged.
+func TestHandleWorkDoneDoesNotJudgeTheRunThatReachesMaxTurns(t *testing.T) {
+	root := judgedRoot(false, inputOf("i1", agentopsv1alpha1.OriginMember))
+	root.Status.Budget = &agentopsv1alpha1.ConversationBudget{MaxTurns: 2, Turns: 1}
+	s := rootWorkReportServer(t, root)
+
+	rec := postWorkDone(t, s, map[string]any{"convo": "root-1", "runId": "r1", "status": "succeeded", "result": "a verdict"})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	got := getRoot(t, s)
+	if n := len(managerInputs(got)); n != 0 {
+		t.Fatalf("the run reaching maxTurns was judged: %d manager input(s) appended", n)
+	}
+}
+
+// A report whose continuity is unavailable is a failure by contract and a held
+// input is not a finished turn. Neither is judged.
+func TestHandleWorkDoneDoesNotJudgeAnUnavailableContext(t *testing.T) {
+	s := rootWorkReportServer(t, judgedRoot(false, inputOf("i1", agentopsv1alpha1.OriginMember)))
+
+	rec := postWorkDone(t, s, map[string]any{
+		"convo": "root-1", "runId": "r1", "status": "succeeded", "result": "x", "continuity": "unavailable",
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := len(managerInputs(getRoot(t, s))); n != 0 {
+		t.Fatalf("a run on an unavailable context was judged: %d manager input(s)", n)
 	}
 }

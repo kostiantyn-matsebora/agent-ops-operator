@@ -656,7 +656,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
 			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
 		}
-		turn = turnEvidence{Dispatched: !hold, Moved: conv.Status.Inflight.Moved}
+		turn = turnEvidence{Dispatched: !hold && d.Continuity != ContinuityUnavailable, Moved: conv.Status.Inflight.Moved}
 		conv.Status.Inflight = nil
 	}
 	// LATEST-WINS, and recorded on a FAILED run too.
@@ -756,18 +756,23 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if len(dispatch.PendingInputs(&conv)) > 0 {
 		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
+	// A Coordinator root's turn is judged BEFORE the run is recorded and its
+	// inflight entry cleared (design D-B, moveperturn.go). That order is what
+	// makes the hand-back durable: a manager that stops between the append and
+	// the record below leaves the inflight entry in place, so the runtime's
+	// retried report is judged again and the append, idempotent per run, lands
+	// once. The corrective input is pending, so the phase lands Queued. The
+	// phase write below still re-reads and refuses to un-close. A run that
+	// reaches maxTurns is not judged: the root closes on that edge, and a
+	// hand-back into a thread about to close helps nobody.
+	if !maxTurnsExceeded && s.Router != nil &&
+		s.actOnMiss(ctx, &conv, d.RunID, result, judgeRootTurn(&conv, d.Status, turn, recorded)) {
+		desiredPhase = agentopsv1alpha1.ConversationQueued
+	}
 	conv.Status.LastActivity = &now
 	if err := s.Client.Status().Patch(ctx, &conv, patch); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
-	}
-	// A Coordinator root's turn is judged AFTER the record and BEFORE the phase
-	// (design D-B, moveperturn.go): a corrective input appended here is pending,
-	// so the phase lands Queued and the next dispatch is the ordinary one. The
-	// phase write below still re-reads and refuses to un-close, so a late
-	// report on a conversation closed meanwhile changes nothing.
-	if s.Router != nil && s.actOnMiss(ctx, &conv, d.RunID, result, judgeRootTurn(&conv, d.Status, turn, recorded)) {
-		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
 	// Phase moves in its OWN optimistic-locked patch, never folded into the
 	// one above: a run that was still in flight when /close landed reports

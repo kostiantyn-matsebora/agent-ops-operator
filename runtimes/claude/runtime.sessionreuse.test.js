@@ -40,7 +40,13 @@ test('computeFingerprint reads systemPrompt, maxTurns and agent from the unit, a
 
 test('computeFingerprint derives offeredTools from the composed allowlist: built-in base names only, MCP grants excluded', () => {
   const fp = computeFingerprint({}, {}, ['mcp__aops__*', 'Read', 'Bash(git *)']);
-  assert.deepStrictEqual(fp.offeredTools, ['Read', 'Bash']);
+  assert.deepStrictEqual(fp.offeredTools, ['Bash', 'Read'], 'sorted, so the same set in another order is one fingerprint');
+});
+
+test('computeFingerprint is order-blind: the same built-ins in another allowlist order are one fingerprint', () => {
+  const a = computeFingerprint({}, {}, ['Read', 'Bash', 'mcp__aops__*']);
+  const b = computeFingerprint({}, {}, ['mcp__aops__*', 'Bash', 'Read']);
+  assert.deepStrictEqual(a, b);
 });
 
 test('computeFingerprint normalizes an absent maxTurns to the same floor normalizedMaxTurns applies', () => {

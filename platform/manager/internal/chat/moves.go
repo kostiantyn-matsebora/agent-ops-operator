@@ -23,13 +23,17 @@ func MoveInputID(conversation, runID string) string {
 
 // AppendManagerInput appends one input the MANAGER itself wrote to a named
 // conversation, origin `{kind: manager, name: move-per-turn}` (design D-C),
-// through the same idempotent append a member's result takes: a Closed
+// through the same idempotent append a member's result takes. It is a `reply`,
+// not a `task`, because only a reply resumes the conversation's stored
+// context (and degrades to a task when there is none): the corrective turn
+// has to see what the agent concluded, or it answers from nothing.
+// Same append: a Closed
 // conversation receives nothing, a repeat of an id still pending is a no-op.
 // Delivery to the conversation's bound threads is the reconciler's, by the
 // existing per-destination rule — nothing here posts.
 func (r *Router) AppendManagerInput(ctx context.Context, convName, inputID, payload string) error {
 	item := agentopsv1alpha1.InputItem{
-		ID: inputID, Type: agentopsv1alpha1.InputTask, Payload: payload, ReceivedAt: metav1.Now(),
+		ID: inputID, Type: agentopsv1alpha1.InputReply, Payload: payload, ReceivedAt: metav1.Now(),
 		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: MoveRuleName},
 	}
 	return r.appendInputIdempotent(ctx, convName, item)

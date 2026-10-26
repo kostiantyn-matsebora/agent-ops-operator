@@ -496,3 +496,15 @@ func TestOriginPhrasePerKind(t *testing.T) {
 		}
 	}
 }
+
+// A payload that quotes another placeholder stays literal text. The template
+// is scanned once, so a value is never rescanned whatever order the map is
+// walked in.
+func TestRenderNeverRescansAValue(t *testing.T) {
+	for range 50 {
+		out := render("a={{A}} b={{B}}", map[string]string{"A": "{{B}}", "B": "tail"})
+		if out != "a={{B}} b=tail" {
+			t.Fatalf("a value was rescanned: %q", out)
+		}
+	}
+}
