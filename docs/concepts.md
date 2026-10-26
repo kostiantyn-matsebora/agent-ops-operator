@@ -367,7 +367,7 @@ authored on its own:**
 
 | Phase | Means |
 |---|---|
-| `Pending` | no claimant has routed yet, and nothing has dropped it |
+| `Pending` | no claimant has routed yet, and nothing has dropped it — including a machine-origin signal waiting on conversation capacity |
 | `Routed` | every claimant terminal, at least one `Routed` |
 | `PartiallyRouted` | at least one `Routed`, at least one still `Routing` |
 | `Dropped` | terminal before any claimant was snapshotted — unclaimed, cooldown, overflow or capacity, with the reason recorded |

@@ -148,6 +148,8 @@ Five views, one question each.
   one shows every claimant's state, a routed one linked to its conversation,
   and a failed or dropped signal's reason verbatim.
 
+  ![The signals inventory, filterable by source and phase: one routed signal, one partially routed after three occurrences, one pending, and one dropped from a source no Pipeline lists.]({{ '/assets/img/console/signals-light.png' | relative_url }})
+
 ## What it does for you
 
 {: .ao-cards}

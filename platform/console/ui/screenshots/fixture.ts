@@ -148,7 +148,7 @@ const kinds: KindInfo[] = [
   { kind: 'agentruntimes', title: 'Agent runtimes', count: 2, synced: true },
   { kind: 'signalsources', title: 'Signal sources', count: 5, synced: true },
   { kind: 'signaladapters', title: 'Signal adapters', count: 3, synced: true },
-  { kind: 'signals', title: 'Signals', count: 1, synced: true },
+  { kind: 'signals', title: 'Signals', count: 4, synced: true },
   { kind: 'channels', title: 'Channels', count: 2, synced: true },
   { kind: 'channeladapters', title: 'Channel adapters', count: 2, synced: true },
   { kind: 'mcptoolsets', title: 'MCP toolsets', count: 4, synced: true },
@@ -244,6 +244,18 @@ const inventory: Record<string, InventoryRow[]> = {
     {
       name: 'cluster-events-sig-7f2a1', created: ago(96), health: 'ok', findings: 0,
       columns: { source: 'cluster-events', initiationId: 'k8s-events-7f2a1', phase: 'Routed', occurrences: '1' },
+    },
+    {
+      name: 'prometheus-alerts-sig-3b9c0', created: ago(41), health: 'ok', findings: 0,
+      columns: { source: 'prometheus-alerts', initiationId: 'alertmanager-3b9c0', phase: 'PartiallyRouted', occurrences: '3' },
+    },
+    {
+      name: 'cluster-events-sig-a41d8', created: ago(12), health: 'ok', findings: 0,
+      columns: { source: 'cluster-events', initiationId: 'k8s-events-a41d8', phase: 'Pending', occurrences: '1' },
+    },
+    {
+      name: 'bench-sensors-sig-0e6f3', created: ago(7), health: 'ok', findings: 0,
+      columns: { source: 'bench-sensors', initiationId: 'cron-0e6f3', phase: 'Dropped', occurrences: '1' },
     },
   ],
 }

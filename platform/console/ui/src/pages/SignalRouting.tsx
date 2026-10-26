@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom'
 import { PlainText } from '../components/Text'
 import { Empty } from '../components/States'
 import type { SignalStatusWire } from '../api/types'
-import { FILTER_ALL, isSignalTrouble, signalPhaseStatus } from './signals'
+import { FILTER_ALL, claimantStateStatus, isSignalTrouble, signalPhaseStatus } from './signals'
 
 // The Signal kind's own additions to the generic Configuration pages — console-signals
 // spec: filterable by source/phase on the list, and the full per-claimant
@@ -15,7 +15,7 @@ import { FILTER_ALL, isSignalTrouble, signalPhaseStatus } from './signals'
 // other Configuration page.
 
 /** A phase rendered as a status-coloured chip, same vocabulary as HealthChip/ConditionChips. */
-export function SignalPhaseLabel({ phase }: { phase?: string }) {
+export function SignalPhaseLabel({ phase }: Readonly<{ phase?: string }>) {
   if (!phase) return <small>—</small>
   const status = signalPhaseStatus(phase)
   return <Label isCompact status={status}>{phase}</Label>
@@ -31,7 +31,7 @@ export interface SignalFiltersProps {
 }
 
 /** The two filters console-signals requires: by source, and by phase. Local to this page — nothing here is shared state. */
-export function SignalFilters({ sources, phases, source, phase, onSourceChange, onPhaseChange }: SignalFiltersProps) {
+export function SignalFilters({ sources, phases, source, phase, onSourceChange, onPhaseChange }: Readonly<SignalFiltersProps>) {
   return (
     <Toolbar>
       <ToolbarContent>
@@ -70,7 +70,7 @@ export function SignalFilters({ sources, phases, source, phase, onSourceChange, 
  * conversation, a failed/skipped one's reason VERBATIM, and the signal's own
  * terminal reason shown as loudly as its phase.
  */
-export function SignalRoutingCard({ status }: { status: SignalStatusWire }) {
+export function SignalRoutingCard({ status }: Readonly<{ status: SignalStatusWire }>) {
   const claimants = status.claimants ?? []
   return (
     <Card>
@@ -110,7 +110,7 @@ export function SignalRoutingCard({ status }: { status: SignalStatusWire }) {
                   <Td dataLabel="Kind">{c.ref.kind}</Td>
                   <Td dataLabel="Name"><PlainText>{c.ref.name}</PlainText></Td>
                   <Td dataLabel="State">
-                    <Label isCompact status={signalPhaseStatus(c.state === 'Routed' ? 'Routed' : undefined) ?? (c.state === 'Failed' ? 'danger' : c.state === 'Skipped' ? 'warning' : 'info')}>
+                    <Label isCompact status={claimantStateStatus(c.state)}>
                       {c.state}
                     </Label>
                   </Td>

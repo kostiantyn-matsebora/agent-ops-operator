@@ -18,8 +18,12 @@ for the source and the reference material beside this file.
   on a still-open `Signal` is absorbed into it rather than posted twice.
 - The console's read-only signals view — list, filters and the per-claimant
   routing detail — reached from the existing Configuration pages.
-- Not breaking. Upgrading runs `kubectl apply -f chart/crds/` as every
-  CRD-adding release already does.
+
+### Upgrade
+
+Not breaking. Helm never upgrades an existing CRD, so run
+`kubectl apply -f chart/crds/` before `helm upgrade` to pick up the new
+`Signal` CRD, as every CRD-adding release already does.
 
 ## [18.0.1] — 2026-10-25
 

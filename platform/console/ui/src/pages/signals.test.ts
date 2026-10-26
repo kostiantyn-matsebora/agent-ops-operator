@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  FILTER_ALL, asSignalStatus, filterSignalRows, isSignalTrouble, signalFilterOptions, signalPhaseStatus,
+  FILTER_ALL, asSignalStatus, claimantStateStatus, filterSignalRows, isSignalTrouble, signalFilterOptions, signalPhaseStatus,
 } from './signals'
 import type { InventoryRow } from '../api/types'
 
@@ -55,6 +55,16 @@ describe('filterSignalRows', () => {
   it('combines both filters', () => {
     const got = filterSignalRows(rows, 'prometheus-alerts', 'PartiallyRouted')
     expect(got).toHaveLength(0)
+  })
+})
+
+describe('claimantStateStatus', () => {
+  it('colours each claimant state, an unknown one as still routing', () => {
+    expect(claimantStateStatus('Routed')).toBe('success')
+    expect(claimantStateStatus('Failed')).toBe('danger')
+    expect(claimantStateStatus('Skipped')).toBe('warning')
+    expect(claimantStateStatus('Routing')).toBe('info')
+    expect(claimantStateStatus(undefined)).toBe('info')
   })
 })
 

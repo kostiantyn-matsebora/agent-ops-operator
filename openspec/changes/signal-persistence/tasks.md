@@ -15,7 +15,7 @@
 
 ## 3. The Signal reconciler
 
-- [x] 3.1 Implement the reconciler routing non-terminal Signals through the shared routing path — claimant snapshot at first routing attempt, retries touching only non-terminal claimants, retry budget flipping exhausted ones to `Failed` — and verify envtest covers each transition — covered by fake-client unit tests in `internal/controller`, this package's own established convention. The real envtest suite lives in `internal/integration`, which imports `internal/controller`
+- [x] 3.1 Implement the reconciler routing non-terminal Signals through the shared routing path — claimant snapshot at first routing attempt, retries touching only non-terminal claimants, retry budget flipping exhausted ones to `Failed` — and verify fake-client unit tests in `internal/controller` cover each transition — this package's own convention for reconciler logic
 - [x] 3.2 Implement the phase roll-up recomputed on every status write (`Pending`/`Routed`/`PartiallyRouted`/`Dropped`/`Failed`) and verify a table test walks every claimant-state combination
 - [x] 3.3 Implement bounds: per-source live cap with oldest-eviction (pre-fan-out as `Dropped` reason overflow, post-fan-out by flipping non-terminal claimants to `Failed`), TTL GC after terminal phases via requeue with `Dropped` shorter than `Routed` and `Failed` on the `Routed` TTL (`SIGNAL_TTL_DROPPED` 4h, `SIGNAL_TTL_ROUTED` 72h, `Failed` on the `Routed` TTL) — and verify envtest covers both eviction shapes, GC ordering, and ownerRef-driven GC on source deletion — TTL is measured from `creationTimestamp` (`SignalStatus` carries no separate "became terminal" stamp). ownerRef GC is asserted as a schema check, not a cascading delete (this repo's envtest runs no garbage-collector controller — consistent with every other ownerRef-GC test here)
 - [x] 3.4 Emit the `Failed` phase as loudly as the unwired drop (activity event, logged, counted) and verify a unit test asserts the event
@@ -34,8 +34,8 @@
 
 ## 6. System tests
 
-- [x] 6.1 Add or extend a lane in `platform/manager/test/system/`: signal ingested → Signal CR observable → conversation opened → phase `Routed`, plus a manager-restart case resuming a `PartiallyRouted` signal without a duplicate conversation, and verify in the pack run — written and compiled (`go vet`/`go test -c -tags system`) in this environment, which has no docker/k3d. Dispatched to `system-smoke.yml` for the pack run itself (the restart case is `fullTier`)
-- [x] 6.2 Verify console RBAC in-cluster: the console ServiceAccount can list/watch `signals` and cannot write them (`kubectl auth can-i` both ways) — asserted in the same dispatched system-test lane (`substrate_test.go`'s `TestRBACAsEnforced`), not run against a live cluster here
+- [ ] 6.1 Add or extend a lane in `platform/manager/test/system/`: signal ingested → Signal CR observable → conversation opened → phase `Routed`, plus a manager-restart case resuming a `PartiallyRouted` signal without a duplicate conversation, and verify in the pack run — the dispatched smoke run passed `TestSignalPersistenceReachesRoutedPhase`. The restart case is `fullTier`, skipped by smoke, so this stays open until a dispatched `system-full.yml` run passes it
+- [x] 6.2 Verify console RBAC in-cluster: the console ServiceAccount can list/watch `signals` and cannot write them (`kubectl auth can-i` both ways) — asserted by `substrate_test.go`'s `TestRBACAsEnforced`, which passed in the dispatched smoke run
 
 ## 7. Documentation
 

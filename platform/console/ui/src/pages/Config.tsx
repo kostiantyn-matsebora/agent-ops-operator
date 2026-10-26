@@ -5,7 +5,7 @@ import {
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link, useParams } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Empty, ErrorState, Loading } from '../components/States'
 import { useDetail, useInventory, useKinds, usePipelineIcon } from '../api/hooks'
 import { PlainText } from '../components/Text'
@@ -179,6 +179,13 @@ export function ConfigKindPage() {
   const isSignals = kind === 'signals'
   const { sources, phases } = isSignals ? signalFilterOptions(data) : { sources: [], phases: [] }
   const rows = isSignals ? filterSignalRows(data, sourceFilter, phaseFilter) : data
+  // Nothing of the kind at all reads differently from a filter hiding every row.
+  let empty: ReactNode = null
+  if (data.length === 0) {
+    empty = <Empty title={`No ${kind}`}>Nothing of this kind exists in the namespace.</Empty>
+  } else if (rows.length === 0) {
+    empty = <Empty title="No signal matches these filters">Clear a filter to see more.</Empty>
+  }
 
   return (
     <>
@@ -206,11 +213,7 @@ export function ConfigKindPage() {
             </StackItem>
           )}
           <StackItem>
-            {data.length === 0 ? (
-              <Empty title={`No ${kind}`}>Nothing of this kind exists in the namespace.</Empty>
-            ) : rows.length === 0 ? (
-              <Empty title="No signal matches these filters">Clear a filter to see more.</Empty>
-            ) : (
+            {empty ?? (
               <Table variant="compact" aria-label={kind}>
                 <Thead>
                   <Tr>

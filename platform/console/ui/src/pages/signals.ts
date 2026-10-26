@@ -20,8 +20,8 @@ export function signalFilterOptions(rows: InventoryRow[]): { sources: string[]; 
     if (phase) phases.add(phase)
   }
   return {
-    sources: [...sources].sort(),
-    phases: [...phases].sort(),
+    sources: [...sources].sort((a, b) => a.localeCompare(b)),
+    phases: [...phases].sort((a, b) => a.localeCompare(b)),
   }
 }
 
@@ -55,6 +55,20 @@ export function signalPhaseStatus(phase?: string): 'success' | 'danger' | 'warni
       return 'info'
     default:
       return undefined
+  }
+}
+
+/** PatternFly Label status for one claimant's routing state — green once routed, red failed, amber skipped, blue still routing. */
+export function claimantStateStatus(state?: string): 'success' | 'danger' | 'warning' | 'info' {
+  switch (state) {
+    case 'Routed':
+      return 'success'
+    case 'Failed':
+      return 'danger'
+    case 'Skipped':
+      return 'warning'
+    default:
+      return 'info'
   }
 }
 
