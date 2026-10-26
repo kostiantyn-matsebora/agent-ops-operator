@@ -153,3 +153,19 @@ func TestCallsDirectiveReportsTurnsAndToolCalls(t *testing.T) {
 		t.Fatalf("echo reports no calls: %+v", echo)
 	}
 }
+
+// The hold directive keeps the unit inflight for the seconds it names and
+// then reports like echo; a bare hold falls back to thirty seconds.
+func TestHoldDirectiveNamesItsWindowAndSucceeds(t *testing.T) {
+	withHome(t)
+	r, ok := perform(unit{RunID: "r", Convo: "c", PromptVars: map[string]string{"USER_TASK": "hold 7 for the lane"}})
+	if !ok || r.Status != "succeeded" || r.Result != "[stub] held for 7s" {
+		t.Fatalf("hold 7: %+v", r)
+	}
+	if got := holdFor(""); got != 30*time.Second {
+		t.Fatalf("a bare hold is thirty seconds, got %s", got)
+	}
+	if got := holdFor("soon"); got != 30*time.Second {
+		t.Fatalf("a non-number falls back to thirty seconds, got %s", got)
+	}
+}

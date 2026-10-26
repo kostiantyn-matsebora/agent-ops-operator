@@ -379,3 +379,185 @@ func stringMembers(v any) []string {
 	}
 	return out
 }
+
+// Move-per-turn (coordinator-move-per-turn, coordination-loop: every root
+// turn ends in a move). The stub runtime calls no aops verb of its own, so a
+// scripted run is a run WITHOUT a move, and a move is made the way the rest of
+// this file makes one: the manager's own /coordinate/* surface with the
+// caller's derived token, here while the caller's run is still inflight (the
+// stub's `hold` directive is that window).
+
+// managerInputs counts the inputs of origin `manager` a conversation holds,
+// consumed (recorded on a run) and still queued alike.
+func managerInputs(c *agentopsv1alpha1.Conversation) []string {
+	var texts []string
+	for _, r := range c.Status.Runs {
+		for _, in := range r.Inputs {
+			if in.Origin == agentopsv1alpha1.OriginManager {
+				texts = append(texts, in.Text)
+			}
+		}
+	}
+	for _, in := range c.Spec.Inputs {
+		if in.Origin != nil && in.Origin.Kind == agentopsv1alpha1.OriginManager {
+			texts = append(texts, in.ID)
+		}
+	}
+	return texts
+}
+
+// moveLane creates a Ready Coordinator with one domain entry over a fresh
+// signal source and returns its name and source.
+func moveLane(t *testing.T, e *Env, suffix string) (coordName, srcName string) {
+	t.Helper()
+	coordName, srcName = "e2e-move-"+suffix, "e2e-move-src-"+suffix
+	domainCap := "e2e-move-domain-" + suffix
+	mustCreate(t, e.K, agentCapability(domainCap, ProfileStub))
+	mustCreate(t, e.K, source(srcName, "e2e", nil))
+	mustCreate(t, e.K, coordinatorObj(coordName, ProfileStub, []string{srcName},
+		[]agentopsv1alpha1.CoordinatorAgentEntry{capabilityEntry("domain", domainCap, "handles domain tasks")}))
+	if err := waitCoordinatorReady(context.Background(), e.K, coordName, 2*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	return coordName, srcName
+}
+
+// A root whose runs call no verb and answer no person is handed its turn back
+// once, then escalated: one manager-origin input, a second run, escalation on
+// the second miss, and no third turn.
+func TestCoordinatorRootWithNoMoveIsHandedBackOnceThenEscalated(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	_, srcName := moveLane(t, e, "miss-"+stamp[len(stamp)-6:])
+
+	fp := "e2e-move-miss-" + stamp
+	e.PostTask(t, srcName, fp, "echo no-move-"+stamp)
+	root := e.ConversationFor(t, fp, 2*time.Minute)
+
+	// After the first run: exactly one corrective input, named for the rule.
+	waitFor(t, "the first run recorded", 3*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		return err == nil && len(c.Status.Runs) >= 1 && c.Status.Runs[0].FinishedAt != nil, err
+	})
+	waitFor(t, "exactly one manager-origin input after the first miss", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		return err == nil && len(managerInputs(c)) == 1, err
+	})
+	c, err := e.K.Conversation(ctx, root.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Status.EscalatedAt != nil {
+		t.Fatalf("one miss must not escalate, got escalatedAt %v", c.Status.EscalatedAt)
+	}
+
+	// The corrective input is dispatched as the next run, and is all that run
+	// consumes (the second miss in a row).
+	c = e.WaitRun(t, root.Name, 2, 3*time.Minute)
+	if got := len(c.Status.Runs[1].Inputs); got != 1 || c.Status.Runs[1].Inputs[0].Origin != agentopsv1alpha1.OriginManager {
+		t.Fatalf("the second run must consume exactly the manager-origin corrective input, got %+v", c.Status.Runs[1].Inputs)
+	}
+
+	// The second miss escalates with a digest naming two turns without a move.
+	waitFor(t, "the root escalated after the second miss", 2*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		return err == nil && c.Status.EscalatedAt != nil, err
+	})
+	c, err = e.K.Conversation(ctx, root.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(c.Status.EscalationMessage, "two turns") {
+		t.Fatalf("the digest must say two turns ended without a move, got %q", c.Status.EscalationMessage)
+	}
+	if n := len(managerInputs(c)); n != 1 {
+		t.Fatalf("no further corrective input after the escalation, got %d manager-origin inputs", n)
+	}
+	if finished := len(c.Status.Runs); finished != 2 {
+		t.Fatalf("no third turn after the escalation, got %d runs", finished)
+	}
+}
+
+// A root whose run makes a move (an invoke, accepted while that run is
+// inflight) is not handed anything back, and its inflight entry is gone when
+// the run completes.
+func TestCoordinatorRootThatInvokesGetsNoCorrectiveInput(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	coordName, srcName := moveLane(t, e, "moved-"+stamp[len(stamp)-6:])
+
+	fp := "e2e-move-moved-" + stamp
+	e.PostTask(t, srcName, fp, "hold 30 moving-"+stamp)
+	root := e.ConversationFor(t, fp, 2*time.Minute)
+
+	// Wait for the run to be inflight, then make the move inside its window.
+	var runID string
+	waitFor(t, "the root's run inflight", 3*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		if err != nil || c.Status.Inflight == nil {
+			return false, err
+		}
+		runID = c.Status.Inflight.RunID
+		return true, nil
+	})
+	e.invokeMember(t, coordName, root.Name, "domain", "echo moved-member-"+stamp)
+
+	c := e.WaitRun(t, root.Name, 1, 3*time.Minute)
+	if n := len(managerInputs(c)); n != 0 {
+		t.Fatalf("a turn that invoked must append no corrective input, got %d", n)
+	}
+	if c.Status.Inflight != nil && c.Status.Inflight.RunID == runID {
+		t.Fatalf("the finished run's inflight entry must be cleared, got %+v", c.Status.Inflight)
+	}
+}
+
+// Closing a root closes its live member first: the member's closedAt is no
+// later than the root's, and both carry the one reason.
+func TestCoordinatorCloseEndsLiveMemberBeforeRoot(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	coordName, srcName := moveLane(t, e, "close-"+stamp[len(stamp)-6:])
+
+	fp := "e2e-move-close-" + stamp
+	e.PostTask(t, srcName, fp, "echo close-root-"+stamp)
+	root := e.ConversationFor(t, fp, 2*time.Minute)
+	e.WaitRun(t, root.Name, 1, 3*time.Minute)
+	member := e.invokeMember(t, coordName, root.Name, "domain", "echo close-member-"+stamp)
+	e.WaitRun(t, member, 1, 3*time.Minute)
+
+	const reason = "children-first close under test"
+	code, out := e.coordinateCall(t, "/coordinate/close", coordinatorToken(e, coordName, root.Name),
+		map[string]any{"conversation": root.Name, "target": root.Name, "reason": reason})
+	if code != 200 {
+		t.Fatalf("close the root: %d %v", code, out)
+	}
+
+	var rootC, memberC *agentopsv1alpha1.Conversation
+	waitFor(t, "root and member both Closed", 2*time.Minute, func() (bool, error) {
+		r, err := e.K.Conversation(ctx, root.Name)
+		if err != nil {
+			return false, err
+		}
+		m, err := e.K.Conversation(ctx, member)
+		if err != nil {
+			return false, err
+		}
+		rootC, memberC = r, m
+		return r.Status.Phase == agentopsv1alpha1.ConversationClosed &&
+			m.Status.Phase == agentopsv1alpha1.ConversationClosed &&
+			r.Status.ClosedAt != nil && m.Status.ClosedAt != nil, nil
+	})
+	if memberC.Status.ClosedAt.After(rootC.Status.ClosedAt.Time) {
+		t.Fatalf("the member must close no later than the root: member %v, root %v",
+			memberC.Status.ClosedAt, rootC.Status.ClosedAt)
+	}
+	if memberC.Status.CloseReason != reason || rootC.Status.CloseReason != reason {
+		t.Fatalf("both must carry the same reason, member %q, root %q", memberC.Status.CloseReason, rootC.Status.CloseReason)
+	}
+}

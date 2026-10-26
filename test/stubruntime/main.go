@@ -22,6 +22,8 @@
 //	stall           hold the unit past the idle TTL (never report)
 //	storage-outage  report the context as unreachable — the breaker's input
 //	calls           report two model turns and one MCP tool call, with a fixed result
+//	hold <seconds>  keep the unit inflight that long (default 30), then succeed like echo — the
+//	                window a lane needs to act on a run while it is still running
 //
 // Anything else is `echo`. Identical input, identical report: no clock, no
 // randomness and no pod name reaches a result.
@@ -103,7 +105,7 @@ var scriptedCalls = struct {
 	tools: []toolCall{{Tool: "mcp__stub__lookup", Server: "stub", DurationMs: 5, ResultBytes: 64}},
 }
 
-var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage", "calls"}
+var directives = []string{"echo", "fail", "stale-context", "no-context", "die", "stall", "storage-outage", "calls", "hold"}
 
 // input extracts the task text a unit carries: USER_TASK when the manager
 // left rendering to the runtime; else the task the manager's own template
@@ -217,12 +219,26 @@ func perform(u unit) (report, bool) {
 		r.Continuity = continuity(handle)
 		r.RuntimeContextID = keep(u.Convo, handle)
 		r.Turns, r.ToolCalls = scriptedCalls.turns, scriptedCalls.tools
+	case "hold":
+		r.Result = resultPrefix + "held for " + holdFor(rest).String()
+		r.Continuity = continuity(handle)
+		r.RuntimeContextID = keep(u.Convo, handle)
 	default: // echo
 		r.Result = resultPrefix + rest
 		r.Continuity = continuity(handle)
 		r.RuntimeContextID = keep(u.Convo, handle)
 	}
 	return r, true
+}
+
+// holdFor reads the seconds a `hold` directive was given, 30 when none or not
+// a positive number, so a bare `hold` is a usable script.
+func holdFor(rest string) time.Duration {
+	word, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+	if n, err := strconv.Atoi(word); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return 30 * time.Second
 }
 
 func continuity(handle string) string {
@@ -309,6 +325,10 @@ func run(control, convo, pod string, ttl time.Duration, exit func(int)) error {
 				exit(0)
 				return nil
 			}
+		}
+		if d == "hold" {
+			_, rest := directive(input(u))
+			time.Sleep(holdFor(rest))
 		}
 		if err := post(client, control+"/work/done", r); err != nil {
 			return fmt.Errorf("report %s: %w", u.RunID, err)
