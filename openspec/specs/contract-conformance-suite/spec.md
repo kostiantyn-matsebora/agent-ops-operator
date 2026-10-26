@@ -229,12 +229,16 @@ from `docs/contracts/runtime.md` behaviorally: `API-1`, `API-2`,
 `API-4`, `API-5`, `API-7`, `API-8`, `API-9`, `LC-1`, `LC-2`, `RT-1`,
 `RT-2`, `RT-3` and its sub-items, `COMPAT-1`.
 
-It SHALL NOT assert `API-3`, `API-6`, `LC-3`, `SEC-1`, `SEC-2`, `SEC-3` or
-any `MGR-n` requirement, each already covered elsewhere:
+It SHALL NOT assert `API-3`, `API-6`, `LC-3`, `LC-4`, `LC-5`, `SEC-1`,
+`SEC-2`, `SEC-3`, `COMPAT-2`, `COMPAT-3` or any `MGR-n` requirement
+(`MGR-5` included), each already covered elsewhere:
 
 | Excluded | Because | Covered by |
 |---|---|---|
-| `API-3`, `API-6`, `MGR-n` | obligates whoever answers `GET /work` — the manager, not the runtime | envtest, the system tier |
+| `API-3`, `API-6`, `MGR-n` (`MGR-5` included) | obligates whoever answers `GET /work` — the manager, not the runtime | envtest, the system tier |
+| `LC-4`, `LC-5` | a crash on missing configuration and the pod's own termination signal are process and kubelet facts, not `/work` behavior | the runtime's own unit tests, the system tier |
+| `COMPAT-2` | obligates the manager reading a report | the manager's own unit tests, envtest |
+| `COMPAT-3` | a documentation fact about stable section anchors, no runtime behavior | the docs checks |
 | `LC-3` | `/exit` refused mid-run is manager-side chat-router logic, no HTTP call to the runtime pod | the manager's own chat-router unit tests |
 | `SEC-1`, `SEC-2`, `SEC-3` | facts about the manager/operator's own pod-spec and RBAC rendering, not runtime-binary behavior | `internal/runtimepod`'s unit tests, the chart's RBAC templates |
 
