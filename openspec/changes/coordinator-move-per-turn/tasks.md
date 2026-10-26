@@ -66,7 +66,7 @@
 
 ## 5. aops MCP server: the descriptions — backend-developer
 
-- [ ] 5.1 Extend the tool descriptions in `platform/mcp-aops/` so `invoke`,
+- [x] 5.1 Extend the tool descriptions in `platform/mcp-aops/` so `invoke`,
       `escalate` and `close` state the turn rule and name themselves moves,
       the six reads name themselves reads, and the moves name the
       hand-back-then-escalate consequence (design D-G). Verify:

@@ -119,6 +119,73 @@ func TestToolsListReturnsAllNineTools(t *testing.T) {
 	}
 }
 
+// listedDescriptions returns tool name → description as a client sees them
+// through tools/list — the wire form, not the Go literal.
+func listedDescriptions(t *testing.T) map[string]string {
+	t.Helper()
+	_, ts := newFakeManager(t)
+	defer ts.Close()
+	out := rpcCall(t, newServer(ts.URL), caller{}, "tools/list", map[string]any{})
+	got := map[string]string{}
+	for _, raw := range out.Result.(map[string]any)["tools"].([]any) {
+		tool := raw.(map[string]any)
+		got[tool["name"].(string)] = tool["description"].(string)
+	}
+	return got
+}
+
+// The turn rule lives in the descriptions (coordinator-move-per-turn,
+// design D-G). The phrases are pinned literally so a reworded constant is a
+// deliberate change, never a drift.
+func TestToolsListMoveDescriptionsStateTheTurnRuleAndItsConsequence(t *testing.T) {
+	descriptions := listedDescriptions(t)
+	for _, tool := range []string{"invoke", "escalate", "close"} {
+		desc := descriptions[tool]
+		for _, phrase := range []string{
+			"This tool is a move.",
+			"Every turn of a coordinating conversation ends in invoke, escalate, close, or an answer to the person whose message the turn answered.",
+			"A turn ending without a move is handed back once by the manager as an input.",
+			"A second consecutive miss is escalated.",
+		} {
+			if !strings.Contains(desc, phrase) {
+				t.Fatalf("%s: description lacks %q: %q", tool, phrase, desc)
+			}
+		}
+		if strings.Contains(desc, "This tool is a read.") {
+			t.Fatalf("%s: a move must not also call itself a read: %q", tool, desc)
+		}
+	}
+}
+
+func TestToolsListReadDescriptionsNameThemselvesReads(t *testing.T) {
+	descriptions := listedDescriptions(t)
+	for _, tool := range []string{"list_agents", "read", "get_tree", "list_conversations", "get_conversation", "list_open_roots"} {
+		desc := descriptions[tool]
+		if !strings.Contains(desc, "This tool is a read. It ends no turn.") {
+			t.Fatalf("%s: description lacks the read text: %q", tool, desc)
+		}
+		if strings.Contains(desc, "This tool is a move.") {
+			t.Fatalf("%s: a read must not call itself a move: %q", tool, desc)
+		}
+	}
+}
+
+// The rule is appended, never substituted — each tool's own content still
+// opens its description.
+func TestToolsListDescriptionsKeepTheirOwnContentFirst(t *testing.T) {
+	descriptions := listedDescriptions(t)
+	for tool, opening := range map[string]string{
+		"invoke":   "Invoke one of this Coordinator's agents[] entries with a task.",
+		"close":    "Close a conversation with a reason:",
+		"escalate": "Escalate the calling conversation with a message.",
+		"read":     "Read one conversation's bounded projection,",
+	} {
+		if !strings.HasPrefix(descriptions[tool], opening) {
+			t.Fatalf("%s: description no longer opens with its own content: %q", tool, descriptions[tool])
+		}
+	}
+}
+
 func TestUnknownMethodReportsMethodNotFound(t *testing.T) {
 	_, ts := newFakeManager(t)
 	defer ts.Close()
