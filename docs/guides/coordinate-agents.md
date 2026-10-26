@@ -235,6 +235,32 @@ A member's result — from finishing normally or from escalating — always
 lands as an input on the conversation that invoked it. Nothing an
 `agents[]` entry names ever answers a human channel directly.
 
+## A turn that ends without a move
+
+Your coordinating agent decides every turn. Every turn ends in `invoke`,
+`escalate`, `close`, or an answer to the person who asked. The manager never
+picks the move for it.
+
+What the manager does is refuse an undecided turn. When a root's run
+succeeds, makes no move and answers no person, it is handed back once.
+
+| What happened | What you see |
+|---|---|
+| the run ended with a verdict and no verb | a short message from the manager in the thread, telling the agent to invoke, escalate or close |
+| the next run ended the same way | the root escalates, with a digest naming the roster and the last result |
+| a person had just written | nothing, the answer is the move |
+
+The hand-back is an ordinary turn, so it spends `maxTurns` like any other. A
+member's result is its own move and is never handed back.
+
+A closed root closes its members first. If a close fails part-way, the root
+stays open and a second close finishes the walk.
+
+Your own instructions are untouched by any of this. The profile's
+`systemPrompt` and the chart's `coordinator.systemPromptPrefix` are appended
+to every root turn, so a severity scale or an on-call convention still
+reaches the agent.
+
 ## See what you have to compose
 
 ```sh

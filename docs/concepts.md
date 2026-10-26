@@ -1361,6 +1361,49 @@ conversation.
 **A member reporting after its parent is `Closed` is dropped.** No input is
 appended, and the result stays on the member's own record.
 
+### Every root turn ends in a move
+
+**A turn is one run of a Coordinator root, and it must end in a move.** The
+model decides which move. The manager only refuses a turn that ended
+undecided.
+
+| A move is | Not a move |
+|---|---|
+| `invoke`, `escalate` or `close`, accepted by the manager | any read: `list_agents`, `read`, `get_tree`, `list_conversations`, `get_conversation`, `list_open_roots` |
+
+**The manager's own handlers are the evidence.** An accepted verb marks the
+caller's inflight run (`status.inflight.moved`). A refused verb marks nothing.
+A runtime's report is never consulted.
+
+| A succeeded root run that | The manager does |
+|---|---|
+| marked a move | nothing |
+| consumed a person's message | nothing, the text is the answer |
+| made no move and answered no person, first time | appends ONE corrective input, origin `manager` |
+| made no move and consumed only that corrective input | escalates the root with a digest |
+
+**A person's message is a `channel` input, or any input recording the surface
+it was typed on.** A chat signal is the second case. An alert, a job tick and a
+posted task record no surface.
+
+**Any other input between two misses resets the count.** A failed run, a
+closed root and a plain member are never judged. A corrective turn spends
+`maxTurns` like any other.
+
+**The corrective input carries origin `{kind: manager, name: move-per-turn}`.**
+It is recorded on `status.runs[].inputs[]` and delivered to the root's bound
+threads like any input, attributed to the manager. It is never a person's
+message.
+
+**A root's work unit is framed as coordination.** The prompt names the input,
+who it came from, and the delivery section. It says nothing of a checkout or a
+role file. The profile's `systemPrompt` is still appended, so instructions and
+guardrails stay the adopter's.
+
+**A cascading close closes descendants first.** A failure mid-walk leaves an
+open, reachable root over a partly closed subtree, and a repeated close
+resumes.
+
 ### Escalation: a decision posted into a thread already open
 
 **An uncaused root's channels bind at creation, unconditionally** — the same

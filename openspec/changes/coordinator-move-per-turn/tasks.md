@@ -101,14 +101,14 @@
 
 ## 8. Unit tests
 
-- [ ] 8.1 `platform/manager`: `go build ./... && go vet ./... && go test
+- [x] 8.1 `platform/manager`: `go build ./... && go vet ./... && go test
       ./...` with `KUBEBUILDER_ASSETS` set, covering sections 1 to 4.
-- [ ] 8.2 `platform/mcp-aops`: `go build ./... && go vet ./... && go test
+- [x] 8.2 `platform/mcp-aops`: `go build ./... && go vet ./... && go test
       ./...`.
-- [ ] 8.3 `runtimes/claude`: `node --test`, including the coverage flags
+- [x] 8.3 `runtimes/claude`: `node --test`, including the coverage flags
       from `.claude/rules/build-test.md`.
-- [ ] 8.4 `platform/console/ui`: `npm run test:coverage`.
-- [ ] 8.5 Chart render tests: `go test ./internal/integration/ -run
+- [x] 8.4 `platform/console/ui`: `npm run test:coverage`.
+- [x] 8.5 Chart render tests: `go test ./internal/integration/ -run
       TestCoordinator` from `platform/manager`, confirming the prompt tests
       are untouched by this change (no prompt wording moved).
 
@@ -132,29 +132,29 @@
 
 ### Reference docs
 
-- [ ] 10.1 `docs/concepts.md`, Coordinated agents: the turn rule, the
+- [x] 10.1 `docs/concepts.md`, Coordinated agents: the turn rule, the
       corrective input, the escalation on a second miss, the `manager`
       origin in the provenance table, and children-first close.
-- [ ] 10.2 `docs/contracts.md`, the aops section: the move mark on the
+- [x] 10.2 `docs/contracts.md`, the aops section: the move mark on the
       inflight run, which tools are moves and which are reads (settle the
       `read` row's Kind column here), the hand-back consequence.
-- [ ] 10.3 `docs/runtimes/claude.md`: the offered built-ins follow the
+- [x] 10.3 `docs/runtimes/claude.md`: the offered built-ins follow the
       composed allowlist, as a form of `RT-3`. `docs/contracts/runtime.md`
       is NOT edited.
-- [ ] 10.4 `docs/CHANGELOG.md`: manager, runtime-claude, mcp-aops and
+- [x] 10.4 `docs/CHANGELOG.md`: manager, runtime-claude, mcp-aops and
       console entries, the chart version, and the `kubectl apply -f
       chart/crds/` line for the two CRD additions.
-- [ ] 10.5 Re-run `python3 .github/scripts/docs-generate.py` for the CRD
+- [x] 10.5 Re-run `python3 .github/scripts/docs-generate.py` for the CRD
       field and enum additions (`docs/crds/conversation.md`). Verify:
       `python3 .github/scripts/docs-generate.py --check` passes.
 
 ### Adopter site
 
-- [ ] 10.6 `docs/guides/coordinate-agents.md`: what a person sees when the
+- [x] 10.6 `docs/guides/coordinate-agents.md`: what a person sees when the
       coordinating agent ends a turn without a move, in the thread and on
       escalation, in dense prose.
-- [ ] 10.7 Check `docs/getting-started.md`, `docs/introduction.md` and
+- [x] 10.7 Check `docs/getting-started.md`, `docs/introduction.md` and
       `docs/index.md` for any claim that a root closes itself unaided, and
       correct it where found.
-- [ ] 10.8 Run the writing lint over every touched page. Verify:
+- [x] 10.8 Run the writing lint over every touched page. Verify:
       `python3 .claude/scripts/rules_compliance.py <pages>` is silent.
