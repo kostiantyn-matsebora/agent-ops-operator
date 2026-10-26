@@ -103,9 +103,10 @@ Order inside `handleWorkDone` for a root (`spec.coordinatorRef != nil`):
 and a hand-back into a thread about to close helps nobody.
 
 **A report whose continuity is `unavailable` is not judged.** The contract
-treats such a run as a failure, and a held input is not a finished turn. A corrective input
-   is pending, so the phase lands `Queued` and the next dispatch is the
-   ordinary one.
+treats such a run as a failure, and a held input is not a finished turn.
+
+On a first miss the corrective input is pending, so the phase lands `Queued`
+and the next dispatch is the ordinary one.
 
 A member (`causedBy` set, `coordinatorRef` nil) is never judged. A member's
 result IS its move, and it reaches the parent by the existing route.
@@ -229,8 +230,11 @@ A failure mid-walk returns before the ancestor closes, so a retry resumes
 from the open members. Already-closed members are skipped as today.
 
 A second sweep runs after the ancestor closes. A run on the still-open
-ancestor may have invoked a member after the first walk listed, and a closed
-conversation can invoke nothing more, so the second sweep is the last word.
+ancestor may have invoked a member after the first walk listed.
+
+`invoke` refuses a Closed caller (`ErrCallerClosed`, HTTP 403). Closed is
+inert, so nothing is created under a conversation once its close lands and the
+second sweep is the last word.
 
 `CloseBudgetExceeded` already closes members before escalating the root.
 Unchanged.

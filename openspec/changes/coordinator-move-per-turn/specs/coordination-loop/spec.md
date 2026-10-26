@@ -13,8 +13,9 @@ person's message. A person asked, and the run's text is the answer.
 An input is a person's message in two cases:
 
 - it carries origin `channel`
-- it carries any origin AND records the surface it was typed on, which a chat
-  signal from a chat origination adapter does
+- it carries any origin AND records a non-empty `surface` on its entry in
+  `status.runs[].inputs[]`, the channel it was typed on, which a chat signal
+  from a chat origination adapter does
 
 An alert, a job tick and a posted task record no surface and are not.
 
@@ -37,8 +38,13 @@ undecided.
 A corrective turn is an ordinary turn. It spends `maxTurns` like any other,
 and the budget edges stay as they are.
 
-A run reporting `failed` SHALL NOT be judged. The existing failure paths
-apply.
+A run SHALL NOT be judged in any of these cases:
+
+- it reports `failed`, and the existing failure paths apply
+- it reports `succeeded` with continuity `unavailable`, which the runtime
+  contract treats as a failure, or its input was held
+- it is the run that reaches `maxTurns`, because the root closes on that edge
+- the conversation is already `Closed`
 
 A conversation carrying `causedBy` and no `coordinatorRef` SHALL NOT be
 judged. A member answers its parent with its result, and that result is its
@@ -70,11 +76,19 @@ move.
 
 #### Scenario: A person's reply resets the count
 - **WHEN** a first miss is followed by a person's reply, and the run answering that reply calls no verb
-- **THEN** the run counts as answered, and the next miss after it is a first miss again
+- **THEN** the run counts as answered, and the next miss after it is a first miss again, not a second
 
 #### Scenario: A failed run is not judged
 - **WHEN** a root's run reports `failed` having called no verb
 - **THEN** no corrective input is appended and the failure is handled as any failed run is
+
+#### Scenario: The run that reaches maxTurns is not judged
+- **WHEN** a root's run makes no move, answers no person, and is the run that reaches `maxTurns`
+- **THEN** no corrective input is appended and the root closes `budget-exceeded` as it does today
+
+#### Scenario: An unavailable context is not judged
+- **WHEN** a root's run reports `succeeded` with continuity `unavailable` and made no move
+- **THEN** no corrective input is appended
 
 #### Scenario: A member is not judged
 - **WHEN** a member conversation's run calls no verb and reports `succeeded`

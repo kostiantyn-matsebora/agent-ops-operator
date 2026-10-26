@@ -1404,6 +1404,9 @@ guardrails stay the adopter's.
 open, reachable root over a partly closed subtree, and a repeated close
 resumes.
 
+A closed conversation can no longer `invoke`, so nothing is created under it
+once its close lands.
+
 ### Escalation: a decision posted into a thread already open
 
 **An uncaused root's channels bind at creation, unconditionally** — the same

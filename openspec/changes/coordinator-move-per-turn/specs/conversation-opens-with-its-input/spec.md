@@ -12,7 +12,7 @@ Every input SHALL record its own origin as
 - It is optional, so inputs created before this change remain valid.
 
 The fourth kind, `manager`, is an input the manager appended under a rule of
-its own. Its `name` is the rule (`conversation-provenance`).
+its own. Its `name` is the rule that wrote it, `move-per-turn` today (`conversation-provenance`).
 
 It entered on no surface. The per-destination delivery rule below therefore
 delivers it to every bound channel, attributed to the manager, with no

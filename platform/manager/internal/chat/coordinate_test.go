@@ -1038,3 +1038,16 @@ func TestDescendantsOfALeafIsEmpty(t *testing.T) {
 		t.Fatalf("want no descendants, got %+v", got)
 	}
 }
+
+// Closed is inert. A closed caller creates no member, so the second sweep a
+// cascading close makes after the ancestor closes is the last word.
+func TestInvokeMemberRefusesAClosedCaller(t *testing.T) {
+	co := testCoordinator("co-a")
+	caller := coordinatorRoot("root-1", "co-a")
+	caller.Status.Phase = agentopsv1alpha1.ConversationClosed
+	r, _ := coordFixture(t, co, caller)
+
+	if _, err := r.InvokeMember(context.Background(), caller, "triage", "task"); err != ErrCallerClosed {
+		t.Fatalf("want ErrCallerClosed, got %v", err)
+	}
+}

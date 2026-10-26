@@ -69,6 +69,11 @@ var (
 	// an ordinary Pipeline-addressed conversation has no access to this reach
 	// class, whatever AgentCapability it runs.
 	ErrNoCoordinatorScope = fmt.Errorf("caller does not act for any Coordinator")
+	// ErrCallerClosed refuses `invoke` from a Closed caller. Closed is inert:
+	// a close walks its subtree before the ancestor and again after it, and
+	// that second sweep is only the last word if nothing more can be created
+	// under a conversation that has closed.
+	ErrCallerClosed = fmt.Errorf("refused: the calling conversation is closed")
 	// ErrSelfInput guards the rule that a conversation must never receive its
 	// own output as an input (coordination-loop) — an inbound message whose
 	// origin channel is named identically to its own target conversation.
@@ -92,6 +97,9 @@ var (
 // no Coordinator at all (an ordinary Pipeline-addressed conversation) is
 // refused exactly as before.
 func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, agentName, task string) (*InvokeResult, error) {
+	if caller.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		return nil, ErrCallerClosed
+	}
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
 	if err != nil {
 		return nil, err

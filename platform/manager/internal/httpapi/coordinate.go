@@ -158,7 +158,8 @@ func statusFor(err error) int {
 		errors.Is(err, chat.ErrOutOfScope),
 		errors.Is(err, chat.ErrOutOfSubtree),
 		errors.Is(err, chat.ErrCannotCloseHumanRoot),
-		errors.Is(err, chat.ErrNoCoordinatorScope):
+		errors.Is(err, chat.ErrNoCoordinatorScope),
+		errors.Is(err, chat.ErrCallerClosed):
 		return 403
 	default:
 		return 500

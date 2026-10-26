@@ -248,7 +248,7 @@ succeeds, makes no move and answers no person, it is handed back once.
 |---|---|
 | the run ended with a verdict and no verb | a short message from the manager in the thread, telling the agent to invoke, escalate or close |
 | the next run ended the same way | the root escalates, with a digest naming the roster and the last result |
-| a person had just written | nothing, the answer is the move |
+| a person had just written | nothing, the answer is the move, and a person's reply also resets the count |
 
 The hand-back is an ordinary turn, so it spends `maxTurns` like any other. A
 member's result is its own move and is never handed back.
