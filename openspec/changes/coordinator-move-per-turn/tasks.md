@@ -41,13 +41,13 @@
 
 ## 3. Manager: the root dispatch template — backend-developer
 
-- [ ] 3.1 Add `platform/manager/internal/dispatch/templates/coordinate.md`
+- [x] 3.1 Add `platform/manager/internal/dispatch/templates/coordinate.md`
       carrying the input verbatim, who it came from per origin (design
       D-E), and `{{DELIVERY_INSTRUCTIONS}}`. No checkout, no role file, no
       "within your tools" fallback. Verify: a test greps the rendered text
       for the absence of `.claude/agents`, `checkout` and `working
       directory`.
-- [ ] 3.2 In `dispatch.Next`, select `coordinate.md` for every input type
+- [x] 3.2 In `dispatch.Next`, select `coordinate.md` for every input type
       when `c.Spec.CoordinatorRef != nil`, keeping `profile.spec.prompt`'s
       precedence and the reply-batching path. Members keep the three
       templates. Verify: `dispatch_test.go` gains one test per origin

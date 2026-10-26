@@ -22,6 +22,9 @@ var investigateTemplate string
 //go:embed templates/reply.md
 var replyTemplate string
 
+//go:embed templates/coordinate.md
+var coordinateTemplate string
+
 //go:embed templates/format.md
 var formatSpec string
 
@@ -174,6 +177,101 @@ func render(tpl string, vars map[string]string) string {
 	return out
 }
 
+// isRoot reports whether a conversation is a Coordinator's own — the one
+// framed as coordination rather than as a repository agent's task. A member
+// (`causedBy` alone) is a domain agent and keeps the lane templates: it may
+// have a repository, and its framing says so.
+func isRoot(c *agentopsv1alpha1.Conversation) bool {
+	return c.Spec.CoordinatorRef != nil
+}
+
+// framed is one work unit's prompt before the lane is chosen: the built-in
+// template a member or plain conversation renders, the variables both lanes
+// share, and the inputs the unit consumes — whose origins a root is told about.
+type framed struct {
+	// promptFile is the profile's own prompt file, "" for the built-in lane.
+	promptFile string
+	// template is the built-in lane template for a non-root conversation.
+	template string
+	vars     map[string]string
+	inputs   []agentopsv1alpha1.InputItem
+	// inputBlock is the input as coordinate.md shows it, verbatim: a quoted
+	// block for text, a json fence for a signal payload.
+	inputBlock string
+}
+
+// into fills the unit's prompt lane. The profile's prompt file wins on either
+// kind of conversation — an adopter's file is their framing — and gets the same
+// variables. Otherwise a Coordinator root renders coordinate.md for EVERY input
+// type, in place of the three lane templates, so that a corrective input from
+// the manager reads exactly like a member's result or a person's reply. The
+// profile's systemPrompt still carries the role; nothing here does.
+func (f framed) into(unit *WorkUnit, root bool) {
+	if root {
+		f.vars["FROM"] = fromLine(f.inputs)
+	}
+	if f.promptFile != "" {
+		unit.PromptFile = f.promptFile
+		unit.PromptVars = f.vars
+		return
+	}
+	tpl := f.template
+	if root {
+		tpl = coordinateTemplate
+		f.vars["INPUT"] = f.inputBlock
+	}
+	unit.PromptText = render(tpl, f.vars)
+}
+
+// fromLine is coordinate.md's FROM: one origin phrase per consumed input, in
+// input order, joined for a batched resume.
+func fromLine(inputs []agentopsv1alpha1.InputItem) string {
+	phrases := make([]string, 0, len(inputs))
+	for _, in := range inputs {
+		phrases = append(phrases, originPhrase(in.Origin))
+	}
+	return strings.Join(phrases, "; then ")
+}
+
+// originPhrase says who one input came from, in the words the root template
+// puts in front of the model. Attribution only: the model is told the door the
+// input came through, never handed anything to act on by it.
+func originPhrase(o *agentopsv1alpha1.InputOrigin) string {
+	if o == nil {
+		return "an input with no recorded origin"
+	}
+	switch o.Kind {
+	case agentopsv1alpha1.OriginSignal:
+		return fmt.Sprintf("a signal on source %s", o.Name)
+	case agentopsv1alpha1.OriginChannel:
+		if o.Sender != "" {
+			return fmt.Sprintf("a person on channel %s (%s)", o.Name, o.Sender)
+		}
+		return fmt.Sprintf("a person on channel %s", o.Name)
+	case agentopsv1alpha1.OriginMember:
+		return fmt.Sprintf("the member invoked as %s (conversation %s)", o.Entry, o.Name)
+	case agentopsv1alpha1.OriginManager:
+		return fmt.Sprintf("the manager, under its rule %s", o.Name)
+	}
+	return fmt.Sprintf("an input of unrecognized origin kind %q", o.Kind)
+}
+
+// quoteBlock renders text verbatim as a markdown blockquote, every line
+// prefixed, so a multi-line input stays one block and a fence inside it
+// (a recurrence's payload) nests rather than closing the quote.
+func quoteBlock(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		lines[i] = "> " + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+// jsonFence renders a signal payload as the json block the lane templates use.
+func jsonFence(payload string) string {
+	return "```json\n" + payload + "\n```"
+}
+
 // PendingInputs returns spec inputs that are neither processed nor inflight.
 func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputItem {
 	done := map[string]bool{}
@@ -280,13 +378,13 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			return WorkUnit{}, nil, false, err
 		}
 		unit.RunID = runID
-		vars := map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection}
-		if profile.Spec.Prompt != "" {
-			unit.PromptFile = profile.Spec.Prompt
-			unit.PromptVars = vars
-		} else {
-			unit.PromptText = render(taskTemplate, vars)
-		}
+		framed{
+			promptFile: profile.Spec.Prompt,
+			template:   taskTemplate,
+			vars:       map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection},
+			inputs:     []agentopsv1alpha1.InputItem{first},
+			inputBlock: quoteBlock(payload),
+		}.into(&unit, isRoot(c))
 		return unit, []string{first.ID}, true, nil
 
 	case agentopsv1alpha1.InputAlert:
@@ -295,13 +393,13 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			return WorkUnit{}, nil, false, err
 		}
 		unit.RunID = runID
-		vars := map[string]string{"AGENT_NAME": agentName, "SIGNAL_JSON": payload, "ALERTS_JSON": payload, "DELIVERY_INSTRUCTIONS": deliverySection}
-		if profile.Spec.Prompt != "" {
-			unit.PromptFile = profile.Spec.Prompt
-			unit.PromptVars = vars
-		} else {
-			unit.PromptText = render(investigateTemplate, vars)
-		}
+		framed{
+			promptFile: profile.Spec.Prompt,
+			template:   investigateTemplate,
+			vars:       map[string]string{"AGENT_NAME": agentName, "SIGNAL_JSON": payload, "ALERTS_JSON": payload, "DELIVERY_INSTRUCTIONS": deliverySection},
+			inputs:     []agentopsv1alpha1.InputItem{first},
+			inputBlock: jsonFence(payload),
+		}.into(&unit, isRoot(c))
 		return unit, []string{first.ID}, true, nil
 
 	case agentopsv1alpha1.InputReply, agentopsv1alpha1.InputRecurrence:
@@ -315,26 +413,20 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 				return WorkUnit{}, nil, false, err
 			}
 			unit.RunID = runID
-			unit.PromptText = render(taskTemplate, map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection})
+			framed{
+				template:   taskTemplate,
+				vars:       map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection},
+				inputs:     []agentopsv1alpha1.InputItem{first},
+				inputBlock: quoteBlock(payload),
+			}.into(&unit, isRoot(c))
 			return unit, []string{first.ID}, true, nil
 		}
-		// batch consecutive inputs of the same type into one resume
-		ids := []string{first.ID}
-		texts := []string{}
-		p, err := resolve(first)
+		batch, texts, err := batchSameType(pending, resolve)
 		if err != nil {
 			return WorkUnit{}, nil, false, err
 		}
-		texts = append(texts, p)
-		for _, in := range pending[1:] {
-			if in.Type != first.Type {
-				break
-			}
-			p, err := resolve(in)
-			if err != nil {
-				break
-			}
-			texts = append(texts, p)
+		ids := make([]string, 0, len(batch))
+		for _, in := range batch {
 			ids = append(ids, in.ID)
 		}
 		joined := strings.Join(texts, "\n---\n")
@@ -347,14 +439,39 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 		// so a runtime image upgrades independently of the manager.
 		unit.RuntimeContextID = contextID
 		unit.ResumeSessionID = contextID
-		vars := map[string]string{"USER_REPLY": joined, "AGENT_NAME": agentName, "DELIVERY_INSTRUCTIONS": deliverySection}
-		if profile.Spec.ReplyPrompt != "" {
-			unit.PromptFile = profile.Spec.ReplyPrompt
-			unit.PromptVars = vars
-		} else {
-			unit.PromptText = render(replyTemplate, vars)
-		}
+		framed{
+			promptFile: profile.Spec.ReplyPrompt,
+			template:   replyTemplate,
+			vars:       map[string]string{"USER_REPLY": joined, "AGENT_NAME": agentName, "DELIVERY_INSTRUCTIONS": deliverySection},
+			inputs:     batch,
+			inputBlock: quoteBlock(joined),
+		}.into(&unit, isRoot(c))
 		return unit, ids, true, nil
 	}
 	return WorkUnit{}, nil, false, fmt.Errorf("unknown input type %q", first.Type)
+}
+
+// batchSameType collects the consecutive pending inputs sharing the first one's
+// type into one resume, with their resolved payloads in the same order. The
+// first input's payload failing is the unit's error; a later one failing ends
+// the batch there, leaving that input pending for the next dispatch.
+func batchSameType(pending []agentopsv1alpha1.InputItem, resolve PayloadResolver) ([]agentopsv1alpha1.InputItem, []string, error) {
+	first := pending[0]
+	p, err := resolve(first)
+	if err != nil {
+		return nil, nil, err
+	}
+	batch, texts := []agentopsv1alpha1.InputItem{first}, []string{p}
+	for _, in := range pending[1:] {
+		if in.Type != first.Type {
+			break
+		}
+		p, err := resolve(in)
+		if err != nil {
+			break
+		}
+		batch = append(batch, in)
+		texts = append(texts, p)
+	}
+	return batch, texts, nil
 }
