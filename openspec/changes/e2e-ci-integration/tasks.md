@@ -102,8 +102,8 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
   pass. **Already done**, landed in #439: `docs/testing.md` line 12 names
   `e2e-live` as nightly against the full tier's own cluster, and
   `CONTRIBUTING.md` lines 275-277 name the full tier running `e2e-live`
-  against that run's own cluster after the pack's assertions pass. Read
-  both files against this branch's tree to confirm before ticking this.
+  against that run's own cluster after the pack's assertions pass. Both
+  files were read against this branch's tree and match.
 - [x] 5.2 Adopter site: none. This change is internal verification process,
   not a product capability, an install/upgrade step, or a claim the
   landing page or guides make — ticked as not applicable.
