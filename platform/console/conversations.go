@@ -184,14 +184,17 @@ type RecordedInput struct {
 	// displayed it — an alert, a job tick, a posted task.
 	Surface string `json:"surface,omitempty"`
 	Sender  string `json:"sender,omitempty"`
-	// Origin is the input's OriginKind ("signal" | "channel" | "member"), the
-	// field name matching the manager's own API exactly
-	// (api/v1alpha1.RecordedInput). "member" is the one value this console
-	// acts on: a task `invoke` handed down, or a member's result routed back
-	// up (coordination-loop) — both coordination-internal, never a human-facing
-	// card. A genuine surfaceless signal (an alert, a job tick) also records
-	// Surface as "", so Surface alone cannot tell the two apart — this is the
-	// field that can. Empty on an input recorded before this field existed.
+	// Origin is the input's OriginKind ("signal" | "channel" | "member" |
+	// "manager"), the field name matching the manager's own API exactly
+	// (api/v1alpha1.RecordedInput). Two values this console acts on: "member"
+	// is a task `invoke` handed down, or a member's result routed back up
+	// (coordination-loop) — both coordination-internal, never a human-facing
+	// card. "manager" is an input the manager itself appended under a rule of
+	// its own (coordinator-move-per-turn) — shown like a signal, attributed to
+	// the manager, never to a SignalSource. A genuine surfaceless signal (an
+	// alert, a job tick) also records Surface as "", so Surface alone cannot
+	// tell these apart — this is the field that can. Empty on an input
+	// recorded before this field existed.
 	Origin     string `json:"origin,omitempty"`
 	ReceivedAt string `json:"receivedAt,omitempty"`
 }
@@ -204,6 +207,17 @@ type RecordedInput struct {
 // card, duplicated a member's result on the page it was invoked from (item
 // #15 QA, bug 2) — matches api/v1alpha1.OriginMember exactly.
 const originMember = "member"
+
+// originManager is the input the MANAGER itself appended, under a rule of its
+// own — nobody typed it, no signal carried it, no edge was crossed
+// (api/v1alpha1.OriginManager; today the only rule is `move-per-turn`, the
+// corrective input a Coordinator root receives after a turn that made no
+// move). It is NOT plumbing: a person watching the thread is meant to see the
+// hand-back, so it renders like a signal does — but attributed to the manager,
+// never to a SignalSource. The rule name travels in the op's Source field, so
+// read as a source it would have named a SignalSource that does not exist.
+// Also the neutral attribution text itself: the speaker label a reader sees.
+const originManager = "manager"
 
 // Inflight is the unit currently dispatched to a runtime.
 type Inflight struct {

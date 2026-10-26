@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // countUnread's derivation table: a message counts by KIND alone, never by
 // re-deriving "is this mine" from the sender — transcriptKind already folded
@@ -194,6 +197,37 @@ func TestAppendOpSuppressesAMemberOriginSignalCard(t *testing.T) {
 	}
 	if got := tr.Thread("coord-root"); len(got) != 0 {
 		t.Fatalf("a member-origin signal must render nowhere on the console: %+v", got)
+	}
+}
+
+// The manager's own corrective input (coordinator-move-per-turn) is the
+// opposite case to a member's: NOT plumbing, shown in the thread like a signal
+// — a person watching is meant to see the hand-back — but attributed to the
+// manager, not to the SignalSource its Source field would otherwise name.
+func TestAppendOpShowsAManagerOriginSignalAttributedToTheManager(t *testing.T) {
+	tr := NewTranscripts()
+	handled := tr.AppendOp("input:coord-root:in-9:console", "coord-root", &OpMessage{
+		Kind: "signal", Source: "move-per-turn", OriginKind: "manager",
+		Body: "You ended a turn without a move.",
+	}, "console")
+	if !handled {
+		t.Fatal("a manager-origin op must report handled")
+	}
+	got := tr.Thread("coord-root")
+	if len(got) != 1 || got[0].Kind != MsgSignal {
+		t.Fatalf("a manager-origin signal must render as one signal card: %+v", got)
+	}
+	if got[0].Sender != "manager" {
+		t.Errorf("Sender = %q, want the neutral %q", got[0].Sender, "manager")
+	}
+	if !strings.Contains(got[0].Text, "You ended a turn without a move.") {
+		t.Errorf("the manager's text is not on the card:\n%s", got[0].Text)
+	}
+	if got[0].Payload != "" {
+		t.Errorf("the manager's text must not also be folded as a payload: %q", got[0].Payload)
+	}
+	if got[0].recordID != "in-9" {
+		t.Errorf("recordID = %q, want the input id so a rehydrated copy dedups against it", got[0].recordID)
 	}
 }
 

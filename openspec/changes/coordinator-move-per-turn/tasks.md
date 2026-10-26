@@ -94,7 +94,7 @@
 
 ## 7. Console: the fourth origin — frontend-developer
 
-- [ ] 7.1 Render origin `manager` wherever the console labels an input's
+- [x] 7.1 Render origin `manager` wherever the console labels an input's
       origin (`ConversationRow.tsx` and the chat tree), with a neutral
       "manager" attribution. Verify: `npm run test` in
       `platform/console/ui` passes with one new case per touched renderer.

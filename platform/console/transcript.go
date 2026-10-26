@@ -64,7 +64,11 @@ type Message struct {
 	ID     string `json:"id"`
 	Thread string `json:"thread"`
 	Kind   string `json:"kind"`
-	// Sender is set for relayed sibling-channel messages ("<channel>/<user>").
+	// Sender is set for relayed sibling-channel messages ("<channel>/<user>")
+	// and, on a signal card the manager itself appended (OriginKind
+	// "manager"), the neutral "manager" — the browser shows a sender as the
+	// speaker when one is named, and otherwise the kind, which here would read
+	// "signal" for something no SignalSource sent.
 	Sender string `json:"sender,omitempty"`
 	Text   string `json:"text"`
 	At     string `json:"at"`
@@ -470,6 +474,11 @@ func transcriptKind(m *OpMessage, ownChannel string) (kind, sender string) {
 	case "notice":
 		return MsgAck, ""
 	case "signal":
+		if m.OriginKind == originManager {
+			// The manager's own hand (coordinator-move-per-turn): named as the
+			// speaker, so the card is not attributed to a SignalSource.
+			return MsgSignal, originManager
+		}
 		return MsgSignal, ""
 	default:
 		return MsgAgent, ""

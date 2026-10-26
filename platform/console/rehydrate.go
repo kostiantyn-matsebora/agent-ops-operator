@@ -159,6 +159,17 @@ func recordedMessage(thread, ownChannel string, in RecordedInput, conv Conversat
 		msg.Text += "\n\n_…truncated — the full payload is not kept in the conversation record._"
 	}
 	switch {
+	case in.Origin == originManager:
+		// THE MANAGER'S OWN HAND, rebuilt (coordinator-move-per-turn). Before
+		// the surface rule, which would read Surface == "" and rebuild the
+		// OPENING signal's card — its title, its source — over text no
+		// SignalSource sent. Shown like a signal, attributed to the manager,
+		// and the text stays inline: it is the hand-back a person is meant to
+		// read, not an event document to fold (SignalPayload says the same of
+		// the live card). The record keeps no rule name, so the rebuilt head
+		// carries the attribution alone.
+		msg.Kind, msg.Sender = MsgSignal, originManager
+		msg.Text = recordedManagerCard(msg.Text)
 	case in.Surface == "":
 		msg.Kind = MsgSignal
 		// A REBUILT SIGNAL IS STILL A CARD.
@@ -249,6 +260,17 @@ func recordedSignalCard(conv ConversationSummary) string {
 		parts = append(parts, "| label | value |\n|---|---|\n"+strings.Join(rows, "\n"))
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// recordedManagerCard rebuilds a manager-origin input's card from the record:
+// the same head the live path composes (Render, OriginKind "manager") minus the
+// rule name the record does not keep, then the manager's own text inline.
+func recordedManagerCard(text string) string {
+	head := "**From** `" + originManager + "`"
+	if text == "" {
+		return head
+	}
+	return head + "\n\n" + text
 }
 
 // signalPayload is the recorded event document, carried apart from the card so
