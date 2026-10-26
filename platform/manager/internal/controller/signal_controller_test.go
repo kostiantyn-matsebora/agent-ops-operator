@@ -75,7 +75,7 @@ func sigCtrlClaimant(pipeline string, state agentopsv1alpha1.ClaimantState) agen
 // every Signal carries from creation (section 2), set here with the exact
 // helper ingest itself uses.
 func sigCtrlSignal(t *testing.T, name string, source *agentopsv1alpha1.SignalSource, initiationID string,
-	phase agentopsv1alpha1.SignalPhase, claimants []agentopsv1alpha1.SignalClaimant, firstAttempt *metav1.Time, created time.Time,
+	phase agentopsv1alpha1.SignalPhase, claimants []agentopsv1alpha1.SignalClaimant, created time.Time,
 ) *agentopsv1alpha1.Signal {
 	t.Helper()
 	sig := &agentopsv1alpha1.Signal{}
@@ -90,7 +90,6 @@ func sigCtrlSignal(t *testing.T, name string, source *agentopsv1alpha1.SignalSou
 	}
 	sig.Status.Phase = phase
 	sig.Status.Claimants = claimants
-	sig.Status.FirstAttemptAt = firstAttempt
 	scheme := runtime.NewScheme()
 	if err := agentopsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -130,7 +129,8 @@ func TestSignalReconcileExhaustedClaimantRollsUpToRoutedAlongsideAnAlreadyRouted
 		[]agentopsv1alpha1.SignalClaimant{
 			sigCtrlClaimant("routed-pipe", agentopsv1alpha1.ClaimantRouted),
 			sigCtrlClaimant("stuck-pipe", agentopsv1alpha1.ClaimantRouting),
-		}, &past, past.Time)
+		}, past.Time)
+	sig.Status.FirstAttemptAt = &past
 	c := fakeSignalClient(t, source, sig)
 	r := &SignalReconciler{Client: c, Activity: activity.New(64)}
 
@@ -163,7 +163,8 @@ func TestSignalReconcileAllClaimantsExhaustedRollsUpToFailedWithLoudSurfacing(t 
 	past := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	sig := sigCtrlSignal(t, "deadline-fail-sig", source, "init-2", agentopsv1alpha1.SignalPending,
 		[]agentopsv1alpha1.SignalClaimant{sigCtrlClaimant("stuck-pipe", agentopsv1alpha1.ClaimantRouting)},
-		&past, past.Time)
+		past.Time)
+	sig.Status.FirstAttemptAt = &past
 	c := fakeSignalClient(t, source, sig)
 	acts := activity.New(64)
 	r := &SignalReconciler{Client: c, Activity: acts}
@@ -199,7 +200,7 @@ func TestSignalReconcileNilFirstAttemptAtNeverExpiresBeforeTheFirstAttempt(t *te
 	source := sigCtrlSource("nilstart-src", "nilstart-t")
 	pipeline := sigCtrlPipeline("nilstart-pipe", source.Name)
 	old := time.Now().Add(-48 * time.Hour) // far older than any retry deadline
-	sig := sigCtrlSignal(t, "nilstart-sig", source, "init-3", agentopsv1alpha1.SignalPending, nil, nil, old)
+	sig := sigCtrlSignal(t, "nilstart-sig", source, "init-3", agentopsv1alpha1.SignalPending, nil, old)
 	c := fakeSignalClient(t, source, pipeline, sig)
 	r := &SignalReconciler{Client: c, Activity: activity.New(64), MaxQueued: 50}
 
@@ -223,8 +224,8 @@ func TestSignalReconcileNilFirstAttemptAtNeverExpiresBeforeTheFirstAttempt(t *te
 func TestSignalReconcileOverflowEvictsOldestPreFanoutAsDropped(t *testing.T) {
 	source := sigCtrlSource("overflow-src", "overflow-t")
 	now := time.Now()
-	older := sigCtrlSignal(t, "overflow-old", source, "init-old", agentopsv1alpha1.SignalPending, nil, nil, now.Add(-time.Hour))
-	newer := sigCtrlSignal(t, "overflow-new", source, "init-new", agentopsv1alpha1.SignalPending, nil, nil, now)
+	older := sigCtrlSignal(t, "overflow-old", source, "init-old", agentopsv1alpha1.SignalPending, nil, now.Add(-time.Hour))
+	newer := sigCtrlSignal(t, "overflow-new", source, "init-new", agentopsv1alpha1.SignalPending, nil, now)
 	c := fakeSignalClient(t, source, older, newer)
 	r := &SignalReconciler{Client: c, Activity: activity.New(64), MaxPerSource: 1}
 
@@ -258,8 +259,9 @@ func TestSignalReconcileOverflowEvictsOldestPostFanoutAsFailedNeverDropped(t *te
 	now := time.Now()
 	older := sigCtrlSignal(t, "overflow2-old", source, "init-old2", agentopsv1alpha1.SignalPending,
 		[]agentopsv1alpha1.SignalClaimant{sigCtrlClaimant("some-pipe", agentopsv1alpha1.ClaimantRouting)},
-		&metav1.Time{Time: now.Add(-time.Hour)}, now.Add(-time.Hour))
-	newer := sigCtrlSignal(t, "overflow2-new", source, "init-new2", agentopsv1alpha1.SignalPending, nil, nil, now)
+		now.Add(-time.Hour))
+	older.Status.FirstAttemptAt = &metav1.Time{Time: now.Add(-time.Hour)}
+	newer := sigCtrlSignal(t, "overflow2-new", source, "init-new2", agentopsv1alpha1.SignalPending, nil, now)
 	c := fakeSignalClient(t, source, older, newer)
 	r := &SignalReconciler{Client: c, Activity: activity.New(64), MaxPerSource: 1}
 
@@ -293,9 +295,9 @@ func TestSignalReconcileOverflowEvictsOldestPostFanoutAsFailedNeverDropped(t *te
 func TestSignalReconcileTerminalDroppedTTL(t *testing.T) {
 	source := sigCtrlSource("ttl-drop-src", "ttl-drop-t")
 
-	within := sigCtrlSignal(t, "ttl-drop-within", source, "init-ttl-1", agentopsv1alpha1.SignalDropped, nil, nil, time.Now().Add(-30*time.Minute))
+	within := sigCtrlSignal(t, "ttl-drop-within", source, "init-ttl-1", agentopsv1alpha1.SignalDropped, nil, time.Now().Add(-30*time.Minute))
 	within.Status.Reason = agentopsv1alpha1.SignalDropUnclaimed
-	past := sigCtrlSignal(t, "ttl-drop-past", source, "init-ttl-2", agentopsv1alpha1.SignalDropped, nil, nil, time.Now().Add(-2*time.Hour))
+	past := sigCtrlSignal(t, "ttl-drop-past", source, "init-ttl-2", agentopsv1alpha1.SignalDropped, nil, time.Now().Add(-2*time.Hour))
 	past.Status.Reason = agentopsv1alpha1.SignalDropUnclaimed
 
 	c := fakeSignalClient(t, source, within, past)
@@ -324,10 +326,12 @@ func TestSignalReconcileRoutedAndFailedShareTheSameTTL(t *testing.T) {
 	source := sigCtrlSource("ttl-share-src", "ttl-share-t")
 	routed := sigCtrlSignal(t, "ttl-share-routed", source, "init-r", agentopsv1alpha1.SignalRouted,
 		[]agentopsv1alpha1.SignalClaimant{sigCtrlClaimant("p", agentopsv1alpha1.ClaimantRouted)},
-		&metav1.Time{Time: time.Now()}, time.Now().Add(-2*time.Hour))
+		time.Now().Add(-2*time.Hour))
+	routed.Status.FirstAttemptAt = &metav1.Time{Time: time.Now()}
 	failed := sigCtrlSignal(t, "ttl-share-failed", source, "init-f", agentopsv1alpha1.SignalFailed,
 		[]agentopsv1alpha1.SignalClaimant{sigCtrlClaimant("p", agentopsv1alpha1.ClaimantFailed)},
-		&metav1.Time{Time: time.Now()}, time.Now().Add(-2*time.Hour))
+		time.Now().Add(-2*time.Hour))
+	failed.Status.FirstAttemptAt = &metav1.Time{Time: time.Now()}
 	c := fakeSignalClient(t, source, routed, failed)
 	r := &SignalReconciler{Client: c, Activity: activity.New(64), TTLRouted: time.Hour}
 
@@ -349,7 +353,7 @@ func TestSignalReconcileRoutedAndFailedShareTheSameTTL(t *testing.T) {
 // of its own).
 func TestSignalOwnerReferenceNamesItsSignalSource(t *testing.T) {
 	source := sigCtrlSource("owner-src", "owner-t")
-	sig := sigCtrlSignal(t, "owner-sig", source, "init-owner", agentopsv1alpha1.SignalPending, nil, nil, time.Now())
+	sig := sigCtrlSignal(t, "owner-sig", source, "init-owner", agentopsv1alpha1.SignalPending, nil, time.Now())
 
 	if len(sig.OwnerReferences) != 1 || sig.OwnerReferences[0].Kind != "SignalSource" || sig.OwnerReferences[0].Name != source.Name {
 		t.Fatalf("ownerRef missing or wrong: %+v", sig.OwnerReferences)
@@ -382,7 +386,8 @@ func TestSignalReconcileLeaderResumeRoutesWithoutReplayingRoutedWork(t *testing.
 			{Ref: agentopsv1alpha1.ClaimantRef{Kind: agentopsv1alpha1.ClaimantKindPipeline, Name: routedPipe.Name},
 				State: agentopsv1alpha1.ClaimantRouted, ConversationRef: &agentopsv1alpha1.ObjectRef{Name: existingConv.Name}},
 			sigCtrlClaimant(pendingPipe.Name, agentopsv1alpha1.ClaimantRouting),
-		}, &attempt, attempt.Time)
+		}, attempt.Time)
+	sig.Status.FirstAttemptAt = &attempt
 
 	c := fakeSignalClient(t, source, routedPipe, pendingPipe, existingConv, sig)
 	// A FRESH reconciler, built exactly as a newly-elected leader's manager

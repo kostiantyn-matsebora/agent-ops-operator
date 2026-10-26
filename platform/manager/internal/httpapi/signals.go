@@ -229,22 +229,7 @@ func (s *Server) routeSignalsCore(ctx context.Context, source *agentopsv1alpha1.
 	servers := chat.PipelinesForSource(ctx, s.Client, s.Namespace, source.Name)
 	unclaimed := len(servers) == 0
 	if !unclaimed {
-		// The claim is a decision about the BATCH, before any Signal's own
-		// routing runs — one event PER server, a Coordinator exactly as a
-		// Pipeline (design D-B).
-		for i := range servers {
-			nodeKind := activity.NodePipeline
-			if servers[i].ClaimantKind() == chat.ClaimantCoordinator {
-				nodeKind = activity.NodeCoordinator
-			}
-			s.Activity.Emit(activity.Event{
-				Kind:     activity.KindSignalClaimed,
-				From:     activity.Node(activity.NodeSignalSource, source.Name),
-				To:       activity.Node(nodeKind, servers[i].GetName()),
-				Pipeline: servers[i].GetName(),
-				Detail:   fmt.Sprintf("%d signal(s)", len(signals)),
-			})
-		}
+		s.emitClaims(source, servers, len(signals))
 	}
 
 	groups, ids := groupByInitiationID(signals)
@@ -272,14 +257,7 @@ func (s *Server) routeSignalsCore(ctx context.Context, source *agentopsv1alpha1.
 	// passed this decision at its own creation.
 	cooldownPassed := map[string]bool{}
 	if !unclaimed && len(freshIDs) > 0 {
-		cd := s.cooldown(source, signals)
-		passed := cd.Fresh(freshIDs)
-		if len(passed) > 0 {
-			s.recordCooldown(ctx, source, cd)
-		}
-		for _, id := range passed {
-			cooldownPassed[id] = true
-		}
+		cooldownPassed = s.freshAfterCooldown(ctx, source, signals, freshIDs)
 	}
 
 	landed, touched, reason := 0, 0, ""
@@ -312,6 +290,40 @@ func (s *Server) routeSignalsCore(ctx context.Context, source *agentopsv1alpha1.
 
 	s.bumpReceived(ctx, source, landed)
 	return landed, touched, reason, nil
+}
+
+// emitClaims records the claim — a decision about the BATCH, before any
+// Signal's own routing runs — one event PER server, a Coordinator exactly as
+// a Pipeline (design D-B).
+func (s *Server) emitClaims(source *agentopsv1alpha1.SignalSource, servers []chat.Claimant, n int) {
+	for i := range servers {
+		nodeKind := activity.NodePipeline
+		if servers[i].ClaimantKind() == chat.ClaimantCoordinator {
+			nodeKind = activity.NodeCoordinator
+		}
+		s.Activity.Emit(activity.Event{
+			Kind:     activity.KindSignalClaimed,
+			From:     activity.Node(activity.NodeSignalSource, source.Name),
+			To:       activity.Node(nodeKind, servers[i].GetName()),
+			Pipeline: servers[i].GetName(),
+			Detail:   fmt.Sprintf("%d signal(s)", n),
+		})
+	}
+}
+
+// freshAfterCooldown consults the per-source cooldown for the fresh ids and
+// returns the set that passed it, recording the cooldown when any did.
+func (s *Server) freshAfterCooldown(ctx context.Context, source *agentopsv1alpha1.SignalSource, signals []NormalizedSignal, freshIDs []string) map[string]bool {
+	cd := s.cooldown(source, signals)
+	passed := cd.Fresh(freshIDs)
+	if len(passed) > 0 {
+		s.recordCooldown(ctx, source, cd)
+	}
+	out := make(map[string]bool, len(passed))
+	for _, id := range passed {
+		out[id] = true
+	}
+	return out
 }
 
 // decidePreFanOut makes the pre-fan-out decision for one FRESH signal —

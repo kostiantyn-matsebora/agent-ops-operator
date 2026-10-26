@@ -363,16 +363,7 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 	var out []OpenRoot
 	for i := range list.Items {
 		c := &list.Items[i]
-		if c.Spec.CausedBy != nil {
-			continue // a member — never an uncaused root, whatever it carries
-		}
-		if c.Spec.CoordinatorRef == nil || c.Spec.CoordinatorRef.Name != scope.Name {
-			continue // not this Coordinator's own root
-		}
-		if c.Name == scope.RootName {
-			continue // the caller's own root
-		}
-		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		if !isOpenSiblingRoot(c, scope) {
 			continue
 		}
 		members, err := r.directMemberEntries(ctx, c.Name)
@@ -387,6 +378,21 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 		})
 	}
 	return out, nil
+}
+
+// isOpenSiblingRoot reports whether c is an open, uncaused root of the
+// acting Coordinator other than the caller's own.
+func isOpenSiblingRoot(c *agentopsv1alpha1.Conversation, scope ActingCoordinator) bool {
+	if c.Spec.CausedBy != nil {
+		return false // a member — never an uncaused root, whatever it carries
+	}
+	if c.Spec.CoordinatorRef == nil || c.Spec.CoordinatorRef.Name != scope.Name {
+		return false // not this Coordinator's own root
+	}
+	if c.Name == scope.RootName {
+		return false // the caller's own root
+	}
+	return c.Status.Phase != agentopsv1alpha1.ConversationClosed
 }
 
 // directMemberEntries lists the agents[] entry names of rootName's own DIRECT

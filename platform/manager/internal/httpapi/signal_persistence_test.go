@@ -139,17 +139,7 @@ func TestSignalInboundAbsorbsRepeatIntoPendingSignal(t *testing.T) {
 		t.Fatalf("second: %d %s", rec.Code, rec.Body.String())
 	}
 
-	var list agentopsv1alpha1.SignalList
-	if err := c.List(context.Background(), &list, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
-	}
-	var matches int
-	for i := range list.Items {
-		if list.Items[i].Spec.InitiationID == "absorb-pending-1" {
-			matches++
-		}
-	}
-	if matches != 1 {
+	if matches := countSignalsByInitiation(t, c, "absorb-pending-1"); matches != 1 {
 		t.Fatalf("absorb must never create a second CR, got %d", matches)
 	}
 	absorbed := onlySignal(t, c, "absorb-pending-1")
@@ -163,13 +153,35 @@ func TestSignalInboundAbsorbsRepeatIntoPendingSignal(t *testing.T) {
 		t.Fatalf("still blocked: phase must stay Pending, got %q", absorbed.Status.Phase)
 	}
 
+	if convs := listSigConversations(t, c); len(convs.Items) != 1 { // only the pre-seeded blocker
+		t.Fatalf("a blocked claimant must never create a conversation, got %d", len(convs.Items))
+	}
+}
+
+// countSignalsByInitiation counts the Signal CRs carrying initiationID.
+func countSignalsByInitiation(t *testing.T, c client.Client, initiationID string) int {
+	t.Helper()
+	var list agentopsv1alpha1.SignalList
+	if err := c.List(context.Background(), &list, client.InNamespace(sigTestNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	var matches int
+	for i := range list.Items {
+		if list.Items[i].Spec.InitiationID == initiationID {
+			matches++
+		}
+	}
+	return matches
+}
+
+// listSigConversations lists every Conversation in the test namespace.
+func listSigConversations(t *testing.T, c client.Client) *agentopsv1alpha1.ConversationList {
+	t.Helper()
 	var convs agentopsv1alpha1.ConversationList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
-	if len(convs.Items) != 1 { // only the pre-seeded blocker
-		t.Fatalf("a blocked claimant must never create a conversation, got %d", len(convs.Items))
-	}
+	return &convs
 }
 
 // "A repeat is absorbed into the open Signal", exercised against a
@@ -236,15 +248,8 @@ func TestSignalInboundAbsorbsRepeatIntoPartiallyRoutedSignal(t *testing.T) {
 	if absorbed.Status.Phase != agentopsv1alpha1.SignalRouted {
 		t.Fatalf("both claimants terminal with one Routed must roll up to Routed, got %q", absorbed.Status.Phase)
 	}
-	var claimantA, claimantB *agentopsv1alpha1.SignalClaimant
-	for i := range absorbed.Status.Claimants {
-		switch absorbed.Status.Claimants[i].Ref.Name {
-		case pipeA.Name:
-			claimantA = &absorbed.Status.Claimants[i]
-		case pipeB.Name:
-			claimantB = &absorbed.Status.Claimants[i]
-		}
-	}
+	claimantA := claimantNamed(absorbed, pipeA.Name)
+	claimantB := claimantNamed(absorbed, pipeB.Name)
 	if claimantA == nil || claimantA.State != agentopsv1alpha1.ClaimantRouted || claimantA.ConversationRef == nil || claimantA.ConversationRef.Name != existing.Name {
 		t.Fatalf("the already-Routed claimant must be left untouched, got %+v", claimantA)
 	}
@@ -252,10 +257,7 @@ func TestSignalInboundAbsorbsRepeatIntoPartiallyRoutedSignal(t *testing.T) {
 		t.Fatalf("the Routing claimant must now be routed, got %+v", claimantB)
 	}
 
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
-	}
+	convs := listSigConversations(t, c)
 	if len(convs.Items) != 2 { // the pre-existing one, plus pipeB's own new one
 		t.Fatalf("want exactly 2 conversations (one per claimant), got %d: %+v", len(convs.Items), convs.Items)
 	}
@@ -265,6 +267,16 @@ func TestSignalInboundAbsorbsRepeatIntoPartiallyRoutedSignal(t *testing.T) {
 				convs.Items[i].Spec.Inputs)
 		}
 	}
+}
+
+// claimantNamed returns the claimant whose ref names pipeline, or nil.
+func claimantNamed(sig *agentopsv1alpha1.Signal, pipeline string) *agentopsv1alpha1.SignalClaimant {
+	for i := range sig.Status.Claimants {
+		if sig.Status.Claimants[i].Ref.Name == pipeline {
+			return &sig.Status.Claimants[i]
+		}
+	}
+	return nil
 }
 
 // conversation-capacity's MODIFIED "pending backlog is bounded": a machine
