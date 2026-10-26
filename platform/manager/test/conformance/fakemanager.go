@@ -30,6 +30,11 @@ import (
 	"time"
 )
 
+const (
+	headerContentType = "Content-Type"
+	errRejected       = "rejected by the conformance fake"
+)
+
 // ChannelInfo is one served channel, as GET /channel/channels lists it.
 type ChannelInfo struct {
 	Name                string          `json:"name"`
@@ -53,6 +58,29 @@ type Completion struct {
 	ID       string
 	ThreadID string
 	Error    string
+}
+
+// WorkRequest is one GET /work as the fake saw it.
+type WorkRequest struct {
+	Convo string
+	Pod   string
+	Wait  int
+}
+
+// WorkCompletion is one POST /work/done. Raw carries the decoded body
+// unmodified — field PRESENCE matters to this contract (API-5/API-7/API-9
+// all turn on whether a key was sent at all, not just its value), which a
+// parsed Go struct with omitempty would already have thrown away.
+type WorkCompletion struct {
+	RunID string
+	Convo string
+	Raw   map[string]any
+}
+
+// workLatest is the latest-wins pair /work/done tracks per conversation.
+type workLatest struct {
+	ContextID string
+	Brief     string
 }
 
 // StatusReport is one POST /channel/channels/{name}/status or
@@ -84,9 +112,10 @@ type FakeManager struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 
-	channels []ChannelInfo
-	sources  []SourceInfo
-	queue    []json.RawMessage // ops to serve, in order
+	channels  []ChannelInfo
+	sources   []SourceInfo
+	queue     []json.RawMessage // ops to serve, in order
+	workQueue []json.RawMessage // work units to serve, in order — see QueueWork
 
 	opsRequests   []OpsRequest
 	completions   []Completion
@@ -96,6 +125,17 @@ type FakeManager struct {
 	state         map[string]string // "<kind>/<name>/<key>" → value
 	unauthorized  int
 	listed        map[string]int // "channel:<adapter>" / "signal:<adapter>" → count
+
+	workRequests    []WorkRequest
+	workCompletions []WorkCompletion
+	// workState is the ONE stateful fact /work/done keeps about its own body
+	// (API-5): runtimeContextId/brief are latest-wins, so a report that omits
+	// either must leave the previously recorded value untouched rather than
+	// clearing it. Everything else about a completion is just RECORDED, never
+	// interpreted — see workCompletions.
+	workState map[string]workLatest
+
+	rejectWorkDone int // HTTP status to answer POST /work/done with; 0 = accept
 
 	rejectSignals int // HTTP status to answer /signal/inbound with; 0 = accept
 	rejectInbound int
@@ -136,11 +176,18 @@ func (f *FakeManager) RejectOpsAsNonLeader(n int) {
 // process still holds a long-poll blocks forever.
 func NewFakeManager(t *testing.T, token string) *FakeManager {
 	t.Helper()
-	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}, reclaimAfterSeconds: 300}
+	f := &FakeManager{Token: token, ContractVersion: "2", state: map[string]string{}, listed: map[string]int{}, reclaimAfterSeconds: 300,
+		workState: map[string]workLatest{}}
 	t.Cleanup(func() { f.Close() })
 	f.cond = sync.NewCond(&f.mu)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	// GET /work and POST /work/done carry no bearer requirement in the real
+	// contract (docs/contracts/runtime.md) — a runtime's Control.Poll/Report
+	// send no Authorization header at all — so these two, alone among every
+	// route below, are registered unauthenticated.
+	mux.HandleFunc("GET /work", f.handleWork)
+	mux.HandleFunc("POST /work/done", f.handleWorkDone)
 	auth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != token {
@@ -195,7 +242,7 @@ func NewFakeManager(t *testing.T, token string) *FakeManager {
 		writeJSON(w, 200, map[string]any{"events": []any{}, "next": 0})
 	}))
 	mux.HandleFunc("GET /activity/stream", auth(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set(headerContentType, "text/event-stream")
 		w.WriteHeader(200)
 		<-r.Context().Done()
 	}))
@@ -251,6 +298,48 @@ func (f *FakeManager) QueueOp(op map[string]any) {
 	f.queue = append(f.queue, raw)
 	f.cond.Broadcast()
 	f.mu.Unlock()
+}
+
+// QueueWork queues one work unit, as raw JSON, to be served on the next
+// GET /work long-poll. Mirrors QueueOp.
+func (f *FakeManager) QueueWork(unit map[string]any) {
+	raw, _ := json.Marshal(unit)
+	f.mu.Lock()
+	f.workQueue = append(f.workQueue, raw)
+	f.cond.Broadcast()
+	f.mu.Unlock()
+}
+
+// RejectWorkDone makes /work/done answer with the status code (0 accepts).
+// Mirrors RejectInbound.
+func (f *FakeManager) RejectWorkDone(code int) {
+	f.mu.Lock()
+	f.rejectWorkDone = code
+	f.mu.Unlock()
+}
+
+// WorkRequests returns every GET /work the fake has seen so far.
+func (f *FakeManager) WorkRequests() []WorkRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]WorkRequest{}, f.workRequests...)
+}
+
+// WorkCompletions returns every accepted POST /work/done so far.
+func (f *FakeManager) WorkCompletions() []WorkCompletion {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]WorkCompletion{}, f.workCompletions...)
+}
+
+// WorkState reads the latest-wins runtimeContextId/brief this fake has
+// recorded for convo (API-5) — the one derived fact /work/done keeps,
+// updated only when a report actually carries the field.
+func (f *FakeManager) WorkState(convo string) (contextID, brief string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := f.workState[convo]
+	return st.ContextID, st.Brief
 }
 
 // RejectSignals makes /signal/inbound answer with the status code (0 accepts).
@@ -384,6 +473,86 @@ func (f *FakeManager) handleDone(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+// handleWork mirrors handleOps: a long-poll that dequeues one work unit, or
+// answers 204 once wait (clamped to 30s, same as the real contract) elapses
+// with nothing queued. No reclaimAfterSeconds stamping here — that is an
+// ops-only concept (durable-chat-ops-broker's claim window), not part of the
+// work contract.
+func (f *FakeManager) handleWork(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	req := WorkRequest{Convo: q.Get("convo"), Pod: q.Get("pod")}
+	fmt.Sscanf(q.Get("wait"), "%d", &req.Wait)
+	f.mu.Lock()
+	f.workRequests = append(f.workRequests, req)
+	f.mu.Unlock()
+	if req.Convo == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing convo"})
+		return
+	}
+	wait := req.Wait
+	if wait > 30 {
+		wait = 30
+	}
+	deadline := time.Now().Add(time.Duration(wait) * time.Second)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(time.Until(deadline)):
+		}
+		f.mu.Lock()
+		f.cond.Broadcast()
+		f.mu.Unlock()
+		close(done)
+	}()
+	f.mu.Lock()
+	for len(f.workQueue) == 0 && time.Now().Before(deadline) && r.Context().Err() == nil {
+		f.cond.Wait()
+	}
+	if len(f.workQueue) == 0 {
+		f.mu.Unlock()
+		w.WriteHeader(204)
+		return
+	}
+	raw := f.workQueue[0]
+	f.workQueue = f.workQueue[1:]
+	f.mu.Unlock()
+	w.Header().Set(headerContentType, "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(raw)
+}
+
+// handleWorkDone mirrors handleDone, recording the whole decoded body (so a
+// test can assert on exact field PRESENCE — API-5/API-7/API-9) and updating
+// the one derived, stateful fact this endpoint keeps about its own body: the
+// latest-wins runtimeContextId/brief (API-5).
+func (f *FakeManager) handleWorkDone(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+	runID, _ := body["runId"].(string)
+	convo, _ := body["convo"].(string)
+	f.mu.Lock()
+	reject := f.rejectWorkDone
+	if reject == 0 {
+		f.workCompletions = append(f.workCompletions, WorkCompletion{RunID: runID, Convo: convo, Raw: body})
+		st := f.workState[convo]
+		if v, ok := body["runtimeContextId"].(string); ok && v != "" {
+			st.ContextID = v
+		}
+		if v, ok := body["brief"].(string); ok && v != "" {
+			st.Brief = v
+		}
+		f.workState[convo] = st
+	}
+	f.mu.Unlock()
+	if reject != 0 {
+		writeJSON(w, reject, map[string]string{"error": errRejected})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
 func (f *FakeManager) handleInbound(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
@@ -394,7 +563,7 @@ func (f *FakeManager) handleInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	if reject != 0 {
-		writeJSON(w, reject, map[string]string{"error": "rejected by the conformance fake"})
+		writeJSON(w, reject, map[string]string{"error": errRejected})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"accepted": true})
@@ -411,7 +580,7 @@ func (f *FakeManager) handleSignalInbound(w http.ResponseWriter, r *http.Request
 	reject := f.rejectSignals
 	f.mu.Unlock()
 	if reject != 0 {
-		writeJSON(w, reject, map[string]string{"error": "rejected by the conformance fake"})
+		writeJSON(w, reject, map[string]string{"error": errRejected})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"queued": len(post.Signals), "conversations": len(post.Signals)})
@@ -461,7 +630,7 @@ func (f *FakeManager) statePut(kind string) http.HandlerFunc {
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }

@@ -62,9 +62,8 @@ Every requirement ID the suite asserts, and which path exercises it:
 |---|---|
 | `API-1`, `LC-1` | the `slow` directive. The double holds its response past one poll cycle, proving the runtime keeps polling and a second poll while Working gets nothing |
 | `API-7` | the `unparsable` directive. A response the runtime cannot parse proves the undetermined fact is omitted, never reported as zero |
-| `API-2`, `API-4`, `API-5`, `API-8`, `API-9`, `RT-1`, `RT-2`, `RT-3` and its sub-items, `SEC-1`–`SEC-3`, `COMPAT-1` | the default path. One ordinary successful run, against a served unit and a repository fixture the test controls directly |
+| `API-2`, `API-4`, `API-5`, `API-8`, `API-9`, `RT-1`, `RT-2`, `RT-3` and its sub-items, `COMPAT-1` | the default path. One ordinary successful run, against a served unit and a repository fixture the test controls directly |
 | `LC-2` | a short `RUNTIME_IDLE_TTL_M`, no directive. The double is never reached once the TTL elapses |
-| `LC-3` | an `/exit` call sent mid-run, no directive. The double is still mid-response when it arrives |
 
 `API-3` is excluded for the same reason as `API-6` and every `MGR-n` row.
 It obligates whoever ANSWERS `GET /work` — the manager — to have context
@@ -73,6 +72,23 @@ already restored before replying.
 `FakeManager` trivially satisfies this by construction, so asserting it
 here would prove nothing about a real manager's behavior. It stays owned
 by envtest/system.
+
+**`LC-3` and `SEC-1`–`SEC-3` are excluded too**, resolving the Open
+Question this design originally left for review. Implementing the suite
+found neither observable from this black-box wire:
+
+- `LC-3` (`/exit` refused mid-run) is manager-side chat-router logic
+  (`internal/chat/router.go`'s `isExitCommand`) with no HTTP call to the
+  runtime pod at all. `runtimes/ollama` exposes no endpoint shaped like it.
+  Already exercised by `internal/chat/router_test.go` against the real
+  router.
+- `SEC-1`–`SEC-3` are facts about the manager/operator's own pod-spec and
+  RBAC rendering (no Secret read, `AOPS_MCP_TOKEN` derivation, no
+  ServiceAccount granted), not behavior the runtime binary performs or
+  could violate. `FakeManager` would satisfy them trivially by
+  construction, the same reason `API-3`/`API-6`/`MGR-n` are excluded above.
+  Already owned by `internal/runtimepod`'s unit tests and the chart's RBAC
+  templates.
 
 **Why:** `test/stubruntime`'s vocabulary (`echo`/`fail`/`stale-context`/
 `no-context`/`die`/`stall`/`storage-outage`/`calls`) exists for manager-side

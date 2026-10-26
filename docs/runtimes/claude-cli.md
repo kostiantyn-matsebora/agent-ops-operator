@@ -19,7 +19,7 @@ surface. It is what EXECUTES an agent — the same vendor as the default
 runtime, run a different way.
 
 It conforms to the [runtime specification]({{ '/contracts/runtime/' | relative_url }}), version
-2.0.0.
+2.0.1.
 
 **With this bundle, agent-ops spawns a fresh `claude` CLI process for every
 work unit**, instead of holding one session open across a pod's life. Each

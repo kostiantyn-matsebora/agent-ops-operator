@@ -21,6 +21,21 @@ for the source and the reference material beside this file.
 - Not breaking. Upgrading runs `kubectl apply -f chart/crds/` as every
   CRD-adding release already does.
 
+## [18.0.1] — 2026-10-25
+
+### Fixed
+
+- `adapterAuth`/`controlPlaneAuth`'s generated Secrets could only ever mint
+  on a fresh `helm install`. An existing install adopting 18.0.0's new
+  `controlPlaneAuth` token had no automatic path to it — the first upgrade
+  that needed the Secret rendered nothing, leaving the manager pod stuck on
+  `CreateContainerConfigError`. A render with real cluster access (a real
+  `helm upgrade`, never `helm template`) now generates or adopts it on an
+  upgrade too, via a new `agentops.clusterConnected` helper that probes
+  `kube-system` rather than trusting `.Release.IsInstall` alone. A
+  cluster-less renderer (`helm template`, CI, a GitOps repo-server) still
+  renders neither Secret, unchanged.
+
 ## [18.0.0] — 2026-10-25
 
 - `manager` 0.61.0, `console` 0.40.0, `runtime-claude` 0.12.0,
@@ -877,33 +892,11 @@ No configuration, CRD or RBAC change. `NodeNotReady` and the other
 reboot is the time axis's job (`route.muteTimeIntervals`, see the
 Kubernetes page).
 
-## [13.1.1] — 2026-08-27
-
-**Every image rebuilt on the current toolchain.** The weekly scan of the
-published images reported fixable findings in every Go binary: 22 Go
-standard-library CVEs, CVE-2025-68121 among them at CRITICAL.
-
-The manager carried eight more from `golang.org/x/net`, `x/oauth2` and
-`x/text`, and `runtime-claude` five inside npm's bundled dependencies. The tree
-had already moved past all of them (Go 1.25, the manager's `x/*` bumped). The
-published images had not.
-
-### Changed
-
-
-Twelve components moved to versions built from that tree:
-`channel-telegram` 0.24.4, `console` 0.38.2, `context-sync` 0.2.3,
-`egress-proxy` 0.2.4, `gateway-telegram` 0.5.3, `housekeeping` 0.2.3,
-`manager` 0.57.2, `runtime-claude` 0.8.3, `signal-alertmanager` 0.7.3,
-`signal-ha` 0.2.3, `signal-k8s-events` 0.4.3, `signal-telegram` 0.6.3.
-
-**No behaviour changes.** `runtime-ollama` 0.1.0 was already built on Go 1.25
-and scanned clean, so it is unchanged.
-
 ## Older versions
 
 | Archive | Covers |
 |---|---|
+| [CHANGELOG-13.1.1.md](changelog/CHANGELOG-13.1.1.md) | chart 13.1.1 |
 | [CHANGELOG-13.1.0.md](changelog/CHANGELOG-13.1.0.md) | chart 13.1.0 |
 | [CHANGELOG-13.0.1.md](changelog/CHANGELOG-13.0.1.md) | chart 13.0.1 |
 | [CHANGELOG-13.0.md](changelog/CHANGELOG-13.0.md) | chart 13.0.0 |

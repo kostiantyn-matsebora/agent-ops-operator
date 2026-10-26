@@ -13,12 +13,17 @@ existing `/channel/ops` and `/channel/ops/{id}/done` pair.
 
 The suite SHALL cover `runtimes/ollama`. It asserts these requirement IDs
 from `docs/contracts/runtime.md` behaviorally: `API-1`, `API-2`,
-`API-4`, `API-5`, `API-7`, `API-8`, `API-9`, `LC-1`, `LC-2`, `LC-3`, `RT-1`,
-`RT-2`, `RT-3` and its sub-items, `SEC-1`, `SEC-2`, `SEC-3`, `COMPAT-1`.
+`API-4`, `API-5`, `API-7`, `API-8`, `API-9`, `LC-1`, `LC-2`, `RT-1`,
+`RT-2`, `RT-3` and its sub-items, `COMPAT-1`.
 
-It SHALL NOT assert `API-3`, `API-6` or any `MGR-n` requirement. Each
-obligates whoever answers `GET /work` — the manager, not the runtime — so
-each is already covered by envtest and the system tier.
+It SHALL NOT assert `API-3`, `API-6`, `LC-3`, `SEC-1`, `SEC-2`, `SEC-3` or
+any `MGR-n` requirement, each already covered elsewhere:
+
+| Excluded | Because | Covered by |
+|---|---|---|
+| `API-3`, `API-6`, `MGR-n` | obligates whoever answers `GET /work` — the manager, not the runtime | envtest, the system tier |
+| `LC-3` | `/exit` refused mid-run is manager-side chat-router logic, no HTTP call to the runtime pod | the manager's own chat-router unit tests |
+| `SEC-1`, `SEC-2`, `SEC-3` | facts about the manager/operator's own pod-spec and RBAC rendering, not runtime-binary behavior | `internal/runtimepod`'s unit tests, the chart's RBAC templates |
 
 #### Scenario: A new runtime joins by being listed
 - **WHEN** a new `AgentRuntime` implementation is added to the repository
