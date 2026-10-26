@@ -9,7 +9,7 @@ The console's read-only view of persisted signals: the inventory of `Signal` obj
 ### Requirement: A signals view lists persisted signals read-only
 The console SHALL provide a signals view fed by its read-only watch of the `Signal` kind:
 
-- Each row SHALL show the signal's source, `initiationId`, phase, occurrence count and age.
+- Each row SHALL show the signal's source, `initiationId`, phase and age.
 - The view SHALL be filterable by source and by phase.
 - The console SHALL expose no action on a signal — no create, no edit, no delete, no retry.
 
