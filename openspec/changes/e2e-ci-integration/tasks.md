@@ -5,20 +5,25 @@
   test:e2e` still passes against this working copy's tree.
   **Passes, 4 of 4, three consecutive runs.** Two of four
   `e2e/topology.spec.ts` specs were already failing on an unmodified
-  `master`, the spec having drifted from the UI it pins — corrected as test
-  content only, no `platform/console/ui/src` change: traffic is asserted
-  through `data-stream` (`Canvas.tsx` never rendered the
-  `data-flashing`/`data-animated`/SMIL `<animate>` it checked); the spec
-  hides `Toolsets` itself before asserting concealment
-  (`VIEW_DEFAULTS.model.hidden` is `[]`); `1 failing` is read from
-  `health-summary` (three elements now carry the text); scoping is a
-  double-click, and the out-of-scope notice is the `failing-hidden` alert;
-  the node count excludes `node-panel`; and the fit is measured against
-  `pictureBounds`' own margins rather than the painted box, whose labels
-  sit off-centre by design — confirmed still failing on a 50px shift of
-  `fit()`. The webServer also binds `--host 127.0.0.1`: on the runner
-  `localhost` resolves to `::1`, so the probe at `127.0.0.1:4173` timed
-  out after a clean build.
+  `master`. The spec had drifted from the UI it pins, corrected as test
+  content only, no `platform/console/ui/src` change:
+  - Traffic is asserted through `data-stream` — `Canvas.tsx` never
+    rendered the `data-flashing`/`data-animated`/SMIL `<animate>` it
+    checked.
+  - The spec hides `Toolsets` itself before asserting concealment —
+    `VIEW_DEFAULTS.model.hidden` is `[]`.
+  - `1 failing` is read from `health-summary` — three elements now carry
+    the text.
+  - Scoping is a double-click, and the out-of-scope notice is the
+    `failing-hidden` alert.
+  - The node count excludes `node-panel`.
+  - The fit is measured against `pictureBounds`' own margins rather than
+    the painted box, whose labels sit off-centre by design. Confirmed
+    still failing on a 50px shift of `fit()`.
+
+  The webServer also binds `--host 127.0.0.1`. On the runner `localhost`
+  resolves to `::1`, so the probe at `127.0.0.1:4173` timed out after a
+  clean build.
 - [x] 1.2 Add a `console-e2e` job to `.github/workflows/ci.yml`, gated on
   `contains(needs.discover.outputs.modules, 'platform/console')`: checkout,
   Node 22 setup, `npm ci`, a Playwright-browser cache keyed on
@@ -73,21 +78,32 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
   log shows `go test` completing, the cluster surviving under
   `SYSTEM_REUSE=1`, the `e2e-live` step running against that same cluster's
   console, and the teardown step deleting `agentops-e2e` afterward.
+  **Dispatched this round** (not waited on — see the pull request for the
+  run link). Left unticked until its log is read.
 - [ ] 4.2 Confirm the scenario "a pack failure skips the browser pass" on
   a scratch run. Temporarily break a chart value to fail the pack's
   `go test` step, then confirm the `e2e-live` step is skipped while the
-  teardown step still runs.
+  teardown step still runs. **Not run this round** — `system.yml`'s own
+  conditionals already read correctly (`e2e-live` gated on
+  `steps.go-test.outcome == 'success'`, teardown on `always()`), but that
+  is a reading of the YAML, not a live failing run, so the box stays open.
 - [ ] 4.3 Run `gh workflow run system-smoke.yml` against this branch and
   confirm the smoke tier (`inputs.tier == 'smoke'`) shows no Node, npm, or
-  Playwright step — the new steps stay full-tier-only.
+  Playwright step — the new steps stay full-tier-only. **Dispatched this
+  round** (not waited on — see the pull request for the run link). Left
+  unticked until its log is read.
 
 ## 5. Documentation
 
-- [ ] 5.1 Reference docs: rewrite `docs/testing.md`'s `e2e-live` section —
+- [x] 5.1 Reference docs: rewrite `docs/testing.md`'s `e2e-live` section —
   remove the "NOT CI-gated, and no workflow dispatches it" claim and state
   the actual nightly wiring into the full tier. Update `CONTRIBUTING.md`'s
   CI section to name the `console-e2e` job and the full tier's browser
-  pass.
-- [ ] 5.2 Adopter site: none. This change is internal verification process,
+  pass. **Already done**, landed in #439: `docs/testing.md` line 12 names
+  `e2e-live` as nightly against the full tier's own cluster, and
+  `CONTRIBUTING.md` lines 275-277 name the full tier running `e2e-live`
+  against that run's own cluster after the pack's assertions pass. Read
+  both files against this branch's tree to confirm before ticking this.
+- [x] 5.2 Adopter site: none. This change is internal verification process,
   not a product capability, an install/upgrade step, or a claim the
   landing page or guides make — ticked as not applicable.
