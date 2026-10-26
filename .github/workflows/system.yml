@@ -71,11 +71,16 @@ jobs:
           helm version --short
           kubectl version --client
       - name: Run the pack
+        id: go-test
         env:
           # Absent on a pull request and on a fork — the real-runtime lane
           # then reports itself SKIPPED. Present only when the full tier is
           # called by e2e-full.yml, which inherits the repository's secrets.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.tier == 'full' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # Full tier only: keep the cluster up for the e2e-live steps below
+          # instead of the harness tearing it down on exit. "Tear down the
+          # e2e cluster" (if: always()) is this workflow's own teardown.
+          SYSTEM_REUSE: ${{ inputs.tier == 'full' && '1' || '' }}
         run: |
           # A step with no `shell:` key runs `bash -e {0}` — pipefail is NOT
           # on by default; that is only true of an explicit `shell: bash`.
@@ -91,6 +96,37 @@ jobs:
           go test -tags system -count=1 -timeout 55m -v -json ./test/system/ \
             | tee "$SYSTEM_ARTIFACT_DIR/events.jsonl" \
             | jq -rR '. as $raw | try (fromjson | select(.Action == "output") | .Output) catch $raw'
+      # Full tier only, from here on: the pack above already produced a
+      # k3d cluster with the chart Ready. These steps reuse it for
+      # platform/console/ui/e2e-live rather than paying for a second one.
+      - name: Set up Node
+        if: inputs.tier == 'full'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/console/ui/package-lock.json
+      - name: Install console UI dependencies
+        if: inputs.tier == 'full'
+        working-directory: platform/console/ui
+        run: npm ci
+      - name: Install Playwright browsers
+        if: inputs.tier == 'full'
+        working-directory: platform/console/ui
+        run: npx playwright install --with-deps chromium
+      # Gated on the pack's own outcome, not shell `&&` chaining, so a pack
+      # failure and a browser-suite failure stay distinguishable in the log.
+      - name: Run e2e-live suite
+        if: inputs.tier == 'full' && steps.go-test.outcome == 'success'
+        working-directory: platform/console/ui
+        run: |
+          kubectl --context k3d-agentops-e2e port-forward \
+            svc/agentops-adapter-console 18099:8080 -n agent-ops &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:18099/ >/dev/null && break
+            sleep 1
+          done
+          npx playwright test --config e2e-live/playwright.config.ts
       # if: always() — a report saying WHY nothing ran is owed on a build
       # failure too. Never fails the job itself: "Run the pack" already does.
       - name: Write system report
@@ -100,6 +136,23 @@ jobs:
             --events "$SYSTEM_ARTIFACT_DIR/events.jsonl" \
             --level ${{ inputs.tier == 'full' && 'summary' || 'full' }} \
             >> "$GITHUB_STEP_SUMMARY"
+      # Nobody watches a nightly run complete — only keep the report when
+      # there is a failure to read it for.
+      - name: Upload e2e-live artifacts
+        if: failure() && inputs.tier == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-live-${{ github.run_id }}
+          path: |
+            platform/console/ui/e2e-live/playwright-report
+            platform/console/ui/e2e-live/test-results
+          if-no-files-found: ignore
+      # Pairs with SYSTEM_REUSE above: whatever "Run the pack" deferred,
+      # this tears down unconditionally, on a pack failure or a browser
+      # suite failure alike.
+      - name: Tear down the e2e cluster
+        if: always() && inputs.tier == 'full'
+        run: k3d cluster delete agentops-e2e || true
       # Unconditional: a failure that did not capture its own context costs a
       # full re-run to learn anything.
       - name: Upload diagnostics

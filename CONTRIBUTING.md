@@ -262,12 +262,19 @@ On every pull request CI runs the module, operator, UI and chart checks above,
 plus `kubeconform` over each rendered chart permutation and the two guards
 over the published tree, below.
 
-Of the two tiers, a pull request meets CONFORMANCE only — no pull request
-provisions a cluster. The cluster smoke gates a release, on the tagged commit
-before anything is published, and runs on demand on any branch
-(`system-smoke.yml`). The `full` tier — the real agent runtime with a real
-credential — runs nightly when master moved and on dispatch (`system-full.yml`),
-and gates nothing.
+A console pull request also runs `console-e2e`: a real-browser Playwright
+smoke against the built UI bundle, mocked API, no cluster.
+
+Of the two cluster tiers, a pull request meets CONFORMANCE only — no pull
+request provisions a cluster.
+
+The cluster smoke gates a release, on the tagged commit before anything is
+published, and runs on demand on any branch (`system-smoke.yml`).
+
+The `full` tier — the real agent runtime with a real credential — runs
+nightly when master moved and on dispatch (`system-full.yml`), and gates
+nothing. It also runs `e2e-live`, the console's real-browser suite, against
+that same run's own cluster, after the pack's own assertions pass.
 
 `platform/manager/` and `runtimes/ollama/` need Go 1.25. The others declare
 1.23 and build under either. Every image is built with `golang:1.27`, because

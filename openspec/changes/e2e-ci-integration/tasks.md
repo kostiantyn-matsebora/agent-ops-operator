@@ -1,9 +1,25 @@
 ## 1. Gate console pull requests with the mocked e2e tier — deployment-engineer
 
-- [ ] 1.1 Add `retries: process.env.CI ? 2 : 0` to
+- [x] 1.1 Add `retries: process.env.CI ? 2 : 0` to
   `platform/console/ui/playwright.config.ts` and verify `CI=1 npm run
   test:e2e` still passes against this working copy's tree.
-- [ ] 1.2 Add a `console-e2e` job to `.github/workflows/ci.yml`, gated on
+  **Passes, 4 of 4, three consecutive runs.** Two of four
+  `e2e/topology.spec.ts` specs were already failing on an unmodified
+  `master`, the spec having drifted from the UI it pins — corrected as test
+  content only, no `platform/console/ui/src` change: traffic is asserted
+  through `data-stream` (`Canvas.tsx` never rendered the
+  `data-flashing`/`data-animated`/SMIL `<animate>` it checked); the spec
+  hides `Toolsets` itself before asserting concealment
+  (`VIEW_DEFAULTS.model.hidden` is `[]`); `1 failing` is read from
+  `health-summary` (three elements now carry the text); scoping is a
+  double-click, and the out-of-scope notice is the `failing-hidden` alert;
+  the node count excludes `node-panel`; and the fit is measured against
+  `pictureBounds`' own margins rather than the painted box, whose labels
+  sit off-centre by design — confirmed still failing on a 50px shift of
+  `fit()`. The webServer also binds `--host 127.0.0.1`: on the runner
+  `localhost` resolves to `::1`, so the probe at `127.0.0.1:4173` timed
+  out after a clean build.
+- [x] 1.2 Add a `console-e2e` job to `.github/workflows/ci.yml`, gated on
   `contains(needs.discover.outputs.modules, 'platform/console')`: checkout,
   Node 22 setup, `npm ci`, a Playwright-browser cache keyed on
   `package-lock.json`'s hash, `npx playwright install --with-deps
@@ -11,30 +27,31 @@
   `playwright-report`/`test-results` `if: failure()`. Verify the job's YAML
   parses, for example with `python3 -c "import yaml
 yaml.safe_load(open('.github/workflows/ci.yml'))"`.
-- [ ] 1.3 Add `console-e2e` to `ci-green`'s `needs:` list in `ci.yml`.
+- [x] 1.3 Add `console-e2e` to `ci-green`'s `needs:` list in `ci.yml`.
   Verify by pushing this branch and running `gh workflow run ci.yml -f
   pr=<n>`, confirming the dispatched run shows `console-e2e` and that
-  `ci-green` reads its result.
+  `ci-green` reads its result. **Pushed** — the pull request's own CI
+  shows `console-e2e` under `ci-green`'s `needs:`.
 
 ## 2. Wire the live browser suite into the nightly full tier — deployment-engineer
 
-- [ ] 2.1 In `.github/workflows/system.yml`'s `pack` job, set
+- [x] 2.1 In `.github/workflows/system.yml`'s `pack` job, set
   `SYSTEM_REUSE=1` on the `go test` step only `if: inputs.tier == 'full'`,
   and give that step an `id` so a later step can read its outcome. Here
   `SYSTEM_REUSE=1` only defers the Go binary's own teardown to task 2.5's
   explicit step — unlike its local-dev use, it does NOT leave the cluster
   running once this job ends.
-- [ ] 2.2 Add Node 22 setup, `npm ci`, and `npx playwright install
+- [x] 2.2 Add Node 22 setup, `npm ci`, and `npx playwright install
   --with-deps chromium` steps under `platform/console/ui`, gated
   `if: inputs.tier == 'full'`.
-- [ ] 2.3 Add a step, `if: inputs.tier == 'full' && steps.<go-test-id>.outcome
+- [x] 2.3 Add a step, `if: inputs.tier == 'full' && steps.<go-test-id>.outcome
   == 'success'`, that opens `kubectl --context k3d-agentops-e2e
   port-forward svc/agentops-adapter-console 18099:8080 -n agent-ops &` and
   then runs `npx playwright test --config e2e-live/playwright.config.ts`
   from `platform/console/ui`.
-- [ ] 2.4 Add `actions/upload-artifact` of `e2e-live`'s report and
+- [x] 2.4 Add `actions/upload-artifact` of `e2e-live`'s report and
   `test-results`, `if: failure() && inputs.tier == 'full'`.
-- [ ] 2.5 Add a teardown step, `if: always() && inputs.tier == 'full'`,
+- [x] 2.5 Add a teardown step, `if: always() && inputs.tier == 'full'`,
   running `k3d cluster delete agentops-e2e || true` — the cleanup task
   2.1's `SYSTEM_REUSE=1` deferred to here, since no human is present in
   CI to delete it later by hand. Verify every added step's YAML with the
@@ -42,10 +59,10 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
 
 ## 3. Unit tests
 
-- [ ] 3.1 Run `CI=1 npm run test:e2e` in `platform/console/ui` against
+- [x] 3.1 Run `CI=1 npm run test:e2e` in `platform/console/ui` against
   this working copy's tree and confirm it passes with the new `retries`
-  setting in place.
-- [ ] 3.2 Validate both edited workflow files parse, for example with
+  setting in place. 4 of 4 pass — see 1.1.
+- [x] 3.2 Validate both edited workflow files parse, for example with
   `python3 -c "import yaml, sys
 [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/ci.yml .github/workflows/system.yml`.
 

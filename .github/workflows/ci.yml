@@ -282,6 +282,47 @@ jobs:
           organization: ${{ secrets.SONAR_ORG }}
           pr: ${{ inputs.pr }}
 
+  # The one real-browser pass `modules` doesn't run. It needs a downloaded
+  # Chromium `modules` has no reason to carry, so it is its own job rather
+  # than another `platform/console`-gated step there — a slow browser
+  # install stays off every OTHER module's path, and a failure here reads
+  # as the UI's own check, not a buried step inside a Go-shaped job.
+  console-e2e:
+    needs: discover
+    if: contains(needs.discover.outputs.modules, 'platform/console')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform/console/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/console/ui/package-lock.json
+      - run: npm ci
+      # Keyed on package-lock.json, same as the Node cache above, so a
+      # Playwright version bump invalidates both together instead of one
+      # pulling a browser build the other half of the cache still expects.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('platform/console/ui/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      # ONLY ON FAILURE — a passing run's report tells a reader nothing an
+      # artifact is worth keeping, and every PR would otherwise accumulate one.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: console-e2e-report
+          path: |
+            platform/console/ui/playwright-report
+            platform/console/ui/test-results
+          if-no-files-found: ignore
+
   # The Node runtimes' unit suites. Neither ran in CI until the copilot runtime
   # arrived with 55 tests nothing executed. No npm install: the suites import
   # only the modules beside runtime.js, by design -- the copilot SDK bundles a
@@ -1087,7 +1128,7 @@ jobs:
     # Never reports on a draft: a green required check on a pull request that
     # ran nothing would be a claim.
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    needs: [discover, operator, modules, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance, review-clean, pinned-runtimes]
+    needs: [discover, operator, modules, console-e2e, node-runtimes, chart, docs, site, images, publication, retired-vocabulary, openspec, docs-task, scripts, pr-title, pr-closes, conformance, review-clean, pinned-runtimes]
     runs-on: ubuntu-latest
     steps:
       - name: Every relevant check passed

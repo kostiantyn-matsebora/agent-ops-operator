@@ -9,7 +9,17 @@ that chain — see below.
 | **Unit and envtest** | every module's `go test`, and the operator's suite against a real API server | rendering, parsing, scheduling, and what a reconciler writes to a CR | anything the kubelet, the scheduler, a CSI driver or a live authorizer decides — envtest runs none of them |
 | **Contract conformance** | every adapter's and runtime's **built binary**, black-box, against a fake manager | that an adapter speaks the adapter contracts — long-poll, `contract=`, ack-once, inbound push, listing, status, no relay loop, a visible-or-error thread-less send, an act-or-error `delete-conversation`, and a retry budget bounded by the reclaim window for a channel adapter, and normalized emission, bearer auth and a surfaced rejected post for a signal adapter — plus, for a runtime, allowlist composition, `turns[]`/`toolCalls[]` bounds trimming, and the idle-TTL exit | anything about the cluster |
 | **System** | the chart from the working tree on a real single-node cluster (k3s under k3d), images built from the same commit | the substrate: credential projection by the kubelet, RBAC as the authorizer enforces it, informer liveness, context continuity across a pod restart, admission FIFO on a real pod DELETE, the signal loop breaker under a runtime that really cannot start | answer *quality* — that is an eval harness, a different project |
-| **Console browser e2e** (`e2e-live`, manual) | Playwright driving a real browser against an ALREADY-RUNNING install — the real console, the real manager, `kubectl` against a real context | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
+| **Console browser e2e** (`e2e-live`, nightly) | Playwright driving a real browser against the full tier's own cluster and console — or any already-running install, by hand | real K8s API behavior none of the three above actually exercises (see below), and what a real browser renders for a real signal through the real console | anything the tiers above already gate — it is read-only verification, never a substitute for them |
+
+The mocked-API browser smoke, `platform/console/ui/e2e/`, gates every console
+pull request alongside contract conformance. It runs as the `console-e2e` job
+in `ci.yml`.
+
+It uses a real browser but no cluster and no secret, the same gating posture as
+contract conformance. The system tier does not gate pull requests.
+
+It is a different suite from `e2e-live` below. A rendering check against a
+mocked backend, not a behavior proof against a real one.
 
 **Every change declares its first and third tiers in its own task list.**
 `docs-task` in CI refuses to finish a change missing any of the three — see
@@ -44,11 +54,17 @@ together, could expose:
   surface (`support/kube.ts`, `support/manager.ts`), exactly as the Go system
   pack's typed client does, and every assertion reads the console's own
   rendering.
-- **It is NOT CI-gated, and no workflow dispatches it.** No job under
-  `.github/workflows/` invokes it, and no `package.json` script runs it either
-  — `test:e2e` is the pre-existing mocked-API rendering smoke (a different
-  config, under `../e2e`, with no real backend). The only way it runs is by
-  hand:
+- **It runs NIGHTLY, wired into the full system tier.** `system.yml`'s `full`
+  tier job (fired by `system-full.yml`) runs it against the same k3d cluster
+  and chart install the pack already stood up for that run — kept alive with
+  `SYSTEM_REUSE=1` for that tier only, then torn down once the browser pass
+  finishes. It still never gates a pull request: cluster provisioning stays
+  reserved for the smoke and full tiers.
+- **`test:e2e` is the separate, pre-existing mocked-API rendering smoke** —
+  a different config, under `../e2e`, with no real backend. That one gates
+  every console pull request (see above), not this suite.
+- **Run it by hand against any already-running install** the same way as
+  before:
 
   ```sh
   cd platform/console/ui
@@ -86,6 +102,9 @@ together, could expose:
 **Contract conformance, and nothing that needs a cluster.** It is a minute of
 `go test`, deterministic, with no secret, so it runs for every pull request —
 from a fork too — and reports through `ci-green`, the one required check.
+
+The console's mocked-API browser smoke (`console-e2e`) gates the same way,
+for a console pull request only — a real browser, but no cluster either.
 
 The cluster smoke — a thin k3s run on the stub runtime — gates a **release**
 instead: it runs on the tagged commit before an image or
