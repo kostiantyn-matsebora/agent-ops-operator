@@ -32,7 +32,7 @@ See `proposal.md` — Why. Current state this design builds on:
   consumer without touching the endpoint.
 - A leader that changes loses nothing and duplicates nothing. All state is on
   the CRs, and the new leader resumes every unfinished `Signal`.
-- Consumption is concurrent on the leader: several workers, not one thread.
+- Consumption is concurrent on the leader: several consumers, not one thread.
 - Routing outcomes are the existing ones: the same cooldown, fan-out and
   equality reuse.
 
@@ -53,7 +53,7 @@ manager mounts nothing, and an accepted signal is neither derivable nor
 declared-lossy, because the adapter will not resend.
 
 Volumes are post-dedup ops signals, tens per hour. The per-source cap and the
-TTLs keep the object count bounded (D-6).
+TTLs keep the object count bounded (D-11).
 
 **Alternative considered:** an external broker (NATS, Redis Streams).
 Rejected. It adds a stateful component, a trust boundary and a credential
@@ -82,25 +82,25 @@ stores no `Signal`.
 
 ### D-3: A concurrent consumer on the leader
 
-The consumer is a pool of workers on the leader, a competing consumer on one
+The consumer side is a pool of consumers on the leader, competing on one
 process. `SIGNAL_CONSUMER_CONCURRENCY` (chart `signalConsumerConcurrency`,
 default 4) sets how many run.
 
 - **Exclusion per `Signal`:** the controller work queue hands one `Signal` to
-  one worker at a time. No claim is written to the CR.
+  one consumer at a time. No claim is written to the CR.
 - **Order per conversation:** messages sharing a `(source, initiationId)` feed
   one conversation, so they are processed one at a time in arrival order
   (`creationTimestamp`, then name). Different keys run in parallel. Without
-  this, two workers could append two messages of one chat out of order, or each
+  this, two consumers could append two messages of one chat out of order, or each
   fail to find the conversation the other is creating.
 - **Shared state:** the cooldown map is checked and spent atomically per
-  source, since workers share it.
+  source, since consumers share it.
 - **Ack:** write the claimants, the phase, `consumedBy` (the leader pod's
   identity, the one the leader Lease holds), `consumedAt` and `attempts`.
-- **Wait:** a machine signal at a full backlog stays `Routing`, and the worker
+- **Wait:** a machine signal at a full backlog stays `Routing`, and the consumer
   requeues it after the reconciler's existing retry interval. It stays
   `Pending` or `PartiallyRouted` while `status.attempts` grows.
-- **Per-key lock:** the work queue only guarantees one worker per object, so
+- **Per-key lock:** the work queue only guarantees one consumer per object, so
   the pool holds a lock per `(source, initiationId)` and releases it in
   arrival order. Requeued signals take the same lock.
 
@@ -113,10 +113,11 @@ means the pool stops taking `Signal`s while publish keeps storing.
 
 **Alternative considered:** a CR claim with a lease so that every replica
 consumes. The cooldown map, `OpQueue` and activity log are per-process and
-leader-filled, so a consumer on a standby would run on state nobody reads. The
-standby would need cross-replica safe state, or a call to the leader for each
-in-memory step. At tens of signals an hour that buys no throughput. It is its
-own change, and this design does not block it.
+leader-filled, so a consumer on a standby would run on state nobody reads.
+
+A standby would need cross-replica safe state, or a call to the leader for
+each in-memory step. At tens of signals an hour that buys no throughput. It
+is its own change, and this design does not block it.
 
 ### D-4: The consumer makes every routing decision
 
@@ -258,7 +259,7 @@ TTLs are per phase: `SIGNAL_TTL_ROUTED` 8h, `SIGNAL_TTL_DROPPED` 4h,
 source's signals from any phase.
 
 Housekeeping goes through the same work queue as the consumer, so a retry
-deadline or an eviction never collides with a worker mid-pass. Its writes are
+deadline or an eviction never collides with a consumer mid-pass. Its writes are
 conditional on the `resourceVersion` as a second guard.
 
 `firstAttemptAt` is set on the first pass. A `Signal` that never gets a pass,
@@ -301,11 +302,11 @@ With a durable record, dropping an alert because 50 conversations are
 - **Overflow can evict a `Signal` with a `Routing` claimant mid-retry.**
   Accepted, deliberately. The cap protects etcd, and the eviction is counted
   and logged.
-- **Concurrent workers share state.** They share the cooldown map, so its
+- **Concurrent consumers share state.** They share the cooldown map, so its
   check-and-spend is atomic per source. Two messages of one conversation are
   serialized in arrival order.
 - **One consumer process.** Throughput is the leader's. At tens of signals an
-  hour that is ample, and the worker count is a chart value.
+  hour that is ample, and the consumer count is a chart value.
 - **The adapter response narrows.** A caller reading `conversations` loses it.
   No shipped adapter does, and the contract bump records it.
 - **A signal squatting non-terminal forever.** The retry deadline

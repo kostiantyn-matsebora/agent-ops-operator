@@ -145,7 +145,7 @@ printed, offered or registered anywhere.
 
 #### Scenario: A repeated pass over an addressed message opens one conversation
 
-- **WHEN** a worker creates the conversation of an addressed `Signal` and the
+- **WHEN** a consumer creates the conversation of an addressed `Signal` and the
   leader stops before the status write
 - **THEN** the new leader's pass finds that conversation and records it `Routed`,
   and the person sees one conversation

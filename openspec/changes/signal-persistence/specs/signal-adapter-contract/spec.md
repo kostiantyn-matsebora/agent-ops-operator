@@ -162,7 +162,7 @@ version is `2.3.0` and not MAJOR.
 
 - **WHEN** an adapter's post is answered `5xx` after some signals landed, and
   it re-sends the batch with the same `signalId`s
-- **THEN** the signals that landed are not stored again, and the rest are
+- **THEN** the signals that landed are not stored again, and the rest are stored
 
 #### Scenario: A signal without signalId still posts
 

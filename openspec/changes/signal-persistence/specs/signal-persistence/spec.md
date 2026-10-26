@@ -5,9 +5,9 @@ broker with the Kubernetes API as its only store:
 
 - PUBLISH — `/signal/inbound` validates, creates one `Signal` per admitted
   signal and acknowledges, and decides nothing else
-- CONSUME — on the leader, a pool of concurrent workers routes each
-  `Signal`, one worker per `Signal` at a time
-- HOUSEKEEPING — the leader alone bounds, dead-letters and collects
+- CONSUME — on the leader, a pool of concurrent consumers routes each
+  `Signal`, one consumer per `Signal` at a time
+- HOUSEKEEPING — the leader alone bounds, fails and collects
 
 Publication and consumption share nothing but the CRs, so consumption can
 stop while publication keeps storing.
@@ -283,18 +283,18 @@ the cooldown removes repeats of a correlation id.
 - **WHEN** a signal carries a `signalId` of 300 bytes
 - **THEN** the response is `400` naming `signalId` and nothing is stored
 
-### Requirement: The leader consumes signals with a pool of workers
+### Requirement: The leader consumes signals with a pool of consumers
 
 The consumer SHALL run on the LEADER only. The manager's channel-operation
 queue, cooldown record, activity log and admission gate are per-process
 state that only the leader holds, so a consumer elsewhere would decide on
 state it does not have.
 
-The consumer is a pool of `SIGNAL_CONSUMER_CONCURRENCY` workers (chart
+The consumer is a pool of `SIGNAL_CONSUMER_CONCURRENCY` consumers (chart
 `signalConsumerConcurrency`), default **4**, fed by a work queue keyed by
 `Signal`:
 
-- exactly one worker holds a given `Signal` at a time
+- exactly one consumer holds a given `Signal` at a time
 - a `Signal` still non-terminal after a pass is requeued, with a delay
 - there is no claim or lease on the CR: exclusion is the work queue's
 
@@ -302,7 +302,7 @@ The consumer pool and housekeeping SHALL start only on the leader and stop
 when it loses the Lease.
 
 Messages sharing a `(source, initiationId)` feed one conversation, so the
-workers SHALL process them ONE AT A TIME in arrival order — by
+consumers SHALL process them ONE AT A TIME in arrival order — by
 `creationTimestamp`, then by name. Messages with different keys run
 concurrently.
 
@@ -312,7 +312,7 @@ leader change is simply repeated.
 #### Scenario: Two messages of one conversation are processed in order
 
 - **WHEN** two `Signal`s with the same source and `initiationId` are waiting
-  and four workers are free
+  and four consumers are free
 - **THEN** the earlier is processed first, the later only after it ends its
   pass, and exactly one conversation exists with the two payloads appended
   in arrival order
@@ -320,12 +320,12 @@ leader change is simply repeated.
 #### Scenario: Two different conversations run in parallel
 
 - **WHEN** two `Signal`s with different `initiationId`s are waiting
-- **THEN** two workers process them at the same time
+- **THEN** two consumers process them at the same time
 
-#### Scenario: One worker per Signal
+#### Scenario: One consumer per Signal
 
-- **WHEN** a `Signal` is requeued while a worker is still processing it
-- **THEN** no second worker starts on it until the first pass ends
+- **WHEN** a `Signal` is requeued while a consumer is still processing it
+- **THEN** no second consumer starts on it until the first pass ends
 
 #### Scenario: The pool starts and stops with the Lease
 
@@ -378,7 +378,7 @@ The append SHALL be idempotent per `Signal`. The consumer writes the
 name counts as delivered. A repeated pass therefore appends nothing twice.
 
 A machine signal (`alert`, `job`, `task`) whose claimant cannot open a
-conversation for a full backlog SHALL stay `Routing`, and the worker
+conversation for a full backlog SHALL stay `Routing`, and the consumer
 requeues it with a delay.
 
 The consumer SHALL move the source's `status.receivedTotal` and
@@ -393,7 +393,7 @@ The consumer SHALL move the source's `status.receivedTotal` and
 
 #### Scenario: A crash between create and the status write does not duplicate
 
-- **WHEN** a worker creates a claimant's conversation and the leader stops
+- **WHEN** a consumer creates a claimant's conversation and the leader stops
   before the status write
 - **THEN** the repeated pass's direct lookup finds the open conversation that
   claimant originated whose `conversationId` equals the `initiationId`,
@@ -408,7 +408,7 @@ The consumer SHALL move the source's `status.receivedTotal` and
 
 #### Scenario: A repeated pass appends once
 
-- **WHEN** a worker appends a `Signal`'s payload to a conversation and the
+- **WHEN** a consumer appends a `Signal`'s payload to a conversation and the
   leader stops before the status write, and the new leader repeats the pass
 - **THEN** the pass finds the input named for that `Signal` and claimant,
   appends nothing again, and records `Routed`
@@ -431,12 +431,12 @@ The consumer SHALL move the source's `status.receivedTotal` and
 
 - **WHEN** a consumer processes an alert `Signal` while the pending backlog
   is full
-- **THEN** its claimant stays `Routing`, the worker requeues it with a
+- **THEN** its claimant stays `Routing`, the consumer requeues it with a
   delay, and a later pass routes it once the backlog drains
 
-#### Scenario: Concurrent workers keep the cooldown consistent
+#### Scenario: Concurrent consumers keep the cooldown consistent
 
-- **WHEN** two workers process fresh signals of one source at the same time
+- **WHEN** two consumers process fresh signals of one source at the same time
 - **THEN** both cooldown entries are recorded, neither overwriting the
   other, and a repeated `initiationId` is suppressed exactly once
 
@@ -537,7 +537,7 @@ Only the replica holding the leader Lease SHALL run housekeeping, deletes
 included. It starts and stops with the consumer pool.
 
 Housekeeping acts on a `Signal` through the consumer's work queue, so it
-never races a worker's pass. Each of its writes is conditional on the
+never races a consumer's pass. Each of its writes is conditional on the
 `resourceVersion` it read.
 
 | Bound | Rule |
@@ -584,7 +584,7 @@ No `Signal` SHALL sit in a non-terminal phase indefinitely.
 - **THEN** the exhausted claimant becomes `Failed` with the reason
   recorded, and the phase rolls up to `Routed`
 
-#### Scenario: A poison signal is dead-lettered
+#### Scenario: A poison signal ends Failed
 
 - **WHEN** every pass over a `Signal` fails and the retry deadline passes
 - **THEN** housekeeping makes every non-terminal claimant `Failed` — or the
@@ -594,7 +594,7 @@ No `Signal` SHALL sit in a non-terminal phase indefinitely.
 
 - **WHEN** a fresh signal makes its source exceed the cap on non-terminal
   `Signal`s
-- **THEN** the oldest non-terminal `Signal` not held by a worker is evicted, counted
+- **THEN** the oldest non-terminal `Signal` not held by a consumer is evicted, counted
   and logged — `Dropped` with reason `overflow` if it never fanned out
 
 #### Scenario: Overflow after fan-out exhausts claimants, never re-drops
@@ -636,7 +636,7 @@ code.
 | Failed TTL | `signalTtlFailed` | `SIGNAL_TTL_FAILED` | `72h` |
 | retry deadline | `signalRetryDeadline` | `SIGNAL_RETRY_DEADLINE` | `1h` |
 | live signals per source | `maxSignalsPerSource` | `MAX_SIGNALS_PER_SOURCE` | `200` |
-| consumer workers | `signalConsumerConcurrency` | `SIGNAL_CONSUMER_CONCURRENCY` | `4` |
+| consumer consumers | `signalConsumerConcurrency` | `SIGNAL_CONSUMER_CONCURRENCY` | `4` |
 
 - The keys sit beside `signalTtlDropped`, `signalTtlRouted`,
   `signalRetryDeadline` and `maxSignalsPerSource` in the chart's values.
@@ -690,7 +690,7 @@ from duplicating an effect.
 ### Requirement: Consumption is separable from publication
 
 Publication SHALL NOT depend on the consumer running. A `Signal` taken by no
-worker SHALL wait, non-terminal, and SHALL be processed as soon as the pool
+consumer SHALL wait, non-terminal, and SHALL be processed as soon as the pool
 runs.
 
 This is the seam a later change gates — pausing consumption is the pool not
@@ -726,7 +726,7 @@ SHALL hold read-only access at most.
 
 Cooldown SHALL be consulted by the consumer, and SHALL keep its key and its
 persistence on the `SignalSource` — this change moves neither. The check and
-the spend SHALL be one atomic step per source, so concurrent workers never
+the spend SHALL be one atomic step per source, so concurrent consumers never
 both pass the same `initiationId`.
 
 A cooldown-suppressed signal SHALL become `Dropped` with reason `cooldown`,

@@ -35,10 +35,10 @@ This change is that enabler, and ONLY that enabler.
   `signalId`, so publish is idempotent: any number of signals with the same
   `(source, signalId)` land as one `Signal`. Every shipped signal adapter
   sends one.
-- **Consume.** The leader runs a pool of concurrent workers, a competing
+- **Consume.** The leader runs a pool of concurrent consumers, a competing
   consumer on the leader. The manager's cooldown map, channel-operation queue
   and activity log are per-process and filled only by the leader, so the
-  consumer runs there. One worker holds a `Signal` at a time, and messages of
+  consumer runs there. One consumer holds a `Signal` at a time, and messages of
   one conversation are processed in arrival order. A leader change resumes
   every unfinished `Signal` from its CR. The `Signal` records who consumed
   it and how many attempts it took.
@@ -130,7 +130,8 @@ This change is that enabler, and ONLY that enabler.
   it is spent by the consumer under optimistic concurrency, and a suppression
   is recorded as `Dropped` (reason cooldown).
 - `signals/{cron,alertmanager,k8s-events,ha,pulse,telegram}/`: each sends a
-  stable `signalId`.
+  stable `signalId`. The Telegram adapter has no spec of its own, so its
+  requirement lives in `chat-signal-origination`.
 - `chart/templates/` and `chart/values.yaml`: `signals` RBAC (full on the
   manager, read-only on the console), and the settings `signalTtlRouted`,
   `signalTtlDropped`, `signalTtlFailed`, `signalRetryDeadline`,
@@ -164,7 +165,7 @@ This change is that enabler, and ONLY that enabler.
 **Tests**:
 
 - Manager unit and envtest: publish idempotency, the consumer's routing
-  decisions, per-conversation ordering under concurrent workers, and
+  decisions, per-conversation ordering under concurrent consumers, and
   leader-only housekeeping.
 - Conformance suite: the `signalId` and re-send-after-`5xx` checks, and a
   Pulse case.
