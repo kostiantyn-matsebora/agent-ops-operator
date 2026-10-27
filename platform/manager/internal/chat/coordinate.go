@@ -147,7 +147,37 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	if err := r.bumpAgentsInvoked(ctx, caller.Name); err != nil {
 		return nil, err
 	}
+	if err := r.closeMemberIfCallerClosed(ctx, caller.Name, created); err != nil {
+		return nil, err
+	}
 	return &InvokeResult{Member: created.Name, Created: true}, nil
+}
+
+// closeMemberIfCallerClosed is the other half of ErrCallerClosed. The check at
+// the top of InvokeMember reads the caller BEFORE the member exists, so a close
+// that lands between that read and the member's creation would leave one open
+// member under a closed ancestor.
+//
+// Re-reading the caller AFTER the member exists settles it either way. If the
+// close landed first, this sees Closed and closes the member. If it lands
+// later, its second sweep runs after the close write, which is after this
+// read, which is after the member was created, so the sweep finds it.
+func (r *Router) closeMemberIfCallerClosed(ctx context.Context, callerName string, member *agentopsv1alpha1.Conversation) error {
+	var fresh agentopsv1alpha1.Conversation
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: callerName}, &fresh); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if fresh.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		return nil
+	}
+	reason := fresh.Status.CloseReason
+	if reason == "" {
+		reason = "the calling conversation closed"
+	}
+	if err := r.closeConversationReason(ctx, member, reason); err != nil {
+		return err
+	}
+	return ErrCallerClosed
 }
 
 // findAgentEntry returns the named `agents[]` entry, or nil.

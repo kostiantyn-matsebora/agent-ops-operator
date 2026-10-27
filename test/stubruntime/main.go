@@ -22,8 +22,9 @@
 //	stall           hold the unit past the idle TTL (never report)
 //	storage-outage  report the context as unreachable — the breaker's input
 //	calls           report two model turns and one MCP tool call, with a fixed result
-//	hold <seconds>  keep the unit inflight that long (default 30), then succeed like echo — the
-//	                window a lane needs to act on a run while it is still running
+//	hold <seconds>  keep the unit inflight that long (default 30), then report success saying
+//	                how long it held — the window a lane needs to act on a run while it is
+//	                still running
 //
 // Anything else is `echo`. Identical input, identical report: no clock, no
 // randomness and no pod name reaches a result.
@@ -326,7 +327,7 @@ func run(control, convo, pod string, ttl time.Duration, exit func(int)) error {
 				return nil
 			}
 		}
-		if d == "hold" {
+		if ok && d == "hold" {
 			_, rest := directive(input(u))
 			time.Sleep(holdFor(rest))
 		}

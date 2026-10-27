@@ -55,7 +55,7 @@ manager-origin input with prose is still a turn without a move.
 
 #### Scenario: A root with no stored context
 - **WHEN** the manager appends the corrective input to a root that has no stored runtime context
-- **THEN** the input is still of type `reply`, and the next work unit degrades to a fresh task around its text
+- **THEN** the input is still of type `reply`, and the next work unit has no context handle to resume, so it is framed as a fresh turn around the input's text
 
 #### Scenario: A manager-origin input reaches every bound channel
 

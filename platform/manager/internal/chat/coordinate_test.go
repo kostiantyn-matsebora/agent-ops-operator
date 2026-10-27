@@ -1039,6 +1039,57 @@ func TestDescendantsOfALeafIsEmpty(t *testing.T) {
 	}
 }
 
+// A close that lands after InvokeMember's first read of the caller and before
+// the member exists must not leave an open member under a closed ancestor. The
+// re-read after creation sees the close and closes the member.
+func TestInvokeMemberClosesTheMemberWhenTheCallerClosedMeanwhile(t *testing.T) {
+	entry := agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does the work",
+		CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	}
+	co := testCoordinator("co-a", entry)
+	caller := coordinatorRoot("root-1", "co-a")
+	var closeCaller func()
+	r, c := coordFixtureIntercepting(t, interceptor.Funcs{
+		Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			err := cli.Create(ctx, obj, opts...)
+			if _, isConv := obj.(*agentopsv1alpha1.Conversation); isConv && obj.GetName() != "root-1" && closeCaller != nil {
+				closeCaller()
+			}
+			return err
+		},
+	}, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
+	closeCaller = func() {
+		var cur agentopsv1alpha1.Conversation
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNS, Name: "root-1"}, &cur); err != nil {
+			t.Fatal(err)
+		}
+		cur.Status.Phase = agentopsv1alpha1.ConversationClosed
+		cur.Status.CloseReason = "resolved: done"
+		if err := c.Status().Update(context.Background(), &cur); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := r.InvokeMember(context.Background(), caller, "worker", "task")
+	if err != ErrCallerClosed {
+		t.Fatalf("want ErrCallerClosed, got %v", err)
+	}
+	var list agentopsv1alpha1.ConversationList
+	if err := c.List(context.Background(), &list, client.InNamespace(testNS)); err != nil {
+		t.Fatal(err)
+	}
+	for i := range list.Items {
+		m := &list.Items[i]
+		if m.Name == "root-1" {
+			continue
+		}
+		if m.Status.Phase != agentopsv1alpha1.ConversationClosed || m.Status.CloseReason != "resolved: done" {
+			t.Fatalf("member %s must be closed with the caller's reason, phase=%s reason=%q", m.Name, m.Status.Phase, m.Status.CloseReason)
+		}
+	}
+}
+
 // Closed is inert. A closed caller creates no member, so the second sweep a
 // cascading close makes after the ancestor closes is the last word.
 func TestInvokeMemberRefusesAClosedCaller(t *testing.T) {

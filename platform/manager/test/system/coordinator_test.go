@@ -89,18 +89,26 @@ func TestCoordinatorModeInvokeAndMemberResultRouting(t *testing.T) {
 	// Member-result routing (coordination-loop): the member's result reaches
 	// the ROOT as an ordinary routed input — a second run on the root, never
 	// a side channel.
-	root = e.WaitRun(t, root.Name, 2, 3*time.Minute)
-	foundRouted := false
-	for _, r := range root.Status.Runs {
-		for _, in := range r.Inputs {
-			if strings.Contains(in.Text, "domain-task-"+stamp) {
-				foundRouted = true
+	//
+	// The scripted root only echoes and makes no move, so the manager also
+	// hands its first turn back (move-per-turn). That corrective run can come
+	// before or after the member's result, so this waits for the run that
+	// CONSUMED the result rather than counting runs.
+	waitFor(t, "a root run consuming the member's result", 3*time.Minute, func() (bool, error) {
+		c, err := e.K.Conversation(ctx, root.Name)
+		if err != nil {
+			return false, err
+		}
+		root = c
+		for _, r := range c.Status.Runs {
+			for _, in := range r.Inputs {
+				if strings.Contains(in.Text, "domain-task-"+stamp) {
+					return true, nil
+				}
 			}
 		}
-	}
-	if !foundRouted {
-		t.Fatalf("the member's result must reach the root as an ordinary routed input, root runs: %+v", root.Status.Runs)
-	}
+		return false, nil
+	})
 }
 
 // 11.2 + 11.3 The self-heal reaper's survey against a live cluster

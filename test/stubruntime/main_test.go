@@ -169,3 +169,47 @@ func TestHoldDirectiveNamesItsWindowAndSucceeds(t *testing.T) {
 		t.Fatalf("a non-number falls back to thirty seconds, got %s", got)
 	}
 }
+
+// The idle clock measures time spent WAITING for work, so it restarts when a
+// report lands. A hold longer than the TTL must not end the pod the moment it
+// reports: the loop keeps polling for about one more TTL.
+func TestIdleClockRestartsWhenAHeldRunReports(t *testing.T) {
+	withHome(t)
+	var mu sync.Mutex
+	served := false
+	var reportedAt time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/work":
+			if served {
+				w.WriteHeader(204)
+				return
+			}
+			served = true
+			_ = json.NewEncoder(w).Encode(unit{RunID: "r1", Convo: "c", PromptVars: map[string]string{"USER_TASK": "hold 1"}})
+		case "/work/done":
+			reportedAt = time.Now()
+			w.WriteHeader(204)
+		}
+	}))
+	defer srv.Close()
+
+	ttl := 700 * time.Millisecond // shorter than the one-second hold
+	exited := make(chan time.Time, 1)
+	go func() { _ = run(srv.URL, "c", "pod-1", ttl, func(int) { exited <- time.Now() }) }()
+	select {
+	case at := <-exited:
+		mu.Lock()
+		defer mu.Unlock()
+		if reportedAt.IsZero() {
+			t.Fatal("the held run never reported")
+		}
+		if waited := at.Sub(reportedAt); waited < ttl-100*time.Millisecond {
+			t.Fatalf("the pod exited %s after reporting, it must wait about one TTL (%s) first", waited, ttl)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the loop never exited on idle")
+	}
+}

@@ -77,7 +77,7 @@ Details:
   conflict, so a concurrent `/work/done` racing the last verb never loses
   the mark. Lost mark = false miss, which is the one failure to design out.
 
-### D-B — The judgement runs in `/work/done`, after the record, before the phase
+### D-B — The judgement runs in `/work/done`, before the record
 
 Order inside `handleWorkDone` for a root (`spec.coordinatorRef != nil`):
 
@@ -275,7 +275,8 @@ Unchanged.
 
 Rollback: roll the previous manager. An unread `inflight.moved` and an
 unknown origin value are ignored by the older binary. Conversations keep
-working. A corrective input already queued dispatches as a plain task.
+working. A corrective input already queued is a `reply`, which an older
+manager dispatches as it dispatches any reply.
 
 ## Open Questions
 
