@@ -327,7 +327,7 @@ func run(control, convo, pod string, ttl time.Duration, exit func(int)) error {
 				return nil
 			}
 		}
-		if ok && d == "hold" {
+		if ok && d == "hold" && r.Status == "succeeded" {
 			_, rest := directive(input(u))
 			time.Sleep(holdFor(rest))
 		}

@@ -245,6 +245,7 @@ The two cover each other:
   after the member existed, and finds it.
 
 No third sweep is needed.
+
 `CloseBudgetExceeded` already closes members before escalating the root.
 Unchanged.
 
