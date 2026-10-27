@@ -124,10 +124,10 @@
 - [x] 9.2 Extend the same lane with a root whose run calls `invoke`: assert
       no corrective input is appended and `inflight.moved` is consumed by
       completion.
-- [x] 9.3 Run the full system pack against THIS WORKTREE's chart
+- [ ] 9.3 Run the full system pack against THIS WORKTREE's chart
       (`--state-values-set chartPath=...`), not the released one. Verify:
       pack green, run id recorded here.
-      Run locally at the full tier on a fresh k3d cluster, images built
+      NOT YET GREEN, so left open. Run locally at the full tier on a fresh k3d cluster, images built
       from this worktree, at the commit that added the invoke re-check:
       33 passed, 2 skipped (the real-runtime lanes, no credential), 1 failed.
       The one failure is `TestImagePullThroughAuthenticatedRegistry`, whose

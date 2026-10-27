@@ -232,10 +232,19 @@ from the open members. Already-closed members are skipped as today.
 A second sweep runs after the ancestor closes. A run on the still-open
 ancestor may have invoked a member after the first walk listed.
 
-`invoke` refuses a Closed caller (`ErrCallerClosed`, HTTP 403). Closed is
-inert, so nothing is created under a conversation once its close lands and the
-second sweep is the last word.
+`invoke` refuses a Closed caller (`ErrCallerClosed`, HTTP 403).
 
+A call that read its caller as open just before the close landed re-reads the
+caller after it created the member. It closes that member with the caller's
+reason when it finds the caller Closed.
+
+The two cover each other:
+
+- If the close landed before the re-read, the call closes the member.
+- If it lands after, the second sweep runs after the close write, which is
+  after the member existed, and finds it.
+
+No third sweep is needed.
 `CloseBudgetExceeded` already closes members before escalating the root.
 Unchanged.
 
