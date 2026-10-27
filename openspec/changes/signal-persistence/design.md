@@ -296,9 +296,10 @@ With a durable record, dropping an alert because 50 conversations are
   them. The cap now evicts the oldest non-terminal `Signal`, so a long flap
   can churn it. The implementer confirms 200 is still sensible.
 - **A body-hash `signalId` deduplicates a re-notification.** Alertmanager and
-  Pulse repeat an identical body every `repeat_interval`. Dedup would drop
-  that recurrence for the `Signal`'s life. D-8 and tasks record the
-  decision.
+  Pulse repeat an identical body every `repeat_interval`, and dedup would drop
+  that recurrence while the earlier `Signal` exists. Accepted: a changed
+  alert carries a new `startsAt` or `endsAt`, so its hash differs, and a
+  duplicate conversation input is the worse failure. Decided by the user.
 - **Overflow can evict a `Signal` with a `Routing` claimant mid-retry.**
   Accepted, deliberately. The cap protects etcd, and the eviction is counted
   and logged.
@@ -330,6 +331,4 @@ Additive. New CRD only.
 
 ## Open Questions
 
-- Whether a body-hash `signalId` for Alertmanager and Pulse is wanted, or
-  whether those adapters should add a delivery time bucket and lose retry
-  stability. Settled by the user before implementation.
+None.

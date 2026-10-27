@@ -37,7 +37,7 @@
 - [ ] 5.2 `signals/k8s-events`: send `<source>/<event uid>/<count>`, and verify a unit test
 - [ ] 5.3 `signals/ha`: send `<initiationId>#<unix seconds the dwell cycle opened>`, and verify a unit test
 - [ ] 5.4 `signals/telegram`: send `tg-<source>-<update id>` for a message and `tg-cb-<source>-<callback id>` for a tap, and verify a unit test
-- [ ] 5.5 `signals/alertmanager` and `signals/pulse`: DECISION FIRST. A body-hash `signalId` deduplicates an identical re-notification for the `Signal`'s life. Ask the user whether that is wanted or whether a delivery time bucket is added, then implement the answer and verify a unit test
+- [ ] 5.5 `signals/alertmanager`: send `am:<sha256 of the raw body>:<alert fingerprint or index>`, and `signals/pulse`: send `pulse:<sha256 of the verified body>`, a body hash with no time bucket (decided), and verify a unit test per adapter for a retry repeating the id and a changed body changing it
 - [ ] 5.6 Extend `platform/manager/test/conformance/`: `fakemanager.go` answers `{"queued": n}` with no `conversations`, every adapter sends a non-empty `signalId` and the SAME one after a `5xx`, a different message gets a different one, and add the missing Pulse case
 
 ## 6. Console signals view
