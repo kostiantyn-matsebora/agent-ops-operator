@@ -114,8 +114,9 @@ read sources from here, never assume connectivity or credentials yourself).
 
 **`signalId` is your id for this one MESSAGE** (`ADP-9`, `API-7`). Keep it
 stable across every re-send of the message, including after a `5xx`, and
-different for two messages even when they share an `initiationId`. The
-manager stores a message once per `signalId`. A stable cron tick, a webhook
+different for two messages even when they share an `initiationId`.
+
+The manager stores a message once per `signalId`. A stable cron tick, a webhook
 body hash or an event uid and count all work.
 
 **`initiationId` is your own correlation id for the THING, not the
@@ -171,16 +172,16 @@ for the full request and response shape.
 
 **The response acknowledges storage, not routing** (`API-2`). `200` is
 `{"queued": n}`: the signals the manager stored or deduplicated. It routes
-them afterwards, so the response never says whether a conversation opened or
-the source was wired. A `5xx` means nothing was acknowledged: re-send the
-batch with the same ids.
+them afterwards, so the response never says whether a conversation opened.
+
+A `5xx` means nothing was acknowledged: re-send the batch with the same ids.
 
 **At-least-once is safe** (`API-3`). A re-send with the same `signalId` is
 stored once, and one without is resolved by the source's cooldown, so never
 build your own dedup to avoid them.
 
 **Verify:** post the same signal, `signalId` included, twice in a row. Both
-posts answer `queued: 1`, and `kubectl get signals` lists one `Signal`.
+posts answer `queued: 1`, and `kubectl -n agent-ops get signals` lists one `Signal`.
 
 Repeating the same `initiationId` after `cooldownHours` has passed still
 lands on that conversation while it stays OPEN — closing it first opens a

@@ -229,6 +229,17 @@ func TestConsumerRoutesAndRecordsTheTerminalWrite(t *testing.T) {
 		got.Status.Claimants[0].ConversationRef == nil {
 		t.Fatalf("claimant not recorded Routed with its conversation: %+v", got.Status.Claimants)
 	}
+	assertRoutedConversation(t, e, got)
+	if s := e.source("alerts"); s.Status.ReceivedTotal != 1 || s.Status.LastReceived == nil {
+		t.Fatalf("the source's receipt counters must move once: %+v", s.Status)
+	}
+	if e.events(activity.KindSignalClaimed, "") != 1 {
+		t.Fatal("the claim must be recorded")
+	}
+}
+
+func assertRoutedConversation(t *testing.T, e *sigEnv, got *agentopsv1alpha1.Signal) {
+	t.Helper()
 	convs := e.conversations()
 	if len(convs) != 1 || convs[0].Name != got.Status.Claimants[0].ConversationRef.Name {
 		t.Fatalf("want exactly the recorded conversation, got %d", len(convs))
@@ -247,12 +258,6 @@ func TestConsumerRoutesAndRecordsTheTerminalWrite(t *testing.T) {
 	ins := e.inputs()
 	if len(ins) != 1 || ins[0].Spec.Severity != agentopsv1alpha1.SeverityWarning || ins[0].Spec.Payload != "payload of sig-1" {
 		t.Fatalf("input not carrying the message: %+v", ins)
-	}
-	if s := e.source("alerts"); s.Status.ReceivedTotal != 1 || s.Status.LastReceived == nil {
-		t.Fatalf("the source's receipt counters must move once: %+v", s.Status)
-	}
-	if e.events(activity.KindSignalClaimed, "") != 1 {
-		t.Fatal("the claim must be recorded")
 	}
 }
 
@@ -324,16 +329,48 @@ func TestConsumerDropsUnclaimedLoudly(t *testing.T) {
 	}
 }
 
+type chatDropCase struct {
+	name    string
+	objs    func(src *agentopsv1alpha1.SignalSource) []client.Object
+	backlog int
+	payload string
+	reason  agentopsv1alpha1.SignalDropReason
+	code    string
+	notice  string
+}
+
+func runChatDropCase(t *testing.T, tc chatDropCase) {
+	src := fxSource("chat")
+	ch := fxChannel("surface")
+	objs := []client.Object{src, ch, chatSignal("sig-1", src, "c-1", "surface", tc.payload, time.Now())}
+	objs = append(objs, tc.objs(src)...)
+	for i := 0; i < tc.backlog; i++ {
+		objs = append(objs, pendingConversation(fmt.Sprintf("pending-%d", i)))
+	}
+	e := newSigEnv(t, objs...)
+	e.reconcile("sig-1")
+
+	got := e.signal("sig-1")
+	if got.Status.Phase != agentopsv1alpha1.SignalDropped || got.Status.Reason != tc.reason {
+		t.Fatalf("want Dropped/%s, got %+v", tc.reason, got.Status)
+	}
+	if e.events(activity.KindSignalDropped, tc.code) != 1 {
+		t.Fatalf("want one %s drop event", tc.code)
+	}
+	op := e.ops.Claim(ch.Spec.Adapter)
+	if op == nil || op.Message == nil || !strings.Contains(op.Message.Body, tc.notice) {
+		t.Fatalf("the surface must be told %q, got %+v", tc.notice, op)
+	}
+	if op.Message.InReplyTo != "msg-sig-1" {
+		t.Fatalf("the notice must answer the message that provoked it, got %q", op.Message.InReplyTo)
+	}
+	if tc.name == "ambiguous" && len(op.Message.Choices) != 2 {
+		t.Fatalf("the ambiguous notice offers each claimant as a choice: %+v", op.Message.Choices)
+	}
+}
+
 func TestConsumerChatDropsTellTheSurface(t *testing.T) {
-	cases := []struct {
-		name    string
-		objs    func(src *agentopsv1alpha1.SignalSource) []client.Object
-		backlog int
-		payload string
-		reason  agentopsv1alpha1.SignalDropReason
-		code    string
-		notice  string
-	}{
+	cases := []chatDropCase{
 		{"unclaimed", func(*agentopsv1alpha1.SignalSource) []client.Object { return nil }, 0, "hello",
 			agentopsv1alpha1.SignalDropUnclaimed, activity.CodeUnclaimed, "Nothing here is wired"},
 		{"ambiguous", func(*agentopsv1alpha1.SignalSource) []client.Object {
@@ -350,35 +387,7 @@ func TestConsumerChatDropsTellTheSurface(t *testing.T) {
 		}, 0, "/nope do it", agentopsv1alpha1.SignalDropUnclaimed, activity.CodeUnclaimed, "Unknown pipeline"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			src := fxSource("chat")
-			ch := fxChannel("surface")
-			objs := []client.Object{src, ch, chatSignal("sig-1", src, "c-1", "surface", tc.payload, time.Now())}
-			objs = append(objs, tc.objs(src)...)
-			for i := 0; i < tc.backlog; i++ {
-				objs = append(objs, pendingConversation(fmt.Sprintf("pending-%d", i)))
-			}
-			e := newSigEnv(t, objs...)
-			e.reconcile("sig-1")
-
-			got := e.signal("sig-1")
-			if got.Status.Phase != agentopsv1alpha1.SignalDropped || got.Status.Reason != tc.reason {
-				t.Fatalf("want Dropped/%s, got %+v", tc.reason, got.Status)
-			}
-			if e.events(activity.KindSignalDropped, tc.code) != 1 {
-				t.Fatalf("want one %s drop event", tc.code)
-			}
-			op := e.ops.Claim(ch.Spec.Adapter)
-			if op == nil || op.Message == nil || !strings.Contains(op.Message.Body, tc.notice) {
-				t.Fatalf("the surface must be told %q, got %+v", tc.notice, op)
-			}
-			if op.Message.InReplyTo != "msg-sig-1" {
-				t.Fatalf("the notice must answer the message that provoked it, got %q", op.Message.InReplyTo)
-			}
-			if tc.name == "ambiguous" && len(op.Message.Choices) != 2 {
-				t.Fatalf("the ambiguous notice offers each claimant as a choice: %+v", op.Message.Choices)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runChatDropCase(t, tc) })
 	}
 }
 
@@ -486,37 +495,42 @@ func TestConsumerRedoAfterALostStatusWriteCreatesNothingTwice(t *testing.T) {
 	// snapshot-then-route ordering means a real crash leaves the snapshot. Wipe
 	// to the snapshot to model that, then to nothing for the harsher case.
 	for _, keepSnapshot := range []bool{true, false} {
-		sig := e.signal("sig-1")
-		sig.Status = agentopsv1alpha1.SignalStatus{}
-		if keepSnapshot {
-			sig.Status.Claimants = []agentopsv1alpha1.SignalClaimant{claimant("ops", agentopsv1alpha1.ClaimantRouting)}
-		}
-		if err := e.c.Status().Update(context.Background(), sig); err != nil {
+		redoAfterLostStatus(t, e, src, keepSnapshot, convs, ins)
+	}
+}
+
+func redoAfterLostStatus(t *testing.T, e *sigEnv, src *agentopsv1alpha1.SignalSource, keepSnapshot bool, convs, ins int) {
+	t.Helper()
+	sig := e.signal("sig-1")
+	sig.Status = agentopsv1alpha1.SignalStatus{}
+	if keepSnapshot {
+		sig.Status.Claimants = []agentopsv1alpha1.SignalClaimant{claimant("ops", agentopsv1alpha1.ClaimantRouting)}
+	}
+	if err := e.c.Status().Update(context.Background(), sig); err != nil {
+		t.Fatal(err)
+	}
+	if !keepSnapshot {
+		// a new leader has no memory of the old one's cooldown spend
+		e.r.Cooldowns = ingest.NewCooldownBook()
+		if err := e.c.Get(context.Background(), types.NamespacedName{Namespace: sigNS, Name: "alerts"}, src); err != nil {
 			t.Fatal(err)
 		}
-		if !keepSnapshot {
-			// a new leader has no memory of the old one's cooldown spend
-			e.r.Cooldowns = ingest.NewCooldownBook()
-			if err := e.c.Get(context.Background(), types.NamespacedName{Namespace: sigNS, Name: "alerts"}, src); err != nil {
-				t.Fatal(err)
-			}
-			src.Status.Cooldown = nil
-			if err := e.c.Status().Update(context.Background(), src); err != nil {
-				t.Fatal(err)
-			}
+		src.Status.Cooldown = nil
+		if err := e.c.Status().Update(context.Background(), src); err != nil {
+			t.Fatal(err)
 		}
-		e.reconcile("sig-1")
-		got := e.signal("sig-1")
-		if got.Status.Phase != agentopsv1alpha1.SignalRouted {
-			t.Fatalf("keepSnapshot=%v: the repeated pass records Routed, got %+v", keepSnapshot, got.Status)
-		}
-		if len(e.conversations()) != convs || len(e.inputs()) != ins {
-			t.Fatalf("keepSnapshot=%v: a repeated pass must create nothing twice (convs %d->%d, inputs %d->%d)",
-				keepSnapshot, convs, len(e.conversations()), ins, len(e.inputs()))
-		}
-		if conv := e.conversations()[0]; len(conv.Spec.Inputs) != 1 {
-			t.Fatalf("keepSnapshot=%v: the input is queued once, got %d", keepSnapshot, len(conv.Spec.Inputs))
-		}
+	}
+	e.reconcile("sig-1")
+	got := e.signal("sig-1")
+	if got.Status.Phase != agentopsv1alpha1.SignalRouted {
+		t.Fatalf("keepSnapshot=%v: the repeated pass records Routed, got %+v", keepSnapshot, got.Status)
+	}
+	if len(e.conversations()) != convs || len(e.inputs()) != ins {
+		t.Fatalf("keepSnapshot=%v: a repeated pass must create nothing twice (convs %d->%d, inputs %d->%d)",
+			keepSnapshot, convs, len(e.conversations()), ins, len(e.inputs()))
+	}
+	if conv := e.conversations()[0]; len(conv.Spec.Inputs) != 1 {
+		t.Fatalf("keepSnapshot=%v: the input is queued once, got %d", keepSnapshot, len(conv.Spec.Inputs))
 	}
 }
 

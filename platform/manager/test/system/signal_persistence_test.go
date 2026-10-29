@@ -417,21 +417,7 @@ func TestSignalPersistenceAddressedConsoleCommandRoutesNamedPipeline(t *testing.
 	setupDedicatedSignalSource(t, ctx, e, name)
 
 	start := time.Now().Add(-5 * time.Second)
-	t.Cleanup(func() {
-		items, err := e.K.Signals(context.Background())
-		if err != nil {
-			return
-		}
-		for i := range items {
-			s := &items[i]
-			if s.Spec.SourceRef.Name == SourceConsole && claimantNamed(s, name) != nil {
-				if c := claimantNamed(s, name); c.ConversationRef != nil {
-					_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: c.ConversationRef.Name}})
-				}
-				_ = e.K.Delete(context.Background(), s)
-			}
-		}
-	})
+	t.Cleanup(func() { cleanupConsoleSignals(e, name) })
 
 	stamp := fmt.Sprint(time.Now().UnixNano())
 	var code int
@@ -446,18 +432,10 @@ func TestSignalPersistenceAddressedConsoleCommandRoutesNamedPipeline(t *testing.
 
 	var sig *agentopsv1alpha1.Signal
 	waitFor(t, "a console Signal addressed to "+name+" to reach Routed", 2*time.Minute, func() (bool, error) {
-		items, err := e.K.Signals(ctx)
-		if err != nil {
-			return false, err
-		}
-		for i := range items {
-			s := &items[i]
-			if s.Spec.SourceRef.Name == SourceConsole && s.CreationTimestamp.Time.After(start) && claimantNamed(s, name) != nil {
-				sig = s
-				return s.Status.Phase == agentopsv1alpha1.SignalRouted, nil
-			}
-		}
-		return false, nil
+		var done bool
+		var err error
+		sig, done, err = addressedConsoleSignalRouted(ctx, e, name, start, sig)
+		return done, err
 	})
 	assertClaimant(t, sig, name, agentopsv1alpha1.ClaimantRouted)
 	c := claimantNamed(sig, name)
@@ -471,6 +449,43 @@ func TestSignalPersistenceAddressedConsoleCommandRoutesNamedPipeline(t *testing.
 	if conv.Spec.PipelineRef == nil || conv.Spec.PipelineRef.Name != name {
 		t.Fatalf("the addressed conversation must name pipeline %s, got %+v", name, conv.Spec.PipelineRef)
 	}
+}
+
+// cleanupConsoleSignals deletes the console Signals claimed by name, and the
+// conversations they opened.
+func cleanupConsoleSignals(e *Env, name string) {
+	items, err := e.K.Signals(context.Background())
+	if err != nil {
+		return
+	}
+	for i := range items {
+		s := &items[i]
+		c := claimantNamed(s, name)
+		if s.Spec.SourceRef.Name != SourceConsole || c == nil {
+			continue
+		}
+		if c.ConversationRef != nil {
+			_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: c.ConversationRef.Name}})
+		}
+		_ = e.K.Delete(context.Background(), s)
+	}
+}
+
+// addressedConsoleSignalRouted finds the console Signal addressed to name
+// created after start and reports whether it reached Routed. With none found
+// it returns prev unchanged.
+func addressedConsoleSignalRouted(ctx context.Context, e *Env, name string, start time.Time, prev *agentopsv1alpha1.Signal) (*agentopsv1alpha1.Signal, bool, error) {
+	items, err := e.K.Signals(ctx)
+	if err != nil {
+		return prev, false, err
+	}
+	for i := range items {
+		s := &items[i]
+		if s.Spec.SourceRef.Name == SourceConsole && s.CreationTimestamp.Time.After(start) && claimantNamed(s, name) != nil {
+			return s, s.Status.Phase == agentopsv1alpha1.SignalRouted, nil
+		}
+	}
+	return prev, false, nil
 }
 
 // claimantNamed returns sig's claimant for name, nil if absent.

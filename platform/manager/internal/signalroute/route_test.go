@@ -42,7 +42,8 @@ func TestAddressedTargetParsesOnlyAChatTaskForNamedTarget(t *testing.T) {
 func TestInputNameIsDerivedFromTheSignalAndClaimant(t *testing.T) {
 	p := agentopsv1alpha1.ClaimantRef{Kind: agentopsv1alpha1.ClaimantKindPipeline, Name: "ops"}
 	c := agentopsv1alpha1.ClaimantRef{Kind: agentopsv1alpha1.ClaimantKindCoordinator, Name: "ops"}
-	if InputName("sig-1", p) != InputName("sig-1", p) {
+	first, again := InputName("sig-1", p), InputName("sig-1", p)
+	if first != again {
 		t.Fatal("must be deterministic")
 	}
 	if InputName("sig-1", p) == InputName("sig-1", c) {

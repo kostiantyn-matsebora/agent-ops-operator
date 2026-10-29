@@ -10,7 +10,8 @@ func TestCooldownBookBuildsOncePerSourceAndReportsSorted(t *testing.T) {
 	b := NewCooldownBook()
 	built := 0
 	build := func() *Cooldown { built++; return NewCooldown(time.Hour) }
-	if b.For("b", build) != b.For("b", build) || built != 1 {
+	first, second := b.For("b", build), b.For("b", build)
+	if first != second || built != 1 {
 		t.Fatal("one Cooldown per source")
 	}
 	b.For("a", build).Fresh([]string{"x"})
@@ -28,7 +29,7 @@ func TestCooldownBookBuildsOncePerSourceAndReportsSorted(t *testing.T) {
 func TestCooldownBookLockSerializesOneSource(t *testing.T) {
 	b := NewCooldownBook()
 	var wg sync.WaitGroup
-	inside, max := 0, 0
+	inside, peak := 0, 0
 	var mu sync.Mutex
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
@@ -37,8 +38,8 @@ func TestCooldownBookLockSerializesOneSource(t *testing.T) {
 			unlock := b.Lock("s")
 			mu.Lock()
 			inside++
-			if inside > max {
-				max = inside
+			if inside > peak {
+				peak = inside
 			}
 			mu.Unlock()
 			time.Sleep(time.Millisecond)
@@ -49,8 +50,8 @@ func TestCooldownBookLockSerializesOneSource(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if max != 1 {
-		t.Fatalf("%d holders at once, want 1", max)
+	if peak != 1 {
+		t.Fatalf("%d holders at once, want 1", peak)
 	}
 	// a different source is independent
 	u1 := b.Lock("a")

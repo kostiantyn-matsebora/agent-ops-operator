@@ -72,10 +72,10 @@ an earlier one. The `Conversation` accumulates an `initiationId`. The optional
 attempt. `status.phase` is the roll-up over it — `Pending`, `Routed`,
 `PartiallyRouted`, `Dropped` or `Failed` — recomputed on every status
 write, never authored on its own. A `Dropped` phase carries `status.reason`
-(`unclaimed`, `ambiguous`, `cooldown`, `capacity`, `overflow` or `exhausted`).
+(`unclaimed`, `ambiguous`, `cooldown`, `capacity`, `unaddressable`, `overflow` or `exhausted`).
 The consumer and the leader's housekeeping are the only writers of status.
 
 The phase vocabulary, the claimant states, the bounds and the GC windows
-are [Concepts](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/docs/concepts.md)'s
+are [Concepts]({{ '/concepts/' | relative_url }})'s
 to state in full. No component but the manager writes this kind — every
 other reader, the console included, holds `get`/`list`/`watch` at most.
