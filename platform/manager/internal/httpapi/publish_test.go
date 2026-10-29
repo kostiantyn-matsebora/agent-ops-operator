@@ -52,6 +52,12 @@ func TestPublishStoresASignalOwnedBySourceAndRoutesNothing(t *testing.T) {
 		t.Fatalf("an unrouted-at-publish signal carries no reason: %v", resp)
 	}
 
+	assertStoredSignal(t, c, source)
+	assertNothingRouted(t, s, c, source)
+}
+
+func assertStoredSignal(t *testing.T, c client.Client, source *agentopsv1alpha1.SignalSource) {
+	t.Helper()
 	sigs := listSignals(t, c)
 	if len(sigs) != 1 {
 		t.Fatalf("want 1 Signal, got %d", len(sigs))
@@ -71,7 +77,10 @@ func TestPublishStoresASignalOwnedBySourceAndRoutesNothing(t *testing.T) {
 	if len(got.OwnerReferences) != 1 || got.OwnerReferences[0].Kind != "SignalSource" || got.OwnerReferences[0].Name != source.Name {
 		t.Fatalf("the Signal must be owned by its SignalSource: %+v", got.OwnerReferences)
 	}
+}
 
+func assertNothingRouted(t *testing.T, s *Server, c client.Client, source *agentopsv1alpha1.SignalSource) {
+	t.Helper()
 	var convs agentopsv1alpha1.ConversationList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil || len(convs.Items) != 0 {
 		t.Fatalf("publication must create no conversation: %v %d", err, len(convs.Items))
@@ -399,6 +408,15 @@ func TestBoundedLabelsKeepsTheReservedSurfaceLabel(t *testing.T) {
 	}
 }
 
+func validObjectName(name string) bool {
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func TestGeneratedSignalNamesSortInPublishOrderAndAreValid(t *testing.T) {
 	prev := ""
 	for i := 0; i < 200; i++ {
@@ -406,10 +424,8 @@ func TestGeneratedSignalNamesSortInPublishOrderAndAreValid(t *testing.T) {
 		if len(name) != len("sig-")+generatedTimeLen+1+generatedSuffixLen || !strings.HasPrefix(name, "sig-") {
 			t.Fatalf("unexpected shape %q", name)
 		}
-		for _, r := range name {
-			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-				t.Fatalf("%q is not a valid object name", name)
-			}
+		if !validObjectName(name) {
+			t.Fatalf("%q is not a valid object name", name)
 		}
 		if prev != "" && name[:len(name)-generatedSuffixLen-1] < prev[:len(prev)-generatedSuffixLen-1] {
 			t.Fatalf("names must sort by time: %q after %q", name, prev)

@@ -59,19 +59,7 @@ func consumeNewSignals(before map[string]bool) {
 	for round := 0; round < 25; round++ {
 		progressed := false
 		for _, name := range fresh {
-			var sig agentopsv1alpha1.Signal
-			if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &sig); err != nil {
-				continue
-			}
-			if sig.Status.Phase == agentopsv1alpha1.SignalRouted || sig.Status.Phase == agentopsv1alpha1.SignalDropped ||
-				sig.Status.Phase == agentopsv1alpha1.SignalFailed {
-				continue
-			}
-			rv := sig.ResourceVersion
-			if _, err := consumer.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}); err != nil {
-				panic(fmt.Sprintf("consume %s: %v", name, err))
-			}
-			if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &sig); err == nil && sig.ResourceVersion != rv {
+			if consumeOnce(consumer, name) {
 				progressed = true
 			}
 		}
@@ -79,6 +67,24 @@ func consumeNewSignals(before map[string]bool) {
 			return
 		}
 	}
+}
+
+// consumeOnce reconciles one non-terminal Signal and reports whether it moved.
+func consumeOnce(consumer *controller.SignalReconciler, name string) bool {
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	var sig agentopsv1alpha1.Signal
+	if err := k8sClient.Get(context.Background(), key, &sig); err != nil {
+		return false
+	}
+	switch sig.Status.Phase {
+	case agentopsv1alpha1.SignalRouted, agentopsv1alpha1.SignalDropped, agentopsv1alpha1.SignalFailed:
+		return false
+	}
+	rv := sig.ResourceVersion
+	if _, err := consumer.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		panic(fmt.Sprintf("consume %s: %v", name, err))
+	}
+	return k8sClient.Get(context.Background(), key, &sig) == nil && sig.ResourceVersion != rv
 }
 
 // inputText is the message an input carries: inline, or — for everything the

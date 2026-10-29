@@ -143,10 +143,11 @@ Five views, one question each.
   ![Three pipelines, each showing its profile, the sources it claims, the channels it posts to, its toolsets, tools mode, MCP configs and Ready status.]({{ '/assets/img/console/configuration-light.png' | relative_url }})
 
   **Signals** are the one kind with no write path anywhere, ever — the
-  durable record of what arrived and whether it reached an agent. The list
-  shows source, phase and age, filterable by source and phase. Opening
-  one shows every claimant's state, a routed one linked to its conversation,
-  and a failed or dropped signal's reason verbatim.
+  durable record of what arrived and whether it reached an agent.
+
+  The list shows source, phase and age, filterable by source and phase.
+  Opening one shows every claimant's state, a routed one linked to its
+  conversation, and a failed or dropped signal's reason verbatim.
 
   ![The signals inventory, filterable by source and phase: one routed signal, one partially routed, one pending, and one dropped from a source no Pipeline lists.]({{ '/assets/img/console/signals-light.png' | relative_url }})
 

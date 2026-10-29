@@ -364,7 +364,9 @@ and equality reuse resolve its re-send instead.
 3. Cooldown is checked and spent, atomically per source (`cooldown`).
 4. A chat message at a full backlog drops (`capacity`). A machine signal
    stays `Routing` and waits.
-5. The claimants are snapshotted and each is routed.
+5. A chat message whose `agentops.dev/channel` label names no existing
+   `Channel` drops (`unaddressable`), since there is nowhere to answer.
+6. The claimants are snapshotted and each is routed.
 
 A chat message dropped for `unclaimed`, `ambiguous` or `capacity` has its
 surface told. The notice stays fire-and-forget, the `Signal` keeps the
@@ -402,7 +404,7 @@ authored on its own:**
 | `Pending` | no claimant has routed yet and nothing has dropped it, including a machine signal waiting on conversation capacity |
 | `Routed` | every claimant terminal, at least one `Routed` |
 | `PartiallyRouted` | at least one `Routed`, at least one still `Routing` |
-| `Dropped` | terminal before any claimant was snapshotted. `status.reason` is one of `unclaimed`, `ambiguous`, `cooldown`, `capacity`, `overflow`, `exhausted` |
+| `Dropped` | terminal before any claimant was snapshotted. `status.reason` is one of `unclaimed`, `ambiguous`, `cooldown`, `capacity`, `unaddressable`, `overflow`, `exhausted` |
 | `Failed` | every claimant terminal, none `Routed`. Surfaced as loudly as the unwired drop |
 
 The write that makes a phase terminal also records `completedAt`,

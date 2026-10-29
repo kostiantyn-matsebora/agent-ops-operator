@@ -596,9 +596,10 @@ curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
 own `Signal` CR before the response is written, and the response
 (`{"queued": n}`) acknowledges that storage, never routing. A separate
 consumer on the leader then decides the claimants, cooldown and capacity and
-routes it. A `5xx` means nothing of the failing signal was stored: re-send
-with the same ids. An optional per-message `signalId` deduplicates the
-re-send.
+routes it.
+
+A `5xx` means nothing of the failing signal was stored: re-send with the
+same ids. An optional per-message `signalId` deduplicates the re-send.
 
 The `conversations` field is withdrawn, and every routing outcome lives on
 the `Signal`. See [Concepts](concepts.md#signal) for the kind and
