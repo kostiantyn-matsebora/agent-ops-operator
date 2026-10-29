@@ -87,9 +87,12 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
   every nightly `system-full` run from 2026-10-26 through 2026-10-29 (runs
   40295360111, 40403246734, 40414922184, 40477200812, 40665777022,
   40853551940). That is a pre-existing CI health issue. This change's diff
-  (CI workflow wiring plus test content) cannot cause or fix it.
-  Re-dispatched this round anyway for a current link. Left unticked, since
-  it will not confirm what it asks until that failure is fixed separately.
+  (CI workflow wiring plus test content) cannot cause or fix it. This round
+  re-dispatched it anyway and
+  [got the same result](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40943262001):
+  the same manager-restart rollout timeout, before `go test` reaches this
+  suite. Left unticked, since it will not confirm what it asks until that
+  unrelated failure is fixed in its own change.
 - [x] 4.2 Confirm the scenario "a pack failure skips the browser pass" on
   a scratch run. Temporarily break a chart value to fail the pack's
   `go test` step, then confirm the `e2e-live` step is skipped while the
