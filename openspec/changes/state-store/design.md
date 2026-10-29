@@ -166,8 +166,9 @@ exactly the selected backend's bundle is enabled. The manager gets
 `deployment.yaml`.
 
 Names rejected: `persistence.*` already means the context and workspace
-volumes. `etcd` names the engine behind the apiserver, which on k3s is
-kine, and what the adopter gets is custom resources — so `kube`.
+volumes. Naming the backend after the apiserver's storage engine would name
+something the adopter neither chooses nor sees. What they get is custom
+resources — so `kube`.
 
 ### D-10: The conformance suite is a Go package every backend imports
 
