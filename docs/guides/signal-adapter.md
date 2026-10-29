@@ -112,11 +112,11 @@ read sources from here, never assume connectivity or credentials yourself).
 {"initiationId": "…", "signalId": "…", "labels": {}, "title": "…", "payload": "…", "kind": "alert"}
 ```
 
-**`signalId` is your id for this one MESSAGE** (`ADP-9`, `API-7`). Keep it
+**`signalId` is your id for this one MESSAGE** (`ADP-9`). Keep it
 stable across every re-send of the message, including after a `5xx`, and
 different for two messages even when they share an `initiationId`.
 
-The manager stores a message once per `signalId`. A stable cron tick, a webhook
+The manager stores a message once per `signalId` (`API-7`). A stable cron tick, a webhook
 body hash or an event uid and count all work.
 
 **`initiationId` is your own correlation id for the THING, not the
