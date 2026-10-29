@@ -42,7 +42,7 @@ per work unit — and its page carries the side-by-side comparison.
 | You get | Which means |
 |---|---|
 | **A session held open** | the startup cost — replaying the transcript, launching every bound MCP server — is paid once per pod, then skipped, instead of on every work unit. |
-| **The tools** | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash` are claude-code's own, plus every MCP server a Pipeline's `mcpConfigs` bind. |
+| **The tools** | `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash` are claude-code's own, plus every MCP server a Pipeline's `mcpConfigs` bind. The model is offered only the built-ins the route's allowlist grants, so a route granting none sees none. |
 | **Permissions enforced per call** | the route's allowlist is a `canUseTool` callback every tool call passes through, re-read fresh each time. |
 | **Conversations that continue** | each conversation keeps its transcript, and a follow-up unit reuses the live session where nothing session-affecting changed. |
 | **The default, by construction** | a Pipeline naming no `runtimeRef` resolves to `default`, which the parent renders as a copy of this runtime on a fresh install. |

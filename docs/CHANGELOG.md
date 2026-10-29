@@ -26,6 +26,11 @@ for the source and the reference material beside this file.
   `signalTtlDropped` and `signalTtlFailed`.
 - The console's read-only signals view, with the per-claimant routing detail,
   reached from the Configuration pages.
+- Input origin `manager`, for an input the manager appends under a rule of its
+  own. Today only the corrective input, named `move-per-turn`. The console
+  attributes it to the manager.
+- `status.inflight.moved` on a Conversation, written by the manager's own
+  verb handlers and read when a run completes.
 
 ### Changed
 
@@ -39,14 +44,28 @@ for the source and the reference material beside this file.
   once and told on its surface.
 - An addressed conversation adopts the `initiationId` as its
   `conversationId`, like every other claimant.
+- A Coordinator root's turn must end in a move: `invoke`, `escalate`, `close`
+  or an answer to a person. A succeeded root run that made none of them and
+  answered no person is handed back once as an input, then escalated on the
+  second consecutive miss. The manager only refuses an undecided turn and
+  never picks the move. See [concepts](concepts.md#every-root-turn-ends-in-a-move).
+- A Coordinator root's work unit is framed as coordination, without the
+  checkout and role-file framing a repository agent gets. The profile's
+  `systemPrompt` is appended as before.
+- `runtime-claude` offers the model only the built-ins its allowlist grants.
+  A route granting none sees none. Per-call enforcement is unchanged.
+- The `aops` tool descriptions say which tools are moves and which are reads.
+- A cascading close closes descendants before the ancestor.
 
 ### Upgrade
 
-Not breaking. Helm never upgrades an existing CRD, so run
-`kubectl apply -f chart/crds/` before `helm upgrade` to pick up the new
-`Signal` CRD, as every CRD-adding release already does. Adapter and manager
-upgrade in either order: an older manager ignores `signalId`. An adapter that
-reads `conversations` from the response, if you wrote one, must stop.
+Not breaking. Helm never upgrades an existing CRD, so apply the new and changed ones with the chart before `helm upgrade`:
+
+```sh
+kubectl apply -f chart/crds/
+```
+
+This adds the `Signal` CRD, one Conversation field and one enum value. Adapter and manager upgrade in either order: an older manager ignores `signalId`. An adapter that reads `conversations` from the response, if you wrote one, must stop.
 
 ## [18.0.1] — 2026-10-25
 

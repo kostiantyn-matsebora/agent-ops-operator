@@ -728,3 +728,174 @@ func TestHandleCoordinateCloseWidenedBoundRefusesTheCallersOwnAncestorRoot(t *te
 		t.Fatal("the reaper must never close its own ancestor root")
 	}
 }
+
+// ---- the move stamp (design D-A, aops-mcp-server: "An accepted move is
+// recorded on the caller's inflight run") -----------------------------------
+
+// coordRootInflight is a Coordinator root with one run in flight — the shape
+// every verb test below starts from, since only an inflight run can be stamped.
+func coordRootInflight(name, coordinator, runID string) *agentopsv1alpha1.Conversation {
+	c := coordRoot(name, coordinator)
+	c.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: runID}
+	return c
+}
+
+// workerCoordinator is a Coordinator with one invokable `worker` entry and the
+// capability/profile its member creation resolves.
+func workerCoordinator(name string) []client.Object {
+	capability := &agentopsv1alpha1.AgentCapability{}
+	capability.Name, capability.Namespace = "cap-worker", "agent-ops"
+	profile := &agentopsv1alpha1.AgentProfile{}
+	profile.Name, profile.Namespace = "profile-worker", "agent-ops"
+	capability.Spec.ProfileRef = &agentopsv1alpha1.ObjectRef{Name: profile.Name}
+	co := coordCoordinator(name, agentopsv1alpha1.CoordinatorAgentEntry{
+		Name: "worker", Description: "does it", CapabilityRef: &agentopsv1alpha1.ObjectRef{Name: "cap-worker"},
+	})
+	return []client.Object{co, capability, profile}
+}
+
+func inflightOf(t *testing.T, c client.Client, name string) *agentopsv1alpha1.InflightRun {
+	t.Helper()
+	var conv agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: name}, &conv); err != nil {
+		t.Fatal(err)
+	}
+	return conv.Status.Inflight
+}
+
+func assertMoved(t *testing.T, c client.Client, name string, want bool) {
+	t.Helper()
+	inflight := inflightOf(t, c, name)
+	if inflight == nil {
+		t.Fatalf("the inflight run must survive the verb, got none on %s", name)
+	}
+	if inflight.Moved != want {
+		t.Fatalf("inflight.moved = %v, want %v", inflight.Moved, want)
+	}
+}
+
+func TestHandleCoordinateInvokeStampsTheMoveOnTheCallersInflightRun(t *testing.T) {
+	objs := append(workerCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	s, c := coordServer(t, objs...)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertMoved(t, c, "root-1", true)
+}
+
+// An invoke that ATTACHES to a live member is still a delegation, so it is
+// still a move — the second invoke of the same entry, with the first run's
+// stamp already consumed by a new inflight run.
+func TestHandleCoordinateInvokeThatAttachesStampsTheMove(t *testing.T) {
+	objs := append(workerCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	s, c := coordServer(t, objs...)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	if rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "do it"}); rec.Code != 200 {
+		t.Fatalf("first invoke: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// A new run on the root: its stamp starts out clear.
+	var root agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &root); err != nil {
+		t.Fatal(err)
+	}
+	patch := client.MergeFrom(root.DeepCopy())
+	root.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r2"}
+	if err := c.Status().Patch(context.Background(), &root, patch); err != nil {
+		t.Fatal(err)
+	}
+	assertMoved(t, c, "root-1", false)
+
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "worker", "task": "and this too"})
+	if rec.Code != 200 {
+		t.Fatalf("second invoke: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["status"] != "attached" {
+		t.Fatalf("the second invoke of one entry must attach, got %+v", out)
+	}
+	assertMoved(t, c, "root-1", true)
+}
+
+func TestHandleCoordinateRefusedInvokeStampsNothing(t *testing.T) {
+	objs := append(workerCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	s, c := coordServer(t, objs...)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/invoke", token,
+		map[string]any{"conversation": "root-1", "agent": "nobody", "task": "do it"})
+	if rec.Code != 403 {
+		t.Fatalf("an unknown agent must be refused, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertMoved(t, c, "root-1", false)
+}
+
+func TestHandleCoordinateAgentsIsAReadAndStampsNothing(t *testing.T) {
+	objs := append(workerCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	s, c := coordServer(t, objs...)
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/agents", token, map[string]any{"conversation": "root-1"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertMoved(t, c, "root-1", false)
+}
+
+func TestHandleCoordinateEscalateStampsTheMove(t *testing.T) {
+	s, c := coordServer(t, coordCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/escalate", token,
+		map[string]any{"conversation": "root-1", "message": "need a person"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertMoved(t, c, "root-1", true)
+}
+
+// close on the caller itself leaves it Closed — never judged — and the stamp is
+// still written, for the record.
+func TestHandleCoordinateCloseOnSelfStampsTheMove(t *testing.T) {
+	s, c := coordServer(t, coordCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/close", token,
+		map[string]any{"conversation": "root-1", "reason": "nothing left to do"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got agentopsv1alpha1.Conversation
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "agent-ops", Name: "root-1"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		t.Fatalf("close on self must close the caller, phase=%s", got.Status.Phase)
+	}
+	assertMoved(t, c, "root-1", true)
+}
+
+// A verb from a pod with no unit: nothing is dispatched, nothing is judged,
+// nothing is stamped — and nothing panics.
+func TestHandleCoordinateVerbWithNoInflightRunStampsNothing(t *testing.T) {
+	s, c := coordServer(t, coordCoordinator("co-a"), coordRoot("root-1", "co-a"))
+	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
+
+	rec := postCoordinate(s, "/coordinate/escalate", token,
+		map[string]any{"conversation": "root-1", "message": "need a person"})
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if inflight := inflightOf(t, c, "root-1"); inflight != nil {
+		t.Fatalf("no inflight run must be invented by the stamp, got %+v", inflight)
+	}
+}

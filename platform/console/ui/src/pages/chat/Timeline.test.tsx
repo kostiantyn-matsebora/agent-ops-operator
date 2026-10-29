@@ -126,6 +126,23 @@ describe('an ack is presence, never a bubble', () => {
   })
 })
 
+describe('a manager-origin input (coordinator-move-per-turn)', () => {
+  it('is attributed to the manager, not labelled as a signal from a source', () => {
+    const messages = [
+      msg('m1', 'signal', '2024-01-01T00:00:00Z', { text: 'Disk pressure on node-3' }),
+      msg('m2', 'agent', '2024-01-01T00:01:00Z'),
+      msg('m3', 'signal', '2024-01-01T00:02:00Z', { sender: 'manager', text: 'You ended a turn without a move.' }),
+    ]
+    render(<Timeline messages={messages} events={[]} presence={false} />)
+    // the opening signal keeps its label; the manager's card wears the manager's name
+    expect(screen.getByText('signal')).toBeInTheDocument()
+    expect(screen.getByText('manager')).toBeInTheDocument()
+    expect(screen.getByText('You ended a turn without a move.')).toBeInTheDocument()
+    // its text reads inline — nothing is folded behind a payload control
+    expect(screen.queryByText('Payload')).toBeNull()
+  })
+})
+
 describe('the new-messages divider', () => {
   it('sits above the first message after the watermark', () => {
     const messages = [

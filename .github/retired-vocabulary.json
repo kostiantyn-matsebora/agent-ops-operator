@@ -825,7 +825,7 @@
       "says": "`.github/scripts/carry.py` is the one carry and it asks `conveyor.py`: the two programs it replaced held the grant rule in two copies, and the gate held a third \u2014 see .claude/rules/worktree-delivery.md",
       "allow": [
         "replaced",
-        "replaces",
+        "replace",
         "removed",
         "retired",
         "deleted",
@@ -1202,6 +1202,26 @@
         "stale",
         "deleted",
         "dead link"
+      ]
+    },
+    {
+      "id": "input-job-name",
+      "pattern": "\\bjobName\\b",
+      "says": "InputItem.origin ({kind, name}) records where every input came from; the job-only jobName field is gone",
+      "allow": [
+        "removed",
+        "retired",
+        "former",
+        "no longer",
+        "is gone",
+        "gone",
+        "replaced",
+        "replace",
+        "renamed",
+        "is now",
+        "stale",
+        "previously",
+        "no jobName"
       ]
     }
   ]

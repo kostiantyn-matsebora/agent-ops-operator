@@ -283,3 +283,228 @@ func TestOutputFormatGatesThePromptOnly(t *testing.T) {
 		t.Fatal("the profile's own role text was replaced rather than appended to")
 	}
 }
+
+// ---- coordinator root framing (design D-E) ----------------------------------
+
+// rootConv is a Coordinator's own conversation: coordinatorRef set, no
+// causedBy. It is the one shape framed as coordination.
+func rootConv(inputs ...agentopsv1alpha1.InputItem) *agentopsv1alpha1.Conversation {
+	c := conv(inputs...)
+	c.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "triage"}
+	return c
+}
+
+// forbiddenInRootPrompt is what the spec says a root's framing must NOT carry:
+// a checkout to read, a role file to adopt, a fallback role to act in.
+var forbiddenInRootPrompt = []string{".claude/agents", "checkout", "working directory", "within your tools", "act as", "repository"}
+
+func assertCoordinationFraming(t *testing.T, u WorkUnit, input, from string) {
+	t.Helper()
+	if u.PromptFile != "" {
+		t.Fatalf("a root without a profile prompt renders the built-in template, got file %q", u.PromptFile)
+	}
+	if !strings.HasPrefix(u.PromptText, "# Coordination turn") {
+		t.Fatalf("coordinate.md not rendered:\n%s", u.PromptText)
+	}
+	if !strings.Contains(u.PromptText, input) {
+		t.Fatalf("input %q missing from prompt:\n%s", input, u.PromptText)
+	}
+	if !strings.Contains(u.PromptText, "It came from "+from+".") {
+		t.Fatalf("FROM %q missing from prompt:\n%s", from, u.PromptText)
+	}
+	if !strings.Contains(u.PromptText, "printed answer IS the deliverable") {
+		t.Fatalf("delivery section missing from prompt:\n%s", u.PromptText)
+	}
+	if strings.Contains(u.PromptText, "{{") {
+		t.Fatalf("unrendered variable left in prompt:\n%s", u.PromptText)
+	}
+	for _, bad := range forbiddenInRootPrompt {
+		if strings.Contains(strings.ToLower(u.PromptText), bad) {
+			t.Fatalf("root framing must not mention %q:\n%s", bad, u.PromptText)
+		}
+	}
+}
+
+func TestRootSignalInputIsFramedAsCoordination(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "disk is filling on node-a",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "cron-nightly", SignalKind: "task"}})
+	u, ids, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok || len(ids) != 1 {
+		t.Fatal(err, ok, ids)
+	}
+	assertCoordinationFraming(t, u, "> disk is filling on node-a", "a signal on source cron-nightly")
+	if u.ResumeSessionID != "" || u.RuntimeContextID != "" {
+		t.Fatal("a fresh root turn carries no context handle")
+	}
+}
+
+func TestRootChannelInputIsFramedAsCoordination(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "look into the backlog",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "ops-room", Sender: "operator-on-duty"}})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	assertCoordinationFraming(t, u, "> look into the backlog", "a person on channel ops-room (operator-on-duty)")
+}
+
+func TestRootMemberResultIsFramedAsCoordination(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "pod restarted, root cause OOM",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "c1-k8s-7f", Entry: "k8s"}})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	assertCoordinationFraming(t, u, "> pod restarted, root cause OOM", "the member invoked as k8s (conversation c1-k8s-7f)")
+}
+
+func TestRootManagerInputIsFramedAsCoordination(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "your last turn made no move",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: "move-per-turn"}})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	assertCoordinationFraming(t, u, "> your last turn made no move", "the manager, under its rule move-per-turn")
+}
+
+// An input recorded before origins existed still dispatches, and says so
+// rather than inventing a door it came through.
+func TestRootInputWithoutOriginSaysSo(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	assertCoordinationFraming(t, u, "> x", "an input with no recorded origin")
+}
+
+// A member is a domain agent and may have a repository: `causedBy` alone keeps
+// the lane templates exactly as today.
+func TestMemberWithCausedByKeepsTaskTemplate(t *testing.T) {
+	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check vacuum",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "root-1", Entry: "ha"}})
+	c.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "ha"}
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if !strings.HasPrefix(u.PromptText, "# Direct task") || !strings.Contains(u.PromptText, ".claude/agents/ha-engineer.md") {
+		t.Fatalf("a member must keep task.md:\n%s", u.PromptText)
+	}
+	if strings.Contains(u.PromptText, "Coordination turn") {
+		t.Fatalf("a member must not be framed as coordination:\n%s", u.PromptText)
+	}
+}
+
+// Every input type, not only tasks: an alert on a root renders the coordination
+// framing with the payload fenced, never the read-only triage lane.
+func TestRootAlertRendersCoordinateNotInvestigate(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: `{"alerts":[{"name":"HighLoad"}]}`,
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "alertmanager", SignalKind: "alert"}})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	assertCoordinationFraming(t, u, "```json\n{\"alerts\":[{\"name\":\"HighLoad\"}]}\n```", "a signal on source alertmanager")
+	if strings.Contains(u.PromptText, "READ-ONLY triage") {
+		t.Fatalf("investigate.md leaked into a root's alert:\n%s", u.PromptText)
+	}
+}
+
+// An adopter's own prompt file is their framing: it still wins on a root, with
+// the same variables plus FROM so the file can name the origin too.
+func TestRootProfilePromptStillWins(t *testing.T) {
+	p := profile()
+	p.Spec.Prompt = "prompts/coordinate.md"
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "cron-nightly"}})
+	u, _, ok, err := dispatchNext(c, p)
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if u.PromptFile != "prompts/coordinate.md" || u.PromptText != "" {
+		t.Fatalf("profile prompt must win on a root: %+v", u)
+	}
+	if u.PromptVars["USER_TASK"] != "x" || u.PromptVars["FROM"] != "a signal on source cron-nightly" {
+		t.Fatalf("vars: %v", u.PromptVars)
+	}
+	if !strings.Contains(u.PromptVars["DELIVERY_INSTRUCTIONS"], "printed answer IS the deliverable") {
+		t.Fatalf("delivery var missing: %v", u.PromptVars)
+	}
+}
+
+// A batched resume on a root carries every input verbatim and one FROM phrase
+// per input, in order — a member's result followed by a person's reply reads
+// as both, not as one anonymous blob.
+func TestRootBatchedReplyNamesEveryOrigin(t *testing.T) {
+	c := rootConv(
+		agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "member says: OOM",
+			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "c1-k8s-7f", Entry: "k8s"}},
+		agentopsv1alpha1.InputItem{ID: "r2", Type: agentopsv1alpha1.InputReply, Payload: "person says: raise the limit",
+			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "ops-room"}},
+	)
+	c.Status.SessionID = "sess-1"
+	u, ids, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok || len(ids) != 2 {
+		t.Fatal(err, ok, ids)
+	}
+	if u.RuntimeContextID != "sess-1" || !strings.HasSuffix(u.RunID, "-resume") {
+		t.Fatalf("resume expected: %+v", u)
+	}
+	assertCoordinationFraming(t, u, "> member says: OOM\n> ---\n> person says: raise the limit",
+		"the member invoked as k8s (conversation c1-k8s-7f); then a person on channel ops-room")
+	if strings.Contains(u.PromptText, "Approval") {
+		t.Fatalf("reply.md leaked into a root's resume:\n%s", u.PromptText)
+	}
+}
+
+// A root's reply before any context handle exists degrades to a fresh turn,
+// still framed as coordination.
+func TestRootReplyWithoutContextStillFramedAsCoordination(t *testing.T) {
+	c := rootConv(agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "hello",
+		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "ops-room"}})
+	u, _, ok, err := dispatchNext(c, profile())
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if u.RuntimeContextID != "" {
+		t.Fatal("no handle to continue")
+	}
+	assertCoordinationFraming(t, u, "> hello", "a person on channel ops-room")
+}
+
+// originPhrase is the one place the FROM wording lives; pin every door, the
+// sender-less channel, and the two non-answers (no origin, unknown kind).
+func TestOriginPhrasePerKind(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *agentopsv1alpha1.InputOrigin
+		want string
+	}{
+		{"nil", nil, "an input with no recorded origin"},
+		{"signal", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "cron"}, "a signal on source cron"},
+		{"channel", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "tg"}, "a person on channel tg"},
+		{"channel+sender", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "tg", Sender: "alice"}, "a person on channel tg (alice)"},
+		{"member", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "c-9", Entry: "k8s"}, "the member invoked as k8s (conversation c-9)"},
+		{"manager", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: "move-per-turn"}, "the manager, under its rule move-per-turn"},
+		{"unknown", &agentopsv1alpha1.InputOrigin{Kind: "portal"}, `an input of unrecognized origin kind "portal"`},
+	}
+	for _, tc := range cases {
+		if got := originPhrase(tc.in); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A payload that quotes another placeholder stays literal text. The template
+// is scanned once, so a value is never rescanned whatever order the map is
+// walked in.
+func TestRenderNeverRescansAValue(t *testing.T) {
+	for range 50 {
+		out := render("a={{A}} b={{B}}", map[string]string{"A": "{{B}}", "B": "tail"})
+		if out != "a={{B}} b=tail" {
+			t.Fatalf("a value was rescanned: %q", out)
+		}
+	}
+}

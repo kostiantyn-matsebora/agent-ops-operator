@@ -78,20 +78,41 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
   log shows `go test` completing, the cluster surviving under
   `SYSTEM_REUSE=1`, the `e2e-live` step running against that same cluster's
   console, and the teardown step deleting `agentops-e2e` afterward.
-  **Dispatched this round** (not waited on — see the pull request for the
-  run link). Left unticked until its log is read.
-- [ ] 4.2 Confirm the scenario "a pack failure skips the browser pass" on
+  **Still open, blocked on an environment failure that is not this
+  change's.** The prior round's dispatch
+  ([run 40407670027](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40407670027))
+  failed before `go test` reached this suite at all: `manager restart`
+  timed out waiting for `agentops-manager`'s rollout (`1 out of 2 new
+  replicas`). The same failure reproduces on unmodified `master` itself,
+  every nightly `system-full` run from 2026-10-26 through 2026-10-29 (runs
+  40295360111, 40403246734, 40414922184, 40477200812, 40665777022,
+  40853551940). That is a pre-existing CI health issue. This change's diff
+  (CI workflow wiring plus test content) cannot cause or fix it. This round
+  re-dispatched it anyway and
+  [got the same result](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40943262001):
+  the same manager-restart rollout timeout, before `go test` reaches this
+  suite. Left unticked, since it will not confirm what it asks until that
+  unrelated failure is fixed in its own change.
+- [x] 4.2 Confirm the scenario "a pack failure skips the browser pass" on
   a scratch run. Temporarily break a chart value to fail the pack's
   `go test` step, then confirm the `e2e-live` step is skipped while the
-  teardown step still runs. **Not run this round** — `system.yml`'s own
-  conditionals already read correctly (`e2e-live` gated on
-  `steps.go-test.outcome == 'success'`, teardown on `always()`), but that
-  is a reading of the YAML, not a live failing run, so the box stays open.
-- [ ] 4.3 Run `gh workflow run system-smoke.yml` against this branch and
+  teardown step still runs. **Confirmed live, not on a scratch run** — the
+  prior round's `system-full` dispatch
+  ([run 40407670027](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40407670027),
+  job `full / system / full`) failed its `go test` step on an unrelated
+  manager-rollout timeout, and the log shows exactly this gate: "Set up
+  Node", "Install console UI dependencies", "Install Playwright
+  browsers" and "Run e2e-live suite" all report `skipped`, while "Tear
+  down the e2e cluster" still reports `success`. A real failing run beats
+  a scratch one for this box.
+- [x] 4.3 Run `gh workflow run system-smoke.yml` against this branch and
   confirm the smoke tier (`inputs.tier == 'smoke'`) shows no Node, npm, or
-  Playwright step — the new steps stay full-tier-only. **Dispatched this
-  round** (not waited on — see the pull request for the run link). Left
-  unticked until its log is read.
+  Playwright step — the new steps stay full-tier-only. **Confirmed** — the
+  prior round's dispatch
+  ([run 40407665557](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40407665557))
+  completed. "Set up Node", "Install console UI dependencies", "Install
+  Playwright browsers" and "Run e2e-live suite" all report `skipped` on
+  the smoke tier.
 
 ## 5. Documentation
 

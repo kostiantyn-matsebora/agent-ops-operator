@@ -59,6 +59,13 @@ describe('row states (prototype/States.html)', () => {
     expect(rowSnippet(row)).toBe('working · oncall: Does the same setting affect…')
   })
 
+  it('a manager-origin hand-back names the manager in the snippet, not a source (coordinator-move-per-turn)', () => {
+    const row = conv('coord-root', {
+      lastMessage: { kind: 'signal', sender: 'manager', text: 'You ended a turn without a move.' },
+    })
+    expect(rowSnippet(row)).toBe('manager: You ended a turn without a move.')
+  })
+
   it('WORKING, READ — no badge, the ack is presence rather than a message', () => {
     const row = conv('payments', { presence: true, pipeline: 'k8s-engineer', unreadCount: 0 })
     renderRow(row)

@@ -1,6 +1,6 @@
 {
   "name": "agentops-runtime-claude",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "agent-ops AgentRuntime image driving claude-code through the Claude Agent SDK in-process, with one session held open per pod — implements the /work contract, nothing else.",
   "license": "MIT",

@@ -457,3 +457,44 @@ func TestRecordedSignalWithNoSeverityStaysUnrated(t *testing.T) {
 		t.Errorf("an unrated signal must rebuild with no severity: %q", got.Severity)
 	}
 }
+
+// A RECORDED MANAGER-ORIGIN INPUT IS SHOWN, ATTRIBUTED TO THE MANAGER
+// (coordinator-move-per-turn). The opposite of a member input: not skipped as
+// plumbing, since a person watching is meant to see the hand-back — but not
+// rebuilt as the OPENING signal's card either, which is what the surface rule
+// alone would do (Surface is "", exactly like an alert's).
+func TestRecordedManagerInputIsShownAndAttributedToTheManager(t *testing.T) {
+	conv := ConversationSummary{Title: "BackOff: jellyfin", Source: "cluster-events", Pipeline: "k8s-ops"}
+	runs := []Run{{
+		RunID: "r2", Result: "invoking ha", FinishedAt: "2026-08-21T06:00:05Z",
+		Inputs: []RecordedInput{{
+			ID: "in-9", Type: "task", Origin: "manager",
+			Text: "You ended a turn without a move.", ReceivedAt: "2026-08-21T06:00:00Z",
+		}},
+	}}
+	got := mergeTranscript("c1", "console", nil, runs, conv)
+	if len(got) != 2 {
+		t.Fatalf("a manager-origin input is shown, never skipped: %+v", got)
+	}
+	in := got[0]
+	if in.Kind != MsgSignal || in.Sender != "manager" {
+		t.Errorf("kind = %q sender = %q, want a signal card attributed to the manager", in.Kind, in.Sender)
+	}
+	if !strings.Contains(in.Text, "**From** `manager`") {
+		t.Errorf("the rebuilt card does not say the manager wrote it:\n%s", in.Text)
+	}
+	if !strings.Contains(in.Text, "You ended a turn without a move.") {
+		t.Errorf("the manager's text is not inline on the rebuilt card:\n%s", in.Text)
+	}
+	if strings.Contains(in.Text, "cluster-events") || strings.Contains(in.Text, "BackOff") {
+		t.Errorf("the rebuilt card wears the OPENING signal's source or title:\n%s", in.Text)
+	}
+	if in.Payload != "" {
+		t.Errorf("the manager's text must not also be folded as a payload: %q", in.Payload)
+	}
+	// Not an internal round: the run's input came from the manager, not a
+	// member, so its result still counts as something a person has to read.
+	if got[1].InternalRound {
+		t.Error("a run answering the manager's hand-back is not coordination-internal")
+	}
+}

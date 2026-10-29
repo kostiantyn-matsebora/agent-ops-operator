@@ -81,13 +81,16 @@ type OpMessage struct {
 	Severity string `json:"severity,omitempty"`
 	InputRef string `json:"inputRef,omitempty"`
 	// OriginKind is this signal's v1alpha1.OriginKind ("signal" | "channel" |
-	// "member"), matching the manager's own OpMessage.OriginKind field name
-	// exactly (internal/chat/message.go). "member" is the one value this
-	// console acts on: a member's result bubbling to its parent
+	// "member" | "manager"), matching the manager's own OpMessage.OriginKind
+	// field name exactly (internal/chat/message.go). Two values this console
+	// acts on. "member" is a member's result bubbling to its parent
 	// (coordination-loop), already shown in full by the invoke card
 	// console-conversation-tree builds straight from that member's own
 	// conversation — rendering it again as a generic card duplicated a
 	// member's result on the page it was invoked from (item #15 QA, bug 2).
+	// "manager" is an input the manager itself appended under a rule of its
+	// own (coordinator-move-per-turn): Source then names the RULE, not a
+	// SignalSource, and the card says so — see Render.
 	OriginKind string `json:"originKind,omitempty"`
 
 	Origin string `json:"origin,omitempty"`
@@ -160,7 +163,17 @@ func (m *OpMessage) Render() string {
 		// thing asked of any alert and it was previously a scrap of italic text
 		// between the title and a wall of chips.
 		var from []string
-		if m.Source != "" {
+		switch {
+		case m.OriginKind == originManager:
+			// THE MANAGER'S OWN HAND. Source carries the rule that produced
+			// the input (api/v1alpha1.OriginManager), so printing it under
+			// "Source" would name a SignalSource nobody declared.
+			from = append(from, "**From** `"+originManager+"`")
+			if m.Source != "" {
+				from = append(from, "**Rule** `"+m.Source+"`")
+				shown[m.Source] = true
+			}
+		case m.Source != "":
 			from = append(from, "**Source** `"+m.Source+"`")
 			shown[m.Source] = true
 		}
@@ -182,7 +195,11 @@ func (m *OpMessage) Render() string {
 		}
 
 		// The payload is NOT here: it travels separately so the browser can
-		// collapse it. See SignalPayload.
+		// collapse it. See SignalPayload — except the manager's own text,
+		// which is prose and reads inline (same function says why).
+		if m.OriginKind == originManager && m.Body != "" {
+			parts = append(parts, m.Body)
+		}
 		if m.InputRef != "" {
 			parts = append(parts, "_full event: `conversationinput/"+m.InputRef+"`_")
 		}
@@ -568,8 +585,13 @@ func labelRows(m *OpMessage, shown map[string]bool) []string {
 // SignalPayload is the raw event document of a `signal`, for a surface that can
 // put it behind a control. Empty for every other kind — an answer, a relay and
 // a notice are prose to be read, not documents to be opened.
+//
+// Empty too for a manager-origin signal: its body is the manager's own task
+// text, a few sentences a person watching the thread is MEANT to read
+// (conversation-provenance: "a person watching sees the hand-back"), not an
+// event document to fold away. Render puts it inline instead.
 func (m *OpMessage) SignalPayload() string {
-	if m == nil || m.Kind != "signal" {
+	if m == nil || m.Kind != "signal" || m.OriginKind == originManager {
 		return ""
 	}
 	return strings.TrimSpace(m.Body)

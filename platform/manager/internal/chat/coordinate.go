@@ -41,7 +41,7 @@ var (
 	ErrUnknownAgent       = fmt.Errorf("no such agents[] entry")
 	ErrCoordinatorCycle   = fmt.Errorf("would repeat a Coordinator already in this coordination")
 	ErrMaxAgents          = fmt.Errorf("maxAgents reached")
-	ErrOutOfScope = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
+	ErrOutOfScope         = fmt.Errorf("out of scope: not the caller itself, a direct member, or an open root of the caller's own Coordinator")
 	// ErrOutOfSubtree refuses `read` and `get_tree` — narrower than
 	// ErrOutOfScope. Those two verbs' bound is the caller's own subtree
 	// only (aops-mcp-server: "read | the calling conversation's own
@@ -69,6 +69,11 @@ var (
 	// an ordinary Pipeline-addressed conversation has no access to this reach
 	// class, whatever AgentCapability it runs.
 	ErrNoCoordinatorScope = fmt.Errorf("caller does not act for any Coordinator")
+	// ErrCallerClosed refuses `invoke` from a Closed caller. Closed is inert:
+	// a close walks its subtree before the ancestor and again after it, and
+	// that second sweep is only the last word if nothing more can be created
+	// under a conversation that has closed.
+	ErrCallerClosed = fmt.Errorf("refused: the calling conversation is closed")
 	// ErrSelfInput guards the rule that a conversation must never receive its
 	// own output as an input (coordination-loop) — an inbound message whose
 	// origin channel is named identically to its own target conversation.
@@ -92,6 +97,9 @@ var (
 // no Coordinator at all (an ordinary Pipeline-addressed conversation) is
 // refused exactly as before.
 func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, agentName, task string) (*InvokeResult, error) {
+	if caller.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		return nil, ErrCallerClosed
+	}
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
 	if err != nil {
 		return nil, err
@@ -139,7 +147,37 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	if err := r.bumpAgentsInvoked(ctx, caller.Name); err != nil {
 		return nil, err
 	}
+	if err := r.closeMemberIfCallerClosed(ctx, caller.Name, created); err != nil {
+		return nil, err
+	}
 	return &InvokeResult{Member: created.Name, Created: true}, nil
+}
+
+// closeMemberIfCallerClosed is the other half of ErrCallerClosed. The check at
+// the top of InvokeMember reads the caller BEFORE the member exists, so a close
+// that lands between that read and the member's creation would leave one open
+// member under a closed ancestor.
+//
+// Re-reading the caller AFTER the member exists settles it either way. If the
+// close landed first, this sees Closed and closes the member. If it lands
+// later, its second sweep runs after the close write, which is after this
+// read, which is after the member was created, so the sweep finds it.
+func (r *Router) closeMemberIfCallerClosed(ctx context.Context, callerName string, member *agentopsv1alpha1.Conversation) error {
+	var fresh agentopsv1alpha1.Conversation
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: callerName}, &fresh); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if fresh.Status.Phase != agentopsv1alpha1.ConversationClosed {
+		return nil
+	}
+	reason := fresh.Status.CloseReason
+	if reason == "" {
+		reason = "the calling conversation closed"
+	}
+	if err := r.closeConversationReason(ctx, member, reason); err != nil {
+		return err
+	}
+	return ErrCallerClosed
 }
 
 // findAgentEntry returns the named `agents[]` entry, or nil.
@@ -705,18 +743,35 @@ func (r *Router) CloseBudgetExceeded(ctx context.Context, conv *agentopsv1alpha1
 	return r.Escalate(ctx, conv, digest)
 }
 
-// closeWithCascade closes ONE conversation with a reason, then closes every
-// LIVE conversation it directly caused with the SAME reason — recursively,
-// since a closed member may itself have members (conversation-close).
+// closeWithCascade closes a conversation and every LIVE conversation it
+// caused, same reason verbatim, CHILDREN FIRST (conversation-close, design
+// D-H): the `causedBy` subtree is walked recursively — a member's own members
+// before that member, since a member may itself be a root — and the
+// conversation itself closes LAST.
+//
+// Children go first because the walk can fail part-way. Returning on the
+// first failure then leaves an OPEN, still-reachable ancestor over a partly
+// closed subtree, and a repeated close resumes from the members still open.
+// The old order — ancestor first — left a closed root over open members that
+// nothing could reach any more.
 func (r *Router) closeWithCascade(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason string) error {
+	if err := r.cascadeCloseMembers(ctx, conv.Name, reason); err != nil {
+		return err
+	}
 	if err := r.closeConversationReason(ctx, conv, reason); err != nil {
 		return err
 	}
+	// A run on the still-open ancestor may have invoked a member after the walk
+	// listed. A closed conversation can invoke nothing more, so this second
+	// sweep is the last word and finds only stragglers.
 	return r.cascadeCloseMembers(ctx, conv.Name, reason)
 }
 
 // cascadeCloseMembers closes every LIVE direct member of parentName, same
-// reason verbatim, each recursively cascading to its own members.
+// reason verbatim, each recursively closing its own members before itself.
+// Returns on the first failure, before any later sibling and before the
+// parent — see closeWithCascade for why. An already-Closed member keeps its
+// own reason and is skipped.
 func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason string) error {
 	var list agentopsv1alpha1.ConversationList
 	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),

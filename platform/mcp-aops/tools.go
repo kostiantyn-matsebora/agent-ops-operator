@@ -249,37 +249,53 @@ func toolListOpenRoots(ctx context.Context, c *managerClient, who caller, _ json
 	return jsonText(out)
 }
 
-// toolDefinitions is tools/list's whole answer — name, a one-line
-// description an agent picks the right tool from, and a JSON Schema for its
-// arguments.
+// The turn rule (coordinator-move-per-turn, design D-G) is stated where the
+// model reads its tools, so the manager's corrective input later names
+// something it has seen. One constant per kind, appended to every
+// description of that kind, so the wording cannot drift between tools. A
+// description states the rule and grants nothing — the manager still
+// validates the token and enforces every bound.
+const (
+	// moveRule closes the description of invoke, escalate and close.
+	moveRule = " This tool is a move." +
+		" Every turn of a coordinating conversation ends in invoke, escalate, close, or an answer to the person whose message the turn answered." +
+		" A turn ending without a move is handed back once by the manager as an input." +
+		" A second consecutive miss is escalated."
+	// readRule closes the description of every other tool.
+	readRule = " This tool is a read. It ends no turn."
+)
+
+// toolDefinitions is tools/list's whole answer — name, a description an
+// agent picks the right tool from (its own content first, then the turn
+// rule for its kind), and a JSON Schema for its arguments.
 var toolDefinitions = []map[string]any{
 	{
 		"name":        "list_agents",
-		"description": "List the agents[] entries (name and description) this coordinating conversation may invoke.",
+		"description": "List the agents[] entries (name and description) this coordinating conversation may invoke." + readRule,
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 	{
 		"name":        "list_conversations",
-		"description": "List the conversations in this caller's own reach: its coordination subtree, or the conversations bound to its channel.",
+		"description": "List the conversations in this caller's own reach: its coordination subtree, or the conversations bound to its channel." + readRule,
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 	{
 		"name":        "get_conversation",
-		"description": "Get one conversation's bounded projection (name, title, brief, phase, pipeline) by name. Omit name for the caller itself.",
+		"description": "Get one conversation's bounded projection (name, title, brief, phase, pipeline) by name. Omit name for the caller itself." + readRule,
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 			"name": map[string]any{"type": "string"},
 		}},
 	},
 	{
 		"name":        "get_tree",
-		"description": "Get the nested coordination tree rooted at a conversation in this caller's own subtree. Omit name for the caller's own tree.",
+		"description": "Get the nested coordination tree rooted at a conversation in this caller's own subtree. Omit name for the caller's own tree." + readRule,
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 			"name": map[string]any{"type": "string"},
 		}},
 	},
 	{
 		"name":        "invoke",
-		"description": "Invoke one of this Coordinator's agents[] entries with a task. Returns at once (created or attached); the result arrives later as an input.",
+		"description": "Invoke one of this Coordinator's agents[] entries with a task. Returns at once (created or attached); the result arrives later as an input." + moveRule,
 		"inputSchema": map[string]any{"type": "object", "required": []string{"agent", "task"}, "properties": map[string]any{
 			"agent": map[string]any{"type": "string"},
 			"task":  map[string]any{"type": "string"},
@@ -287,7 +303,7 @@ var toolDefinitions = []map[string]any{
 	},
 	{
 		"name":        "close",
-		"description": "Close a conversation with a reason: the caller itself, or one of its own direct members. Never a deeper descendant.",
+		"description": "Close a conversation with a reason: the caller itself, or one of its own direct members. Never a deeper descendant." + moveRule,
 		"inputSchema": map[string]any{"type": "object", "required": []string{"reason"}, "properties": map[string]any{
 			"conversation": map[string]any{"type": "string", "description": "target to close; omit to close the caller itself"},
 			"reason":       map[string]any{"type": "string"},
@@ -295,21 +311,21 @@ var toolDefinitions = []map[string]any{
 	},
 	{
 		"name":        "escalate",
-		"description": "Escalate the calling conversation with a message. On the uncaused root this opens a human thread; on a nested member it closes and bubbles the message to its parent.",
+		"description": "Escalate the calling conversation with a message. On the uncaused root this opens a human thread; on a nested member it closes and bubbles the message to its parent." + moveRule,
 		"inputSchema": map[string]any{"type": "object", "required": []string{"message"}, "properties": map[string]any{
 			"message": map[string]any{"type": "string"},
 		}},
 	},
 	{
 		"name":        "read",
-		"description": "Read one conversation's bounded projection, at any depth within the caller's own subtree. Omit name for the caller itself.",
+		"description": "Read one conversation's bounded projection, at any depth within the caller's own subtree. Omit name for the caller itself." + readRule,
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 			"name": map[string]any{"type": "string"},
 		}},
 	},
 	{
 		"name":        "list_open_roots",
-		"description": "List the caller's own Coordinator's other open, uncaused root conversations — name, title, brief, phase and each root's direct member entry names. Never the caller's own root. Refused for a caller that does not act for any Coordinator.",
+		"description": "List the caller's own Coordinator's other open, uncaused root conversations — name, title, brief, phase and each root's direct member entry names. Never the caller's own root. Refused for a caller that does not act for any Coordinator." + readRule,
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 }

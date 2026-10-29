@@ -763,7 +763,13 @@ export interface Message {
   thread: string
   /** "agent" | "user" | "notice" — who the bubble belongs to. */
   kind: string
-  /** Set only for relayed sibling-channel messages ("<channel>/<user>"). */
+  /**
+   * Who sent it, when the kind alone would misname the speaker: a relayed
+   * sibling-channel message ("<channel>/<user>"), or the neutral "manager" on
+   * a signal card the manager itself appended (origin `manager`,
+   * coordinator-move-per-turn) — read as a bare signal it would be attributed
+   * to a SignalSource nobody declared.
+   */
   sender?: string
   text: string
   at: string

@@ -35,6 +35,10 @@ per-destination rule, attributed to the manager. It entered on no surface,
 so every bound channel receives it, and a person watching sees the
 hand-back.
 
+The corrective input SHALL be of type `reply`, so the run it dispatches
+resumes the conversation's stored context. A `task` input never carries the
+context handle, and the turn must see what the agent concluded.
+
 It SHALL never be treated as a person's message. A turn that answers only a
 manager-origin input with prose is still a turn without a move.
 
@@ -44,6 +48,14 @@ manager-origin input with prose is still a turn without a move.
   the run came from a person
 - **THEN** the manager appends one input with origin `{kind: manager, name:
   move-per-turn}`, and the next run's `status.runs[].inputs[]` carries it
+
+#### Scenario: The corrective input continues the context
+- **WHEN** the manager appends the corrective input to a root that has a stored runtime context
+- **THEN** its type is `reply` and the next work unit carries that context handle
+
+#### Scenario: A root with no stored context
+- **WHEN** the manager appends the corrective input to a root that has no stored runtime context
+- **THEN** the input is still of type `reply`, and the next work unit has no context handle to resume, so it is framed as a fresh turn around the input's text
 
 #### Scenario: A manager-origin input reaches every bound channel
 

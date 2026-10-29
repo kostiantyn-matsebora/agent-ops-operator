@@ -114,11 +114,21 @@ An allowlist inside the runtime pod is never relied on for any of these.
 | `list_conversations()` | read | conversations in the caller's scope, each with `brief` |
 | `get_conversation(name)` | read | one conversation's detail, in scope |
 | `get_tree()` | read | the caller's own subtree, walked from itself downward |
-| `invoke(agent, task)` | verb | the member's name at once — `created` or `attached` |
-| `close(conversation, reason)` | verb | acknowledgement |
-| `escalate(message)` | verb | acknowledgement |
-| `read(conversation)` | verb | a conversation's own record, in scope |
+| `invoke(agent, task)` | move | the member's name at once — `created` or `attached` |
+| `close(conversation, reason)` | move | acknowledgement |
+| `escalate(message)` | move | acknowledgement |
+| `read(conversation)` | read | a conversation's own record, in scope |
 | `list_open_roots()` | read | the caller's own Coordinator's OTHER open, uncaused roots — name, title, brief, phase, plus `members` (each root's direct `agents[]` entry names) |
+
+**A move ends a coordinating turn, a read does not.** Every tool description
+states which it is.
+
+- An accepted move marks the caller's inflight run. A refused verb marks
+  nothing.
+- A root run that made no move and answered no person is handed back once,
+  then escalated.
+- See [Every root turn ends in a
+  move](concepts.md#every-root-turn-ends-in-a-move).
 
 **All nine complete within the request.** None waits on another agent's
 work — a `list_conversations` call never blocks on a member still running.
@@ -130,8 +140,8 @@ already returns, plus `members`.
 
 ### Read tools
 
-The five read tools — `list_agents`, `list_conversations`, `get_conversation`,
-`get_tree` and `list_open_roots` — cover Conversations and the caller's own
+The five list and get tools — `list_agents`, `list_conversations`,
+`get_conversation`, `get_tree` and `list_open_roots` — cover Conversations and the caller's own
 Coordinator's `agents[]` entries, filtered to what the calling Coordinator
 lists and what it caused.
 

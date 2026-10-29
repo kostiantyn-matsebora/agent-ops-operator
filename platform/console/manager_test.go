@@ -98,3 +98,51 @@ func TestOneLineProseIsNotFenced(t *testing.T) {
 		t.Fatalf("a multi-line payload lost its fence: %q", got)
 	}
 }
+
+// THE MANAGER'S OWN HAND IS NOT A SIGNALSOURCE (coordinator-move-per-turn).
+//
+// A manager-origin input's Source carries the RULE that produced it, so the
+// card that prints "**Source** `move-per-turn`" names a SignalSource nobody
+// declared. The card says who wrote it, names the rule as the detail, and
+// keeps the manager's text inline — it is the hand-back a person watching is
+// meant to read, not an event document to fold.
+func TestManagerOriginSignalCardIsAttributedToTheManager(t *testing.T) {
+	m := &OpMessage{
+		Kind: "signal", OriginKind: "manager", Source: "move-per-turn", Pipeline: "triage",
+		Title: "No move this turn",
+		Body:  "You ended a turn without invoking, escalating or closing. Roster: `k8s`, `ha`.",
+	}
+	got := m.Render()
+
+	if !strings.Contains(got, "**From** `manager`") {
+		t.Errorf("the card does not say the manager wrote it:\n%s", got)
+	}
+	if !strings.Contains(got, "**Rule** `move-per-turn`") {
+		t.Errorf("the rule is not the card's detail:\n%s", got)
+	}
+	if strings.Contains(got, "**Source**") {
+		t.Errorf("the rule is printed as if it were a SignalSource:\n%s", got)
+	}
+	if !strings.Contains(got, "**Pipeline** `triage`") {
+		t.Errorf("the route is dropped from a manager card:\n%s", got)
+	}
+	if !strings.Contains(got, "Roster: `k8s`, `ha`.") {
+		t.Errorf("the manager's text is not inline on the card:\n%s", got)
+	}
+	if p := m.SignalPayload(); p != "" {
+		t.Errorf("the manager's text must not ALSO travel as a foldable payload: %q", p)
+	}
+}
+
+// Every other origin kind renders exactly as before — the manager case is one
+// more arm, not a rewrite of the card.
+func TestSignalOriginCardStillNamesItsSource(t *testing.T) {
+	m := &OpMessage{Kind: "signal", OriginKind: "signal", Source: "cluster-events", Body: "{}"}
+	got := m.Render()
+	if !strings.Contains(got, "**Source** `cluster-events`") || strings.Contains(got, "**From**") {
+		t.Errorf("a signal-origin card changed shape:\n%s", got)
+	}
+	if m.SignalPayload() != "{}" {
+		t.Errorf("a signal's payload must still travel apart: %q", m.SignalPayload())
+	}
+}
