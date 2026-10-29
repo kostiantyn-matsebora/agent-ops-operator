@@ -207,11 +207,16 @@ func (r *SignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 // requeue for exactly the moment it will.
 func (r *SignalReconciler) reconcileTerminal(ctx context.Context, sig *agentopsv1alpha1.Signal) (ctrl.Result, error) {
 	if sig.Status.CompletedAt == nil {
-		// A terminal Signal this version did not write. Start its clock now
-		// rather than delete on a creation time it was never measured from.
+		// A terminal Signal this version did not write. Its completion time was
+		// never recorded, so take the best the object itself knows: the first
+		// attempt, then the creation. Stamping "now" would restart the TTL of a
+		// signal that finished days ago.
 		before := sig.DeepCopy()
-		now := metav1.NewTime(r.now())
-		sig.Status.CompletedAt = &now
+		at := sig.CreationTimestamp
+		if sig.Status.FirstAttemptAt != nil {
+			at = *sig.Status.FirstAttemptAt
+		}
+		sig.Status.CompletedAt = &at
 		if err := r.writeStatus(ctx, sig, before); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}

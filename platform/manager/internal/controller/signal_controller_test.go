@@ -1131,3 +1131,25 @@ func TestRollupPhaseWalksEveryClaimantStateCombination(t *testing.T) {
 		}
 	}
 }
+
+func TestHousekeepingBackfillsCompletedAtFromTheObjectNotNow(t *testing.T) {
+	src := fxSource("alerts")
+	e := newSigEnv(t)
+	// A terminal Signal written by an older build: no completedAt, finished
+	// 9h ago. Its TTL clock must start there, not at this reconcile.
+	sig := fxSignal("legacy", src, "x", e.now.Add(-9*time.Hour))
+	sig.Status.Phase = agentopsv1alpha1.SignalRouted
+	first := metav1.NewTime(e.now.Add(-9 * time.Hour))
+	sig.Status.FirstAttemptAt = &first
+	if err := e.c.Create(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.Create(context.Background(), sig); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile("legacy")
+	e.reconcile("legacy")
+	if e.exists("legacy") {
+		t.Fatal("a legacy Signal already past its TTL must be collected, not given a fresh clock")
+	}
+}
