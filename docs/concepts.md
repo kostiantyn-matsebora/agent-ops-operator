@@ -1480,8 +1480,14 @@ A runtime's report is never consulted.
 |---|---|
 | marked a move | nothing |
 | consumed a person's message | nothing, the text is the answer |
+| made no move on a root that already escalated | nothing, the root waits on a person and is never handed back |
 | made no move and answered no person, first time | appends ONE corrective input, origin `manager` |
 | made no move and consumed only that corrective input | escalates the root with a digest |
+
+**A Coordinator never closes a conversation a person started.** `close` on the
+caller's own root is refused when a person opened it, by an addressed
+`/<pipeline> <task>` or a chat message. That person ends it with `/close`.
+A root an alert or a job opened may still close itself.
 
 **A person's message is a `channel` input, or any input recording the surface
 it was typed on.** A chat signal is the second case. An alert, a job tick and a

@@ -62,7 +62,7 @@ var (
 	// named reason rather than the generic ErrOutOfScope, per
 	// aops-mcp-server's "a refusal SHALL reach the caller as an error
 	// naming the bound that refused it."
-	ErrCannotCloseHumanRoot = fmt.Errorf("out of scope: a sibling root a person started is never closed by the widened reach")
+	ErrCannotCloseHumanRoot = fmt.Errorf("out of scope: a conversation a person started is closed only by that person, never by the Coordinator")
 	// ErrNoCoordinatorScope refuses the Coordinator-owner reach class
 	// (list_open_roots, the widened close — coordinator-owner-reach) for a
 	// caller that resolves to no Coordinator at all by ResolveActingCoordinator:
@@ -709,6 +709,12 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 		return fmt.Errorf("a coordinator's close requires a reason")
 	}
 	if targetName == caller.Name {
+		// A person's own uncaused root is closed by that person (/close), a
+		// cascade from it, or an operator — never by the Coordinator's own
+		// verb, however finished it thinks the answer is.
+		if caller.Spec.CausedBy == nil && isHumanInitiated(caller) {
+			return ErrCannotCloseHumanRoot
+		}
 		return r.closeWithCascade(ctx, caller, reason)
 	}
 	var target agentopsv1alpha1.Conversation
