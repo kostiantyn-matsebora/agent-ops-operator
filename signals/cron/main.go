@@ -232,10 +232,12 @@ func (a *adapter) evaluate(ctx context.Context, name string, now time.Time) erro
 		// The source's own job identity — every tick of this job shares it,
 		// so all of them correlate to the one recurring conversation.
 		InitiationID: name,
-		Labels:       map[string]string{"alertgroup": "cron", "alertname": name, "source": name},
-		Title:        src.cfg.Title,
-		Payload:      src.cfg.Input,
-		Kind:         "job",
+		// One id per tick: a re-fire of the same tick repeats it.
+		SignalID: "cron:" + name + ":" + tick,
+		Labels:   map[string]string{"alertgroup": "cron", "alertname": name, "source": name},
+		Title:    src.cfg.Title,
+		Payload:  src.cfg.Input,
+		Kind:     "job",
 	}})
 	if err != nil {
 		return err

@@ -26,7 +26,7 @@ MetricsQL is a PromQL superset, so one server serves both.
 
 `signals/alertmanager` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.2.0.
+2.3.0.
 
 ## What starts work
 

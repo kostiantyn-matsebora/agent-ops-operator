@@ -342,6 +342,9 @@ func (q *pendingQueue) decide(e *pendingEntry, now time.Time) (Signal, bool) {
 	// splitting one recurring integration's history across conversations,
 	// the exact failure this correlation id exists to prevent.
 	sig.InitiationID = e.initiationID()
+	// The message is this emission: the id plus the second the dwell cycle
+	// opened, so a re-post repeats it and the next cycle differs.
+	sig.SignalID = fmt.Sprintf("%s#%d", sig.InitiationID, e.firstSeen.Unix())
 	return sig, true
 }
 

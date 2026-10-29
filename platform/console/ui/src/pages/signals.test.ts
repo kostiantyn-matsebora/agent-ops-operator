@@ -97,7 +97,11 @@ describe('asSignalStatus', () => {
     const status = {
       phase: 'PartiallyRouted',
       claimants: [{ ref: { kind: 'Pipeline', name: 'k8s-observe' }, state: 'Routed' }],
+      attempts: 2,
       firstAttemptAt: '2026-01-01T00:00:00Z',
+      completedAt: '2026-01-01T00:00:09Z',
+      consumedBy: 'agentops-manager-0_ab12',
+      consumedAt: '2026-01-01T00:00:08Z',
     }
     expect(asSignalStatus(status)).toEqual(status)
   })

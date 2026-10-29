@@ -174,8 +174,8 @@ verbatim.
 
 **`Signal` rides this same inventory, read-only like every other kind.**
 
-- **The list** shows source, `initiationId`, phase and occurrence count.
-  Filterable by source and by phase.
+- **The list** shows source, `initiationId`, phase and age. Filterable by
+  source and by phase.
 - **The detail** renders the full routing record: every claimant's kind,
   name and state, a routed one linked to its conversation, a failed or
   skipped one's reason verbatim.

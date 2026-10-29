@@ -95,8 +95,7 @@ agent-ops is more than a model and a prompt in a pod: grouping and cooldown, a
 capacity cap with a queue, context that survives a restart, per-route cluster
 identity, mediated egress and at-least-once delivery are already in it.
 
-- **Kubernetes native** — fourteen custom resources, validated by the API
-  server like anything else you deploy.
+- **Kubernetes native** — fourteen custom resources, validated by the API server.
 - **GitOps ready** — every route is text. It reviews as a diff and deploys
   through the pipeline you already run.
 - **Open at three seams** — your own signal source, runtime or channel.
@@ -143,8 +142,8 @@ Fourteen, one line each. [Every field, in full](docs/concepts.md).
 | [`ChannelAdapter`](docs/concepts.md#channeladapter) | A channel implementation, plugged in as a CR whose name is the type key. |
 | [`SignalSource`](docs/concepts.md#signalsource) | An ingest lane. Inert until a Pipeline claims it. |
 | [`SignalAdapter`](docs/concepts.md#signaladapter) | A signal implementation — the inbound-only sibling of ChannelAdapter. |
-| [`Signal`](docs/concepts.md#signal) | The durable, persist-then-ack record of one signal arrival and its per-claimant routing. Read-only in the console. |
-| [`Pipeline`](docs/concepts.md#pipeline) | **The wiring**: sources × channels + profile + capabilities + what executes it and under whose identity. |
+| [`Signal`](docs/concepts.md#signal) | The durable record of one published signal message and its per-claimant routing. Read-only in the console. |
+| [`Pipeline`](docs/concepts.md#pipeline) | **The wiring**: sources × channels + profile + capabilities + what executes it and under whose identity. The only place any of them is declared. |
 | [`AgentCapability`](docs/concepts.md#agentcapability) | A named capability — profile, runtime, identity, tools, persistence — referenced by a Pipeline or Coordinator instead of inlined. |
 | [`Coordinator`](docs/concepts.md#coordinator) | The second wiring kind: a coordinating agent that invokes named members, budgeted per level, escalating to a channel only when it decides to. |
 | [`MCPConfig`](docs/concepts.md#mcpconfig) | Reusable MCP server sets, bound per wiring. |

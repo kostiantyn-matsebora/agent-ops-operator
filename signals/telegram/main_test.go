@@ -55,6 +55,9 @@ func TestNormalizeChatSignal(t *testing.T) {
 	if sig.Kind != "chat" {
 		t.Fatalf("kind = %q, want chat", sig.Kind)
 	}
+	if sig.SignalID != "tg-tg-chat-77" {
+		t.Fatalf("signalId = %q, want tg-tg-chat-77", sig.SignalID)
+	}
 	if sig.InitiationID != "tg-tg-chat-77" {
 		t.Fatalf("initiationId = %q, want tg-tg-chat-77 (scoped to the source, not just the update id)", sig.InitiationID)
 	}
@@ -95,6 +98,9 @@ func TestRepeatedTextGetsDistinctInitiationIDs(t *testing.T) {
 	if a1.InitiationID == a2.InitiationID {
 		t.Fatalf("identical text collapsed on initiationId %q", a1.InitiationID)
 	}
+	if a1.SignalID == a2.SignalID {
+		t.Fatalf("two messages share signalId %q", a1.SignalID)
+	}
 }
 
 // TestRedeliveredUpdateRepeatsItsInitiationID pins the other half of "fresh
@@ -112,6 +118,9 @@ func TestRedeliveredUpdateRepeatsItsInitiationID(t *testing.T) {
 	}
 	if a1.InitiationID != a2.InitiationID {
 		t.Fatalf("a redelivered update must repeat its initiationId: %q vs %q", a1.InitiationID, a2.InitiationID)
+	}
+	if a1.SignalID == "" || a1.SignalID != a2.SignalID {
+		t.Fatalf("a redelivered update must repeat its signalId: %q vs %q", a1.SignalID, a2.SignalID)
 	}
 }
 
@@ -280,6 +289,9 @@ func TestSelectionCarriesTheOriginalMessage(t *testing.T) {
 	}
 	if sig.Payload != "/k8s-observe who is on call?" {
 		t.Fatalf("payload = %q — the original was not carried forward", sig.Payload)
+	}
+	if sig.SignalID != "tg-cb-tg-chat-cb-1" {
+		t.Fatalf("signalId = %q, want tg-cb-tg-chat-cb-1", sig.SignalID)
 	}
 	if sig.InitiationID != "tg-cb-tg-chat-cb-1" {
 		t.Fatalf("initiationId = %q, want tg-cb-tg-chat-cb-1 (scoped to the source)", sig.InitiationID)

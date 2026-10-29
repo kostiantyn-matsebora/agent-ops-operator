@@ -46,7 +46,18 @@ func adapterReq(srv *httpapi.Server, method, path string, body any, token string
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
+	// A signal posted is only STORED by the endpoint; the consumer routes it.
+	// No manager runs here, so the leader's consumer pool is stood in for.
+	publishing := method == "POST" && path == "/signal/inbound"
+	var before map[string]bool
+	if publishing {
+		lastServer = srv
+		before = signalNames()
+	}
 	srv.Handler().ServeHTTP(rec, req)
+	if publishing && rec.Code == 200 {
+		consumeNewSignals(before)
+	}
 	return rec
 }
 
@@ -96,7 +107,7 @@ func TestInboundCreatesConversationAndAckOp(t *testing.T) {
 	}
 	if conv.Spec.ProfileRef.Name != "prof-inb" || len(conv.Spec.Inputs) != 1 ||
 		conv.Spec.Inputs[0].Type != agentopsv1alpha1.InputTask ||
-		conv.Spec.Inputs[0].Payload != "check the nodes" {
+		inputText(t, conv.Spec.Inputs[0]) != "check the nodes" {
 		t.Fatalf("conversation shape: %+v", conv.Spec)
 	}
 

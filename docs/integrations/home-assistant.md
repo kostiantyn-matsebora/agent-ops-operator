@@ -25,7 +25,7 @@ the house, one that can repair it.
 
 `signals/ha` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.2.0.
+2.3.0.
 
 ## What starts work
 

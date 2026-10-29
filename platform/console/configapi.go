@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -515,7 +514,6 @@ func kindColumns(o *Object) map[string]string {
 		cols["source"] = spec.SourceRef.Name
 		cols["initiationId"] = spec.InitiationID
 		cols["phase"] = status.Phase
-		cols["occurrences"] = strconv.Itoa(int(spec.Occurrences))
 		if status.Reason != "" {
 			cols["reason"] = status.Reason
 		}

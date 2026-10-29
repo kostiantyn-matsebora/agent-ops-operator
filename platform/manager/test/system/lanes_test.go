@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -337,9 +338,15 @@ func TestTelegramLane(t *testing.T) {
 func TestUnclaimedSourceDrops(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
-	res := e.PostTask(t, SourceUnclaimed, "e2e-unclaimed-"+fmt.Sprint(time.Now().UnixNano()), "echo nobody")
-	if fmt.Sprint(res["queued"]) != "0" || !strings.Contains(fmt.Sprint(res["reason"]), "Wired=False") {
-		t.Fatalf("an unclaimed source must drop with Wired=False: %v", res)
+	id := "e2e-unclaimed-" + fmt.Sprint(time.Now().UnixNano())
+	// Publication only stores: routing, and so the unwired decision, is the
+	// consumer's, recorded on the Signal.
+	res := e.PostTask(t, SourceUnclaimed, id, "echo nobody")
+	if fmt.Sprint(res["queued"]) != "1" {
+		t.Fatalf("an unclaimed source's signal must still be stored: %v", res)
+	}
+	if sig := waitSignalPhase(t, ctx, e, SourceUnclaimed, id, time.Minute, agentopsv1alpha1.SignalDropped); sig.Status.Reason != agentopsv1alpha1.SignalDropUnclaimed {
+		t.Fatalf("an unclaimed source must drop as %q, got %q", agentopsv1alpha1.SignalDropUnclaimed, sig.Status.Reason)
 	}
 	waitFor(t, "Wired=False on the source", time.Minute, func() (bool, error) {
 		var src struct {

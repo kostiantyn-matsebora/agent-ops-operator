@@ -60,7 +60,7 @@ func (f *fakeManager) server(t *testing.T) *httptest.Server {
 		f.inbounds = append(f.inbounds, body)
 		n := len(body["signals"].([]any))
 		f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"queued": n, "conversations": 1})
+		_ = json.NewEncoder(w).Encode(map[string]any{"queued": n})
 	})
 	mux.HandleFunc("POST /signal/sources/{name}/status", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -180,7 +180,7 @@ func TestWebhookRoutingAndEventFilter(t *testing.T) {
 
 func TestNormalizeTitleIsTheAlertMessage(t *testing.T) {
 	e := pulseEvent{Event: "alert", Resource: "master", Message: "IoT: Tion 4S Bedroom is unreachable from every current observation location by ICMP probe: context deadline exceeded"}
-	signals := normalize(e, correlationStrategyIDStartTime)
+	signals := normalize(e, correlationStrategyIDStartTime, "d")
 	if len(signals) != 1 {
 		t.Fatalf("expected one signal, got %d", len(signals))
 	}
@@ -191,7 +191,7 @@ func TestNormalizeTitleIsTheAlertMessage(t *testing.T) {
 
 func TestNormalizeTitleFallsBackToResourceWhenMessageIsBlank(t *testing.T) {
 	e := pulseEvent{Event: "alert", Resource: "master", Message: ""}
-	signals := normalize(e, correlationStrategyIDStartTime)
+	signals := normalize(e, correlationStrategyIDStartTime, "d")
 	if len(signals) != 1 {
 		t.Fatalf("expected one signal, got %d", len(signals))
 	}
@@ -654,5 +654,23 @@ func TestUnknownSourceRefusalNamesIt(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.inbounds) != 0 {
 		t.Fatalf("a refused source must push nothing: %d pushes", len(f.inbounds))
+	}
+}
+
+// TestSignalIDStableAcrossRetryAndChangesWithBody pins pulse:<body digest>.
+func TestSignalIDStableAcrossRetryAndChangesWithBody(t *testing.T) {
+	e := pulseEvent{Event: "alert", Resource: "r"}
+	d1 := bodyDigest([]byte(`{"a":1}`))
+	first := normalize(e, correlationStrategyIDStartTime, d1)
+	retry := normalize(e, correlationStrategyIDStartTime, bodyDigest([]byte(`{"a":1}`)))
+	changed := normalize(e, correlationStrategyIDStartTime, bodyDigest([]byte(`{"a":2}`)))
+	if len(first) != 1 || first[0].SignalID != "pulse:"+d1 {
+		t.Fatalf("format: %+v", first)
+	}
+	if retry[0].SignalID != first[0].SignalID {
+		t.Fatal("retry changed signalId")
+	}
+	if changed[0].SignalID == first[0].SignalID {
+		t.Fatal("changed body kept signalId")
 	}
 }

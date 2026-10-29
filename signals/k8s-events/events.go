@@ -174,11 +174,23 @@ func normalize(source string, ev *Event, enr enrichment) Signal {
 
 	return Signal{
 		InitiationID: fmt.Sprintf("%s@%s/%s", source, ns, subject),
-		Labels:       labels,
-		Title:        fmt.Sprintf("%s: %s", ev.Reason, subject),
-		Payload:      string(payload),
-		Kind:         "alert",
+		// One observation of one Event at one count: a resync replaying an
+		// unchanged Event repeats it, an aggregated update increments count.
+		SignalID: fmt.Sprintf("%s/%s/%d", source, eventIdentity(ev), ev.Count),
+		Labels:   labels,
+		Title:    fmt.Sprintf("%s: %s", ev.Reason, subject),
+		Payload:  string(payload),
+		Kind:     "alert",
 	}
+}
+
+// eventIdentity is the Event's uid, or its namespaced name for a source that
+// omits one, so two Events never share a signalId for want of a uid.
+func eventIdentity(ev *Event) string {
+	if ev.Metadata.UID != "" {
+		return ev.Metadata.UID
+	}
+	return ev.Metadata.Namespace + "." + ev.Metadata.Name
 }
 
 func set(vals []string) map[string]bool {

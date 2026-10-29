@@ -115,9 +115,9 @@ function columnsFor(kind: string): string[] {
     case 'conversations':
       return ['phase', 'profile', 'coordinator', 'causedBy']
     case 'signals':
-      // console-signals: "source, initiationId, phase, occurrence count, age"
+      // console-signals: "source, initiationId, phase and age"
       // — age is the generic column every kind already gets.
-      return ['source', 'initiationId', 'phase', 'occurrences']
+      return ['source', 'initiationId', 'phase']
     default:
       return []
   }

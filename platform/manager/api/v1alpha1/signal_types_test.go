@@ -66,3 +66,23 @@ func TestRollupPhaseAllTerminalNoneRoutedIsFailed(t *testing.T) {
 		t.Fatalf("RollupPhase(terminal, none Routed) = %q, want Failed", got)
 	}
 }
+
+func TestSignalNameForIsDeterministicSourceScopedAndBounded(t *testing.T) {
+	a := SignalNameFor("src", "m-1")
+	if a != SignalNameFor("src", "m-1") {
+		t.Fatal("deterministic")
+	}
+	if a == SignalNameFor("other", "m-1") {
+		t.Fatal("two sources never collide on one signalId")
+	}
+	if a == SignalNameFor("src", "m-2") {
+		t.Fatal("two ids never collide")
+	}
+	// the NUL separator: ("ab","c") and ("a","bc") hash apart
+	if SignalNameFor("ab", "c") == SignalNameFor("a", "bc") {
+		t.Fatal("(source, id) pairs must not alias")
+	}
+	if len(a) != len("sig-")+32 || a[:4] != "sig-" {
+		t.Fatalf("name %q is not sig-<32 hex>", a)
+	}
+}

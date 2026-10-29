@@ -19,23 +19,23 @@ vi.mock('../api/hooks', () => ({
   usePipelineIcon: () => () => undefined,
 }))
 
-function signalRow(name: string, source: string, phase: string, occurrences: string, over: Partial<InventoryRow> = {}): InventoryRow {
+function signalRow(name: string, source: string, phase: string, over: Partial<InventoryRow> = {}): InventoryRow {
   return {
     name, health: 'none', findings: 0, created: new Date().toISOString(),
-    columns: { source, initiationId: `init-${name}`, phase, occurrences },
+    columns: { source, initiationId: `init-${name}`, phase },
     ...over,
   }
 }
 
 describe('ConfigKindPage — the Signal kind', () => {
-  it('shows source, initiationId, phase and occurrences, and filters by source and phase', async () => {
+  it('shows source, initiationId, phase, and filters by source and phase', async () => {
     inventory.mockReturnValue({
       isLoading: false,
       error: undefined,
       data: [
-        signalRow('sig-a', 'cluster-events', 'Routed', '1'),
-        signalRow('sig-b', 'cluster-events', 'PartiallyRouted', '3'),
-        signalRow('sig-c', 'prometheus-alerts', 'Routed', '2'),
+        signalRow('sig-a', 'cluster-events', 'Routed'),
+        signalRow('sig-b', 'cluster-events', 'PartiallyRouted'),
+        signalRow('sig-c', 'prometheus-alerts', 'Routed'),
       ],
     })
     render(
@@ -66,7 +66,7 @@ describe('ConfigKindPage — the Signal kind', () => {
 
   it('offers no create/edit/delete/retry control anywhere on the page', () => {
     inventory.mockReturnValue({
-      isLoading: false, error: undefined, data: [signalRow('sig-a', 'cluster-events', 'Pending', '1')],
+      isLoading: false, error: undefined, data: [signalRow('sig-a', 'cluster-events', 'Pending')],
     })
     render(
       <MemoryRouter initialEntries={['/config/signals']}>

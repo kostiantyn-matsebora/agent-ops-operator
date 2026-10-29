@@ -21,7 +21,7 @@ the events, decides which are real, and gives an agent the tools to look.
 
 `signals/k8s-events` conforms to the [signal adapter
 specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-2.2.0.
+2.3.0.
 
 ## What starts work
 

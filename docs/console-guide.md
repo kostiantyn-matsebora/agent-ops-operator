@@ -144,11 +144,11 @@ Five views, one question each.
 
   **Signals** are the one kind with no write path anywhere, ever — the
   durable record of what arrived and whether it reached an agent. The list
-  shows source, phase and occurrence count, filterable by either. Opening
+  shows source, phase and age, filterable by source and phase. Opening
   one shows every claimant's state, a routed one linked to its conversation,
   and a failed or dropped signal's reason verbatim.
 
-  ![The signals inventory, filterable by source and phase: one routed signal, one partially routed after three occurrences, one pending, and one dropped from a source no Pipeline lists.]({{ '/assets/img/console/signals-light.png' | relative_url }})
+  ![The signals inventory, filterable by source and phase: one routed signal, one partially routed, one pending, and one dropped from a source no Pipeline lists.]({{ '/assets/img/console/signals-light.png' | relative_url }})
 
 ## What it does for you
 

@@ -93,6 +93,10 @@ export function asSignalStatus(status: unknown): SignalStatusWire {
     phase: s.phase,
     reason: s.reason,
     claimants: Array.isArray(s.claimants) ? s.claimants : undefined,
+    attempts: s.attempts,
     firstAttemptAt: s.firstAttemptAt,
+    completedAt: s.completedAt,
+    consumedBy: s.consumedBy,
+    consumedAt: s.consumedAt,
   }
 }

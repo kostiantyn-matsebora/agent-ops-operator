@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +245,13 @@ func TestInitiationIDRecursAcrossDwellCycles(t *testing.T) {
 	first, second := (*got)[0].sigs[0].InitiationID, (*got)[1].sigs[0].InitiationID
 	if first != second || first != "ha-logs@zwave_js" {
 		t.Fatalf("a recurring integration must repeat its initiationId: %q vs %q", first, second)
+	}
+	// ...while each dwell cycle is its own message: initiationId#<opened unix>.
+	id1, id2 := (*got)[0].sigs[0].SignalID, (*got)[1].sigs[0].SignalID
+	want1 := fmt.Sprintf("ha-logs@zwave_js#%d", (*now).Unix())
+	want2 := fmt.Sprintf("ha-logs@zwave_js#%d", now.Add(10*time.Minute).Unix())
+	if id1 != want1 || id2 != want2 {
+		t.Fatalf("signalIds = %q, %q; want %q, %q", id1, id2, want1, want2)
 	}
 }
 

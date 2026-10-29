@@ -260,7 +260,8 @@ func (c *Collector) Observe(e activity.Event) {
 	switch e.Kind {
 	case activity.KindSignalReceived:
 		c.signalsReceived.WithLabelValues(nodeName(e.To), nodeName(e.From), e.Status).Inc()
-	case activity.KindSignalDropped:
+	case activity.KindSignalDropped, activity.KindSignalFailed:
+		// A Failed signal is counted with the drops: same loudness, one series.
 		c.signalsDropped.WithLabelValues(nodeName(e.From), e.Code).Inc()
 	case activity.KindConversationCreated:
 		c.conversations.WithLabelValues(e.Pipeline).Inc()

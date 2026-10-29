@@ -295,14 +295,10 @@ func TestBacklogBoundLeavesAMachineSignalWaiting(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
-	var out struct {
-		Queued        int    `json:"queued"`
-		Conversations int    `json:"conversations"`
-		Reason        string `json:"reason"`
-	}
+	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if out.Reason != "" || out.Conversations != 0 || out.Queued != 0 {
-		t.Fatalf("a waiting machine signal must report no drop reason: %s", rec.Body.String())
+	if _, has := out["reason"]; has || out["queued"] != float64(1) {
+		t.Fatalf("publication only acknowledges the store: %s", rec.Body.String())
 	}
 	if n := convCountFor(t, "prof-backlog"); n != 1 {
 		t.Fatalf("a waiting signal created a conversation: %d exist", n)

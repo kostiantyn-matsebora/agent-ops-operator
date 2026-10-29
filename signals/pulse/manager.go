@@ -45,6 +45,7 @@ type SourceInfo struct {
 // Signal is the contract's normalized signal shape.
 type Signal struct {
 	InitiationID string            `json:"initiationId"`
+	SignalID     string            `json:"signalId,omitempty"` // this one message, stable across re-sends
 	Labels       map[string]string `json:"labels,omitempty"`
 	Title        string            `json:"title,omitempty"`
 	Payload      string            `json:"payload,omitempty"`
@@ -53,9 +54,8 @@ type Signal struct {
 
 // InboundResult is the manager's routing outcome for a signal batch.
 type InboundResult struct {
-	Queued        int    `json:"queued"`
-	Conversations int    `json:"conversations"`
-	Reason        string `json:"reason,omitempty"`
+	Queued int    `json:"queued"`
+	Reason string `json:"reason,omitempty"`
 }
 
 func (m *Manager) do(ctx context.Context, method, path string, in, out any) error {

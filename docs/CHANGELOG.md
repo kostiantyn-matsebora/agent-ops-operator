@@ -12,18 +12,41 @@ for the source and the reference material beside this file.
 
 ### Added
 
-- A new `Signal` CRD: the durable, persist-then-ack record of one inbound
-  signal arrival and its per-claimant routing workflow. `/signal/inbound`
-  creates the CR before writing the response, and a repeat `initiationId`
-  on a still-open `Signal` is absorbed into it rather than posted twice.
-- The console's read-only signals view — list, filters and the per-claimant
-  routing detail — reached from the existing Configuration pages.
+- A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
+  The endpoint validates, stores one `Signal` per admitted message and
+  acknowledges. A separate consumer pool on the leader then claims it, spends
+  cooldown, applies capacity and routes it, so a leader change or a crash
+  loses and duplicates nothing. Each `Signal` records a per-claimant routing
+  workflow and a roll-up phase.
+- An optional per-message `signalId` on a normalized signal. A re-send with
+  the same `signalId` is stored once. Every shipped signal adapter now sends
+  one.
+- Six chart values bound the queue: `signalConsumerConcurrency`,
+  `signalRetryDeadline`, `maxSignalsPerSource`, `signalTtlRouted`,
+  `signalTtlDropped` and `signalTtlFailed`.
+- The console's read-only signals view, with the per-claimant routing detail,
+  reached from the Configuration pages.
+
+### Changed
+
+- The signal adapter specification moves to **2.3.0**. The `200` response is
+  now `{"queued": n}`: the `conversations` field is withdrawn, and no routing
+  outcome appears on it (`API-2` is replaced). A `5xx` asks for a re-send
+  (`API-3`). No shipped adapter read the withdrawn field, so none stops
+  conforming.
+- A machine signal arriving at a full conversation backlog now waits as
+  `Pending` and routes when it drains. A chat message is still declined at
+  once and told on its surface.
+- An addressed conversation adopts the `initiationId` as its
+  `conversationId`, like every other claimant.
 
 ### Upgrade
 
 Not breaking. Helm never upgrades an existing CRD, so run
 `kubectl apply -f chart/crds/` before `helm upgrade` to pick up the new
-`Signal` CRD, as every CRD-adding release already does.
+`Signal` CRD, as every CRD-adding release already does. Adapter and manager
+upgrade in either order: an older manager ignores `signalId`. An adapter that
+reads `conversations` from the response, if you wrote one, must stop.
 
 ## [18.0.1] — 2026-10-25
 

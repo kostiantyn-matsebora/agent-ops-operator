@@ -400,10 +400,13 @@ func (a *adapter) normalize(upd tgUpdate) (string, Signal, bool) {
 		// source repeats the same id rather than posing as a second
 		// request.
 		InitiationID: "tg-" + match + "-" + strconv.FormatInt(upd.UpdateID, 10),
-		Labels:       a.chatLabels(cfg, m.From, m.MessageID),
-		Kind:         "chat",
-		Payload:      text,
-		Title:        title(text),
+		// The same identity names the MESSAGE: the router's redelivery of
+		// this update repeats it, so the manager stores it once.
+		SignalID: "tg-" + match + "-" + strconv.FormatInt(upd.UpdateID, 10),
+		Labels:   a.chatLabels(cfg, m.From, m.MessageID),
+		Kind:     "chat",
+		Payload:  text,
+		Title:    title(text),
 	}, true
 }
 
@@ -450,6 +453,7 @@ func (a *adapter) normalizeSelection(upd tgUpdate) (string, Signal, bool) {
 		// per tap, so tapping twice is two requests rather than one
 		// collapsed by cooldown.
 		InitiationID: "tg-cb-" + match + "-" + cb.ID,
+		SignalID:     "tg-cb-" + match + "-" + cb.ID,
 		Labels:       a.chatLabels(cfg, cb.From, handle),
 		Kind:         "chat",
 		Payload:      payload,

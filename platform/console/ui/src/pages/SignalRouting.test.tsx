@@ -116,4 +116,21 @@ describe('SignalRoutingCard', () => {
     )
     expect(screen.getByText('No claimant was ever snapshotted')).toBeInTheDocument()
   })
+
+  it('lists the consumer and delivery history the manager recorded, and omits what it did not', () => {
+    render(
+      <MemoryRouter>
+        <SignalRoutingCard
+          status={{
+            phase: 'Routed', attempts: 2, firstAttemptAt: '2026-01-01T00:00:00Z',
+            consumedBy: 'agentops-manager-0_ab12', consumedAt: '2026-01-01T00:00:08Z',
+          }}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('agentops-manager-0_ab12')).toBeInTheDocument()
+    expect(screen.getByText('Attempts')).toBeInTheDocument()
+    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.queryByText('Completed at')).not.toBeInTheDocument()
+  })
 })

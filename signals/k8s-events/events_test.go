@@ -269,3 +269,22 @@ func TestEventWhenPrefersMostSpecificTimestamp(t *testing.T) {
 		t.Fatal("no timestamps must yield the zero time, never epoch")
 	}
 }
+
+// TestNormalizeSignalID pins <source>/<event uid>/<count>: an unchanged Event
+// replayed by a resync repeats it, an aggregated update changes it.
+func TestNormalizeSignalID(t *testing.T) {
+	e := evt("Warning", "prod", "Pod", "api-1", "BackOff")
+	e.Metadata.UID = "uid-1"
+	e.Count = 3
+	first := normalize("src", &e, enrichment{})
+	if first.SignalID != "src/uid-1/3" {
+		t.Fatalf("signalId = %q, want src/uid-1/3", first.SignalID)
+	}
+	if again := normalize("src", &e, enrichment{}); again.SignalID != first.SignalID {
+		t.Fatalf("replayed event changed signalId: %q vs %q", again.SignalID, first.SignalID)
+	}
+	e.Count = 4
+	if next := normalize("src", &e, enrichment{}); next.SignalID == first.SignalID {
+		t.Fatal("an aggregated update must change the signalId")
+	}
+}

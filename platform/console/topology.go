@@ -124,7 +124,6 @@ type runtimeSpec struct {
 type signalSpec struct {
 	SourceRef    Ref    `json:"sourceRef"`
 	InitiationID string `json:"initiationId"`
-	Occurrences  int32  `json:"occurrences,omitempty"`
 }
 
 // signalStatus is the console's read of Signal.status — the roll-up phase and

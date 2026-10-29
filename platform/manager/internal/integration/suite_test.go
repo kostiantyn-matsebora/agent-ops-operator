@@ -32,6 +32,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 )
 
@@ -90,9 +91,6 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	if err := controller.SetupConversationIndexes(routingCache); err != nil {
-		panic(err)
-	}
-	if err := controller.SetupSignalIndexes(routingCache); err != nil {
 		panic(err)
 	}
 	go func() {
@@ -165,7 +163,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	acts := activity.New(512)
 	rt := runtimepod.Config{ContextPVC: "test-context"}
 	ops := &chat.OpQueue{Client: k8sClient, Namespace: ns, Registry: chat.NewRegistry(), Activity: acts}
-	return &httpapi.Server{
+	srv := &httpapi.Server{
 		// routingClient: equality routing and reopen's at-most-one-open check
 		// both read client.MatchingFields{IndexConversationID:...}, which only
 		// a cache-backed client answers correctly (see routingClient's own
@@ -187,8 +185,19 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 		Activity:               acts,
 		Version:                "test",
 		MaxActiveConversations: 5,
-	}, acts
+		// The consumer shares it, as in production: a fresh Server is a fresh
+		// cooldown, which is how a test stands in for "outside the window".
+		Cooldowns: ingest.NewCooldownBook(),
+	}
+	lastServer = srv
+	return srv, acts
 }
+
+// lastServer is the most recently built API server. postSignal drives the
+// consumer that goes with it: publication only stores a Signal, and routing is
+// the leader's consumer pool — which a test with no manager running stands in
+// for by reconciling the Signals a post created, synchronously.
+var lastServer *httpapi.Server
 
 func mkProfile(t *testing.T, name string) {
 	t.Helper()
@@ -387,7 +396,7 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 		{"initiationId": "batch-a", "labels": labels, "payload": "alert-a"},
 		{"initiationId": "batch-a", "labels": labels, "payload": "alert-a2"},
 	})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"conversations":1`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued":2`) {
 		t.Fatalf("batch: %d %s", rec.Code, rec.Body.String())
 	}
 	var list agentopsv1alpha1.ConversationList
@@ -401,15 +410,21 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 	if conv == nil {
 		t.Fatal("alert conversation not created")
 	}
+	// Each message is its own Signal now: the first opens the conversation, and
+	// the second — same source, same id, inside the one cooldown — is dropped
+	// rather than combined into it.
 	if len(conv.Spec.Inputs) != 1 || conv.Spec.Inputs[0].PayloadRef == nil {
-		t.Fatalf("one combined input with payloadRef expected: %+v", conv.Spec.Inputs)
+		t.Fatalf("one input with payloadRef expected: %+v", conv.Spec.Inputs)
+	}
+	if n := droppedForCooldown(t, "batch-a"); n != 1 {
+		t.Fatalf("the second message of the batch must be cooldown-dropped, got %d", n)
 	}
 	var ci agentopsv1alpha1.ConversationInput
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(ci.Spec.Payload, "alert-a") || !strings.Contains(ci.Spec.Payload, "alert-a2") {
-		t.Fatalf("combined payload expected: %q", ci.Spec.Payload)
+	if !strings.Contains(ci.Spec.Payload, "alert-a") {
+		t.Fatalf("payload expected: %q", ci.Spec.Payload)
 	}
 	return conv
 }
@@ -417,7 +432,7 @@ func postBatchAndFindCombinedConversation(t *testing.T, ctx context.Context, h h
 func assertCooldownSuppressesDuplicateInitiationID(t *testing.T, h http.Handler, labels map[string]string) {
 	t.Helper()
 	rec := postSignal(t, h, testMasterToken, "am", []map[string]any{{"initiationId": "batch-a", "labels": labels}})
-	if !strings.Contains(rec.Body.String(), `"queued":0`) {
+	if rec.Code != 200 || droppedForCooldown(t, "batch-a") < 2 {
 		t.Fatalf("cooldown: %s", rec.Body.String())
 	}
 }

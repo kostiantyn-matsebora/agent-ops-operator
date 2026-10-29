@@ -3,6 +3,7 @@
 package conformance
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,6 +39,66 @@ func attempts(mgr *FakeManager, source string) int {
 	return n
 }
 
+// maxSignalIDBytes is the contract's bound on a signalId.
+const maxSignalIDBytes = 256
+
+// signalIDsOf returns the signalId of every signal in a post, in order,
+// failing the test on one that is missing or outside the contract's bound
+// (1 to 256 bytes, printable ASCII without spaces).
+func signalIDsOf(t *testing.T, post SignalPost) []string {
+	t.Helper()
+	ids := make([]string, 0, len(post.Signals))
+	for _, s := range post.Signals {
+		id, _ := s["signalId"].(string)
+		if id == "" || len(id) > maxSignalIDBytes {
+			t.Fatalf("every signal needs a signalId of 1 to %d bytes: %v", maxSignalIDBytes, s)
+		}
+		for _, r := range id {
+			if r <= ' ' || r > '~' {
+				t.Fatalf("signalId must be printable ASCII without spaces: %q", id)
+			}
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// assertResendRepeatsSignalIDs: the same message sent again (after a 5xx, or a
+// redelivery) carries the SAME signalIds, so the manager stores it once.
+func assertResendRepeatsSignalIDs(t *testing.T, first, again SignalPost) {
+	t.Helper()
+	a, b := signalIDsOf(t, first), signalIDsOf(t, again)
+	if strings.Join(a, "\n") != strings.Join(b, "\n") {
+		t.Fatalf("a re-sent message must repeat its signalIds: %v, then %v", a, b)
+	}
+}
+
+// assertDifferentMessageHasDifferentSignalIDs: no signalId of other appears in
+// first.
+func assertDifferentMessageHasDifferentSignalIDs(t *testing.T, first, other SignalPost) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, id := range signalIDsOf(t, first) {
+		seen[id] = true
+	}
+	for _, id := range signalIDsOf(t, other) {
+		if seen[id] {
+			t.Fatalf("a different message reused signalId %q", id)
+		}
+	}
+}
+
+// rejected returns the rejected posts for a source, oldest first.
+func rejected(mgr *FakeManager, source string) []SignalPost {
+	var out []SignalPost
+	for _, p := range mgr.SignalPosts() {
+		if p.Source == source && p.Rejected && len(p.Signals) > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func assertNormalized(t *testing.T, post SignalPost, source string) {
 	t.Helper()
 	if !post.Bearer {
@@ -49,6 +110,7 @@ func assertNormalized(t *testing.T, post SignalPost, source string) {
 	if len(post.Signals) == 0 {
 		t.Fatalf("an empty post")
 	}
+	signalIDsOf(t, post)
 	for _, s := range post.Signals {
 		if id, _ := s["initiationId"].(string); id == "" {
 			t.Fatalf("every signal needs an initiationId: %v", s)
@@ -59,14 +121,28 @@ func assertNormalized(t *testing.T, post SignalPost, source string) {
 	}
 }
 
+// assertRetriedBatchRepeatsSignalIDs: where the adapter retried the batch the
+// manager refused, the retry carries the SAME signalIds as the first attempt.
+// An adapter that reports the failure instead of retrying has nothing to
+// compare, and passes.
+func assertRetriedBatchRepeatsSignalIDs(t *testing.T, mgr *FakeManager, source string) {
+	t.Helper()
+	rej := rejected(mgr, source)
+	if len(rej) < 2 {
+		return
+	}
+	assertResendRepeatsSignalIDs(t, rej[0], rej[1])
+}
+
 // ---- signal-cron -----------------------------------------------------------
 
 func TestSignalCronConformance(t *testing.T) {
 	mgr := NewFakeManager(t, "adapter-token")
-	mgr.ServeSources(SourceInfo{Name: "tick", Config: json.RawMessage(`{"schedule":"* * * * *","input":"echo tick","title":"tick"}`)})
-	// A cursor two minutes back makes the first evaluation fire at once
-	// instead of waiting for the next minute boundary.
-	mgr.Seed("signal", "tick", "last-fire", time.Now().Add(-2*time.Minute).UTC().Format(time.RFC3339))
+	mgr.ServeSources(SourceInfo{Name: "tick", Config: json.RawMessage(`{"schedule":"0 * * * *","input":"echo tick","title":"tick"}`)})
+	// An hourly schedule with a cursor over an hour back makes the first
+	// evaluation fire at once, and keeps the tick (so the signalId) the same
+	// across the retries below except at the hour boundary itself.
+	mgr.Seed("signal", "tick", "last-fire", time.Now().Add(-61*time.Minute).UTC().Format(time.RFC3339))
 	// Reject first: a failed post must be retried, not dropped.
 	mgr.RejectSignals(500)
 
@@ -80,6 +156,10 @@ func TestSignalCronConformance(t *testing.T) {
 	waitFor(t, "an accepted post", 45*time.Second, func() bool { return len(accepted(mgr, "tick")) >= 1 })
 	post := accepted(mgr, "tick")[0]
 	assertNormalized(t, post, "tick")
+	// The same tick re-fired after the 5xx repeats its signalId.
+	rej := rejected(mgr, "tick")
+	assertResendRepeatsSignalIDs(t, rej[0], rej[1])
+	assertResendRepeatsSignalIDs(t, rej[len(rej)-1], post)
 	s := post.Signals[0]
 	// initiationId is the source's own job identity, not a per-tick value —
 	// every tick of this job shares it (design: "cron | the source's job
@@ -136,12 +216,28 @@ func TestSignalAlertmanagerConformance(t *testing.T) {
 	if code, resp := postJSON(t, p.URL()+"/webhook/nope", body, nil); code != 404 || !strings.Contains(resp, `nope`) {
 		t.Fatalf("unknown source must be 404 naming the source, got %d %s", code, resp)
 	}
-	// A rejected post is SURFACED to the caller: the webhook fails.
+	// A different body is a different message: no signalId carries over.
+	changed := append(append([]byte{}, body...), '\n')
+	if code, resp := postJSON(t, p.URL()+"/webhook/vm-alerts", changed, nil); code != 200 {
+		t.Fatalf("a changed body must be accepted: %d %s", code, resp)
+	}
+	acc := accepted(mgr, "vm-alerts")
+	assertDifferentMessageHasDifferentSignalIDs(t, acc[0], acc[len(acc)-1])
+	// A rejected post is SURFACED to the caller: the webhook fails, and the
+	// re-delivery of the identical body repeats every signalId.
 	mgr.RejectSignals(500)
 	code, resp = postJSON(t, p.URL()+"/webhook/vm-alerts", body, nil)
 	if code/100 == 2 {
 		t.Fatalf("a rejected manager post must fail the webhook, got %d %s", code, resp)
 	}
+	rej := rejected(mgr, "vm-alerts")
+	assertResendRepeatsSignalIDs(t, acc[0], rej[len(rej)-1])
+	mgr.RejectSignals(0)
+	if code, resp := postJSON(t, p.URL()+"/webhook/vm-alerts", body, nil); code != 200 {
+		t.Fatalf("the re-delivery must be accepted: %d %s", code, resp)
+	}
+	acc = accepted(mgr, "vm-alerts")
+	assertResendRepeatsSignalIDs(t, rej[len(rej)-1], acc[len(acc)-1])
 	if p.Exited() {
 		t.Fatalf("a rejected post must not kill the adapter")
 	}
@@ -176,12 +272,28 @@ func TestSignalTelegramConformance(t *testing.T) {
 	if labels["agentops.dev/sender"] != "operator" {
 		t.Fatalf("the sender label: %v", labels)
 	}
-	// Rejected → surfaced to the router as a failed push.
+	if ids := signalIDsOf(t, post); ids[0] != "tg-tg-chat-77" {
+		t.Fatalf("signalId = %v, want tg-<source>-<update id>", ids)
+	}
+	// A different update is a different message.
+	next := bytes.Replace(body, []byte(`"update_id": 77`), []byte(`"update_id": 78`), 1)
+	if bytes.Equal(next, body) {
+		t.Fatalf("the fixture no longer carries update_id 77 — update this case")
+	}
+	if code, resp := postJSON(t, p.URL()+"/updates", next, nil); code/100 != 2 {
+		t.Fatalf("the next update must be accepted: %d %s", code, resp)
+	}
+	acc := accepted(mgr, "tg-chat")
+	assertDifferentMessageHasDifferentSignalIDs(t, acc[0], acc[len(acc)-1])
+	// Rejected → surfaced to the router as a failed push; the router's
+	// redelivery of the same update repeats the signalId.
 	mgr.RejectSignals(500)
 	code, resp := postJSON(t, p.URL()+"/updates", body, nil)
 	if code/100 == 2 {
 		t.Fatalf("a rejected manager post must fail the push, got %d %s", code, resp)
 	}
+	rej := rejected(mgr, "tg-chat")
+	assertResendRepeatsSignalIDs(t, acc[0], rej[len(rej)-1])
 }
 
 // ---- signal-k8s-events -----------------------------------------------------
@@ -252,6 +364,7 @@ func k8sEventsAssertRejectedPostRetriedOrReported(t *testing.T, mgr *FakeManager
 	api.Push("/api/v1/namespaces/apps/events", "ADDED", k8sEventsEventPayload(now, "api-backoff.2"))
 	waitFor(t, "the rejected post attempt", 60*time.Second, func() bool { return attempts(mgr, "events") > before })
 	afterFirst := attempts(mgr, "events")
+	defer assertRetriedBatchRepeatsSignalIDs(t, mgr, "events")
 	waitFor(t, "a retry or a status report about the rejection", 90*time.Second, func() bool {
 		if attempts(mgr, "events") > afterFirst {
 			return true
@@ -329,6 +442,7 @@ func haAssertRejectedPostRetriedOrReported(t *testing.T, mgr *FakeManager, ha *F
 	ha.PushLog(rec2)
 	waitFor(t, "the rejected post attempt", 60*time.Second, func() bool { return attempts(mgr, "ha") > before })
 	afterFirst := attempts(mgr, "ha")
+	defer assertRetriedBatchRepeatsSignalIDs(t, mgr, "ha")
 	waitFor(t, "a retry or a status report about the rejection", 90*time.Second, func() bool {
 		if attempts(mgr, "ha") > afterFirst {
 			return true

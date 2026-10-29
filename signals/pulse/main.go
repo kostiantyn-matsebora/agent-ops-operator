@@ -39,6 +39,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -277,7 +279,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signals := normalize(event, correlationStrategy)
+	signals := normalize(event, correlationStrategy, bodyDigest(body))
 	if len(signals) == 0 {
 		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "not a firing alert"})
 		return
@@ -292,6 +294,12 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, res)
 }
 
+// bodyDigest returns the hex SHA-256 of a verified webhook body.
+func bodyDigest(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 // normalize converts one parsed Pulse event into contract signals, deriving
 // initiationId per the served source's resolved correlationStrategy. Only
 // "alert" (firing) events produce one — "resolved" produces none, so Pulse
@@ -299,7 +307,11 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // spec, "Firing alerts normalize into the signal contract, resolved alerts
 // do not"). Correlation is minted here, as the initiationId; cooldown,
 // routing and recurrence are the manager's.
-func normalize(e pulseEvent, strategy string) []Signal {
+//
+// digest is the SHA-256 of the verified request body: Pulse retries a failed
+// delivery with the identical body, so the signalId repeats on a retry and
+// differs for any other message. No time bucket (decided).
+func normalize(e pulseEvent, strategy, digest string) []Signal {
 	if e.Event != "alert" {
 		return nil
 	}
@@ -322,6 +334,7 @@ func normalize(e pulseEvent, strategy string) []Signal {
 	payloadJSON, _ := json.MarshalIndent(e, "", "  ")
 	return []Signal{{
 		InitiationID: e.initiationID(strategy),
+		SignalID:     "pulse:" + digest,
 		Labels: map[string]string{
 			"resource": e.Resource, "resourceType": e.ResourceType,
 			"severity": e.Severity, "node": e.Node,

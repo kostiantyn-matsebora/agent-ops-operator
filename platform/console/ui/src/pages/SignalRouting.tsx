@@ -1,5 +1,6 @@
 import {
-  Alert, Card, CardBody, CardTitle, FormSelect, FormSelectOption, Label, Toolbar, ToolbarContent, ToolbarItem,
+  Alert, Card, CardBody, CardTitle, DescriptionList, DescriptionListDescription, DescriptionListGroup,
+  DescriptionListTerm, FormSelect, FormSelectOption, Label, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { Link } from 'react-router-dom'
@@ -87,6 +88,7 @@ export function SignalRoutingCard({ status }: Readonly<{ status: SignalStatusWir
             />
           )}
         </div>
+        <DeliveryHistory status={status} />
         {claimants.length === 0 ? (
           <Empty title="No claimant was ever snapshotted">
             {status.phase === 'Dropped'
@@ -131,5 +133,28 @@ export function SignalRoutingCard({ status }: Readonly<{ status: SignalStatusWir
         )}
       </CardBody>
     </Card>
+  )
+}
+
+/** The consumer and delivery history, verbatim from the status — only what the manager recorded is listed. */
+export function DeliveryHistory({ status }: Readonly<{ status: SignalStatusWire }>) {
+  const rows: [string, string | number | undefined][] = [
+    ['Attempts', status.attempts],
+    ['First attempt', status.firstAttemptAt],
+    ['Consumed by', status.consumedBy],
+    ['Consumed at', status.consumedAt],
+    ['Completed at', status.completedAt],
+  ]
+  const shown = rows.filter(([, v]) => v !== undefined && v !== '')
+  if (shown.length === 0) return null
+  return (
+    <DescriptionList isHorizontal isCompact aria-label="delivery history" style={{ marginBottom: 12 }}>
+      {shown.map(([term, value]) => (
+        <DescriptionListGroup key={term}>
+          <DescriptionListTerm>{term}</DescriptionListTerm>
+          <DescriptionListDescription>{String(value)}</DescriptionListDescription>
+        </DescriptionListGroup>
+      ))}
+    </DescriptionList>
   )
 }

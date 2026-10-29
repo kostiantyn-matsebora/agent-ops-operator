@@ -401,13 +401,18 @@ func normalize(source string, rec *logRecord) Signal {
 		"surface":     surface,
 	}
 
+	initiationID := fmt.Sprintf("%s@%s", source, rec.Key())
 	return Signal{
-		InitiationID: fmt.Sprintf("%s@%s", source, rec.Key()),
-		Labels:       labels,
-		Title:        fmt.Sprintf("%s: %s", integration, truncate(oneLine(text), maxTitleText)),
-		Payload:      string(payload),
-		Kind:         "alert",
-		MatchText:    text,
+		InitiationID: initiationID,
+		// An immediate (no dwell) emission is identified by the record's own
+		// timestamp, so a re-post of an unadvanced cursor repeats it. A
+		// dwell emission overrides this at decide() time.
+		SignalID:  fmt.Sprintf("%s#%d", initiationID, int64(rec.Timestamp)),
+		Labels:    labels,
+		Title:     fmt.Sprintf("%s: %s", integration, truncate(oneLine(text), maxTitleText)),
+		Payload:   string(payload),
+		Kind:      "alert",
+		MatchText: text,
 	}
 }
 

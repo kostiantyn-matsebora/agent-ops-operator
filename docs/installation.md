@@ -212,6 +212,9 @@ kubectl apply -f $env:TEMP\agentops-chart\agent-ops-operator\crds\
 
 Working from a checkout? `kubectl apply -f chart/crds/` does the same thing.
 
+The release that adds the `Signal` kind needs this step: until the new CRD is
+applied, the manager cannot store the signals `/signal/inbound` accepts.
+
 Then the release itself:
 
 ```sh

@@ -32,11 +32,6 @@ const (
 	kindAlert = "alert"
 )
 
-// labelChatChannel mirrors internal/httpapi.LabelChatChannel for the same
-// reason the kind constants above do — it is what lets a freshly created
-// conversation stamp OriginReader.Channel for a chat signal.
-const labelChatChannel = "agentops.dev/channel"
-
 // oneShot mirrors internal/httpapi's own oneShot: a one-shot signal's
 // payload IS the request, so it makes the title; a recurring-subject one
 // (alert, job) keeps the source's name instead.
@@ -44,11 +39,16 @@ func oneShot(kind string) bool { return kind == kindChat || kind == kindTask }
 
 // routeOneClaimant attempts one claimant's own routing workflow for sig:
 // reuse an open conversation it already originated whose conversationId
-// equals the signal's initiationId, or create one. Returns waiting=true
-// when the create was refused because the pending backlog is full — the
-// caller leaves that claimant Routing rather than failing it (design D-8).
+// equals the signal's initiationId, or create one, then append the message.
+// Returns waiting=true when the create was refused because the pending
+// backlog is full — the caller leaves that claimant Routing (design D-13).
+//
+// Idempotent end to end: the lookup reads the API server, so a conversation a
+// crashed pass created is found, and the input is written under a name
+// derived from the Signal and claimant, so a repeated pass appends nothing
+// twice (design D-5).
 func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, sig *agentopsv1alpha1.Signal) (*agentopsv1alpha1.ObjectRef, bool, error) {
-	conv, err := findReusableConversation(ctx, deps.Client, deps.Namespace, claimant, sig.Spec.InitiationID)
+	conv, err := findReusableConversation(ctx, deps.Reader, deps.Namespace, claimant, sig.Spec.InitiationID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -76,19 +76,28 @@ func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, si
 	return &agentopsv1alpha1.ObjectRef{Name: conv.Name}, false, nil
 }
 
-// findReusableConversation returns the OPEN conversation, originated by
-// this claimant, whose conversationId equals initiationID — pure equality,
-// read off the informer field index on spec.conversationId
-// (agentopsv1alpha1.IndexConversationID), exactly as it always has.
+// messageOf is the text routed to the agent: the signal's payload verbatim,
+// or — for an addressed chat message — the task after `/<name> `.
+func messageOf(sig *agentopsv1alpha1.Signal) (text string, addressed bool) {
+	if _, task, ok := AddressedTarget(sig); ok {
+		return task, true
+	}
+	return sig.Spec.Payload, false
+}
+
+// findReusableConversation returns the OPEN conversation, originated by this
+// claimant, whose conversationId equals initiationID — pure equality. It reads
+// the API server directly (never an informer cache, and so no field index): a
+// pass repeated after a crash between create and the status write must find
+// the conversation it just made.
 func findReusableConversation(ctx context.Context, c client.Reader, namespace string, claimant chat.Claimant, initiationID string) (*agentopsv1alpha1.Conversation, error) {
 	var list agentopsv1alpha1.ConversationList
-	if err := c.List(ctx, &list, client.InNamespace(namespace),
-		client.MatchingFields{agentopsv1alpha1.IndexConversationID: initiationID}); err != nil {
+	if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 		return nil, err
 	}
 	for i := range list.Items {
 		conv := &list.Items[i]
-		if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		if conv.Spec.ConversationID != initiationID || conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
 			continue
 		}
 		if reusableBy(conv, claimant) {
@@ -154,7 +163,8 @@ func titleForSignal(sourceName string, sig *agentopsv1alpha1.Signal) string {
 		if sig.Spec.Kind == kindTask {
 			icon = "🛠"
 		}
-		if title := titleFromText(icon, sig.Spec.Payload); title != "" {
+		text, _ := messageOf(sig)
+		if title := titleFromText(icon, text); title != "" {
 			return title
 		}
 	}
@@ -214,6 +224,11 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 		Title:          title,
 		ConversationID: sig.Spec.InitiationID,
 	}
+	// An addressed conversation binds the addressing channel too, so the
+	// answer comes back to where the person is looking.
+	if _, addressed := messageOf(sig); addressed {
+		conv.Spec.ChannelRefs = withChannel(conv.Spec.ChannelRefs, sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel])
+	}
 	nodeKind := activity.NodePipeline
 	if claimant.ClaimantKind() == chat.ClaimantCoordinator {
 		nodeKind = activity.NodeCoordinator
@@ -225,7 +240,7 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 	// Only for a person on a chat surface: an alert has no reader, and a
 	// machine posting a task is not owed a read mark.
 	if sig.Spec.Kind == kindChat && sig.Spec.Reader != "" {
-		if ch := sig.Spec.Labels[labelChatChannel]; ch != "" {
+		if ch := sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel]; ch != "" {
 			conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{Channel: ch, Key: sig.Spec.Reader}
 		}
 	}
@@ -250,23 +265,70 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 	return conv, nil
 }
 
-// appendInput records sig's own payload as a ConversationInput and queues
-// it on the conversation's own input list, retrying the optimistic patch on
-// conflict.
+// withChannel adds a channel ref unless it is already bound.
+func withChannel(refs []agentopsv1alpha1.ObjectRef, name string) []agentopsv1alpha1.ObjectRef {
+	if name == "" {
+		return refs
+	}
+	for _, r := range refs {
+		if r.Name == name {
+			return refs
+		}
+	}
+	return append(refs, agentopsv1alpha1.ObjectRef{Name: name})
+}
+
+// InputName is the name of the ConversationInput carrying sig's message to one
+// claimant — derived deterministically from the Signal and the claimant, so a
+// repeated pass finds the delivery it already made rather than making
+// another. Pipeline and Coordinator share a namespace and may share a name,
+// hence the kind letter.
+func InputName(sigName string, ref agentopsv1alpha1.ClaimantRef) string {
+	kind := "p"
+	if ref.Kind == agentopsv1alpha1.ClaimantKindCoordinator {
+		kind = "c"
+	}
+	return sigName + "-" + kind + "-" + ref.Name
+}
+
+// inputDelivered reports whether the conversation already carries the named
+// input: queued in spec.inputs[], or — once dispatch consumed it and pruned
+// the queue — cited by a run's recorded inputs. The ConversationInput object
+// itself is deleted with its queue entry, so its absence proves nothing.
+func inputDelivered(conv *agentopsv1alpha1.Conversation, ciName string) bool {
+	for i := range conv.Spec.Inputs {
+		if ref := conv.Spec.Inputs[i].PayloadRef; ref != nil && ref.Name == ciName {
+			return true
+		}
+	}
+	for r := range conv.Status.Runs {
+		for i := range conv.Status.Runs[r].Inputs {
+			if ref := conv.Status.Runs[r].Inputs[i].PayloadRef; ref != nil && ref.Name == ciName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// appendInput records sig's message as a ConversationInput under its derived
+// name and queues it on the conversation, retrying the optimistic patch on
+// conflict. A delivery that already happened (an earlier pass of the same
+// Signal and claimant) is left alone.
 func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *agentopsv1alpha1.Conversation, sig *agentopsv1alpha1.Signal, inputType agentopsv1alpha1.InputType) error {
 	sourceName := sig.Spec.SourceRef.Name
+	ciName := InputName(sig.Name, claimantRef(claimant))
+	text, _ := messageOf(sig)
+
 	ci := &agentopsv1alpha1.ConversationInput{}
 	ci.Namespace = deps.Namespace
-	ci.GenerateName = conv.Name + "-in-"
+	ci.Name = ciName
 	ci.Spec = agentopsv1alpha1.ConversationInputSpec{
 		ConversationRef: agentopsv1alpha1.ObjectRef{Name: conv.Name},
 		Type:            inputType,
-		Payload:         sig.Spec.Payload,
+		Payload:         text,
 		Labels:          sig.Spec.Labels,
 		Severity:        sig.Spec.Severity,
-	}
-	if err := deps.Client.Create(ctx, ci); err != nil {
-		return err
 	}
 
 	for attempt := 0; attempt < 5; attempt++ {
@@ -274,12 +336,20 @@ func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *a
 		if err := deps.Reader.Get(ctx, types.NamespacedName{Namespace: deps.Namespace, Name: conv.Name}, &fresh); err != nil {
 			return err
 		}
+		if inputDelivered(&fresh, ciName) {
+			return nil
+		}
+		// Created only now that the queue is known not to carry it, and an
+		// existing object under the name is the same delivery's earlier half.
+		if err := deps.Client.Create(ctx, ci); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
 		patch := client.MergeFrom(fresh.DeepCopy())
 		inputID := "in-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		fresh.Spec.Inputs = append(fresh.Spec.Inputs, agentopsv1alpha1.InputItem{
 			ID:         inputID,
 			Type:       inputType,
-			PayloadRef: &agentopsv1alpha1.ObjectRef{Name: ci.Name},
+			PayloadRef: &agentopsv1alpha1.ObjectRef{Name: ciName},
 			Origin: &agentopsv1alpha1.InputOrigin{
 				Kind: agentopsv1alpha1.OriginSignal, Name: sourceName,
 				SignalKind: orDefault(sig.Spec.Kind, kindAlert),

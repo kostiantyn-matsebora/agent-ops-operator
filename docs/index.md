@@ -65,7 +65,7 @@ already in it.
 {: .ao-cards}
 - ![]({{ '/assets/img/logos/kubernetes.svg' | relative_url }}) Kubernetes native
 
-  Thirteen custom resources, validated by the API server like anything else
+  Fourteen custom resources, validated by the API server like anything else
   you deploy. `kubectl get conversations` tells you what is running.
 
 - ![]({{ '/assets/img/claim-gitops.svg' | relative_url }}) GitOps ready

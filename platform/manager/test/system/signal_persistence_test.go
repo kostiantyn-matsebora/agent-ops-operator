@@ -2,23 +2,23 @@
 
 package system
 
-// Section 6 (signal-persistence) — the persist-then-ack lane end to end
-// against a REAL /signal/inbound HTTP endpoint, a REAL owned Signal CR and
-// REAL Conversation CRs, plus the one event only a live cluster adds: a
-// genuine manager restart resuming a Signal the inline attempt left
-// non-terminal, with neither claimant's conversation duplicated. The pure
-// claimant-state-machine and roll-up MATH (signalroute.RouteClaimants,
-// agentopsv1alpha1.RollupPhase) is pinned at envtest
-// (internal/controller/signal_controller_test.go) — nothing here re-derives
-// that logic. What only a real cluster adds is a real OwnerReference set by
-// the real API server, a real informer field index serving the
-// absorb-by-initiationId read, and a real rolled Deployment recovering from
-// nothing but the Signal CRs themselves (design D-3's "crash recovery is
-// therefore free").
+// Section 6 (signal-persistence) — the publish/consume broker end to end
+// against a REAL /signal/inbound HTTP endpoint (publish only: store and ack),
+// the leader's REAL consumer pool, a REAL owned Signal CR and REAL
+// Conversation CRs, plus the one event only a live cluster adds: a genuine
+// manager restart handing a Signal the consumer left non-terminal to a fresh
+// leader, with neither claimant's conversation duplicated. The claimant
+// state machine and roll-up MATH (signalroute, agentopsv1alpha1.RollupPhase)
+// is pinned at envtest (internal/controller/signal_controller_test.go) —
+// nothing here re-derives that logic. What only a real cluster adds is a
+// real OwnerReference set by the real API server, the real leader Lease and a
+// real rolled Deployment recovering from nothing but the Signal CRs
+// themselves.
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,8 +128,8 @@ func assertExactlyOneConversationPerClaimant(t *testing.T, ctx context.Context, 
 }
 
 // 6.1.a The happy-path lane: a posted signal persists as an owned Signal CR
-// before the manager ever answers, routes inline on the first attempt, and
-// reaches Routed naming the real conversation it opened.
+// before the manager answers, is routed by the leader's consumer, and reaches
+// Routed naming the real conversation it opened and the replica that did it.
 func TestSignalPersistenceReachesRoutedPhase(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
@@ -150,6 +150,9 @@ func TestSignalPersistenceReachesRoutedPhase(t *testing.T) {
 	}
 	if !owned {
 		t.Fatalf("the Signal must be owned by its SignalSource, got owners %+v", sig.OwnerReferences)
+	}
+	if sig.Status.CompletedAt == nil || sig.Status.ConsumedBy == "" || sig.Status.ConsumedAt == nil {
+		t.Fatalf("a terminal Signal records when and by whom it was consumed: %+v", sig.Status)
 	}
 	if sig.Spec.InitiationID != id {
 		t.Fatalf("the Signal must carry the posted initiationId, got %q want %q", sig.Spec.InitiationID, id)
@@ -186,13 +189,10 @@ func TestSignalPersistenceReachesRoutedPhase(t *testing.T) {
 // TestCorrelationRepeatOutsideCooldownRecursOnOpenConversation already
 // makes for a single restart.
 //
-// WHY THIS DRIVES PartiallyRouted THE WAY IT DOES: signalroute.RouteClaimants
-// attempts every Routing claimant inside ONE Status().Patch call, so there
-// is no window an HTTP caller can observe between two claimants of the SAME
-// inline attempt finishing at different times — by the time
-// /signal/inbound answers, the Signal's status already reflects every
-// claimant's end state for that one call. The only per-claimant branch
-// RouteClaimants makes is the pending-backlog check ahead of a CREATE
+// WHY THIS DRIVES PartiallyRouted THE WAY IT DOES: the consumer attempts
+// every Routing claimant in ONE pass, so there is no window to observe two
+// claimants of the SAME pass finishing at different times. The only
+// per-claimant branch is the pending-backlog check ahead of a CREATE
 // (design D-8): a claimant that already has an open, reusable conversation
 // for this initiationId (equality-reuse) skips that check entirely and
 // always succeeds; a claimant with none must CREATE, which the check
@@ -366,4 +366,197 @@ func patchManagerEnv(t *testing.T, ctx context.Context, e *Env, name, value stri
 		t.Fatal(err)
 	}
 	forceManagerRollout(t, ctx, e, n)
+}
+
+// 6.1.c A signalId makes publication idempotent against the real API server:
+// the same (source, signalId) posted twice stores ONE Signal, and the second
+// answer still counts it queued.
+func TestSignalPersistenceSignalIDDeduplicates(t *testing.T) {
+	e := requireEnv(t)
+	ctx := context.Background()
+	const name = "e2e-sigpersist-dedup"
+	setupDedicatedSignalSource(t, ctx, e, name)
+
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	id := "e2e-sigpersist-dedup-" + stamp
+	sigID := "delivery-" + stamp
+	for i := 0; i < 2; i++ {
+		res := e.PostSignal(t, name, map[string]any{
+			"initiationId": id, "signalId": sigID, "kind": "task", "payload": "once", "title": id,
+		})
+		if res["queued"] != float64(1) {
+			t.Fatalf("post %d: a resend is still acknowledged as queued, got %v", i, res)
+		}
+	}
+	waitSignalPhase(t, ctx, e, name, id, 2*time.Minute, agentopsv1alpha1.SignalRouted)
+	items, err := e.K.Signals(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for i := range items {
+		if items[i].Spec.SourceRef.Name == name && items[i].Spec.SignalID == sigID {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("one signalId must store exactly one Signal, got %d", n)
+	}
+	assertExactlyOneConversationPerClaimant(t, ctx, e, id, name)
+}
+
+// 8.1 (addressed) The console path: a person types `/<pipeline> <task>` in
+// the console, which originates a chat Signal on the console source. The
+// consumer takes the NAMED pipeline as the one claimant — no claim, so the
+// pipeline's own source is NOT the console's — and the Signal reaches Routed
+// naming the conversation it opened.
+func TestSignalPersistenceAddressedConsoleCommandRoutesNamedPipeline(t *testing.T) {
+	e := requireEnv(t)
+	ctx := context.Background()
+	const name = "e2e-sigpersist-addr"
+	setupDedicatedSignalSource(t, ctx, e, name)
+
+	start := time.Now().Add(-5 * time.Second)
+	t.Cleanup(func() {
+		items, err := e.K.Signals(context.Background())
+		if err != nil {
+			return
+		}
+		for i := range items {
+			s := &items[i]
+			if s.Spec.SourceRef.Name == SourceConsole && claimantNamed(s, name) != nil {
+				if c := claimantNamed(s, name); c.ConversationRef != nil {
+					_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: c.ConversationRef.Name}})
+				}
+				_ = e.K.Delete(context.Background(), s)
+			}
+		}
+	})
+
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	var code int
+	var out string
+	waitFor(t, "the console to accept an addressed start", time.Minute, func() (bool, error) {
+		code, out = e.ConsoleStart(t, "/"+name+" echo addr-"+stamp)
+		return code/100 == 2, nil
+	})
+	if code/100 != 2 {
+		t.Fatalf("addressed start: %d %s", code, out)
+	}
+
+	var sig *agentopsv1alpha1.Signal
+	waitFor(t, "a console Signal addressed to "+name+" to reach Routed", 2*time.Minute, func() (bool, error) {
+		items, err := e.K.Signals(ctx)
+		if err != nil {
+			return false, err
+		}
+		for i := range items {
+			s := &items[i]
+			if s.Spec.SourceRef.Name == SourceConsole && s.CreationTimestamp.Time.After(start) && claimantNamed(s, name) != nil {
+				sig = s
+				return s.Status.Phase == agentopsv1alpha1.SignalRouted, nil
+			}
+		}
+		return false, nil
+	})
+	assertClaimant(t, sig, name, agentopsv1alpha1.ClaimantRouted)
+	c := claimantNamed(sig, name)
+	if c.ConversationRef == nil || c.ConversationRef.Name == "" {
+		t.Fatalf("the addressed claimant must name the conversation it opened: %+v", c)
+	}
+	conv, err := e.K.Conversation(ctx, c.ConversationRef.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv.Spec.PipelineRef == nil || conv.Spec.PipelineRef.Name != name {
+		t.Fatalf("the addressed conversation must name pipeline %s, got %+v", name, conv.Spec.PipelineRef)
+	}
+}
+
+// claimantNamed returns sig's claimant for name, nil if absent.
+func claimantNamed(sig *agentopsv1alpha1.Signal, name string) *agentopsv1alpha1.SignalClaimant {
+	for i := range sig.Status.Claimants {
+		if sig.Status.Claimants[i].Ref.Name == name {
+			return &sig.Status.Claimants[i]
+		}
+	}
+	return nil
+}
+
+// currentLeaderPod names the manager pod holding the leader Lease — the
+// holder identity is "<pod>_<uuid>" (main.go's LeaderElectionID).
+func currentLeaderPod(t *testing.T, ctx context.Context, e *Env) string {
+	t.Helper()
+	lease, err := e.K.Clientset.CoordinationV1().Leases(Namespace).Get(ctx, "agentops-manager.agentops.dev", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
+		t.Fatalf("the leader Lease has no holder: %+v", lease.Spec)
+	}
+	return strings.SplitN(*lease.Spec.HolderIdentity, "_", 2)[0]
+}
+
+// 8.2 Leader loss mid-routing: a Signal left PartiallyRouted survives the
+// LEADER POD being removed, and the next leader finishes it from the Signal
+// CR alone, opening exactly one conversation per claimant. FULL TIER ONLY.
+// The part-routed state is driven exactly as the restart lane above drives it
+// (MAX_QUEUED_CONVERSATIONS=0 holds the claimant with no open conversation
+// Routing). The leader is then force-deleted and the bound restored; the
+// Signal must end Routed, consumed by a pod other than the one removed.
+func TestSignalPersistenceLeaderRemovalFinishesPartiallyRouted(t *testing.T) {
+	fullTier(t)
+	e := requireEnv(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	const p1 = "e2e-sigpersist-l1"
+	const p2 = "e2e-sigpersist-l2"
+	const soleSource = "e2e-sigpersist-lsole"
+	const sharedSource = "e2e-sigpersist-lshared"
+	id := "e2e-sigpersist-leader-" + stamp
+
+	t.Cleanup(func() {
+		items, err := e.K.Conversations(context.Background())
+		if err != nil {
+			return
+		}
+		for i := range items {
+			if items[i].Spec.ConversationID == id {
+				_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: items[i].Name}})
+			}
+		}
+	})
+
+	mustCreate(t, e.K, source(soleSource, "e2e", nil))
+	mustCreate(t, e.K, source(sharedSource, "e2e", nil))
+	mustCreate(t, e.K, pipeline(p1, ProfileStub, []string{soleSource, sharedSource}, []string{ChannelConsole}))
+	mustCreate(t, e.K, pipeline(p2, ProfileStub, []string{sharedSource}, []string{ChannelConsole}))
+	for _, p := range []string{p1, p2} {
+		if err := waitPipelineReady(ctx, e.K, p, 2*time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.PostSignal(t, soleSource, map[string]any{"initiationId": id, "kind": "task", "payload": "p1 only", "title": id})
+	e.ConversationFor(t, id, 2*time.Minute)
+
+	restoreQueueCap := setManagerQueueCap(t, ctx, e, "0")
+	e.PostSignal(t, sharedSource, map[string]any{"initiationId": id, "kind": "task", "payload": "shared", "title": id})
+	sig := waitSignalPhase(t, ctx, e, sharedSource, id, 2*time.Minute, agentopsv1alpha1.SignalPartiallyRouted)
+	assertClaimant(t, sig, p2, agentopsv1alpha1.ClaimantRouting)
+
+	// Remove the leader while the Signal is part-routed.
+	leader := currentLeaderPod(t, ctx, e)
+	if err := e.K.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: leader}}, client.GracePeriodSeconds(0)); err != nil {
+		t.Fatal(err)
+	}
+	restoreQueueCap()
+
+	sig = waitSignalPhase(t, ctx, e, sharedSource, id, 3*time.Minute, agentopsv1alpha1.SignalRouted)
+	assertClaimant(t, sig, p1, agentopsv1alpha1.ClaimantRouted)
+	assertClaimant(t, sig, p2, agentopsv1alpha1.ClaimantRouted)
+	if sig.Status.ConsumedBy == leader {
+		t.Fatalf("the Signal must be finished by a successor, but ConsumedBy is the removed leader %s", leader)
+	}
+	assertExactlyOneConversationPerClaimant(t, ctx, e, id, p1, p2)
 }

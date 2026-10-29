@@ -409,7 +409,8 @@ export interface Detail {
 // generic `K8sObject.spec`/`.status` (typed `unknown`) actually holds here.
 
 export type SignalPhase = 'Pending' | 'Routed' | 'PartiallyRouted' | 'Dropped' | 'Failed'
-export type SignalDropReason = 'unclaimed' | 'cooldown' | 'overflow' | 'capacity'
+export type SignalDropReason =
+  | 'unclaimed' | 'ambiguous' | 'unaddressable' | 'cooldown' | 'capacity' | 'overflow' | 'exhausted'
 export type ClaimantKind = 'Pipeline' | 'Coordinator'
 export type ClaimantState = 'Routing' | 'Routed' | 'Failed' | 'Skipped'
 
@@ -432,7 +433,7 @@ export interface SignalSpecWire {
   labels?: Record<string, string>
   reader?: string
   payload?: string
-  occurrences?: number
+  signalId?: string
 }
 
 export interface SignalStatusWire {
@@ -441,7 +442,14 @@ export interface SignalStatusWire {
   reason?: SignalDropReason
   /** Snapshotted once at the first routing attempt — empty while Pending or Dropped. */
   claimants?: SignalClaimant[]
+  /** Processing attempts started, monotonic. */
+  attempts?: number
   firstAttemptAt?: string
+  /** Set by the write that first made the phase terminal. */
+  completedAt?: string
+  /** The leader identity that consumed it, and when. */
+  consumedBy?: string
+  consumedAt?: string
 }
 
 // ---- conversations -----------------------------------------------------------

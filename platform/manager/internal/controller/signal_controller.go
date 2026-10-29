@@ -4,95 +4,142 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
 )
 
-// DefaultSignalRetryDeadline bounds how long a claimant may sit Routing,
-// measured from status.firstAttemptAt (SIGNAL_RETRY_DEADLINE, chart
-// signalRetryDeadline) — "A partially routed signal exits": past this, every
-// remaining Routing claimant is flipped to Failed so PartiallyRouted (and a
-// Pending signal whose only claimants never got past Routing) never sits
-// non-terminal forever.
-const DefaultSignalRetryDeadline = time.Hour
+// LeaderLeaseName is the controller-runtime leader-election Lease this manager
+// holds (main.go's LeaderElectionID). Its holderIdentity is the string a
+// terminal Signal records as status.consumedBy.
+const LeaderLeaseName = "agentops-manager.agentops.dev"
 
-// DefaultMaxSignalsPerSource caps simultaneously NON-TERMINAL Signals one
-// source may hold (MAX_SIGNALS_PER_SOURCE, chart maxSignalsPerSource) before
-// the oldest is evicted. Zero on the reconciler struct means "use this
-// default", never "uncapped" — the cap is a safety rail on etcd, not an
-// opt-in feature.
-const DefaultMaxSignalsPerSource = 200
+// The defaults of the six signal bounds (chart keys signalTtlRouted,
+// signalTtlDropped, signalTtlFailed, signalRetryDeadline, maxSignalsPerSource,
+// signalConsumerConcurrency). Zero on the reconciler means "use this", never
+// "off": every bound is a safety rail on etcd or on the leader.
+const (
+	DefaultSignalTTLRouted           = 8 * time.Hour
+	DefaultSignalTTLDropped          = 4 * time.Hour
+	DefaultSignalTTLFailed           = 72 * time.Hour // the record an operator investigates
+	DefaultSignalRetryDeadline       = time.Hour
+	DefaultMaxSignalsPerSource       = 200
+	DefaultSignalConsumerConcurrency = 4
+)
 
-// DefaultSignalTTLDropped is how long a Dropped Signal survives before GC
-// (SIGNAL_TTL_DROPPED, chart signalTtlDropped) — short, since a pre-fan-out
-// drop carries no routing record worth keeping long.
-const DefaultSignalTTLDropped = 4 * time.Hour
-
-// DefaultSignalTTLRouted is how long a Routed OR Failed Signal survives
-// before GC (SIGNAL_TTL_ROUTED, chart signalTtlRouted). Failed shares this
-// TTL rather than carrying its own (design D-6): "nobody got it" is exactly
-// the record an operator investigates, the same reasoning that sizes
-// Routed's own, longer, audit-trail window.
-const DefaultSignalTTLRouted = 72 * time.Hour
-
-// DefaultSignalRetryInterval is how soon a non-terminal Signal with a
-// claimant still Routing — and not yet past its retry deadline — is
-// reconciled again. Matches the order of magnitude ConversationReconciler's
-// own "worth checking again soon" requeues use (enterPending's 30s), rather
-// than inventing a different cadence for a sibling kind of retry.
+// DefaultSignalRetryInterval is how soon a non-terminal Signal with a claimant
+// still Routing is processed again. Matches the order of magnitude the
+// ConversationReconciler's own "worth checking again soon" requeues use.
 const DefaultSignalRetryInterval = 30 * time.Second
 
-// SignalReconciler owns every routing attempt on a Signal AFTER its first —
-// ingest's own inline call makes that one (design D-2/D-3) — plus the three
-// bounds that make a Signal a bounded, terminating record rather than a
-// queue entry nothing ever closes: the retry deadline, the per-source live
-// cap, and TTL garbage collection once a Signal goes terminal.
+// defaultOrderRetry is how soon a Signal that must wait its turn (an earlier
+// message of its conversation is still in flight) looks again.
+const defaultOrderRetry = time.Second
+
+// SignalReconciler is the Signal consumer pool and housekeeping, in one
+// controller so that both go through ONE work queue (design D-3, D-11): the
+// queue hands a Signal to one worker at a time, so a retry deadline or an
+// eviction never collides with a consumer mid-pass.
 //
-// It is the reconciler-side half of signalroute.RouteClaimants's own
-// contract: "the caller is expected to call this again later ... the
-// reconciler's retry". Crash/leader-change recovery needs no code here
-// beyond an ordinary watch: the Pending/PartiallyRouted Signals are exactly
-// the objects a new leader's initial reconcile already revisits
-// (controller-runtime re-enqueues every watched object once its cache
-// syncs), the mechanism design D-3 describes as "free".
+// It runs on the LEADER only — controller-runtime's own leader gating, the
+// same that holds back every other reconciler on a standby. The cooldown map,
+// the channel-operation queue and the activity log it works from are
+// per-process state only the leader fills.
+//
+// Every pass is idempotent (equality reuse + the input named for the Signal),
+// so a pass interrupted by a crash or a leader change is simply repeated; a
+// new leader needs no recovery step beyond the initial reconcile of every
+// non-terminal Signal controller-runtime performs when its cache syncs.
 type SignalReconciler struct {
 	client.Client
-	// Activity records the loud Failed surfacing and the overflow-eviction
-	// drop. Nil is usable and ignores every emission — activity.Log.Emit's
-	// own contract, shared by every other reconciler's Activity field.
+	// Reader is the API server read path. A Signal is read from it, never
+	// from the cache, so a requeued pass cannot act on a status it already
+	// advanced. Nil falls back to Client (tests).
+	Reader client.Reader
+	// Activity records the loud Failed/Dropped surfacing. Nil is inert.
 	Activity *activity.Log
-	// Runtime and MaxQueued are threaded straight into signalroute.Deps —
-	// the SAME bootstrap config and backlog bound dispatch/ingest already
-	// resolve against, so a retry here can never disagree with the inline
-	// first attempt about what a claimant's conversation looks like.
+	// Ops carries the chat notices, fire-and-forget. Nil skips notices.
+	Ops *chat.OpQueue
+	// Cooldowns is the leader's per-source cooldown map.
+	Cooldowns *ingest.CooldownBook
+	// Runtime and MaxQueued are the SAME bootstrap config and backlog bound
+	// the conversation reconciler resolves against.
 	Runtime   runtimepod.Config
 	MaxQueued int
+	// Identity is the fallback for status.consumedBy when the leader Lease
+	// cannot be read: this replica's own name.
+	Identity string
 
-	// RetryDeadline overrides DefaultSignalRetryDeadline. Zero means the
-	// default, never "off" — SIGNAL_RETRY_DEADLINE has no "off" spelling.
+	// Concurrency is SIGNAL_CONSUMER_CONCURRENCY. Zero is the default.
+	Concurrency int
+	// RetryDeadline, MaxPerSource and the three TTLs override the matching
+	// Default*. Zero means the default.
 	RetryDeadline time.Duration
-	// MaxPerSource overrides DefaultMaxSignalsPerSource. Zero means the
-	// default.
-	MaxPerSource int
-	// TTLDropped/TTLRouted override DefaultSignalTTLDropped/
-	// DefaultSignalTTLRouted. Zero means the matching default.
-	TTLDropped time.Duration
-	TTLRouted  time.Duration
+	MaxPerSource  int
+	TTLRouted     time.Duration
+	TTLDropped    time.Duration
+	TTLFailed     time.Duration
+	// RetryInterval and OrderRetry override the requeue delays (tests).
+	RetryInterval time.Duration
+	OrderRetry    time.Duration
+
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+
+	mu   sync.Mutex
+	held map[string]struct{} // (source, initiationId) keys a pass is working on
+	kick chan event.GenericEvent
+}
+
+func (r *SignalReconciler) reader() client.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
+}
+
+func (r *SignalReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
+}
+
+func orDuration(v, def time.Duration) time.Duration {
+	if v > 0 {
+		return v
+	}
+	return def
 }
 
 func (r *SignalReconciler) retryDeadline() time.Duration {
-	if r.RetryDeadline > 0 {
-		return r.RetryDeadline
-	}
-	return DefaultSignalRetryDeadline
+	return orDuration(r.RetryDeadline, DefaultSignalRetryDeadline)
+}
+
+func (r *SignalReconciler) retryInterval() time.Duration {
+	return orDuration(r.RetryInterval, DefaultSignalRetryInterval)
+}
+
+func (r *SignalReconciler) orderRetry() time.Duration {
+	return orDuration(r.OrderRetry, defaultOrderRetry)
 }
 
 func (r *SignalReconciler) maxPerSource() int {
@@ -102,34 +149,27 @@ func (r *SignalReconciler) maxPerSource() int {
 	return DefaultMaxSignalsPerSource
 }
 
-func (r *SignalReconciler) ttlDropped() time.Duration {
-	if r.TTLDropped > 0 {
-		return r.TTLDropped
+func (r *SignalReconciler) concurrency() int {
+	if r.Concurrency > 0 {
+		return r.Concurrency
 	}
-	return DefaultSignalTTLDropped
+	return DefaultSignalConsumerConcurrency
 }
 
-func (r *SignalReconciler) ttlRouted() time.Duration {
-	if r.TTLRouted > 0 {
-		return r.TTLRouted
-	}
-	return DefaultSignalTTLRouted
-}
-
-// ttlFor is the GC window for a TERMINAL phase. Routed and Failed share one
-// window (design D-6); Dropped carries its own, shorter one.
+// ttlFor is the deletion window of a TERMINAL phase, measured from
+// status.completedAt. Each phase has its own.
 func (r *SignalReconciler) ttlFor(phase agentopsv1alpha1.SignalPhase) time.Duration {
-	if phase == agentopsv1alpha1.SignalDropped {
-		return r.ttlDropped()
+	switch phase {
+	case agentopsv1alpha1.SignalDropped:
+		return orDuration(r.TTLDropped, DefaultSignalTTLDropped)
+	case agentopsv1alpha1.SignalFailed:
+		return orDuration(r.TTLFailed, DefaultSignalTTLFailed)
+	default:
+		return orDuration(r.TTLRouted, DefaultSignalTTLRouted)
 	}
-	return r.ttlRouted()
 }
 
-// terminalSignalPhase mirrors internal/httpapi's own isTerminalSignalPhase.
-// Duplicated rather than shared: internal/httpapi already imports
-// internal/controller (CredentialEnvPrefix), so the dependency cannot run
-// the other way — the same layering signalroute's own package comment and
-// SignalClaimant's doc explain for their own small duplications.
+// terminalSignalPhase reports whether a phase is final.
 func terminalSignalPhase(p agentopsv1alpha1.SignalPhase) bool {
 	switch p {
 	case agentopsv1alpha1.SignalRouted, agentopsv1alpha1.SignalDropped, agentopsv1alpha1.SignalFailed:
@@ -139,232 +179,378 @@ func terminalSignalPhase(p agentopsv1alpha1.SignalPhase) bool {
 	}
 }
 
-// Reconcile advances one Signal: retry, bound, or garbage-collect it.
+func (r *SignalReconciler) deps(namespace string) signalroute.Deps {
+	return signalroute.Deps{
+		Client: r.Client, Reader: r.reader(), Namespace: namespace,
+		Activity: r.Activity, Ops: r.Ops, Cooldowns: r.Cooldowns,
+		Runtime: r.Runtime, MaxQueued: r.MaxQueued,
+	}
+}
+
+// Reconcile is one pass over one Signal: housekeeping first (TTL delete, cap,
+// retry deadline), then — in arrival order within its conversation — the
+// consumer.
 func (r *SignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var sig agentopsv1alpha1.Signal
-	if err := r.Get(ctx, req.NamespacedName, &sig); err != nil {
+	if err := r.reader().Get(ctx, req.NamespacedName, &sig); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if terminalSignalPhase(sig.Status.Phase) {
 		return r.reconcileTerminal(ctx, &sig)
 	}
-	return r.reconcileNonTerminal(ctx, &sig)
+	return r.reconcileLive(ctx, &sig)
 }
 
-// reconcileTerminal is TTL GC: delete a terminal Signal once it has outlived
-// its window, or requeue for exactly the moment it will.
+// reconcileTerminal is TTL housekeeping: delete a terminal Signal once its
+// phase's TTL has passed, measured from status.completedAt — never from
+// creationTimestamp, which a long-retried signal left behind long ago — or
+// requeue for exactly the moment it will.
 func (r *SignalReconciler) reconcileTerminal(ctx context.Context, sig *agentopsv1alpha1.Signal) (ctrl.Result, error) {
-	ttl := r.ttlFor(sig.Status.Phase)
-	elapsed := time.Since(sig.CreationTimestamp.Time)
-	if elapsed >= ttl {
-		log.FromContext(ctx).Info("deleting a terminal signal past its TTL",
-			"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "phase", sig.Status.Phase,
-			"age", elapsed.Round(time.Minute), "ttl", ttl)
-		return ctrl.Result{}, client.IgnoreNotFound(r.Delete(ctx, sig))
+	if sig.Status.CompletedAt == nil {
+		// A terminal Signal this version did not write. Start its clock now
+		// rather than delete on a creation time it was never measured from.
+		before := sig.DeepCopy()
+		now := metav1.NewTime(r.now())
+		sig.Status.CompletedAt = &now
+		if err := r.writeStatus(ctx, sig, before); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
 	}
-	return ctrl.Result{RequeueAfter: jitter(ttl - elapsed)}, nil
+	ttl := r.ttlFor(sig.Status.Phase)
+	age := r.now().Sub(sig.Status.CompletedAt.Time)
+	if age < ttl {
+		return ctrl.Result{RequeueAfter: jitter(ttl - age)}, nil
+	}
+	log.FromContext(ctx).Info("deleting a terminal signal past its TTL",
+		"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "phase", sig.Status.Phase,
+		"sinceCompleted", age.Round(time.Minute), "ttl", ttl)
+	// Conditional on the version this pass read: a write that landed since is
+	// a Signal that is not finished after all.
+	err := r.Delete(ctx, sig, client.Preconditions{UID: &sig.UID, ResourceVersion: &sig.ResourceVersion})
+	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
+		return ctrl.Result{Requeue: true}, nil
+	}
+	return ctrl.Result{}, err
 }
 
-// reconcileNonTerminal is the retry path: the per-source cap first (it can
-// terminate `sig` itself before any routing attempt is worth making), then
-// the retry deadline, then an ordinary signalroute.RouteClaimants retry.
-func (r *SignalReconciler) reconcileNonTerminal(ctx context.Context, sig *agentopsv1alpha1.Signal) (ctrl.Result, error) {
-	evictedSelf, err := r.enforceSourceCap(ctx, sig)
+// reconcileLive handles a non-terminal Signal.
+func (r *SignalReconciler) reconcileLive(ctx context.Context, sig *agentopsv1alpha1.Signal) (ctrl.Result, error) {
+	var src agentopsv1alpha1.SignalSource
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: sig.Namespace, Name: sig.Spec.SourceRef.Name}, &src); err != nil {
+		// A source deleted under its Signals takes them through the ownerRef;
+		// nothing here can route without it.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if evicted, err := r.enforceSourceCap(ctx, sig); err != nil || evicted {
+		return ctrl.Result{}, err
+	}
+	if first := sig.Status.FirstAttemptAt; first != nil {
+		if elapsed := r.now().Sub(first.Time); elapsed >= r.retryDeadline() {
+			return ctrl.Result{}, r.exhaust(ctx, sig, elapsed)
+		}
+	}
+
+	// Messages of one conversation are processed one at a time, in arrival
+	// order; different conversations run in parallel (design D-3).
+	key := sig.Spec.SourceRef.Name + "\x00" + sig.Spec.InitiationID
+	if !r.acquire(key) {
+		return ctrl.Result{RequeueAfter: r.orderRetry()}, nil
+	}
+	defer r.release(key)
+	head, err := r.isHead(ctx, sig)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if evictedSelf {
-		return r.reconcileTerminal(ctx, sig)
+	if !head {
+		return ctrl.Result{RequeueAfter: r.orderRetry()}, nil
 	}
-
-	// The retry deadline is measured FROM status.firstAttemptAt, so a Signal
-	// that has never had one yet (nil) has not started that clock — it is
-	// waiting for its FIRST attempt, not a retry, and the ordinary
-	// RouteClaimants call below both makes that attempt and sets the stamp.
-	// Treating nil as "already expired" would fail a Signal before it was
-	// ever given a chance to route.
-	if sig.Status.FirstAttemptAt != nil {
-		if elapsed := time.Since(sig.Status.FirstAttemptAt.Time); elapsed >= r.retryDeadline() {
-			if err := r.exhaustRetries(ctx, sig, elapsed); err != nil {
-				return ctrl.Result{}, err
-			}
-			return r.reconcileTerminal(ctx, sig)
-		}
-	}
-
-	if err := signalroute.RouteClaimants(ctx, r.deps(sig.Namespace), sig); err != nil {
-		return ctrl.Result{}, err
-	}
-	// Reached only when `sig` entered this reconcile non-terminal, so a
-	// Failed phase here is a FRESH transition this pass (every claimant
-	// resolved — typically all Skipped — with none Routed). Retry-deadline
-	// exhaustion and overflow eviction have their own call sites below;
-	// this is the third, rarer way RouteClaimants alone can produce it.
-	if sig.Status.Phase == agentopsv1alpha1.SignalFailed {
-		r.emitSignalFailed(ctx, sig, activity.CodeRetryExhausted, "every claimant resolved without routing")
-	}
-	if terminalSignalPhase(sig.Status.Phase) {
-		return r.reconcileTerminal(ctx, sig)
-	}
-	return ctrl.Result{RequeueAfter: DefaultSignalRetryInterval}, nil
+	return r.consume(ctx, sig, &src)
 }
 
-// exhaustRetries flips every still-Routing claimant to Failed once elapsed
-// has passed the retry deadline, recomputes phase via RollupPhase, and
-// surfaces a resulting Failed as loudly as the unwired drop.
-func (r *SignalReconciler) exhaustRetries(ctx context.Context, sig *agentopsv1alpha1.Signal, elapsed time.Duration) error {
-	patch := client.MergeFrom(sig.DeepCopy())
-	reason := fmt.Sprintf("retry deadline exceeded after %s (limit %s)", elapsed.Round(time.Second), r.retryDeadline())
-	exhausted := false
-	for i := range sig.Status.Claimants {
-		c := &sig.Status.Claimants[i]
-		if c.State != agentopsv1alpha1.ClaimantRouting {
+// acquire takes the in-process lock of one (source, initiationId) key. The
+// work queue already guarantees one worker per Signal; this is the per-KEY
+// exclusion on top, so a requeued Signal takes the same lock as a first pass.
+func (r *SignalReconciler) acquire(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.held == nil {
+		r.held = map[string]struct{}{}
+	}
+	if _, busy := r.held[key]; busy {
+		return false
+	}
+	r.held[key] = struct{}{}
+	return true
+}
+
+func (r *SignalReconciler) release(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.held, key)
+}
+
+// signalBefore orders by arrival: creationTimestamp, then name.
+func signalBefore(a, b *agentopsv1alpha1.Signal) bool {
+	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+		return a.CreationTimestamp.Before(&b.CreationTimestamp)
+	}
+	return a.Name < b.Name
+}
+
+// isHead reports whether sig is the earliest non-terminal Signal of its
+// (source, initiationId): an earlier one still in flight goes first, because
+// both feed one conversation and appending out of order — or each failing to
+// find the conversation the other is creating — is the failure this prevents.
+func (r *SignalReconciler) isHead(ctx context.Context, sig *agentopsv1alpha1.Signal) (bool, error) {
+	// Read from the API server, not the cache: an earlier message the cache has
+	// not seen yet would otherwise be overtaken. The namespace holds at most
+	// the per-source cap of live Signals per source, so the list stays small.
+	var list agentopsv1alpha1.SignalList
+	if err := r.reader().List(ctx, &list, client.InNamespace(sig.Namespace)); err != nil {
+		return false, fmt.Errorf("list signals of %s: %w", sig.Spec.InitiationID, err)
+	}
+	for i := range list.Items {
+		other := &list.Items[i]
+		if other.Name == sig.Name || terminalSignalPhase(other.Status.Phase) ||
+			other.Spec.SourceRef.Name != sig.Spec.SourceRef.Name || other.Spec.InitiationID != sig.Spec.InitiationID {
 			continue
 		}
-		c.State = agentopsv1alpha1.ClaimantFailed
-		c.Reason = reason
-		exhausted = true
+		if signalBefore(other, sig) {
+			return false, nil
+		}
 	}
-	if !exhausted {
-		// Nothing left Routing — an ordinary retry on an earlier pass
-		// already resolved every claimant, and this reconcile is stale.
-		return nil
+	return true, nil
+}
+
+// consume runs one consumer pass: the admission decision (when the claimant
+// snapshot does not exist yet), then the routing of every claimant still
+// Routing. Each step is recorded in its own status write, and the snapshot is
+// written BEFORE anything is created: a repeated pass then skips admission, so
+// the cooldown it spent cannot suppress the repeat.
+func (r *SignalReconciler) consume(ctx context.Context, sig *agentopsv1alpha1.Signal, src *agentopsv1alpha1.SignalSource) (ctrl.Result, error) {
+	deps := r.deps(sig.Namespace)
+	before := sig.DeepCopy()
+	r.stampAttempt(sig)
+
+	if len(sig.Status.Claimants) == 0 {
+		res, err := signalroute.Admit(ctx, deps, sig, src)
+		if err != nil {
+			// Persist the attempt even so: attempts and firstAttemptAt must
+			// advance, or a poison Signal would never reach its retry deadline.
+			_ = r.writeStatus(ctx, sig, before)
+			rollback(res)
+			return ctrl.Result{}, err
+		}
+		r.finishIfTerminal(ctx, sig)
+		if err := r.writeStatus(ctx, sig, before); err != nil {
+			rollback(res)
+			return ctrl.Result{}, err
+		}
+		if res.Dropped {
+			return ctrl.Result{}, nil
+		}
+		before = sig.DeepCopy()
 	}
-	sig.Status.Phase = agentopsv1alpha1.RollupPhase(sig.Status.Claimants)
-	if err := r.Status().Patch(ctx, sig, patch); err != nil {
+
+	res, procErr := signalroute.Route(ctx, deps, sig)
+	r.finishIfTerminal(ctx, sig)
+	if err := r.writeStatus(ctx, sig, before); err != nil {
+		return ctrl.Result{}, err
+	}
+	if procErr != nil {
+		return ctrl.Result{}, procErr
+	}
+	if res.FirstRouted {
+		if err := signalroute.RecordReceived(ctx, deps, src.Name); err != nil {
+			log.FromContext(ctx).Info("recording receipt on the signal source failed",
+				"source", src.Name, "error", err.Error())
+		}
+	}
+	if sig.Status.Phase == agentopsv1alpha1.SignalFailed {
+		signalroute.Loud(ctx, r.Activity, sig, activity.KindSignalFailed, activity.CodeSkipped,
+			"every claimant resolved without routing the signal")
+	}
+	if res.Wait && !terminalSignalPhase(sig.Status.Phase) {
+		return ctrl.Result{RequeueAfter: r.retryInterval()}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+func rollback(res signalroute.Result) {
+	if res.Rollback != nil {
+		res.Rollback()
+	}
+}
+
+// stampAttempt counts the pass and stamps the first one — the origin the retry
+// deadline measures from.
+func (r *SignalReconciler) stampAttempt(sig *agentopsv1alpha1.Signal) {
+	sig.Status.Attempts++
+	if sig.Status.FirstAttemptAt == nil {
+		now := metav1.NewTime(r.now())
+		sig.Status.FirstAttemptAt = &now
+	}
+}
+
+// finishIfTerminal stamps the write that makes a phase terminal: completedAt
+// (never moved by a later write), and the leader that processed it.
+func (r *SignalReconciler) finishIfTerminal(ctx context.Context, sig *agentopsv1alpha1.Signal) {
+	if !terminalSignalPhase(sig.Status.Phase) || sig.Status.CompletedAt != nil {
+		return
+	}
+	now := metav1.NewTime(r.now())
+	sig.Status.CompletedAt = &now
+	sig.Status.ConsumedAt = &now
+	sig.Status.ConsumedBy = r.consumer(ctx, sig.Namespace)
+}
+
+// consumer is the leader's identity: the leader Lease's holderIdentity, which
+// carries controller-runtime's own uniqueness suffix, falling back to this
+// replica's name when the Lease cannot be read.
+func (r *SignalReconciler) consumer(ctx context.Context, namespace string) string {
+	var lease coordinationv1.Lease
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: LeaderLeaseName}, &lease); err == nil &&
+		lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != "" {
+		return *lease.Spec.HolderIdentity
+	}
+	return r.Identity
+}
+
+// writeStatus persists sig's status against the version it was read at, so a
+// concurrent writer fails this pass (and it is repeated) instead of being
+// overwritten.
+func (r *SignalReconciler) writeStatus(ctx context.Context, sig, before *agentopsv1alpha1.Signal) error {
+	patch := client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})
+	return r.Status().Patch(ctx, sig, patch)
+}
+
+// exhaust applies the retry deadline: every non-terminal claimant becomes
+// Failed with the exhaustion as its reason — or, before fan-out, the Signal is
+// Dropped with reason exhausted. A PartiallyRouted signal always exits.
+func (r *SignalReconciler) exhaust(ctx context.Context, sig *agentopsv1alpha1.Signal, elapsed time.Duration) error {
+	reason := fmt.Sprintf("retry deadline exceeded after %s (limit %s)", elapsed.Round(time.Second), r.retryDeadline())
+	before := sig.DeepCopy()
+	if len(sig.Status.Claimants) == 0 {
+		sig.Status.Phase = agentopsv1alpha1.SignalDropped
+		sig.Status.Reason = agentopsv1alpha1.SignalDropExhausted
+	} else {
+		failRouting(sig, reason)
+	}
+	r.finishIfTerminal(ctx, sig)
+	if err := r.writeStatus(ctx, sig, before); err != nil {
 		return err
 	}
-	log.FromContext(ctx).Info("signal retry deadline exceeded; exhausted claimant(s) marked Failed",
-		"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "phase", sig.Status.Phase,
-		"elapsed", elapsed.Round(time.Second), "deadline", r.retryDeadline())
-	if sig.Status.Phase == agentopsv1alpha1.SignalFailed {
-		r.emitSignalFailed(ctx, sig, activity.CodeRetryExhausted, "retry deadline exceeded with no claimant routed")
-	}
+	r.surface(ctx, sig, activity.CodeRetryExhausted, activity.CodeExhausted, reason)
 	return nil
 }
 
-// enforceSourceCap re-checks MAX_SIGNALS_PER_SOURCE on every non-terminal
-// Signal's own reconcile — ingest's create (section 2) never checks it, so
-// this reconciler is the one place it is enforced at all. Evicts the SINGLE
-// oldest live Signal on this source when over cap; a burst that overshoots
-// by more than one converges over the next few reconciles rather than in
-// one pass, which costs nothing a Signal's own short retry requeue does not
-// already pay for.
-//
-// Reports whether `sig` ITSELF was the one evicted, updating its in-memory
-// copy in place so the caller can route straight to the terminal path
-// without a second Get.
+// failRouting marks every claimant still Routing Failed and rolls the phase up.
+func failRouting(sig *agentopsv1alpha1.Signal, reason string) {
+	for i := range sig.Status.Claimants {
+		c := &sig.Status.Claimants[i]
+		if c.State == agentopsv1alpha1.ClaimantRouting {
+			c.State = agentopsv1alpha1.ClaimantFailed
+			c.Reason = reason
+		}
+	}
+	sig.Status.Phase = agentopsv1alpha1.RollupPhase(sig.Status.Claimants)
+}
+
+// surface makes a housekeeping end as loud as the unwired drop: a Dropped
+// signal carries dropCode, a Failed one failCode; a Routed roll-up (some
+// claimants routed, the rest failed) is logged only, as the Signal is not lost.
+func (r *SignalReconciler) surface(ctx context.Context, sig *agentopsv1alpha1.Signal, failCode, dropCode, detail string) {
+	switch sig.Status.Phase {
+	case agentopsv1alpha1.SignalDropped:
+		signalroute.Loud(ctx, r.Activity, sig, activity.KindSignalDropped, dropCode, detail)
+	case agentopsv1alpha1.SignalFailed:
+		signalroute.Loud(ctx, r.Activity, sig, activity.KindSignalFailed, failCode, detail)
+	default:
+		log.FromContext(ctx).Info("signal housekeeping failed its unrouted claimants",
+			"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "phase", sig.Status.Phase, "detail", detail)
+	}
+}
+
+// enforceSourceCap holds the per-source cap on non-terminal Signals by
+// evicting the OLDEST first. The eviction happens in the victim's OWN pass —
+// the work queue is what keeps it from racing a consumer — so a pass that finds
+// its source over the cap evicts itself when it is among the oldest, and
+// kicks the others' passes otherwise. Reports whether sig itself was evicted.
 func (r *SignalReconciler) enforceSourceCap(ctx context.Context, sig *agentopsv1alpha1.Signal) (bool, error) {
-	limit := r.maxPerSource()
 	var list agentopsv1alpha1.SignalList
 	if err := r.List(ctx, &list, client.InNamespace(sig.Namespace)); err != nil {
 		return false, err
 	}
-	var live []*agentopsv1alpha1.Signal
+	live := []*agentopsv1alpha1.Signal{sig}
 	for i := range list.Items {
 		item := &list.Items[i]
-		if item.Spec.SourceRef.Name == sig.Spec.SourceRef.Name && !terminalSignalPhase(item.Status.Phase) {
+		if item.Name != sig.Name && item.Spec.SourceRef.Name == sig.Spec.SourceRef.Name && !terminalSignalPhase(item.Status.Phase) {
 			live = append(live, item)
 		}
 	}
-	if len(live) <= limit {
+	limit := r.maxPerSource()
+	over := len(live) - limit
+	if over <= 0 {
 		return false, nil
 	}
-	sort.Slice(live, func(i, j int) bool {
-		return live[i].CreationTimestamp.Before(&live[j].CreationTimestamp)
-	})
-	victim := live[0]
-	if err := r.evictOverflow(ctx, victim, len(live), limit); err != nil {
-		return false, err
+	sort.Slice(live, func(i, j int) bool { return signalBefore(live[i], live[j]) })
+	evictedSelf := false
+	for _, victim := range live[:over] {
+		if victim.Name != sig.Name {
+			r.kickSignal(victim)
+			continue
+		}
+		if err := r.evict(ctx, sig, len(live), limit); err != nil {
+			return false, err
+		}
+		evictedSelf = true
 	}
-	if victim.Name == sig.Name {
-		*sig = *victim
-		return true, nil
-	}
-	return false, nil
+	return evictedSelf, nil
 }
 
-// evictOverflow terminates the oldest live Signal on a source past
-// MAX_SIGNALS_PER_SOURCE: pre-fan-out (no claimant snapshot yet) it goes
-// Dropped/overflow, exactly like every other pre-fan-out drop (design
-// D-5a); post-fan-out every still-Routing claimant goes Failed/overflow and
-// the phase rolls up — Dropped stays strictly pre-fan-out either way.
-func (r *SignalReconciler) evictOverflow(ctx context.Context, victim *agentopsv1alpha1.Signal, live, limit int) error {
-	patch := client.MergeFrom(victim.DeepCopy())
-	if len(victim.Status.Claimants) == 0 {
-		victim.Status.Phase = agentopsv1alpha1.SignalDropped
-		victim.Status.Reason = agentopsv1alpha1.SignalDropOverflow
-	} else {
-		for i := range victim.Status.Claimants {
-			c := &victim.Status.Claimants[i]
-			if c.State == agentopsv1alpha1.ClaimantRouting {
-				c.State = agentopsv1alpha1.ClaimantFailed
-				c.Reason = "evicted: per-source live Signal cap exceeded"
-			}
-		}
-		victim.Status.Phase = agentopsv1alpha1.RollupPhase(victim.Status.Claimants)
+// kickSignal enqueues another Signal's pass on the same work queue.
+func (r *SignalReconciler) kickSignal(victim *agentopsv1alpha1.Signal) {
+	if r.kick == nil {
+		return
 	}
-	if err := r.Status().Patch(ctx, victim, patch); err != nil {
+	select {
+	case r.kick <- event.GenericEvent{Object: victim.DeepCopy()}:
+	default: // full: the victim's own requeue reaches it
+	}
+}
+
+// evict terminates sig to hold the per-source cap: before fan-out it is
+// Dropped (reason overflow), after it every non-terminal claimant is Failed
+// (reason overflow) and the phase rolls up — Dropped stays strictly
+// pre-fan-out. Counted and logged either way.
+func (r *SignalReconciler) evict(ctx context.Context, sig *agentopsv1alpha1.Signal, live, limit int) error {
+	before := sig.DeepCopy()
+	const reason = "evicted: per-source signal cap exceeded (overflow)"
+	if len(sig.Status.Claimants) == 0 {
+		sig.Status.Phase = agentopsv1alpha1.SignalDropped
+		sig.Status.Reason = agentopsv1alpha1.SignalDropOverflow
+	} else {
+		failRouting(sig, reason)
+	}
+	r.finishIfTerminal(ctx, sig)
+	if err := r.writeStatus(ctx, sig, before); err != nil {
 		return err
 	}
-	// COUNTED AND LOGGED (design D-6): the live/limit pair is what lets an
-	// operator tell a one-off overshoot from a source that is permanently
-	// over its cap.
-	log.FromContext(ctx).Info("evicted the oldest live signal on an over-cap source",
-		"signal", victim.Name, "source", victim.Spec.SourceRef.Name,
-		"live", live, "limit", limit, "phase", victim.Status.Phase)
-	switch victim.Status.Phase {
-	case agentopsv1alpha1.SignalDropped:
-		r.Activity.Emit(activity.Event{
-			Kind:   activity.KindSignalDropped,
-			From:   activity.Node(activity.NodeSignalSource, victim.Spec.SourceRef.Name),
-			Status: activity.StatusError,
-			Code:   activity.CodeOverflow,
-			Detail: fmt.Sprintf("evicted: per-source live Signal cap exceeded (%s)", victim.Spec.InitiationID),
-		})
-	case agentopsv1alpha1.SignalFailed:
-		r.emitSignalFailed(ctx, victim, activity.CodeOverflow,
-			"evicted: per-source live Signal cap exceeded, no claimant had routed")
-	}
+	log.FromContext(ctx).Info("evicted the oldest non-terminal signal of an over-cap source",
+		"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "live", live, "limit", limit, "phase", sig.Status.Phase)
+	r.surface(ctx, sig, activity.CodeOverflow, activity.CodeOverflow, reason)
 	return nil
 }
 
-// emitSignalFailed surfaces a Signal that just rolled up to Failed as
-// loudly as the unwired drop (signal-persistence spec, "the phase is a
-// roll-up ... the Failed loud-surfacing half") — an activity event AND a
-// log line, never a silent status change.
-func (r *SignalReconciler) emitSignalFailed(ctx context.Context, sig *agentopsv1alpha1.Signal, code, reason string) {
-	log.FromContext(ctx).Info("signal failed: no claimant routed it",
-		"signal", sig.Name, "source", sig.Spec.SourceRef.Name,
-		"initiationId", sig.Spec.InitiationID, "reason", reason)
-	r.Activity.Emit(activity.Event{
-		Kind:   activity.KindSignalFailed,
-		From:   activity.Node(activity.NodeSignalSource, sig.Spec.SourceRef.Name),
-		Status: activity.StatusError,
-		Code:   code,
-		Detail: fmt.Sprintf("%s (%s)", reason, sig.Spec.InitiationID),
-	})
-}
-
-// deps builds signalroute.Deps from this reconciler's own fields — the same
-// shape ingest's Server builds from its own (internal/httpapi's
-// signalRouteDeps), so the two callers of RouteClaimants can never disagree
-// about what a routing attempt may read or write.
-func (r *SignalReconciler) deps(namespace string) signalroute.Deps {
-	return signalroute.Deps{
-		Client: r.Client, Reader: r.Client, Namespace: namespace,
-		Activity: r.Activity, Runtime: r.Runtime, MaxQueued: r.MaxQueued,
-	}
-}
-
-// SetupWithManager wires the controller to Signal events alone. No extra
-// watch is needed for a re-wire (a Pipeline/Coordinator claim changing who
-// serves a source): RouteClaimants itself re-resolves the live claimant set
-// on every call and Skips one no longer served, and this reconciler's own
-// short retry requeue (DefaultSignalRetryInterval) already revisits a
-// non-terminal Signal often enough to notice.
+// SetupWithManager wires the consumer pool: SIGNAL_CONSUMER_CONCURRENCY workers
+// over one work queue keyed by Signal, plus the channel housekeeping uses to
+// enqueue another Signal's pass. The controller runs on the leader only.
 func (r *SignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.kick = make(chan event.GenericEvent, 64)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentopsv1alpha1.Signal{}).
+		WatchesRawSource(source.Channel(r.kick, &handler.EnqueueRequestForObject{})).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.concurrency()}).
 		Complete(r)
 }

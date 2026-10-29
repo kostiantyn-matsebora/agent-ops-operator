@@ -26,8 +26,8 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.occurrences
-      name: Occurrences
+    - jsonPath: .status.attempts
+      name: Attempts
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -36,11 +36,11 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Signal is the durable, persist-then-ack record of one signal arrival (and
-          every occurrence absorbed into it) and its per-claimant routing workflow.
-          Owned by the SignalSource named in spec.sourceRef — set as this object's
-          OwnerReference at creation by whatever persists it — so a deleted source
-          takes its signals from any phase.
+          Signal is the durable message of one admitted signal: published by
+          /signal/inbound, consumed (routed) by the leader's consumer pool, bounded by
+          the leader's housekeeping. Owned by the SignalSource named in
+          spec.sourceRef — set as this object's OwnerReference at creation — so a
+          deleted source takes its signals from any phase.
         properties:
           apiVersion:
             description: |-
@@ -61,104 +61,84 @@ spec:
             type: object
           spec:
             description: |-
-              SignalSpec is everything about one signal arrival that a routing attempt —
-              the inline first try at ingest, or a later retry in the reconciler — needs
-              to act, with no other in-memory state (design D-3: "no in-memory routing
-              state, a new leader resumes from the CRs alone").
+              SignalSpec is everything about ONE signal message that the consumer needs to
+              route it, written by PUBLICATION only and never rewritten (design D-2): a
+              Signal has one payload and one arrival, and a repeat of an initiationId is
+              its own Signal — the Conversation is the accumulator, not this object.
 
               It is deliberately shaped like NormalizedSignal (internal/httpapi) plus the
-              bookkeeping a durable record adds: a signal already carries everything a
-              conversation create/append needs, so nothing here is invented, only
+              bookkeeping a durable record adds, so nothing here is invented, only
               persisted.
             properties:
               adapter:
                 description: |-
-                  Adapter is the serving SignalAdapter's name, copied from
-                  SourceRef's own spec.adapter at creation — a display/filter
-                  convenience, so a reader says what kind of signal this is without a
-                  live lookup of the (possibly since-renamed) source.
+                  Adapter is the serving SignalAdapter's name, copied from the source's
+                  spec.adapter at creation — a display copy, so a reader says what kind of
+                  signal this is without a live lookup of the (possibly since-renamed)
+                  source.
                 minLength: 1
                 type: string
               initiationId:
                 description: |-
-                  InitiationID is the sender-minted correlation id — see
-                  NormalizedSignal.InitiationID. A fresh arrival whose id matches a
-                  still-open (non-terminal) Signal of the same source is ABSORBED into
-                  it: Payload appended, Occurrences bumped, no second CR (design D-5). A
-                  repeat matching only a TERMINAL Signal creates a fresh CR instead —
-                  reopening a terminal record would make the audit trail mutable (design
-                  D-5a).
-
-                  MATERIALIZED at creation, never rewritten.
+                  InitiationID is the sender-minted correlation id, shared across the
+                  messages of one conversation on purpose. The consumer's key for finding
+                  the conversation (equality reuse); publication never reads it.
                 minLength: 1
                 type: string
               kind:
                 description: |-
-                  Kind selects the input lane: alert (default), job, task or chat — the
+                  Kind selects the input lane: alert (absent), job, task or chat — the
                   same closed vocabulary httpapi.NormalizedSignal.Kind and
-                  InputOrigin.SignalKind already carry as a plain string, unenforced by
-                  either's own CRD schema. Written once, from the occurrence that
-                  created this Signal — a later absorb carries its own payload in but
-                  never changes the lane.
+                  InputOrigin.SignalKind already carry as a plain string.
                 type: string
               labels:
                 additionalProperties:
                   type: string
                 description: |-
                   Labels are attribution only — rendered on signal cards, feeding no
-                  routing decision (the manager routes purely by InitiationID equality).
-                  From the occurrence that created this Signal; written once, like Kind.
-                  Bounded at MaxSignalLabels, the same cap SignalProvenance.Labels uses.
+                  routing decision (the manager routes purely by InitiationID equality),
+                  except the reserved chat labels naming the originating surface. Bounded
+                  at MaxSignalLabels, the same cap SignalProvenance.Labels uses.
                 type: object
-              occurrences:
-                default: 1
-                description: |-
-                  Occurrences counts how many signal arrivals have landed on this CR —
-                  1 for the arrival that created it, bumped by every later absorb
-                  (design D-5). Never decremented.
-                format: int32
-                minimum: 1
-                type: integer
               payload:
                 description: |-
-                  Payload is this signal's content, handed to the agent. An absorbed
-                  occurrence APPENDS its own payload here (the same join
-                  httpapi.combineJoined already applies within one batch, now applied
-                  across occurrences over this Signal's open lifetime) rather than
-                  creating a second CR.
-
-                  Left unbounded like ConversationInputSpec.Payload: this is the bulky
-                  half of a signal, out-of-line from the lighter-weight objects (status
-                  subresources, Conversations) that reference it. The per-source live
-                  cap plus absorb-by-id (design D-6) are what keep its growth bounded in
-                  practice, not a field-level limit.
+                  Payload is this ONE message's content, handed to the agent. Left
+                  unbounded like ConversationInputSpec.Payload: the bulky half of a
+                  signal, out-of-line from the lighter-weight objects that reference it.
+                  An addressed chat target (/<pipeline> <task>) stays in it verbatim — the
+                  consumer parses it, publication never does.
                 type: string
               reader:
                 description: |-
                   Reader is the opaque key of the person who sent this, for a chat
-                  signal only — see NormalizedSignal.Reader. Written once, like Kind.
+                  signal only — see NormalizedSignal.Reader.
                 type: string
               severity:
-                description: |-
-                  Severity is this signal's own urgency rating, from the occurrence that
-                  created this Signal. Absent means unrated. Written once, like Kind —
-                  an absorbed occurrence disagreeing with it is not retroactively
-                  applied, the same rule SignalProvenance.Severity already follows on a
-                  Conversation.
+                description: Severity is this signal's own urgency rating. Absent
+                  means unrated.
                 enum:
                 - critical
                 - error
                 - warning
                 - info
                 type: string
+              signalId:
+                description: |-
+                  SignalID is the sender's id for this one MESSAGE, stable across every
+                  re-send of it (design D-8). When present it fixes the Signal's name —
+                  sig-<first 32 hex of sha256(source NUL signalId)> — so publication is
+                  idempotent per (source, signalId) without a lookup. Opaque: compared for
+                  equality, never parsed. Absent: a generated name and no deduplication.
+                maxLength: 256
+                minLength: 1
+                type: string
               sourceRef:
                 description: |-
                   SourceRef names the SignalSource this signal arrived on (same
                   namespace). The owning SignalSource also owns this object by
-                  OwnerReference — set at creation by whatever persists the Signal — so a
-                  deleted source takes its signals from any phase (design D-6). SourceRef
-                  is carried here too, rather than read off the owner reference alone, so
-                  a lister or index can filter by source without resolving it.
+                  OwnerReference — set at creation — so a deleted source takes its
+                  signals from any phase. SourceRef is carried here too so a lister or
+                  index can filter by source without resolving the owner.
                 properties:
                   name:
                     description: Name of the referenced object.
@@ -168,9 +148,8 @@ spec:
                 - name
                 type: object
               title:
-                description: |-
-                  Title overrides the conversation title a routed claimant opens with.
-                  Written once, like Kind.
+                description: Title overrides the conversation title a routed claimant
+                  opens with.
                 type: string
             required:
             - adapter
@@ -178,20 +157,24 @@ spec:
             - sourceRef
             type: object
           status:
-            description: SignalStatus is the observed, derived state of a Signal.
+            description: SignalStatus is written by the CONSUMER and HOUSEKEEPING
+              only.
             properties:
+              attempts:
+                description: Attempts counts the processing attempts started, monotonic.
+                format: int32
+                type: integer
               claimants:
                 description: |-
-                  Claimants is the per-claimant routing workflow, snapshotted once at
-                  first routing attempt. Empty while Pending (no attempt yet) or Dropped
-                  (no claimant ever served the source).
+                  Claimants is the per-claimant routing workflow, snapshotted once at the
+                  first processing that reaches fan-out. Empty while Pending or Dropped.
                 items:
                   description: |-
                     SignalClaimant is one claimant's own routing workflow for a Signal — the
                     state machine Phase derives from. The set is snapshotted ONCE, at the
-                    signal's first routing attempt: the same principle that pins a
-                    Conversation's refs at creation, so a later rewire of who serves the
-                    source never changes an in-flight signal's own fan-out (design D-4).
+                    signal's first processing: the same principle that pins a Conversation's
+                    refs at creation, so a later rewire of who serves the source never changes
+                    an in-flight signal's own fan-out (design D-6).
                   properties:
                     conversationRef:
                       description: |-
@@ -239,15 +222,32 @@ spec:
                   - state
                   type: object
                 type: array
+              completedAt:
+                description: |-
+                  CompletedAt is set by the write that first makes the phase terminal and
+                  never moved by a later one — the origin every TTL measures from.
+                format: date-time
+                type: string
+              consumedAt:
+                description: ConsumedAt is when that identity processed it, set by
+                  the same write.
+                format: date-time
+                type: string
+              consumedBy:
+                description: |-
+                  ConsumedBy is the leader's identity, the same string as the leader
+                  Lease's holderIdentity, set by the write that makes the phase terminal.
+                type: string
               firstAttemptAt:
                 description: |-
-                  FirstAttemptAt stamps the moment Claimants was snapshotted — the
-                  origin the retry deadline (SIGNAL_RETRY_DEADLINE) measures from.
-                  Absent while Pending or Dropped.
+                  FirstAttemptAt stamps the first processing pass — the origin the retry
+                  deadline (SIGNAL_RETRY_DEADLINE) measures from.
                 format: date-time
                 type: string
               phase:
-                description: Phase is the roll-up over Claimants. See RollupPhase.
+                description: |-
+                  Phase is the roll-up over Claimants. See RollupPhase. Absent reads as
+                  Pending.
                 enum:
                 - Pending
                 - Routed
@@ -260,9 +260,12 @@ spec:
                   phase.
                 enum:
                 - unclaimed
+                - ambiguous
+                - unaddressable
                 - cooldown
-                - overflow
                 - capacity
+                - overflow
+                - exhausted
                 type: string
             type: object
         type: object

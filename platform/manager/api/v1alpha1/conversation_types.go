@@ -145,6 +145,11 @@ const SignalKindChat = "chat"
 const (
 	LabelChatChannel = "agentops.dev/channel"
 	LabelChatSender  = "agentops.dev/sender"
+	// LabelChatMessage is the transport's OWN handle for the message that
+	// arrived, set by the adapter that normalized it. OPAQUE everywhere in the
+	// manager: stored and handed back unaltered, never parsed, compared or
+	// constructed. It lets a reply say WHICH message it answers.
+	LabelChatMessage = "agentops.dev/message"
 )
 
 // LabelCausedBy indexes a member conversation by its immediate parent's name —

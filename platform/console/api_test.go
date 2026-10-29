@@ -527,7 +527,7 @@ func TestInventoryColumnsCoverEveryKind(t *testing.T) {
 // function outgrows the complexity bound.
 func TestInventoryColumnsCoverSignals(t *testing.T) {
 	signal := obj("signals", "sig1", "1",
-		`{"sourceRef":{"name":"cluster-events"},"adapter":"k8s-events","initiationId":"abc-123","occurrences":3}`,
+		`{"sourceRef":{"name":"cluster-events"},"adapter":"k8s-events","initiationId":"abc-123","signalId":"m-1"}`,
 		`{"phase":"PartiallyRouted"}`)
 	api, _, _ := apiUnderTest(t, "tok", signal)
 	rec := authed(t, api.Handler(http.NotFoundHandler()), "GET", "/api/config/signals", "")
@@ -536,7 +536,7 @@ func TestInventoryColumnsCoverSignals(t *testing.T) {
 		t.Fatalf("signals: %v (%s)", err, rec.Body.String())
 	}
 	if c := rows[0].Columns; c["source"] != "cluster-events" || c["initiationId"] != "abc-123" ||
-		c["phase"] != "PartiallyRouted" || c["occurrences"] != "3" || c["reason"] != "" {
+		c["phase"] != "PartiallyRouted" || c["reason"] != "" {
 		t.Fatalf("signals columns: %+v", c)
 	}
 }

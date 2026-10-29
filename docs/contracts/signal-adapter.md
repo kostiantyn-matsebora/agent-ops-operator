@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/signal-adapter/
 ---
 
-**Version 2.2.0**
+**Version 2.3.0**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -88,15 +88,16 @@ surface.
 
 ```json
 {"source": "my-source",
- "signals": [{"initiationId": "…", "labels": {}, "title": "…",
-              "payload": "…", "kind": "alert"}]}
+ "signals": [{"initiationId": "…", "signalId": "…", "labels": {},
+              "title": "…", "payload": "…", "kind": "alert"}]}
 ```
 
 | Status | Body |
 |---|---|
-| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `initiationId` (naming the field, never synthesized — `MGR-3`), a `chat` signal missing its channel label (`LANE-2`), or any signal's `severity` outside the four accepted values (`API-6`) |
+| `400` | `{"error": "<message>"}` — missing `source`/`signals`, a signal with no `initiationId` (naming the field, never synthesized — `MGR-3`), a `chat` signal missing its channel label (`LANE-2`), any signal's `severity` outside the four accepted values (`API-6`), or an invalid `signalId` (`API-7`) |
 | `401` / `403` | see [Security posture](#security-posture) |
-| `200` | `{"queued": <n>, "conversations": <n>, "reason": "<optional>"}` |
+| `200` | `{"queued": <n>, "reason": "<optional>"}` — storage acknowledged, never routing (`API-2`) |
+| `5xx` | `{"error": "<message>"}` — a signal could not be stored, so none of the batch is acknowledged. Re-send it (`API-3`) |
 
 ### Normalized signal
 
@@ -108,13 +109,15 @@ surface.
 | `payload` | string | no | The raw content handed to the agent, stored out of band. Never parsed as prose by the manager. |
 | `kind` | string | no | Selects the [lane](#lanes). Absent reads as `alert`. |
 | `reader` | string | no | `chat` lane only. An opaque, salted hash of the sender — never an identity — used only to stamp their own read watermark so their own message is not shown back to them as unread. |
+| `signalId` | string | no | The sender's id for this one MESSAGE, stable across every re-send of it. 1 to 256 bytes, printable ASCII without spaces. Not the `initiationId`, which correlates many messages on purpose. See `API-7`. |
 | `severity` | string | no | One of `critical`, `error`, `warning`, `info` — see [Enums](#enums). Absent means unrated, the only state a signal carried before this field existed. Unrelated to any adapter's own `severity` label — see [Compatibility](#compatibility). |
 
 | ID | Requirement |
 |---|---|
-| `API-2` | `queued`/`conversations` count the signals accepted and the conversations they touched, which may be fewer than `len(signals)` under cooldown. |
-| `API-3` | At-least-once delivery MUST be safe. A re-sent `initiationId` within the source's cooldown window collapses rather than opening a second conversation. |
+| `API-2` | The response acknowledges STORAGE, never routing. `queued` counts the signals accepted: stored, or deduplicated by `signalId`. `reason` appears only when the source's `attributeFilters` refused part of the batch. `conversations` is not returned, and no routing outcome (unclaimed, ambiguous, cooldown, capacity) appears on the response: each is recorded on the signal's `Signal` and, for a chat message, told on its surface. An adapter therefore cannot learn from the response that its source is unwired. |
+| `API-3` | At-least-once delivery MUST be safe. A `5xx` means nothing of the failing signal was acknowledged: re-send the batch with the same `initiationId` and the same `signalId` where one was sent. A signal with a `signalId` is deduplicated at publication. One without is stored again, and the manager's cooldown and equality reuse resolve the repeat. |
 | `API-6` | A `severity` outside the four accepted values MUST refuse the WHOLE batch with `400`, naming the four accepted values. No adapter is required to send it. |
+| `API-7` | A `signalId` is optional. When present the manager deduplicates a re-send per `(source, signalId)` for as long as the stored `Signal` exists, through every phase until the manager's TTL deletes it. Duplicates are acknowledged and counted in `queued`. An invalid `signalId` refuses the WHOLE batch with `400` naming the field. An older manager ignores it (`COMPAT-2`). |
 
 ## Lanes
 
@@ -198,6 +201,7 @@ condition.
 | `ADP-2` | Supply `initiationId` one of two ways: MINTED where the adapter's own aggregation already happens — the same recurring problem reusing the same id across occurrences — or PROPAGATED verbatim when a round trip hands back a manager-issued `conversationId`, with no re-derivation. For example, a chat reply in a bound thread propagates the `conversationId` stamped on that binding, and an adapter fronting an external system that accepts input can carry a `conversationId` outward and propagate it back unchanged when that system's response arrives — both are the propagated case, not a special lane. The manager never determines an id and treats it opaquely either way. |
 | `ADP-3` | Normalize and push. An adapter MUST NOT implement dedup, cooldown, or recurrence itself — those are the manager's, per `MGR-2`. The one named carve-out is the [post-emit refractory window](#post-emit-refractory-window), `ADP-8`. |
 | `ADP-4` | An observing adapter MUST NOT emit a signal about agent-ops' own machinery — see [Self-exclusion](#self-exclusion). |
+| `ADP-9` | A shipped adapter MUST send a `signalId` on every signal, stable across a re-send of the same delivery (including after a `5xx` or a transport error) and different between two messages the sender regards as distinct. An adapter written elsewhere SHOULD. Each adapter's own page states what a message is for it. |
 
 ### Self-exclusion
 
@@ -268,10 +272,10 @@ An adapter implementing none of these stays fully conformant — see
 
 | ID | Requirement |
 |---|---|
-| `MGR-1` | The manager owns the one inbound endpoint: `POST /signal/inbound` accepts every normalized signal, and it is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
-| `MGR-2` | Routing and cooldown are pure id equality, evaluated once per source above every claiming Pipeline — never once per Pipeline, or the first one starves the rest. An OPEN conversation whose `conversationId` equals the signal's `initiationId`, for the claiming pipeline, receives the signal as a recurrence. Otherwise a new conversation is created, adopting the `initiationId` as its `conversationId`. Cooldown keys on `initiationId`. |
+| `MGR-1` | The manager owns the one inbound endpoint: `POST /signal/inbound` accepts every normalized signal by STORING it as a `Signal` and acknowledging, and routes it afterwards through a separate consumer, and it is the ONLY way work originates from outside a chat surface. No route names a `Pipeline` directly — a caller posts to a `SignalSource`, and the Ready Pipeline claiming it decides which agent answers. |
+| `MGR-2` | Routing and cooldown are pure id equality, evaluated by the consumer once per source above every claiming Pipeline — never once per Pipeline, or the first one starves the rest. An OPEN conversation whose `conversationId` equals the signal's `initiationId`, for the claiming pipeline, receives the signal as a recurrence. Otherwise a new conversation is created, adopting the `initiationId` as its `conversationId`. Cooldown keys on `initiationId`. |
 | `MGR-3` | The manager MUST NOT mint, derive, or default an `initiationId`. A signal arriving without one is rejected `4xx`, naming the missing field — including from a `1.x` adapter during rollout. There is no compatibility shim: a manager-synthesized id would re-mint grouping policy the manager no longer owns. |
-| `MGR-4` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is dropped. |
+| `MGR-4` | A `SignalSource` naming no served adapter carries `Served=False`. One claimed by no Ready Pipeline carries `Wired=False`, and every signal posted to it is stored, then dropped, its `Signal` recording reason `unclaimed`. |
 | `MGR-5` | The manager MUST supply every variable in [Environment](#environment). |
 | `MGR-6` | The manager authenticates every call by `SEC-1`: the master token, or a per-`SignalAdapter` derived token scoped to the adapter's own name. |
 | `MGR-7` | An adapter needs no Kubernetes access: source listing, cursor state and status reporting reach it through this page's own endpoints. |
@@ -311,6 +315,7 @@ An adapter implementing none of these stays fully conformant — see
 | `COMPAT-3` | An adapter MUST ignore source-listing fields it does not know. |
 | `COMPAT-4` | A published section anchor on this page is a stable name. Renaming one is MAJOR. |
 | `COMPAT-5` | `severity` is UNRELATED to any adapter-defined `severity` **label**. `signals/k8s-events` and `signals/ha` each write their own `severity` label on their own scale, read by nothing as this field — see [concepts](../concepts.md#signalsource). |
+| `COMPAT-6` | A manager that predates `2.3.0` ignores `signalId` (`COMPAT-2`), so adapter and manager upgrade in either order. No adapter conformant with `2.2.0` reads the withdrawn `conversations` field, so none stops conforming. |
 
 | Version part | Moves when |
 |---|---|
@@ -337,12 +342,27 @@ Every shipped adapter claims the version it conforms to on its own page.
 | `signals/pulse` | `docs/integrations/pulse.md` | no |
 | `signals/telegram` | `docs/integrations/telegram.md` | no |
 
-All six conform to this version.
+All six conform to this version, and each sends a `signalId` (`ADP-9`):
+
+| Adapter | A message is | `signalId` |
+|---|---|---|
+| `signals/cron` | one fired tick | `cron:<source>:<tick, RFC 3339 UTC>` |
+| `signals/alertmanager` | one alert of one webhook delivery | `am:<body sha256>:<alert fingerprint or index>` |
+| `signals/k8s-events` | one observation of an Event at one `count` | `<source>/<event uid>/<count>` |
+| `signals/ha` | one emission of the dwell queue for one condition | `<initiationId>#<unix seconds the dwell cycle opened>` |
+| `signals/pulse` | one verified delivery of a firing alert | `pulse:<body sha256>` |
+| `signals/telegram` | one chat message or button tap | `tg-<source>-<update id>`, `tg-cb-<source>-<callback id>` for a tap |
+
+`signals/alertmanager` and `signals/pulse` carry no per-delivery id, so their
+`signalId` is a body hash: a re-notification with an identical body is
+deduplicated for the `Signal`'s life, and a changed alert carries a new
+`startsAt` or `endsAt`, so its hash differs.
 
 ## Changelog
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.3.0 | 2026-10-29 | `POST /signal/inbound` is publish-then-consume. `API-2` is REPLACED: the response acknowledges storage, `{"queued", "reason"?}`, and the `conversations` field is withdrawn. `API-3` is rewritten around a `5xx` re-send. A normalized signal may carry an optional `signalId` (`API-7`), and every shipped adapter sends one (`ADP-9`). `MGR-1`, `MGR-2` and `MGR-4` say the routing is the consumer's. ADDITIVE by the page's rule: no shipped adapter read the withdrawn field, and a `2.2.0` adapter sending no `signalId` stays conformant. |
 | 2.2.0 | 2026-10-21 | The [post-emit refractory window](#post-emit-refractory-window) is named as the one carve-out beside `ADP-3` (`ADP-8`): a bounded quiet period on an emitted `initiationId`, declared per adapter. Only `signals/ha` and `signals/k8s-events` use it. `signals/pulse` joins every shipped-adapter enumeration on this page — it was omitted, which never exempted it. ADDITIVE: no adapter needs to change to stay conformant. |
 | 2.1.0 | 2026-10-21 | A normalized signal may carry an optional `severity` — one of `critical`, `error`, `warning`, `info` (`API-6`, [Enums](#enums)). Unmapped refuses the whole batch with `400` naming the four values. Unrelated to any adapter's own `severity` **label** (`COMPAT-5`). ADDITIVE: no shipped adapter sends it yet, and none needs to change to stay conformant. |
 | 2.0.0 | 2026-10-18 | BREAKING. `fingerprint` is replaced by the sender-minted `initiationId`, required on every signal — minted where the sender's aggregation already happens, or propagated verbatim from a round-tripped `conversationId`. The manager's grouping provision (`labels`×`signatureLabels`, window reuse) is removed — routing is pure `conversationId` equality, and cooldown keys on `initiationId`. A missing `initiationId` is rejected `4xx` naming the field, with no compatibility shim — a `1.x` adapter gets the same rejection. |
