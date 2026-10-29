@@ -77,20 +77,36 @@ Details:
   conflict, so a concurrent `/work/done` racing the last verb never loses
   the mark. Lost mark = false miss, which is the one failure to design out.
 
-### D-B — The judgement runs in `/work/done`, after the record, before the phase
+### D-B — The judgement runs in `/work/done`, before the record
 
 Order inside `handleWorkDone` for a root (`spec.coordinatorRef != nil`):
 
-1. Record the run and its inputs, as today.
+1. Read the run's inputs and the move stamp, as today. Nothing is written yet.
 2. Judge: `status == succeeded` AND `inflight.moved == false` AND no recorded
    input of this run has origin `channel`. Otherwise no miss.
 3. On a miss, decide first or second: the run's recorded inputs are exactly
    one input of origin `manager` → second. Anything else → first.
 4. First: append the corrective input (D-C). Second: `Router.Escalate` with
    the digest.
-5. Phase, fan-out, member routing, budget edge, as today. A corrective input
-   is pending, so the phase lands `Queued` and the next dispatch is the
-   ordinary one.
+5. Record the run and clear `inflight`, then phase, fan-out, member routing,
+   budget edge, as today.
+
+**The judgement is written BEFORE the run is recorded, on purpose.**
+
+- A manager that stops between the append and the record leaves `inflight` in
+  place, so the runtime's retried report is judged again.
+- The append is idempotent per run, so the corrective input lands once.
+- Judged after the record, a lost append left a recorded run with no inflight
+  entry and nothing to retry from.
+
+**A run that reaches `maxTurns` is not judged.** The root closes on that edge,
+and a hand-back into a thread about to close helps nobody.
+
+**A report whose continuity is `unavailable` is not judged.** The contract
+treats such a run as a failure, and a held input is not a finished turn.
+
+On a first miss the corrective input is pending, so the phase lands `Queued`
+and the next dispatch is the ordinary one.
 
 A member (`causedBy` set, `coordinatorRef` nil) is never judged. A member's
 result IS its move, and it reaches the parent by the existing route.
@@ -101,9 +117,13 @@ A nested Coordinator's root (both set) is judged as a root.
 
 | Field | Value |
 |---|---|
-| type | `task` |
+| type | `reply` |
 | origin | `{kind: manager, name: move-per-turn}` |
 | payload | fixed text naming the rule and the roster, the Coordinator's `agents[]` names read at the moment of the miss |
+
+It is a `reply`, not a `task`. Only a reply resumes the conversation's stored
+context, and it degrades to a task when there is none. The corrective turn has
+to see what the agent concluded. A `task` never carries the context handle.
 
 Dispatched through the same template as any root input (D-E), so the model
 sees "from the manager" where it sees "from a member" otherwise.
@@ -209,6 +229,23 @@ children-first), then close the conversation itself. Same reason verbatim.
 A failure mid-walk returns before the ancestor closes, so a retry resumes
 from the open members. Already-closed members are skipped as today.
 
+A second sweep runs after the ancestor closes. A run on the still-open
+ancestor may have invoked a member after the first walk listed.
+
+`invoke` refuses a Closed caller (`ErrCallerClosed`, HTTP 403).
+
+A call that read its caller as open just before the close landed re-reads the
+caller after it created the member. It closes that member with the caller's
+reason when it finds the caller Closed.
+
+The two cover each other:
+
+- If the close landed before the re-read, the call closes the member.
+- If it lands after, the second sweep runs after the close write, which is
+  after the member existed, and finds it.
+
+No third sweep is needed.
+
 `CloseBudgetExceeded` already closes members before escalating the root.
 Unchanged.
 
@@ -248,7 +285,8 @@ Unchanged.
 
 Rollback: roll the previous manager. An unread `inflight.moved` and an
 unknown origin value are ignored by the older binary. Conversations keep
-working. A corrective input already queued dispatches as a plain task.
+working. A corrective input already queued is a `reply`, which an older
+manager dispatches as it dispatches any reply.
 
 ## Open Questions
 

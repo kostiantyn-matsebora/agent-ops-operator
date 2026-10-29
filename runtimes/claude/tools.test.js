@@ -10,6 +10,7 @@ const path = require('path');
 const {
   MODE_MERGE, MODE_OVERWRITE,
   parseFrontmatterTools, agentDeclaredTools, composeAllowedTools,
+  offeredBuiltins,
   safeJoin, sanitizeLog, resolveBin, buildClaudeArgs, logUngrantedTools,
 } = require('./tools');
 
@@ -226,6 +227,41 @@ test('the composed allowlist joins to a comma-separated argument', () => {
   assert.strictEqual(
     composeAllowedTools(declared, 'Bash', MODE_OVERWRITE).join(','),
     'Bash',
+  );
+});
+
+// ---- offeredBuiltins (coordinator-move-per-turn 6.1, design D-F) -----------
+//
+// What the SDK is told to OFFER as built-ins is derived from the composed
+// allowlist and is a stricter form of the per-call denial, never a wider
+// one: a built-in absent here is one the model never sees, and canUseTool
+// (runtime.permissions.test.js) still governs every call to one it does.
+
+test('offeredBuiltins of an empty allowlist offers no built-in', () => {
+  assert.deepStrictEqual(offeredBuiltins([]), []);
+  assert.deepStrictEqual(offeredBuiltins(undefined), []);
+});
+
+// The coordinator's wiring: `mcp__aops__*` alone. The model is to see the
+// aops tools (offered by binding the server) and no Bash/Read/Glob/Edit/
+// Write/web tool — its own toolbox never contradicts "your tools are the
+// agents".
+test('offeredBuiltins of an aops-only allowlist offers no built-in — MCP tools are offered by binding their server', () => {
+  assert.deepStrictEqual(offeredBuiltins(['mcp__aops__*']), []);
+});
+
+test('offeredBuiltins offers exactly the granted built-ins, in allowlist order', () => {
+  assert.deepStrictEqual(offeredBuiltins(['Read', 'Grep']), ['Read', 'Grep']);
+});
+
+test('offeredBuiltins strips a scoped entry to its base tool name', () => {
+  assert.deepStrictEqual(offeredBuiltins(['Bash(git *)']), ['Bash']);
+});
+
+test('offeredBuiltins drops MCP globs, strips scopes, trims and dedups across a mixed allowlist', () => {
+  assert.deepStrictEqual(
+    offeredBuiltins(['mcp__aops__*', ' Read ', 'Bash(git *)', 'mcp__kubernetes', 'Bash(kubectl *)', 'Grep', 'Read', '']),
+    ['Read', 'Bash', 'Grep'],
   );
 });
 

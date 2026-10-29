@@ -19,12 +19,15 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
@@ -155,7 +158,8 @@ func statusFor(err error) int {
 		errors.Is(err, chat.ErrOutOfScope),
 		errors.Is(err, chat.ErrOutOfSubtree),
 		errors.Is(err, chat.ErrCannotCloseHumanRoot),
-		errors.Is(err, chat.ErrNoCoordinatorScope):
+		errors.Is(err, chat.ErrNoCoordinatorScope),
+		errors.Is(err, chat.ErrCallerClosed):
 		return 403
 	default:
 		return 500
@@ -190,6 +194,8 @@ func (s *Server) handleCoordinateInvoke(w http.ResponseWriter, r *http.Request) 
 		writeCoordinateError(w, statusFor(err), err)
 		return
 	}
+	// Created or attached, the model delegated: both are a move (design D-A).
+	s.stampMove(ctx, caller.Name)
 	status := "created"
 	if !result.Created {
 		status = "attached"
@@ -227,6 +233,9 @@ func (s *Server) handleCoordinateClose(w http.ResponseWriter, r *http.Request) {
 		writeCoordinateError(w, statusFor(err), err)
 		return
 	}
+	// Stamped even when the target was the caller itself and is now Closed: a
+	// Closed conversation is never judged, so the mark is the record only.
+	s.stampMove(ctx, caller.Name)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -254,7 +263,56 @@ func (s *Server) handleCoordinateEscalate(w http.ResponseWriter, r *http.Request
 		writeCoordinateError(w, statusFor(err), err)
 		return
 	}
+	// An escalate on an already-escalated root replays no digest but is still
+	// a decision, so it is still a move (design D-A).
+	s.stampMove(ctx, caller.Name)
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// stampMoveAttempts bounds the optimistic retry of a move stamp, the same
+// bound setPhaseUnlessClosed uses for the other sticky status fact here.
+const stampMoveAttempts = 5
+
+// stampMove records on the CALLER's inflight run that the verb just accepted
+// was a move — `status.inflight.moved` (design D-A, aops-mcp-server: "An
+// accepted move is recorded on the caller's inflight run"). Called only after
+// InvokeMember, CloseCoordinated or Escalate returned nil: a refused verb
+// reached nothing, so it records nothing. A caller with no inflight run (a
+// verb from a pod with no unit) stamps nothing, since nothing was dispatched
+// and nothing will be judged.
+//
+// Its own optimistic-locked patch, re-read and retried on conflict, because a
+// `/work/done` racing the last verb would otherwise clear the entry under an
+// unconditioned merge and lose the mark — a lost mark reads as a false miss,
+// the one failure design D-A exists to rule out. The verb itself already
+// happened, so a stamp that still fails is logged and never fails the verb.
+func (s *Server) stampMove(ctx context.Context, callerName string) {
+	if err := s.tryStampMove(ctx, callerName); err != nil {
+		log.FromContext(ctx).Info("recording a move on the caller's inflight run",
+			"conversation", callerName, "error", err.Error())
+	}
+}
+
+func (s *Server) tryStampMove(ctx context.Context, callerName string) error {
+	for range stampMoveAttempts {
+		var conv agentopsv1alpha1.Conversation
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: callerName}, &conv); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if conv.Status.Inflight == nil || conv.Status.Inflight.Moved {
+			return nil
+		}
+		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		conv.Status.Inflight.Moved = true
+		err := s.Client.Status().Patch(ctx, &conv, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return client.IgnoreNotFound(err)
+		}
+	}
+	return fmt.Errorf("conflict recording a move on %q after %d attempts", callerName, stampMoveAttempts)
 }
 
 // conversationProjection is the bounded view both reach classes get: never a

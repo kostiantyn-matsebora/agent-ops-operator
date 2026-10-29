@@ -31,11 +31,12 @@ const (
 	SeverityInfo     Severity = "info"
 )
 
-// OriginKind says HOW an input reached the manager. There are three doors: a
+// OriginKind says HOW an input reached the manager. There are four doors: a
 // signal through a claimed SignalSource, a channel the user is already looking
-// at, or a coordinated conversation crossing a `causedBy` edge. (`POST /task`
-// was a fourth once; it is gone.)
-// +kubebuilder:validation:Enum=signal;channel;member
+// at, a coordinated conversation crossing a `causedBy` edge, or the manager
+// itself appending one under a rule of its own. (`POST /task` was a door once;
+// it is gone.)
+// +kubebuilder:validation:Enum=signal;channel;member;manager
 type OriginKind string
 
 const (
@@ -51,6 +52,15 @@ const (
 	// is the CONVERSATION on the other side of that edge, and Entry is the
 	// `agents[]` entry name the edge was invoked through.
 	OriginMember OriginKind = "member"
+	// OriginManager: the manager itself appended the input, under a rule of its
+	// own — nobody typed it, no signal carried it, no edge was crossed. Name is
+	// the RULE that produced it. Today the only rule is `move-per-turn`: the
+	// corrective input a Coordinator root receives after a successful turn that
+	// made no move (coordination-loop). It is recorded like every other origin
+	// and delivered to every bound channel, attributed to the manager, and it
+	// is never a person's message — a turn that answers it with prose alone is
+	// still a turn without a move.
+	OriginManager OriginKind = "manager"
 )
 
 // SignalProvenance is the originating signal, kept for attribution.
@@ -103,7 +113,8 @@ type InputOrigin struct {
 	Kind OriginKind `json:"kind"`
 	// Name is the SignalSource or Channel the input came from, or — for
 	// OriginMember — the conversation on the other side of the `causedBy`
-	// edge this input crossed.
+	// edge this input crossed, or — for OriginManager — the rule that wrote
+	// it (`move-per-turn`).
 	// +optional
 	Name string `json:"name,omitempty"`
 	// Entry is the parent Coordinator's `agents[]` entry name the edge was
@@ -706,6 +717,17 @@ type InflightRun struct {
 	InputIDs []string `json:"inputIds,omitempty"`
 	// +optional
 	DispatchedAt metav1.Time `json:"dispatchedAt,omitempty"`
+	// Moved records that this run made a MOVE: the manager's own
+	// /coordinate/invoke, /escalate and /close handlers set it when the verb is
+	// ACCEPTED for a caller with an inflight run — an attached invoke counts, an
+	// escalate on an already-escalated root counts, a refused verb and a read
+	// set nothing. /work/done reads it to judge a Coordinator root's turn
+	// (coordination-loop: every root turn ends in a move) and consumes it with
+	// the rest of the inflight entry, so it survives nowhere else. The evidence
+	// is the manager's own — a runtime's report never sets it, whatever
+	// `toolCalls[]` says.
+	// +optional
+	Moved bool `json:"moved,omitempty"`
 }
 
 // OriginReader names the reader who started a conversation, in the key space of

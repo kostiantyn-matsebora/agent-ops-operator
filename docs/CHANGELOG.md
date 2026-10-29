@@ -8,6 +8,40 @@ This file holds the **ten most recent versions**. Older entries are in
 See [the repository](https://github.com/kostiantyn-matsebora/agent-ops-operator)
 for the source and the reference material beside this file.
 
+## [Unreleased]
+
+### Added
+
+- Input origin `manager`, for an input the manager appends under a rule of its
+  own. Today only the corrective input, named `move-per-turn`. The console
+  attributes it to the manager.
+- `status.inflight.moved` on a Conversation, written by the manager's own
+  verb handlers and read when a run completes.
+
+### Changed
+
+- A Coordinator root's turn must end in a move: `invoke`, `escalate`, `close`
+  or an answer to a person. A succeeded root run that made none of them and
+  answered no person is handed back once as an input, then escalated on the
+  second consecutive miss. The manager only refuses an undecided turn and
+  never picks the move. See [concepts](concepts.md#every-root-turn-ends-in-a-move).
+- A Coordinator root's work unit is framed as coordination, without the
+  checkout and role-file framing a repository agent gets. The profile's
+  `systemPrompt` is appended as before.
+- `runtime-claude` offers the model only the built-ins its allowlist grants.
+  A route granting none sees none. Per-call enforcement is unchanged.
+- The `aops` tool descriptions say which tools are moves and which are reads.
+- A cascading close closes descendants before the ancestor.
+
+### Upgrade
+
+One additive CRD field and one enum value. Helm never upgrades CRDs, so
+apply them with the chart:
+
+```sh
+kubectl apply -f chart/crds/
+```
+
 ## [18.0.1] — 2026-10-25
 
 ### Fixed

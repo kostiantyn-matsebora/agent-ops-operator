@@ -646,6 +646,9 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// (item #15 QA) and needs a real StartedAt to do it, not the run's own
 	// finish time standing in for both ends.
 	var startedAt *metav1.Time
+	// The move stamp (design D-A) is consumed with the rest of the inflight
+	// entry — read here, judged below, surviving nowhere else.
+	var turn turnEvidence
 	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
 		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
 		startedAt = &conv.Status.Inflight.DispatchedAt
@@ -653,6 +656,7 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
 			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
 		}
+		turn = turnEvidence{Dispatched: !hold && d.Continuity != ContinuityUnavailable, Moved: conv.Status.Inflight.Moved}
 		conv.Status.Inflight = nil
 	}
 	// LATEST-WINS, and recorded on a FAILED run too.
@@ -750,6 +754,19 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	}
 	desiredPhase := agentopsv1alpha1.ConversationIdle
 	if len(dispatch.PendingInputs(&conv)) > 0 {
+		desiredPhase = agentopsv1alpha1.ConversationQueued
+	}
+	// A Coordinator root's turn is judged BEFORE the run is recorded and its
+	// inflight entry cleared (design D-B, moveperturn.go). That order is what
+	// makes the hand-back durable: a manager that stops between the append and
+	// the record below leaves the inflight entry in place, so the runtime's
+	// retried report is judged again and the append, idempotent per run, lands
+	// once. The corrective input is pending, so the phase lands Queued. The
+	// phase write below still re-reads and refuses to un-close. A run that
+	// reaches maxTurns is not judged: the root closes on that edge, and a
+	// hand-back into a thread about to close helps nobody.
+	if !maxTurnsExceeded && s.Router != nil &&
+		s.actOnMiss(ctx, &conv, d.RunID, result, judgeRootTurn(&conv, d.Status, turn, recorded)) {
 		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
 	conv.Status.LastActivity = &now
