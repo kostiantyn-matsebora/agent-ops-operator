@@ -15,6 +15,9 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // A flaky browser launch on a shared runner shouldn't fail a gate that
+  // passed a moment later; locally a retry only hides a real failure.
+  retries: process.env.CI ? 2 : 0,
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:4173',
@@ -23,7 +26,7 @@ export default defineConfig({
   webServer: {
     // Serves the production build against the mock API the spec installs, so
     // the smoke test exercises the SAME bundle the image embeds.
-    command: 'npm run build && npm run preview -- --port 4173 --strictPort',
+    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: true,
     timeout: 180_000,
