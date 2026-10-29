@@ -24,10 +24,11 @@ differently per install.
 ## What Changes
 
 - A **state store contract** inside the manager: the only way the manager
-  reaches a conversation, an input or a signal. Domain records, an opaque
-  revision, compare-and-swap writes, a declared index set, a resumable
-  at-least-once change feed, expiry, append-only sub-records, blobs. No
-  Kubernetes types, no selector strings, no transactions.
+  reaches a conversation or an input. Domain records, an opaque revision,
+  compare-and-swap writes, a declared index set, a resumable at-least-once
+  change feed, expiry, append-only sub-records, blobs. No Kubernetes types,
+  no selector strings, no transactions. Signal joins the contract with
+  `signal-persistence`, which owns that extension.
 - The contract is written from what the manager does with state, never from
   a backend's features. Every guarantee is one scenario of a **conformance
   suite**, and the suite is what a backend passes to exist. It also measures

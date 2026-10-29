@@ -9,8 +9,8 @@ homes, and SHALL NOT hold state that belongs to no class:
   reading. Survives any process restart and any rescheduling.
 - **State store** — conversation state: session id, threads, inputs, runs,
   phase, the conversation's MESSAGE RECORD (what people sent as well as what
-  the agent answered), and signals. Reached only through the state store
-  contract. The selected backend decides where it is kept. The `kube`
+  the agent answered), and signals once `signal-persistence` lands. Reached
+  only through the state store contract. The selected backend decides where it is kept. The `kube`
   backend keeps it in the Kubernetes API, so a default install has the same
   two homes it always had.
 - **PersistentVolume** — state that genuinely IS a filesystem: the runtime's

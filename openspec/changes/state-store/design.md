@@ -68,9 +68,9 @@ contract's provenance and lives in the spec's requirements:
 | Manager does | Contract guarantees |
 |---|---|
 | get-modify-put raced by leader and HTTP handler | CAS on an opaque revision |
-| finds by `initiationId`, `pipelineRef`+phase, phase, source | declared index set, closed |
+| finds by `initiationId`, `pipelineRef`+phase, phase | declared index set, closed — `signal-persistence` adds source |
 | resumes as a new leader from state alone | at-least-once resumable feed |
-| treats signals as expiring | `expiresAt` on a record |
+| will treat signals as expiring (`signal-persistence`) | `expiresAt` on a record |
 | appends runs, reads them rarely | append-only sub-records |
 | stores a payload once, reads it once | blobs by key |
 | one install per namespace | scope fixed at construction |
@@ -101,12 +101,19 @@ the latest. The reconcile hot path gains no round trip.
 ### D-5: The `kube` backend keeps today's CRD layout
 
 Runs stay embedded in `status.runs[]`, inputs stay `ConversationInput`
-objects. The contract's append-only runs are a CAS update of the status
-array.
+objects.
 
-Splitting runs into a `ConversationRun` CRD would be a CRD migration in a
-change whose acceptance criterion is zero behaviour change. It stays open as
-a later `kube`-only optimisation, decided by the bench.
+The contract's append takes no revision and never surfaces a conflict. The
+`kube` backend meets that with an internal read-append-CAS loop on the
+status array, retried on conflict, since appends commute.
+
+The cost: an append moves the control record's revision. The bench measures
+the write amplification this causes.
+
+Splitting runs into a `ConversationRun` CRD would remove that cost and would
+be a CRD migration in a change whose acceptance criterion is zero behaviour
+change. It stays open as a later `kube`-only optimisation, decided by the
+bench.
 
 ### D-6: The reconciler is driven by the store's feed
 
@@ -171,8 +178,8 @@ written per run, allocations per write and resident records after a
 listing, so the NATS decision is made from measurements.
 
 A static check in the manager's test suite fails on any package outside
-`internal/state/` that references the Conversation, ConversationInput or
-Signal types through a Kubernetes client call.
+`internal/state/` that references the Conversation or ConversationInput
+types through a Kubernetes client call.
 
 ## Risks / Trade-offs
 

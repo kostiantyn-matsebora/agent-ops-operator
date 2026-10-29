@@ -8,10 +8,13 @@ that lets an install choose where state lives.
 ## ADDED Requirements
 
 ### Requirement: State is reached only through the store contract
-The manager SHALL read and write conversations, conversation inputs and
-signals only through the state store contract. No manager code path SHALL
-reach a state record through a Kubernetes client, a Kubernetes cache or a
-Kubernetes watch directly.
+The manager SHALL read and write conversations and conversation inputs only
+through the state store contract. No manager code path SHALL reach a state
+record through a Kubernetes client, a Kubernetes cache or a Kubernetes watch
+directly.
+
+The Signal record joins the contract with `signal-persistence`, as the
+contract extension that change owns.
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -23,7 +26,7 @@ backend offers it.
 
 #### Scenario: A state access outside the store is a build failure
 - **WHEN** a manager package imports the Kubernetes client to read or write a
-  Conversation, ConversationInput or Signal
+  Conversation or a ConversationInput
 - **THEN** the manager's own test suite fails, naming the package
 
 #### Scenario: Configuration kinds are untouched
@@ -51,9 +54,8 @@ A create SHALL be refused when the key already exists.
 
 ### Requirement: Lookup is by key or by a declared index
 The contract SHALL offer lookup by key and listing by a declared, closed set
-of indexes: a conversation by `initiationId`, by `pipelineRef` and phase, by
-phase, and a signal by source and by phase. Every backend SHALL serve every
-declared index.
+of indexes: a conversation by `initiationId`, by `pipelineRef` and phase,
+and by phase. Every backend SHALL serve every declared index.
 
 The contract SHALL NOT accept a free-form selector. Adding an index SHALL be
 a contract change with a conformance scenario, never a per-backend feature.
@@ -101,10 +103,11 @@ A record SHALL be able to carry an expiry instant. Past that instant the
 store SHALL NOT return the record from a lookup or a listing, and SHALL
 eventually remove it. How the removal happens is the backend's own.
 
-#### Scenario: An expired signal is invisible before it is gone
-- **WHEN** a signal's expiry instant has passed and the backend has not yet
+#### Scenario: An expired record is invisible before it is gone
+- **WHEN** a record's expiry instant has passed and the backend has not yet
   removed it
-- **THEN** a lookup by key and a listing by source both omit it
+- **THEN** a lookup by key and every listing that would have returned it
+  both omit it
 
 #### Scenario: Expiry is observable on the feed
 - **WHEN** the store removes an expired record
@@ -112,14 +115,17 @@ eventually remove it. How the removal happens is the backend's own.
 
 ### Requirement: Runs are append-only sub-records of a conversation
 A conversation's runs SHALL be appended, never rewritten, and SHALL list in
-the order they were appended. Appending a run SHALL NOT require rewriting the
-conversation's control record.
+the order they were appended.
 
-#### Scenario: A run appends without a control-record conflict
-- **WHEN** a run is appended while another actor holds the control record at
-  an older revision
-- **THEN** the append succeeds and the other actor's later control-record
-  write is judged on the control record's revision alone
+An append SHALL take no revision from the caller and SHALL NOT fail with a
+conflict. Whether an append also moves the control record's revision is the
+backend's layout, and a caller's later control-record write tolerates it the
+way it tolerates any conflict.
+
+#### Scenario: An append needs no revision and never conflicts
+- **WHEN** two actors append a run each to the same conversation at the same
+  moment, neither holding a revision
+- **THEN** both appends succeed and the listing holds both runs
 
 #### Scenario: Runs read back in order
 - **WHEN** runs 1 to N were appended
