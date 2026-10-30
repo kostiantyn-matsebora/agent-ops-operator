@@ -148,6 +148,7 @@ const kinds: KindInfo[] = [
   { kind: 'agentruntimes', title: 'Agent runtimes', count: 2, synced: true },
   { kind: 'signalsources', title: 'Signal sources', count: 5, synced: true },
   { kind: 'signaladapters', title: 'Signal adapters', count: 3, synced: true },
+  { kind: 'signals', title: 'Signals', count: 4, synced: true },
   { kind: 'channels', title: 'Channels', count: 2, synced: true },
   { kind: 'channeladapters', title: 'Channel adapters', count: 2, synced: true },
   { kind: 'mcptoolsets', title: 'MCP toolsets', count: 4, synced: true },
@@ -235,6 +236,69 @@ const inventory: Record<string, InventoryRow[]> = {
       columns: { adapter: 'cron', served: 'true', wired: 'false' },
     },
   ],
+  // signal-persistence: one representative Signal — the durable, persist-then-ack
+  // record a SignalSource's admitted arrival becomes. Routed rather than one of
+  // the other four phases, so the inventory's default row reads as the ordinary
+  // case rather than a fault.
+  signals: [
+    {
+      name: 'cluster-events-sig-7f2a1', created: ago(96), health: 'ok', findings: 0,
+      columns: { source: 'cluster-events', initiationId: 'k8s-events-7f2a1', phase: 'Routed' },
+    },
+    {
+      name: 'prometheus-alerts-sig-3b9c0', created: ago(41), health: 'ok', findings: 0,
+      columns: { source: 'prometheus-alerts', initiationId: 'alertmanager-3b9c0', phase: 'PartiallyRouted' },
+    },
+    {
+      name: 'cluster-events-sig-a41d8', created: ago(12), health: 'ok', findings: 0,
+      columns: { source: 'cluster-events', initiationId: 'k8s-events-a41d8', phase: 'Pending' },
+    },
+    {
+      name: 'bench-sensors-sig-0e6f3', created: ago(7), health: 'ok', findings: 0,
+      columns: { source: 'bench-sensors', initiationId: 'cron-0e6f3', phase: 'Dropped' },
+    },
+  ],
+}
+
+// Signal details by name: a held-up signal (one claimant routed, one still
+// routing) and a failure carrying the manager's reason verbatim. The detail
+// page renders status straight from the object, so these are the CRD's shape.
+const signalDetail = (name: string, source: string, initiationId: string, status: Record<string, unknown>): Detail => ({
+  object: {
+    kind: 'Signal',
+    metadata: { name, namespace: 'agent-ops', creationTimestamp: ago(41) },
+    spec: { sourceRef: { name: source }, adapter: 'alertmanager', initiationId },
+    status,
+  },
+  health: 'none',
+  conditions: [],
+  usedBy: [],
+  findings: [],
+  yaml: ['apiVersion: agentops.dev/v1alpha1', 'kind: Signal', 'metadata:', `  name: ${name}`].join('\n'),
+})
+
+export const signalDetails: Record<string, Detail> = {
+  'prometheus-alerts-sig-3b9c0': signalDetail('prometheus-alerts-sig-3b9c0', 'prometheus-alerts', 'alertmanager-3b9c0', {
+    phase: 'PartiallyRouted',
+    attempts: 3,
+    firstAttemptAt: ago(41),
+    claimants: [
+      { ref: { kind: 'Pipeline', name: 'alert-triage' }, state: 'Routed', conversationRef: { name: 'alert-triage-3b9c0' } },
+      { ref: { kind: 'Coordinator', name: 'incident-response' }, state: 'Routing' },
+    ],
+  }),
+  'bench-sensors-sig-0e6f3': signalDetail('bench-sensors-sig-0e6f3', 'bench-sensors', 'cron-0e6f3', {
+    phase: 'Failed',
+    attempts: 5,
+    firstAttemptAt: ago(7),
+    completedAt: ago(2),
+    consumedBy: 'agentops-manager-0_ab12',
+    consumedAt: ago(2),
+    claimants: [
+      { ref: { kind: 'Pipeline', name: 'alert-triage' }, state: 'Failed', reason: 'retry deadline exceeded: context storage unavailable' },
+      { ref: { kind: 'Pipeline', name: 'old-pipeline' }, state: 'Skipped', reason: 'claimant no longer exists' },
+    ],
+  }),
 }
 
 const findings: Finding[] = [
@@ -1029,6 +1093,8 @@ export function responder(state: Install) {
     const inv = /^\/api\/config\/([a-z]+)$/.exec(path)
     if (inv) return state.inventory[inv[1]] ?? []
     if (path === '/api/config/pipelines/k8s-observe') return state.pipelineDetail
+    const sig = /^\/api\/config\/signals\/([^/]+)$/.exec(path)
+    if (sig && signalDetails[sig[1]]) return signalDetails[sig[1]]
 
     return null
   }

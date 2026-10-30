@@ -117,7 +117,10 @@ type Server struct {
 	// stale read at worst admits one over the bound. <=0 means the default.
 	MaxQueuedConversations int
 
-	cooldowns map[string]*ingest.Cooldown
+	// Cooldowns is the leader's per-source cooldown map the consumer pool
+	// shares, read here only to report on it (GET /status, the metrics
+	// sample). Nil is usable and reports nothing.
+	Cooldowns *ingest.CooldownBook
 
 	// StorageBreaker judges whether unreachable context is one conversation's
 	// loss or an install-wide outage. SHARED with the reconciler, which feeds
@@ -150,9 +153,6 @@ func (s *Server) maxQueued() int {
 
 // Handler builds the HTTP mux (shared by Start and tests).
 func (s *Server) Handler() http.Handler {
-	if s.cooldowns == nil {
-		s.cooldowns = map[string]*ingest.Cooldown{}
-	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})

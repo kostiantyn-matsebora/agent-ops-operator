@@ -52,6 +52,7 @@ var Kinds = []string{
 	"mcptoolsets",
 	"pipelines",
 	"signaladapters",
+	"signals",
 	"signalsources",
 }
 
@@ -92,6 +93,7 @@ var Singular = map[string]string{
 	"mcptoolsets":       "MCPToolset",
 	"pipelines":         "Pipeline",
 	"signaladapters":    "SignalAdapter",
+	"signals":           "Signal",
 	"signalsources":     "SignalSource",
 	"cronjobs":          "CronJob",
 	"deployments":       "Deployment",

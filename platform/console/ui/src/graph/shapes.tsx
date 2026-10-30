@@ -115,6 +115,10 @@ export const NODE_STYLES: Record<string, NodeStyle> = {
   channels: { shape: 'cylinder', glyph: GLYPHS.channel, label: 'Channel' },
   channeladapters: { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Channel adapter' },
   conversations: { shape: 'note', glyph: GLYPHS.conversation, label: 'Conversation' },
+  // Signal is a Configuration-page kind only — it carries no wiring edges of
+  // its own, so it never appears as a Model/graph node, just the glyph the
+  // Configuration list and detail pages draw beside its name.
+  signals: { shape: 'plaque', glyph: GLYPHS.source, label: 'Signal' },
   // Components
   manager: { shape: 'hub', glyph: GLYPHS.manager, label: 'Manager' },
   'signal-adapter': { shape: 'plaque', glyph: GLYPHS.adapter, label: 'Signal adapter' },

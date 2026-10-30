@@ -101,6 +101,9 @@ const VIEWS: { file: string; path: string; ready: string; pick?: string }[] = [
   // The Pipelines inventory rather than the kind index: the tour asks "what is
   // wired to what", and a grid of object counts does not answer it.
   { file: 'configuration', path: '/config/pipelines', ready: 'alert-triage' },
+  // The one kind with no write path: what arrived, and whether it reached an
+  // agent — a row per phase, so the chips read as the vocabulary they are.
+  { file: 'signals', path: '/config/signals', ready: 'cluster-events-sig-7f2a1' },
 ]
 
 /**

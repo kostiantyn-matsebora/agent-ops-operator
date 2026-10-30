@@ -512,3 +512,34 @@ func TestIsHumanInitiated(t *testing.T) {
 		})
 	}
 }
+
+func TestCloseCoordinatedRefusesACoordinatorClosingItsOwnPersonStartedRoot(t *testing.T) {
+	chatRoot := coordinatorRoot("chat-1", "co-a")
+	chatRoot.Spec.Signal = chatSignal()
+	addressed := coordinatorRoot("task-1", "co-a") // no spec.signal — an addressed command
+	alert := coordinatorRoot("alert-1", "co-a")
+	alert.Spec.Signal = &agentopsv1alpha1.SignalProvenance{}
+
+	r, c := coordFixture(t, testCoordinator("co-a"), chatRoot, addressed, alert)
+
+	for _, name := range []string{"chat-1", "task-1"} {
+		t.Run(name, func(t *testing.T) {
+			var caller agentopsv1alpha1.Conversation
+			c.Get(context.Background(), nsName(name), &caller)
+			if err := r.CloseCoordinated(context.Background(), &caller, name, "done"); err != ErrCannotCloseHumanRoot {
+				t.Fatalf("want ErrCannotCloseHumanRoot, got %v", err)
+			}
+			c.Get(context.Background(), nsName(name), &caller)
+			if caller.Status.Phase == agentopsv1alpha1.ConversationClosed {
+				t.Fatal("a person's own root must stay open")
+			}
+		})
+	}
+	t.Run("a machine-originated root may still close itself", func(t *testing.T) {
+		var caller agentopsv1alpha1.Conversation
+		c.Get(context.Background(), nsName("alert-1"), &caller)
+		if err := r.CloseCoordinated(context.Background(), &caller, "alert-1", "resolved"); err != nil {
+			t.Fatalf("self-close of an alert root: %v", err)
+		}
+	})
+}

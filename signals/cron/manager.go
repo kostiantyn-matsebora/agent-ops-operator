@@ -40,6 +40,7 @@ type SourceInfo struct {
 // Signal is the contract's normalized signal shape.
 type Signal struct {
 	InitiationID string            `json:"initiationId"`
+	SignalID     string            `json:"signalId,omitempty"` // this one message, stable across re-sends
 	Labels       map[string]string `json:"labels,omitempty"`
 	Title        string            `json:"title,omitempty"`
 	Payload      string            `json:"payload,omitempty"`

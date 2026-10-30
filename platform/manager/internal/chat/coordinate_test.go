@@ -410,6 +410,7 @@ func TestInvokeMemberRefusesAtMaxAgentsAndBubblesWhenCallerIsNested(t *testing.T
 
 func TestCloseCoordinatedSelf(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
+	caller.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), caller)
 
 	if err := r.CloseCoordinated(context.Background(), caller, "root-1", "resolved: done"); err != nil {
@@ -464,6 +465,7 @@ func TestCloseCoordinatedDirectMemberCascadesToGrandchildren(t *testing.T) {
 // name, so member-1 (with the grandchild) is walked before member-2.
 func TestCloseCoordinatedCascadeClosesChildrenBeforeAncestors(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	member := causedMember("member-1", root.Name, "worker")
 	grandchild := causedMember("grandchild-1", member.Name, "helper")
 	sibling := causedMember("member-2", root.Name, "reviewer")
@@ -486,6 +488,7 @@ func TestCloseCoordinatedCascadeClosesChildrenBeforeAncestors(t *testing.T) {
 // over members nothing can reach.
 func TestCloseCoordinatedCascadeFailureLeavesTheRootOpenAndResumes(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	member := causedMember("member-1", root.Name, "worker")
 	grandchild := causedMember("grandchild-1", member.Name, "helper")
 	sibling := causedMember("member-2", root.Name, "reviewer")
@@ -864,6 +867,7 @@ func TestCloseCoordinatedIgnoresAMissingTarget(t *testing.T) {
 // a hint, the field is the fact.
 func TestCloseCoordinatedCascadeSkipsClosedAndStaleLabelMembers(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	alreadyClosed := &agentopsv1alpha1.Conversation{}
 	alreadyClosed.Name, alreadyClosed.Namespace = "closed-member", testNS
 	alreadyClosed.Labels = map[string]string{agentopsv1alpha1.LabelCausedBy: root.Name}
@@ -889,6 +893,7 @@ func TestCloseCoordinatedCascadeSkipsClosedAndStaleLabelMembers(t *testing.T) {
 
 func TestCloseCoordinatedSelfIsANoOpWhenAlreadyClosed(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
+	caller.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	caller.Status.Phase = agentopsv1alpha1.ConversationClosed
 	caller.Status.CloseReason = "already done"
 	r, c := coordFixture(t, testCoordinator("co-a"), caller)
@@ -905,6 +910,7 @@ func TestCloseCoordinatedSelfIsANoOpWhenAlreadyClosed(t *testing.T) {
 
 func TestCloseCoordinatedEnqueuesAFarewellOnEveryBoundThread(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	root.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "chan-1"}}
 	root.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "chan-1", ThreadID: "t1"}}
 	r, _ := coordFixture(t, testCoordinator("co-a"), root, nsChannel("chan-1", "telegram"))
@@ -916,6 +922,7 @@ func TestCloseCoordinatedEnqueuesAFarewellOnEveryBoundThread(t *testing.T) {
 
 func TestCloseCoordinatedTruncatesALongReason(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
+	caller.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), caller)
 	long := strings.Repeat("x", agentopsv1alpha1.MaxCloseReason+50)
 

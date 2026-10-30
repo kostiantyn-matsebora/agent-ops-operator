@@ -76,7 +76,11 @@ func postSignal(t *testing.T, srv http.Handler, token, source string, signals []
 	req := httptest.NewRequest("POST", "/signal/inbound", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
+	before := signalNames()
 	srv.ServeHTTP(rec, req)
+	if rec.Code == 200 {
+		consumeNewSignals(before)
+	}
 	return rec
 }
 
@@ -106,8 +110,12 @@ func assertUnwiredSourceDropsSignal(t *testing.T, h http.Handler) {
 	rec0 := postSignal(t, h, testMasterToken, "sig-unwired", []map[string]any{{
 		"initiationId": "u-1", "labels": map[string]string{"alertname": "x"},
 	}})
-	if rec0.Code != 200 || !strings.Contains(rec0.Body.String(), "not served by any Ready pipeline") {
-		t.Fatalf("unwired drop reason expected: %d %s", rec0.Code, rec0.Body.String())
+	if rec0.Code != 200 {
+		t.Fatalf("an unwired signal is stored, then dropped by the consumer: %d %s", rec0.Code, rec0.Body.String())
+	}
+	sig := onlySignalFor(t, "u-1")
+	if sig.Status.Phase != agentopsv1alpha1.SignalDropped || sig.Status.Reason != agentopsv1alpha1.SignalDropUnclaimed {
+		t.Fatalf("unwired drop expected: %+v", sig.Status)
 	}
 }
 
@@ -167,8 +175,8 @@ func assertDuplicateInitiationIDAbsorbedByCooldown(t *testing.T, h http.Handler)
 	rec := postSignal(t, h, testMasterToken, "sig-src", []map[string]any{{
 		"initiationId": "tick-1", "labels": map[string]string{"alertname": "nightly"}, "kind": "job",
 	}})
-	if !strings.Contains(rec.Body.String(), `"queued":0`) {
-		t.Fatalf("cooldown not applied: %s", rec.Body.String())
+	if rec.Code != 200 || droppedForCooldown(t, "tick-1") != 1 {
+		t.Fatalf("the duplicate is stored, then dropped by cooldown: %s", rec.Body.String())
 	}
 }
 

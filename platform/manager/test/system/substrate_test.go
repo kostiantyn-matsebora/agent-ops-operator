@@ -99,6 +99,16 @@ func TestRBACAsEnforced(t *testing.T) {
 	deny("agentops-adapter-console", "create", "agentops.dev", "conversations")
 	deny("agentops-adapter-console", "get", "", "secrets")
 	deny("agentops-adapter-console", "delete", "", "pods")
+	// 6.2 (signal-persistence) — the console's Role gains get/list/watch on
+	// the new Signal kind and nothing more (design D-7): a read-only
+	// inventory view, never a write path, exactly like every other
+	// agentops kind the console reads.
+	for _, verb := range []string{"get", "list", "watch"} {
+		allow("agentops-adapter-console", verb, "agentops.dev", "signals")
+	}
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		deny("agentops-adapter-console", verb, "agentops.dev", "signals")
+	}
 }
 
 // 7.3 Informer liveness — THE INFORMER. Every reconciled kind is genuinely
@@ -109,7 +119,7 @@ func TestInformerLiveness(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
 	for _, kind := range []string{"agentprofiles", "agentruntimes", "channels", "channeladapters", "conversations",
-		"mcpconfigs", "mcptoolsets", "pipelines", "signaladapters", "signalsources"} {
+		"mcpconfigs", "mcptoolsets", "pipelines", "signaladapters", "signalsources", "signals"} {
 		for _, verb := range []string{"list", "watch"} {
 			ok, err := e.K.Can(ctx, "agentops-manager", verb, "agentops.dev", kind, Namespace)
 			if err != nil {

@@ -240,3 +240,21 @@ func TestFilterMatchesLevelOnly(t *testing.T) {
 		t.Fatal("WARNING should not match")
 	}
 }
+
+// TestNormalizeSignalIDRepeatsForTheSameRecord pins the immediate-path id: the
+// record's own timestamp, so a re-post of an unadvanced cursor repeats it and
+// a later record differs.
+func TestNormalizeSignalIDRepeatsForTheSameRecord(t *testing.T) {
+	rec := logRecord{Name: "homeassistant.components.hue", Message: []string{"boom"}, Level: "ERROR", Timestamp: 1700000000.5}
+	first := normalize("ha-logs", &rec)
+	if first.SignalID == "" || first.SignalID != first.InitiationID+"#1700000000" {
+		t.Fatalf("signalId = %q", first.SignalID)
+	}
+	if again := normalize("ha-logs", &rec); again.SignalID != first.SignalID {
+		t.Fatal("same record changed signalId")
+	}
+	rec.Timestamp = 1700000060
+	if later := normalize("ha-logs", &rec); later.SignalID == first.SignalID {
+		t.Fatal("a later record kept the signalId")
+	}
+}

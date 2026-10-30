@@ -553,19 +553,7 @@ func (r *Router) handleListPipelines(ctx context.Context, ch *agentopsv1alpha1.C
 // claim check, no Ready check — exactly as it was before a second kind
 // existed. Returns a nil Claimant, not an error, when neither exists.
 func (r *Router) resolveClaimant(ctx context.Context, name string) (Claimant, error) {
-	var pipe agentopsv1alpha1.Pipeline
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &pipe); err == nil {
-		return pipelineClaimant{&pipe}, nil
-	} else if !apierrors.IsNotFound(err) {
-		return nil, err
-	}
-	var co agentopsv1alpha1.Coordinator
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &co); err == nil {
-		return coordinatorClaimant{&co}, nil
-	} else if !apierrors.IsNotFound(err) {
-		return nil, err
-	}
-	return nil, nil
+	return ResolveClaimant(ctx, r.Reader, r.Namespace, name)
 }
 
 // HandleCommand answers chat input that addresses a pipeline. Called from the

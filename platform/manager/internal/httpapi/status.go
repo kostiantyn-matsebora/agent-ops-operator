@@ -36,6 +36,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/metrics"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
@@ -44,7 +45,7 @@ import (
 // LeaseName is the controller-runtime leader-election lease this manager holds
 // — the LeaderElectionID from cmd/manager. Reading its holder answers "which
 // replica is reconciling", a fact no CR of ours carries.
-const LeaseName = "agentops-manager.agentops.dev"
+const LeaseName = controller.LeaderLeaseName
 
 // statusResponse is the manager's own state. Deliberately carries no CR spec or
 // status: everything here is process memory or a count over pods.
@@ -122,9 +123,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		out.StorageOutage = o
 	}
-	for name, cd := range s.cooldowns {
-		n, window := cd.Stats()
-		out.Cooldowns = append(out.Cooldowns, cooldownStat{Source: name, Suppressed: n, WindowSecs: window.Seconds()})
+	for _, st := range s.Cooldowns.Stats() {
+		out.Cooldowns = append(out.Cooldowns, cooldownStat{Source: st.Source, Suppressed: st.Suppressed, WindowSecs: st.Window.Seconds()})
 	}
 	writeJSON(w, 200, out)
 }
@@ -290,9 +290,8 @@ func (s *Server) MetricsSample() metrics.Sample {
 	if slots, err := s.runtimeSlots(ctx); err == nil {
 		out.RuntimeSlotsInUse, out.RuntimeSlotsMax = slots.InUse, slots.Max
 	}
-	for name, cd := range s.cooldowns {
-		n, _ := cd.Stats()
-		out.CooldownsActive[name] = n
+	for _, st := range s.Cooldowns.Stats() {
+		out.CooldownsActive[st.Source] = st.Suppressed
 	}
 	// The install-level storage fact, straight from the breaker both edges
 	// feed. This is where the "why is nothing running" answer lives: a queue

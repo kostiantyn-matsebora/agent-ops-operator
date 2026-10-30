@@ -603,9 +603,15 @@ names what is not covered.
 | Key | Default | Consequence |
 |---|---|---|
 | `maxActiveConversations` | `5` | how many agents hold a pod at once. Over-cap work waits in `Pending` with no pod and no thread |
-| `maxQueuedConversations` | `50` | the backlog bound. Past it, new signals are declined and the sender is told |
+| `maxQueuedConversations` | `50` | the backlog bound; `0` queues nothing. Past it, a chat message is declined and the sender is told. A machine signal stays `Pending` and routes when the backlog drains |
 | `global.agentops.runtimeDefaults.idleTtlMinutes` | `1` | how long a finished agent keeps its pod. Raise it for expensive startup |
 | `replicas` | `2` | how many manager pods run. Safe above 1: an ensure-topic op is claimed on the Conversation CR by the current leader, never served from an in-memory queue a non-leader never populated |
+| `signalConsumerConcurrency` | `4` | how many consumers route stored signals at once on the leader. Messages of one `(source, initiationId)` still run one at a time, in arrival order |
+| `signalRetryDeadline` | `1h` | how long a claimant may sit `Routing` before the leader marks it `Failed`, measured from the signal's first attempt |
+| `maxSignalsPerSource` | `200` | the cap on non-terminal `Signal`s per source. Over it the leader evicts the oldest |
+| `signalTtlRouted` | `8h` | how long a `Routed` signal is kept, from `status.completedAt` |
+| `signalTtlDropped` | `4h` | the same for `Dropped` |
+| `signalTtlFailed` | `72h` | the same for `Failed` |
 | `claimStalenessSeconds` | `90` | how long a claimed-but-undelivered thread may sit before the leader treats it as abandoned and retries. Raise it for a slower transport |
 
 ### The agent's power

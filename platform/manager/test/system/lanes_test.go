@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -332,32 +333,43 @@ func TestTelegramLane(t *testing.T) {
 	}
 }
 
+// sourceWiredFalse reports whether the named SignalSource carries Wired=False.
+func sourceWiredFalse(ctx context.Context, e *Env, name string) (bool, error) {
+	var src struct {
+		Status struct {
+			Conditions []metav1.Condition `json:"conditions"`
+		}
+	}
+	out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "get", "signalsource", name, "-o", "json")
+	if err != nil {
+		return false, err
+	}
+	_ = json.Unmarshal([]byte(out), &src)
+	for _, c := range src.Status.Conditions {
+		if c.Type == "Wired" && c.Status == metav1.ConditionFalse {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // 10.6 An unclaimed source drops its signal with Wired=False, and a chat
 // source's reason reaches the surface the person typed on.
 func TestUnclaimedSourceDrops(t *testing.T) {
 	e := requireEnv(t)
 	ctx := context.Background()
-	res := e.PostTask(t, SourceUnclaimed, "e2e-unclaimed-"+fmt.Sprint(time.Now().UnixNano()), "echo nobody")
-	if fmt.Sprint(res["queued"]) != "0" || !strings.Contains(fmt.Sprint(res["reason"]), "Wired=False") {
-		t.Fatalf("an unclaimed source must drop with Wired=False: %v", res)
+	id := "e2e-unclaimed-" + fmt.Sprint(time.Now().UnixNano())
+	// Publication only stores: routing, and so the unwired decision, is the
+	// consumer's, recorded on the Signal.
+	res := e.PostTask(t, SourceUnclaimed, id, "echo nobody")
+	if fmt.Sprint(res["queued"]) != "1" {
+		t.Fatalf("an unclaimed source's signal must still be stored: %v", res)
+	}
+	if sig := waitSignalPhase(t, ctx, e, SourceUnclaimed, id, time.Minute, agentopsv1alpha1.SignalDropped); sig.Status.Reason != agentopsv1alpha1.SignalDropUnclaimed {
+		t.Fatalf("an unclaimed source must drop as %q, got %q", agentopsv1alpha1.SignalDropUnclaimed, sig.Status.Reason)
 	}
 	waitFor(t, "Wired=False on the source", time.Minute, func() (bool, error) {
-		var src struct {
-			Status struct {
-				Conditions []metav1.Condition `json:"conditions"`
-			}
-		}
-		out, err := e.Cluster.Kubectl(ctx, "-n", Namespace, "get", "signalsource", SourceUnclaimed, "-o", "json")
-		if err != nil {
-			return false, err
-		}
-		_ = json.Unmarshal([]byte(out), &src)
-		for _, c := range src.Status.Conditions {
-			if c.Type == "Wired" && c.Status == metav1.ConditionFalse {
-				return true, nil
-			}
-		}
-		return false, nil
+		return sourceWiredFalse(ctx, e, SourceUnclaimed)
 	})
 	// A chat source nobody claims: the reason goes back to the surface.
 	chat := source("e2e-unclaimed-chat", "e2e", nil)

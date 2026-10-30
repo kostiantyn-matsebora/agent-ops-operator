@@ -1087,6 +1087,9 @@ func (a *adapter) emitDrainExceeded(ctx context.Context, source, node string, st
 		// being collapsed by the manager's cooldown as a repeat of the
 		// first.
 		InitiationID: fmt.Sprintf("%s@/Node/%s/NodeDrainExceeded/%d", source, node, start.Unix()),
+		// One signal per node per drain, so the incident identity is also the
+		// message identity.
+		SignalID: fmt.Sprintf("%s/Node/%s/NodeDrainExceeded/%d", source, node, start.Unix()),
 		Labels: map[string]string{
 			"alertgroup": "k8s-events",
 			"alertname":  "NodeDrainExceeded",

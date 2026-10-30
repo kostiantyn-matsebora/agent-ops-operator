@@ -67,6 +67,12 @@ func judgeRootTurn(conv *agentopsv1alpha1.Conversation, status string, ev turnEv
 		conv.Status.Phase == agentopsv1alpha1.ConversationClosed || answeredAPerson(recorded) {
 		return turnEnded
 	}
+	// An escalated root is waiting on a person: the escalation WAS its move,
+	// and demanding another only invites the cheapest one — a close that
+	// archives the thread the person was asked to act in.
+	if conv.Status.EscalatedAt != nil {
+		return turnEnded
+	}
 	if consumedOnlyTheCorrectiveInput(recorded) {
 		return turnSecondMiss
 	}

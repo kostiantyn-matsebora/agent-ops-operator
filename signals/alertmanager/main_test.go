@@ -58,7 +58,7 @@ func (f *fakeManager) server(t *testing.T) *httptest.Server {
 		f.inbounds = append(f.inbounds, body)
 		n := len(body["signals"].([]any))
 		f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"queued": n, "conversations": 1})
+		_ = json.NewEncoder(w).Encode(map[string]any{"queued": n})
 	})
 	mux.HandleFunc("POST /signal/sources/{name}/status", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -194,7 +194,7 @@ func TestGroupLabelsFallbackIsStable(t *testing.T) {
 	signals := normalize(amPayload{
 		GroupLabels: map[string]string{"a": "1", "b": "2"},
 		Alerts:      []amAlert{{Status: "firing", Labels: map[string]string{"a": "1", "b": "2"}}},
-	})
+	}, "d")
 	if len(signals) != 1 || signals[0].InitiationID != a1 {
 		t.Fatalf("normalize fallback: %+v", signals)
 	}
@@ -207,7 +207,7 @@ func TestGroupKeyWinsOverFallback(t *testing.T) {
 		GroupKey:    "{}/{alertname=\"X\"}",
 		GroupLabels: map[string]string{"alertname": "X"},
 		Alerts:      []amAlert{{Status: "firing", Labels: map[string]string{"alertname": "X"}}},
-	})
+	}, "d")
 	if len(signals) != 1 || signals[0].InitiationID != `{}/{alertname="X"}` {
 		t.Fatalf("groupKey must win verbatim: %+v", signals)
 	}
@@ -560,5 +560,36 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("main() did not return after its context was cancelled")
+	}
+}
+
+// TestSignalIDStableAcrossRetryAndChangesWithBody pins that a re-delivered
+// (byte-identical) body repeats each alert's signalId, a changed body changes
+// it, and an alert without a fingerprint falls back to its index.
+func TestSignalIDStableAcrossRetryAndChangesWithBody(t *testing.T) {
+	payload := amPayload{GroupKey: "g", Alerts: []amAlert{
+		{Status: "firing", Fingerprint: "f1", Labels: map[string]string{"alertname": "X"}},
+		{Status: "firing", Labels: map[string]string{"alertname": "Y"}},
+	}}
+	d1 := bodyDigest([]byte(`{"a":1}`))
+	first := normalize(payload, d1)
+	retry := normalize(payload, bodyDigest([]byte(`{"a":1}`)))
+	changed := normalize(payload, bodyDigest([]byte(`{"a":2}`)))
+	if len(first) != 2 {
+		t.Fatalf("signals: %+v", first)
+	}
+	if first[0].SignalID != "am:"+d1+":f1" || first[1].SignalID != "am:"+d1+":1" {
+		t.Fatalf("formats: %q %q", first[0].SignalID, first[1].SignalID)
+	}
+	for i := range first {
+		if first[i].SignalID != retry[i].SignalID {
+			t.Fatalf("retry changed signalId: %q vs %q", first[i].SignalID, retry[i].SignalID)
+		}
+		if first[i].SignalID == changed[i].SignalID {
+			t.Fatalf("changed body kept signalId %q", first[i].SignalID)
+		}
+	}
+	if first[0].SignalID == first[1].SignalID {
+		t.Fatal("two alerts of one body share a signalId")
 	}
 }

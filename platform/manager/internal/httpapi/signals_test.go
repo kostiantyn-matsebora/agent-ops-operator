@@ -14,6 +14,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 )
 
@@ -21,16 +22,20 @@ import (
 const sigTestNamespace = "agent-ops"
 
 // sigServer builds a Server wired for /signal/inbound: a fake client seeded
-// with the given objects, indexed on spec.conversationId exactly as the real
-// manager's cache is (routeSignalGroup's equality routing depends on it).
+// with the given objects. Publication only creates Signals, so the Signal
+// status subresource is all it needs; the Router is the real one over the same
+// client, for the chat commands that answer in place.
 func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
-		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.Signal{}).
 		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, controller.ConversationIDIndexer).
 		WithObjects(objs...).Build()
+	acts := activity.New(64)
+	q := &chat.OpQueue{Client: c, Namespace: sigTestNamespace, Registry: chat.NewRegistry(), Activity: acts}
+	router := &chat.Router{Client: c, Reader: c, Namespace: sigTestNamespace, Ops: q, Activity: acts}
 	return &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
-		Activity: activity.New(64)}, c
+		Ops: q, Router: router, Activity: acts}, c
 }
 
 // sigTestSource is a minimal SignalSource fixture.
@@ -114,12 +119,12 @@ func TestSignalInboundOneBadSeverityRefusesWholeBatch(t *testing.T) {
 		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 0 {
-		t.Fatalf("one bad signal must refuse the WHOLE batch — want 0 conversations, got %d", len(convs.Items))
+		t.Fatalf("one bad signal must refuse the WHOLE batch — want 0 Signals, got %d", len(convs.Items))
 	}
 	var inputs agentopsv1alpha1.ConversationInputList
 	if err := c.List(context.Background(), &inputs, client.InNamespace(sigTestNamespace)); err != nil {
@@ -136,8 +141,7 @@ func TestSignalInboundOneBadSeverityRefusesWholeBatch(t *testing.T) {
 // Severity.
 func TestSignalInboundAbsentSeverityBehavesAsToday(t *testing.T) {
 	source := sigTestSource("sev-absent-src", "sev-absent-t")
-	pipeline := sigTestPipeline("sev-absent-pipe", source.Name)
-	s, c := sigServer(t, source, pipeline)
+	s, c := sigServer(t, source)
 
 	rec := postSig(s, source.Name, []map[string]any{
 		{"initiationId": "sev-absent-1", "payload": "hello"},
@@ -145,143 +149,48 @@ func TestSignalInboundAbsentSeverityBehavesAsToday(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
+	sigs := listSignals(t, c)
+	if len(sigs) != 1 {
+		t.Fatalf("want 1 Signal, got %d", len(sigs))
 	}
-	if len(convs.Items) != 1 {
-		t.Fatalf("want 1 conversation, got %d", len(convs.Items))
-	}
-	conv := convs.Items[0]
-	if conv.Spec.Signal == nil || conv.Spec.Signal.Severity != "" {
-		t.Fatalf("absent severity must leave provenance.severity omitted, got %+v", conv.Spec.Signal)
-	}
-	if len(conv.Spec.Inputs) != 1 || conv.Spec.Inputs[0].PayloadRef == nil {
-		t.Fatalf("opening input missing: %+v", conv.Spec.Inputs)
-	}
-	var ci agentopsv1alpha1.ConversationInput
-	if err := c.Get(context.Background(), types.NamespacedName{
-		Namespace: sigTestNamespace, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
-		t.Fatal(err)
-	}
-	if ci.Spec.Severity != "" {
-		t.Fatalf("absent severity must leave the input's severity omitted, got %q", ci.Spec.Severity)
+	if sigs[0].Spec.Severity != "" {
+		t.Fatalf("absent severity must leave the Signal's severity omitted, got %q", sigs[0].Spec.Severity)
 	}
 }
 
-// signal-severity: "Each vocabulary value is accepted", threaded onto
-// SignalProvenance and the opening ConversationInputSpec exactly where
-// Labels already lands.
-// signal-severity: "Each vocabulary value is accepted" — all four, not just
-// the one this test used to exercise (critical). info was previously only
-// ever named in a 400 rejection's body, never posted and stored as a valid
-// value in its own right.
-func TestSignalInboundValidSeverityThreadsOntoProvenanceAndInput(t *testing.T) {
+// signal-severity: "Each vocabulary value is accepted" — all four, stored on
+// the Signal verbatim. The consumer threads it onto the conversation's
+// provenance and the input (internal/signalroute's tests).
+func TestSignalInboundValidSeverityIsStoredOnTheSignal(t *testing.T) {
 	for _, sev := range []agentopsv1alpha1.Severity{
 		agentopsv1alpha1.SeverityCritical, agentopsv1alpha1.SeverityError,
 		agentopsv1alpha1.SeverityWarning, agentopsv1alpha1.SeverityInfo,
 	} {
-		t.Run(string(sev), func(t *testing.T) { assertValidSeverityThreads(t, sev) })
+		t.Run(string(sev), func(t *testing.T) {
+			source := sigTestSource("sev-valid-src-"+string(sev), "sev-valid-t")
+			s, c := sigServer(t, source)
+			rec := postSig(s, source.Name, []map[string]any{
+				{"initiationId": "sev-valid-1", "payload": "hello", "severity": string(sev)},
+			})
+			if rec.Code != 200 {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			sigs := listSignals(t, c)
+			if len(sigs) != 1 || sigs[0].Spec.Severity != sev {
+				t.Fatalf("severity %q not stored on the Signal: %+v", sev, sigs)
+			}
+		})
 	}
 }
 
-func assertValidSeverityThreads(t *testing.T, sev agentopsv1alpha1.Severity) {
+// listSignals returns every Signal in the test namespace.
+func listSignals(t *testing.T, c client.Client) []agentopsv1alpha1.Signal {
 	t.Helper()
-	source := sigTestSource("sev-valid-src-"+string(sev), "sev-valid-t")
-	pipeline := sigTestPipeline("sev-valid-pipe-"+string(sev), source.Name)
-	s, c := sigServer(t, source, pipeline)
-
-	rec := postSig(s, source.Name, []map[string]any{
-		{"initiationId": "sev-valid-1", "payload": "hello", "severity": string(sev)},
-	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
+	var list agentopsv1alpha1.SignalList
+	if err := c.List(context.Background(), &list, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
-	if len(convs.Items) != 1 {
-		t.Fatalf("want 1 conversation, got %d", len(convs.Items))
-	}
-	conv := convs.Items[0]
-	if conv.Spec.Signal == nil || conv.Spec.Signal.Severity != sev {
-		t.Fatalf("provenance severity wrong: %+v", conv.Spec.Signal)
-	}
-	var ci agentopsv1alpha1.ConversationInput
-	if err := c.Get(context.Background(), types.NamespacedName{
-		Namespace: sigTestNamespace, Name: conv.Spec.Inputs[0].PayloadRef.Name}, &ci); err != nil {
-		t.Fatal(err)
-	}
-	if ci.Spec.Severity != sev {
-		t.Fatalf("input severity wrong: %q", ci.Spec.Severity)
-	}
-}
-
-// signal-severity: "Provenance keeps the opening severity" / "A recurrence
-// records its own severity" — a conversation opened by a `warning` signal
-// keeps `warning` on its provenance after a later `error` recurrence lands,
-// while the NEW input records `error`.
-func TestSignalInboundRecurrenceNeverRewritesProvenanceSeverity(t *testing.T) {
-	source := sigTestSource("sev-recur-src", "sev-recur-t")
-	pipeline := sigTestPipeline("sev-recur-pipe", source.Name)
-	s, c := sigServer(t, source, pipeline)
-
-	rec := postSig(s, source.Name, []map[string]any{
-		{"initiationId": "sev-recur-1", "payload": "first", "severity": "warning"},
-	})
-	if rec.Code != 200 {
-		t.Fatalf("opening signal: %d %s", rec.Code, rec.Body.String())
-	}
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
-	}
-	if len(convs.Items) != 1 {
-		t.Fatalf("want 1 conversation, got %d", len(convs.Items))
-	}
-	conv := &convs.Items[0]
-
-	// A session must exist for the SAME initiationId to land as a recurrence
-	// rather than reopen the conversation, exactly as
-	// assertRecurrenceIntoSameConversation does in internal/integration.
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.SessionID = "sess-sev-recur"
-	if err := c.Status().Patch(context.Background(), conv, patch); err != nil {
-		t.Fatal(err)
-	}
-
-	// Cooldown is in-process (s.cooldowns), so a second Server stands in for
-	// "outside the source's cooldown window" without waiting one out — same
-	// device TestOpenConversationWithMatchingConversationIDGetsRecurrence
-	// uses.
-	s2 := &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: s.AdapterToken}
-	rec = postSig(s2, source.Name, []map[string]any{
-		{"initiationId": "sev-recur-1", "payload": "second", "severity": "error"},
-	})
-	if rec.Code != 200 {
-		t.Fatalf("recurrence signal: %d %s", rec.Code, rec.Body.String())
-	}
-
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: sigTestNamespace, Name: conv.Name}, conv); err != nil {
-		t.Fatal(err)
-	}
-	if conv.Spec.Signal == nil || conv.Spec.Signal.Severity != agentopsv1alpha1.SeverityWarning {
-		t.Fatalf("provenance must keep the OPENING severity (warning), got %+v", conv.Spec.Signal)
-	}
-	if len(conv.Spec.Inputs) != 2 || conv.Spec.Inputs[1].Type != agentopsv1alpha1.InputRecurrence {
-		t.Fatalf("recurrence input expected: %+v", conv.Spec.Inputs)
-	}
-	var recurCI agentopsv1alpha1.ConversationInput
-	if err := c.Get(context.Background(), types.NamespacedName{
-		Namespace: sigTestNamespace, Name: conv.Spec.Inputs[1].PayloadRef.Name}, &recurCI); err != nil {
-		t.Fatal(err)
-	}
-	if recurCI.Spec.Severity != agentopsv1alpha1.SeverityError {
-		t.Fatalf("the recurrence's OWN input must record its own severity (error), got %q", recurCI.Spec.Severity)
-	}
+	return list.Items
 }
 
 // signalsource-attribute-filter: "A signal matching every requirement routes
@@ -301,12 +210,12 @@ func TestSignalInboundAttributeFilterAdmitsMatchingSignal(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 1 {
-		t.Fatalf("a matching signal must route normally — want 1 conversation, got %d", len(convs.Items))
+		t.Fatalf("a matching signal must route normally — want 1 Signal, got %d", len(convs.Items))
 	}
 }
 
@@ -335,12 +244,12 @@ func TestSignalInboundAttributeFilterDropsFailingSignalBeforeCooldown(t *testing
 		t.Fatalf("reason = %v, want %q", resp["reason"], ReasonFiltered)
 	}
 
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 0 {
-		t.Fatalf("a filtered signal must never reach a serving pipeline — want 0 conversations, got %d", len(convs.Items))
+		t.Fatalf("a filtered signal must never reach a serving pipeline — want 0 Signals, got %d", len(convs.Items))
 	}
 
 	var refreshed agentopsv1alpha1.SignalSource
@@ -391,12 +300,12 @@ func TestSignalInboundNilOrEmptyAttributeFiltersAdmitsEverything(t *testing.T) {
 			if rec.Code != 200 {
 				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 			}
-			var convs agentopsv1alpha1.ConversationList
+			var convs agentopsv1alpha1.SignalList
 			if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 				t.Fatal(err)
 			}
 			if len(convs.Items) != 1 {
-				t.Fatalf("%s filters must admit every signal — want 1 conversation, got %d", tc.name, len(convs.Items))
+				t.Fatalf("%s filters must admit every signal — want 1 Signal, got %d", tc.name, len(convs.Items))
 			}
 		})
 	}
@@ -420,12 +329,12 @@ func TestSignalInboundAttributeFilterFailsClosedOnMalformedRequirement(t *testin
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 0 {
-		t.Fatalf("a malformed requirement must fail closed — want 0 conversations, got %d", len(convs.Items))
+		t.Fatalf("a malformed requirement must fail closed — want 0 Signals, got %d", len(convs.Items))
 	}
 }
 
@@ -456,12 +365,12 @@ func TestSignalInboundAttributeFilterReasonSetOnPartialBatchUnsetOnFullAdmit(t *
 	if resp["reason"] != ReasonFiltered {
 		t.Fatalf("a partially-filtered batch must report reason=%q, got %v", ReasonFiltered, resp["reason"])
 	}
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 1 {
-		t.Fatalf("the admitted remainder must still route — want 1 conversation, got %d", len(convs.Items))
+		t.Fatalf("the admitted remainder must still route — want 1 Signal, got %d", len(convs.Items))
 	}
 
 	// A fully-admitted batch on a DIFFERENT source — same filter, nothing
@@ -503,12 +412,12 @@ func TestSignalInboundLogFilteredFalseSuppressesFilteredDropEvent(t *testing.T) 
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 0 {
-		t.Fatalf("the signal must still be dropped — want 0 conversations, got %d", len(convs.Items))
+		t.Fatalf("the signal must still be dropped — want 0 Signals, got %d", len(convs.Items))
 	}
 
 	events, _ := s.Activity.Since("", 0)
@@ -520,36 +429,31 @@ func TestSignalInboundLogFilteredFalseSuppressesFilteredDropEvent(t *testing.T) 
 }
 
 // signalsource-attribute-filter: "Other drop reasons still log regardless of
-// logFiltered" — an unclaimed source with logFiltered:false still records
-// its CodeUnclaimed drop, since that field gates only CodeFiltered.
+// logFiltered" — logFiltered:false gates only CodeFiltered, so the duplicate
+// record of a re-sent message is still emitted.
 func TestSignalInboundLogFilteredFalseDoesNotSuppressOtherDropCodes(t *testing.T) {
-	source := sigTestSource("attrfilter-unclaimed-src", "attrfilter-t")
+	source := sigTestSource("attrfilter-dup-src", "attrfilter-t")
 	source.Spec.LogFiltered = falsePtr()
-	s, c := sigServer(t, source) // no Pipeline claims it: Wired=False
+	s, _ := sigServer(t, source)
 
-	rec := postSig(s, source.Name, []map[string]any{
-		{"initiationId": "attrfilter-unclaimed-1", "payload": "hello"},
-	})
-	if rec.Code != 200 {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	var convs agentopsv1alpha1.ConversationList
-	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
-		t.Fatal(err)
-	}
-	if len(convs.Items) != 0 {
-		t.Fatalf("want 0 conversations, got %d", len(convs.Items))
+	for i := 0; i < 2; i++ {
+		rec := postSig(s, source.Name, []map[string]any{
+			{"initiationId": "attrfilter-dup-1", "signalId": "m-1", "payload": "hello"},
+		})
+		if rec.Code != 200 {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
 	}
 
 	events, _ := s.Activity.Since("", 0)
 	found := false
 	for _, e := range events {
-		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeUnclaimed {
+		if e.Kind == activity.KindSignalDropped && e.Code == activity.CodeDuplicate {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("logFiltered must not suppress an unclaimed-source drop")
+		t.Fatal("logFiltered must not suppress the duplicate event")
 	}
 }
 
@@ -622,16 +526,16 @@ func checkAttributeFilterOperator(t *testing.T, name string, requirement agentop
 		t.Fatalf("operator %s: reason = %v, want %q", name, resp["reason"], ReasonFiltered)
 	}
 
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 1 {
-		t.Fatalf("operator %s: want exactly 1 admitted conversation, got %d", name, len(convs.Items))
+		t.Fatalf("operator %s: want exactly 1 admitted Signal, got %d", name, len(convs.Items))
 	}
-	if convs.Items[0].Spec.ConversationID != "op-admit-1" {
+	if convs.Items[0].Spec.InitiationID != "op-admit-1" {
 		t.Fatalf("operator %s: the routed conversation must be the ADMITTED signal, got conversationId %q",
-			name, convs.Items[0].Spec.ConversationID)
+			name, convs.Items[0].Spec.InitiationID)
 	}
 }
 
@@ -659,16 +563,16 @@ func TestSignalInboundAttributeFilterMultipleRequirementsRequiresAll(t *testing.
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 1 {
-		t.Fatalf("a signal failing only the SECOND requirement must still be dropped — want 1 conversation, got %d", len(convs.Items))
+		t.Fatalf("a signal failing only the SECOND requirement must still be dropped — want 1 Signal, got %d", len(convs.Items))
 	}
-	if convs.Items[0].Spec.ConversationID != "and-both-1" {
+	if convs.Items[0].Spec.InitiationID != "and-both-1" {
 		t.Fatalf("the routed conversation must be the one satisfying BOTH requirements, got conversationId %q",
-			convs.Items[0].Spec.ConversationID)
+			convs.Items[0].Spec.InitiationID)
 	}
 }
 
@@ -707,12 +611,12 @@ func TestSignalInboundAttributeFilterDropsChatKindSignal(t *testing.T) {
 		t.Fatalf("a filtered chat signal must report reason=%q, got %v", ReasonFiltered, resp["reason"])
 	}
 
-	var convs agentopsv1alpha1.ConversationList
+	var convs agentopsv1alpha1.SignalList
 	if err := c.List(context.Background(), &convs, client.InNamespace(sigTestNamespace)); err != nil {
 		t.Fatal(err)
 	}
 	if len(convs.Items) != 0 {
-		t.Fatalf("a filtered chat signal must never open a conversation — want 0, got %d", len(convs.Items))
+		t.Fatalf("a filtered chat signal must never open a Signal — want 0, got %d", len(convs.Items))
 	}
 
 	var refreshed agentopsv1alpha1.SignalSource

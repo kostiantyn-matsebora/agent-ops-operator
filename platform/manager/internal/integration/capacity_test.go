@@ -253,11 +253,15 @@ func TestPodDeletionWakesOldestPending(t *testing.T) {
 	}
 }
 
-// TestBacklogBoundRefusesCreation: an unbounded Pending queue would reproduce
-// the original complaint one level down. Equality routing is NOT gated by it —
-// the bound stops new objects, not new inputs (conversation-capacity:
-// "Grouping still reuses a pending conversation").
-func TestBacklogBoundRefusesCreation(t *testing.T) {
+// TestBacklogBoundLeavesAMachineSignalWaiting: an unbounded Pending queue
+// would reproduce the original complaint one level down, but a machine
+// signal (alert/job/task) hitting the bound no longer drops — it waits as a
+// Pending Signal CR instead (signal-persistence, conversation-capacity's
+// MODIFIED "the pending backlog is bounded": "never dropped for capacity
+// alone"). Equality routing is NOT gated by the bound at all — it stops new
+// objects, not new inputs (conversation-capacity: "Grouping still reuses a
+// pending conversation").
+func TestBacklogBoundLeavesAMachineSignalWaiting(t *testing.T) {
 	clearRuntimePods(t)
 	mkProfile(t, "prof-backlog")
 	mkSignalSource(t, "src-backlog", "sig-backlog", "")
@@ -282,24 +286,31 @@ func TestBacklogBoundRefusesCreation(t *testing.T) {
 	// bound and not about what earlier tests happened to leave behind
 	srv.MaxQueuedConversations = pendingCount(t)
 
-	// backlog is full: a signal with a NEW initiationId is refused with a reason
+	// backlog is full: a NEW machine-kind initiationId creates no conversation,
+	// but it is NOT dropped either — it waits, silently as far as the response
+	// goes (no reason — that vocabulary is now reserved for an actual drop).
 	rec := postSignal(t, srv.Handler(), testMasterToken, "src-backlog", []map[string]any{{
 		"initiationId": "fp-b2", "labels": map[string]string{"alertname": "Two"}, "payload": "two",
 	}})
 	if rec.Code != 200 {
 		t.Fatalf("second signal: %d %s", rec.Code, rec.Body.String())
 	}
-	var out struct {
-		Queued        int    `json:"queued"`
-		Conversations int    `json:"conversations"`
-		Reason        string `json:"reason"`
-	}
+	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if out.Reason == "" || out.Conversations != 0 || out.Queued != 0 {
-		t.Fatalf("full backlog must report a drop reason: %s", rec.Body.String())
+	if _, has := out["reason"]; has || out["queued"] != float64(1) {
+		t.Fatalf("publication only acknowledges the store: %s", rec.Body.String())
 	}
 	if n := convCountFor(t, "prof-backlog"); n != 1 {
-		t.Fatalf("a refused signal created a conversation: %d exist", n)
+		t.Fatalf("a waiting signal created a conversation: %d exist", n)
+	}
+	// its Signal CR stays Pending, with its one claimant still Routing — the
+	// bound never produced a Failed or Dropped claimant.
+	sig := onlySignalFor(t, "fp-b2")
+	if sig.Status.Phase != agentopsv1alpha1.SignalPending {
+		t.Fatalf("a backlog-blocked machine signal must stay Pending, got %q", sig.Status.Phase)
+	}
+	if len(sig.Status.Claimants) != 1 || sig.Status.Claimants[0].State != agentopsv1alpha1.ClaimantRouting {
+		t.Fatalf("its one claimant must stay Routing, got %+v", sig.Status.Claimants)
 	}
 
 	// but a repeat of "fp-b1" — the SAME initiationId the pending conversation
@@ -515,6 +526,26 @@ func pendingCount(t *testing.T) int {
 		}
 	}
 	return n
+}
+
+// onlySignalFor returns the single Signal CR carrying the given
+// initiationId, failing the test if there is not exactly one.
+func onlySignalFor(t *testing.T, initiationID string) agentopsv1alpha1.Signal {
+	t.Helper()
+	var list agentopsv1alpha1.SignalList
+	if err := k8sClient.List(context.Background(), &list, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	var matches []agentopsv1alpha1.Signal
+	for i := range list.Items {
+		if list.Items[i].Spec.InitiationID == initiationID {
+			matches = append(matches, list.Items[i])
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("want exactly one Signal for initiationId %q, got %d", initiationID, len(matches))
+	}
+	return matches[0]
 }
 
 func convCountFor(t *testing.T, profile string) int {

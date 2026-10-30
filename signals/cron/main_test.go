@@ -518,6 +518,9 @@ func TestEvaluateFiresElapsedTickThenPersistsCursor(t *testing.T) {
 		sig.Payload != "payload" || sig.Title != "title" {
 		t.Fatalf("unexpected signal: %+v", sig)
 	}
+	if sig.SignalID != "cron:s:2026-08-06T06:00:00Z" {
+		t.Fatalf("signalId = %q, want cron:s:<tick RFC3339 UTC>", sig.SignalID)
+	}
 	if sig.Labels["alertgroup"] != "cron" || sig.Labels["alertname"] != "s" || sig.Labels["source"] != "s" {
 		t.Fatalf("unexpected labels: %+v", sig.Labels)
 	}
@@ -556,6 +559,9 @@ func TestEvaluateAllTicksShareOneInitiationID(t *testing.T) {
 	}
 	if es.inbound[0].InitiationID != "s" || es.inbound[1].InitiationID != "s" {
 		t.Fatalf("every tick of one job must share the job's initiationId: %+v", es.inbound)
+	}
+	if es.inbound[0].SignalID == "" || es.inbound[0].SignalID == es.inbound[1].SignalID {
+		t.Fatalf("each tick is its own message: %q vs %q", es.inbound[0].SignalID, es.inbound[1].SignalID)
 	}
 }
 
@@ -741,5 +747,26 @@ func TestMainRunsUntilSignaled(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("main() did not return after its context was cancelled")
+	}
+}
+
+// TestEvaluateRefireOfTheSameTickRepeatsSignalID pins the crash window between
+// the post and the cursor write: the same tick re-fires under the same id.
+func TestEvaluateRefireOfTheSameTickRepeatsSignalID(t *testing.T) {
+	es := &evalServer{getStateVal: "2026-08-05T06:00:00Z"}
+	srv := newEvalServer(t, es)
+	defer srv.Close()
+
+	a := &adapter{mgr: NewManager(srv.URL, "t"), sources: map[string]servedSource{"s": dailySource(t)}}
+	now := at("2026-08-06T12:00:00Z")
+	for i := 0; i < 2; i++ { // cursor never advanced: getStateVal is unchanged
+		if err := a.evaluate(context.Background(), "s", now); err != nil {
+			t.Fatalf("evaluate: %v", err)
+		}
+	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	if len(es.inbound) != 2 || es.inbound[0].SignalID != es.inbound[1].SignalID {
+		t.Fatalf("a re-fired tick must repeat its signalId: %+v", es.inbound)
 	}
 }

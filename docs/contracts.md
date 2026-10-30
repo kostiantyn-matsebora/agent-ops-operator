@@ -591,3 +591,17 @@ curl -s -X POST http://agentops-manager.<ns>.svc:8080/signal/inbound \
   -d '{"source":"<source>","signals":[{"initiationId":"ci-'"$BUILD_ID"'",
        "kind":"task","payload":"why is the api pod crashlooping?"}]}'
 ```
+
+**The manager publishes, then consumes.** Every admitted signal becomes its
+own `Signal` CR before the response is written, and the response
+(`{"queued": n}`) acknowledges that storage, never routing. A separate
+consumer on the leader then decides the claimants, cooldown and capacity and
+routes it.
+
+A `5xx` means nothing of the failing signal was stored: re-send with the
+same ids. An optional per-message `signalId` deduplicates the re-send.
+
+The `conversations` field is withdrawn, and every routing outcome lives on
+the `Signal`. See [Concepts](concepts.md#signal) for the kind and
+[the adapter specification](contracts/signal-adapter.md), version 2.3.0, for
+the contract.

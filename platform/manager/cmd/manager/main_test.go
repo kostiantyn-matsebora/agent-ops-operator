@@ -40,6 +40,26 @@ func TestEnvIntRejectsUnparseableAndNonPositive(t *testing.T) {
 	}
 }
 
+func TestEnvIntNonNegativeKeepsZero(t *testing.T) {
+	for _, tc := range []struct {
+		name, val string
+		want      int
+	}{
+		{"unset", "", 7},
+		{"not a number", "nope", 7},
+		{"zero", "0", 0},
+		{"negative", "-1", 7},
+		{"positive", "3", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AGENTOPS_TEST_ENVINT", tc.val)
+			if got := envIntNonNegative("AGENTOPS_TEST_ENVINT", 7); got != tc.want {
+				t.Fatalf("envIntNonNegative(%q) = %d, want %d", tc.val, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnvBoolOnlyRecognisesExplicitTrueSpellings(t *testing.T) {
 	for _, tc := range []struct{ val string }{{"true"}, {"1"}, {"yes"}, {"on"}, {"TRUE"}, {" on "}} {
 		t.Setenv("AGENTOPS_TEST_ENVBOOL", tc.val)
@@ -154,5 +174,42 @@ func TestTheRetiredBootstrapSpellingIsNotRead(t *testing.T) {
 	t.Setenv("CONTEXT_PVC", "agentops-context")
 	if got := bootstrapContextClaim(); got != "agentops-context" {
 		t.Fatalf("CONTEXT_PVC = %q, want the claim it names", got)
+	}
+}
+
+// signal-persistence: "A bad duration falls back loudly" — an unparseable or
+// non-positive SIGNAL_TTL_ROUTED yields the default AND a warning that names
+// the variable. An unset one is the default without a warning.
+func TestEnvDurationOrWarnsNamingTheVariableOnABadValue(t *testing.T) {
+	var warned []string
+	prev := warn
+	warn = func(msg string, kv ...any) {
+		for i := 0; i+1 < len(kv); i += 2 {
+			if kv[i] == "variable" {
+				warned = append(warned, kv[i+1].(string))
+			}
+		}
+	}
+	t.Cleanup(func() { warn = prev })
+
+	for _, bad := range []string{"soon", "-1h", "0s"} {
+		t.Setenv("SIGNAL_TTL_ROUTED", bad)
+		if got := envDurationOr("SIGNAL_TTL_ROUTED", 8*time.Hour); got != 8*time.Hour {
+			t.Fatalf("%q: want the 8h default, got %v", bad, got)
+		}
+	}
+	if len(warned) != 3 || warned[0] != "SIGNAL_TTL_ROUTED" {
+		t.Fatalf("each bad value warns, naming the variable: %v", warned)
+	}
+
+	warned = nil
+	t.Setenv("SIGNAL_TTL_ROUTED", "")
+	envDurationOr("SIGNAL_TTL_ROUTED", 8*time.Hour)
+	t.Setenv("SIGNAL_TTL_ROUTED", "6h")
+	if got := envDurationOr("SIGNAL_TTL_ROUTED", 8*time.Hour); got != 6*time.Hour {
+		t.Fatalf("override: %v", got)
+	}
+	if len(warned) != 0 {
+		t.Fatalf("unset and valid values must not warn: %v", warned)
 	}
 }

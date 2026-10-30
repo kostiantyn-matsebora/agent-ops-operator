@@ -48,6 +48,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -57,6 +58,7 @@ import (
 // amAlert is one entry of the standard Alertmanager webhook payload.
 type amAlert struct {
 	Status       string            `json:"status"`
+	Fingerprint  string            `json:"fingerprint"`
 	StartsAt     string            `json:"startsAt"`
 	Labels       map[string]string `json:"labels"`
 	Annotations  map[string]string `json:"annotations"`
@@ -341,7 +343,7 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signals := normalize(payload)
+	signals := normalize(payload, bodyDigest(body))
 	if len(signals) == 0 {
 		writeJSON(w, 200, map[string]any{"queued": 0, "reason": "no firing alerts"})
 		return
@@ -363,13 +365,17 @@ func (a *adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // parity. Every signal of this webhook body shares one initiationId — the
 // group's own correlation id, resolved once per payload, never per alert.
 // No dedup/cooldown here — the manager owns that, keyed on that id.
-func normalize(payload amPayload) []Signal {
+//
+// digest is the hash of the raw request body; Alertmanager re-delivers a
+// failed notification byte-identical, so it makes each alert's signalId stable
+// across the retry and different for any changed body.
+func normalize(payload amPayload, digest string) []Signal {
 	initiationID := payload.GroupKey
 	if initiationID == "" {
 		initiationID = groupLabelsFallbackID(payload.GroupLabels)
 	}
 	var signals []Signal
-	for _, alert := range payload.Alerts {
+	for i, alert := range payload.Alerts {
 		if alert.Status != "firing" {
 			continue
 		}
@@ -384,12 +390,28 @@ func normalize(payload amPayload) []Signal {
 		payloadJSON, _ := json.MarshalIndent(payloadDoc, "", "  ")
 		signals = append(signals, Signal{
 			InitiationID: initiationID,
+			SignalID:     signalID(digest, alert.Fingerprint, i),
 			Labels:       alert.Labels,
 			Title:        title,
 			Payload:      string(payloadJSON),
 		})
 	}
 	return signals
+}
+
+// bodyDigest returns the hex SHA-256 of a raw webhook body.
+func bodyDigest(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+// signalID is am:<body digest>:<alert fingerprint, or its index when the
+// sender omits one>.
+func signalID(digest, fingerprint string, index int) string {
+	if fingerprint == "" {
+		fingerprint = strconv.Itoa(index)
+	}
+	return "am:" + digest + ":" + fingerprint
 }
 
 // groupLabelsFallbackID derives a deterministic id from sorted groupLabels

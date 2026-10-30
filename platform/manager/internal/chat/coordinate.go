@@ -62,7 +62,7 @@ var (
 	// named reason rather than the generic ErrOutOfScope, per
 	// aops-mcp-server's "a refusal SHALL reach the caller as an error
 	// naming the bound that refused it."
-	ErrCannotCloseHumanRoot = fmt.Errorf("out of scope: a sibling root a person started is never closed by the widened reach")
+	ErrCannotCloseHumanRoot = fmt.Errorf("out of scope: a conversation a person started is closed only by that person, never by the Coordinator")
 	// ErrNoCoordinatorScope refuses the Coordinator-owner reach class
 	// (list_open_roots, the widened close — coordinator-owner-reach) for a
 	// caller that resolves to no Coordinator at all by ResolveActingCoordinator:
@@ -401,16 +401,7 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 	var out []OpenRoot
 	for i := range list.Items {
 		c := &list.Items[i]
-		if c.Spec.CausedBy != nil {
-			continue // a member — never an uncaused root, whatever it carries
-		}
-		if c.Spec.CoordinatorRef == nil || c.Spec.CoordinatorRef.Name != scope.Name {
-			continue // not this Coordinator's own root
-		}
-		if c.Name == scope.RootName {
-			continue // the caller's own root
-		}
-		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		if !isOpenSiblingRoot(c, scope) {
 			continue
 		}
 		members, err := r.directMemberEntries(ctx, c.Name)
@@ -425,6 +416,21 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 		})
 	}
 	return out, nil
+}
+
+// isOpenSiblingRoot reports whether c is an open, uncaused root of the
+// acting Coordinator other than the caller's own.
+func isOpenSiblingRoot(c *agentopsv1alpha1.Conversation, scope ActingCoordinator) bool {
+	if c.Spec.CausedBy != nil {
+		return false // a member — never an uncaused root, whatever it carries
+	}
+	if c.Spec.CoordinatorRef == nil || c.Spec.CoordinatorRef.Name != scope.Name {
+		return false // not this Coordinator's own root
+	}
+	if c.Name == scope.RootName {
+		return false // the caller's own root
+	}
+	return c.Status.Phase != agentopsv1alpha1.ConversationClosed
 }
 
 // directMemberEntries lists the agents[] entry names of rootName's own DIRECT
@@ -523,7 +529,7 @@ func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, 
 
 // createMember opens a new member conversation for one `agents[]` entry,
 // resolving its capability whether the entry names an AgentCapability or nests
-// another Coordinator — mirroring httpapi.createConversationForGroup's
+// another Coordinator — mirroring internal/signalroute's own createConversation
 // wiring-snapshot shape, with CausedBy in place of Signal/PipelineRef and no
 // channels bound (coordination-loop: "a caused conversation binds no
 // channel").
@@ -703,6 +709,12 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 		return fmt.Errorf("a coordinator's close requires a reason")
 	}
 	if targetName == caller.Name {
+		// A person's own uncaused root is closed by that person (/close), a
+		// cascade from it, or an operator — never by the Coordinator's own
+		// verb, however finished it thinks the answer is.
+		if caller.Spec.CausedBy == nil && isHumanInitiated(caller) {
+			return ErrCannotCloseHumanRoot
+		}
 		return r.closeWithCascade(ctx, caller, reason)
 	}
 	var target agentopsv1alpha1.Conversation

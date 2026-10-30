@@ -259,7 +259,7 @@ func TestAddressedCoordinatorBindsItsOwnChannelsPlusTheOriginSurface(t *testing.
 	if conv.Status.Budget == nil || conv.Status.Budget.MaxAgents != 2 {
 		t.Fatalf("an addressed root still snapshots the Coordinator's limits: %+v", conv.Status.Budget)
 	}
-	if len(conv.Spec.Inputs) != 1 || conv.Spec.Inputs[0].Payload != "investigate api latency" {
+	if len(conv.Spec.Inputs) != 1 || inputText(t, conv.Spec.Inputs[0]) != "investigate api latency" {
 		t.Fatalf("the task text must be the first input: %+v", conv.Spec.Inputs)
 	}
 }

@@ -1,0 +1,275 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: signals.agentops.dev
+spec:
+  group: agentops.dev
+  names:
+    kind: Signal
+    listKind: SignalList
+    plural: signals
+    shortNames:
+    - sig
+    singular: signal
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.sourceRef.name
+      name: Source
+      type: string
+    - jsonPath: .spec.initiationId
+      name: InitiationID
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.attempts
+      name: Attempts
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Signal is the durable message of one admitted signal: published by
+          /signal/inbound, consumed (routed) by the leader's consumer pool, bounded by
+          the leader's housekeeping. Owned by the SignalSource named in
+          spec.sourceRef — set as this object's OwnerReference at creation — so a
+          deleted source takes its signals from any phase.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SignalSpec is everything about ONE signal message that the consumer needs to
+              route it, written by PUBLICATION only and never rewritten (design D-2): a
+              Signal has one payload and one arrival, and a repeat of an initiationId is
+              its own Signal — the Conversation is the accumulator, not this object.
+
+              It is deliberately shaped like NormalizedSignal (internal/httpapi) plus the
+              bookkeeping a durable record adds, so nothing here is invented, only
+              persisted.
+            properties:
+              adapter:
+                description: |-
+                  Adapter is the serving SignalAdapter's name, copied from the source's
+                  spec.adapter at creation — a display copy, so a reader says what kind of
+                  signal this is without a live lookup of the (possibly since-renamed)
+                  source.
+                minLength: 1
+                type: string
+              initiationId:
+                description: |-
+                  InitiationID is the sender-minted correlation id, shared across the
+                  messages of one conversation on purpose. The consumer's key for finding
+                  the conversation (equality reuse); publication never reads it.
+                minLength: 1
+                type: string
+              kind:
+                description: |-
+                  Kind selects the input lane: alert (absent), job, task or chat — the
+                  same closed vocabulary httpapi.NormalizedSignal.Kind and
+                  InputOrigin.SignalKind already carry as a plain string.
+                type: string
+              labels:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Labels are attribution only — rendered on signal cards, feeding no
+                  routing decision (the manager routes purely by InitiationID equality),
+                  except the reserved chat labels naming the originating surface. Bounded
+                  at MaxSignalLabels, the same cap SignalProvenance.Labels uses.
+                type: object
+              payload:
+                description: |-
+                  Payload is this ONE message's content, handed to the agent. Left
+                  unbounded like ConversationInputSpec.Payload: the bulky half of a
+                  signal, out-of-line from the lighter-weight objects that reference it.
+                  An addressed chat target (/<pipeline> <task>) stays in it verbatim — the
+                  consumer parses it, publication never does.
+                type: string
+              reader:
+                description: |-
+                  Reader is the opaque key of the person who sent this, for a chat
+                  signal only — see NormalizedSignal.Reader.
+                type: string
+              severity:
+                description: Severity is this signal's own urgency rating. Absent
+                  means unrated.
+                enum:
+                - critical
+                - error
+                - warning
+                - info
+                type: string
+              signalId:
+                description: |-
+                  SignalID is the sender's id for this one MESSAGE, stable across every
+                  re-send of it (design D-8). When present it fixes the Signal's name —
+                  sig-<first 32 hex of sha256(source NUL signalId)> — so publication is
+                  idempotent per (source, signalId) without a lookup. Opaque: compared for
+                  equality, never parsed. Absent: a generated name and no deduplication.
+                maxLength: 256
+                minLength: 1
+                type: string
+              sourceRef:
+                description: |-
+                  SourceRef names the SignalSource this signal arrived on (same
+                  namespace). The owning SignalSource also owns this object by
+                  OwnerReference — set at creation — so a deleted source takes its
+                  signals from any phase. SourceRef is carried here too so a lister or
+                  index can filter by source without resolving the owner.
+                properties:
+                  name:
+                    description: Name of the referenced object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              title:
+                description: Title overrides the conversation title a routed claimant
+                  opens with.
+                type: string
+            required:
+            - adapter
+            - initiationId
+            - sourceRef
+            type: object
+          status:
+            description: SignalStatus is written by the CONSUMER and HOUSEKEEPING
+              only.
+            properties:
+              attempts:
+                description: Attempts counts the processing attempts started, monotonic.
+                format: int32
+                type: integer
+              claimants:
+                description: |-
+                  Claimants is the per-claimant routing workflow, snapshotted once at the
+                  first processing that reaches fan-out. Empty while Pending or Dropped.
+                items:
+                  description: |-
+                    SignalClaimant is one claimant's own routing workflow for a Signal — the
+                    state machine Phase derives from. The set is snapshotted ONCE, at the
+                    signal's first processing: the same principle that pins a Conversation's
+                    refs at creation, so a later rewire of who serves the source never changes
+                    an in-flight signal's own fan-out (design D-6).
+                  properties:
+                    conversationRef:
+                      description: |-
+                        ConversationRef names the conversation this claimant routed the
+                        signal onto, once State is Routed.
+                      properties:
+                        name:
+                          description: Name of the referenced object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    reason:
+                      description: Reason explains a Failed or Skipped state. Empty
+                        for Routing/Routed.
+                      type: string
+                    ref:
+                      description: Ref names the claiming Pipeline or Coordinator.
+                      properties:
+                        kind:
+                          description: Kind of the claiming object.
+                          enum:
+                          - Pipeline
+                          - Coordinator
+                          type: string
+                        name:
+                          description: Name of the claiming object.
+                          minLength: 1
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                    state:
+                      description: State is this claimant's own routing workflow.
+                      enum:
+                      - Routing
+                      - Routed
+                      - Failed
+                      - Skipped
+                      type: string
+                  required:
+                  - ref
+                  - state
+                  type: object
+                type: array
+              completedAt:
+                description: |-
+                  CompletedAt is set by the write that first makes the phase terminal and
+                  never moved by a later one — the origin every TTL measures from.
+                format: date-time
+                type: string
+              consumedAt:
+                description: ConsumedAt is when that identity processed it, set by
+                  the same write.
+                format: date-time
+                type: string
+              consumedBy:
+                description: |-
+                  ConsumedBy is the leader's identity, the same string as the leader
+                  Lease's holderIdentity, set by the write that makes the phase terminal.
+                type: string
+              firstAttemptAt:
+                description: |-
+                  FirstAttemptAt stamps the first processing pass — the origin the retry
+                  deadline (SIGNAL_RETRY_DEADLINE) measures from.
+                format: date-time
+                type: string
+              phase:
+                description: |-
+                  Phase is the roll-up over Claimants. See RollupPhase. Absent reads as
+                  Pending.
+                enum:
+                - Pending
+                - Routed
+                - PartiallyRouted
+                - Dropped
+                - Failed
+                type: string
+              reason:
+                description: Reason explains a Dropped phase. Absent for every other
+                  phase.
+                enum:
+                - unclaimed
+                - ambiguous
+                - unaddressable
+                - cooldown
+                - capacity
+                - overflow
+                - exhausted
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

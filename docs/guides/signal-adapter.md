@@ -109,8 +109,15 @@ read sources from here, never assume connectivity or credentials yourself).
 ## 2. Normalise into signals
 
 ```json
-{"initiationId": "…", "labels": {}, "title": "…", "payload": "…", "kind": "alert"}
+{"initiationId": "…", "signalId": "…", "labels": {}, "title": "…", "payload": "…", "kind": "alert"}
 ```
+
+**`signalId` is your id for this one MESSAGE** (`ADP-9`). Keep it
+stable across every re-send of the message, including after a `5xx`, and
+different for two messages even when they share an `initiationId`.
+
+The manager stores a message once per `signalId` (`API-7`). A stable cron tick, a webhook
+body hash or an event uid and count all work.
 
 **`initiationId` is your own correlation id for the THING, not the
 occurrence** (`ADP-2`). Mint it where your aggregation already decides "this
@@ -163,12 +170,18 @@ curl -X POST -H "Authorization: Bearer $env:ADAPTER_TOKEN" `
 See [`POST /signal/inbound`]({{ '/contracts/signal-adapter/' | relative_url }}#post-signalinbound)
 for the full request and response shape.
 
-**At-least-once is safe** (`API-3`). Re-sends collapse under the source's
-cooldown, so never build your own dedup to avoid them.
+**The response acknowledges storage, not routing** (`API-2`). `200` is
+`{"queued": n}`: the signals the manager stored or deduplicated. It routes
+them afterwards, so the response never says whether a conversation opened.
 
-**Verify:** post the same signal twice in a row. The response's
-`conversations` count stays at one, and `queued` reflects both posts
-accepted.
+A `5xx` means nothing was acknowledged: re-send the batch with the same ids.
+
+**At-least-once is safe** (`API-3`). A re-send with the same `signalId` is
+stored once, and one without is resolved by the source's cooldown, so never
+build your own dedup to avoid them.
+
+**Verify:** post the same signal, `signalId` included, twice in a row. Both
+posts answer `queued: 1`, and `kubectl -n agent-ops get signals` lists one `Signal`.
 
 Repeating the same `initiationId` after `cooldownHours` has passed still
 lands on that conversation while it stays OPEN — closing it first opens a
@@ -356,7 +369,7 @@ signals land.
    dependency-free Go with a five-field cron parser and restart-safe cursors.
    It conforms to the [signal adapter
    specification]({{ '/contracts/signal-adapter/' | relative_url }}), version
-   2.2.0.
+   2.3.0.
 3. **Compare a different transport** —
    [`signals/alertmanager`](https://github.com/kostiantyn-matsebora/agent-ops-operator/blob/master/signals/alertmanager/)
    receives webhooks,

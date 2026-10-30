@@ -36,6 +36,40 @@ maxActiveConversations: 5
 # told on the surface they typed on, alerts are logged and counted.
 maxQueuedConversations: 50
 
+# Signals are a durable message queue on the Kubernetes API (kind Signal):
+# /signal/inbound stores one per admitted signal, the leader's consumer pool
+# routes them, the leader's housekeeping bounds and collects them. Every bound
+# below reaches the manager as an env var. A duration is a Go duration such as
+# 90m; an unparseable or non-positive one falls back to its default with a
+# warning in the manager's log.
+
+# How many consumers route Signals at once on the leader. One consumer holds a
+# Signal at a time, and messages sharing a (source, initiationId) are always
+# processed one after another in arrival order.
+signalConsumerConcurrency: 4
+
+# How long a claimant may sit Routing (a machine signal waiting on a full
+# backlog), measured from the Signal's first processing attempt, before the
+# leader marks it Failed. Bounds a poison message: PartiallyRouted never sits
+# non-terminal forever.
+signalRetryDeadline: 1h
+
+# Per-source cap on NON-TERMINAL Signals. Over it the leader evicts the OLDEST:
+# Dropped (reason overflow) if it never fanned out, or each still-Routing
+# claimant Failed (reason overflow) if it had.
+maxSignalsPerSource: 200
+
+# How long a finished Signal survives, per phase, measured from the moment it
+# went terminal (status.completedAt), never from its creation.
+# Routed:
+signalTtlRouted: 8h
+# Dropped, short because a pre-fan-out drop carries no routing record worth
+# keeping:
+signalTtlDropped: 4h
+# Failed, long because "nobody got it" is exactly the record an operator
+# investigates:
+signalTtlFailed: 72h
+
 # DEPRECATED alias for maxActiveConversations, honored for one release when the
 # new key is unset (the manager logs a deprecation line). Named after pods
 # rather than conversations, which is what made `maxRuntimes: 5` read as a limit

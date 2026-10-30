@@ -23,6 +23,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/httpapi"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/metrics"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
@@ -44,6 +45,15 @@ func env(key, def string) string {
 
 func envInt(key string, def int) int {
 	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {
+		return v
+	}
+	return def
+}
+
+// envIntNonNegative is envInt for a knob where zero is a real setting: an
+// unparseable or negative value falls back to def, zero is kept.
+func envIntNonNegative(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v >= 0 {
 		return v
 	}
 	return def
@@ -78,7 +88,17 @@ func envDurationOr(key string, def time.Duration) time.Duration {
 	if d := envDuration(key); d > 0 {
 		return d
 	}
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		warn("ignoring an unparseable or non-positive duration; using the default",
+			"variable", key, "value", raw, "default", def.String())
+	}
 	return def
+}
+
+// warn logs a configuration warning before the manager's logger is
+// necessarily configured. A variable so a test can observe it.
+var warn = func(msg string, keysAndValues ...any) {
+	ctrl.Log.WithName("setup").Info(msg, keysAndValues...)
 }
 
 // envSeconds reads a plain integer seconds value (chart values express a
@@ -172,7 +192,6 @@ func main() {
 		setupLog.Error(err, "conversation indexes")
 		os.Exit(1)
 	}
-
 	// Channel plumbing: built-in channel types register in-process providers
 	// here; every other type is served by an external adapter consuming the op
 	// queue over /channel/*. The manager reads no secrets — adapter auth
@@ -366,6 +385,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Signal consumer pool and housekeeping (signal-persistence D-3, D-11): one
+	// controller, so both go through ONE work queue, and — like every
+	// reconciler here — it runs only while this process holds the Lease. The
+	// cooldown map is shared with the HTTP surface that reports on it;
+	// Runtime/MaxQueued are the SAME bootstrap config and backlog bound the
+	// conversation reconciler resolves against, so a consumer can never
+	// disagree with it about what a claimant's conversation looks like.
+	cooldowns := ingest.NewCooldownBook()
+	if err := (&controller.SignalReconciler{
+		Client:    mgr.GetClient(),
+		Reader:    mgr.GetAPIReader(),
+		Activity:  acts,
+		Ops:       ops,
+		Cooldowns: cooldowns,
+		Runtime:   reconciler.Runtime,
+		MaxQueued: envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
+		Identity:  replicaIdentity,
+		// Chart values, never constants. Zero (unset, unparseable or
+		// non-positive) falls back to each Default*; a bad duration also logs
+		// a warning naming the variable (envDurationOr).
+		Concurrency:   envInt("SIGNAL_CONSUMER_CONCURRENCY", controller.DefaultSignalConsumerConcurrency),
+		RetryDeadline: envDurationOr("SIGNAL_RETRY_DEADLINE", controller.DefaultSignalRetryDeadline),
+		MaxPerSource:  envInt("MAX_SIGNALS_PER_SOURCE", controller.DefaultMaxSignalsPerSource),
+		TTLRouted:     envDurationOr("SIGNAL_TTL_ROUTED", controller.DefaultSignalTTLRouted),
+		TTLDropped:    envDurationOr("SIGNAL_TTL_DROPPED", controller.DefaultSignalTTLDropped),
+		TTLFailed:     envDurationOr("SIGNAL_TTL_FAILED", controller.DefaultSignalTTLFailed),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "signal controller")
+		os.Exit(1)
+	}
+
 	api := &httpapi.Server{
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),
@@ -373,6 +423,7 @@ func main() {
 		Addr:      env("API_ADDR", ":8080"),
 		Ops:       ops,
 		Router:    router,
+		Cooldowns: cooldowns,
 		Activity:  acts,
 		Version:   env("VERSION", "dev"),
 		// The same bootstrap config the reconciler builds pods from: dispatch
@@ -380,7 +431,7 @@ func main() {
 		Runtime: reconciler.Runtime,
 		// The backlog bound: the one capacity check that must live in ingest,
 		// because the point is not to create the object at all.
-		MaxQueuedConversations: envInt("MAX_QUEUED_CONVERSATIONS", 50),
+		MaxQueuedConversations: envIntNonNegative("MAX_QUEUED_CONVERSATIONS", 50),
 		StorageBreaker:         breaker,
 		MaxActiveConversations: maxActive,
 		AdapterToken:           os.Getenv("ADAPTER_TOKEN"),

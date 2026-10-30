@@ -583,7 +583,7 @@ func (f *FakeManager) handleSignalInbound(w http.ResponseWriter, r *http.Request
 		writeJSON(w, reject, map[string]string{"error": errRejected})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"queued": len(post.Signals), "conversations": len(post.Signals)})
+	writeJSON(w, 200, map[string]any{"queued": len(post.Signals)})
 }
 
 func (f *FakeManager) handleStatus(w http.ResponseWriter, r *http.Request) {

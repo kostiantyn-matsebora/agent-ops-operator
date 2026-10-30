@@ -298,7 +298,8 @@ bounded.
 
 - **The in-memory map is the hot path, this is the record.** It is read on first
   use per source after a restart, so a restart mid-incident does not re-open
-  conversations for signals still inside their window.
+  conversations for signals still inside their window. The consumer checks and
+  spends it atomically per source.
 - **Only an admitted `initiationId` writes.** A suppressed re-delivery — the
   high-volume case cooldown exists for — writes nothing.
 
@@ -331,6 +332,106 @@ writing their own `severity` **label**, part of the vocabulary the
 **Suppression is the adapter's job, and is distinct from correlation.** It
 decides whether a signal is emitted at all — see
 [kubernetes](integrations/kubernetes.md#tune-what-reaches-you).
+
+### Signal
+
+**The durable record of one published message, and its routing.**
+`/signal/inbound` only PUBLISHES: it validates, applies `attributeFilters`,
+creates the `Signal` and acknowledges. A separate consumer, on the leader,
+routes it afterwards. Publish looks up no claimant, spends no cooldown and
+checks no capacity, so consumption can later be paused without stopping
+ingest.
+
+**One `Signal` per message, never merged.** A repeat of an `initiationId` is
+its own `Signal`. The `Conversation` already accumulates an `initiationId`:
+its id is that value, and later messages append to it as inputs.
+
+**`spec.signalId` makes publish idempotent.** An adapter may send a
+per-message `signalId`, stable across a re-send of that message and
+distinct from the shared `initiationId`. The `Signal` is named from
+`(source, signalId)`, so a duplicate create is acknowledged and written
+nowhere. This holds in every phase until the TTL deletes the `Signal`. A
+message with no `signalId` gets a generated name and no dedup, and cooldown
+and equality reuse resolve its re-send instead.
+
+**The consumer decides, in order:**
+
+1. An addressed chat message (`/<pipeline> <task>`) takes the named target
+   as its one claimant, with no claim, `Ready` or cooldown check.
+2. Otherwise the claimants are the source's Ready Pipelines and
+   Coordinators. None drops it (`unclaimed`). A chat message with several
+   drops (`ambiguous`).
+3. Cooldown is checked and spent, atomically per source (`cooldown`).
+4. A chat message at a full backlog drops (`capacity`). A machine signal
+   stays `Routing` and waits.
+5. A chat message whose `agentops.dev/channel` label names no existing
+   `Channel` drops (`unaddressable`), since there is nowhere to answer.
+6. The claimants are snapshotted and each is routed.
+
+A chat message dropped for `unclaimed`, `ambiguous` or `capacity` has its
+surface told. The notice stays fire-and-forget, the `Signal` keeps the
+fact.
+
+**The consumer is a pool on the leader.** `SIGNAL_CONSUMER_CONCURRENCY`
+(chart `signalConsumerConcurrency`, default `4`) sets its size. One consumer
+holds a `Signal` at a time. Messages sharing a `(source, initiationId)` are
+processed one after another in arrival order, and different keys in
+parallel. A leader change needs no recovery step: the new leader resumes
+every non-terminal `Signal`, and routing is idempotent, so a redo neither
+duplicates a conversation nor an input.
+
+**`status.claimants[]` is the per-claimant routing workflow**, snapshotted
+once at first processing. A re-wire of who serves the source never reaches an
+in-flight signal's fan-out.
+
+| State | Means |
+|---|---|
+| `Routing` | not yet terminal: never attempted, or owed a retry |
+| `Routed` | terminal. Carries the conversation it routed to |
+| `Failed` | terminal. Retry deadline passed, or evicted after fan-out |
+| `Skipped` | terminal. The snapshotted claimant no longer exists |
+
+Retries touch only non-terminal claimants, bounded by
+`SIGNAL_RETRY_DEADLINE` (chart `signalRetryDeadline`, default `1h`). Past it
+an exhausted claimant flips to `Failed`, so a signal never sits
+`PartiallyRouted` forever.
+
+**`status.phase` is a roll-up, recomputed on every status write and never
+authored on its own:**
+
+| Phase | Means |
+|---|---|
+| `Pending` | no claimant has routed yet and nothing has dropped it, including a machine signal waiting on conversation capacity |
+| `Routed` | every claimant terminal, at least one `Routed` |
+| `PartiallyRouted` | at least one `Routed`, at least one still `Routing` |
+| `Dropped` | terminal before any claimant was snapshotted. `status.reason` is one of `unclaimed`, `ambiguous`, `cooldown`, `capacity`, `unaddressable`, `overflow`, `exhausted` |
+| `Failed` | every claimant terminal, none `Routed`. Surfaced as loudly as the unwired drop |
+
+The write that makes a phase terminal also records `completedAt`,
+`consumedBy` (the leader's identity) and `consumedAt`. `attempts` and
+`firstAttemptAt` track the passes.
+
+**Bounds keep the object count flat, all by the leader's housekeeping.** A
+per-source cap on non-terminal `Signal`s, `MAX_SIGNALS_PER_SOURCE` (chart
+`maxSignalsPerSource`, default `200`), evicts the OLDEST: `Dropped` (reason
+`overflow`) before fan-out, its non-terminal claimants `Failed` after.
+
+**Finished `Signal`s are deleted on a per-phase TTL**, measured from
+`status.completedAt`:
+
+| Phase | Chart value | Default |
+|---|---|---|
+| `Routed` | `signalTtlRouted` | `8h` |
+| `Dropped` | `signalTtlDropped` | `4h` |
+| `Failed` | `signalTtlFailed` | `72h` |
+
+`Failed` outlives the rest because "nobody got it" is the record an operator
+investigates.
+
+**Owned by its `SignalSource`.** Deleting the source garbage-collects every
+`Signal` it owns, from any phase. The manager holds full CRUD on the kind
+and every other component, the console included, at most `get`, `list` and
+`watch`.
 
 ### SignalAdapter
 
@@ -484,17 +585,17 @@ conversations — one per Pipeline**, each with that Pipeline's own profile,
 channels and capabilities. Two agents investigating one alert from two angles is
 a configuration, not a fault.
 
-**Per-source ingest policy is evaluated once, before the fan-out.** An
-`initiationId` passes cooldown once and is then delivered to every server, so
-the first Pipeline cannot spend the window and starve the rest.
+**Per-source policy is evaluated once, before the fan-out.** The consumer
+passes an `initiationId` through cooldown once and then delivers it to every
+server, so the first Pipeline cannot spend the window and starve the rest.
 
 The counters keep the two apart:
 
 | Counter | Counts |
 |---|---|
 | `receivedTotal` | signals received |
-| ingest response `queued` | signals |
-| ingest response `conversations` | one per server |
+| ingest response `queued` | signals stored or deduplicated |
+| a `Signal`'s `status.claimants[]` | one per server |
 
 **The `Wired` condition names every serving Pipeline, and that count is what to
 read.** It is how many conversations one signal will open, and — on a chat
@@ -512,7 +613,7 @@ Pipeline they meant.
 | **addressed** | any number | resolves by name, unaffected by the count |
 | a thread reply | any number | never travels this path at all |
 
-**That distinction comes from the arriving signal's `kind`**, which ingest
+**That distinction comes from the arriving signal's `kind`**, which the consumer
 already holds. Nothing on a `SignalSource` or a `SignalAdapter` declares "this
 is a chat source", and no reconciler decides it.
 
@@ -1379,8 +1480,14 @@ A runtime's report is never consulted.
 |---|---|
 | marked a move | nothing |
 | consumed a person's message | nothing, the text is the answer |
+| made no move on a root that already escalated | nothing, the root waits on a person and is never handed back |
 | made no move and answered no person, first time | appends ONE corrective input, origin `manager` |
 | made no move and consumed only that corrective input | escalates the root with a digest |
+
+**A Coordinator never closes a conversation a person started.** `close` on the
+caller's own root is refused when a person opened it, by an addressed
+`/<pipeline> <task>` or a chat message. That person ends it with `/close`.
+A root an alert or a job opened may still close itself.
 
 **A person's message is a `channel` input, or any input recording the surface
 it was typed on.** A chat signal is the second case. An alert, a job tick and a
@@ -1804,6 +1911,7 @@ a second source of truth beside the CRs.
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
 | Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
 | Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
+| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | `Signal` CRs, Kubernetes-API state surviving every restart and leader change | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |

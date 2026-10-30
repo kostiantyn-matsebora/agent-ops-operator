@@ -62,6 +62,20 @@ spec:
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS
               value: {{ .Values.maxQueuedConversations | quote }}
+            # signal-persistence: the consumer pool's concurrency and the
+            # leader's housekeeping bounds, all chart values.
+            - name: SIGNAL_CONSUMER_CONCURRENCY
+              value: {{ .Values.signalConsumerConcurrency | quote }}
+            - name: SIGNAL_RETRY_DEADLINE
+              value: {{ .Values.signalRetryDeadline | quote }}
+            - name: MAX_SIGNALS_PER_SOURCE
+              value: {{ .Values.maxSignalsPerSource | quote }}
+            - name: SIGNAL_TTL_ROUTED
+              value: {{ .Values.signalTtlRouted | quote }}
+            - name: SIGNAL_TTL_DROPPED
+              value: {{ .Values.signalTtlDropped | quote }}
+            - name: SIGNAL_TTL_FAILED
+              value: {{ .Values.signalTtlFailed | quote }}
             # durable-chat-ops-broker: a chart value, never a compiled-in
             # constant, so an install with a slower transport can raise it.
             - name: CLAIM_STALENESS_SECONDS

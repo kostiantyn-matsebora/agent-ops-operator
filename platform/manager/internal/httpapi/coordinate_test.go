@@ -405,6 +405,7 @@ func TestHandleCoordinateCloseRefusesAWrongToken(t *testing.T) {
 
 func TestHandleCoordinateCloseDefaultsTargetToTheCaller(t *testing.T) {
 	root := coordRoot("root-1", "co-a")
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	s, c := coordServer(t, coordCoordinator("co-a"), root)
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
 
@@ -866,7 +867,9 @@ func TestHandleCoordinateEscalateStampsTheMove(t *testing.T) {
 // close on the caller itself leaves it Closed — never judged — and the stamp is
 // still written, for the record.
 func TestHandleCoordinateCloseOnSelfStampsTheMove(t *testing.T) {
-	s, c := coordServer(t, coordCoordinator("co-a"), coordRootInflight("root-1", "co-a", "r1"))
+	root := coordRootInflight("root-1", "co-a", "r1")
+	root.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
+	s, c := coordServer(t, coordCoordinator("co-a"), root)
 	token := chat.DeriveCoordinatorToken(coordTestMasterKey, "co-a", "root-1")
 
 	rec := postCoordinate(s, "/coordinate/close", token,

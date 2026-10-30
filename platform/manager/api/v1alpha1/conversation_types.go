@@ -156,6 +156,11 @@ const SignalKindChat = "chat"
 const (
 	LabelChatChannel = "agentops.dev/channel"
 	LabelChatSender  = "agentops.dev/sender"
+	// LabelChatMessage is the transport's OWN handle for the message that
+	// arrived, set by the adapter that normalized it. OPAQUE everywhere in the
+	// manager: stored and handed back unaltered, never parsed, compared or
+	// constructed. It lets a reply say WHICH message it answers.
+	LabelChatMessage = "agentops.dev/message"
 )
 
 // LabelCausedBy indexes a member conversation by its immediate parent's name —
@@ -381,8 +386,8 @@ type ConversationSpec struct {
 	//
 	// Absent on conversations predating the field. Nothing backfills it —
 	// inference is what it replaces — so an empty ref is read conservatively
-	// (see routeSignalGroup: reusable only while ONE Ready Pipeline serves the
-	// source).
+	// (see internal/signalroute's reusableBy: reusable only while ONE Ready
+	// Pipeline serves the source).
 	// +optional
 	PipelineRef *ObjectRef `json:"pipelineRef,omitempty"`
 

@@ -186,6 +186,8 @@ func pulseAssertRedeliveryRepeatsTheID(t *testing.T, mgr *FakeManager, p *Proces
 	if got := posts[1].Signals[0]["initiationId"]; got != first["initiationId"] {
 		t.Fatalf("a redelivered occurrence must repeat its initiationId: %v, then %v", first["initiationId"], got)
 	}
+	// ...and, being the identical body, its signalId: one message, stored once.
+	assertResendRepeatsSignalIDs(t, posts[0], posts[1])
 }
 
 func pulseAssertUnrelatedAlertGetsItsOwnID(t *testing.T, mgr *FakeManager, p *Process, hook PulseWebhook, first map[string]any) {
@@ -199,6 +201,7 @@ func pulseAssertUnrelatedAlertGetsItsOwnID(t *testing.T, mgr *FakeManager, p *Pr
 	if got == first["initiationId"] {
 		t.Fatalf("two unrelated alerts must never share an initiationId: both %v", got)
 	}
+	assertDifferentMessageHasDifferentSignalIDs(t, posts[0], posts[len(posts)-1])
 }
 
 func pulseAssertResolvedAndUnsignedPushNothing(t *testing.T, mgr *FakeManager, p *Process, hook PulseWebhook) {
@@ -246,6 +249,7 @@ func pulseAssertRejectedPostSurfaced(t *testing.T, mgr *FakeManager, p *Process,
 		t.Fatalf("a rejected post must not kill the adapter")
 	}
 	rejectedID := pulseLastRejectedID(t, mgr)
+	rej := rejected(mgr, pulseSource)
 	mgr.RejectSignals(0)
 	if code, resp := pulseDeliver(t, hook.URL, hook, alert, true); code != 200 {
 		t.Fatalf("Pulse's retry of the failed delivery must be accepted: %d %s", code, resp)
@@ -254,6 +258,7 @@ func pulseAssertRejectedPostSurfaced(t *testing.T, mgr *FakeManager, p *Process,
 	if got := posts[len(posts)-1].Signals[0]["initiationId"]; got != rejectedID {
 		t.Fatalf("a re-send after a rejected post must repeat its initiationId: %q, then %v", rejectedID, got)
 	}
+	assertResendRepeatsSignalIDs(t, rej[len(rej)-1], posts[len(posts)-1])
 }
 
 // pulseLastRejectedID is the initiationId of the most recent rejected post
