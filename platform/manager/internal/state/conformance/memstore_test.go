@@ -145,28 +145,24 @@ func (m *memStore) List(ctx context.Context, index state.Index, key state.ListKe
 	defer m.mu.Unlock()
 	m.sweepExpiredLocked(time.Now())
 
-	var out []state.ConversationRecord
+	var match func(state.ConversationRecord) bool
 	switch index {
 	case state.ByConversationID:
-		for _, mr := range m.records {
-			if mr.rec.ConversationID == key.ConversationID {
-				out = append(out, mr.rec)
-			}
-		}
+		match = func(r state.ConversationRecord) bool { return r.ConversationID == key.ConversationID }
 	case state.ByPipelineAndPhase:
-		for _, mr := range m.records {
-			if mr.rec.PipelineRef == key.PipelineRef && mr.rec.Phase == key.Phase {
-				out = append(out, mr.rec)
-			}
+		match = func(r state.ConversationRecord) bool {
+			return r.PipelineRef == key.PipelineRef && r.Phase == key.Phase
 		}
 	case state.ByPhase:
-		for _, mr := range m.records {
-			if mr.rec.Phase == key.Phase {
-				out = append(out, mr.rec)
-			}
-		}
+		match = func(r state.ConversationRecord) bool { return r.Phase == key.Phase }
 	default:
 		return nil, state.ErrUnknownIndex
+	}
+	var out []state.ConversationRecord
+	for _, mr := range m.records {
+		if match(mr.rec) {
+			out = append(out, mr.rec)
+		}
 	}
 	return out, nil
 }

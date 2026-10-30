@@ -10,6 +10,8 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
+const benchInputID = "input-1"
+
 // Bench reports the tier-1 numbers design.md's D-8/D-10 name for comparing
 // backends: bytes written per run, allocations per write, and records
 // resident after a listing — at design.md's own measured scale (161
@@ -114,7 +116,7 @@ func benchRecord() state.ConversationRecord {
 		Phase:       "Working",
 		Title:       "a representative conversation title, not empty",
 		Inputs: []state.InputItem{
-			{ID: "input-1", Type: "task", Payload: "a representative queued payload", ReceivedAt: now},
+			{ID: benchInputID, Type: "task", Payload: "a representative queued payload", ReceivedAt: now},
 		},
 		LastActivity: &now,
 	}
@@ -128,9 +130,9 @@ func benchRun() state.Run {
 		Status:     "Succeeded",
 		StartedAt:  &now,
 		FinishedAt: &now,
-		InputIDs:   []string{"input-1"},
+		InputIDs:   []string{benchInputID},
 		Inputs: []state.RecordedInput{
-			{ID: "input-1", Type: "task", Text: "a representative recorded input body", Surface: "telegram"},
+			{ID: benchInputID, Type: "task", Text: "a representative recorded input body", Surface: "telegram"},
 		},
 	}
 }

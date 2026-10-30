@@ -141,13 +141,20 @@ func TestAppendRunConcurrentNoConflictSurfaced(t *testing.T) {
 		t.Fatalf("got %d runs, want %d", len(runs), want)
 	}
 
+	assertPerPrefixOrder(t, runs, prefixes, perGoroutine)
+}
+
+// assertPerPrefixOrder checks every "<prefix>-<i>" run is listed, and that
+// each prefix's own runs keep their relative order.
+func assertPerPrefixOrder(t *testing.T, runs []state.Run, prefixes []string, perPrefix int) {
+	t.Helper()
 	position := make(map[string]int, len(runs))
 	for i, r := range runs {
 		position[r.RunID] = i
 	}
 	for _, prefix := range prefixes {
 		last := -1
-		for i := 0; i < perGoroutine; i++ {
+		for i := 0; i < perPrefix; i++ {
 			id := fmt.Sprintf("%s-%d", prefix, i)
 			pos, ok := position[id]
 			if !ok {

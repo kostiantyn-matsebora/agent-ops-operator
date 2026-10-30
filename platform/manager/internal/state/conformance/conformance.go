@@ -23,6 +23,23 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
+// Fixture values and failure formats the scenarios repeat.
+const (
+	profileDefault         = "profile-default"
+	fmtCreate              = "Create: %v"
+	fmtGet                 = "Get: %v"
+	fmtWatch               = "Watch: %v"
+	secondActor            = "second-actor"
+	convCreateTwice        = "conv-create-twice"
+	convID1                = "conv-id-1"
+	pipe1                  = "pipe-1"
+	convExpired            = "conv-expired"
+	secondLife             = "second life"
+	convSharedName         = "conv-shared-name"
+	convCrashBetweenWrites = "conv-crash-between-writes"
+	owedInput              = "owed-input"
+)
+
 // Run executes every conformance scenario against a Store newStore
 // constructs fresh for it, one t.Run per scenario named for the spec
 // requirement and scenario title it proves (tasks.md 3.1).
@@ -179,10 +196,10 @@ func drainQuiet(events <-chan state.Event, quiet time.Duration) []state.Event {
 func testCASTwoActorsRace(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	key := state.Key("conv-cas-race")
-	base := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-cas-race", Phase: "Working"}
+	base := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-cas-race", Phase: "Working"}
 	rev, err := store.Create(ctx, key, base)
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	var wg sync.WaitGroup
@@ -217,7 +234,7 @@ func testCASTwoActorsRace(t *testing.T, store state.Store) {
 
 	final, _, err := store.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if final.Title != "actor-A" && final.Title != "actor-B" {
 		t.Fatalf("final Title = %q, want exactly one actor's write, never a merge", final.Title)
@@ -230,14 +247,14 @@ func testCASTwoActorsRace(t *testing.T, store state.Store) {
 func testCASStaleClaimNeverMerged(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	key := state.Key("conv-cas-stale")
-	base := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-cas-stale", Phase: "Working", Title: "original"}
+	base := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-cas-stale", Phase: "Working", Title: "original"}
 	staleRev, err := store.Create(ctx, key, base)
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	winning := base
-	winning.Title = "second-actor"
+	winning.Title = secondActor
 	if _, err := store.Update(ctx, key, staleRev, winning); err != nil {
 		t.Fatalf("Update (winning write): %v", err)
 	}
@@ -250,10 +267,10 @@ func testCASStaleClaimNeverMerged(t *testing.T, store state.Store) {
 
 	got, _, err := store.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
-	if got.Title != "second-actor" {
-		t.Fatalf("Title = %q after refused stale write, want %q unchanged", got.Title, "second-actor")
+	if got.Title != secondActor {
+		t.Fatalf("Title = %q after refused stale write, want %q unchanged", got.Title, secondActor)
 	}
 }
 
@@ -262,20 +279,20 @@ func testCASStaleClaimNeverMerged(t *testing.T, store state.Store) {
 // record is left untouched.
 func testCreateRefusedOnExistingKey(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	key := state.Key("conv-create-twice")
-	first := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-create-twice", Title: "first"}
+	key := state.Key(convCreateTwice)
+	first := state.ConversationRecord{ProfileRef: profileDefault, Name: convCreateTwice, Title: "first"}
 	if _, err := store.Create(ctx, key, first); err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
 
-	second := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-create-twice", Title: "second"}
+	second := state.ConversationRecord{ProfileRef: profileDefault, Name: convCreateTwice, Title: "second"}
 	if _, err := store.Create(ctx, key, second); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("second Create error = %v, want ErrAlreadyExists", err)
 	}
 
 	got, _, err := store.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	if got.Title != "first" {
 		t.Fatalf("Title = %q after refused create, want %q unchanged", got.Title, "first")
@@ -288,8 +305,8 @@ func testCreateRefusedOnExistingKey(t *testing.T, store state.Store) {
 // conversation" scenario.
 func testIndexEqualityRouting(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	target := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-target", ConversationID: "conv-id-1", Phase: "Working"}
-	other := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-other", ConversationID: "conv-id-2", Phase: "Working"}
+	target := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-target", ConversationID: convID1, Phase: "Working"}
+	other := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-other", ConversationID: "conv-id-2", Phase: "Working"}
 	if _, err := store.Create(ctx, state.Key(target.Name), target); err != nil {
 		t.Fatalf("Create target: %v", err)
 	}
@@ -297,11 +314,11 @@ func testIndexEqualityRouting(t *testing.T, store state.Store) {
 		t.Fatalf("Create other: %v", err)
 	}
 
-	got, err := store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: "conv-id-1"})
+	got, err := store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: convID1})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(got) != 1 || got[0].ConversationID != "conv-id-1" {
+	if len(got) != 1 || got[0].ConversationID != convID1 {
 		t.Fatalf("List(ByConversationID, conv-id-1) = %+v, want exactly the one matching record", got)
 	}
 }
@@ -314,9 +331,9 @@ func testIndexEqualityRouting(t *testing.T, store state.Store) {
 func testEveryDeclaredIndex(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	records := []state.ConversationRecord{
-		{ProfileRef: "profile-default", Name: "conv-a", ConversationID: "id-a", PipelineRef: "pipe-1", Phase: "Working"},
-		{ProfileRef: "profile-default", Name: "conv-b", ConversationID: "id-b", PipelineRef: "pipe-1", Phase: "Closed"},
-		{ProfileRef: "profile-default", Name: "conv-c", ConversationID: "id-c", PipelineRef: "pipe-2", Phase: "Working"},
+		{ProfileRef: profileDefault, Name: "conv-a", ConversationID: "id-a", PipelineRef: pipe1, Phase: "Working"},
+		{ProfileRef: profileDefault, Name: "conv-b", ConversationID: "id-b", PipelineRef: pipe1, Phase: "Closed"},
+		{ProfileRef: profileDefault, Name: "conv-c", ConversationID: "id-c", PipelineRef: "pipe-2", Phase: "Working"},
 	}
 	for _, r := range records {
 		if _, err := store.Create(ctx, state.Key(r.Name), r); err != nil {
@@ -337,7 +354,7 @@ func testEveryDeclaredIndex(t *testing.T, store state.Store) {
 		t.Fatalf("List(ByConversationID, id-b) = %+v, want exactly conv-b", byConvID)
 	}
 
-	byPipelinePhase, err := store.List(ctx, state.ByPipelineAndPhase, state.ListKey{PipelineRef: "pipe-1", Phase: "Working"})
+	byPipelinePhase, err := store.List(ctx, state.ByPipelineAndPhase, state.ListKey{PipelineRef: pipe1, Phase: "Working"})
 	if err != nil {
 		t.Fatalf("List ByPipelineAndPhase: %v", err)
 	}
@@ -375,13 +392,13 @@ func testFeedEventShape(t *testing.T, store state.Store) {
 
 	events, err := store.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 
 	key := state.Key("conv-feed-shape")
-	rev, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-feed-shape", Title: "v1"})
+	rev, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-feed-shape", Title: "v1"})
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	// A backend may land one Create as more than one underlying write
@@ -407,12 +424,12 @@ func testFeedResumeContinuity(t *testing.T, store state.Store) {
 
 	formerLeaderEvents, err := store.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := state.Key("conv-resume-leader")
-	rec := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-resume-leader", Phase: "Working"}
+	rec := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-resume-leader", Phase: "Working"}
 	if _, err := store.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	createEvt := mustRecvEvent(t, formerLeaderEvents, 5*time.Second)
 	resumePoint := createEvt.Resume
@@ -422,7 +439,7 @@ func testFeedResumeContinuity(t *testing.T, store state.Store) {
 	// still lands.
 	_, rev, err := store.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	rec.Phase = "Closed"
 	if _, err := store.Update(ctx, key, rev, rec); err != nil {
@@ -453,12 +470,12 @@ func testFeedNoGapAcrossDisconnect(t *testing.T, store state.Store) {
 
 	events, err := store.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := state.Key("conv-no-gap")
-	rec := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-no-gap", Title: "0"}
+	rec := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-no-gap", Title: "0"}
 	if _, err := store.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	firstEvt := mustRecvEvent(t, events, 5*time.Second)
 	lastSeen := firstEvt.Resume
@@ -467,7 +484,7 @@ func testFeedNoGapAcrossDisconnect(t *testing.T, store state.Store) {
 	const duringDisconnect = 20
 	_, currentRev, err := store.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf(fmtGet, err)
 	}
 	for i := 1; i <= duringDisconnect; i++ {
 		rec.Title = fmt.Sprintf("%d", i)
@@ -527,12 +544,12 @@ func testFeedStaleSnapshotCaughtByCAS(t *testing.T, store state.Store) {
 
 	events, err := store.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := state.Key("conv-stale-snapshot")
-	rec := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-stale-snapshot", Title: "v1"}
+	rec := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-stale-snapshot", Title: "v1"}
 	if _, err := store.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 	snapshot := mustRecvEvent(t, events, 5*time.Second)
 
@@ -574,11 +591,11 @@ func testFeedStaleSnapshotCaughtByCAS(t *testing.T, store state.Store) {
 // gone" scenario.
 func testExpiryInvisible(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	key := state.Key("conv-expired")
+	key := state.Key(convExpired)
 	past := time.Now().Add(-time.Hour)
-	rec := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-expired", Phase: "Working", ExpiresAt: &past}
+	rec := state.ConversationRecord{ProfileRef: profileDefault, Name: convExpired, Phase: "Working", ExpiresAt: &past}
 	if _, err := store.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	if _, _, err := store.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
@@ -590,7 +607,7 @@ func testExpiryInvisible(t *testing.T, store state.Store) {
 		t.Fatalf("List: %v", err)
 	}
 	for _, r := range listed {
-		if r.Name == "conv-expired" {
+		if r.Name == convExpired {
 			t.Fatalf("List(ByPhase, Active) returned the expired record")
 		}
 	}
@@ -605,13 +622,13 @@ func testExpiryObservableOnFeed(t *testing.T, store state.Store) {
 
 	events, err := store.Watch(ctx, "")
 	if err != nil {
-		t.Fatalf("Watch: %v", err)
+		t.Fatalf(fmtWatch, err)
 	}
 	key := state.Key("conv-expiry-feed")
 	past := time.Now().Add(-time.Hour)
-	rec := state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-expiry-feed", Phase: "Working", ExpiresAt: &past}
+	rec := state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-expiry-feed", Phase: "Working", ExpiresAt: &past}
 	if _, err := store.Create(ctx, key, rec); err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf(fmtCreate, err)
 	}
 
 	putEvt := mustRecvEvent(t, events, 5*time.Second)
@@ -643,8 +660,8 @@ func testExpiryObservableOnFeed(t *testing.T, store state.Store) {
 func testAppendRunNeverConflicts(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	key := state.Key("conv-append-race")
-	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-append-race"}); err != nil {
-		t.Fatalf("Create: %v", err)
+	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-append-race"}); err != nil {
+		t.Fatalf(fmtCreate, err)
 	}
 
 	var wg sync.WaitGroup
@@ -682,8 +699,8 @@ func testAppendRunNeverConflicts(t *testing.T, store state.Store) {
 func testListRunsOrder(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	key := state.Key("conv-runs-order")
-	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-runs-order"}); err != nil {
-		t.Fatalf("Create: %v", err)
+	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-runs-order"}); err != nil {
+		t.Fatalf(fmtCreate, err)
 	}
 
 	const n = 5
@@ -736,15 +753,15 @@ func testBlobLifecycle(t *testing.T, store state.Store) {
 	}
 
 	// A pruned input's key may be reused later without special-casing.
-	if err := store.PutBlob(ctx, key, state.Blob{ConversationName: "conv-with-input", Type: "task", Payload: "second life"}); err != nil {
+	if err := store.PutBlob(ctx, key, state.Blob{ConversationName: "conv-with-input", Type: "task", Payload: secondLife}); err != nil {
 		t.Fatalf("PutBlob (re-put after delete): %v", err)
 	}
 	got2, err := store.GetBlob(ctx, key)
 	if err != nil {
 		t.Fatalf("GetBlob (after re-put): %v", err)
 	}
-	if got2.Payload != "second life" {
-		t.Fatalf("GetBlob.Payload after re-put = %q, want %q", got2.Payload, "second life")
+	if got2.Payload != secondLife {
+		t.Fatalf("GetBlob.Payload after re-put = %q, want %q", got2.Payload, secondLife)
 	}
 }
 
@@ -758,8 +775,8 @@ func testScopeIsolation(t *testing.T, newA, newB func() state.Store) {
 	storeA := newA()
 	storeB := newB()
 
-	key := state.Key("conv-shared-name")
-	if _, err := storeA.Create(ctx, key, state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-shared-name", Title: "install-A-only"}); err != nil {
+	key := state.Key(convSharedName)
+	if _, err := storeA.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: convSharedName, Title: "install-A-only"}); err != nil {
 		t.Fatalf("Create on A: %v", err)
 	}
 
@@ -772,7 +789,7 @@ func testScopeIsolation(t *testing.T, newA, newB func() state.Store) {
 		t.Fatalf("List on B: %v", err)
 	}
 	for _, r := range listed {
-		if r.Name == "conv-shared-name" {
+		if r.Name == convSharedName {
 			t.Fatalf("B's listing includes A's record")
 		}
 	}
@@ -800,9 +817,9 @@ func testScopeIsolation(t *testing.T, newA, newB func() state.Store) {
 // with nothing silently lost.
 func testNoMultiRecordAtomicity(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	key := state.Key("conv-crash-between-writes")
-	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: "profile-default", Name: "conv-crash-between-writes", Phase: "Working"}); err != nil {
-		t.Fatalf("Create: %v", err)
+	key := state.Key(convCrashBetweenWrites)
+	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: convCrashBetweenWrites, Phase: "Working"}); err != nil {
+		t.Fatalf(fmtCreate, err)
 	}
 
 	// "Crash" before the input payload's blob is written: the conversation
@@ -817,14 +834,14 @@ func testNoMultiRecordAtomicity(t *testing.T, store state.Store) {
 
 	// The next reconciliation completes the owed input.
 	blobKey := state.Key("conv-crash-between-writes-input-1")
-	if err := store.PutBlob(ctx, blobKey, state.Blob{ConversationName: "conv-crash-between-writes", Type: "task", Payload: "owed-input"}); err != nil {
+	if err := store.PutBlob(ctx, blobKey, state.Blob{ConversationName: convCrashBetweenWrites, Type: "task", Payload: owedInput}); err != nil {
 		t.Fatalf("PutBlob (completing the owed write): %v", err)
 	}
 	blob, err := store.GetBlob(ctx, blobKey)
 	if err != nil {
 		t.Fatalf("GetBlob: %v", err)
 	}
-	if blob.Payload != "owed-input" {
-		t.Fatalf("Payload = %q, want %q", blob.Payload, "owed-input")
+	if blob.Payload != owedInput {
+		t.Fatalf("Payload = %q, want %q", blob.Payload, owedInput)
 	}
 }
