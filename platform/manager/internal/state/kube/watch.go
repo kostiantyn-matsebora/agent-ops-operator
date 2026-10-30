@@ -82,11 +82,23 @@ func runWatch(ctx context.Context, w watch.Interface, events chan<- state.Event)
 	}
 }
 
-// translateWatchEvent maps one apiserver watch.Event to a state.Event.
-// forward is false for watch.Bookmark (and anything else unrecognized):
-// nothing today resumes from a bookmark-only point, so there is nothing
-// useful to hand a consumer. watch.Error is handled by the caller before
-// this is reached (runWatch).
+// translateWatchEvent maps one apiserver watch.Event to a state.Event,
+// trusting the raw watch payload directly — never re-reading the object.
+// This forwards EVERY real write exactly once, in order, which is what the
+// "no gap" half of the contract rests on: Create and Update each land as
+// two apiserver calls (the main object, then the status subresource —
+// store.go's Update comment), so a consumer may see a spec change with the
+// PRIOR status still attached as its own, intermediate, genuinely-once-true
+// state. That is an accurate history, not a defect — a design that instead
+// re-read the object per notification was tried and reverted: under a
+// burst of rapid writes it let a slow consumer's catch-up collapse many
+// real intermediate states into repeats of whatever was CURRENT by the
+// time each notification was finally processed, which is a real gap wearing
+// the contract's own "duplicates permitted" sentence as cover. A caller
+// that wants a stable basis for its next write reads a snapshot's
+// Revision knowing a sibling call from the SAME logical operation may
+// still land after it — exactly as CAS already requires it to tolerate any
+// other writer.
 func translateWatchEvent(ev watch.Event) (state.Event, bool) {
 	switch ev.Type {
 	case watch.Added, watch.Modified:
