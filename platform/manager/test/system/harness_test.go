@@ -128,6 +128,60 @@ func run(m *testing.M) int {
 	return enforceSmokeBudget(code)
 }
 
+// restartManagerSchedulable rolls the manager without the plain
+// `rollout restart` deadlock: the chart runs 2 replicas with HARD pod
+// anti-affinity, this pack's cluster has one node, so the new ReplicaSet's
+// pods stay Pending behind the old ones ("1 out of 2 new replicas updated",
+// the nightly full tier failing at setup). Same mechanics as
+// forceManagerRollout (replicas_test.go), via kubectl since TestMain has no
+// *testing.T: clear the affinity, bump a template annotation so a new
+// ReplicaSet always exists, zero every ReplicaSet still carrying the old
+// affinity, force-delete its pods and any Pending pod of the current one.
+func restartManagerSchedulable(ctx context.Context, cluster *Cluster) error {
+	kc := func(args ...string) (string, error) {
+		return cluster.Kubectl(ctx, append([]string{"-n", Namespace}, args...)...)
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"agentops.dev/system-test-restarted-at":%q}},"spec":{"affinity":null}}}}`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	if out, err := kc("patch", "deployment/agentops-manager", "--type=merge", "-p", patch); err != nil {
+		return fmt.Errorf("manager restart patch: %w %s", err, out)
+	}
+	const sel = "app.kubernetes.io/name=agentops-manager"
+	const rsFmt = `jsonpath={range .items[*]}{.metadata.name}|{.metadata.labels.pod-template-hash}|{.spec.template.spec.affinity.podAntiAffinity}{"\n"}{end}`
+	var current string
+	deadline := time.Now().Add(30 * time.Second)
+	for current == "" && time.Now().Before(deadline) {
+		out, _ := kc("get", "rs", "-l", sel, "-o", rsFmt)
+		for _, line := range strings.Split(out, "\n") {
+			f := strings.Split(strings.TrimSpace(line), "|")
+			if len(f) < 3 {
+				continue
+			}
+			if f[2] == "" {
+				current = f[1]
+				continue
+			}
+			_, _ = kc("scale", "rs/"+f[0], "--replicas=0")
+			_, _ = kc("delete", "pods", "-l", "pod-template-hash="+f[1], "--grace-period=0", "--force", "--wait=false")
+		}
+		if current == "" {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	if current != "" {
+		// A pod that lost the first scheduling race sits in the scheduler's
+		// backoff queue; a fresh pod object gets an ordinary attempt.
+		out, _ := kc("get", "pods", "-l", "pod-template-hash="+current, "--field-selector=status.phase=Pending", "-o", "name")
+		for _, p := range strings.Fields(out) {
+			_, _ = kc("delete", p, "--grace-period=0", "--force", "--wait=false")
+		}
+	}
+	if out, err := kc("rollout", "status", "deployment/agentops-manager", "--timeout=5m"); err != nil {
+		return fmt.Errorf("manager restart: %w %s", err, out)
+	}
+	return nil
+}
+
 // resetReusedInstall: a reused install carries the previous run's
 // conversations and the manager's in-memory state — an open storage breaker,
 // above all. Start from a clean manager, as a fresh cluster would.
@@ -146,9 +200,8 @@ func resetReusedInstall(ctx context.Context, cluster *Cluster, k *Kube) error {
 	}
 	// rollout status waits for the OLD pod to be gone too, so the
 	// port-forward below cannot latch onto a terminating one.
-	_, _ = cluster.Kubectl(ctx, "-n", Namespace, "rollout", "restart", "deployment/agentops-manager")
-	if out, err := cluster.Kubectl(ctx, "-n", Namespace, "rollout", "status", "deployment/agentops-manager", "--timeout=3m"); err != nil {
-		return fmt.Errorf("manager restart: %w %s", err, out)
+	if err := restartManagerSchedulable(ctx, cluster); err != nil {
+		return err
 	}
 	// The restarted manager re-applies every adapter Deployment and their
 	// pods roll shortly after — a port-forward opened before that lands on
