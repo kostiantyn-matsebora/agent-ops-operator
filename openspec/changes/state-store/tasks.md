@@ -38,7 +38,7 @@
 ## 5. Chart selection — deployment-engineer
 
 - [x] 5.1 Add `stateStore.backend` to `chart/values.yaml`, default `kube`, with the comment stating the one-backend rule and that `kube` renders no bundle. Verify `helm template` renders with the default.
-- [x] 5.2 Add `agentops.stateStoreGuard` to `_helpers.tpl` beside `defaultRuntimeGuard`: fail the render naming the value on an unknown backend, on a selected backend whose bundle is disabled, or on two backend bundles enabled. Verify a chart render test for each of the three failures and for the default passing.
+- [x] 5.2 Add `agentops.stateStoreGuard` to `_helpers.tpl` beside `defaultRuntimeGuard`: fail the render naming the value on an unknown backend, on a selected backend whose bundle is disabled, or on two backend bundles enabled. Verify a chart render test for each of the three failures and for the default passing. Only the unknown-backend refusal and the default are render-tested: no backend bundle exists to enable, and a test-only `stateStore.bundles` value was removed rather than ship a public key for it. The bundle-off and two-bundles-on refusals are tested by the first backend bundle that adds its row to `agentops.stateStoreBackends`.
 - [x] 5.3 Render `STATE_BACKEND` into the manager Deployment from the selector. Verify the chart render test pins the env var NAME and value.
 
 ## 6. Unit tests
@@ -73,4 +73,4 @@ Verdict 8.7: `docs/configuration.md` carries a State store section opening "You 
 
 Fixed: undelivered-note settling now runs in the reconciler backstop and only for the run the note names; the expiry sweep lists only when armed; `kube.Store.Update` returns `ErrConflict` when a status retry meets a non-run change; the feed clears a rejected resume point and `kube` Watch requests and forwards bookmarks (`EventBookmark`); the static check covers dot-imports and untyped Conversation kinds; the chart tolerates `stateStore=null`.
 
-Deliberately not fixed: `Reconcile`'s `Get` then `ListRuns` stay two reads (sharing needs a combined `Store` read, which widens the contract); a cluster measurement of `kube` read cost is outstanding (the bench covers the in-memory store only); `stateStore.bundles` is left as is, awaiting the user's decision; `markDelivered` still clears whatever note the thread holds after a successful marker write (an older owed run no longer recorded has nothing left to re-derive).
+Deliberately not fixed: `Reconcile`'s `Get` then `ListRuns` stay two reads (sharing needs a combined `Store` read, which widens the contract); a cluster measurement of `kube` read cost is outstanding (the bench covers the in-memory store only); `markDelivered` still clears whatever note the thread holds after a successful marker write (an older owed run no longer recorded has nothing left to re-derive).

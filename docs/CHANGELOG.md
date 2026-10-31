@@ -15,8 +15,7 @@ for the source and the reference material beside this file.
 - A new values key, `stateStore.backend`, default `kube`. It selects where the
   manager keeps conversation state, and exactly one backend may be selected.
   `kube` is the Kubernetes API, as before, and it is the only backend this
-  release ships. The render refuses an unknown value. `stateStore.bundles` is
-  reserved for backend bundles and stays empty.
+  release ships. The render refuses an unknown value.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
   acknowledges. A separate consumer pool on the leader then claims it, spends

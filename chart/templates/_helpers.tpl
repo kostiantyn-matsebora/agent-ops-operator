@@ -237,21 +237,19 @@ the chosen entry as YAML, or nothing when no runtime is declared. */ -}}
 {{- if $pick -}}{{- toYaml $pick -}}{{- end -}}
 {{- end -}}
 
-{{- /* THE STATE-STORE BACKENDS: backend name -> the values key whose `.enabled`
-turns that backend's bundle on. `kube` is the baseline and has NO bundle. A later
-backend bundle adds its row HERE; `stateStore.bundles` is merged over this table
-so a render test (or a fork) can declare one without a template edit. */ -}}
+{{- /* THE STATE-STORE BACKENDS: the names of the backends that ship a bundle. A
+backend's bundle is the values key of the SAME name (`<backend>.enabled`), so
+there is nothing to map. `kube` is the baseline and has NO bundle. A later
+backend bundle adds its name HERE, and its render tests with it. */ -}}
 {{- define "agentops.stateStoreBackends" -}}
-{{- $table := dict -}}
-{{- range $b, $key := ((.Values.stateStore | default dict).bundles | default dict) -}}{{- $_ := set $table $b $key -}}{{- end -}}
-{{- toYaml $table -}}
+{{- toYaml (list) -}}
 {{- end -}}
 
 {{- /* THE STATE-STORE GUARD.
 
 `stateStore.backend` selects ONE backend and exactly that backend's bundle must
 be enabled. Fails the render, naming the value, on (a) a backend that is neither
-`kube` nor in the table, (b) a selected backend whose bundle is disabled, and
+`kube` nor in the list, (b) a selected backend whose bundle is disabled, and
 (c) a backend bundle enabled that is not the selected one — two bundles on, or
 one on beside `kube`.
 
@@ -259,29 +257,24 @@ IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects an
 interactive one. */ -}}
 {{- define "agentops.stateStoreGuard" -}}
 {{- $backend := ((.Values.stateStore | default dict).backend | default "kube") -}}
-{{- $table := fromYaml (include "agentops.stateStoreBackends" .) -}}
-{{- if and (ne $backend "kube") (not (hasKey $table $backend)) -}}
-{{- fail (printf "stateStore.backend=%q is not a known state backend (known: kube%s)" $backend (include "agentops.stateStoreKnownSuffix" $table)) -}}
+{{- $known := fromYamlArray (include "agentops.stateStoreBackends" .) -}}
+{{- if and (ne $backend "kube") (not (has $backend $known)) -}}
+{{- fail (printf "stateStore.backend=%q is not a known state backend (known: %s)" $backend (join ", " (concat (list "kube") $known))) -}}
 {{- end -}}
 {{- $on := list -}}
-{{- range $b, $key := $table -}}
-{{- if (index $.Values $key | default dict).enabled -}}{{- $on = append $on (printf "%s.enabled" $key) -}}{{- end -}}
+{{- range $b := $known -}}
+{{- if (index $.Values $b | default dict).enabled -}}{{- $on = append $on (printf "%s.enabled" $b) -}}{{- end -}}
 {{- end -}}
 {{- if gt (len $on) 1 -}}
 {{- fail (printf "more than one state backend bundle is enabled (%s); stateStore.backend=%q selects exactly one, so enable only its bundle" (join ", " (sortAlpha $on)) $backend) -}}
 {{- end -}}
 {{- if ne $backend "kube" -}}
-{{- $key := index $table $backend -}}
-{{- if not (index $.Values $key | default dict).enabled -}}
-{{- fail (printf "stateStore.backend=%q needs its bundle, but %s.enabled is false" $backend $key) -}}
+{{- if not (index $.Values $backend | default dict).enabled -}}
+{{- fail (printf "stateStore.backend=%q needs its bundle, but %s.enabled is false" $backend $backend) -}}
 {{- end -}}
 {{- else if $on -}}
 {{- fail (printf "%s is enabled but stateStore.backend=\"kube\" selects no bundle; select that backend or disable the bundle" (first $on)) -}}
 {{- end -}}
-{{- end -}}
-
-{{- define "agentops.stateStoreKnownSuffix" -}}
-{{- range $b, $_ := . }}, {{ $b }}{{ end -}}
 {{- end -}}
 
 {{- /* THE DEFAULT-RUNTIME GUARD.

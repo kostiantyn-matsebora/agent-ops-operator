@@ -44,11 +44,6 @@ maxQueuedConversations: 50
 # bundle. The manager reads the choice as STATE_BACKEND.
 stateStore:
   backend: kube
-  # backend -> name of the values key whose `.enabled` turns that backend's
-  # bundle on. EMPTY: no bundle ships yet. A backend bundle adds its row to the
-  # table in `agentops.stateStoreBackends`; this key exists so the guard's table
-  # can be extended without a template edit (the render tests use it).
-  bundles: {}
 
 # Signals are a durable message queue on the Kubernetes API (kind Signal):
 # /signal/inbound stores one per admitted signal, the leader's consumer pool

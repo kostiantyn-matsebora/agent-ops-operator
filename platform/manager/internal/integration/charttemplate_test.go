@@ -3628,13 +3628,6 @@ func TestStateBackendEnvIsRenderedFromTheSelector(t *testing.T) {
 	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"kube\"") {
 		t.Fatalf("manager Deployment must carry STATE_BACKEND=kube by default:\n%s", deploy)
 	}
-	fake := findDocByKindAndMetaName(helmTemplate(t,
-		"--set", "stateStore.backend=fakedb",
-		"--set", "stateStore.bundles.fakedb=fakedb",
-		"--set", "fakedb.enabled=true"), "Deployment", "agentops-manager")
-	if !strings.Contains(fake, "name: STATE_BACKEND\n              value: \"fakedb\"") {
-		t.Fatalf("STATE_BACKEND must follow stateStore.backend:\n%s", fake)
-	}
 }
 
 // `--set stateStore=null` removes the whole block; the guard and the env line
@@ -3646,38 +3639,17 @@ func TestStateStoreNullFallsBackToTheKubeDefault(t *testing.T) {
 	}
 }
 
-// The guard's table is empty of bundles today, so the render tests declare a
-// fake backend through stateStore.bundles (backend -> values key) and turn its
-// bundle on with <key>.enabled, which the guard reads like any real bundle.
+// The guard's table has no backend bundle today (kube renders none), so the
+// only refusal a render can reach is an unknown backend. The selected-bundle-off
+// and two-bundles-on refusals are exercised by the first backend bundle that adds
+// its row to agentops.stateStoreBackends.
 func TestStateStoreGuard(t *testing.T) {
-	fake := []string{"--set", "stateStore.bundles.fakedb=fakedb"}
-	other := []string{"--set", "stateStore.bundles.otherdb=otherdb"}
-	cases := []struct {
-		name string
-		args []string
-		want []string
-	}{
-		{"unknown backend", []string{"--set", "stateStore.backend=nope"},
-			[]string{"stateStore.backend=\"nope\"", "not a known state backend"}},
-		{"selected bundle disabled", append(append([]string{}, fake...), "--set", "stateStore.backend=fakedb"),
-			[]string{"stateStore.backend=\"fakedb\"", "fakedb.enabled is false"}},
-		{"two bundles enabled", append(append(append([]string{}, fake...), other...),
-			"--set", "stateStore.backend=fakedb", "--set", "fakedb.enabled=true", "--set", "otherdb.enabled=true"),
-			[]string{"more than one state backend bundle", "fakedb.enabled", "otherdb.enabled"}},
-		{"bundle enabled beside kube", append(append([]string{}, fake...), "--set", "fakedb.enabled=true"),
-			[]string{"fakedb.enabled is enabled", "kube"}},
+	msg := helmTemplateErr(t, "--set", "stateStore.backend=nope")
+	for _, w := range []string{"stateStore.backend=\"nope\"", "not a known state backend"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("failure must contain %q:\n%s", w, msg)
+		}
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			msg := helmTemplateErr(t, c.args...)
-			for _, w := range c.want {
-				if !strings.Contains(msg, w) {
-					t.Errorf("failure must contain %q:\n%s", w, msg)
-				}
-			}
-		})
-	}
-	// The default, and a coherent non-kube selection, both pass.
+	// The default passes.
 	helmTemplate(t)
-	helmTemplate(t, append(append([]string{}, fake...), "--set", "stateStore.backend=fakedb", "--set", "fakedb.enabled=true")...)
 }

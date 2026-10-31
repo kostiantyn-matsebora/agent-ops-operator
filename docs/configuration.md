@@ -606,7 +606,6 @@ is the Kubernetes API, as before.
 | Key | Default | Consequence |
 |---|---|---|
 | `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps the `Conversation` and `ConversationInput` custom resources, byte-identical, so `kubectl get conv` is unchanged |
-| `stateStore.bundles` | `{}` | reserved for backend bundles. Empty until a second backend ships, so leave it alone |
 
 **Exactly one backend is selected.** The render refuses anything else:
 
