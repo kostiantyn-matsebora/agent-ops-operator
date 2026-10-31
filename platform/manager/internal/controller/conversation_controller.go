@@ -7,15 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
@@ -34,6 +36,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
 
@@ -91,6 +94,12 @@ type ConversationReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	Runtime runtimepod.Config
+	// Store is the only way the reconciler reaches a Conversation or a queued
+	// input's payload (state-store design D-2). Its scope is one namespace;
+	// Namespace names it for the pods, ConfigMaps and channels that live beside
+	// the conversations, which stay Kubernetes objects under every backend.
+	Store     state.Store
+	Namespace string
 	// MaxActiveConversations caps simultaneously ACTIVE conversations — a
 	// conversation is active while a runtime pod exists for it. Counted from
 	// live pods, never from status: a pod stuck Pending on an unschedulable
@@ -185,21 +194,22 @@ func (r *ConversationReconciler) claimStaleness() time.Duration {
 func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var conv agentopsv1alpha1.Conversation
-	if err := r.Get(ctx, req.NamespacedName, &conv); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	key := state.Key(req.Name)
+	conv, _, err := r.Store.Get(ctx, key)
+	if err != nil {
+		return ctrl.Result{}, state.IgnoreNotFound(err)
 	}
 
 	// A conversation on its way out archives its threads first — by /close or by
 	// `kubectl delete conversation`, both take this path.
-	if !conv.DeletionTimestamp.IsZero() {
+	if conv.DeletionRequestedAt != nil {
 		return r.finalizeClose(ctx, &conv)
 	}
-	if !controllerutil.ContainsFinalizer(&conv, FinalizerCloseTopics) {
-		patch := client.MergeFrom(conv.DeepCopy())
-		controllerutil.AddFinalizer(&conv, FinalizerCloseTopics)
-		if err := r.Patch(ctx, &conv, patch); err != nil {
-			return ctrl.Result{}, err
+	if !slices.Contains(conv.Finalizers, FinalizerCloseTopics) {
+		if err := state.Patch(ctx, r.Store, &conv, func(c *state.ConversationRecord) {
+			c.Finalizers = append(c.Finalizers, FinalizerCloseTopics)
+		}); err != nil {
+			return ctrl.Result{}, state.IgnoreNotFound(err)
 		}
 	}
 
@@ -207,8 +217,12 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// topic, a ConfigMap, a pod, a work unit — and a closed conversation gets
 	// none of it. A closed conversation is not a place work can land, so
 	// there is nothing to prune toward either.
-	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+	if conv.Phase == state.PhaseClosed {
 		return r.reconcileClosed(ctx, &conv)
+	}
+	runs, err := r.Store.ListRuns(ctx, key)
+	if err != nil {
+		return ctrl.Result{}, state.IgnoreNotFound(err)
 	}
 
 	// The DEADLINE budget edge (design D-E): a Coordinator-rooted conversation
@@ -222,12 +236,12 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// requeue this pass would otherwise choose, so the reconciler is guaranteed
 	// to revisit no later than the deadline itself.
 	var deadlineRequeue time.Duration
-	if budget := conv.Status.Budget; budget != nil && budget.Deadline != nil && r.Router != nil {
-		if !budget.Deadline.Time.After(time.Now()) {
-			digest := fmt.Sprintf("budget-exceeded: deadline (%s) passed", budget.Deadline.Time.Format(time.RFC3339))
+	if budget := conv.Budget; budget != nil && budget.Deadline != nil && r.Router != nil {
+		if !budget.Deadline.After(time.Now()) {
+			digest := fmt.Sprintf("budget-exceeded: deadline (%s) passed", budget.Deadline.Format(time.RFC3339))
 			return ctrl.Result{}, r.Router.CloseBudgetExceeded(ctx, &conv, digest)
 		}
-		deadlineRequeue = time.Until(budget.Deadline.Time)
+		deadlineRequeue = time.Until(*budget.Deadline)
 	}
 
 	// input pruning: drop processed inputs from spec, GC consumed payload objects
@@ -242,7 +256,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// the conversation counting against the cap.
 	var pod corev1.Pod
 	podName := runtimepod.PodName(conv.Name)
-	podErr := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: podName}, &pod)
+	podErr := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: podName}, &pod)
 	podExists := podErr == nil
 
 	if podExists && (pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed) {
@@ -251,11 +265,11 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, err
 		}
 		podExists = false
-		if conv.Status.Inflight != nil || conv.Status.RuntimePod != "" {
-			patch := client.MergeFrom(conv.DeepCopy())
-			conv.Status.Inflight = nil
-			conv.Status.RuntimePod = ""
-			if err := r.Status().Patch(ctx, &conv, patch); err != nil {
+		if conv.Inflight != nil || conv.RuntimePod != "" {
+			if err := state.Patch(ctx, r.Store, &conv, func(c *state.ConversationRecord) {
+				c.Inflight = nil
+				c.RuntimePod = ""
+			}); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -361,7 +375,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// is claimed before this notice and it lands somewhere that can take
 		// it. The op id is stable per reopen, so re-deriving it every pass is
 		// what makes it survive a restart mid-reopen without saying it twice.
-		if conv.Status.Reopens > 0 && r.Router != nil {
+		if conv.Reopens > 0 && r.Router != nil {
 			r.Router.FanOutReopenNotice(ctx, &conv)
 		}
 		// The escalation digest (design D-D): the ensure-topic enqueue above and
@@ -373,9 +387,9 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// Input delivery, PARALLEL to dispatch rather than sequenced with it:
 		// the human reads the event while the agent is already working, and a
 		// run that hangs or dies still leaves the thread saying what happened.
-		chat.DeliverInputs(ctx, r.Client, r.Ops, &conv)
+		chat.DeliverInputs(ctx, chat.Env{Reader: r.Client, Store: r.Store, Namespace: r.Namespace}, r.Ops, &conv)
 		// The BACKSTOP that makes a reply derivable rather than queue-resident.
-		if err := r.deliverRunReplies(ctx, &conv); err != nil {
+		if err := r.deliverRunReplies(ctx, &conv, runs); err != nil {
 			logger.Error(err, "re-deriving undelivered run replies")
 		}
 	}
@@ -386,7 +400,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// gave up retrying. Independent of chat topics entirely: a caused
 	// conversation binds no channel, so this must not be gated on r.Ops.
 	if r.Router != nil {
-		if err := r.deliverMemberResults(ctx, &conv); err != nil {
+		if err := r.deliverMemberResults(ctx, &conv, runs); err != nil {
 			logger.Error(err, "re-deriving unrouted member results")
 		}
 	}
@@ -402,11 +416,11 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// phase bookkeeping
-	phase := agentopsv1alpha1.ConversationIdle
-	if conv.Status.Inflight != nil {
-		phase = agentopsv1alpha1.ConversationWorking
+	phase := state.PhaseIdle
+	if conv.Inflight != nil {
+		phase = state.PhaseWorking
 	} else if len(pending) > 0 {
-		phase = agentopsv1alpha1.ConversationQueued
+		phase = state.PhaseQueued
 	}
 	if err := r.setPhase(ctx, &conv, phase); err != nil {
 		return ctrl.Result{}, err
@@ -418,7 +432,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if needsWorker {
 		return capRequeue(ctrl.Result{RequeueAfter: 60 * time.Second}, deadlineRequeue), nil
 	}
-	result, err := r.autoClose(ctx, &conv, podExists)
+	result, err := r.autoClose(ctx, &conv, runs, podExists)
 	return capRequeue(result, deadlineRequeue), err
 }
 
@@ -444,14 +458,16 @@ func capRequeue(result ctrl.Result, extra time.Duration) ctrl.Result {
 // conversation with exactly the state this decision needs, so a periodic List
 // would re-read everything to act on almost nothing — and would produce the
 // burst the requeue avoids.
-func (r *ConversationReconciler) autoClose(ctx context.Context, conv *agentopsv1alpha1.Conversation, podExists bool) (ctrl.Result, error) {
+func (r *ConversationReconciler) autoClose(ctx context.Context, conv *state.ConversationRecord,
+	runs []state.Run, podExists bool) (ctrl.Result, error) {
+
 	if !r.AutoCloseEnabled || r.AutoCloseIdleAge <= 0 || r.Router == nil {
 		return ctrl.Result{}, nil
 	}
-	if !finished(conv, podExists) {
+	if !finished(conv, runs, podExists) {
 		return ctrl.Result{}, nil
 	}
-	idle := time.Since(lastActivity(conv))
+	idle := time.Since(lastActivity(conv, runs))
 	if idle < r.AutoCloseIdleAge {
 		return ctrl.Result{RequeueAfter: jitter(r.AutoCloseIdleAge - idle)}, nil
 	}
@@ -468,30 +484,30 @@ func (r *ConversationReconciler) autoClose(ctx context.Context, conv *agentopsv1
 // unclaimed send op. A long window makes that unlikely, not impossible — an
 // adapter down for the length of the window is exactly when it happens — and
 // closing then archives the thread out from under the answer.
-func finished(conv *agentopsv1alpha1.Conversation, podExists bool) bool {
-	if conv.Status.Phase != agentopsv1alpha1.ConversationIdle {
+func finished(conv *state.ConversationRecord, runs []state.Run, podExists bool) bool {
+	if conv.Phase != state.PhaseIdle {
 		return false
 	}
 	if dispatch.NeedsWorker(conv) || podExists {
 		return false
 	}
-	return allRunsDelivered(conv)
+	return allRunsDelivered(conv, runs)
 }
 
 // allRunsDelivered reports whether every recorded run reached every bound
 // channel. A conversation with no bound channels is trivially delivered — there
 // is no thread for an answer to be owed to.
-func allRunsDelivered(conv *agentopsv1alpha1.Conversation) bool {
-	if len(conv.Spec.ChannelRefs) == 0 {
+func allRunsDelivered(conv *state.ConversationRecord, runs []state.Run) bool {
+	if len(conv.ChannelRefs) == 0 {
 		return true
 	}
-	for i := range conv.Status.Runs {
-		run := &conv.Status.Runs[i]
+	for i := range runs {
+		run := &runs[i]
 		if !run.DeliveryTracked {
 			continue // pre-upgrade run: backfilled as delivered, never sent
 		}
-		for _, ref := range conv.Spec.ChannelRefs {
-			if !run.DeliveredTo(ref.Name) {
+		for _, ref := range conv.ChannelRefs {
+			if !run.DeliveredTo(ref) {
 				return false
 			}
 		}
@@ -506,22 +522,22 @@ func allRunsDelivered(conv *agentopsv1alpha1.Conversation) bool {
 // answered an hour ago simply because it was opened last week, which is the one
 // outcome nobody asks for. This is the same instant the console shows as the
 // conversation's age, so the list and the behaviour agree.
-func lastActivity(conv *agentopsv1alpha1.Conversation) time.Time {
+func lastActivity(conv *state.ConversationRecord, runs []state.Run) time.Time {
 	var last time.Time
 	note := func(t time.Time) {
 		if t.After(last) {
 			last = t
 		}
 	}
-	if conv.Status.LastActivity != nil {
-		note(conv.Status.LastActivity.Time)
+	if conv.LastActivity != nil {
+		note(*conv.LastActivity)
 	}
-	for i := range conv.Spec.Inputs {
-		note(conv.Spec.Inputs[i].ReceivedAt.Time)
+	for i := range conv.Inputs {
+		note(conv.Inputs[i].ReceivedAt)
 	}
-	for i := range conv.Status.Runs {
-		if f := conv.Status.Runs[i].FinishedAt; f != nil {
-			note(f.Time)
+	for i := range runs {
+		if f := runs[i].FinishedAt; f != nil {
+			note(*f)
 		}
 	}
 	// Creation is the FALLBACK, not a floor: a conversation that has run is
@@ -529,7 +545,7 @@ func lastActivity(conv *agentopsv1alpha1.Conversation) time.Time {
 	// with creation instead would make a freshly-adopted conversation look busy
 	// for a whole window because the object is young.
 	if last.IsZero() {
-		return conv.CreationTimestamp.Time
+		return conv.CreatedAt
 	}
 	return last
 }
@@ -562,13 +578,13 @@ func (r *ConversationReconciler) startDeadline() time.Duration {
 // runtimeStartCooldown reports how much of the post-failure backoff is left.
 // Derived from the failure count and the last failure stamp — never stored —
 // so nothing can disagree about when the next attempt is due.
-func (r *ConversationReconciler) runtimeStartCooldown(conv *agentopsv1alpha1.Conversation, now time.Time) time.Duration {
-	last := conv.Status.LastRuntimeStartFailure
-	if last == nil || conv.Status.RuntimeStartFailures <= 0 {
+func (r *ConversationReconciler) runtimeStartCooldown(conv *state.ConversationRecord, now time.Time) time.Duration {
+	last := conv.LastRuntimeStartFailure
+	if last == nil || conv.RuntimeStartFailures <= 0 {
 		return 0
 	}
-	elapsed := now.Sub(last.Time)
-	if wait := runtimeStartBackoff(conv.Status.RuntimeStartFailures) - elapsed; wait > 0 {
+	elapsed := now.Sub(*last)
+	if wait := runtimeStartBackoff(conv.RuntimeStartFailures) - elapsed; wait > 0 {
 		return wait
 	}
 	return 0
@@ -580,7 +596,7 @@ func (r *ConversationReconciler) runtimeStartCooldown(conv *agentopsv1alpha1.Con
 // The condition message carries the pod's own words. A message reading only
 // "start deadline exceeded" would reproduce the very failure this exists to
 // end: fifteen hours in which nothing said what was wrong.
-func (r *ConversationReconciler) reapUnstartedPod(ctx context.Context, conv *agentopsv1alpha1.Conversation, pod *corev1.Pod) error {
+func (r *ConversationReconciler) reapUnstartedPod(ctx context.Context, conv *state.ConversationRecord, pod *corev1.Pod) error {
 	fail := classifyStuckPod(pod)
 	logger := log.FromContext(ctx)
 	logger.Info("reaping a runtime pod that never started",
@@ -595,7 +611,7 @@ func (r *ConversationReconciler) reapUnstartedPod(ctx context.Context, conv *age
 		return err
 	}
 	if r.Recorder != nil {
-		r.Recorder.Event(conv, corev1.EventTypeWarning, fail.Reason,
+		r.Recorder.Event(r.eventRef(conv), corev1.EventTypeWarning, fail.Reason,
 			"runtime pod "+pod.Name+" never started: "+fail.Message)
 	}
 	// ONLY a storage-attributable failure is evidence about storage. An
@@ -609,47 +625,73 @@ func (r *ConversationReconciler) reapUnstartedPod(ctx context.Context, conv *age
 		}
 	}
 
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.RuntimePod = ""
-	// Inflight is NOT cleared here. A pod that never started ran nothing, so
-	// there is no work to re-dispatch and nothing to reconcile away; the input
-	// is still pending and will be dispatched to the replacement pod.
-	conv.Status.RuntimeStartFailures++
-	now := metav1.Now()
-	conv.Status.LastRuntimeStartFailure = &now
-	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-		Type:    ConditionRuntimeStarted,
-		Status:  metav1.ConditionFalse,
-		Reason:  fail.Reason,
-		Message: fail.Message,
+	return state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.RuntimePod = ""
+		// Inflight is NOT cleared here. A pod that never started ran nothing, so
+		// there is no work to re-dispatch and nothing to reconcile away; the input
+		// is still pending and will be dispatched to the replacement pod.
+		c.RuntimeStartFailures++
+		now := time.Now().UTC()
+		c.LastRuntimeStartFailure = &now
+		c.SetCondition(state.Condition{
+			Type:    ConditionRuntimeStarted,
+			Status:  state.ConditionFalse,
+			Reason:  fail.Reason,
+			Message: fail.Message,
+		})
 	})
-	return r.Status().Patch(ctx, conv, patch)
+}
+
+// eventRef names a conversation for a Kubernetes event. An event is a report
+// and never a control path, so a reference is all it needs — the record is not
+// a Kubernetes object under every backend.
+func (r *ConversationReconciler) eventRef(conv *state.ConversationRecord) *corev1.ObjectReference {
+	return &corev1.ObjectReference{
+		APIVersion: agentopsv1alpha1.GroupVersion.String(), Kind: conversationKind,
+		Namespace: r.Namespace, Name: conv.Name, UID: types.UID(conv.ID),
+	}
+}
+
+// conversationKind is the kind an owner reference or event reference names.
+const conversationKind = "Conversation"
+
+// ownerOf is the owner a runtime pod or ConfigMap carries a controller
+// reference to. Built from the record's identity alone (design D-7): the
+// owner link is the second net under explicit release, and it only needs the
+// kind, name and UID, not a Kubernetes object to read them from.
+func (r *ConversationReconciler) ownerOf(conv *state.ConversationRecord) *metav1.PartialObjectMetadata {
+	return &metav1.PartialObjectMetadata{
+		TypeMeta: metav1.TypeMeta{APIVersion: agentopsv1alpha1.GroupVersion.String(), Kind: conversationKind},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: r.Namespace, Name: conv.Name, UID: types.UID(conv.ID),
+		},
+	}
 }
 
 // clearRuntimeStartFailure records that a runtime pod finally started, resetting
 // the backoff. Writes only on an actual change, so a healthy conversation does
 // not spend a status patch per reconcile.
-func (r *ConversationReconciler) clearRuntimeStartFailure(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	existing := apimeta.FindStatusCondition(conv.Status.Conditions, ConditionRuntimeStarted)
-	if conv.Status.RuntimeStartFailures == 0 && conv.Status.LastRuntimeStartFailure == nil &&
-		existing != nil && existing.Status == metav1.ConditionTrue {
+func (r *ConversationReconciler) clearRuntimeStartFailure(ctx context.Context, conv *state.ConversationRecord) error {
+	existing := conv.FindCondition(ConditionRuntimeStarted)
+	if conv.RuntimeStartFailures == 0 && conv.LastRuntimeStartFailure == nil &&
+		existing != nil && existing.Status == state.ConditionTrue {
 		return nil
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.RuntimeStartFailures = 0
-	conv.Status.LastRuntimeStartFailure = nil
-	// Only conversations that have actually failed to start carry this
-	// condition. A conversation whose pods have always come up stays
-	// condition-free rather than accumulating a permanent "everything is fine".
-	if existing != nil {
-		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-			Type:    ConditionRuntimeStarted,
-			Status:  metav1.ConditionTrue,
-			Reason:  ReasonStarted,
-			Message: "runtime pod is running",
-		})
-	}
-	return r.Status().Patch(ctx, conv, patch)
+	return state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.RuntimeStartFailures = 0
+		c.LastRuntimeStartFailure = nil
+		// Only conversations that have actually failed to start carry this
+		// condition. A conversation whose pods have always come up stays
+		// condition-free rather than accumulating a permanent "everything is fine".
+		if c.FindCondition(ConditionRuntimeStarted) != nil {
+			c.SetCondition(state.Condition{
+				Type:    ConditionRuntimeStarted,
+				Status:  state.ConditionTrue,
+				Reason:  ReasonStarted,
+				Message: "runtime pod is running",
+			})
+		}
+	})
 }
 
 // reconcileClosed is the whole of a closed conversation's lifecycle: tear down
@@ -666,22 +708,22 @@ func (r *ConversationReconciler) clearRuntimeStartFailure(ctx context.Context, c
 // thread missing from status.threadsArchived is an archive still owed, and this
 // pass re-derives it after any restart. The op id is stable per
 // conversation×channel, so enqueueing on every pass dedups.
-func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
+func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *state.ConversationRecord) (ctrl.Result, error) {
 	if err := r.releaseWorkload(ctx, conv); err != nil {
 		return ctrl.Result{}, err
 	}
-	if conv.Status.Inflight != nil || conv.Status.RuntimePod != "" {
-		patch := client.MergeFrom(conv.DeepCopy())
-		conv.Status.Inflight = nil
-		conv.Status.RuntimePod = ""
-		if err := r.Status().Patch(ctx, conv, patch); err != nil {
+	if conv.Inflight != nil || conv.RuntimePod != "" {
+		if err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+			c.Inflight = nil
+			c.RuntimePod = ""
+		}); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	if r.Ops != nil {
-		for _, t := range conv.Status.Threads {
-			if conv.Status.ThreadArchived(t.Channel) {
+		for _, t := range conv.Threads {
+			if conv.ThreadArchived(t.Channel) {
 				continue
 			}
 			if t.ThreadID == "" {
@@ -696,7 +738,7 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 				continue
 			}
 			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: t.Channel}, &ch); err != nil {
 				continue // channel gone: nothing left to archive on it
 			}
 			if ch.Spec.Adapter == "" {
@@ -717,14 +759,14 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 // Grace 0: the run, if any, was abandoned and nobody is waiting for its
 // output, so a graceful shutdown would only hold the capacity slot longer.
 // Absence is not an error: both are routinely already gone.
-func (r *ConversationReconciler) releaseWorkload(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+func (r *ConversationReconciler) releaseWorkload(ctx context.Context, conv *state.ConversationRecord) error {
 	pod := &corev1.Pod{}
-	pod.Namespace, pod.Name = conv.Namespace, runtimepod.PodName(conv.Name)
+	pod.Namespace, pod.Name = r.Namespace, runtimepod.PodName(conv.Name)
 	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 	cm := &corev1.ConfigMap{}
-	cm.Namespace, cm.Name = conv.Namespace, convMCPConfigMapName(conv.Name)
+	cm.Namespace, cm.Name = r.Namespace, convMCPConfigMapName(conv.Name)
 	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -738,17 +780,17 @@ func (r *ConversationReconciler) releaseWorkload(ctx context.Context, conv *agen
 // the clock. Applies to Closed conversations only: a never-closed conversation
 // is never auto-deleted however idle it is, because the two stages are separate
 // decisions with separate flags.
-func (r *ConversationReconciler) autoDelete(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
-	if !r.AutoDeleteEnabled || r.AutoDeleteClosedAge <= 0 || conv.Status.ClosedAt == nil {
+func (r *ConversationReconciler) autoDelete(ctx context.Context, conv *state.ConversationRecord) (ctrl.Result, error) {
+	if !r.AutoDeleteEnabled || r.AutoDeleteClosedAge <= 0 || conv.ClosedAt == nil {
 		return ctrl.Result{}, nil
 	}
-	elapsed := time.Since(conv.Status.ClosedAt.Time)
+	elapsed := time.Since(*conv.ClosedAt)
 	if elapsed < r.AutoDeleteClosedAge {
 		return ctrl.Result{RequeueAfter: jitter(r.AutoDeleteClosedAge - elapsed)}, nil
 	}
 	log.FromContext(ctx).Info("auto-deleting a long-closed conversation",
 		"conversation", conv.Name, "closedFor", elapsed.Round(time.Minute), "window", r.AutoDeleteClosedAge)
-	return ctrl.Result{}, client.IgnoreNotFound(r.Delete(ctx, conv))
+	return ctrl.Result{}, r.Store.Delete(ctx, state.Key(conv.Name))
 }
 
 // jitter spreads a requeue by up to 10%, so an install whose conversations all
@@ -773,9 +815,9 @@ func jitter(d time.Duration) time.Duration {
 // Enqueueing on every pass is safe — the op id is stable per
 // conversation×channel, so it dedups against both the pending op and the
 // completed one.
-func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
+func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *state.ConversationRecord) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	if !controllerutil.ContainsFinalizer(conv, FinalizerCloseTopics) {
+	if !slices.Contains(conv.Finalizers, FinalizerCloseTopics) {
 		return ctrl.Result{}, nil
 	}
 
@@ -788,9 +830,9 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 
 	outstanding := false
 	if r.Ops != nil {
-		for _, t := range conv.Status.Threads {
+		for _, t := range conv.Threads {
 			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: t.Channel}, &ch); err != nil {
 				continue // channel gone: nobody left to tell
 			}
 			if ch.Spec.Adapter == "" {
@@ -807,16 +849,17 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 			}
 		}
 	}
-	if outstanding && time.Since(conv.DeletionTimestamp.Time) < r.closeGrace() {
+	if outstanding && time.Since(*conv.DeletionRequestedAt) < r.closeGrace() {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	if outstanding {
 		logger.Info("close-topic grace expired; releasing the conversation with threads still open",
 			"conversation", conv.Name)
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	controllerutil.RemoveFinalizer(conv, FinalizerCloseTopics)
-	return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, conv, patch))
+	err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.Finalizers = slices.DeleteFunc(c.Finalizers, func(f string) bool { return f == FinalizerCloseTopics })
+	})
+	return ctrl.Result{}, state.IgnoreNotFound(err)
 }
 
 // liveRuntimePods lists the runtime pods that consume capacity: Running or
@@ -848,8 +891,8 @@ func (r *ConversationReconciler) liveRuntimePods(ctx context.Context, ns string)
 // EVICTABLE (its conversation has nothing inflight and nothing queued) —
 // createRuntimePod does the eviction, and admitting on that basis is what keeps
 // a burst from blocking behind a worker that is doing nothing.
-func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alpha1.Conversation) (bool, error) {
-	live, err := r.liveRuntimePods(ctx, conv.Namespace)
+func (r *ConversationReconciler) admit(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
+	live, err := r.liveRuntimePods(ctx, r.Namespace)
 	if err != nil {
 		return false, err
 	}
@@ -860,14 +903,14 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 
 	free := r.MaxActiveConversations - len(live)
 	if free <= 0 {
-		free = r.evictableCount(ctx, conv.Namespace, live)
+		free = r.evictableCount(ctx, live)
 	}
 	if free <= 0 {
 		return false, nil
 	}
 
-	var list agentopsv1alpha1.ConversationList
-	if err := r.List(ctx, &list, client.InNamespace(conv.Namespace)); err != nil {
+	all, err := r.Store.List(ctx, state.ByAll, state.ListKey{})
+	if err != nil {
 		return false, err
 	}
 	now := time.Now()
@@ -875,10 +918,10 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 	// needs a worker and holds none is waiting, whether it has been marked
 	// Pending yet or has only just been created. Keying on phase would let a
 	// brand-new conversation reconciled first jump an older one.
-	var waiting []agentopsv1alpha1.Conversation
-	for i := range list.Items {
-		c := &list.Items[i]
-		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] || !dispatch.NeedsWorker(c) {
+	var waiting []state.ConversationRecord
+	for i := range all {
+		c := &all[i]
+		if c.DeletionRequestedAt != nil || hasPod[c.Name] || !dispatch.NeedsWorker(c) {
 			continue
 		}
 		// Closed is inert: it will never be given a pod, so leaving it in the
@@ -886,7 +929,7 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 		// of a Pending one in FIFO order and starve it. Its inputs, if it was
 		// closed holding any, stay on the object untouched — they are part of
 		// the record a reopen restores, not work owed.
-		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		if c.Phase == state.PhaseClosed {
 			continue
 		}
 		// A conversation still serving out a start-failure backoff will not be
@@ -900,8 +943,8 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 		waiting = append(waiting, *c)
 	}
 	sort.Slice(waiting, func(i, j int) bool {
-		if !waiting[i].CreationTimestamp.Equal(&waiting[j].CreationTimestamp) {
-			return waiting[i].CreationTimestamp.Before(&waiting[j].CreationTimestamp)
+		if !waiting[i].CreatedAt.Equal(waiting[j].CreatedAt) {
+			return waiting[i].CreatedAt.Before(waiting[j].CreatedAt)
 		}
 		return waiting[i].Name < waiting[j].Name // stable tiebreak within a second
 	})
@@ -919,11 +962,11 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *agentopsv1alph
 // those whose conversation has nothing inflight and nothing queued. Eviction
 // deletes only the pod — the conversation and its session survive and it gets a
 // fresh pod on its next input.
-func (r *ConversationReconciler) evictableCount(ctx context.Context, ns string, live []corev1.Pod) int {
+func (r *ConversationReconciler) evictableCount(ctx context.Context, live []corev1.Pod) int {
 	n := 0
 	for _, p := range live {
-		var c agentopsv1alpha1.Conversation
-		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: p.Labels[runtimepod.LabelConversation]}, &c); err != nil {
+		c, _, err := r.Store.Get(ctx, state.Key(p.Labels[runtimepod.LabelConversation]))
+		if err != nil {
 			continue
 		}
 		if !dispatch.NeedsWorker(&c) {
@@ -948,26 +991,26 @@ const ReasonStorageUnavailable = "StorageUnavailable"
 // enterPendingFor holds a conversation in Pending and records WHY on the
 // RuntimeStarted condition, so a queue that has stopped moving explains itself
 // where an operator is already looking.
-func (r *ConversationReconciler) enterPendingFor(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason, message string) error {
-	patch := client.MergeFrom(conv.DeepCopy())
-	if apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-		Type:    ConditionRuntimeStarted,
-		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
-	}) {
-		if err := r.Status().Patch(ctx, conv, patch); err != nil {
-			return err
-		}
+func (r *ConversationReconciler) enterPendingFor(ctx context.Context, conv *state.ConversationRecord, reason, message string) error {
+	// Written only on an actual change: Mutate skips a write that changes nothing.
+	if err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.SetCondition(state.Condition{
+			Type:    ConditionRuntimeStarted,
+			Status:  state.ConditionFalse,
+			Reason:  reason,
+			Message: message,
+		})
+	}); err != nil {
+		return err
 	}
 	return r.enterPending(ctx, conv)
 }
 
-func (r *ConversationReconciler) enterPending(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if conv.Status.Phase == agentopsv1alpha1.ConversationPending {
+func (r *ConversationReconciler) enterPending(ctx context.Context, conv *state.ConversationRecord) error {
+	if conv.Phase == state.PhasePending {
 		return nil
 	}
-	if err := r.setPhase(ctx, conv, agentopsv1alpha1.ConversationPending); err != nil {
+	if err := r.setPhase(ctx, conv, state.PhasePending); err != nil {
 		return err
 	}
 	r.notifyQueued(ctx, conv)
@@ -979,37 +1022,35 @@ func (r *ConversationReconciler) enterPending(ctx context.Context, conv *agentop
 // what the phase suppresses — so the notice goes to the originating channel's
 // general surface; a conversation that already earned a thread on an earlier
 // admission is told there instead, where the person is looking.
-func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
-	if r.Ops == nil || len(conv.Spec.ChannelRefs) == 0 {
+func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *state.ConversationRecord) {
+	if r.Ops == nil || len(conv.ChannelRefs) == 0 {
 		return
 	}
-	ref := conv.Spec.ChannelRefs[0]
+	ref := conv.ChannelRefs[0]
 	var ch agentopsv1alpha1.Channel
-	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
 		return
 	}
-	r.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref.Name), chat.Notice(
+	r.Ops.EnqueueMessage(ctx, &ch, conv, conv.ThreadFor(ref), chat.Notice(
 		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up."))
 }
 
-func (r *ConversationReconciler) setPhase(ctx context.Context, conv *agentopsv1alpha1.Conversation, phase agentopsv1alpha1.ConversationPhase) error {
-	if conv.Status.Phase == phase {
+func (r *ConversationReconciler) setPhase(ctx context.Context, conv *state.ConversationRecord, phase string) error {
+	if conv.Phase == phase {
 		return nil
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.Phase = phase
-	return r.Status().Patch(ctx, conv, patch)
+	return state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) { c.Phase = phase })
 }
 
 // ensureTopics enqueues topic creation for every bound channel lacking a
 // thread binding; reports whether any are still pending. Dangling channelRefs
 // are skipped (that channel stays chat-less) without blocking the others.
-func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentopsv1alpha1.Conversation) (bool, error) {
+func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
 	pending := false
 	var firstErr error
-	for _, ref := range conv.Spec.ChannelRefs {
-		existing := conv.ThreadFor(ref.Name)
-		archived := conv.Status.ThreadArchived(ref.Name)
+	for _, ref := range conv.ChannelRefs {
+		existing := conv.ThreadFor(ref)
+		archived := conv.ThreadArchived(ref)
 		// A thread that exists and is not archived is a live thread: nothing to
 		// do. A thread that exists and IS archived belongs to a conversation
 		// that was closed and reopened, and needs re-establishing — carrying
@@ -1018,7 +1059,7 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 			continue
 		}
 		var ch agentopsv1alpha1.Channel
-		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -1034,7 +1075,7 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 		// an op genuinely in flight with an adapter; re-enqueuing it here would
 		// not change what the in-memory queue already holds, but it would race
 		// the claim write against nothing, for no reason. See claimEnsureTopic.
-		claimed, err := r.claimEnsureTopic(ctx, conv.Namespace, conv.Name, ref.Name)
+		claimed, err := r.claimEnsureTopic(ctx, conv.Name, ref)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -1067,53 +1108,50 @@ func (r *ConversationReconciler) ensureTopics(ctx context.Context, conv *agentop
 // already held by this leader is outstanding — the op is genuinely in flight
 // with an adapter and nothing new is dispatched this pass.
 //
-// Does its own fresh Get/patch retry rather than reusing the caller's
+// Does its own fresh read-and-swap retry rather than reusing the caller's
 // (possibly several-reconcile-functions-old) copy: every other writer in this
-// file that touches Conversation status does the same, for the same
+// file that touches the conversation does the same, for the same
 // optimistic-concurrency reason (see finishEnsureTopic, markDelivered).
-func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, namespace, name, channel string) (bool, error) {
-	for attempt := 0; attempt < 5; attempt++ {
-		var conv agentopsv1alpha1.Conversation
-		if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &conv); err != nil {
-			return false, client.IgnoreNotFound(err)
+func (r *ConversationReconciler) claimEnsureTopic(ctx context.Context, name, channel string) (bool, error) {
+	claimed := false
+	_, err := state.Mutate(ctx, r.Store, state.Key(name), func(conv *state.ConversationRecord) error {
+		claimed = false
+		if r.holdsLiveClaim(conv, channel) {
+			return nil
 		}
-		if r.holdsLiveClaim(&conv, channel) {
-			return false, nil
+		r.setClaim(conv, channel)
+		claimed = true
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, state.ErrConflict) {
+			return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s: %w", channel, name, err)
 		}
-		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		r.setClaim(&conv, channel)
-		err := r.Status().Patch(ctx, &conv, patch)
-		if err == nil {
-			return true, nil
-		}
-		if !apierrors.IsConflict(err) {
-			return false, client.IgnoreNotFound(err)
-		}
+		return false, state.IgnoreNotFound(err)
 	}
-	return false, fmt.Errorf("conflict claiming ensure-topic for %s on conversation %s", channel, name)
+	return claimed, nil
 }
 
 // holdsLiveClaim reports whether THIS replica's claim on the channel's
 // ensure-topic is still inside the staleness bound.
-func (r *ConversationReconciler) holdsLiveClaim(conv *agentopsv1alpha1.Conversation, channel string) bool {
-	existing := conv.Status.Thread(channel)
+func (r *ConversationReconciler) holdsLiveClaim(conv *state.ConversationRecord, channel string) bool {
+	existing := conv.Thread(channel)
 	if existing == nil || existing.Claim == nil {
 		return false
 	}
 	return existing.Claim.Holder == r.ReplicaIdentity &&
-		time.Since(existing.Claim.ClaimedAt.Time) <= r.claimStaleness()
+		time.Since(existing.Claim.ClaimedAt) <= r.claimStaleness()
 }
 
 // setClaim stamps this replica's claim on the channel's binding, creating the
 // binding when none exists yet.
-func (r *ConversationReconciler) setClaim(conv *agentopsv1alpha1.Conversation, channel string) {
-	claim := &agentopsv1alpha1.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: metav1.Time{Time: time.Now()}}
-	if binding := conv.Status.Thread(channel); binding != nil {
+func (r *ConversationReconciler) setClaim(conv *state.ConversationRecord, channel string) {
+	claim := &state.OpClaim{Holder: r.ReplicaIdentity, ClaimedAt: time.Now().UTC()}
+	if binding := conv.Thread(channel); binding != nil {
 		binding.Claim = claim
 		return
 	}
-	conv.Status.Threads = append(conv.Status.Threads,
-		agentopsv1alpha1.ThreadBinding{Channel: channel, Claim: claim})
+	conv.Threads = append(conv.Threads, state.ThreadBinding{Channel: channel, Claim: claim})
 }
 
 // deliverEscalation posts the digest an `escalate` call snapshotted
@@ -1123,31 +1161,31 @@ func (r *ConversationReconciler) setClaim(conv *agentopsv1alpha1.Conversation, c
 // the decision made visible on one already running). A conversation that
 // never escalated, or whose threads are not established yet, gets nothing —
 // Ops itself is what makes a second delivery a no-op.
-func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
-	if conv.Status.EscalatedAt == nil || r.Ops == nil {
+func (r *ConversationReconciler) deliverEscalation(ctx context.Context, conv *state.ConversationRecord) {
+	if conv.EscalatedAt == nil || r.Ops == nil {
 		return
 	}
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
-		r.Ops.EnqueueEscalationMessage(ctx, ch, conv, tid, chat.Notice(conv.Status.EscalationMessage))
+		r.Ops.EnqueueEscalationMessage(ctx, ch, conv, tid, chat.Notice(conv.EscalationMessage))
 	})
 }
 
 // eachBoundThread mirrors chat.Router's own helper of the same shape: every
 // bound channel that already has a thread, so a send to one that does not
 // exist yet is never queued.
-func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *state.ConversationRecord,
 	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
 
-	for _, ref := range conv.Spec.ChannelRefs {
-		if ref.Name == skip {
+	for _, ref := range conv.ChannelRefs {
+		if ref == skip {
 			continue
 		}
-		tid := conv.ThreadFor(ref.Name)
+		tid := conv.ThreadFor(ref)
 		if tid == nil {
 			continue
 		}
 		var ch agentopsv1alpha1.Channel
-		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
 			continue
 		}
 		fn(&ch, tid)
@@ -1158,19 +1196,19 @@ func (r *ConversationReconciler) eachBoundThread(ctx context.Context, conv *agen
 // The manager supplies facts — route, source, title, labels, lane — and no
 // formatting: Telegram caps forum topics at 128 characters and takes no markup,
 // a web chat has neither limit, and neither constraint belongs here.
-func (r *ConversationReconciler) topicDescriptor(ctx context.Context, conv *agentopsv1alpha1.Conversation) chat.TopicDescriptor {
+func (r *ConversationReconciler) topicDescriptor(ctx context.Context, conv *state.ConversationRecord) chat.TopicDescriptor {
 	d := chat.TopicDescriptor{
 		Conversation: conv.Name,
-		Title:        conv.Spec.Title,
+		Title:        conv.Title,
 		Pipeline:     r.inferredPipeline(ctx, conv),
 	}
 	// The FIRST input is what opened the conversation, so it names the lane and
 	// the source the topic is about; later recurrences share both.
-	for i := range conv.Spec.Inputs {
-		if o := conv.Spec.Inputs[i].Origin; o != nil {
+	for i := range conv.Inputs {
+		if o := conv.Inputs[i].Origin; o != nil {
 			d.Source, d.Kind = o.Name, o.SignalKind
-			if payload := chat.InputPayload(ctx, r.Client, conv.Namespace, &conv.Spec.Inputs[i]); payload != nil {
-				d.Labels = payload.Spec.Labels
+			if payload, ok := chat.InputPayload(ctx, r.Store, &conv.Inputs[i]); ok {
+				d.Labels = payload.Labels
 			}
 			break
 		}
@@ -1182,8 +1220,8 @@ func (r *ConversationReconciler) topicDescriptor(ctx context.Context, conv *agen
 // the bindings are ambiguous. Conversations record no pipelineRef on purpose —
 // this is the same inference /status and the console already use, and a blank
 // answer is the honest one rather than a guess.
-func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
-	if p := chat.PipelineForConversation(ctx, r.Client, conv.Namespace, conv); p != nil {
+func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *state.ConversationRecord) string {
+	if p := chat.PipelineForConversation(ctx, r.Client, r.Namespace, conv); p != nil {
 		return p.Name
 	}
 	return ""
@@ -1205,8 +1243,10 @@ func (r *ConversationReconciler) inferredPipeline(ctx context.Context, conv *age
 //     delivered rather than sent (see RunStatus.DeliveryTracked). That is the
 //     one migration hazard: without it, upgrading would re-post every recent
 //     answer to every bound thread.
-func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if len(conv.Spec.ChannelRefs) == 0 || len(conv.Status.Runs) == 0 {
+func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *state.ConversationRecord,
+	runs []state.Run) error {
+
+	if len(conv.ChannelRefs) == 0 || len(runs) == 0 {
 		return nil
 	}
 	// Threads, not channelRefs: a channel whose topic does not exist yet has
@@ -1214,14 +1254,14 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 	// come back here.
 	var backfill []string
 	owed := map[string]bool{}
-	for i := range conv.Status.Runs {
-		run := &conv.Status.Runs[i]
+	for i := range runs {
+		run := &runs[i]
 		if !run.DeliveryTracked {
 			backfill = append(backfill, run.RunID)
 			continue
 		}
 		msg := chat.RunReplyMessage(run)
-		for _, t := range conv.Status.Threads {
+		for _, t := range conv.Threads {
 			if run.DeliveredTo(t.Channel) || !conv.BoundTo(t.Channel) {
 				continue
 			}
@@ -1239,7 +1279,7 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 				continue
 			}
 			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: t.Channel}, &ch); err != nil ||
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: t.Channel}, &ch); err != nil ||
 				ch.Spec.Adapter == "" {
 				continue
 			}
@@ -1251,33 +1291,34 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *ag
 	if len(backfill) == 0 {
 		return nil
 	}
-	return r.backfillDelivered(ctx, conv, backfill)
+	return r.backfillDelivered(ctx, conv, backfill, runs)
 }
 
 // deliverMemberResults is the reconciler backstop for coordination-loop's
 // "member's result becomes an input on its parent" rule: any run on THIS
 // conversation not yet marked RoutedToParent gets appended again (idempotent
 // per its dedup id) and marked once that succeeds.
-func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if conv.Spec.CausedBy == nil {
+func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv *state.ConversationRecord,
+	runs []state.Run) error {
+
+	if conv.CausedBy == nil {
 		return nil
 	}
 	var firstErr error
-	for i := range conv.Status.Runs {
-		run := &conv.Status.Runs[i]
+	for i := range runs {
+		run := &runs[i]
 		if run.RoutedToParent {
 			continue
 		}
 		dedup := "member:" + conv.Name + ":" + run.RunID
-		if err := r.Router.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name, dedup, run.Result); err != nil {
+		if err := r.Router.AppendMemberResult(ctx, conv.CausedBy, conv.Name, dedup, run.Result); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		patch := client.MergeFrom(conv.DeepCopy())
-		run.RoutedToParent = true
-		if err := r.Status().Patch(ctx, conv, patch); err != nil && firstErr == nil {
+		if err := r.Store.UpdateRun(ctx, state.Key(conv.Name), run.RunID,
+			state.RunUpdate{MarkRoutedToParent: true}); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -1290,10 +1331,10 @@ func (r *ConversationReconciler) deliverMemberResults(ctx context.Context, conv 
 // where is not actionable — one wedged transport among three bound channels
 // looks identical to all three being down.
 func (r *ConversationReconciler) setDeliveryPendingCondition(ctx context.Context,
-	conv *agentopsv1alpha1.Conversation, owed map[string]bool) {
+	conv *state.ConversationRecord, owed map[string]bool) {
 
-	cond := metav1.Condition{
-		Type: ConditionDeliveryPending, Status: metav1.ConditionFalse,
+	cond := state.Condition{
+		Type: ConditionDeliveryPending, Status: state.ConditionFalse,
 		Reason: "AllDelivered", Message: "every recorded run has reached every bound thread",
 	}
 	if len(owed) > 0 {
@@ -1302,20 +1343,16 @@ func (r *ConversationReconciler) setDeliveryPendingCondition(ctx context.Context
 			names = append(names, c)
 		}
 		sort.Strings(names) // stable: a condition that reshuffles reads as a change
-		cond.Status = metav1.ConditionTrue
+		cond.Status = state.ConditionTrue
 		cond.Reason = "Undelivered"
 		cond.Message = "answers recorded but not yet posted to: " + strings.Join(names, ", ")
 	}
 	// Nothing to say about a conversation that has never produced an answer.
-	if cond.Status == metav1.ConditionFalse &&
-		apimeta.FindStatusCondition(conv.Status.Conditions, ConditionDeliveryPending) == nil {
+	if cond.Status == state.ConditionFalse && conv.FindCondition(ConditionDeliveryPending) == nil {
 		return
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	if !apimeta.SetStatusCondition(&conv.Status.Conditions, cond) {
-		return // unchanged: do not spend a write per reconcile
-	}
-	if err := r.Status().Patch(ctx, conv, patch); err != nil {
+	// Unchanged writes nothing: Mutate does not spend a write per reconcile.
+	if err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) { c.SetCondition(cond) }); err != nil {
 		log.FromContext(ctx).Error(err, "patching DeliveryPending condition", "conversation", conv.Name)
 	}
 }
@@ -1323,45 +1360,28 @@ func (r *ConversationReconciler) setDeliveryPendingCondition(ctx context.Context
 // backfillDelivered records pre-upgrade runs as delivered to every bound
 // channel WITHOUT enqueueing anything. Their replies were posted by the manager
 // that ran them; the markers simply did not exist yet.
-func (r *ConversationReconciler) backfillDelivered(ctx context.Context, conv *agentopsv1alpha1.Conversation, runIDs []string) error {
-	want := map[string]bool{}
+func (r *ConversationReconciler) backfillDelivered(ctx context.Context, conv *state.ConversationRecord,
+	runIDs []string, runs []state.Run) error {
+
+	byID := map[string]*state.Run{}
+	for i := range runs {
+		byID[runs[i].RunID] = &runs[i]
+	}
 	for _, id := range runIDs {
-		want[id] = true
-	}
-	for attempt := 0; attempt < 5; attempt++ {
-		var fresh agentopsv1alpha1.Conversation
-		if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Name}, &fresh); err != nil {
-			return client.IgnoreNotFound(err)
+		run := byID[id]
+		if run == nil || run.DeliveryTracked {
+			continue
 		}
-		patch := client.MergeFrom(fresh.DeepCopy())
-		changed := false
-		for i := range fresh.Status.Runs {
-			run := &fresh.Status.Runs[i]
-			if !want[run.RunID] || run.DeliveryTracked {
-				continue
-			}
-			// Tracked from here on, and already delivered as far as anyone can
-			// tell — which is the honest record: this manager never owed it.
-			run.DeliveryTracked = true
-			for _, ref := range conv.Spec.ChannelRefs {
-				if !run.DeliveredTo(ref.Name) {
-					run.Delivered = append(run.Delivered, ref.Name)
-				}
-			}
-			changed = true
-		}
-		if !changed {
-			return nil
-		}
-		err := r.Status().Patch(ctx, &fresh, patch)
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return err
+		// Tracked from here on, and already delivered as far as anyone can
+		// tell — which is the honest record: this manager never owed it.
+		err := r.Store.UpdateRun(ctx, state.Key(conv.Name), id, state.RunUpdate{
+			MarkDeliveryTracked: true, MarkDelivered: conv.ChannelRefs,
+		})
+		if err != nil && !errors.Is(err, state.ErrNotFound) {
+			return fmt.Errorf("backfilling delivery markers on %s: %w", conv.Name, err)
 		}
 	}
-	return fmt.Errorf("conflict backfilling delivery markers on %s", conv.Name)
+	return nil
 }
 
 // pruneProcessed removes queue entries dispatch has consumed, and deletes the
@@ -1375,17 +1395,17 @@ func (r *ConversationReconciler) backfillDelivered(ctx context.Context, conv *ag
 // guarantee this depends on, and it is one-directional: recording afterwards
 // would let a crash in between destroy what somebody said, with the queue entry
 // gone and nothing to re-read it from.
-func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if len(conv.Status.ProcessedInputIDs) == 0 {
+func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *state.ConversationRecord) error {
+	if len(conv.ProcessedInputIDs) == 0 {
 		return nil
 	}
 	done := map[string]bool{}
-	for _, id := range conv.Status.ProcessedInputIDs {
+	for _, id := range conv.ProcessedInputIDs {
 		done[id] = true
 	}
-	var keep []agentopsv1alpha1.InputItem
-	var prune []agentopsv1alpha1.InputItem
-	for _, in := range conv.Spec.Inputs {
+	var keep []state.InputItem
+	var prune []state.InputItem
+	for _, in := range conv.Inputs {
 		if done[in.ID] {
 			prune = append(prune, in)
 		} else {
@@ -1395,17 +1415,14 @@ func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agent
 	if len(prune) == 0 {
 		return nil
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Spec.Inputs = keep
-	if err := r.Patch(ctx, conv, patch); err != nil {
+	if err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.Inputs = slices.DeleteFunc(c.Inputs, func(in state.InputItem) bool { return done[in.ID] })
+	}); err != nil {
 		return err
 	}
 	for _, in := range prune {
-		if in.PayloadRef != nil {
-			ci := &agentopsv1alpha1.ConversationInput{}
-			ci.Namespace = conv.Namespace
-			ci.Name = in.PayloadRef.Name
-			if err := r.Delete(ctx, ci); err != nil && !apierrors.IsNotFound(err) {
+		if in.PayloadRef != "" {
+			if err := r.Store.DeleteBlob(ctx, in.PayloadRef); err != nil {
 				return err
 			}
 		}
@@ -1417,10 +1434,10 @@ func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *agent
 // admission decided against a possibly stale cache, so this is the last word —
 // and evicts an idle worker when that is what a slot costs. Returns
 // created=false when every slot is held by a busy conversation.
-func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *agentopsv1alpha1.Conversation) (bool, error) {
+func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *state.ConversationRecord) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	live, err := r.liveRuntimePods(ctx, conv.Namespace)
+	live, err := r.liveRuntimePods(ctx, r.Namespace)
 	if err != nil {
 		return false, err
 	}
@@ -1433,14 +1450,14 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		var cands []cand
 		for _, p := range live {
 			cn := p.Labels[runtimepod.LabelConversation]
-			var c agentopsv1alpha1.Conversation
-			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: cn}, &c); err != nil {
+			c, _, err := r.Store.Get(ctx, state.Key(cn))
+			if err != nil {
 				continue
 			}
 			if !dispatch.NeedsWorker(&c) {
-				last := c.CreationTimestamp.Time
-				if c.Status.LastActivity != nil {
-					last = c.Status.LastActivity.Time
+				last := c.CreatedAt
+				if c.LastActivity != nil {
+					last = *c.LastActivity
 				}
 				cands = append(cands, cand{p, last})
 			}
@@ -1458,7 +1475,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 	}
 
 	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: conv.ProfileRef}, &profile); err != nil {
 		return false, err
 	}
 	mcpRes, mcpCM, err := r.ensureMCPConfigMap(ctx, conv)
@@ -1470,17 +1487,17 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		if errors.As(err, &rawExclusive) {
 			reason = "RawConfigNotExclusive"
 		}
-		r.setToolingCondition(ctx, conv, metav1.ConditionFalse, reason, err.Error())
+		r.setToolingCondition(ctx, conv, state.ConditionFalse, reason, err.Error())
 		return false, err
 	}
-	r.setToolingCondition(ctx, conv, metav1.ConditionTrue, "Resolved", "")
+	r.setToolingCondition(ctx, conv, state.ConditionTrue, "Resolved", "")
 
 	// resolve the execution backend from the conversation's OWN snapshot:
 	// conv.runtimeRef -> profile.runtimeRef (deprecated) -> "default" CR ->
 	// bootstrap, with conv.serviceAccountName overriding the runtime's identity.
 	// The Pipeline is deliberately absent — its choice was resolved into these
 	// fields at creation, so editing it cannot re-wire this pod.
-	resolved, err := runtimepod.ResolveFor(ctx, r.Client, conv.Namespace, conv, r.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, r.Client, r.Store, r.Namespace, conv, r.Runtime)
 	if err != nil {
 		return false, err
 	}
@@ -1502,12 +1519,12 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		resolved.Config.ContextPVC = ""
 		resolved.ContextSync = nil
 		logger.Info("starting a runtime pod WITHOUT its context volume; the conversation has lost its memory",
-			"conversation", conv.Name, "failures", conv.Status.RuntimeStartFailures)
+			"conversation", conv.Name, "failures", conv.RuntimeStartFailures)
 	}
 
 	pod := runtimepod.Build(conv, &profile, mcpRes, mcpCM, resolved, r.MasterToken)
-	pod.Namespace = conv.Namespace
-	if err := controllerutil.SetControllerReference(conv, pod, r.Scheme); err != nil {
+	pod.Namespace = r.Namespace
+	if err := controllerutil.SetControllerReference(r.ownerOf(conv), pod, r.Scheme); err != nil {
 		return false, err
 	}
 	if err := r.Create(ctx, pod); err != nil {
@@ -1527,28 +1544,28 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *age
 		Detail:       "runtime pod created" + degradedSuffix(degraded),
 	})
 
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.RuntimePod = pod.Name
-	// What mediation actually covers, judged from the endpoints just compiled.
-	// A conversation with one unenforceable endpoint is not mostly mediated, and
-	// an operator who enabled the feature has every reason to think otherwise
-	// unless told.
-	applyMediationCondition(conv, mediationCondition(mcpRes, resolved.EgressMediation))
-	if degraded {
-		// The handle names a context this pod cannot reach. Clearing it is what
-		// stops the next run failing a continuation that can never succeed —
-		// and the condition is what stops the loss being silent.
-		conv.Status.RuntimeContextID = ""
-		conv.Status.SessionID = ""
-		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-			Type:   ConditionContextContinuity,
-			Status: metav1.ConditionFalse,
-			Reason: "ContextVolumeUnusable",
-			Message: "the context volume could not be attached after repeated attempts; " +
-				"this conversation is running without its previous memory",
-		})
-	}
-	return true, r.Status().Patch(ctx, conv, patch)
+	return true, state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.RuntimePod = pod.Name
+		// What mediation actually covers, judged from the endpoints just compiled.
+		// A conversation with one unenforceable endpoint is not mostly mediated, and
+		// an operator who enabled the feature has every reason to think otherwise
+		// unless told.
+		applyMediationCondition(c, mediationCondition(mcpRes, resolved.EgressMediation))
+		if degraded {
+			// The handle names a context this pod cannot reach. Clearing it is what
+			// stops the next run failing a continuation that can never succeed —
+			// and the condition is what stops the loss being silent.
+			c.RuntimeContextID = ""
+			c.SessionID = ""
+			c.SetCondition(state.Condition{
+				Type:   ConditionContextContinuity,
+				Status: state.ConditionFalse,
+				Reason: "ContextVolumeUnusable",
+				Message: "the context volume could not be attached after repeated attempts; " +
+					"this conversation is running without its previous memory",
+			})
+		}
+	})
 }
 
 // degradedStartAfter is how many consecutive storage-attributable start
@@ -1562,14 +1579,14 @@ const degradedStartAfter = 5
 
 // contextLost reports whether this conversation should start without its
 // context volume.
-func (r *ConversationReconciler) contextLost(conv *agentopsv1alpha1.Conversation) bool {
-	if conv.Status.RuntimeStartFailures < degradedStartAfter {
+func (r *ConversationReconciler) contextLost(conv *state.ConversationRecord) bool {
+	if conv.RuntimeStartFailures < degradedStartAfter {
 		return false
 	}
 	// Only when the recorded reason was about STORAGE. A conversation whose
 	// pods could not be scheduled must never be stripped of its context — it
 	// would lose its memory for a capacity problem.
-	cond := apimeta.FindStatusCondition(conv.Status.Conditions, ConditionRuntimeStarted)
+	cond := conv.FindCondition(ConditionRuntimeStarted)
 	return cond != nil && cond.Reason == ReasonVolumeUnavailable
 }
 
@@ -1582,20 +1599,20 @@ func (r *ConversationReconciler) contextLost(conv *agentopsv1alpha1.Conversation
 // A conversation with no binding compiles to an empty document — no servers,
 // which is what an unwired conversation should get.
 func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context,
-	conv *agentopsv1alpha1.Conversation) (mcpcompile.Result, string, error) {
+	conv *state.ConversationRecord) (mcpcompile.Result, string, error) {
 
 	var (
 		configs []agentopsv1alpha1.MCPConfigSpec
 		names   []string
 	)
-	if binding := conv.Spec.MCPConfigs; binding != nil {
+	if binding := conv.MCPConfigs; binding != nil {
 		for _, ref := range binding.Refs {
 			var mc agentopsv1alpha1.MCPConfig
-			if err := r.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &mc); err != nil {
-				return mcpcompile.Result{}, "", fmt.Errorf("bound MCPConfig %q: %w", ref.Name, err)
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &mc); err != nil {
+				return mcpcompile.Result{}, "", fmt.Errorf("bound MCPConfig %q: %w", ref, err)
 			}
 			configs = append(configs, mc.Spec)
-			names = append(names, ref.Name)
+			names = append(names, ref)
 		}
 	}
 	res, err := mcpcompile.Compile(configs, names)
@@ -1606,28 +1623,27 @@ func (r *ConversationReconciler) ensureMCPConfigMap(ctx context.Context,
 		return res, "", nil
 	}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-		Name: convMCPConfigMapName(conv.Name), Namespace: conv.Namespace,
+		Name: convMCPConfigMapName(conv.Name), Namespace: r.Namespace,
 	}}
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		cm.Data = map[string]string{"mcp.json": res.JSON}
-		return controllerutil.SetControllerReference(conv, cm, r.Scheme)
+		return controllerutil.SetControllerReference(r.ownerOf(conv), cm, r.Scheme)
 	})
 	return res, cm.Name, err
 }
 
 // setToolingCondition surfaces binding resolution on the conversation.
 // Conversations without bindings carry no such condition.
-func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	status metav1.ConditionStatus, reason, message string) {
+func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *state.ConversationRecord,
+	status, reason, message string) {
 
-	if conv.Spec.MCPConfigs == nil && conv.Spec.Toolsets == nil {
+	if conv.MCPConfigs == nil && conv.Toolsets == nil {
 		return
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-		Type: ConditionToolingResolved, Status: status, Reason: reason, Message: message,
+	err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		c.SetCondition(state.Condition{Type: ConditionToolingResolved, Status: status, Reason: reason, Message: message})
 	})
-	if err := r.Status().Patch(ctx, conv, patch); err != nil {
+	if err != nil {
 		log.FromContext(ctx).Error(err, "patching ToolingResolved condition", "conversation", conv.Name)
 	}
 }
@@ -1638,20 +1654,20 @@ func (r *ConversationReconciler) setToolingCondition(ctx context.Context, conv *
 // Owns(&corev1.Pod{}) cannot do this — it routes a pod event to the pod's OWN
 // conversation, which is precisely the conversation that no longer needs the
 // slot. Without this watch a freed slot waits on the 30 s requeue backstop.
-func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, _ client.Object) []reconcile.Request {
-	var list agentopsv1alpha1.ConversationList
-	if err := r.List(ctx, &list); err != nil {
+func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, obj client.Object) []reconcile.Request {
+	// The store is scoped to one namespace (design D-2), so a pod beside another
+	// install's conversations has nothing to wake here.
+	if obj != nil && obj.GetNamespace() != "" && obj.GetNamespace() != r.Namespace {
 		return nil
 	}
-	var pending []agentopsv1alpha1.Conversation
-	for i := range list.Items {
-		if list.Items[i].Status.Phase == agentopsv1alpha1.ConversationPending && list.Items[i].DeletionTimestamp.IsZero() {
-			pending = append(pending, list.Items[i])
-		}
+	pending, err := r.Store.List(ctx, state.ByPhase, state.ListKey{Phase: state.PhasePending})
+	if err != nil {
+		return nil
 	}
+	pending = slices.DeleteFunc(pending, func(c state.ConversationRecord) bool { return c.DeletionRequestedAt != nil })
 	sort.Slice(pending, func(i, j int) bool {
-		if !pending[i].CreationTimestamp.Equal(&pending[j].CreationTimestamp) {
-			return pending[i].CreationTimestamp.Before(&pending[j].CreationTimestamp)
+		if !pending[i].CreatedAt.Equal(pending[j].CreatedAt) {
+			return pending[i].CreatedAt.Before(pending[j].CreatedAt)
 		}
 		return pending[i].Name < pending[j].Name
 	})
@@ -1668,7 +1684,7 @@ func (r *ConversationReconciler) MapRuntimePodToPending(ctx context.Context, _ c
 	out := make([]reconcile.Request, 0, len(pending))
 	for i := range pending {
 		out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: pending[i].Namespace, Name: pending[i].Name,
+			Namespace: r.Namespace, Name: pending[i].Name,
 		}})
 	}
 	return out
@@ -1679,11 +1695,19 @@ func isRuntimePod(obj client.Object) bool {
 	return obj.GetLabels()[runtimepod.LabelApp] == runtimepod.LabelAppValue
 }
 
-// SetupWithManager wires the controller.
+// SetupWithManager wires the controller. The conversations themselves arrive on
+// the store's feed (design D-6) rather than from an informer on the CRD; a
+// runtime pod is still a Kubernetes object under every backend, so its events
+// stay on the manager's cache.
+//
+// Owns(&corev1.Pod{}) is spelled out as a Watches on the pod with the owner
+// read off its controller reference: the builder's Owns needs For(<the
+// Conversation type>), which is the dependency this change removes.
 func (r *ConversationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&agentopsv1alpha1.Conversation{}).
-		Owns(&corev1.Pod{}).
+		Named("conversation").
+		WatchesRawSource(source.Func(r.startFeed)).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.mapPodToOwner)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.MapRuntimePodToPending),
 			builder.WithPredicates(predicate.Funcs{
 				CreateFunc:  func(event.CreateEvent) bool { return false },
@@ -1692,6 +1716,20 @@ func (r *ConversationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				DeleteFunc:  func(e event.DeleteEvent) bool { return isRuntimePod(e.Object) },
 			})).
 		Complete(r)
+}
+
+// mapPodToOwner routes a pod event to the conversation that controls the pod,
+// exactly what Owns(&corev1.Pod{}) did.
+func (r *ConversationReconciler) mapPodToOwner(_ context.Context, obj client.Object) []reconcile.Request {
+	ref := metav1.GetControllerOf(obj)
+	if ref == nil || ref.Kind != conversationKind {
+		return nil
+	}
+	gv, err := schema.ParseGroupVersion(ref.APIVersion)
+	if err != nil || gv.Group != agentopsv1alpha1.GroupVersion.Group {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: ref.Name}}}
 }
 
 // degradedSuffix names a pod started without its context volume, so the reason

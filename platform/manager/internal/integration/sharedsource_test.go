@@ -246,7 +246,7 @@ func TestAttributionIsExactForIdenticallyWiredPipelines(t *testing.T) {
 		if len(convs) != 1 {
 			t.Fatalf("%s: want 1 conversation, got %d", name, len(convs))
 		}
-		p := chat.PipelineForConversation(ctx, k8sClient, ns, &convs[0])
+		p := chat.PipelineForConversation(ctx, k8sClient, ns, recOf(t, convs[0].Name))
 		if p == nil || p.Name != name {
 			t.Fatalf("%s: attribution must read the recorded origin, got %v", name, p)
 		}

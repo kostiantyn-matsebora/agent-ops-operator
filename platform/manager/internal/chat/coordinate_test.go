@@ -12,22 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
-
-// indexConversationIDForTest is internal/controller.SetupConversationIndexes'
-// own extractor, DUPLICATED rather than imported: internal/controller already
-// imports internal/chat for its own reconcilers, so the reverse import would
-// cycle — the same shape this package's other duplicated constants
-// (runtimepod.DeriveCoordinatorToken's sibling) are pinned against. Nothing
-// here needs the cross-package pin a production path would, since this fake
-// client is the only consumer.
-func indexConversationIDForTest(obj client.Object) []string {
-	conv := obj.(*agentopsv1alpha1.Conversation)
-	if conv.Spec.ConversationID == "" {
-		return nil
-	}
-	return []string{conv.Spec.ConversationID}
-}
 
 func coordFixture(t *testing.T, objs ...client.Object) (*Router, client.Client) {
 	t.Helper()
@@ -40,14 +26,13 @@ func coordFixtureIntercepting(t *testing.T, funcs interceptor.Funcs, objs ...cli
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
-		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, indexConversationIDForTest).
 		WithObjects(objs...).
 		WithInterceptorFuncs(funcs).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
-	return &Router{Client: c, Reader: c, Namespace: testNS, Ops: q}, c
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	return &Router{Client: c, Reader: c, Store: newTestStore(c), Namespace: testNS, Ops: q}, c
 }
 
-// statusPatchRecorder is a SubResourcePatch interceptor that records the name
+// statusPatchRecorder is a SubResourceUpdate interceptor that records the name
 // of every object whose status is patched, in call order, and refuses the
 // patch for failOn while it is set — the close cascade's only status write is
 // closeConversationReason's, so the recorded order IS the close order.
@@ -57,17 +42,17 @@ type statusPatchRecorder struct {
 	err    error
 }
 
-func (rec *statusPatchRecorder) patch(ctx context.Context, cli client.Client, subResourceName string,
-	obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+func (rec *statusPatchRecorder) update(ctx context.Context, cli client.Client, subResourceName string,
+	obj client.Object, opts ...client.SubResourceUpdateOption) error {
 	if rec.failOn != "" && obj.GetName() == rec.failOn {
 		return rec.err
 	}
 	rec.order = append(rec.order, obj.GetName())
-	return cli.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+	return cli.SubResource(subResourceName).Update(ctx, obj, opts...)
 }
 
 func (rec *statusPatchRecorder) funcs() interceptor.Funcs {
-	return interceptor.Funcs{SubResourcePatch: rec.patch}
+	return interceptor.Funcs{SubResourceUpdate: rec.update}
 }
 
 // causedMember is a LIVE member conversation of parent, labelled and
@@ -150,7 +135,7 @@ func TestInvokeMemberCreatesANewConversation(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
-	result, err := r.InvokeMember(context.Background(), caller, "worker", "look into it")
+	result, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "look into it")
 	if err != nil {
 		t.Fatalf("InvokeMember: %v", err)
 	}
@@ -189,11 +174,11 @@ func TestInvokeMemberAttachesToALiveMemberOfTheSameEntry(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
-	first, err := r.InvokeMember(context.Background(), caller, "worker", "first task")
+	first, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "first task")
 	if err != nil {
 		t.Fatalf("first invoke: %v", err)
 	}
-	second, err := r.InvokeMember(context.Background(), caller, "worker", "second task")
+	second, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "second task")
 	if err != nil {
 		t.Fatalf("second invoke: %v", err)
 	}
@@ -217,7 +202,7 @@ func TestInvokeMemberRefusesAnUnknownAgent(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, co, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "nope", "task"); err != ErrUnknownAgent {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "nope", "task"); err != ErrUnknownAgent {
 		t.Fatalf("want ErrUnknownAgent, got %v", err)
 	}
 }
@@ -227,7 +212,7 @@ func TestInvokeMemberRefusesANonCoordinatorCaller(t *testing.T) {
 	caller.Name, caller.Namespace = "plain-1", testNS
 	r, _ := coordFixture(t, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "worker", "task"); err != ErrNotCoordinatorRoot {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "task"); err != ErrNotCoordinatorRoot {
 		t.Fatalf("want ErrNotCoordinatorRoot, got %v", err)
 	}
 }
@@ -248,7 +233,7 @@ func TestInvokeMemberRefusesACycle(t *testing.T) {
 
 	r, _ := coordFixture(t, coA, coB, root, member)
 
-	if _, err := r.InvokeMember(context.Background(), member, "loopback", "task"); err != ErrCoordinatorCycle {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, member.Name), "loopback", "task"); err != ErrCoordinatorCycle {
 		t.Fatalf("want ErrCoordinatorCycle, got %v", err)
 	}
 }
@@ -263,7 +248,7 @@ func TestInvokeMemberRefusesADirectCycle(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, coA, root)
 
-	if _, err := r.InvokeMember(context.Background(), root, "loopback", "task"); err != ErrCoordinatorCycle {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, root.Name), "loopback", "task"); err != ErrCoordinatorCycle {
 		t.Fatalf("want ErrCoordinatorCycle, got %v", err)
 	}
 }
@@ -284,7 +269,7 @@ func TestInvokeMemberCreatesANestedCoordinatorMember(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
 	r, c := coordFixture(t, coA, coB, root)
 
-	out, err := r.InvokeMember(context.Background(), root, "nested", "delegate this")
+	out, err := r.InvokeMember(context.Background(), recOf(t, r.Store, root.Name), "nested", "delegate this")
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -327,7 +312,7 @@ func TestNestedCoordinatorBudgetIsIndependentOfItsAncestor(t *testing.T) {
 
 	r, c := coordFixture(t, coA, coB, root, nested, testCapability("cap-helper", "profile-helper"), testProfile("profile-helper"))
 
-	if _, err := r.InvokeMember(context.Background(), nested, "helper", "task"); err != nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, nested.Name), "helper", "task"); err != nil {
 		t.Fatalf("InvokeMember on the nested coordinator: %v", err)
 	}
 	var gotNested, gotRoot agentopsv1alpha1.Conversation
@@ -351,7 +336,7 @@ func TestInvokeMemberRefusesAtMaxAgentsAndClosesTheCaller(t *testing.T) {
 	caller.Status.Budget = &agentopsv1alpha1.ConversationBudget{MaxAgents: 1, AgentsInvoked: 1}
 	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
-	if _, err := r.InvokeMember(context.Background(), caller, "worker", "task"); err != ErrMaxAgents {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "task"); err != ErrMaxAgents {
 		t.Fatalf("want ErrMaxAgents, got %v", err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -390,7 +375,7 @@ func TestInvokeMemberRefusesAtMaxAgentsAndBubblesWhenCallerIsNested(t *testing.T
 	r, c := coordFixture(t, testCoordinator("co-a"), co, root, nestedCaller,
 		testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
-	if _, err := r.InvokeMember(context.Background(), nestedCaller, "worker", "task"); err != ErrMaxAgents {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, nestedCaller.Name), "worker", "task"); err != ErrMaxAgents {
 		t.Fatalf("want ErrMaxAgents, got %v", err)
 	}
 	var gotCaller, gotRoot agentopsv1alpha1.Conversation
@@ -413,7 +398,7 @@ func TestCloseCoordinatedSelf(t *testing.T) {
 	caller.Spec.Signal = &agentopsv1alpha1.SignalProvenance{SourceRef: &agentopsv1alpha1.ObjectRef{Name: "alerts"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), caller)
 
-	if err := r.CloseCoordinated(context.Background(), caller, "root-1", "resolved: done"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "root-1", "resolved: done"); err != nil {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -427,7 +412,7 @@ func TestCloseCoordinatedRequiresAReason(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller)
 
-	if err := r.CloseCoordinated(context.Background(), caller, "root-1", ""); err == nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "root-1", ""); err == nil {
 		t.Fatal("a coordinator's close with no reason must be refused")
 	}
 }
@@ -445,7 +430,7 @@ func TestCloseCoordinatedDirectMemberCascadesToGrandchildren(t *testing.T) {
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, member, grandchild)
 
-	if err := r.CloseCoordinated(context.Background(), root, member.Name, "budget-exceeded"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), member.Name, "budget-exceeded"); err != nil {
 		t.Fatal(err)
 	}
 	var gotMember, gotGrandchild agentopsv1alpha1.Conversation
@@ -472,7 +457,7 @@ func TestCloseCoordinatedCascadeClosesChildrenBeforeAncestors(t *testing.T) {
 	rec := &statusPatchRecorder{}
 	r, c := coordFixtureIntercepting(t, rec.funcs(), testCoordinator("co-a"), root, member, grandchild, sibling)
 
-	if err := r.CloseCoordinated(context.Background(), root, root.Name, "resolved: done"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), root.Name, "resolved: done"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{grandchild.Name, member.Name, sibling.Name, root.Name}
@@ -496,7 +481,7 @@ func TestCloseCoordinatedCascadeFailureLeavesTheRootOpenAndResumes(t *testing.T)
 	rec := &statusPatchRecorder{failOn: sibling.Name, err: boom}
 	r, c := coordFixtureIntercepting(t, rec.funcs(), testCoordinator("co-a"), root, member, grandchild, sibling)
 
-	err := r.CloseCoordinated(context.Background(), root, root.Name, "resolved: done")
+	err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), root.Name, "resolved: done")
 	if !errors.Is(err, boom) {
 		t.Fatalf("the member's failure must surface, got %v", err)
 	}
@@ -504,7 +489,7 @@ func TestCloseCoordinatedCascadeFailureLeavesTheRootOpenAndResumes(t *testing.T)
 	assertOpen(t, c, sibling.Name, root.Name)
 
 	rec.failOn = ""
-	if err := r.CloseCoordinated(context.Background(), root, root.Name, "resolved: done"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), root.Name, "resolved: done"); err != nil {
 		t.Fatalf("a repeated close must resume from the open members, got %v", err)
 	}
 	assertClosedWith(t, c, "resolved: done", grandchild.Name, member.Name, sibling.Name, root.Name)
@@ -527,7 +512,7 @@ func TestCloseCoordinatedRefusesAGrandchildDirectly(t *testing.T) {
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, member, grandchild)
 
-	err := r.CloseCoordinated(context.Background(), root, grandchild.Name, "trying to reach too far")
+	err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), grandchild.Name, "trying to reach too far")
 	if err != ErrOutOfScope {
 		t.Fatalf("want ErrOutOfScope, got %v", err)
 	}
@@ -550,7 +535,7 @@ func TestEscalateUncausedRootPostsIntoAlreadyBoundChannelsAndStampsTheDigest(t *
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), root, nsChannel("ops-desk", "telegram"))
 
-	if err := r.Escalate(context.Background(), root, "3 members failed, see the tree"); err != nil {
+	if err := r.Escalate(context.Background(), recOf(t, r.Store, root.Name), "3 members failed, see the tree"); err != nil {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -581,7 +566,7 @@ func TestEscalateUncausedRootNeverOverwritesAWiderBoundChannelSet(t *testing.T) 
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), root, nsChannel("ops-desk", "telegram"), nsChannel("telegram-adhoc", "telegram"))
 
-	if err := r.Escalate(context.Background(), root, "need a human"); err != nil {
+	if err := r.Escalate(context.Background(), recOf(t, r.Store, root.Name), "need a human"); err != nil {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -601,7 +586,7 @@ func TestEscalateMemberBubblesToItsParentInsteadOfOpeningAThread(t *testing.T) {
 
 	r, c := coordFixture(t, testCoordinator("co-a"), testCoordinator("co-b"), root, member)
 
-	if err := r.Escalate(context.Background(), member, "stuck, need a human"); err != nil {
+	if err := r.Escalate(context.Background(), recOf(t, r.Store, member.Name), "stuck, need a human"); err != nil {
 		t.Fatal(err)
 	}
 	var gotMember, gotRoot agentopsv1alpha1.Conversation
@@ -631,7 +616,7 @@ func TestAppendMemberResultSkipsAClosedParent(t *testing.T) {
 	r, c := coordFixture(t, testCoordinator("co-a"), parent)
 
 	err := r.AppendMemberResult(context.Background(),
-		&agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}, "member-1", "member:member-1:r1", "the result")
+		&state.Provenance{Parent: "root-1", Entry: "worker"}, "member-1", "member:member-1:r1", "the result")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +631,7 @@ func TestAppendMemberResultIsIdempotentPerDedupID(t *testing.T) {
 	parent := coordinatorRoot("root-1", "co-a")
 	r, c := coordFixture(t, testCoordinator("co-a"), parent)
 
-	causedBy := &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "worker"}
+	causedBy := &state.Provenance{Parent: "root-1", Entry: "worker"}
 	for i := 0; i < 2; i++ {
 		if err := r.AppendMemberResult(context.Background(), causedBy, "member-1", "member:member-1:r1", "the result"); err != nil {
 			t.Fatal(err)
@@ -675,7 +660,7 @@ func TestInvokeMemberFailsWhenTheCallersOwnCoordinatorIsMissing(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-missing")
 	r, _ := coordFixture(t, caller) // no Coordinator object exists for "co-missing"
 
-	if _, err := r.InvokeMember(context.Background(), caller, "worker", "task"); err == nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "task"); err == nil {
 		t.Fatal("want an error when the caller's own Coordinator does not exist")
 	}
 }
@@ -694,7 +679,7 @@ func TestInvokeMemberPropagatesABrokenAncestryChain(t *testing.T) {
 	caller.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "missing-parent", Entry: "x"}
 	r, _ := coordFixture(t, coA, coB, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "nested", "task"); err == nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "nested", "task"); err == nil {
 		t.Fatal("want an error when the caller's ancestry chain is broken")
 	}
 }
@@ -717,7 +702,7 @@ func TestInvokeMemberIgnoresAClosedMemberWithTheSameConversationID(t *testing.T)
 
 	r, _ := coordFixture(t, co, caller, closedMember, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
-	result, err := r.InvokeMember(context.Background(), caller, "worker", "new task")
+	result, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "new task")
 	if err != nil {
 		t.Fatalf("InvokeMember: %v", err)
 	}
@@ -735,7 +720,7 @@ func TestInvokeMemberFailsWhenTheCapabilityIsMissing(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, co, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "worker", "task"); err == nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "task"); err == nil {
 		t.Fatal("want an error when the entry's capabilityRef does not exist")
 	}
 }
@@ -748,7 +733,7 @@ func TestInvokeMemberFailsWhenTheNestedCoordinatorIsMissing(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, co, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "nested", "task"); err == nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "nested", "task"); err == nil {
 		t.Fatal("want an error when the entry's coordinatorRef does not exist")
 	}
 }
@@ -763,7 +748,7 @@ func TestInvokeMemberFailsWhenTheNestedCoordinatorsOwnCapabilityIsMissing(t *tes
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, coA, coB, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "nested", "task"); err == nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "nested", "task"); err == nil {
 		t.Fatal("want an error when the nested coordinator's own capability cannot be resolved")
 	}
 }
@@ -774,7 +759,7 @@ func TestInvokeMemberFailsWhenTheEntryNamesNeitherRef(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, co, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "bare", "task"); err == nil {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "bare", "task"); err == nil {
 		t.Fatal("want an error when the entry names neither a capabilityRef nor a coordinatorRef")
 	}
 }
@@ -789,7 +774,7 @@ func TestInvokeMemberTitlesAMemberFromItsEntryWhenTaskIsBlank(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
-	result, err := r.InvokeMember(context.Background(), caller, "worker", "   ")
+	result, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "   ")
 	if err != nil {
 		t.Fatalf("InvokeMember: %v", err)
 	}
@@ -817,7 +802,7 @@ func TestInvokeMemberKeepsALongTitleWhole(t *testing.T) {
 	r, c := coordFixture(t, co, caller, testCapability("cap-worker", "profile-worker"), testProfile("profile-worker"))
 
 	longTask := strings.Repeat("word ", 30)
-	result, err := r.InvokeMember(context.Background(), caller, "worker", longTask)
+	result, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", longTask)
 	if err != nil {
 		t.Fatalf("InvokeMember: %v", err)
 	}
@@ -837,7 +822,7 @@ func TestAppendMemberResultSkipsNilOrSelfReferencingProvenance(t *testing.T) {
 	if err := r.AppendMemberResult(context.Background(), nil, "member-1", "id-1", "result"); err != nil {
 		t.Fatalf("a nil provenance must be a no-op, got %v", err)
 	}
-	self := &agentopsv1alpha1.Provenance{Parent: "member-1", Entry: "worker"}
+	self := &state.Provenance{Parent: "member-1", Entry: "worker"}
 	if err := r.AppendMemberResult(context.Background(), self, "member-1", "id-2", "result"); err != nil {
 		t.Fatalf("a self-referencing provenance must be a no-op, got %v", err)
 	}
@@ -847,7 +832,7 @@ func TestAppendMemberResultIgnoresAMissingParent(t *testing.T) {
 	r, _ := coordFixture(t)
 
 	err := r.AppendMemberResult(context.Background(),
-		&agentopsv1alpha1.Provenance{Parent: "does-not-exist", Entry: "worker"}, "member-1", "id-1", "result")
+		&state.Provenance{Parent: "does-not-exist", Entry: "worker"}, "member-1", "id-1", "result")
 	if err != nil {
 		t.Fatalf("a missing parent must be ignored, not error, got %v", err)
 	}
@@ -857,7 +842,7 @@ func TestCloseCoordinatedIgnoresAMissingTarget(t *testing.T) {
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller)
 
-	if err := r.CloseCoordinated(context.Background(), caller, "does-not-exist", "reason"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "does-not-exist", "reason"); err != nil {
 		t.Fatalf("a missing target must be ignored, not error, got %v", err)
 	}
 }
@@ -881,7 +866,7 @@ func TestCloseCoordinatedCascadeSkipsClosedAndStaleLabelMembers(t *testing.T) {
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, alreadyClosed, staleLabel)
 
-	if err := r.CloseCoordinated(context.Background(), root, root.Name, "wrapping up"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), root.Name, "wrapping up"); err != nil {
 		t.Fatal(err)
 	}
 	var gotStale agentopsv1alpha1.Conversation
@@ -898,7 +883,7 @@ func TestCloseCoordinatedSelfIsANoOpWhenAlreadyClosed(t *testing.T) {
 	caller.Status.CloseReason = "already done"
 	r, c := coordFixture(t, testCoordinator("co-a"), caller)
 
-	if err := r.CloseCoordinated(context.Background(), caller, "root-1", "a new reason"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "root-1", "a new reason"); err != nil {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -915,7 +900,7 @@ func TestCloseCoordinatedEnqueuesAFarewellOnEveryBoundThread(t *testing.T) {
 	root.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "chan-1", ThreadID: "t1"}}
 	r, _ := coordFixture(t, testCoordinator("co-a"), root, nsChannel("chan-1", "telegram"))
 
-	if err := r.CloseCoordinated(context.Background(), root, root.Name, "wrapping up"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, root.Name), root.Name, "wrapping up"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -926,7 +911,7 @@ func TestCloseCoordinatedTruncatesALongReason(t *testing.T) {
 	r, c := coordFixture(t, testCoordinator("co-a"), caller)
 	long := strings.Repeat("x", agentopsv1alpha1.MaxCloseReason+50)
 
-	if err := r.CloseCoordinated(context.Background(), caller, "root-1", long); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "root-1", long); err != nil {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -941,13 +926,13 @@ func TestEscalateUncausedRootIsANoOpWhenAlreadyEscalated(t *testing.T) {
 	root.Spec.EscalationChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "ops-desk"}}
 	r, c := coordFixture(t, testCoordinator("co-a"), root, nsChannel("ops-desk", "telegram"))
 
-	if err := r.Escalate(context.Background(), root, "first digest"); err != nil {
+	if err := r.Escalate(context.Background(), recOf(t, r.Store, root.Name), "first digest"); err != nil {
 		t.Fatal(err)
 	}
 	var got agentopsv1alpha1.Conversation
 	c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: root.Name}, &got)
 
-	if err := r.Escalate(context.Background(), &got, "second digest"); err != nil {
+	if err := r.Escalate(context.Background(), recOf(t, r.Store, got.Name), "second digest"); err != nil {
 		t.Fatal(err)
 	}
 	var second agentopsv1alpha1.Conversation
@@ -965,7 +950,7 @@ func TestCoordinatorChainCollectsTheCallersOwnAndEveryAncestor(t *testing.T) {
 	member.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-b"}
 
 	r, _ := coordFixture(t, root, member)
-	chain, err := r.coordinatorChain(context.Background(), member)
+	chain, err := r.coordinatorChain(context.Background(), recOf(t, r.Store, member.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +966,7 @@ func TestCoordinatorAgentsReturnsTheCallersOwnEntries(t *testing.T) {
 	root := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, co, root)
 
-	entries, err := r.CoordinatorAgents(context.Background(), root)
+	entries, err := r.CoordinatorAgents(context.Background(), recOf(t, r.Store, root.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,7 +980,7 @@ func TestCoordinatorAgentsFailsWhenTheCallerIsNotACoordinatorRoot(t *testing.T) 
 	notARoot.Name, notARoot.Namespace = "plain-1", testNS
 	r, _ := coordFixture(t, notARoot)
 
-	if _, err := r.CoordinatorAgents(context.Background(), notARoot); err != ErrNotCoordinatorRoot {
+	if _, err := r.CoordinatorAgents(context.Background(), recOf(t, r.Store, notARoot.Name)); err != ErrNotCoordinatorRoot {
 		t.Fatalf("want ErrNotCoordinatorRoot, got %v", err)
 	}
 }
@@ -1078,7 +1063,7 @@ func TestInvokeMemberClosesTheMemberWhenTheCallerClosedMeanwhile(t *testing.T) {
 		}
 	}
 
-	_, err := r.InvokeMember(context.Background(), caller, "worker", "task")
+	_, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "worker", "task")
 	if err != ErrCallerClosed {
 		t.Fatalf("want ErrCallerClosed, got %v", err)
 	}
@@ -1105,7 +1090,7 @@ func TestInvokeMemberRefusesAClosedCaller(t *testing.T) {
 	caller.Status.Phase = agentopsv1alpha1.ConversationClosed
 	r, _ := coordFixture(t, co, caller)
 
-	if _, err := r.InvokeMember(context.Background(), caller, "triage", "task"); err != ErrCallerClosed {
+	if _, err := r.InvokeMember(context.Background(), recOf(t, r.Store, caller.Name), "triage", "task"); err != ErrCallerClosed {
 		t.Fatalf("want ErrCallerClosed, got %v", err)
 	}
 }

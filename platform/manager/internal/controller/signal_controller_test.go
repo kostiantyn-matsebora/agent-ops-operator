@@ -23,6 +23,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // The Signal consumer and housekeeping (signal-persistence D-3..D-6, D-10,
@@ -55,10 +56,11 @@ func newSigEnv(t *testing.T, objs ...client.Object) *sigEnv {
 		WithStatusSubresource(&agentopsv1alpha1.Signal{}, &agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.SignalSource{}).
 		WithObjects(objs...).Build()
 	acts := activity.New(256)
-	ops := &chat.OpQueue{Client: c, Namespace: sigNS, Registry: chat.NewRegistry(), Activity: acts}
+	store := kube.NewStore(c, sigNS)
+	ops := &chat.OpQueue{Store: store, Registry: chat.NewRegistry(), Activity: acts}
 	e := &sigEnv{t: t, c: c, acts: acts, ops: ops, now: time.Now()}
 	e.r = &SignalReconciler{
-		Client: c, Reader: c, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
+		Client: c, Reader: c, Store: store, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
 		MaxQueued: 50, Identity: "replica-a", Now: func() time.Time { return e.now },
 	}
 	return e

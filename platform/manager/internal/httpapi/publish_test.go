@@ -16,6 +16,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // Publication (signal-persistence D-2, D-8, D-9): /signal/inbound validates,
@@ -309,7 +310,7 @@ func TestPublishFailedStoreIsNotAcknowledgedAndResendIsDeduplicated(t *testing.T
 		return cl.Create(ctx, obj, opts...)
 	}}
 	c := base.WithInterceptorFuncs(failSecond).Build()
-	s := &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master", Activity: activity.New(16)}
+	s := &Server{Reader: c, Store: kube.NewStore(c, sigTestNamespace), Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master", Activity: activity.New(16)}
 
 	batch := []map[string]any{
 		{"initiationId": "i-1", "signalId": "m-1", "payload": "x"},

@@ -15,6 +15,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // LabelApp marks runtime pods; LabelConversation binds one to its conversation.
@@ -132,7 +133,7 @@ type Resolved struct {
 	// ActingCoordinator is the Coordinator a MEMBER conversation acts for,
 	// resolved by walking causedBy (design D-A, coordinator-owner-reach) —
 	// "" for a conversation that is itself a Coordinator's own root (Build
-	// reads conv.Spec.CoordinatorRef directly for that case) or that acts for
+	// reads conv.CoordinatorRef directly for that case) or that acts for
 	// no Coordinator at all. See ResolveActingCoordinator's doc comment for
 	// why this is a duplicated walk rather than an imported one.
 	ActingCoordinator string
@@ -171,12 +172,12 @@ type Resolved struct {
 // rather than an omission: its fields were RESOLVED into the conversation at
 // creation, so nothing reads a Pipeline at dispatch time and editing one cannot
 // move a running conversation onto a different identity.
-func ResolveFor(ctx context.Context, r client.Reader, namespace string,
-	conv *agentopsv1alpha1.Conversation, fallback Config) (Resolved, error) {
+func ResolveFor(ctx context.Context, r client.Reader, store state.Store, namespace string,
+	conv *state.ConversationRecord, fallback Config) (Resolved, error) {
 
 	name, explicit := "default", false
-	if conv != nil && conv.Spec.RuntimeRef != nil && conv.Spec.RuntimeRef.Name != "" {
-		name, explicit = conv.Spec.RuntimeRef.Name, true
+	if conv != nil && conv.RuntimeRef != "" {
+		name, explicit = conv.RuntimeRef, true
 	} else if conv != nil {
 		// DEPRECATED, one release: a profile applied before the upgrade keeps
 		// dispatching to the runtime it named. Read below the conversation's
@@ -196,8 +197,8 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 	// a conversation the volume it has already written to.
 	sa, ctxClaim, wsClaim := "", "", ""
 	if conv != nil {
-		sa = conv.Spec.ServiceAccountName
-		ctxClaim, wsClaim = conv.Spec.ContextClaimName, conv.Spec.WorkspaceClaimName
+		sa = conv.ServiceAccountName
+		ctxClaim, wsClaim = conv.ContextClaimName, conv.WorkspaceClaimName
 	}
 	// ActingCoordinator (design D-A, coordinator-owner-reach): resolved here,
 	// once, regardless of which branch below answers — a MEMBER conversation
@@ -208,7 +209,7 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 	// conversation may not even use.
 	actingCoordinator := ""
 	if conv != nil {
-		actingCoordinator = resolveActingCoordinatorBestEffort(ctx, r, namespace, conv)
+		actingCoordinator = resolveActingCoordinatorBestEffort(ctx, store, conv)
 	}
 	applyStorage := func(cfg Config) Config {
 		if ctxClaim != "" {
@@ -261,14 +262,14 @@ func ResolveFor(ctx context.Context, r client.Reader, namespace string,
 // falls through to `default`, which is what a conversation with no snapshot and
 // no readable profile ran on before this branch existed.
 func deprecatedProfileRuntime(ctx context.Context, r client.Reader, namespace string,
-	conv *agentopsv1alpha1.Conversation) string {
+	conv *state.ConversationRecord) string {
 
-	if conv.Spec.ProfileRef.Name == "" {
+	if conv.ProfileRef == "" {
 		return ""
 	}
 	var profile agentopsv1alpha1.AgentProfile
 	if err := r.Get(ctx, types.NamespacedName{
-		Namespace: namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+		Namespace: namespace, Name: conv.ProfileRef}, &profile); err != nil {
 		return ""
 	}
 	if profile.Spec.RuntimeRef == nil {
@@ -301,7 +302,7 @@ func (r Resolved) ContinuityPossible() bool {
 // mcpCM names the ConfigMap holding the compiled mcp.json — the shared
 // profile-keyed one, or the conversation's own when its wiring binds MCPConfigs
 // (raw refs in mcp override it).
-func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile,
+func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfile,
 	mcp mcpcompile.Result, mcpCM string, resolved Resolved, masterToken string) *corev1.Pod {
 
 	cfg := resolved.Config
@@ -360,8 +361,8 @@ func Build(conv *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentP
 	// ResolveFor walking causedBy to the uncaused root. Same token format
 	// either way: `coordinator:<name>:<conversation>`, no new context.
 	coordinatorName := resolved.ActingCoordinator
-	if conv.Spec.CoordinatorRef != nil {
-		coordinatorName = conv.Spec.CoordinatorRef.Name
+	if conv.CoordinatorRef != "" {
+		coordinatorName = conv.CoordinatorRef
 	}
 	if coordinatorName != "" {
 		if _, bound := mcp.Endpoints[aopsMCPServerKey]; bound {

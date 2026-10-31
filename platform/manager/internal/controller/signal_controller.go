@@ -25,6 +25,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // LeaderLeaseName is the controller-runtime leader-election Lease this manager
@@ -78,6 +79,8 @@ type SignalReconciler struct {
 	Activity *activity.Log
 	// Ops carries the chat notices, fire-and-forget. Nil skips notices.
 	Ops *chat.OpQueue
+	// Store is the only way a signal's route reaches a Conversation.
+	Store state.Store
 	// Cooldowns is the leader's per-source cooldown map.
 	Cooldowns *ingest.CooldownBook
 	// Runtime and MaxQueued are the SAME bootstrap config and backlog bound
@@ -181,7 +184,7 @@ func terminalSignalPhase(p agentopsv1alpha1.SignalPhase) bool {
 
 func (r *SignalReconciler) deps(namespace string) signalroute.Deps {
 	return signalroute.Deps{
-		Client: r.Client, Reader: r.reader(), Namespace: namespace,
+		Client: r.Client, Reader: r.reader(), Store: r.Store, Namespace: namespace,
 		Activity: r.Activity, Ops: r.Ops, Cooldowns: r.Cooldowns,
 		Runtime: r.Runtime, MaxQueued: r.MaxQueued,
 	}

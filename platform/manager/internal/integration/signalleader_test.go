@@ -24,6 +24,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // The consumer pool is leader-gated by controller-runtime itself. These tests
@@ -57,11 +58,12 @@ func startReplica(t *testing.T, nsName string, mod func(*controller.SignalReconc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.SetupConversationIndexes(mgr.GetFieldIndexer()); err != nil {
+	storeClient, err := client.NewWithWatch(mgr.GetConfig(), client.Options{Scheme: scheme})
+	if err != nil {
 		t.Fatal(err)
 	}
 	r := &controller.SignalReconciler{
-		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(),
+		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Store: kube.NewStore(storeClient, nsName),
 		Cooldowns: ingest.NewCooldownBook(),
 		Runtime:   runtimepod.Config{ContextPVC: "test-context"},
 		MaxQueued: 50, Identity: "integration-replica",

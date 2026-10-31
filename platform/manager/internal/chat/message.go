@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // THE MANAGER COMPOSES MEANING; ADAPTERS COMPOSE PRESENTATION.
@@ -285,7 +286,7 @@ func AnswerMessage(body, status string) Message {
 // A run that produced nothing is a FAILURE to report, not an answer to render —
 // it goes out as a notice so an adapter styles it as one rather than presenting
 // an empty agent reply.
-func RunReplyMessage(run *agentopsv1alpha1.RunStatus) Message {
+func RunReplyMessage(run *state.Run) Message {
 	body := strings.TrimSpace(run.Result)
 	switch {
 	case run.Status != "succeeded" && body != "":

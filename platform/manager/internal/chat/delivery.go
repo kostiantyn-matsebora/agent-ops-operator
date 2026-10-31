@@ -7,7 +7,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
+
+// Env is what a chat helper reads through: the cluster's custom resources via
+// Reader, conversations and their input payloads via Store, all in one
+// Namespace (a Store is bound to its namespace at construction, but the
+// Reader's calls name one).
+type Env struct {
+	Reader    client.Reader
+	Store     state.Store
+	Namespace string
+}
 
 // DELIVERING A MESSAGE TO THE SURFACES THAT HAVE NOT SHOWN IT.
 //
@@ -47,28 +58,28 @@ import (
 //
 // A COORDINATOR ROOT'S CHANNELS ARE BOUND AT CREATION, NOT AT ESCALATION
 // (coordinator-unconditional-channels, superseding design D-D's escalation
-// fencing): every channel in `conv.Spec.ChannelRefs` already has a thread from
+// fencing): every channel in `conv.ChannelRefs` already has a thread from
 // the conversation's own start, so there is no "freshly bound channel" moment
 // for a backlog to flood. Every input is delivered to it in the ordinary
 // per-destination way, `escalate` included — it posts a notice into a thread
 // that was already open, not the thread's opening post. Nothing here is fenced
 // on `status.escalatedAt` any more.
-func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv *agentopsv1alpha1.Conversation) {
-	if ops == nil || len(conv.Spec.ChannelRefs) == 0 {
+func DeliverInputs(ctx context.Context, env Env, ops *OpQueue, conv *state.ConversationRecord) {
+	if ops == nil || len(conv.ChannelRefs) == 0 {
 		return
 	}
-	ns := conv.Namespace
+	reader, ns := env.Reader, env.Namespace
 	pipeline := ""
 	resolved := false
 	echoes := map[string]bool{} // surface -> does its transport show its own?
-	for i := range conv.Spec.Inputs {
-		item := &conv.Spec.Inputs[i]
+	for i := range conv.Inputs {
+		item := &conv.Inputs[i]
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
 		}
 		body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
-		if ci := InputPayload(ctx, reader, ns, item); ci != nil {
-			body, inputRef, labels, severity = ci.Spec.Payload, ci.Name, ci.Spec.Labels, ci.Spec.Severity
+		if blob, ok := InputPayload(ctx, env.Store, item); ok {
+			body, inputRef, labels, severity = blob.Payload, string(item.PayloadRef), blob.Labels, agentopsv1alpha1.Severity(blob.Severity)
 		}
 		surface := item.OriginSurface(labels)
 		surfaceEchoes := true
@@ -90,18 +101,18 @@ func DeliverInputs(ctx context.Context, reader client.Reader, ops *OpQueue, conv
 				}
 				resolved = true
 			}
-			msg = SignalMessage(pipeline, item.Origin.Name, conv.Spec.Title, inputRef, labels, body, item.Origin.Kind).WithSeverity(severity)
+			msg = SignalMessage(pipeline, item.Origin.Name, conv.Title, inputRef, labels, body, agentopsv1alpha1.OriginKind(item.Origin.Kind)).WithSeverity(severity)
 		}
-		for _, ref := range conv.Spec.ChannelRefs {
-			if !item.DeliverTo(ref.Name, surface, surfaceEchoes) {
+		for _, ref := range conv.ChannelRefs {
+			if !item.DeliverTo(ref, surface, surfaceEchoes) {
 				continue
 			}
-			tid := conv.ThreadFor(ref.Name)
+			tid := conv.ThreadFor(ref)
 			if tid == nil {
 				continue
 			}
 			var ch agentopsv1alpha1.Channel
-			if err := reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: ref.Name}, &ch); err != nil ||
+			if err := reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: ref}, &ch); err != nil ||
 				ch.Spec.Adapter == "" {
 				continue
 			}
@@ -130,19 +141,17 @@ func SurfaceEchoes(ctx context.Context, reader client.Reader, ns, channel string
 	return ca.Spec.Echoes()
 }
 
-// InputPayload reads an input's out-of-line ConversationInput, or nil when the
-// payload is inline or the object is gone (pruned once processed). Exported
-// because the topic descriptor reads the same object the same way, and two
+// InputPayload reads an input's out-of-line payload blob, or reports false when
+// the payload is inline or the blob is gone (pruned once processed). Exported
+// because the topic descriptor reads the same blob the same way, and two
 // spellings of one read is how they drift.
-func InputPayload(ctx context.Context, reader client.Reader, ns string,
-	item *agentopsv1alpha1.InputItem) *agentopsv1alpha1.ConversationInput {
-
-	if item.PayloadRef == nil {
-		return nil
+func InputPayload(ctx context.Context, store state.Store, item *state.InputItem) (state.Blob, bool) {
+	if item.PayloadRef == "" {
+		return state.Blob{}, false
 	}
-	var ci agentopsv1alpha1.ConversationInput
-	if err := reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: item.PayloadRef.Name}, &ci); err != nil {
-		return nil
+	blob, err := store.GetBlob(ctx, item.PayloadRef)
+	if err != nil {
+		return state.Blob{}, false
 	}
-	return &ci
+	return blob, true
 }

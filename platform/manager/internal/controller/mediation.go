@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // ConditionMediated reports whether every MCP server this conversation binds is
@@ -95,16 +95,14 @@ func schemeOf(url string) string {
 }
 
 // applyMediationCondition sets or clears the condition on a conversation.
-func applyMediationCondition(conv *agentopsv1alpha1.Conversation, cond *metav1.Condition) bool {
+func applyMediationCondition(conv *state.ConversationRecord, cond *metav1.Condition) bool {
 	if cond == nil {
 		// A conversation that is not mediated carries no claim. An install that
 		// never enabled the feature must not accumulate a permanent condition
 		// about it.
-		if apimeta.FindStatusCondition(conv.Status.Conditions, ConditionMediated) == nil {
-			return false
-		}
-		apimeta.RemoveStatusCondition(&conv.Status.Conditions, ConditionMediated)
-		return true
+		return conv.RemoveCondition(ConditionMediated)
 	}
-	return apimeta.SetStatusCondition(&conv.Status.Conditions, *cond)
+	return conv.SetCondition(state.Condition{
+		Type: cond.Type, Status: string(cond.Status), Reason: cond.Reason, Message: cond.Message,
+	})
 }

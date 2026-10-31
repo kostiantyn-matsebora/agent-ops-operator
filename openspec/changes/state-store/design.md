@@ -262,6 +262,51 @@ atomicity requirement.
 An arbitrary run edit was rejected: a run is history, and an operation able
 to rewrite it would need a revision and a merge story.
 
+### D-13: How the call sites moved
+
+Recorded after section 4, where the decisions were made against real code.
+
+- **Writes.** Every merge patch became `state.Mutate` (get, change, `Update`
+  with the revision read, read again on `ErrConflict`, ten attempts, a change
+  that alters nothing writes nothing). The closure re-derives its change from
+  the record it is handed, since a patch never conflicted and a closure does.
+  The four run-growth sites use `AppendRun` / `UpdateRun`.
+- **Reads.** The reconciler reads one record and its runs once per pass. The
+  `kube` store reads through an uncached client in production (D-4), so a pass
+  costs one more apiserver read than the informer cache did; the cost is the
+  price of a revision the CAS can trust.
+- **Event source.** `SetupWithManager` registers the store's feed as a
+  `source.Func`, which controller-runtime starts under the leader lease like
+  every other source. `Owns(&corev1.Pod{})` cannot survive the removal of
+  `For(&Conversation{})` (the builder refuses `Owns` without `For`), so it is a
+  `Watches` on the pod mapping the controller reference to the conversation:
+  the same routing, spelled out. `MapRuntimePodToPending` is unchanged.
+- **Scope.** A store is bound to one namespace (D-2), so the pod watch that
+  once listed conversations across every namespace now ignores a pod outside
+  the store's namespace. The manager's cache is already limited to its own
+  namespace, so no event it delivered before is lost.
+- **Owner link.** The pod and ConfigMap owner reference is built from the
+  record's `ID`, name and kind (a `PartialObjectMetadata` as the owner);
+  nothing reads a Kubernetes object to produce it.
+- **A delivery is two writes.** `markDelivered` is `UpdateRun(MarkDelivered)`
+  then a record `Update` clearing the thread's undelivered-reply note. A crash
+  between them leaves a run recorded delivered with the note still naming it.
+  The note is informational (nothing else reads it), and the next delivery pass
+  settles it without sending again; a crash before the first write loses
+  nothing, since the reply is re-derived. Both are pinned by
+  `TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote`.
+- **Run history bound.** The ten-run cap the work report applied itself is now
+  the `kube` backend's, applied on `AppendRun`, because it is a limit of the
+  stored object and every writer must stay inside it.
+- **Unused index.** `ByPhase` is read by the backlog bound and the pod-freed
+  wake-up; `ByAll`, `ByCausedBy`, `ByNameBase` and `ByConversationID` are read
+  at their call sites. `ByPipelineAndPhase` has no caller yet. It stays: it is
+  in the spec and the conformance suite, and a later backend serves it for a
+  Pipeline-rooted sweep without a contract change.
+- **The static check** (`internal/state/static_test.go`) flags any reference to
+  a Conversation or ConversationInput type, which is stricter than a client
+  call taking one, so holding the object in a variable cannot get around it.
+
 ## Risks / Trade-offs
 
 - [Zero behaviour change across 29 write sites is a claim, not a property] →

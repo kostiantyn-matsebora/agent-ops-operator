@@ -7,12 +7,11 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-func conversation(name string) *agentopsv1alpha1.Conversation {
-	c := &agentopsv1alpha1.Conversation{}
-	c.Name = name
-	return c
+func conversation(name string) *state.ConversationRecord {
+	return &state.ConversationRecord{Name: name}
 }
 
 func build(convName string, cfg Config) *corev1.Pod {

@@ -107,7 +107,7 @@ func TestAppendRunConcurrentNoConflictSurfaced(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	const perGoroutine = 10
+	const perGoroutine = maxRunHistory / 2 // all kept: the history is bounded
 	prefixes := []string{"a", "b"}
 	var wg sync.WaitGroup
 	errs := make(chan error, len(prefixes)*perGoroutine)
@@ -185,5 +185,28 @@ func TestListRunsOnMissingKeyIsNotFound(t *testing.T) {
 	_, err := s.ListRuns(ctx, state.Key("no-such-conversation"))
 	if !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("ListRuns on missing key: got %v, want ErrNotFound", err)
+	}
+}
+
+// The stored history is bounded so a long-lived conversation cannot grow its
+// object without limit: the oldest run falls off, order is kept.
+func TestAppendRunKeepsOnlyTheNewestRuns(t *testing.T) {
+	_, s := newTestNamespace(t)
+	ctx := context.Background()
+	rec := fixtureRecord("conv-append-bound")
+	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for i := 0; i < maxRunHistory+3; i++ {
+		if err := s.AppendRun(ctx, state.Key(rec.Name), state.Run{RunID: fmt.Sprintf("run-%d", i)}); err != nil {
+			t.Fatalf("AppendRun: %v", err)
+		}
+	}
+	runs, err := s.ListRuns(ctx, state.Key(rec.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != maxRunHistory || runs[0].RunID != "run-3" || runs[len(runs)-1].RunID != fmt.Sprintf("run-%d", maxRunHistory+2) {
+		t.Fatalf("want the newest %d runs in order, got %d starting %q", maxRunHistory, len(runs), runs[0].RunID)
 	}
 }

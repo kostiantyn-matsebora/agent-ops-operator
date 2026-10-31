@@ -1,0 +1,62 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
+)
+
+// stateBackendEnv names the variable selecting the state store backend. The
+// chart renders it from stateStore.backend; unset means the kube backend.
+const stateBackendEnv = "STATE_BACKEND"
+
+// backendKube is today's backend: the Conversation and ConversationInput custom
+// resources, behind the state.Store contract.
+const backendKube = "kube"
+
+// stateBackendFromEnv resolves the selected backend name and refuses one this
+// binary does not carry, naming it. Called before the manager connects to
+// anything, so a bad value stops the process at once.
+func stateBackendFromEnv() (string, error) {
+	name := strings.TrimSpace(os.Getenv(stateBackendEnv))
+	switch name {
+	case "", backendKube:
+		return backendKube, nil
+	}
+	return "", fmt.Errorf("%s=%q is not a state backend this manager carries (known: %s)",
+		stateBackendEnv, name, backendKube)
+}
+
+// newStateStore constructs the selected backend scoped to namespace, and
+// registers whatever it must run beside the manager.
+//
+// The kube backend reads through a client with no cache: its Get and Update
+// carry the compare-and-swap, and a cached read would make that precondition
+// a guess (state-store design D-4). The cost is an apiserver read where the
+// informer used to answer; Watch is the one thing the feed needs from it.
+func newStateStore(backend string, mgr ctrl.Manager, namespace string) (state.Store, error) {
+	switch backend {
+	case backendKube:
+		c, err := client.NewWithWatch(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+		if err != nil {
+			return nil, fmt.Errorf("building the uncached client for the kube state store: %w", err)
+		}
+		store := kube.NewStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval)
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			store.Run(ctx)
+			return nil
+		})); err != nil {
+			return nil, fmt.Errorf("registering the kube state store's expiry sweep: %w", err)
+		}
+		return store, nil
+	}
+	return nil, fmt.Errorf("%s=%q is not a state backend this manager carries", stateBackendEnv, backend)
+}

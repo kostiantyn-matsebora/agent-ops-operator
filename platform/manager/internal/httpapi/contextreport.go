@@ -5,14 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // POST /work/context — the context-sync sidecar reports one operation.
@@ -140,27 +136,24 @@ func contextData(rep contextReport) map[string]string {
 
 // recordCheckpoint stamps the durable half onto the Conversation.
 func (s *Server) recordCheckpoint(ctx context.Context, rep contextReport) error {
-	var conv agentopsv1alpha1.Conversation
-	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: rep.Conversation}, &conv); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.ContextCheckpoint = &agentopsv1alpha1.ContextCheckpoint{
-		At:       metav1.Now(),
-		Quiesced: rep.Quiesced,
-		Bytes:    rep.Bytes,
-	}
-	// A best-effort copy is worth reporting on the conversation too: a reader
-	// deciding whether continuity is safe needs to know the newest copy may
-	// hold a torn file.
-	if !rep.Quiesced {
-		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-			Type:               "ContextCheckpointQuiesced",
-			Status:             metav1.ConditionFalse,
-			Reason:             "TakenMidRun",
-			Message:            "the newest durable copy was taken while a run was inflight and may hold a partially written file",
-			LastTransitionTime: metav1.Now(),
-		})
-	}
-	return s.Client.Status().Patch(ctx, &conv, patch)
+	_, err := state.Mutate(ctx, s.Store, state.Key(rep.Conversation), func(c *state.ConversationRecord) error {
+		c.ContextCheckpoint = &state.ContextCheckpoint{
+			At:       time.Now().UTC(),
+			Quiesced: rep.Quiesced,
+			Bytes:    rep.Bytes,
+		}
+		// A best-effort copy is worth reporting on the conversation too: a reader
+		// deciding whether continuity is safe needs to know the newest copy may
+		// hold a torn file.
+		if !rep.Quiesced {
+			c.SetCondition(state.Condition{
+				Type:    "ContextCheckpointQuiesced",
+				Status:  state.ConditionFalse,
+				Reason:  "TakenMidRun",
+				Message: "the newest durable copy was taken while a run was inflight and may hold a partially written file",
+			})
+		}
+		return nil
+	})
+	return state.IgnoreNotFound(err)
 }

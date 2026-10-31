@@ -11,6 +11,11 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
+// maxRunHistory bounds status.runs[] on the stored object, so a long-lived
+// conversation cannot grow its CR without limit. It is the bound the work
+// report always applied itself; owning it here keeps every writer inside it.
+const maxRunHistory = 10
+
 // AppendRun adds run to key's append-only run history (store.go's
 // Store.AppendRun: "takes no revision ... never fails with a conflict").
 //
@@ -32,6 +37,9 @@ func (s *Store) AppendRun(ctx context.Context, key state.Key, run state.Run) err
 			return fmt.Errorf("kube: get conversation %q to append run: %w", key, err)
 		}
 		conv.Status.Runs = append(conv.Status.Runs, rs)
+		if len(conv.Status.Runs) > maxRunHistory {
+			conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-maxRunHistory:]
+		}
 		if err := s.client.Status().Update(ctx, conv); err != nil {
 			if apierrors.IsConflict(err) {
 				continue

@@ -7,17 +7,13 @@ import (
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // The signal-kind vocabulary, duplicated from internal/httpapi's own
@@ -48,14 +44,14 @@ func oneShot(kind string) bool { return kind == kindChat || kind == kindTask }
 // derived from the Signal and claimant, so a repeated pass appends nothing
 // twice (design D-5).
 func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, sig *agentopsv1alpha1.Signal) (*agentopsv1alpha1.ObjectRef, bool, error) {
-	conv, err := findReusableConversation(ctx, deps.Reader, deps.Namespace, claimant, sig.Spec.InitiationID)
+	conv, err := findReusableConversation(ctx, deps.Store, claimant, sig.Spec.InitiationID)
 	if err != nil {
 		return nil, false, err
 	}
 
 	inputType := inputTypeForKind(sig.Spec.Kind)
 	if conv == nil {
-		full, err := BacklogFull(ctx, deps.Reader, deps.Namespace, deps.MaxQueued)
+		full, err := BacklogFull(ctx, deps.Store, deps.MaxQueued)
 		if err != nil {
 			return nil, false, err
 		}
@@ -67,7 +63,7 @@ func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, si
 			return nil, false, err
 		}
 	} else if conv.ContextID() != "" {
-		inputType = agentopsv1alpha1.InputRecurrence // same problem/job, resume with context
+		inputType = state.InputRecurrence // same problem/job, resume with context
 	}
 
 	if err := appendInput(ctx, deps, claimant, conv, sig, inputType); err != nil {
@@ -86,18 +82,18 @@ func messageOf(sig *agentopsv1alpha1.Signal) (text string, addressed bool) {
 }
 
 // findReusableConversation returns the OPEN conversation, originated by this
-// claimant, whose conversationId equals initiationID — pure equality. It reads
-// the API server directly (never an informer cache, and so no field index): a
-// pass repeated after a crash between create and the status write must find
-// the conversation it just made.
-func findReusableConversation(ctx context.Context, c client.Reader, namespace string, claimant chat.Claimant, initiationID string) (*agentopsv1alpha1.Conversation, error) {
-	var list agentopsv1alpha1.ConversationList
-	if err := c.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+// claimant, whose conversationId equals initiationID — pure equality, served
+// by the store's conversationId index. The store reads its source of truth
+// directly (never a cache): a pass repeated after a crash between create and
+// the status write must find the conversation it just made.
+func findReusableConversation(ctx context.Context, store state.Store, claimant chat.Claimant, initiationID string) (*state.ConversationRecord, error) {
+	list, err := store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: initiationID})
+	if err != nil {
 		return nil, err
 	}
-	for i := range list.Items {
-		conv := &list.Items[i]
-		if conv.Spec.ConversationID != initiationID || conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+	for i := range list {
+		conv := &list[i]
+		if conv.Phase == state.PhaseClosed {
 			continue
 		}
 		if reusableBy(conv, claimant) {
@@ -110,12 +106,12 @@ func findReusableConversation(ctx context.Context, c client.Reader, namespace st
 // reusableBy reports whether an existing conversation may absorb an input
 // from this claimant — the provenance half of equality routing, on top of
 // the id match the caller already made.
-func reusableBy(c *agentopsv1alpha1.Conversation, claimant chat.Claimant) bool {
-	if c.Spec.PipelineRef != nil {
-		return claimant.ClaimantKind() == chat.ClaimantPipeline && c.Spec.PipelineRef.Name == claimant.GetName()
+func reusableBy(c *state.ConversationRecord, claimant chat.Claimant) bool {
+	if c.PipelineRef != "" {
+		return claimant.ClaimantKind() == chat.ClaimantPipeline && c.PipelineRef == claimant.GetName()
 	}
-	if c.Spec.CoordinatorRef != nil {
-		return claimant.ClaimantKind() == chat.ClaimantCoordinator && c.Spec.CoordinatorRef.Name == claimant.GetName()
+	if c.CoordinatorRef != "" {
+		return claimant.ClaimantKind() == chat.ClaimantCoordinator && c.CoordinatorRef == claimant.GetName()
 	}
 	return false
 }
@@ -123,14 +119,14 @@ func reusableBy(c *agentopsv1alpha1.Conversation, claimant chat.Claimant) bool {
 // inputTypeForKind is the input lane for a freshly admitted signal — base
 // kind for new work. Recurrence is layered on top by the caller once a
 // session already exists.
-func inputTypeForKind(kind string) agentopsv1alpha1.InputType {
+func inputTypeForKind(kind string) string {
 	switch kind {
 	case kindJob:
-		return agentopsv1alpha1.InputJob
+		return state.InputJob
 	case kindChat, kindTask:
-		return agentopsv1alpha1.InputTask
+		return state.InputTask
 	default:
-		return agentopsv1alpha1.InputAlert
+		return state.InputAlert
 	}
 }
 
@@ -196,10 +192,8 @@ func wordsForSignal(sourceName, title string) string {
 // execution wiring ONCE. Returns nil, nil only when the backlog is full is
 // checked by the caller — this function is never asked to create while
 // full.
-func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, sig *agentopsv1alpha1.Signal) (*agentopsv1alpha1.Conversation, error) {
+func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, sig *agentopsv1alpha1.Signal) (*state.ConversationRecord, error) {
 	sourceName := sig.Spec.SourceRef.Name
-	conv := &agentopsv1alpha1.Conversation{}
-	conv.Namespace = deps.Namespace
 
 	title := titleForSignal(sourceName, sig)
 	capability, err := dispatch.ResolveCapability(ctx, deps.Reader, claimant)
@@ -207,19 +201,19 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 		return nil, fmt.Errorf("%s: resolve capability: %w", claimant.GetName(), err)
 	}
 	snap := runtimepod.SnapshotFor(ctx, deps.Reader, deps.Namespace, claimant.GetName(), capability, deps.Runtime)
-	conv.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef:         agentopsv1alpha1.ObjectRef{Name: capability.ProfileName()},
-		ChannelRefs:        append([]agentopsv1alpha1.ObjectRef{}, claimant.BoundChannelRefs()...),
-		Toolsets:           capability.Toolsets.DeepCopy(),
-		MCPConfigs:         capability.MCPConfigs.DeepCopy(),
+	conv := &state.ConversationRecord{
+		ProfileRef:         capability.ProfileName(),
+		ChannelRefs:        append([]state.Ref{}, claimant.BoundChannelRefs()...),
+		Toolsets:           dispatch.ToolsetBindingOf(capability.Toolsets),
+		MCPConfigs:         dispatch.ToolingBindingOf(capability.MCPConfigs),
 		RuntimeRef:         snap.RuntimeRef,
 		ServiceAccountName: snap.ServiceAccountName,
 		ContextClaimName:   snap.ContextClaimName,
 		WorkspaceClaimName: snap.WorkspaceClaimName,
-		Signal: &agentopsv1alpha1.SignalProvenance{
-			SourceRef: &agentopsv1alpha1.ObjectRef{Name: sourceName},
+		Signal: &state.SignalProvenance{
+			SourceRef: sourceName,
 			Labels:    sig.Spec.Labels,
-			Severity:  sig.Spec.Severity,
+			Severity:  string(sig.Spec.Severity),
 		},
 		Title:          title,
 		ConversationID: sig.Spec.InitiationID,
@@ -227,55 +221,53 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 	// An addressed conversation binds the addressing channel too, so the
 	// answer comes back to where the person is looking.
 	if _, addressed := messageOf(sig); addressed {
-		conv.Spec.ChannelRefs = withChannel(conv.Spec.ChannelRefs, sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel])
+		conv.ChannelRefs = withChannel(conv.ChannelRefs, sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel])
 	}
 	nodeKind := activity.NodePipeline
 	if claimant.ClaimantKind() == chat.ClaimantCoordinator {
 		nodeKind = activity.NodeCoordinator
-		conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: claimant.GetName()}
-		conv.Spec.EscalationChannelRefs = claimant.EscalationChannelRefs()
+		conv.CoordinatorRef = claimant.GetName()
+		conv.EscalationChannelRefs = claimant.EscalationChannelRefs()
 	} else {
-		conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: claimant.GetName()}
+		conv.PipelineRef = claimant.GetName()
 	}
 	// Only for a person on a chat surface: an alert has no reader, and a
 	// machine posting a task is not owed a read mark.
 	if sig.Spec.Kind == kindChat && sig.Spec.Reader != "" {
 		if ch := sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel]; ch != "" {
-			conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{Channel: ch, Key: sig.Spec.Reader}
+			conv.OriginReader = &state.OriginReader{Channel: ch, Key: sig.Spec.Reader}
 		}
 	}
-	if _, err := namewords.AllocateName(ctx, deps.Client, deps.Namespace,
+	// A Coordinator-rooted conversation's own resource ceiling is STATUS, and
+	// a record carries spec and status alike, so it rides the one Create.
+	if budget := claimant.SnapshotBudget(); budget != nil {
+		conv.Budget = budget
+	}
+	if _, err := namewords.AllocateName(ctx, deps.Store,
 		nameKindForSignal(sig.Spec.Kind), wordsForSignal(sourceName, title), conv); err != nil {
 		return nil, err
-	}
-	if budget := claimant.SnapshotBudget(); budget != nil {
-		patch := client.MergeFrom(conv.DeepCopy())
-		conv.Status.Budget = budget
-		if err := deps.Client.Status().Patch(ctx, conv, patch); err != nil {
-			return nil, err
-		}
 	}
 	deps.Activity.Emit(activity.Event{
 		Kind:     activity.KindConversationCreated,
 		From:     activity.Node(nodeKind, claimant.GetName()),
 		To:       activity.Node(activity.NodeConversation, conv.Name),
 		Pipeline: claimant.GetName(), Conversation: conv.Name,
-		Detail: conv.Spec.Title,
+		Detail: conv.Title,
 	})
 	return conv, nil
 }
 
 // withChannel adds a channel ref unless it is already bound.
-func withChannel(refs []agentopsv1alpha1.ObjectRef, name string) []agentopsv1alpha1.ObjectRef {
+func withChannel(refs []state.Ref, name string) []state.Ref {
 	if name == "" {
 		return refs
 	}
 	for _, r := range refs {
-		if r.Name == name {
+		if r == name {
 			return refs
 		}
 	}
-	return append(refs, agentopsv1alpha1.ObjectRef{Name: name})
+	return append(refs, name)
 }
 
 // InputName is the name of the ConversationInput carrying sig's message to one
@@ -292,86 +284,98 @@ func InputName(sigName string, ref agentopsv1alpha1.ClaimantRef) string {
 }
 
 // inputDelivered reports whether the conversation already carries the named
-// input: queued in spec.inputs[], or — once dispatch consumed it and pruned
-// the queue — cited by a run's recorded inputs. The ConversationInput object
-// itself is deleted with its queue entry, so its absence proves nothing.
-func inputDelivered(conv *agentopsv1alpha1.Conversation, ciName string) bool {
-	for i := range conv.Spec.Inputs {
-		if ref := conv.Spec.Inputs[i].PayloadRef; ref != nil && ref.Name == ciName {
-			return true
+// input: queued in its inputs, or — once dispatch consumed it and pruned the
+// queue — cited by a run's recorded inputs. The blob itself is deleted with
+// its queue entry, so its absence proves nothing.
+func inputDelivered(ctx context.Context, store state.Store, conv *state.ConversationRecord, blobKey string) (bool, error) {
+	if queuedInput(conv, blobKey) {
+		return true, nil
+	}
+	runs, err := store.ListRuns(ctx, state.Key(conv.Name))
+	if err != nil {
+		return false, err
+	}
+	for r := range runs {
+		for i := range runs[r].Inputs {
+			if runs[r].Inputs[i].PayloadRef == state.Key(blobKey) {
+				return true, nil
+			}
 		}
 	}
-	for r := range conv.Status.Runs {
-		for i := range conv.Status.Runs[r].Inputs {
-			if ref := conv.Status.Runs[r].Inputs[i].PayloadRef; ref != nil && ref.Name == ciName {
-				return true
-			}
+	return false, nil
+}
+
+// queuedInput reports whether the conversation's queue holds the named blob.
+func queuedInput(conv *state.ConversationRecord, blobKey string) bool {
+	for i := range conv.Inputs {
+		if conv.Inputs[i].PayloadRef == state.Key(blobKey) {
+			return true
 		}
 	}
 	return false
 }
 
-// appendInput records sig's message as a ConversationInput under its derived
-// name and queues it on the conversation, retrying the optimistic patch on
-// conflict. A delivery that already happened (an earlier pass of the same
-// Signal and claimant) is left alone.
-func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *agentopsv1alpha1.Conversation, sig *agentopsv1alpha1.Signal, inputType agentopsv1alpha1.InputType) error {
+// appendInput records sig's message as a blob under its derived name and
+// queues it on the conversation, re-reading the record on a lost race
+// (state.Mutate). A delivery that already happened (an earlier pass of the
+// same Signal and claimant) is left alone.
+func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *state.ConversationRecord, sig *agentopsv1alpha1.Signal, inputType string) error {
 	sourceName := sig.Spec.SourceRef.Name
 	ciName := InputName(sig.Name, claimantRef(claimant))
 	text, _ := messageOf(sig)
 
-	ci := &agentopsv1alpha1.ConversationInput{}
-	ci.Namespace = deps.Namespace
-	ci.Name = ciName
-	ci.Spec = agentopsv1alpha1.ConversationInputSpec{
-		ConversationRef: agentopsv1alpha1.ObjectRef{Name: conv.Name},
-		Type:            inputType,
-		Payload:         text,
-		Labels:          sig.Spec.Labels,
-		Severity:        sig.Spec.Severity,
+	fresh, _, err := deps.Store.Get(ctx, state.Key(conv.Name))
+	if err != nil {
+		return err
 	}
-
-	for attempt := 0; attempt < 5; attempt++ {
-		var fresh agentopsv1alpha1.Conversation
-		if err := deps.Reader.Get(ctx, types.NamespacedName{Namespace: deps.Namespace, Name: conv.Name}, &fresh); err != nil {
-			return err
-		}
-		if inputDelivered(&fresh, ciName) {
+	delivered, err := inputDelivered(ctx, deps.Store, &fresh, ciName)
+	if err != nil || delivered {
+		return err
+	}
+	// Written only now that the queue is known not to carry it, and an
+	// existing blob under the name is the same delivery's earlier half.
+	if err := deps.Store.PutBlob(ctx, state.Key(ciName), state.Blob{
+		ConversationName: conv.Name,
+		Type:             inputType,
+		Payload:          text,
+		Labels:           sig.Spec.Labels,
+		Severity:         string(sig.Spec.Severity),
+	}); err != nil {
+		return err
+	}
+	inputID := "in-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	queued := false
+	if _, err := state.Mutate(ctx, deps.Store, state.Key(conv.Name), func(rec *state.ConversationRecord) error {
+		queued = false
+		if queuedInput(rec, ciName) {
 			return nil
 		}
-		// Created only now that the queue is known not to carry it, and an
-		// existing object under the name is the same delivery's earlier half.
-		if err := deps.Client.Create(ctx, ci); err != nil && !apierrors.IsAlreadyExists(err) {
-			return err
-		}
-		patch := client.MergeFrom(fresh.DeepCopy())
-		inputID := "in-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-		fresh.Spec.Inputs = append(fresh.Spec.Inputs, agentopsv1alpha1.InputItem{
+		rec.Inputs = append(rec.Inputs, state.InputItem{
 			ID:         inputID,
 			Type:       inputType,
-			PayloadRef: &agentopsv1alpha1.ObjectRef{Name: ciName},
-			Origin: &agentopsv1alpha1.InputOrigin{
-				Kind: agentopsv1alpha1.OriginSignal, Name: sourceName,
+			PayloadRef: state.Key(ciName),
+			Origin: &state.InputOrigin{
+				Kind: state.OriginSignal, Name: sourceName,
 				SignalKind: orDefault(sig.Spec.Kind, kindAlert),
 			},
-			ReceivedAt: metav1.Now(),
+			ReceivedAt: time.Now(),
 		})
-		if err := deps.Client.Patch(ctx, &fresh, patch); err != nil {
-			if apierrors.IsConflict(err) {
-				continue
-			}
-			return err
-		}
-		deps.Activity.Emit(activity.Event{
-			Kind:     activity.KindInputQueued,
-			From:     activity.Node(activity.NodeSignalSource, sourceName),
-			To:       activity.Node(activity.NodeConversation, conv.Name),
-			Pipeline: claimant.GetName(), Conversation: conv.Name, InputID: inputID,
-			Code: string(inputType), Detail: sourceName,
-		})
+		queued = true
+		return nil
+	}); err != nil {
+		return fmt.Errorf("append input to %s: %w", conv.Name, err)
+	}
+	if !queued {
 		return nil
 	}
-	return fmt.Errorf("conflict appending input to %s", conv.Name)
+	deps.Activity.Emit(activity.Event{
+		Kind:     activity.KindInputQueued,
+		From:     activity.Node(activity.NodeSignalSource, sourceName),
+		To:       activity.Node(activity.NodeConversation, conv.Name),
+		Pipeline: claimant.GetName(), Conversation: conv.Name, InputID: inputID,
+		Code: inputType, Detail: sourceName,
+	})
+	return nil
 }
 
 // orDefault fills an empty string with a fallback, mirroring

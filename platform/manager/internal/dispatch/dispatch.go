@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 //go:embed templates/task.md
@@ -123,7 +124,7 @@ type WorkUnit struct {
 }
 
 // PayloadResolver returns the payload for an input (inline or via ConversationInput).
-type PayloadResolver func(item agentopsv1alpha1.InputItem) (string, error)
+type PayloadResolver func(item state.InputItem) (string, error)
 
 // EffectiveAllowedTools resolves THE WIRING'S CONTRIBUTION to a conversation's
 // allowlist from the toolsets its wiring bound, whose tool lists arrive in ref
@@ -162,9 +163,9 @@ func EffectiveAllowedTools(byRef [][]string) string {
 // singleThread returns the thread id handed to the runtime as context: only
 // single-channel conversations expose one, since a mirrored conversation has
 // no single thread. The runtime never posts to it — the operator delivers.
-func singleThread(c *agentopsv1alpha1.Conversation) *string {
-	if len(c.Spec.ChannelRefs) == 1 {
-		return c.ThreadFor(c.Spec.ChannelRefs[0].Name)
+func singleThread(c *state.ConversationRecord) *string {
+	if len(c.ChannelRefs) == 1 {
+		return c.ThreadFor(c.ChannelRefs[0])
 	}
 	return nil
 }
@@ -184,8 +185,8 @@ func render(tpl string, vars map[string]string) string {
 // framed as coordination rather than as a repository agent's task. A member
 // (`causedBy` alone) is a domain agent and keeps the lane templates: it may
 // have a repository, and its framing says so.
-func isRoot(c *agentopsv1alpha1.Conversation) bool {
-	return c.Spec.CoordinatorRef != nil
+func isRoot(c *state.ConversationRecord) bool {
+	return c.CoordinatorRef != ""
 }
 
 // framed is one work unit's prompt before the lane is chosen: the built-in
@@ -197,7 +198,7 @@ type framed struct {
 	// template is the built-in lane template for a non-root conversation.
 	template string
 	vars     map[string]string
-	inputs   []agentopsv1alpha1.InputItem
+	inputs   []state.InputItem
 	// inputBlock is the input as coordinate.md shows it, verbatim: a quoted
 	// block for text, a json fence for a signal payload.
 	inputBlock string
@@ -228,7 +229,7 @@ func (f framed) into(unit *WorkUnit, root bool) {
 
 // fromLine is coordinate.md's FROM: one origin phrase per consumed input, in
 // input order, joined for a batched resume.
-func fromLine(inputs []agentopsv1alpha1.InputItem) string {
+func fromLine(inputs []state.InputItem) string {
 	phrases := make([]string, 0, len(inputs))
 	for _, in := range inputs {
 		phrases = append(phrases, originPhrase(in.Origin))
@@ -239,21 +240,21 @@ func fromLine(inputs []agentopsv1alpha1.InputItem) string {
 // originPhrase says who one input came from, in the words the root template
 // puts in front of the model. Attribution only: the model is told the door the
 // input came through, never handed anything to act on by it.
-func originPhrase(o *agentopsv1alpha1.InputOrigin) string {
+func originPhrase(o *state.InputOrigin) string {
 	if o == nil {
 		return "an input with no recorded origin"
 	}
 	switch o.Kind {
-	case agentopsv1alpha1.OriginSignal:
+	case state.OriginSignal:
 		return fmt.Sprintf("a signal on source %s", o.Name)
-	case agentopsv1alpha1.OriginChannel:
+	case state.OriginChannel:
 		if o.Sender != "" {
 			return fmt.Sprintf("a person on channel %s (%s)", o.Name, o.Sender)
 		}
 		return fmt.Sprintf("a person on channel %s", o.Name)
-	case agentopsv1alpha1.OriginMember:
+	case state.OriginMember:
 		return fmt.Sprintf("the member invoked as %s (conversation %s)", o.Entry, o.Name)
-	case agentopsv1alpha1.OriginManager:
+	case state.OriginManager:
 		return fmt.Sprintf("the manager, under its rule %s", o.Name)
 	}
 	return fmt.Sprintf("an input of unrecognized origin kind %q", o.Kind)
@@ -276,18 +277,18 @@ func jsonFence(payload string) string {
 }
 
 // PendingInputs returns spec inputs that are neither processed nor inflight.
-func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputItem {
+func PendingInputs(c *state.ConversationRecord) []state.InputItem {
 	done := map[string]bool{}
-	for _, id := range c.Status.ProcessedInputIDs {
+	for _, id := range c.ProcessedInputIDs {
 		done[id] = true
 	}
-	if c.Status.Inflight != nil {
-		for _, id := range c.Status.Inflight.InputIDs {
+	if c.Inflight != nil {
+		for _, id := range c.Inflight.InputIDs {
 			done[id] = true
 		}
 	}
-	var out []agentopsv1alpha1.InputItem
-	for _, in := range c.Spec.Inputs {
+	var out []state.InputItem
+	for _, in := range c.Inputs {
 		if !done[in.ID] {
 			out = append(out, in)
 		}
@@ -304,8 +305,8 @@ func PendingInputs(c *agentopsv1alpha1.Conversation) []agentopsv1alpha1.InputIte
 // Restating it on either side would let a conversation an operator was told is
 // releasable be one the manager refuses to release — a disagreement that
 // surfaces as a bug report about the cap, far from either definition.
-func NeedsWorker(c *agentopsv1alpha1.Conversation) bool {
-	return len(PendingInputs(c)) > 0 || c.Status.Inflight != nil
+func NeedsWorker(c *state.ConversationRecord) bool {
+	return len(PendingInputs(c)) > 0 || c.Inflight != nil
 }
 
 // Tooling is the wiring's half of a work unit's tool access: the resolved
@@ -328,16 +329,25 @@ func ToolsModeOf(b *agentopsv1alpha1.ToolsetBinding) string {
 	return b.Mode
 }
 
+// ToolsModeOfRecord is ToolsModeOf for the binding a conversation record
+// carries.
+func ToolsModeOfRecord(b *state.ToolsetBinding) string {
+	if b == nil || b.Mode == "" {
+		return agentopsv1alpha1.ToolsModeMerge
+	}
+	return b.Mode
+}
+
 // Next resolves the next work unit. Returns the unit and the consumed input
 // ids, or ok=false when there is nothing to dispatch (inflight or empty).
 // contextID is the handle to continue, or "" to start fresh. The CALLER decides
 // it, because whether continuity is possible depends on the execution backend —
 // which runtime, and whether this deployment gives it somewhere to keep context
 // — and resolving that here would put runtime knowledge in the prompt builder.
-func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfile, tools Tooling,
+func Next(c *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfile, tools Tooling,
 	resolve PayloadResolver, now time.Time, contextID string) (WorkUnit, []string, bool, error) {
 
-	if c.Status.Inflight != nil {
+	if c.Inflight != nil {
 		return WorkUnit{}, nil, false, nil
 	}
 	pending := PendingInputs(c)
@@ -375,7 +385,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 	unit.Agent = agentName
 
 	switch first.Type {
-	case agentopsv1alpha1.InputTask, agentopsv1alpha1.InputJob:
+	case state.InputTask, state.InputJob:
 		payload, err := resolve(first)
 		if err != nil {
 			return WorkUnit{}, nil, false, err
@@ -385,12 +395,12 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			promptFile: profile.Spec.Prompt,
 			template:   taskTemplate,
 			vars:       map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection},
-			inputs:     []agentopsv1alpha1.InputItem{first},
+			inputs:     []state.InputItem{first},
 			inputBlock: quoteBlock(payload),
 		}.into(&unit, isRoot(c))
 		return unit, []string{first.ID}, true, nil
 
-	case agentopsv1alpha1.InputAlert:
+	case state.InputAlert:
 		payload, err := resolve(first)
 		if err != nil {
 			return WorkUnit{}, nil, false, err
@@ -400,12 +410,12 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			promptFile: profile.Spec.Prompt,
 			template:   investigateTemplate,
 			vars:       map[string]string{"AGENT_NAME": agentName, "SIGNAL_JSON": payload, "ALERTS_JSON": payload, "DELIVERY_INSTRUCTIONS": deliverySection},
-			inputs:     []agentopsv1alpha1.InputItem{first},
+			inputs:     []state.InputItem{first},
 			inputBlock: jsonFence(payload),
 		}.into(&unit, isRoot(c))
 		return unit, []string{first.ID}, true, nil
 
-	case agentopsv1alpha1.InputReply, agentopsv1alpha1.InputRecurrence:
+	case state.InputReply, state.InputRecurrence:
 		if contextID == "" {
 			// nothing to continue — degrade to a task around the text (v0.6
 			// behavior). Reached both before the first run has produced a handle
@@ -419,7 +429,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			framed{
 				template:   taskTemplate,
 				vars:       map[string]string{"AGENT_NAME": agentName, "USER_TASK": payload, "DELIVERY_INSTRUCTIONS": deliverySection},
-				inputs:     []agentopsv1alpha1.InputItem{first},
+				inputs:     []state.InputItem{first},
 				inputBlock: quoteBlock(payload),
 			}.into(&unit, isRoot(c))
 			return unit, []string{first.ID}, true, nil
@@ -433,7 +443,7 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 			ids = append(ids, in.ID)
 		}
 		joined := strings.Join(texts, "\n---\n")
-		if first.Type == agentopsv1alpha1.InputRecurrence {
+		if first.Type == state.InputRecurrence {
 			joined = "[automatic notification — this signal fired AGAIN; this is not a user reply]\n```json\n" +
 				joined + "\n```\nRe-assess with your previous context: has anything changed? Update the diagnosis or proposed fix if needed; keep it short if nothing changed."
 		}
@@ -458,13 +468,13 @@ func Next(c *agentopsv1alpha1.Conversation, profile *agentopsv1alpha1.AgentProfi
 // type into one resume, with their resolved payloads in the same order. The
 // first input's payload failing is the unit's error; a later one failing ends
 // the batch there, leaving that input pending for the next dispatch.
-func batchSameType(pending []agentopsv1alpha1.InputItem, resolve PayloadResolver) ([]agentopsv1alpha1.InputItem, []string, error) {
+func batchSameType(pending []state.InputItem, resolve PayloadResolver) ([]state.InputItem, []string, error) {
 	first := pending[0]
 	p, err := resolve(first)
 	if err != nil {
 		return nil, nil, err
 	}
-	batch, texts := []agentopsv1alpha1.InputItem{first}, []string{p}
+	batch, texts := []state.InputItem{first}, []string{p}
 	for _, in := range pending[1:] {
 		if in.Type != first.Type {
 			break

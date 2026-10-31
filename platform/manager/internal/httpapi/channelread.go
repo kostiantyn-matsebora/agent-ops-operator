@@ -3,27 +3,20 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // MaxReadBatch bounds one read report. The blast radius is one screen of
 // conversations — the same bound, for the same reason, as bulk close.
 const MaxReadBatch = 50
-
-// readPatchAttempts retries a status patch losing to a concurrent writer. The
-// reconciler patches conversation status on every run, so a conflict here is
-// ordinary rather than exceptional.
-const readPatchAttempts = 3
 
 type readEntry struct {
 	ThreadID string `json:"threadId"`
@@ -116,15 +109,15 @@ func (s *Server) handleChannelRead(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now()
 
-	var list agentopsv1alpha1.ConversationList
-	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace)); err != nil {
+	all, err := s.Store.List(ctx, state.ByAll, state.ListKey{})
+	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	byThread := map[string]string{}
-	for i := range list.Items {
-		c := &list.Items[i]
-		if t := c.Status.Thread(ch.Name); t != nil && t.ThreadID != "" {
+	for i := range all {
+		c := &all[i]
+		if t := c.Thread(ch.Name); t != nil && t.ThreadID != "" {
 			byThread[t.ThreadID] = c.Name
 		}
 	}
@@ -222,24 +215,13 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 			}
 		}
 	}
-	for attempt := 0; attempt < readPatchAttempts; attempt++ {
-		var conv agentopsv1alpha1.Conversation
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
-			if apierrors.IsNotFound(err) {
-				fail(fmt.Sprintf("conversation %q no longer exists", name))
-				return
-			}
-			fail(err.Error())
-			return
-		}
-		t := conv.Status.Thread(channel)
+	var pending map[*readTarget]bool
+	_, err := state.Mutate(ctx, s.Store, state.Key(name), func(conv *state.ConversationRecord) error {
+		t := conv.Thread(channel)
 		if t == nil {
-			fail(fmt.Sprintf("conversation %q holds no thread on channel %q", name, channel))
-			return
+			return fmt.Errorf("conversation %q holds no thread on channel %q", name, channel)
 		}
-		patch := client.MergeFrom(conv.DeepCopy())
-		advanced := false
-		pending := map[*readTarget]bool{}
+		pending = map[*readTarget]bool{}
 		for _, target := range targets {
 			// A REWIND is exempt from the monotonic check by design — "mark
 			// unread" exists precisely to set a reader's own entry EARLIER
@@ -251,7 +233,7 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 			// them either.
 			if !target.rewind {
 				if cur := t.Watermark(target.reader); cur != nil {
-					if curTime, ok := agentopsv1alpha1.ParseWatermark(*cur); ok && !target.at.After(curTime) {
+					if curTime, ok := state.ParseWatermark(*cur); ok && !target.at.After(curTime) {
 						for _, i := range target.results {
 							results[i].Outcome, results[i].Reason = readSkipped, "the watermark would not advance"
 						}
@@ -261,30 +243,36 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 			}
 			setWatermark(t, target.reader, target.at)
 			pending[target] = true
-			advanced = true
 		}
-		if !advanced {
-			return
+		if len(pending) == 0 {
+			return nil
 		}
 		// A binding written before this mechanism existed is being read NOW, so
 		// it is tracked from here on: leaving it untracked would keep it
 		// permanently "read" whatever the watermark said.
 		t.ReadTracked = true
-		err := s.Client.Status().Patch(ctx, &conv, patch)
-		if err == nil {
-			for target := range pending {
-				for _, i := range target.results {
-					results[i].Outcome, results[i].Reason = readMarked, ""
-				}
-			}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			fail(fmt.Sprintf("conversation %q no longer exists", name))
 			return
 		}
-		if !apierrors.IsConflict(err) {
-			fail(err.Error())
+		if errors.Is(err, state.ErrConflict) {
+			fail(fmt.Sprintf("conflict marking thread on %q read: %v", name, err))
 			return
+		}
+		fail(err.Error())
+		return
+	}
+	// The monotonic check ran against the record the winning write was built
+	// from, so a batch resolved a moment ago never overwrites a watermark
+	// another reporter advanced in between.
+	for target := range pending {
+		for _, i := range target.results {
+			results[i].Outcome, results[i].Reason = readMarked, ""
 		}
 	}
-	fail(fmt.Sprintf("conflict marking thread on %q read", name))
 }
 
 // setWatermark records one reader's mark, or the channel-wide one when no
@@ -293,7 +281,7 @@ func (s *Server) markThreadRead(ctx context.Context, name, channel string, targe
 // A reader report NEVER advances the channel-wide mark: that is the whole point
 // of the overlay — one person reading must not clear the badge for colleagues
 // who have not.
-func setWatermark(t *agentopsv1alpha1.ThreadBinding, reader string, at time.Time) {
+func setWatermark(t *state.ThreadBinding, reader string, at time.Time) {
 	// Full nanosecond precision, preserved as an opaque string rather than run
 	// through metav1.Time — see ThreadBinding.ReadAt's comment for why that
 	// distinction is the whole fix here.
@@ -308,14 +296,14 @@ func setWatermark(t *agentopsv1alpha1.ThreadBinding, reader string, at time.Time
 			return
 		}
 	}
-	t.Readers = append(t.Readers, agentopsv1alpha1.ReaderMark{Key: reader, ReadAt: &formatted})
+	t.Readers = append(t.Readers, state.ReaderMark{Key: reader, ReadAt: &formatted})
 	evictReaders(t, reader)
 }
 
 // evictReaders keeps the overlay bounded, dropping the oldest watermark first
 // and never the entry just written — evicting the new mark would silently
 // discard the report that caused the eviction.
-func evictReaders(t *agentopsv1alpha1.ThreadBinding, keep string) {
+func evictReaders(t *state.ThreadBinding, keep string) {
 	for len(t.Readers) > agentopsv1alpha1.MaxReadersPerThread {
 		oldest := -1
 		for i := range t.Readers {
@@ -333,15 +321,15 @@ func evictReaders(t *agentopsv1alpha1.ThreadBinding, keep string) {
 	}
 }
 
-func readerBefore(a, b agentopsv1alpha1.ReaderMark) bool {
+func readerBefore(a, b state.ReaderMark) bool {
 	if a.ReadAt == nil {
 		return true
 	}
 	if b.ReadAt == nil {
 		return false
 	}
-	at, aok := agentopsv1alpha1.ParseWatermark(*a.ReadAt)
-	bt, bok := agentopsv1alpha1.ParseWatermark(*b.ReadAt)
+	at, aok := state.ParseWatermark(*a.ReadAt)
+	bt, bok := state.ParseWatermark(*b.ReadAt)
 	if !aok {
 		return true
 	}

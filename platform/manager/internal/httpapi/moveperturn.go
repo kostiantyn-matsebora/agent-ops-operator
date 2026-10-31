@@ -16,6 +16,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // turnEvidence is what the manager knows about a completed run from its OWN
@@ -60,17 +61,17 @@ const maxDigestResultRunes = 500
 // is inert and never judged, which is also what makes `close` on the caller
 // itself end the turn cleanly. A turn that consumed any input a person typed
 // (origin `channel`) is answered by its own text, whatever verbs it called.
-func judgeRootTurn(conv *agentopsv1alpha1.Conversation, status string, ev turnEvidence,
-	recorded []agentopsv1alpha1.RecordedInput) rootTurnVerdict {
+func judgeRootTurn(conv *state.ConversationRecord, status string, ev turnEvidence,
+	recorded []state.RecordedInput) rootTurnVerdict {
 
-	if conv.Spec.CoordinatorRef == nil || !ev.Dispatched || ev.Moved || status != "succeeded" ||
-		conv.Status.Phase == agentopsv1alpha1.ConversationClosed || answeredAPerson(recorded) {
+	if conv.CoordinatorRef == "" || !ev.Dispatched || ev.Moved || status != "succeeded" ||
+		conv.Phase == state.PhaseClosed || answeredAPerson(recorded) {
 		return turnEnded
 	}
 	// An escalated root is waiting on a person: the escalation WAS its move,
 	// and demanding another only invites the cheapest one — a close that
 	// archives the thread the person was asked to act in.
-	if conv.Status.EscalatedAt != nil {
+	if conv.EscalatedAt != nil {
 		return turnEnded
 	}
 	if consumedOnlyTheCorrectiveInput(recorded) {
@@ -88,9 +89,9 @@ func judgeRootTurn(conv *agentopsv1alpha1.Conversation, status string, ev turnEv
 // records the surface it was typed on. An alert, a job tick or a posted task
 // records no surface, so the surface is what separates a person from a
 // machine for a signal-origin input.
-func answeredAPerson(recorded []agentopsv1alpha1.RecordedInput) bool {
+func answeredAPerson(recorded []state.RecordedInput) bool {
 	for i := range recorded {
-		if recorded[i].Origin == agentopsv1alpha1.OriginChannel || recorded[i].Surface != "" {
+		if recorded[i].Origin == state.OriginChannel || recorded[i].Surface != "" {
 			return true
 		}
 	}
@@ -100,25 +101,26 @@ func answeredAPerson(recorded []agentopsv1alpha1.RecordedInput) bool {
 // consumedOnlyTheCorrectiveInput is the "two misses IN A ROW" test: the run's
 // consumed inputs are exactly one input of origin `manager`. Anything else
 // between the two misses — a member's result, a signal — resets the count.
-func consumedOnlyTheCorrectiveInput(recorded []agentopsv1alpha1.RecordedInput) bool {
-	return len(recorded) == 1 && recorded[0].Origin == agentopsv1alpha1.OriginManager
+func consumedOnlyTheCorrectiveInput(recorded []state.RecordedInput) bool {
+	return len(recorded) == 1 && recorded[0].Origin == state.OriginManager
 }
 
 // actOnMiss performs a verdict's consequence on the conversation itself and
 // reports whether a corrective input was appended, so the caller lands the
 // phase Queued for it. Never fails `/work/done`: the run is already recorded,
 // and a consequence that could not be written is logged for the record.
-func (s *Server) actOnMiss(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+func (s *Server) actOnMiss(ctx context.Context, conv *state.ConversationRecord,
 	runID, result string, verdict rootTurnVerdict) bool {
 
 	switch verdict {
 	case turnFirstMiss:
 		return s.appendCorrectiveInput(ctx, conv, runID)
 	case turnSecondMiss:
-		// A COPY: Escalate patches the object it is handed and the API's reply
-		// overwrites it, which would discard the run record /work/done is still
-		// holding in memory for its own status write.
-		s.escalateSecondMiss(ctx, conv.DeepCopy(), result)
+		// A COPY: Escalate writes through the record it is handed and replaces
+		// it with what was stored, which must not disturb the one /work/done
+		// is still holding.
+		held := *conv
+		s.escalateSecondMiss(ctx, &held, result)
 	}
 	return false
 }
@@ -127,7 +129,7 @@ func (s *Server) actOnMiss(ctx context.Context, conv *agentopsv1alpha1.Conversat
 // `task` input, origin `{manager, move-per-turn}`, naming the rule and the
 // roster read at this moment. Idempotent per run, so a retried report
 // appends it once.
-func (s *Server) appendCorrectiveInput(ctx context.Context, conv *agentopsv1alpha1.Conversation, runID string) bool {
+func (s *Server) appendCorrectiveInput(ctx context.Context, conv *state.ConversationRecord, runID string) bool {
 	text := correctiveInputText(s.coordinatorRoster(ctx, conv))
 	if err := s.Router.AppendManagerInput(ctx, conv.Name, chat.MoveInputID(conv.Name, runID), text); err != nil {
 		log.FromContext(ctx).Info("appending the corrective input after a turn without a move",
@@ -141,9 +143,9 @@ func (s *Server) appendCorrectiveInput(ctx context.Context, conv *agentopsv1alph
 // escalation digest, never a close — nothing was exceeded. An already
 // escalated root replays no digest (Escalate is a no-op there), so the miss is
 // logged and the corrective loop stops; the person already holds the thread.
-func (s *Server) escalateSecondMiss(ctx context.Context, conv *agentopsv1alpha1.Conversation, result string) {
+func (s *Server) escalateSecondMiss(ctx context.Context, conv *state.ConversationRecord, result string) {
 	logger := log.FromContext(ctx).WithValues("conversation", conv.Name)
-	if conv.Status.EscalatedAt != nil {
+	if conv.EscalatedAt != nil {
 		logger.Info("a second turn without a move on an already escalated root; the person holds the thread")
 		return
 	}
@@ -156,12 +158,12 @@ func (s *Server) escalateSecondMiss(ctx context.Context, conv *agentopsv1alpha1.
 // coordinatorRoster reads the `agents[]` names of the Coordinator this root
 // runs for, bounded, at the moment of the miss. An unreadable Coordinator
 // yields no names, and the texts then say "the roster" instead.
-func (s *Server) coordinatorRoster(ctx context.Context, conv *agentopsv1alpha1.Conversation) []string {
-	if conv.Spec.CoordinatorRef == nil {
+func (s *Server) coordinatorRoster(ctx context.Context, conv *state.ConversationRecord) []string {
+	if conv.CoordinatorRef == "" {
 		return nil
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.CoordinatorRef.Name}, &co); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.CoordinatorRef}, &co); err != nil {
 		return nil
 	}
 	names := make([]string, 0, len(co.Spec.Agents))

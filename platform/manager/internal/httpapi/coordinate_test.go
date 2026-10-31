@@ -14,7 +14,8 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // erroringReader always fails to read, for exercising readJSON's error path —
@@ -33,11 +34,11 @@ func coordServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
-		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, controller.ConversationIDIndexer).
 		WithObjects(objs...).Build()
-	q := &chat.OpQueue{Client: c, Namespace: "agent-ops", Registry: chat.NewRegistry()}
-	router := &chat.Router{Client: c, Reader: c, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Namespace: "agent-ops", AdapterToken: coordTestMasterKey, Router: router}, c
+	store := kube.NewStore(c, "agent-ops")
+	q := &chat.OpQueue{Store: store, Registry: chat.NewRegistry()}
+	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: "agent-ops", Ops: q}
+	return &Server{Reader: c, Client: c, Store: store, Namespace: "agent-ops", AdapterToken: coordTestMasterKey, Router: router}, c
 }
 
 func postCoordinate(s *Server, path, token string, body map[string]any) *httptest.ResponseRecorder {
@@ -439,9 +440,7 @@ func TestHandleCoordinateEscalateRefusesAWrongToken(t *testing.T) {
 }
 
 func TestProjectConversationNamesThePipelineWhenNotCoordinated(t *testing.T) {
-	c := &agentopsv1alpha1.Conversation{}
-	c.Name = "conv-1"
-	c.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: "pipeline-a"}
+	c := &state.ConversationRecord{Name: "conv-1", PipelineRef: "pipeline-a"}
 	p := projectConversation(c)
 	if p.Pipeline != "pipeline-a" {
 		t.Fatalf("want the pipelineRef's name when there is no coordinatorRef, got %q", p.Pipeline)

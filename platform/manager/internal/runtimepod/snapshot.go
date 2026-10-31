@@ -7,6 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // Snapshot is what a new Conversation freezes out of its originating
@@ -16,8 +17,8 @@ import (
 // One struct rather than a widening return list, because these are one
 // decision read four ways and a caller must not be able to take three of them.
 type Snapshot struct {
-	// RuntimeRef is the RESOLVED runtime name, or nil for the bootstrap config.
-	RuntimeRef *agentopsv1alpha1.ObjectRef
+	// RuntimeRef is the RESOLVED runtime name, or "" for the bootstrap config.
+	RuntimeRef state.Ref
 	// ServiceAccountName is frozen ONLY where the Pipeline named one — see
 	// below, the asymmetry is deliberate.
 	ServiceAccountName string
@@ -76,7 +77,7 @@ func SnapshotFor(ctx context.Context, r client.Reader, namespace string,
 	snap.ServiceAccountName = capability.ServiceAccountName
 
 	if capability.RuntimeRef != nil && capability.RuntimeRef.Name != "" {
-		snap.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: capability.RuntimeRef.Name}
+		snap.RuntimeRef = capability.RuntimeRef.Name
 		return snap
 	}
 	// DEPRECATED, one release: a profile applied before the upgrade named the
@@ -88,7 +89,7 @@ func SnapshotFor(ctx context.Context, r client.Reader, namespace string,
 		if err := r.Get(ctx, types.NamespacedName{
 			Namespace: namespace, Name: profileName}, &profile); err == nil {
 			if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
-				snap.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: profile.Spec.RuntimeRef.Name}
+				snap.RuntimeRef = profile.Spec.RuntimeRef.Name
 				return snap
 			}
 		}
@@ -98,7 +99,7 @@ func SnapshotFor(ctx context.Context, r client.Reader, namespace string,
 	// named runtime must exist, and this one would not.
 	var rt agentopsv1alpha1.AgentRuntime
 	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "default"}, &rt); err == nil {
-		snap.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: rt.Name}
+		snap.RuntimeRef = rt.Name
 		return snap
 	}
 	// Nothing to name: the manager's bootstrap config answers, and it is not a

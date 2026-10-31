@@ -15,7 +15,7 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
-	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // sigTestNamespace is the namespace every fixture in this file shares.
@@ -29,12 +29,12 @@ func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.Signal{}).
-		WithIndex(&agentopsv1alpha1.Conversation{}, agentopsv1alpha1.IndexConversationID, controller.ConversationIDIndexer).
 		WithObjects(objs...).Build()
 	acts := activity.New(64)
-	q := &chat.OpQueue{Client: c, Namespace: sigTestNamespace, Registry: chat.NewRegistry(), Activity: acts}
-	router := &chat.Router{Client: c, Reader: c, Namespace: sigTestNamespace, Ops: q, Activity: acts}
-	return &Server{Reader: c, Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
+	store := kube.NewStore(c, sigTestNamespace)
+	q := &chat.OpQueue{Store: store, Registry: chat.NewRegistry(), Activity: acts}
+	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: sigTestNamespace, Ops: q, Activity: acts}
+	return &Server{Reader: c, Client: c, Store: store, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
 		Ops: q, Router: router, Activity: acts}, c
 }
 

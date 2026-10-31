@@ -47,7 +47,6 @@ import (
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -62,6 +61,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/storagebreaker"
 )
 
@@ -73,8 +73,11 @@ const errInvalidJSON = "invalid JSON"
 
 // Server carries dependencies for the HTTP surface.
 type Server struct {
-	Client    client.Client // cached
-	Reader    client.Reader // APIReader: strong reads for dispatch state
+	Client client.Client // cached
+	Reader client.Reader // APIReader: strong reads for dispatch state
+	// Store is the only way this surface reaches a Conversation or a queued
+	// input's payload (state-store design D-2).
+	Store     state.Store
 	Namespace string
 	Addr      string
 
@@ -292,16 +295,16 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 
 // ---- work dispatch ----------------------------------------------------------
 
-func (s *Server) resolvePayload(ctx context.Context, ns string) dispatch.PayloadResolver {
-	return func(item agentopsv1alpha1.InputItem) (string, error) {
-		if item.PayloadRef == nil {
+func (s *Server) resolvePayload(ctx context.Context) dispatch.PayloadResolver {
+	return func(item state.InputItem) (string, error) {
+		if item.PayloadRef == "" {
 			return item.Payload, nil
 		}
-		var ci agentopsv1alpha1.ConversationInput
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: item.PayloadRef.Name}, &ci); err != nil {
+		blob, err := s.Store.GetBlob(ctx, item.PayloadRef)
+		if err != nil {
 			return "", err
 		}
-		return ci.Spec.Payload, nil
+		return blob.Payload, nil
 	}
 }
 
@@ -345,20 +348,20 @@ func (s *Server) handleWork(w http.ResponseWriter, r *http.Request) {
 // nothing — capabilities live only on the Pipeline. A ref that no longer
 // resolves fails the dispatch and is recorded on the conversation, never
 // degraded to partial tooling.
-func (s *Server) effectiveTooling(ctx context.Context, conv *agentopsv1alpha1.Conversation) (dispatch.Tooling, error) {
-	byRef, err := s.resolveToolsets(ctx, conv, conv.Spec.Toolsets)
+func (s *Server) effectiveTooling(ctx context.Context, conv *state.ConversationRecord) (dispatch.Tooling, error) {
+	byRef, err := s.resolveToolsets(ctx, conv, conv.Toolsets)
 	if err != nil {
 		return dispatch.Tooling{}, err
 	}
 	return dispatch.Tooling{
 		AllowedTools: dispatch.EffectiveAllowedTools(byRef),
-		Mode:         dispatch.ToolsModeOf(conv.Spec.Toolsets),
+		Mode:         dispatch.ToolsModeOfRecord(conv.Toolsets),
 	}, nil
 }
 
 // resolveToolsets reads a binding's MCPToolsets in ref order.
-func (s *Server) resolveToolsets(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	binding *agentopsv1alpha1.ToolsetBinding) ([][]string, error) {
+func (s *Server) resolveToolsets(ctx context.Context, conv *state.ConversationRecord,
+	binding *state.ToolsetBinding) ([][]string, error) {
 
 	if binding == nil {
 		return nil, nil
@@ -366,8 +369,8 @@ func (s *Server) resolveToolsets(ctx context.Context, conv *agentopsv1alpha1.Con
 	byRef := make([][]string, 0, len(binding.Refs))
 	for _, ref := range binding.Refs {
 		var ts agentopsv1alpha1.MCPToolset
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ts); err != nil {
-			err = fmt.Errorf("bound MCPToolset %q: %w", ref.Name, err)
+		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref}, &ts); err != nil {
+			err = fmt.Errorf("bound MCPToolset %q: %w", ref, err)
 			s.setToolingCondition(ctx, conv, "ToolsetUnresolved", err.Error())
 			return nil, err
 		}
@@ -378,18 +381,18 @@ func (s *Server) resolveToolsets(ctx context.Context, conv *agentopsv1alpha1.Con
 
 // setToolingCondition surfaces a binding failure on the conversation so it is
 // visible in `kubectl describe` rather than only in manager logs.
-func (s *Server) setToolingCondition(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason, message string) {
-	patch := client.MergeFrom(conv.DeepCopy())
-	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-		Type: controller.ConditionToolingResolved, Status: metav1.ConditionFalse,
-		Reason: reason, Message: message,
+func (s *Server) setToolingCondition(ctx context.Context, conv *state.ConversationRecord, reason, message string) {
+	_ = state.Patch(ctx, s.Store, conv, func(r *state.ConversationRecord) {
+		r.SetCondition(state.Condition{
+			Type: controller.ConditionToolingResolved, Status: state.ConditionFalse,
+			Reason: reason, Message: message,
+		})
 	})
-	_ = s.Client.Status().Patch(ctx, conv, patch)
 }
 
 func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (dispatch.WorkUnit, bool, error) {
-	var conv agentopsv1alpha1.Conversation
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: convoName}, &conv); err != nil {
+	conv, rev, err := s.Store.Get(ctx, state.Key(convoName))
+	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
 	// pending-topic gate: a channel-bound conversation waits until AT LEAST ONE
@@ -397,21 +400,21 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// would deadlock on one broken channel; late topics catch up). Dangling
 	// channelRefs stay chat-less. Delivery itself needs no channel lookup — the
 	// operator routes every result to the bound channels after /work/done.
-	if len(conv.Spec.ChannelRefs) > 0 {
+	if len(conv.ChannelRefs) > 0 {
 		chatBound := false
-		for _, ref := range conv.Spec.ChannelRefs {
+		for _, ref := range conv.ChannelRefs {
 			var ch agentopsv1alpha1.Channel
-			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}, &ch); err != nil || ch.Spec.Adapter == "" {
+			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: ref}, &ch); err != nil || ch.Spec.Adapter == "" {
 				continue
 			}
 			chatBound = true
 		}
-		if chatBound && len(conv.Status.Threads) == 0 {
+		if chatBound && len(conv.Threads) == 0 {
 			return dispatch.WorkUnit{}, false, nil
 		}
 	}
 	var profile agentopsv1alpha1.AgentProfile
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: conv.ProfileRef}, &profile); err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
 	tools, err := s.effectiveTooling(ctx, &conv)
@@ -425,7 +428,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 	// declaration: it answers each message fresh and says so, instead of failing
 	// every follow-up for a configuration the operator deliberately chose.
 	contextID := ""
-	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Namespace, &conv, s.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Store, s.Namespace, &conv, s.Runtime)
 	if err != nil {
 		return dispatch.WorkUnit{}, false, err
 	}
@@ -441,20 +444,21 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 			return dispatch.WorkUnit{}, false, nil
 		}
 	}
-	unit, ids, ok, err := dispatch.Next(&conv, &profile, tools, s.resolvePayload(ctx, s.Namespace), time.Now(), contextID)
+	unit, ids, ok, err := dispatch.Next(&conv, &profile, tools, s.resolvePayload(ctx), time.Now(), contextID)
 	if err != nil || !ok {
 		return dispatch.WorkUnit{}, false, err
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	conv.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: unit.RunID, InputIDs: ids, DispatchedAt: now}
-	conv.Status.Phase = agentopsv1alpha1.ConversationWorking
-	conv.Status.LastActivity = &now
+	now := time.Now().UTC()
+	conv.Inflight = &state.InflightRun{RunID: unit.RunID, InputIDs: ids, DispatchedAt: now}
+	conv.Phase = state.PhaseWorking
+	conv.LastActivity = &now
 	if podName != "" {
-		conv.Status.RuntimePod = podName
+		conv.RuntimePod = podName
 	}
-	if err := s.Client.Status().Patch(ctx, &conv, patch); err != nil {
-		if apierrors.IsConflict(err) { // racing update — caller retries next tick
+	// Compare-and-swap on the revision read above: a racing update is not
+	// merged over, the caller retries next tick.
+	if _, err := s.Store.Update(ctx, state.Key(conv.Name), rev, conv); err != nil {
+		if errors.Is(err, state.ErrConflict) {
 			return dispatch.WorkUnit{}, false, nil
 		}
 		return dispatch.WorkUnit{}, false, err
@@ -474,7 +478,7 @@ func (s *Server) tryDispatch(ctx context.Context, convoName, podName string) (di
 // the wiring is ambiguous. INFERRED from materialized bindings — a Conversation
 // records no pipelineRef — so a blank answer is the honest one and never a
 // guess. Telemetry labelling only; nothing routes on it.
-func (s *Server) pipelineName(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
+func (s *Server) pipelineName(ctx context.Context, conv *state.ConversationRecord) string {
 	if p := chat.PipelineForConversation(ctx, s.Client, s.Namespace, conv); p != nil {
 		return p.Name
 	}
@@ -496,14 +500,14 @@ func (s *Server) originNode(pipeline, conversation string) *activity.NodeRef {
 // attribution. It follows the pod builder's own chain — the conversation's
 // snapshot, then the deprecated profile ref, then "default" — because a graph
 // edge naming a different runtime than the pod ran on is worse than no edge.
-func (s *Server) runtimeName(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
-	if conv != nil && conv.Spec.RuntimeRef != nil && conv.Spec.RuntimeRef.Name != "" {
-		return conv.Spec.RuntimeRef.Name
+func (s *Server) runtimeName(ctx context.Context, conv *state.ConversationRecord) string {
+	if conv != nil && conv.RuntimeRef != "" {
+		return conv.RuntimeRef
 	}
-	if conv != nil && conv.Spec.ProfileRef.Name != "" {
+	if conv != nil && conv.ProfileRef != "" {
 		var profile agentopsv1alpha1.AgentProfile
 		if err := s.Client.Get(ctx, types.NamespacedName{
-			Namespace: s.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err == nil {
+			Namespace: s.Namespace, Name: conv.ProfileRef}, &profile); err == nil {
 			if profile.Spec.RuntimeRef != nil && profile.Spec.RuntimeRef.Name != "" {
 				return profile.Spec.RuntimeRef.Name // DEPRECATED, one release
 			}
@@ -613,17 +617,17 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	var conv agentopsv1alpha1.Conversation
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: d.Convo}, &conv); err != nil {
-		writeJSON(w, 404, map[string]string{"error": err.Error()})
+	key := state.Key(d.Convo)
+	conv, _, err := s.Store.Get(ctx, key)
+	if err != nil {
+		code := 500
+		if errors.Is(err, state.ErrNotFound) {
+			code = 404
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	// Latency is DERIVED from the dispatch stamp the manager itself wrote, not
-	// reported by the runtime: a runtime that lies or has a skewed clock would
-	// otherwise put a fiction on the graph.
-	var latencyMs int64
+	now := time.Now().UTC()
 	// An unavailable context during an OUTAGE holds its work instead of losing
 	// it: the input stays pending so it can be dispatched once contexts are
 	// reachable again, with the context it was always meant to continue.
@@ -633,101 +637,38 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	if d.Continuity == ContinuityUnavailable {
 		hold = s.breaker().Report()
 	}
-	// The messages this run consumed, recorded WITH the run. Same status write
-	// that marks them processed, so the record exists before the reconciler is
-	// allowed to prune the queue entry — a crash between the two would otherwise
-	// lose what a person said, permanently and silently.
-	var recorded []agentopsv1alpha1.RecordedInput
-	// Carried out of Inflight before it is cleared below — the only place this
-	// run's true start time is ever recorded. A coordinator's member is
-	// created mid-run, as soon as `invoke` is called, well before the run
-	// that invoked it finishes and writes its own RunStatus entry; the
-	// console anchors the member's transcript position to this run's window
-	// (item #15 QA) and needs a real StartedAt to do it, not the run's own
-	// finish time standing in for both ends.
-	var startedAt *metav1.Time
+	// What this run consumed and when it started, read off the inflight entry
+	// BEFORE it is cleared below — the only place this run's true start time is
+	// ever recorded. A coordinator's member is created mid-run, well before the
+	// run that invoked it writes its own entry; the console anchors the member's
+	// transcript position to this run's window (item #15 QA) and needs a real
+	// StartedAt for it, not the finish time standing in for both ends.
+	//
+	// The messages this run consumed are recorded WITH the run: the record must
+	// exist before the reconciler is allowed to prune the queue entry, or a
+	// crash between the two would lose what a person said, silently.
+	var (
+		recorded  []state.RecordedInput
+		startedAt *time.Time
+		latencyMs int64
+		turn      turnEvidence
+	)
 	// The move stamp (design D-A) is consumed with the rest of the inflight
 	// entry — read here, judged below, surviving nowhere else.
-	var turn turnEvidence
-	if conv.Status.Inflight != nil && conv.Status.Inflight.RunID == d.RunID {
-		latencyMs = now.Sub(conv.Status.Inflight.DispatchedAt.Time).Milliseconds()
-		startedAt = &conv.Status.Inflight.DispatchedAt
+	if inf := conv.Inflight; inf != nil && inf.RunID == d.RunID {
+		latencyMs = now.Sub(inf.DispatchedAt).Milliseconds()
+		started := inf.DispatchedAt
+		startedAt = &started
 		if !hold {
-			recorded = s.recordInputs(ctx, &conv, conv.Status.Inflight.InputIDs)
-			conv.Status.ProcessedInputIDs = bound(append(conv.Status.ProcessedInputIDs, conv.Status.Inflight.InputIDs...), 50)
+			recorded = s.recordInputs(ctx, &conv, inf.InputIDs)
 		}
-		turn = turnEvidence{Dispatched: !hold && d.Continuity != ContinuityUnavailable, Moved: conv.Status.Inflight.Moved}
-		conv.Status.Inflight = nil
-	}
-	// LATEST-WINS, and recorded on a FAILED run too.
-	//
-	// This was write-once, which was unsound: a run may legitimately end in a
-	// different context than it was asked to continue, and keeping the first
-	// handle then named something that no longer existed. Because dispatch and
-	// ingest both key off it, every later message repeated the same failed
-	// continuation — one recoverable loss became permanent. Recording on failure
-	// matters for the same reason: a crash after the context was established
-	// otherwise strands it, and the next message starts over.
-	// Both spellings on the wire too, for the same one release: a runtime image
-	// upgrades independently of the manager, so an older one still reporting the
-	// retired name must not have its handle silently dropped.
-	reported := d.RuntimeContextID
-	if reported == "" {
-		reported = d.SessionID
-	}
-	if reported != "" {
-		conv.SetContextID(reported)
-	}
-	// LATEST-WINS, same rule as the context handle: the agent restates what the
-	// conversation is about having read the whole context, so a report omitting
-	// it leaves the stored one untouched rather than blanking it.
-	if d.Brief != "" {
-		brief := d.Brief
-		if len(brief) > agentopsv1alpha1.MaxBrief {
-			brief = brief[:agentopsv1alpha1.MaxBrief]
-		}
-		conv.Status.Brief = brief
-	}
-	// Context continuity, recorded where anyone can see it. This is the one
-	// failure that leaves a conversation looking entirely healthy — same phase,
-	// same run history, answers still arriving — while every answer is given
-	// without memory. Every other health fact about a conversation is a
-	// condition, so this is one too.
-	//
-	// ABSENT report = no claim: a runtime that does not implement it leaves the
-	// condition untouched rather than appearing to have lost something.
-	switch d.Continuity {
-	case ContinuityUnavailable:
-		reason := d.ContinuityReason
-		if reason == "" {
-			reason = "the runtime could not reach the context it was given"
-		}
-		condReason := "ContextUnavailable"
-		if hold {
-			// Not this conversation's loss: contexts are unreachable across the
-			// install, so the work waits rather than being written off.
-			condReason = "ContextStoreUnavailable"
-			reason = "held: contexts are unreachable across this install, so this " +
-				"message waits rather than being answered without its history — " + reason
-		}
-		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-			Type: controller.ConditionContextContinuity, Status: metav1.ConditionFalse,
-			Reason: condReason, Message: reason,
-		})
-	case ContinuityContinued:
-		s.breaker().Continued()
-		// Recovered: the condition describes the present, not a history of every
-		// hiccup the conversation ever had.
-		apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-			Type: controller.ConditionContextContinuity, Status: metav1.ConditionTrue,
-			Reason: "Continued", Message: "the run continued this conversation's context",
-		})
+		turn = turnEvidence{Dispatched: !hold && d.Continuity != ContinuityUnavailable, Moved: inf.Moved}
 	}
 	result := d.Result
-	if len(result) > 2000 {
-		result = result[:2000]
+	if len(result) > maxRecordedResult {
+		result = result[:maxRecordedResult]
 	}
-	conv.Status.Runs = append(conv.Status.Runs, agentopsv1alpha1.RunStatus{
+	run := state.Run{
 		RunID: d.RunID, Status: d.Status, ExitCode: d.ExitCode, Result: result,
 		StartedAt: startedAt, FinishedAt: &now,
 		// This manager owes the reply to every bound thread. Recorded on the run
@@ -737,51 +678,71 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 		// half a thread: durable results linked by inputIds to text the queue
 		// already deleted.
 		Inputs: recorded,
-	})
-	if len(conv.Status.Runs) > 10 {
-		conv.Status.Runs = conv.Status.Runs[len(conv.Status.Runs)-10:]
-	}
-	// Turns count on the conversation WHOSE OWN status this is, when ITS OWN
-	// run is recorded — never when a member's result arrives as an input, so N
-	// members finishing at once is one turn (design D-C, D-E). Absent Budget
-	// means this conversation is not itself a Coordinator's root: nothing to
-	// count.
-	var maxTurnsExceeded bool
-	if conv.Status.Budget != nil {
-		conv.Status.Budget.Turns++
-		b := conv.Status.Budget
-		maxTurnsExceeded = b.MaxTurns > 0 && b.Turns >= b.MaxTurns
-	}
-	desiredPhase := agentopsv1alpha1.ConversationIdle
-	if len(dispatch.PendingInputs(&conv)) > 0 {
-		desiredPhase = agentopsv1alpha1.ConversationQueued
 	}
 	// A Coordinator root's turn is judged BEFORE the run is recorded and its
 	// inflight entry cleared (design D-B, moveperturn.go). That order is what
 	// makes the hand-back durable: a manager that stops between the append and
 	// the record below leaves the inflight entry in place, so the runtime's
 	// retried report is judged again and the append, idempotent per run, lands
-	// once. The corrective input is pending, so the phase lands Queued. The
-	// phase write below still re-reads and refuses to un-close. A run that
-	// reaches maxTurns is not judged: the root closes on that edge, and a
+	// once. The corrective input is pending, so the phase lands Queued. A run
+	// that reaches maxTurns is not judged: the root closes on that edge, and a
 	// hand-back into a thread about to close helps nobody.
-	if !maxTurnsExceeded && s.Router != nil &&
-		s.actOnMiss(ctx, &conv, d.RunID, result, judgeRootTurn(&conv, d.Status, turn, recorded)) {
-		desiredPhase = agentopsv1alpha1.ConversationQueued
+	missed := false
+	if !turnsReachMax(&conv) && s.Router != nil {
+		missed = s.actOnMiss(ctx, &conv, d.RunID, result, judgeRootTurn(&conv, d.Status, turn, recorded))
 	}
-	conv.Status.LastActivity = &now
-	if err := s.Client.Status().Patch(ctx, &conv, patch); err != nil {
+	if err := s.recordRun(ctx, key, run); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	// Phase moves in its OWN optimistic-locked patch, never folded into the
-	// one above: a run that was still in flight when /close landed reports
-	// its completion here, and this write must not un-close the conversation
-	// when that belated report lands — Closed is sticky until an explicit
-	// reopen. Folded in, an unconditioned merge patch landing after close's
-	// own patch silently reverted phase to Idle/Queued while leaving
-	// ClosedAt stamped — measured live on the chart-v14.0.0 release smoke
-	// (TestConsoleLifecycle/close_then_delete).
+	var (
+		maxTurnsExceeded bool
+		desiredPhase     = state.PhaseIdle
+	)
+	reported := d.RuntimeContextID
+	if reported == "" {
+		reported = d.SessionID // the retired spelling, accepted for one release
+	}
+	if d.Continuity == ContinuityContinued {
+		s.breaker().Continued()
+	}
+	updated, err := state.Mutate(ctx, s.Store, key, func(c *state.ConversationRecord) error {
+		if inf := c.Inflight; inf != nil && inf.RunID == d.RunID && !hold {
+			c.ProcessedInputIDs = bound(append(c.ProcessedInputIDs, inf.InputIDs...), 50)
+		}
+		if c.Inflight != nil && c.Inflight.RunID == d.RunID {
+			c.Inflight = nil
+		}
+		applyReport(c, &d, reported, hold)
+		// Turns count on the conversation WHOSE OWN status this is, when ITS OWN
+		// run is recorded — never when a member's result arrives as an input, so N
+		// members finishing at once is one turn (design D-C, D-E). Absent Budget
+		// means this conversation is not itself a Coordinator's root: nothing to
+		// count.
+		maxTurnsExceeded = false
+		if b := c.Budget; b != nil {
+			b.Turns++
+			maxTurnsExceeded = b.MaxTurns > 0 && b.Turns >= b.MaxTurns
+		}
+		desiredPhase = state.PhaseIdle
+		if missed || len(dispatch.PendingInputs(c)) > 0 {
+			desiredPhase = state.PhaseQueued
+		}
+		c.LastActivity = &now
+		return nil
+	})
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	conv = updated
+	// Phase moves in its OWN write, never folded into the one above: a run that
+	// was still in flight when /close landed reports its completion here, and
+	// this write must not un-close the conversation when that belated report
+	// lands — Closed is sticky until an explicit reopen. Folded in, a write
+	// landing after close's own silently reverted phase to Idle/Queued while
+	// leaving ClosedAt stamped — measured live on the chart-v14.0.0 release
+	// smoke (TestConsoleLifecycle/close_then_delete).
 	if err := s.setPhaseUnlessClosed(ctx, d.Convo, desiredPhase); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -808,38 +769,33 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	// no surface can mistake silence for success.
 	//
 	// This is the FAST PATH, not the only one: the reply's op id is stable per
-	// conversation×channel×run and delivery is marked on the run, so a manager
+	// conversation x channel x run and delivery is marked on the run, so a manager
 	// restart in the window between this write and an adapter claiming the op
 	// re-derives the answer from reconciliation instead of losing it. The message
 	// is composed from the RECORDED run so both paths say the same thing.
-	if len(conv.Spec.ChannelRefs) > 0 && s.Router != nil {
-		if run := runByID(&conv, d.RunID); run != nil {
-			s.Router.FanOutRunReply(ctx, &conv, d.RunID, chat.RunReplyMessage(run))
-		}
+	if len(conv.ChannelRefs) > 0 && s.Router != nil {
+		s.Router.FanOutRunReply(ctx, &conv, d.RunID, chat.RunReplyMessage(&run))
 	}
 	// A member's result becomes an input on its PARENT, one hop
 	// (coordination-loop) — the FAST PATH; a conversation with no causedBy has
 	// nothing to route. The reconciler backstop re-derives a missed append from
-	// `causedBy ∧ !RoutedToParent`.
-	if conv.Spec.CausedBy != nil && s.Router != nil {
+	// `causedBy and !RoutedToParent`.
+	if conv.CausedBy != nil && s.Router != nil {
 		dedup := "member:" + conv.Name + ":" + d.RunID
-		if err := s.Router.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name, dedup, result); err != nil {
+		if err := s.Router.AppendMemberResult(ctx, conv.CausedBy, conv.Name, dedup, result); err != nil {
 			log.FromContext(ctx).Info("routing member result to parent (backstop will retry)",
-				"conversation", conv.Name, "parent", conv.Spec.CausedBy.Parent, "error", err.Error())
-		} else if run := runByID(&conv, d.RunID); run != nil {
-			markPatch := client.MergeFrom(conv.DeepCopy())
-			run.RoutedToParent = true
-			if err := s.Client.Status().Patch(ctx, &conv, markPatch); err != nil {
-				log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
-					"conversation", conv.Name, "runId", d.RunID, "error", err.Error())
-			}
+				"conversation", conv.Name, "parent", conv.CausedBy.Parent, "error", err.Error())
+		} else if err := s.Store.UpdateRun(ctx, key, d.RunID, state.RunUpdate{MarkRoutedToParent: true}); err != nil &&
+			!errors.Is(err, state.ErrNotFound) {
+			log.FromContext(ctx).Info("marking run routed to parent (backstop will retry)",
+				"conversation", conv.Name, "runId", d.RunID, "error", err.Error())
 		}
 	}
 	// Budget edges are evaluated PER COORDINATOR LEVEL (design D-E): only a
 	// conversation that is itself a Coordinator's root carries a Budget, and
 	// only ITS OWN maxTurns bounds ITS OWN turns.
 	if maxTurnsExceeded && s.Router != nil {
-		digest := fmt.Sprintf("budget-exceeded: maxTurns (%d) reached", conv.Status.Budget.MaxTurns)
+		digest := fmt.Sprintf("budget-exceeded: maxTurns (%d) reached", conv.Budget.MaxTurns)
 		if err := s.Router.CloseBudgetExceeded(ctx, &conv, digest); err != nil {
 			log.FromContext(ctx).Info("closing conversation on maxTurns",
 				"conversation", conv.Name, "error", err.Error())
@@ -848,37 +804,111 @@ func (s *Server) handleWorkDone(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// maxRecordedResult bounds the result kept on a run; a longer one is cut, never
+// refused.
+const maxRecordedResult = 2000
+
+// turnsReachMax reports whether recording one more turn reaches the root's
+// maxTurns, judged on the record read before the write.
+func turnsReachMax(c *state.ConversationRecord) bool {
+	b := c.Budget
+	return b != nil && b.MaxTurns > 0 && b.Turns+1 >= b.MaxTurns
+}
+
+// recordRun appends the run unless the history already holds it: a retried
+// report whose first attempt landed the run but not the inflight clear must not
+// record it twice.
+func (s *Server) recordRun(ctx context.Context, key state.Key, run state.Run) error {
+	runs, err := s.Store.ListRuns(ctx, key)
+	if err != nil {
+		return err
+	}
+	for i := range runs {
+		if runs[i].RunID == run.RunID {
+			return nil
+		}
+	}
+	return s.Store.AppendRun(ctx, key, run)
+}
+
+// applyReport records what a work report says about the context onto the
+// conversation: the handle, the brief and the continuity condition.
+func applyReport(c *state.ConversationRecord, d *workDone, reported string, hold bool) {
+	// LATEST-WINS, and recorded on a FAILED run too.
+	//
+	// This was write-once, which was unsound: a run may legitimately end in a
+	// different context than it was asked to continue, and keeping the first
+	// handle then named something that no longer existed. Because dispatch and
+	// ingest both key off it, every later message repeated the same failed
+	// continuation — one recoverable loss became permanent. Recording on failure
+	// matters for the same reason: a crash after the context was established
+	// otherwise strands it, and the next message starts over.
+	if reported != "" {
+		c.SetContextID(reported)
+	}
+	// LATEST-WINS, same rule as the context handle: the agent restates what the
+	// conversation is about having read the whole context, so a report omitting
+	// it leaves the stored one untouched rather than blanking it.
+	if d.Brief != "" {
+		brief := d.Brief
+		if len(brief) > agentopsv1alpha1.MaxBrief {
+			brief = brief[:agentopsv1alpha1.MaxBrief]
+		}
+		c.Brief = brief
+	}
+	// Context continuity, recorded where anyone can see it. This is the one
+	// failure that leaves a conversation looking entirely healthy — same phase,
+	// same run history, answers still arriving — while every answer is given
+	// without memory. Every other health fact about a conversation is a
+	// condition, so this is one too.
+	//
+	// ABSENT report = no claim: a runtime that does not implement it leaves the
+	// condition untouched rather than appearing to have lost something.
+	switch d.Continuity {
+	case ContinuityUnavailable:
+		reason := d.ContinuityReason
+		if reason == "" {
+			reason = "the runtime could not reach the context it was given"
+		}
+		condReason := "ContextUnavailable"
+		if hold {
+			// Not this conversation's loss: contexts are unreachable across the
+			// install, so the work waits rather than being written off.
+			condReason = "ContextStoreUnavailable"
+			reason = "held: contexts are unreachable across this install, so this " +
+				"message waits rather than being answered without its history — " + reason
+		}
+		c.SetCondition(state.Condition{
+			Type: controller.ConditionContextContinuity, Status: state.ConditionFalse,
+			Reason: condReason, Message: reason,
+		})
+	case ContinuityContinued:
+		c.SetCondition(state.Condition{
+			Type: controller.ConditionContextContinuity, Status: state.ConditionTrue,
+			Reason: "Continued", Message: "the run continued this conversation's context",
+		})
+	}
+}
+
 // setPhaseUnlessClosed moves a conversation to Queued or Idle after a run
 // completes, UNLESS a concurrent /close already moved it to Closed — Closed
 // is sticky until an explicit reopen, so a work report that was merely slow
 // to arrive must never resurrect the phase close already retired.
 //
-// Optimistic-locked and retried on conflict, deliberately separate from the
-// rest of handleWorkDone's status write: that write carries no sticky
-// invariant (a late result is still worth recording, closed or not), so it
-// stays a plain, unconditioned patch. Phase is the one field here that must
-// be re-decided against the LATEST state rather than the state this request
-// started with.
-func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired agentopsv1alpha1.ConversationPhase) error {
-	for range 5 {
-		var conv agentopsv1alpha1.Conversation
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
-			return client.IgnoreNotFound(err)
+// Phase is the one field here that must be re-decided against the LATEST state
+// rather than the state this request started with, so the decision is made
+// inside the compare-and-swap loop and a loser re-reads.
+func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired string) error {
+	_, err := state.Mutate(ctx, s.Store, state.Key(name), func(c *state.ConversationRecord) error {
+		if c.Phase != state.PhaseClosed {
+			c.Phase = desired
 		}
-		if conv.Status.Phase == agentopsv1alpha1.ConversationClosed || conv.Status.Phase == desired {
-			return nil
-		}
-		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		conv.Status.Phase = desired
-		err := s.Client.Status().Patch(ctx, &conv, patch)
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return client.IgnoreNotFound(err)
-		}
+		return nil
+	})
+	if err = state.IgnoreNotFound(err); err != nil {
+		return fmt.Errorf("setting phase on %q: %w", name, err)
 	}
-	return fmt.Errorf("conflict setting phase on %q", name)
+	return nil
 }
 
 // recordInputs renders the queued inputs a run consumed as the record kept on
@@ -886,15 +916,15 @@ func (s *Server) setPhaseUnlessClosed(ctx context.Context, name string, desired 
 //
 // Reads the out-of-line payload where there is one, so the record holds the
 // MESSAGE rather than a reference to an object that is about to be pruned with
-// the queue entry. The inline cap lives on the API type, applied once, in
+// the queue entry. The inline cap lives on the record type, applied once, in
 // InputItem.Record.
 //
 // An id with no queue entry left is skipped rather than recorded empty: a
 // conversation reconciled between the dispatch and this report has already
 // pruned nothing, so this only happens when the input was never there — and an
 // entry with no text is a message nobody sent.
-func (s *Server) recordInputs(ctx context.Context, conv *agentopsv1alpha1.Conversation,
-	ids []string) []agentopsv1alpha1.RecordedInput {
+func (s *Server) recordInputs(ctx context.Context, conv *state.ConversationRecord,
+	ids []string) []state.RecordedInput {
 
 	if len(ids) == 0 {
 		return nil
@@ -903,33 +933,21 @@ func (s *Server) recordInputs(ctx context.Context, conv *agentopsv1alpha1.Conver
 	for _, id := range ids {
 		want[id] = true
 	}
-	var out []agentopsv1alpha1.RecordedInput
-	for i := range conv.Spec.Inputs {
-		item := &conv.Spec.Inputs[i]
+	var out []state.RecordedInput
+	for i := range conv.Inputs {
+		item := &conv.Inputs[i]
 		if !want[item.ID] {
 			continue
 		}
 		text, labels := item.Payload, map[string]string(nil)
-		if item.PayloadRef != nil {
-			var ci agentopsv1alpha1.ConversationInput
-			if err := s.Reader.Get(ctx, types.NamespacedName{
-				Namespace: conv.Namespace, Name: item.PayloadRef.Name}, &ci); err == nil {
-				text, labels = ci.Spec.Payload, ci.Spec.Labels
+		if item.PayloadRef != "" {
+			if blob, err := s.Store.GetBlob(ctx, item.PayloadRef); err == nil {
+				text, labels = blob.Payload, blob.Labels
 			}
 		}
 		out = append(out, item.Record(text, labels))
 	}
 	return out
-}
-
-// runByID finds a recorded run on a conversation, or nil.
-func runByID(conv *agentopsv1alpha1.Conversation, runID string) *agentopsv1alpha1.RunStatus {
-	for i := range conv.Status.Runs {
-		if conv.Status.Runs[i].RunID == runID {
-			return &conv.Status.Runs[i]
-		}
-	}
-	return nil
 }
 
 func bound(s []string, n int) []string {
@@ -1194,7 +1212,7 @@ type inboundReq struct {
 // proof, because posting a command on a thread is only possible for a surface
 // that has one. A CLOSED conversation has no thread, so that proof is
 // unavailable, and the binding that put the thread there is the next-strongest.
-func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*agentopsv1alpha1.Conversation, bool) {
+func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*state.ConversationRecord, bool) {
 	name := r.PathValue("name")
 	var in struct {
 		Channel string `json:"channel"`
@@ -1214,13 +1232,13 @@ func (s *Server) reachConversation(w http.ResponseWriter, r *http.Request) (*age
 		forbidScope(w)
 		return nil, false
 	}
-	var conv agentopsv1alpha1.Conversation
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": fmt.Sprintf("unknown conversation %q", name)})
 		return nil, false
 	}
-	for _, ref := range conv.Spec.ChannelRefs {
-		if ref.Name == ch.Name {
+	for _, ref := range conv.ChannelRefs {
+		if ref == ch.Name {
 			return &conv, true
 		}
 	}
@@ -1258,7 +1276,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+	if conv.Phase != state.PhaseClosed {
 		writeJSON(w, 409, map[string]string{"error": fmt.Sprintf(
 			"conversation %q is %s, not Closed — close it first. Deleting removes its recorded results, "+
 				"which are the only durable copy of what the agent answered", conv.Name, phaseOrOpen(conv))})
@@ -1268,7 +1286,7 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.Client.Delete(r.Context(), conv); err != nil && !apierrors.IsNotFound(err) {
+	if err := s.Store.Delete(r.Context(), state.Key(conv.Name)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1286,31 +1304,30 @@ func (s *Server) handleConversationDelete(w http.ResponseWriter, r *http.Request
 // be deleted — so there is no "not yet closed" case to refuse here, and
 // NotFound is tolerated: some other path may already have deleted it.
 func (s *Server) cascadeDeleteMembers(ctx context.Context, parentName string) error {
-	var list agentopsv1alpha1.ConversationList
-	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace),
-		client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parentName}); err != nil {
+	members, err := s.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parentName})
+	if err != nil {
 		return err
 	}
-	for i := range list.Items {
-		member := &list.Items[i]
-		if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != parentName {
-			continue // the label is a hint; the field is the fact
+	for i := range members {
+		member := &members[i]
+		if member.CausedBy == nil || member.CausedBy.Parent != parentName {
+			continue // the index is a hint; the field is the fact
 		}
 		if err := s.cascadeDeleteMembers(ctx, member.Name); err != nil {
 			return err
 		}
-		if err := s.Client.Delete(ctx, member); err != nil && !apierrors.IsNotFound(err) {
+		if err := s.Store.Delete(ctx, state.Key(member.Name)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func phaseOrOpen(conv *agentopsv1alpha1.Conversation) string {
-	if conv.Status.Phase == "" {
+func phaseOrOpen(conv *state.ConversationRecord) string {
+	if conv.Phase == "" {
 		return "open"
 	}
-	return string(conv.Status.Phase)
+	return conv.Phase
 }
 
 func (s *Server) handleChannelInbound(w http.ResponseWriter, r *http.Request) {

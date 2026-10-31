@@ -45,8 +45,8 @@ type Index string
 
 const (
 	// ByConversationID looks up the equality match every signal re-delivery,
-	// reopen's at-most-one-open check and member reuse perform today on
-	// api/v1alpha1.IndexConversationID. ListKey.ConversationID is read.
+	// reopen's at-most-one-open check and member reuse perform on a
+	// conversation's own correlation id. ListKey.ConversationID is read.
 	ByConversationID Index = "conversationId"
 	// ByPipelineAndPhase looks up a Pipeline's own conversations in one
 	// phase — the queue a Pipeline-rooted dispatch sweep reads.

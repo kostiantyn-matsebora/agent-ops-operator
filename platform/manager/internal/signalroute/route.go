@@ -25,17 +25,20 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // Deps bundles what a pass needs from its caller.
 type Deps struct {
-	// Client is used for every write: conversation create/patch, input
-	// create, source status.
+	// Client is used for the source status writes.
 	Client client.Client
-	// Reader serves the reads a pass needs (claimants, reusable-conversation
-	// lookup, backlog count). The API server directly in production, never an
-	// informer cache: a pass interrupted after a create must find what it
-	// just made.
+	// Store holds every conversation and queued input payload: the
+	// reusable-conversation lookup, the backlog count, conversation create and
+	// the input append. Read straight from its source of truth, never a cache:
+	// a pass interrupted after a create must find what it just made.
+	Store state.Store
+	// Reader serves the reads a pass needs (claimants, capability and
+	// runtime). The API server directly in production.
 	Reader client.Reader
 	// Namespace every object above lives in — the manager is single-namespace
 	// per install.
@@ -189,7 +192,7 @@ func admit(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal, source 
 	}
 
 	if isChat {
-		full, err := BacklogFull(ctx, deps.Reader, deps.Namespace, deps.MaxQueued)
+		full, err := BacklogFull(ctx, deps.Store, deps.MaxQueued)
 		if err != nil {
 			rollbackIf(rollback)
 			return nil, nil, false, err
@@ -308,16 +311,10 @@ func routeClaimants(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal
 // BacklogFull reports whether the pending backlog has reached its bound.
 // Only PENDING conversations count: an admitted one holds a pod (or is about
 // to) and is already bounded by MAX_ACTIVE_CONVERSATIONS.
-func BacklogFull(ctx context.Context, reader client.Reader, namespace string, maxQueued int) (bool, error) {
-	var list agentopsv1alpha1.ConversationList
-	if err := reader.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+func BacklogFull(ctx context.Context, store state.Store, maxQueued int) (bool, error) {
+	pending, err := store.List(ctx, state.ByPhase, state.ListKey{Phase: state.PhasePending})
+	if err != nil {
 		return false, err
 	}
-	n := 0
-	for i := range list.Items {
-		if list.Items[i].Status.Phase == agentopsv1alpha1.ConversationPending {
-			n++
-		}
-	}
-	return n >= maxQueued, nil
+	return len(pending) >= maxQueued, nil
 }

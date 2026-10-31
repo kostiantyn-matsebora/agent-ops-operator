@@ -492,7 +492,7 @@ func TestStatusReportsOpQueueState(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "chan-status"}, &ch); err != nil {
 		t.Fatal(err)
 	}
-	srv.Ops.EnqueueEnsureTopic(ctx, &ch, conv, chat.TopicDescriptor{})
+	srv.Ops.EnqueueEnsureTopic(ctx, &ch, recOf(t, conv.Name), chat.TopicDescriptor{})
 
 	st := getStatus(t, srv)
 	q := queueFor(st, "status-adapter")

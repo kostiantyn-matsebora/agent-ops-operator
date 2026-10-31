@@ -156,6 +156,15 @@ func main() {
 
 	namespace := env("NAMESPACE", "agent-ops")
 
+	// The state backend is validated before anything connects to a cluster: a
+	// name this binary does not carry is a deployment mistake, and it must stop
+	// the process with the name in the message rather than run on the wrong one.
+	backend, err := stateBackendFromEnv()
+	if err != nil {
+		setupLog.Error(err, "state backend")
+		os.Exit(1)
+	}
+
 	// durable-chat-ops-broker: this process's own identity for the claims its
 	// reconciler writes. Needs no relation to the leader-election Lease's own
 	// HolderIdentity — see ConversationReconciler.ReplicaIdentity's comment.
@@ -183,13 +192,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Equality routing (internal/httpapi), reopen's at-most-one-open check and
-	// member reuse (internal/chat) all read this index instead of the removed
-	// agentops.dev/signature-hash label. Registered before any
-	// SetupWithManager call — an index added after the cache starts is a
-	// startup error.
-	if err := controller.SetupConversationIndexes(mgr.GetFieldIndexer()); err != nil {
-		setupLog.Error(err, "conversation indexes")
+	store, err := newStateStore(backend, mgr, namespace)
+	if err != nil {
+		setupLog.Error(err, "state store", "backend", backend)
 		os.Exit(1)
 	}
 	// Channel plumbing: built-in channel types register in-process providers
@@ -203,8 +208,8 @@ func main() {
 	acts := activity.New(envInt("ACTIVITY_BUFFER", activity.DefaultSize))
 
 	registry := chat.NewRegistry()
-	ops := &chat.OpQueue{Client: mgr.GetClient(), Namespace: namespace, Registry: registry, Activity: acts}
-	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace, Ops: ops, Activity: acts}
+	ops := &chat.OpQueue{Store: store, Registry: registry, Activity: acts}
+	router := &chat.Router{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Store: store, Namespace: namespace, Ops: ops, Activity: acts}
 	controlURL := env("CONTROL_URL", "http://agentops-manager."+namespace+".svc.cluster.local:8080")
 
 	// ChannelAdapter lifecycle: adapters are plugged in as CRs; the reconciler
@@ -290,6 +295,8 @@ func main() {
 	breaker := storagebreaker.New()
 	reconciler := &controller.ConversationReconciler{
 		Client:                 mgr.GetClient(),
+		Store:                  store,
+		Namespace:              namespace,
 		Scheme:                 mgr.GetScheme(),
 		MaxActiveConversations: maxActive,
 		// A runtime pod that never STARTS holds its slot until it is reaped.
@@ -396,6 +403,7 @@ func main() {
 	if err := (&controller.SignalReconciler{
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),
+		Store:     store,
 		Activity:  acts,
 		Ops:       ops,
 		Cooldowns: cooldowns,
@@ -419,6 +427,7 @@ func main() {
 	api := &httpapi.Server{
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),
+		Store:     store,
 		Namespace: namespace,
 		Addr:      env("API_ADDR", ":8080"),
 		Ops:       ops,

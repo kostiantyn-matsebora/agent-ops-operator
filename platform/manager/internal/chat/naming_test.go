@@ -46,7 +46,7 @@ func TestInvokeMemberNamesTheInvokedEntry(t *testing.T) {
 	r, _ := coordFixture(t, co, callerA, callerB,
 		testCapability("cap-researcher", "profile-researcher"), testProfile("profile-researcher"))
 
-	resultA, err := r.InvokeMember(context.Background(), callerA, "researcher", "look into it")
+	resultA, err := r.InvokeMember(context.Background(), recOf(t, r.Store, callerA.Name), "researcher", "look into it")
 	if err != nil {
 		t.Fatalf("InvokeMember (A): %v", err)
 	}
@@ -57,7 +57,7 @@ func TestInvokeMemberNamesTheInvokedEntry(t *testing.T) {
 	// A different parent invoking the SAME entry name is a genuinely new
 	// member — findReusableMember scopes reuse to (parent, entry), so this
 	// is not an attach.
-	resultB, err := r.InvokeMember(context.Background(), callerB, "researcher", "look into it too")
+	resultB, err := r.InvokeMember(context.Background(), recOf(t, r.Store, callerB.Name), "researcher", "look into it too")
 	if err != nil {
 		t.Fatalf("InvokeMember (B): %v", err)
 	}

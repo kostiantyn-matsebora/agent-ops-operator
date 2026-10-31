@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // Pipeline resolution. EVERY origination resolves the same way: through the
@@ -125,22 +126,22 @@ func PipelinesForSource(ctx context.Context, c client.Reader, namespace, source 
 // either way is labelling (telemetry, the console); nothing routes on it, so a
 // blank answer costs a label rather than a decision.
 func PipelineForConversation(ctx context.Context, c client.Reader, namespace string,
-	conv *agentopsv1alpha1.Conversation) *agentopsv1alpha1.Pipeline {
+	conv *state.ConversationRecord) *agentopsv1alpha1.Pipeline {
 
 	return MatchPipeline(readyPipelines(ctx, c, namespace), conv)
 }
 
 // MatchPipeline is PipelineForConversation over an already-listed candidate set.
-func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha1.Conversation) *agentopsv1alpha1.Pipeline {
+func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *state.ConversationRecord) *agentopsv1alpha1.Pipeline {
 	if conv == nil {
 		return nil
 	}
 	// Recorded origin wins. Inference cannot beat it and must not second-guess
 	// it: two pipelines sharing a source and a profile are indistinguishable to
 	// the matcher below, which is exactly the case the ref exists for.
-	if ref := conv.Spec.PipelineRef; ref != nil && ref.Name != "" {
+	if ref := conv.PipelineRef; ref != "" {
 		for i := range candidates {
-			if candidates[i].Name == ref.Name {
+			if candidates[i].Name == ref {
 				cp := candidates[i]
 				return &cp
 			}
@@ -156,13 +157,13 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha
 		// nothing routes on it, and the honest answer for a candidate this
 		// cannot see into is "does not match", never a guess.
 		capability := p.InlineCapability()
-		if capability.ProfileName() != conv.Spec.ProfileRef.Name {
+		if capability.ProfileName() != conv.ProfileRef {
 			continue
 		}
-		if !sameRefs(p.Spec.ChannelRefs, conv.Spec.ChannelRefs) {
+		if !sameRefs(p.Spec.ChannelRefs, conv.ChannelRefs) {
 			continue
 		}
-		if !sameToolsets(capability.Toolsets, conv.Spec.Toolsets) || !sameMCPConfigs(capability.MCPConfigs, conv.Spec.MCPConfigs) {
+		if !sameToolsets(capability.Toolsets, conv.Toolsets) || !sameMCPConfigs(capability.MCPConfigs, conv.MCPConfigs) {
 			continue
 		}
 		if match != nil {
@@ -174,9 +175,10 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *agentopsv1alpha
 	return match
 }
 
-// sameRefs compares two ref lists as SETS: a conversation's channel set may
-// have gained the surface it originated on, and order carries no meaning here.
-func sameRefs(a, b []agentopsv1alpha1.ObjectRef) bool {
+// sameRefs compares a pipeline's channel refs with a record's channel names as
+// SETS: a conversation's channel set may have gained the surface it originated
+// on, and order carries no meaning here.
+func sameRefs(a []agentopsv1alpha1.ObjectRef, b []state.Ref) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -185,7 +187,7 @@ func sameRefs(a, b []agentopsv1alpha1.ObjectRef) bool {
 		seen[r.Name]++
 	}
 	for _, r := range b {
-		seen[r.Name]--
+		seen[r]--
 	}
 	for _, n := range seen {
 		if n != 0 {
@@ -195,11 +197,13 @@ func sameRefs(a, b []agentopsv1alpha1.ObjectRef) bool {
 	return true
 }
 
-// sameToolsets / sameMCPConfigs compare capability bindings by their ORDERED
-// refs — order is meaningful (tools concatenate, server keys overlay later-wins),
-// so the same set in a different order is a different binding.
-func sameToolsets(a, b *agentopsv1alpha1.ToolsetBinding) bool {
-	var ar, br []agentopsv1alpha1.ObjectRef
+// sameToolsets / sameMCPConfigs compare a capability's bindings with a
+// record's by their ORDERED refs — order is meaningful (tools concatenate,
+// server keys overlay later-wins), so the same set in a different order is a
+// different binding.
+func sameToolsets(a *agentopsv1alpha1.ToolsetBinding, b *state.ToolsetBinding) bool {
+	var ar []agentopsv1alpha1.ObjectRef
+	var br []state.Ref
 	var am, bm string
 	if a != nil {
 		ar, am = a.Refs, a.Mode
@@ -213,8 +217,9 @@ func sameToolsets(a, b *agentopsv1alpha1.ToolsetBinding) bool {
 	return am == bm && orderedRefsEqual(ar, br)
 }
 
-func sameMCPConfigs(a, b *agentopsv1alpha1.ToolingBinding) bool {
-	var ar, br []agentopsv1alpha1.ObjectRef
+func sameMCPConfigs(a *agentopsv1alpha1.ToolingBinding, b *state.ToolingBinding) bool {
+	var ar []agentopsv1alpha1.ObjectRef
+	var br []state.Ref
 	if a != nil {
 		ar = a.Refs
 	}
@@ -224,12 +229,12 @@ func sameMCPConfigs(a, b *agentopsv1alpha1.ToolingBinding) bool {
 	return orderedRefsEqual(ar, br)
 }
 
-func orderedRefsEqual(a, b []agentopsv1alpha1.ObjectRef) bool {
+func orderedRefsEqual(a []agentopsv1alpha1.ObjectRef, b []state.Ref) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name {
+		if a[i].Name != b[i] {
 			return false
 		}
 	}

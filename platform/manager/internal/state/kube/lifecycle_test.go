@@ -44,7 +44,7 @@ func TestFinalizersRoundTrip(t *testing.T) {
 	ns, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-finalizers")
-	rec.Finalizers = []string{"example.dev/hold"}
+	rec.Finalizers = []string{"example.com/hold"}
 	rev, err := s.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -54,7 +54,7 @@ func TestFinalizersRoundTrip(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 	assertRecordsEqual(t, got, rec)
-	if f := getObject(t, ns, rec.Name).Finalizers; len(f) != 1 || f[0] != "example.dev/hold" {
+	if f := getObject(t, ns, rec.Name).Finalizers; len(f) != 1 || f[0] != "example.com/hold" {
 		t.Fatalf("object finalizers = %v, want the record's", f)
 	}
 
@@ -90,8 +90,8 @@ func TestUpdateKeepsMetadataTheRecordDoesNotModel(t *testing.T) {
 
 	// Something else (kubectl, another controller) labels and annotates it.
 	obj := getObject(t, ns, rec.Name)
-	obj.Labels["example.dev/foreign"] = "kept"
-	obj.Annotations = map[string]string{"example.dev/note": "kept"}
+	obj.Labels["example.com/foreign"] = "kept"
+	obj.Annotations = map[string]string{"example.com/note": "kept"}
 	if err := wwClient.Update(ctx, obj); err != nil {
 		t.Fatalf("foreign write: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestUpdateKeepsMetadataTheRecordDoesNotModel(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 	after := getObject(t, ns, rec.Name)
-	if after.Labels["example.dev/foreign"] != "kept" || after.Annotations["example.dev/note"] != "kept" {
+	if after.Labels["example.com/foreign"] != "kept" || after.Annotations["example.com/note"] != "kept" {
 		t.Fatalf("Update dropped metadata it does not model: labels %v annotations %v", after.Labels, after.Annotations)
 	}
 }

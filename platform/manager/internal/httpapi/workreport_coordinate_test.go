@@ -15,6 +15,8 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // memberWorkReportServer is a Coordinator-rooted MEMBER conversation
@@ -31,9 +33,10 @@ func memberWorkReportServer(t *testing.T, parent *agentopsv1alpha1.Conversation,
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithObjects(member, parent).
 		WithStatusSubresource(member, parent).Build()
-	q := &chat.OpQueue{Client: c, Namespace: "agent-ops", Registry: chat.NewRegistry()}
-	router := &chat.Router{Client: c, Reader: c, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Namespace: "agent-ops", Activity: activity.New(64), Router: router}, member
+	store := kube.NewStore(c, "agent-ops")
+	q := &chat.OpQueue{Store: store, Registry: chat.NewRegistry()}
+	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: "agent-ops", Ops: q}
+	return &Server{Reader: c, Client: c, Store: store, Namespace: "agent-ops", Activity: activity.New(64), Router: router}, member
 }
 
 func TestHandleWorkDoneRoutesAMemberResultToItsParent(t *testing.T) {
@@ -143,9 +146,10 @@ func rootWorkReportServer(t *testing.T, root *agentopsv1alpha1.Conversation) *Se
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).
 		WithObjects(root, co).
 		WithStatusSubresource(root).Build()
-	q := &chat.OpQueue{Client: c, Namespace: "agent-ops", Registry: chat.NewRegistry()}
-	router := &chat.Router{Client: c, Reader: c, Namespace: "agent-ops", Ops: q}
-	return &Server{Reader: c, Client: c, Namespace: "agent-ops", Activity: activity.New(64), Router: router}
+	store := kube.NewStore(c, "agent-ops")
+	q := &chat.OpQueue{Store: store, Registry: chat.NewRegistry()}
+	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: "agent-ops", Ops: q}
+	return &Server{Reader: c, Client: c, Store: store, Namespace: "agent-ops", Activity: activity.New(64), Router: router}
 }
 
 // judgedRoot is a root whose run r1 consumed the given inputs.
@@ -379,7 +383,11 @@ func dispatchNextRun(t *testing.T, s *Server, runID string, extra ...agentopsv1a
 	root = getRoot(t, s)
 	statusPatch := client.MergeFrom(root.DeepCopy())
 	var ids []string
-	for _, in := range dispatch.PendingInputs(root) {
+	stored, _, err := s.Store.Get(ctx, state.Key(root.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range dispatch.PendingInputs(&stored) {
 		ids = append(ids, in.ID)
 	}
 	root.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: runID, InputIDs: ids, DispatchedAt: metav1.Now()}
@@ -461,17 +469,17 @@ func TestSecondMissDigestIsBounded(t *testing.T) {
 // A chat signal records origin `signal` and the surface the person typed on.
 // An alert records no surface. The surface is what separates the two.
 func TestAnsweredAPersonCountsAChatSignalByItsSurface(t *testing.T) {
-	sig := agentopsv1alpha1.OriginSignal
+	sig := state.OriginSignal
 	cases := []struct {
 		name     string
-		recorded []agentopsv1alpha1.RecordedInput
+		recorded []state.RecordedInput
 		want     bool
 	}{
-		{"a channel input", []agentopsv1alpha1.RecordedInput{{Origin: agentopsv1alpha1.OriginChannel}}, true},
-		{"a chat signal that records its surface", []agentopsv1alpha1.RecordedInput{{Origin: sig, Surface: "home-telegram"}}, true},
-		{"an alert with no surface", []agentopsv1alpha1.RecordedInput{{Origin: sig}}, false},
-		{"a member result", []agentopsv1alpha1.RecordedInput{{Origin: agentopsv1alpha1.OriginMember}}, false},
-		{"the corrective input", []agentopsv1alpha1.RecordedInput{{Origin: agentopsv1alpha1.OriginManager}}, false},
+		{"a channel input", []state.RecordedInput{{Origin: state.OriginChannel}}, true},
+		{"a chat signal that records its surface", []state.RecordedInput{{Origin: sig, Surface: "home-telegram"}}, true},
+		{"an alert with no surface", []state.RecordedInput{{Origin: sig}}, false},
+		{"a member result", []state.RecordedInput{{Origin: state.OriginMember}}, false},
+		{"the corrective input", []state.RecordedInput{{Origin: state.OriginManager}}, false},
 		{"none", nil, false},
 	}
 	for _, tc := range cases {

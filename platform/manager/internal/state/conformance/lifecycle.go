@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	finalizerA = "example.dev/hold-a"
-	finalizerB = "example.dev/hold-b"
+	finalizerA = "example.com/hold-a"
+	finalizerB = "example.com/hold-b"
 )
 
 func runLifecycleScenarios(t *testing.T, newStore func() state.Store) {

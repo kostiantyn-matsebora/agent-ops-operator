@@ -25,7 +25,7 @@ func testConsumer() *controller.SignalReconciler {
 		maxQueued = 50
 	}
 	return &controller.SignalReconciler{
-		Client: k8sClient, Reader: k8sClient, Activity: s.Activity, Ops: s.Ops, Cooldowns: s.Cooldowns,
+		Client: k8sClient, Reader: k8sClient, Store: stateStore, Activity: s.Activity, Ops: s.Ops, Cooldowns: s.Cooldowns,
 		Runtime: s.Runtime, MaxQueued: maxQueued, Identity: "integration-replica",
 		OrderRetry: time.Millisecond,
 	}

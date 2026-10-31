@@ -171,19 +171,6 @@ const (
 // changed — exactly like the field it mirrors.
 const LabelCausedBy = "agentops.dev/caused-by"
 
-// IndexConversationID names the informer field index on
-// Conversation.spec.conversationId — equality routing, reopen's
-// at-most-one-open check, and coordination's member reuse all read it
-// (signal-correlation-id), in place of the removed
-// agentops.dev/signature-hash label. initiationId values are not
-// label-safe (an Alertmanager groupKey carries "{}", quotes, spaces), so
-// the lookup moved to a cache-backed field index instead of a derived
-// label. Registered by internal/controller.SetupConversationIndexes;
-// defined here, not there, so a package with no reason to import
-// internal/controller (internal/chat, which internal/controller itself
-// imports) can still build the same client.MatchingFields query.
-const IndexConversationID = "spec.conversationId"
-
 // LabelNameBase names a conversation's own word-chain base name —
 // "<kind>-<words>", with no numeric collision suffix — so a later creation
 // for the same base can find every prior conversation sharing it with one

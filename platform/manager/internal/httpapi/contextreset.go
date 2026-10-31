@@ -3,14 +3,12 @@ package httpapi
 import (
 	"net/http"
 
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // POST /channel/conversations/{name}/reset-context — the way out of an
@@ -51,20 +49,21 @@ func (s *Server) handleContextReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.RuntimeContextID = ""
-	// The retired spelling is cleared too. Leaving it would let the dual-read
-	// that exists for upgrades resurrect the handle this call just removed.
-	conv.Status.SessionID = ""
-	conv.Status.ContextCheckpoint = nil
-	apimeta.SetStatusCondition(&conv.Status.Conditions, metav1.Condition{
-		Type:   controller.ConditionContextContinuity,
-		Status: metav1.ConditionFalse,
-		Reason: "ResetByOperator",
-		Message: "an operator reset this conversation's context; its previous memory is " +
-			"gone and the next run starts fresh",
+	err := state.Patch(r.Context(), s.Store, conv, func(c *state.ConversationRecord) {
+		c.RuntimeContextID = ""
+		// The retired spelling is cleared too. Leaving it would let the dual-read
+		// that exists for upgrades resurrect the handle this call just removed.
+		c.SessionID = ""
+		c.ContextCheckpoint = nil
+		c.SetCondition(state.Condition{
+			Type:   controller.ConditionContextContinuity,
+			Status: state.ConditionFalse,
+			Reason: "ResetByOperator",
+			Message: "an operator reset this conversation's context; its previous memory is " +
+				"gone and the next run starts fresh",
+		})
 	})
-	if err := s.Client.Status().Patch(r.Context(), conv, patch); err != nil {
+	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -81,17 +80,17 @@ func (s *Server) handleContextReset(w http.ResponseWriter, r *http.Request) {
 //
 // A TYPED message, never rendered text: the manager composes meaning and the
 // adapter composes presentation, so no transport dialect appears here.
-func (s *Server) announceContextReset(r *http.Request, conv *agentopsv1alpha1.Conversation) {
+func (s *Server) announceContextReset(r *http.Request, conv *state.ConversationRecord) {
 	if s.Ops == nil {
 		return
 	}
-	for _, ref := range conv.Spec.ChannelRefs {
+	for _, ref := range conv.ChannelRefs {
 		var ch agentopsv1alpha1.Channel
-		key := types.NamespacedName{Namespace: s.Namespace, Name: ref.Name}
+		key := types.NamespacedName{Namespace: s.Namespace, Name: ref}
 		if err := s.Reader.Get(r.Context(), key, &ch); err != nil {
 			continue // channel gone: nobody left to tell
 		}
-		s.Ops.EnqueueMessage(r.Context(), &ch, conv, conv.ThreadFor(ref.Name), chat.Warn(
+		s.Ops.EnqueueMessage(r.Context(), &ch, conv, conv.ThreadFor(ref), chat.Warn(
 			"This conversation's stored context was reset by an operator. "+
 				"Its previous memory is gone, and the next message starts fresh."))
 	}

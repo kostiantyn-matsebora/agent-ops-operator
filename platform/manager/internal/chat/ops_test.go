@@ -35,7 +35,7 @@ func testConv(name string) *agentopsv1alpha1.Conversation {
 	return c
 }
 
-// tryFinishEnsureTopic's two error branches -- an adapter that reported it
+// finishEnsureTopic's two error branches -- an adapter that reported it
 // could not create a topic at all, and one that reported success but no
 // thread id -- were untouched by any test before this: neither TopicReady
 // condition it writes had ever been asserted.
@@ -45,12 +45,12 @@ func TestTryFinishEnsureTopicRecordsAnAdapterError(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
-	done, err := q.tryFinishEnsureTopic(context.Background(),
+	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{Error: "rate limited"})
-	if !done || err == nil || !strings.Contains(err.Error(), "rate limited") {
-		t.Fatalf("done=%v err=%v, want an error naming the adapter's own message", done, err)
+	if err == nil || !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("err=%v, want an error naming the adapter's own message", err)
 	}
 
 	var got agentopsv1alpha1.Conversation
@@ -72,12 +72,12 @@ func TestTryFinishEnsureTopicRecordsAMissingThreadID(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
-	done, err := q.tryFinishEnsureTopic(context.Background(),
+	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{})
-	if !done || err == nil || !strings.Contains(err.Error(), "without a thread id") {
-		t.Fatalf("done=%v err=%v, want an error naming the missing thread id", done, err)
+	if err == nil || !strings.Contains(err.Error(), "without a thread id") {
+		t.Fatalf("err=%v, want an error naming the missing thread id", err)
 	}
 
 	var got agentopsv1alpha1.Conversation
@@ -92,7 +92,7 @@ func TestTryFinishEnsureTopicRecordsAMissingThreadID(t *testing.T) {
 
 // A brand new thread — no binding at all for the channel yet — is appended
 // rather than updated in place. This is distinct from the claim-only
-// placeholder case tryFinishEnsureTopic also treats as "new": here there is
+// placeholder case finishEnsureTopic also treats as "new": here there is
 // nothing on the conversation for this channel to begin with.
 func TestTryFinishEnsureTopicAppendsABindingWhenNoneExistedAtAll(t *testing.T) {
 	conv := testConv("conv-1")
@@ -100,12 +100,12 @@ func TestTryFinishEnsureTopicAppendsABindingWhenNoneExistedAtAll(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
-	done, err := q.tryFinishEnsureTopic(context.Background(),
+	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{ThreadID: "t1"})
-	if !done || err != nil {
-		t.Fatalf("done=%v err=%v, want success", done, err)
+	if err != nil {
+		t.Fatalf("err=%v, want success", err)
 	}
 
 	var got agentopsv1alpha1.Conversation
@@ -132,12 +132,12 @@ func TestTryFinishEnsureTopicReestablishesAnArchivedThread(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
-	done, err := q.tryFinishEnsureTopic(context.Background(),
+	err := q.finishEnsureTopic(context.Background(),
 		&Op{Conversation: "conv-1", Channel: "c1"}, OpResult{ThreadID: "new-thread"})
-	if !done || err != nil {
-		t.Fatalf("done=%v err=%v, want success", done, err)
+	if err != nil {
+		t.Fatalf("err=%v, want success", err)
 	}
 
 	var got agentopsv1alpha1.Conversation
@@ -168,7 +168,7 @@ func TestMarkUndeliveredRecordsTheRunOnTheChannelsBinding(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err != nil {
@@ -192,7 +192,7 @@ func TestMarkUndeliveredIsANoOpWithNoBindingYet(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err != nil {
@@ -214,7 +214,7 @@ func TestMarkUndeliveredIsANoOpWithNoBindingYet(t *testing.T) {
 func TestMarkUndeliveredToleratesAMissingConversation(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err != nil {
@@ -234,12 +234,12 @@ func TestMarkUndeliveredReturnsANonConflictPatchError(t *testing.T) {
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).
 		WithInterceptorFuncs(interceptor.Funcs{
-			SubResourcePatch: func(ctx context.Context, cli client.Client, subResourceName string,
-				obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			SubResourceUpdate: func(ctx context.Context, cli client.Client, subResourceName string,
+				obj client.Object, opts ...client.SubResourceUpdateOption) error {
 				return boom
 			},
 		}).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	if err := q.markUndelivered(context.Background(), op); err == nil || !errors.Is(err, boom) {
@@ -249,7 +249,7 @@ func TestMarkUndeliveredReturnsANonConflictPatchError(t *testing.T) {
 	// Complete must not panic when the mark itself fails -- the send-failure's
 	// own release already happened, so this is purely the observable half.
 	ch := testChannel("c1", "slack")
-	q.EnqueueRunReply(context.Background(), ch, testConv("conv-1"), "run-1", nil, AnswerMessage("a", "s"))
+	q.EnqueueRunReply(context.Background(), ch, crRec(testConv("conv-1")), "run-1", nil, AnswerMessage("a", "s"))
 	q.Claim("slack")
 	q.Complete(context.Background(), op.ID, OpResult{Error: "sendMessage: Too Many Requests"})
 }
@@ -264,12 +264,12 @@ func TestMarkUndeliveredGivesUpAfterRepeatedConflicts(t *testing.T) {
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(conv).
 		WithInterceptorFuncs(interceptor.Funcs{
-			SubResourcePatch: func(ctx context.Context, cli client.Client, subResourceName string,
-				obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			SubResourceUpdate: func(ctx context.Context, cli client.Client, subResourceName string,
+				obj client.Object, opts ...client.SubResourceUpdateOption) error {
 				return apierrors.NewConflict(schema.GroupResource{Resource: "conversations"}, "conv-1", errors.New("stale"))
 			},
 		}).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
 
 	op := &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}
 	err := q.markUndelivered(context.Background(), op)
@@ -282,8 +282,8 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{})
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{}) // reconcile-driven repeat
+	q.EnqueueEnsureTopic(ctx, ch, crRec(testConv("conv-1")), TopicDescriptor{})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(testConv("conv-1")), TopicDescriptor{}) // reconcile-driven repeat
 	if op := q.Claim("slack"); op == nil || op.ID != "topic:conv-1:uid-conv-1:c1" || op.Kind != OpEnsureTopic {
 		t.Fatalf("first claim: %+v", op)
 	}
@@ -291,7 +291,7 @@ func TestEnsureTopicDedupsByConversation(t *testing.T) {
 		t.Fatalf("duplicate ensure-topic not deduped: %+v", op)
 	}
 	// still deduped while claimed
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(testConv("conv-1")), TopicDescriptor{})
 	if op := q.Claim("slack"); op != nil {
 		t.Fatalf("re-enqueue while claimed must dedup: %+v", op)
 	}
@@ -310,13 +310,13 @@ func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *test
 	ch := testChannel("c1", "slack")
 
 	first := testConv("chat-echo-console")
-	q.EnqueueEnsureTopic(ctx, ch, first, TopicDescriptor{})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(first), TopicDescriptor{})
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("first conversation's ensure-topic never queued")
 	}
 	// Marks it settled directly, as Complete would, without needing a fake
-	// client wired for tryFinishEnsureTopic's CR patch — irrelevant here.
+	// client wired for finishEnsureTopic's CR patch — irrelevant here.
 	q.mu.Lock()
 	q.recent[op.ID] = true
 	q.mu.Unlock()
@@ -324,7 +324,7 @@ func TestEnsureTopicDoesNotDedupAcrossDifferentConversationsSharingAName(t *test
 	// A second, distinct object (different UID) reuses the exact same name.
 	second := testConv("chat-echo-console")
 	second.UID = types.UID("uid-chat-echo-console-reborn")
-	q.EnqueueEnsureTopic(ctx, ch, second, TopicDescriptor{})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(second), TopicDescriptor{})
 	if op := q.Claim("slack"); op == nil {
 		t.Fatal("a conversation reusing a deleted one's name must still get its own ensure-topic queued")
 	}
@@ -335,9 +335,9 @@ func TestClaimIsFIFOAndTypeScoped(t *testing.T) {
 	ctx := context.Background()
 	slack := testChannel("s", "slack")
 	teams := testChannel("m", "teams")
-	q.EnqueueMessage(ctx, slack, nil, nil, Notice("one"))
-	q.EnqueueMessage(ctx, slack, nil, nil, Notice("two"))
-	q.EnqueueMessage(ctx, teams, nil, nil, Notice("other"))
+	q.EnqueueMessage(ctx, slack, crRec(nil), nil, Notice("one"))
+	q.EnqueueMessage(ctx, slack, crRec(nil), nil, Notice("two"))
+	q.EnqueueMessage(ctx, teams, crRec(nil), nil, Notice("other"))
 	if op := q.Claim("slack"); op == nil || op.Message.Body != "one" {
 		t.Fatalf("fifo: %+v", op)
 	}
@@ -419,8 +419,8 @@ func TestRunReplyDedupsWhilePendingAndAfterCompletion(t *testing.T) {
 	tid := "t1"
 	msg := AnswerMessage("done", "succeeded")
 
-	q.EnqueueRunReply(ctx, ch, testConv("conv-1"), "run-1", &tid, msg)
-	q.EnqueueRunReply(ctx, ch, testConv("conv-1"), "run-1", &tid, msg) // reconcile-driven repeat
+	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg)
+	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg) // reconcile-driven repeat
 	op := q.Claim("slack")
 	if op == nil || op.ID != "send:conv-1:c1:run-1" {
 		t.Fatalf("first claim: %+v", op)
@@ -428,12 +428,12 @@ func TestRunReplyDedupsWhilePendingAndAfterCompletion(t *testing.T) {
 	if dup := q.Claim("slack"); dup != nil {
 		t.Fatalf("duplicate reply not deduped: %+v", dup)
 	}
-	q.EnqueueRunReply(ctx, ch, testConv("conv-1"), "run-1", &tid, msg) // re-enqueue while claimed
+	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg) // re-enqueue while claimed
 	if dup := q.Claim("slack"); dup != nil {
 		t.Fatalf("re-enqueue while claimed must dedup: %+v", dup)
 	}
 	// An ack for the same conversation is EPHEMERAL and must still get through.
-	q.EnqueueMessage(ctx, ch, nil, &tid, Notice("working on it"))
+	q.EnqueueMessage(ctx, ch, crRec(nil), &tid, Notice("working on it"))
 	if ack := q.Claim("slack"); ack == nil || ack.Message.Body != "working on it" {
 		t.Fatalf("an ack must never be suppressed by reply dedup: %+v", ack)
 	}
@@ -445,10 +445,10 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 	slack := testChannel("c1", "slack")
 	teams := testChannel("c2", "teams")
 
-	q.EnqueueCloseTopic(ctx, slack, "9876", testConv("conv-1"))
-	q.EnqueueCloseTopic(ctx, teams, "T-42", testConv("conv-1"))
+	q.EnqueueCloseTopic(ctx, slack, "9876", crRec(testConv("conv-1")))
+	q.EnqueueCloseTopic(ctx, teams, "T-42", crRec(testConv("conv-1")))
 	// the finalizer re-derives the op on every pass until it lets go
-	q.EnqueueCloseTopic(ctx, slack, "9876", testConv("conv-1"))
+	q.EnqueueCloseTopic(ctx, slack, "9876", crRec(testConv("conv-1")))
 
 	op := q.Claim("slack")
 	if op == nil || op.ID != CloseTopicOpID("conv-1", "c1") || op.Kind != OpCloseTopic {
@@ -474,7 +474,7 @@ func TestCloseTopicOpIsEnqueuedPerChannelAndSettlesOnce(t *testing.T) {
 		t.Fatal("completed close-topic must report settled — the finalizer reads this")
 	}
 	// and it is NOT regenerated: a completed close-topic stays completed
-	q.EnqueueCloseTopic(ctx, slack, "9876", testConv("conv-1"))
+	q.EnqueueCloseTopic(ctx, slack, "9876", crRec(testConv("conv-1")))
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("completed close-topic was regenerated: %+v", again)
 	}
@@ -495,13 +495,13 @@ func TestFailedCloseTopicIsReDerivable(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
-	q.EnqueueCloseTopic(ctx, ch, "9876", testConv("conv-1"))
+	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1")))
 	op := q.Claim("slack")
 	q.Complete(ctx, op.ID, OpResult{Error: "closeForumTopic: chat not found"})
 	if q.Pending(op.ID) {
 		t.Fatal("failed close-topic must not stay pending")
 	}
-	q.EnqueueCloseTopic(ctx, ch, "9876", testConv("conv-1"))
+	q.EnqueueCloseTopic(ctx, ch, "9876", crRec(testConv("conv-1")))
 	again := q.Claim("slack")
 	if again == nil {
 		t.Fatal("a failed close-topic must be re-derivable: the thread is still owed an archive")
@@ -569,7 +569,7 @@ func TestFarewellIsPostedOncePerClose(t *testing.T) {
 	tid := "9876"
 
 	for i := 0; i < 3; i++ {
-		q.EnqueueFarewell(ctx, ch, conv, &tid, Notice("goodbye"))
+		q.EnqueueFarewell(ctx, ch, crRec(conv), &tid, Notice("goodbye"))
 	}
 	if ops := len(drainOps(q, "slack")); ops != 1 {
 		t.Fatalf("a retried close must post ONE farewell, got %d", ops)
@@ -577,7 +577,7 @@ func TestFarewellIsPostedOncePerClose(t *testing.T) {
 
 	// ...but a conversation closed, REOPENED and closed again is owed a second.
 	conv.Status.Reopens = 1
-	q.EnqueueFarewell(ctx, ch, conv, &tid, Notice("goodbye again"))
+	q.EnqueueFarewell(ctx, ch, crRec(conv), &tid, Notice("goodbye again"))
 	if ops := len(drainOps(q, "slack")); ops != 1 {
 		t.Fatalf("a close after a reopen must post its own farewell, got %d", ops)
 	}
@@ -605,7 +605,7 @@ func TestFailedSendIsReDerivable(t *testing.T) {
 	tid := "t1"
 	msg := AnswerMessage("the answer", "succeeded")
 
-	q.EnqueueRunReply(ctx, ch, testConv("conv-1"), "run-1", &tid, msg)
+	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg)
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("no reply queued")
@@ -615,7 +615,7 @@ func TestFailedSendIsReDerivable(t *testing.T) {
 		t.Fatal("a failed send must not stay pending")
 	}
 
-	q.EnqueueRunReply(ctx, ch, testConv("conv-1"), "run-1", &tid, msg) // the reconciler backstop
+	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg) // the reconciler backstop
 	again := q.Claim("slack")
 	if again == nil {
 		t.Fatal("a failed send must be re-derivable: the answer is still owed to the thread")
@@ -627,7 +627,7 @@ func TestFailedSendIsReDerivable(t *testing.T) {
 	// ...and a SUCCESSFUL one still dedups, or the backstop would repost every
 	// answer on every reconcile.
 	q.Complete(ctx, again.ID, OpResult{})
-	q.EnqueueRunReply(ctx, ch, testConv("conv-1"), "run-1", &tid, msg)
+	q.EnqueueRunReply(ctx, ch, crRec(testConv("conv-1")), "run-1", &tid, msg)
 	if dup := q.Claim("slack"); dup != nil {
 		t.Fatalf("a delivered reply must stay deduped: %+v", dup)
 	}
@@ -643,14 +643,14 @@ func TestFailedInputCardIsReDerivable(t *testing.T) {
 	tid := "t1"
 	card := SignalMessage("k8s-ops", "cluster-events", "PodCrashLooping", "i1", nil, "the alert body", agentopsv1alpha1.OriginSignal)
 
-	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "i1", &tid, card)
+	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "i1", &tid, card)
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("no card queued")
 	}
 	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: Too Many Requests: retry after 30"})
 
-	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "i1", &tid, card)
+	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "i1", &tid, card)
 	again := q.Claim("slack")
 	if again == nil {
 		t.Fatal("a failed input card must be re-derivable: the thread never opened with its event")
@@ -668,14 +668,14 @@ func TestFailedDeleteConversationIsNotReDerivable(t *testing.T) {
 	ctx := context.Background()
 	ch := testChannel("c1", "slack")
 
-	q.EnqueueDeleteConversation(ctx, ch, "9876", testConv("conv-1"))
+	q.EnqueueDeleteConversation(ctx, ch, "9876", crRec(testConv("conv-1")))
 	op := q.Claim("slack")
 	if op == nil {
 		t.Fatal("no delete-conversation queued")
 	}
 	q.Complete(ctx, op.ID, OpResult{Error: "sendMessage: chat not found"})
 
-	q.EnqueueDeleteConversation(ctx, ch, "9876", testConv("conv-1"))
+	q.EnqueueDeleteConversation(ctx, ch, "9876", crRec(testConv("conv-1")))
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("a failed delete-conversation is TERMINAL and must stay suppressed: %+v", again)
 	}
@@ -696,31 +696,31 @@ func TestOpsCarryTheOwningConversationID(t *testing.T) {
 	withID := testConv("conv-with-id")
 	withID.Spec.ConversationID = "corr-77"
 
-	q.EnqueueEnsureTopic(ctx, ch, withID, TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(withID), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" {
 		t.Fatalf("ensure-topic must carry the conversationId: %+v", op)
 	}
 
 	tid := "t-1"
-	q.EnqueueCloseTopic(ctx, ch, tid, withID)
+	q.EnqueueCloseTopic(ctx, ch, tid, crRec(withID))
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" || op.Conversation != "conv-with-id" {
 		t.Fatalf("close-topic must carry both the name and the conversationId: %+v", op)
 	}
 
-	q.EnqueueMessage(ctx, ch, withID, &tid, Notice("hello"))
+	q.EnqueueMessage(ctx, ch, crRec(withID), &tid, Notice("hello"))
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "corr-77" {
 		t.Fatalf("a message bound to a conversation must carry its conversationId: %+v", op)
 	}
 
 	// no conversationId to adopt — legacy conversation, never backfilled
 	legacy := testConv("conv-legacy")
-	q.EnqueueEnsureTopic(ctx, ch, legacy, TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(legacy), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "" {
 		t.Fatalf("a legacy conversation's op must carry no conversationId: %+v", op)
 	}
 
 	// no conversation at all — a general-surface notice
-	q.EnqueueMessage(ctx, ch, nil, nil, Notice("unwired source dropped a signal"))
+	q.EnqueueMessage(ctx, ch, crRec(nil), nil, Notice("unwired source dropped a signal"))
 	if op := q.Claim("slack"); op == nil || op.ConversationID != "" || op.Conversation != "" {
 		t.Fatalf("a conversation-less notice must carry neither name nor conversationId: %+v", op)
 	}

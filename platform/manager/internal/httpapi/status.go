@@ -40,6 +40,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/metrics"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // LeaseName is the controller-runtime leader-election lease this manager holds
@@ -242,14 +243,14 @@ func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 		inUse++
 		hasPod[p.Labels[runtimepod.LabelConversation]] = true
 	}
-	var convs agentopsv1alpha1.ConversationList
-	if err := s.Client.List(ctx, &convs, client.InNamespace(s.Namespace)); err != nil {
+	convs, err := s.Store.List(ctx, state.ByAll, state.ListKey{})
+	if err != nil {
 		return runtimeSlots{}, err
 	}
 	waiting := 0
-	for i := range convs.Items {
-		c := &convs.Items[i]
-		if !c.DeletionTimestamp.IsZero() || hasPod[c.Name] {
+	for i := range convs {
+		c := &convs[i]
+		if c.DeletionRequestedAt != nil || hasPod[c.Name] {
 			continue
 		}
 		// A closed conversation is INERT (invariants.md: "no place in the FIFO
@@ -259,10 +260,10 @@ func (s *Server) runtimeSlots(ctx context.Context) (runtimeSlots, error) {
 		// apply it. Left unchecked, every such conversation inflated this count
 		// and the console's Queues page with conversations that will never be
 		// dispatched again.
-		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+		if c.Phase == state.PhaseClosed {
 			continue
 		}
-		if len(dispatch.PendingInputs(c)) > 0 || c.Status.Inflight != nil {
+		if len(dispatch.PendingInputs(c)) > 0 || c.Inflight != nil {
 			waiting++
 		}
 	}
@@ -307,11 +308,10 @@ func (s *Server) MetricsSample() metrics.Sample {
 	// conversation independently would list the pipeline set per row, on every
 	// scrape.
 	pipelines := chat.ReadyPipelines(ctx, s.Client, s.Namespace)
-	var convs agentopsv1alpha1.ConversationList
-	if err := s.Client.List(ctx, &convs, client.InNamespace(s.Namespace)); err == nil {
-		for i := range convs.Items {
-			c := &convs.Items[i]
-			if c.Status.Inflight == nil {
+	if convs, err := s.Store.List(ctx, state.ByAll, state.ListKey{}); err == nil {
+		for i := range convs {
+			c := &convs[i]
+			if c.Inflight == nil {
 				continue
 			}
 			name := ""
