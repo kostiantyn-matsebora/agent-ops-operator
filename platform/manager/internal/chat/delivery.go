@@ -68,19 +68,18 @@ func DeliverInputs(ctx context.Context, env Env, ops *OpQueue, conv *state.Conve
 	if ops == nil || len(conv.ChannelRefs) == 0 {
 		return
 	}
-	p := &deliveryPass{ctx: ctx, env: env, ops: ops, conv: conv, echoes: map[string]bool{}}
+	p := &deliveryPass{env: env, ops: ops, conv: conv, echoes: map[string]bool{}}
 	for i := range conv.Inputs {
 		item := &conv.Inputs[i]
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
 		}
-		p.deliver(item)
+		p.deliver(ctx, item)
 	}
 }
 
 // deliveryPass is the state one DeliverInputs call carries across inputs.
 type deliveryPass struct {
-	ctx      context.Context
 	env      Env
 	ops      *OpQueue
 	conv     *state.ConversationRecord
@@ -90,18 +89,18 @@ type deliveryPass struct {
 }
 
 // deliver enqueues one input to every bound channel that should show it.
-func (p *deliveryPass) deliver(item *state.InputItem) {
+func (p *deliveryPass) deliver(ctx context.Context, item *state.InputItem) {
 	body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
-	if blob, ok := InputPayload(p.ctx, p.env.Store, item); ok {
+	if blob, ok := InputPayload(ctx, p.env.Store, item); ok {
 		body, inputRef, labels, severity = blob.Payload, string(item.PayloadRef), blob.Labels, agentopsv1alpha1.Severity(blob.Severity)
 	}
 	surface := item.OriginSurface(labels)
-	surfaceEchoes := p.surfaceEchoes(surface)
+	surfaceEchoes := p.surfaceEchoes(ctx, surface)
 	var msg Message
 	if item.TypedByAPerson() {
 		msg = RelayMessage(surface, item.OriginSender(labels), body)
 	} else {
-		msg = SignalMessage(p.pipelineName(), item.Origin.Name, p.conv.Title, inputRef, labels, body, agentopsv1alpha1.OriginKind(item.Origin.Kind)).WithSeverity(severity)
+		msg = SignalMessage(p.pipelineName(ctx), item.Origin.Name, p.conv.Title, inputRef, labels, body, agentopsv1alpha1.OriginKind(item.Origin.Kind)).WithSeverity(severity)
 	}
 	for _, ref := range p.conv.ChannelRefs {
 		if !item.DeliverTo(ref, surface, surfaceEchoes) {
@@ -112,31 +111,31 @@ func (p *deliveryPass) deliver(item *state.InputItem) {
 			continue
 		}
 		var ch agentopsv1alpha1.Channel
-		if err := p.env.Reader.Get(p.ctx, types.NamespacedName{Namespace: p.env.Namespace, Name: ref}, &ch); err != nil ||
+		if err := p.env.Reader.Get(ctx, types.NamespacedName{Namespace: p.env.Namespace, Name: ref}, &ch); err != nil ||
 			ch.Spec.Adapter == "" {
 			continue
 		}
-		p.ops.EnqueueInputDelivery(p.ctx, &ch, p.conv, item.ID, tid, msg)
+		p.ops.EnqueueInputDelivery(ctx, &ch, p.conv, item.ID, tid, msg)
 	}
 }
 
 // surfaceEchoes answers once per surface per pass.
-func (p *deliveryPass) surfaceEchoes(surface string) bool {
+func (p *deliveryPass) surfaceEchoes(ctx context.Context, surface string) bool {
 	if surface == "" {
 		return true
 	}
 	known, ok := p.echoes[surface]
 	if !ok {
-		known = SurfaceEchoes(p.ctx, p.env.Reader, p.env.Namespace, surface)
+		known = SurfaceEchoes(ctx, p.env.Reader, p.env.Namespace, surface)
 		p.echoes[surface] = known
 	}
 	return known
 }
 
 // pipelineName is one lookup per pass, and only when a card needs it.
-func (p *deliveryPass) pipelineName() string {
+func (p *deliveryPass) pipelineName(ctx context.Context) string {
 	if !p.resolved {
-		if pl := PipelineForConversation(p.ctx, p.env.Reader, p.env.Namespace, p.conv); pl != nil {
+		if pl := PipelineForConversation(ctx, p.env.Reader, p.env.Namespace, p.conv); pl != nil {
 			p.pipeline = pl.Name
 		}
 		p.resolved = true
