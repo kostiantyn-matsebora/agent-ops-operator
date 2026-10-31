@@ -789,24 +789,26 @@ func (r *Router) FanOutRunReply(ctx context.Context, conv *state.ConversationRec
 	}
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 		if run != nil && run.DeliveredTo(ch.Name) {
-			r.settleDeliveredNote(ctx, conv, ch.Name)
+			SettleDeliveredNote(ctx, r.Store, conv, ch.Name, runID)
 			return
 		}
 		r.Ops.EnqueueRunReply(ctx, ch, conv, runID, tid, msg)
 	})
 }
 
-// settleDeliveredNote clears a thread's undelivered-reply note when the run it
-// names is already recorded delivered there. markDelivered writes the run
-// marker and then the note as two writes, and a crash between them leaves the
-// note naming a reply that did arrive; the delivery pass, which skips a run it
-// finds delivered, is where that converges. Best effort: the note is
-// observable bookkeeping, never what decides whether a reply is owed.
-func (r *Router) settleDeliveredNote(ctx context.Context, conv *state.ConversationRecord, channel string) {
-	if b := conv.Thread(channel); b == nil || b.UndeliveredReply == "" {
+// SettleDeliveredNote clears a thread's undelivered-reply note when it names
+// the run that is recorded delivered there. markDelivered writes the run marker
+// and then the note as two writes, and a crash between them leaves the note
+// naming a reply that did arrive; both delivery passes (the fan-out and the
+// reconciler backstop) call this for a run they skip as delivered. A note
+// naming a DIFFERENT run is left alone: that reply is genuinely owed. Best
+// effort: the note is observable bookkeeping, never what decides whether a
+// reply is owed.
+func SettleDeliveredNote(ctx context.Context, store state.Store, conv *state.ConversationRecord, channel, runID string) {
+	if b := conv.Thread(channel); b == nil || b.UndeliveredReply != runID {
 		return
 	}
-	_ = clearUndeliveredNote(ctx, r.Store, state.Key(conv.Name), channel)
+	_ = clearUndeliveredNote(ctx, store, state.Key(conv.Name), channel)
 }
 
 // eachBoundThread runs fn for every bound channel that already has a thread,

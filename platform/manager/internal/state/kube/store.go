@@ -16,8 +16,10 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,6 +43,13 @@ type Store struct {
 	client        client.WithWatch
 	namespace     string
 	sweepInterval time.Duration
+	// expiryArmed says the next sweep tick has something to look for. A sweep
+	// lists the whole namespace, and nothing in the manager sets ExpiresAt
+	// today, so an idle tick would be a pure apiserver cost. It is raised by
+	// a write carrying ExpiresAt, by a read or watch event that meets an
+	// expiry annotation, and at Run's start (a record from a previous
+	// process); a sweep that finds no annotation left lowers it.
+	expiryArmed atomic.Bool
 }
 
 // NewStore builds a kube-backed state.Store scoped to namespace (design D-2:
@@ -84,6 +93,7 @@ func (s *Store) Get(ctx context.Context, key state.Key) (state.ConversationRecor
 		return state.ConversationRecord{}, "", fmt.Errorf("kube: get conversation %q: %w", key, err)
 	}
 	if isExpired(&conv, time.Now()) {
+		s.expiryArmed.Store(true)
 		return state.ConversationRecord{}, "", state.ErrNotFound
 	}
 	return toRecord(&conv), state.Revision(conv.ResourceVersion), nil
@@ -98,6 +108,7 @@ func (s *Store) Get(ctx context.Context, key state.Key) (state.ConversationRecor
 func (s *Store) Create(ctx context.Context, key state.Key, rec state.ConversationRecord) (state.Revision, error) {
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = string(key), s.namespace
+	s.armExpiry(rec.ExpiresAt)
 	applySpecAndMeta(conv, rec)
 	if err := s.client.Create(ctx, conv); err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -132,12 +143,12 @@ func (s *Store) Create(ctx context.Context, key state.Key, rec state.Conversatio
 //     one, leaves every piece of metadata the record does not model (other
 //     labels, annotations, owner references) as the apiserver holds it.
 //  2. Having passed that check, the status write races nothing the caller
-//     asked this call to detect: nothing else should be writing between
-//     these two calls within one logical Update. It is retried on its own
-//     conflict, re-reading just before each retry, WITHOUT re-applying the
-//     caller's CAS check — the contract's revision is a precondition on
-//     the WHOLE record as the caller last read it, already honoured by
-//     step 1.
+//     asked this call to detect. It is retried on its own conflict,
+//     re-reading just before each retry, but only while the re-read status
+//     still equals the one the main write returned apart from Runs (which
+//     only grow and which Update never writes). A status that changed
+//     otherwise is a competing writer, and re-applying the caller's whole
+//     status would overwrite it: that returns ErrConflict.
 //
 // The revision handed back is the FINAL resourceVersion, after both calls
 // land.
@@ -150,6 +161,7 @@ func (s *Store) Create(ctx context.Context, key state.Key, rec state.Conversatio
 // finalizer deletes the object, and the status subresource of a deleted
 // object is gone.
 func (s *Store) Update(ctx context.Context, key state.Key, rev state.Revision, rec state.ConversationRecord) (state.Revision, error) {
+	s.armExpiry(rec.ExpiresAt)
 	conv := &agentopsv1alpha1.Conversation{}
 	if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -180,6 +192,7 @@ func (s *Store) Update(ctx context.Context, key state.Key, rev state.Revision, r
 	// status field the record carries except Runs, which this call must
 	// never rewrite (design D-5: runs are append-only, never part of
 	// Update's own record).
+	base := conv.Status.DeepCopy()
 	applyStatus(conv, rec)
 	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
 		err := s.client.Status().Update(ctx, conv)
@@ -192,9 +205,25 @@ func (s *Store) Update(ctx context.Context, key state.Key, rev state.Revision, r
 		if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
 			return "", fmt.Errorf("kube: re-read conversation %q before status retry: %w", key, err)
 		}
+		// The caller's status was computed from base. If anything other than a
+		// run append (which commutes) changed it since, re-applying the
+		// caller's whole status would silently overwrite that writer.
+		if statusChangedBeyondRuns(base, &conv.Status) {
+			return "", state.ErrConflict
+		}
 		applyStatus(conv, rec)
 	}
 	return "", fmt.Errorf("kube: update conversation %q status: exhausted %d attempts on conflict", key, statusUpdateMaxAttempts)
+}
+
+// statusChangedBeyondRuns reports whether current differs from base in any
+// field other than Runs. Update never writes Runs, and AppendRun/UpdateRun
+// only grow them, so a difference there is not a competing write to Update's
+// fields.
+func statusChangedBeyondRuns(base, current *agentopsv1alpha1.ConversationStatus) bool {
+	b := base.DeepCopy()
+	b.Runs = current.Runs
+	return !equality.Semantic.DeepEqual(b, current)
 }
 
 // updateReleasingLastFinalizer is Update for a record marked for deletion

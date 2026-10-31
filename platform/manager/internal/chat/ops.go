@@ -673,8 +673,8 @@ func (q *OpQueue) markThreadArchived(ctx context.Context, op *Op) error {
 // append), then the thread's undelivered-reply note (a record write, retried on
 // conflict). The first is the fact — it is what stops the re-derivation — and
 // the second is the observable note beside it. A crash between them leaves a
-// run recorded delivered with a note still naming it; settleDeliveredNote,
-// which the delivery pass runs for every run it skips as delivered, clears it.
+// run recorded delivered with a note still naming it; SettleDeliveredNote,
+// which both delivery passes run for every run they skip as delivered, clears it.
 // The reverse order would clear the note on a reply nothing yet records as
 // delivered, and a crash then would hide an owed reply.
 //

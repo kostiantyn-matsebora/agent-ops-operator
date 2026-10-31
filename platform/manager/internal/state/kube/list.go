@@ -33,6 +33,7 @@ func (s *Store) List(ctx context.Context, index state.Index, key state.ListKey) 
 	for i := range list.Items {
 		conv := &list.Items[i]
 		if isExpired(conv, now) {
+			s.expiryArmed.Store(true)
 			continue
 		}
 		if !matchesIndex(conv, index, key) {

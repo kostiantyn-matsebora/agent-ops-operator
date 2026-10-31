@@ -3637,6 +3637,15 @@ func TestStateBackendEnvIsRenderedFromTheSelector(t *testing.T) {
 	}
 }
 
+// `--set stateStore=null` removes the whole block; the guard and the env line
+// fall back to the kube default rather than failing on a nil pointer.
+func TestStateStoreNullFallsBackToTheKubeDefault(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t, "--set", "stateStore=null"), "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"kube\"") {
+		t.Fatalf("a null stateStore must render STATE_BACKEND=kube:\n%s", deploy)
+	}
+}
+
 // The guard's table is empty of bundles today, so the render tests declare a
 // fake backend through stateStore.bundles (backend -> values key) and turn its
 // bundle on with <key>.enabled, which the guard reads like any real bundle.

@@ -68,3 +68,9 @@
 - [x] 8.8 Confirm `docs/installation.md`, `docs/getting-started.md`, the landing page and `README.md` need no change: a default install is identical. Record the verdict here.
 
 Verdict 8.7: `docs/configuration.md` carries a State store section opening "You need do nothing", so an adopter choosing nothing reads no action. Verdict 8.8: `installation.md`, `getting-started.md`, the landing page and `README.md` need no change, since a default install is identical (`kube`, same objects). They change when the first alternative backend lands.
+
+## Review round (sections 4/5)
+
+Fixed: undelivered-note settling now runs in the reconciler backstop and only for the run the note names; the expiry sweep lists only when armed; `kube.Store.Update` returns `ErrConflict` when a status retry meets a non-run change; the feed clears a rejected resume point and `kube` Watch requests and forwards bookmarks (`EventBookmark`); the static check covers dot-imports and untyped Conversation kinds; the chart tolerates `stateStore=null`.
+
+Deliberately not fixed: `Reconcile`'s `Get` then `ListRuns` stay two reads (sharing needs a combined `Store` read, which widens the contract); a cluster measurement of `kube` read cost is outstanding (the bench covers the in-memory store only); `stateStore.bundles` is left as is, awaiting the user's decision; `markDelivered` still clears whatever note the thread holds after a successful marker write (an older owed run no longer recorded has nothing left to re-derive).

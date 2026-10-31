@@ -5,11 +5,14 @@ package kube
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
@@ -95,6 +98,44 @@ func TestExpiredRecordEventuallySweptAndObservedOnWatch(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("expired record was never actually deleted by the sweep (last error: %v)", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The sweep lists the namespace only when something can have expired: a tick
+// with nothing armed makes no list call.
+func TestSweepSkipsTheNamespaceListUntilAnExpiryIsArmed(t *testing.T) {
+	ns, _ := newTestNamespace(t)
+	var lists atomic.Int32
+	c := interceptor.NewClient(wwClient, interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, l client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := l.(*agentopsv1alpha1.ConversationList); ok {
+				lists.Add(1)
+			}
+			return cl.List(ctx, l, opts...)
+		},
+	})
+	s := NewStoreWithSweepInterval(c, ns, 20*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+
+	time.Sleep(300 * time.Millisecond)
+	if n := lists.Load(); n != 1 {
+		t.Fatalf("idle sweep listed %d times, want exactly the start-up one", n)
+	}
+
+	past := time.Now().Add(-time.Hour)
+	rec := fixtureRecord("conv-arm")
+	rec.ExpiresAt = &past
+	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for lists.Load() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("a write carrying ExpiresAt did not arm the sweep")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

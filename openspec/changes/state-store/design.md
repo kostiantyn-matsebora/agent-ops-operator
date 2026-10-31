@@ -125,8 +125,22 @@ staleness — how controller-runtime already behaves under `kube`.
 `Get` returns the current record. The `kube` backend serves it from the
 apiserver, the way `APIReader` does for the HTTP handlers today.
 
-The reconciler acts on the fed snapshot and reads again only when it needs
-the latest. The reconcile hot path gains no round trip.
+What is uncached under `kube`, and so costs an apiserver round trip where an
+informer answered from memory: every `Get`, `List` and `ListRuns` (a read of
+the whole Conversation, runs included, since the CRD keeps them in status);
+`Reconcile` opens with `Get` and then `ListRuns`, two reads of one object, and
+`Store` has no combined read to share them without widening the contract, so
+that pair stays. Every write re-reads before its compare-and-swap. Request-path
+reads already went to the apiserver through `APIReader`; the new cost is the
+reconciler's own reads. The expiry sweep lists the namespace only when armed
+(a write or an observed record carries `ExpiresAt`, plus once at start), so an
+install where nothing sets it pays one list per process, not one per 30s.
+
+The bench (`go test -bench . -benchmem ./internal/state/...`) measures the
+in-memory conformance store only (about 350 ns and 3 writes per run append); it
+says nothing about apiserver latency, and the `kube` read cost has not been
+measured against a cluster. This change therefore does not claim the reconcile
+path is free of round trips.
 
 ### D-5: The `kube` backend keeps today's CRD layout
 
@@ -313,8 +327,9 @@ Recorded after section 4, where the decisions were made against real code.
   the system pack is the acceptance test, unchanged, plus the byte-identical
   object scenario in the conformance suite.
 - [D-4 turns some cache reads into apiserver reads under `kube`] → only
-  paths that used `APIReader` already pay it. The reconciler acts on the fed
-  snapshot. Measured by the bench before and after.
+  paths that used `APIReader` already pay it; the reconciler's own `Get` and
+  `ListRuns` now do too (D-4 lists what stays uncached). The bench covers the
+  in-memory store only; a cluster measurement is outstanding.
 - [D-6 changes the reconciler's event source] → under `kube` the informer
   still feeds it, with a test asserting the same event sequence for a
   lifecycle as before.

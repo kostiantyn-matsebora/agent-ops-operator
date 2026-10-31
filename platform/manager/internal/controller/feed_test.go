@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -172,3 +173,95 @@ func ownedPod(t *testing.T, r *ConversationReconciler, owner *metav1.PartialObje
 }
 
 func bareObject() *corev1.Pod { return &corev1.Pod{} }
+
+// feedStub scripts Store.Watch: each call records the resume point it was
+// given and answers from the next scripted step.
+type feedStub struct {
+	state.Store
+	mu      sync.Mutex
+	resumes []state.Revision
+	steps   []func() (<-chan state.Event, error)
+}
+
+func (f *feedStub) Watch(_ context.Context, resume state.Revision) (<-chan state.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumes = append(f.resumes, resume)
+	if len(f.resumes) > len(f.steps) {
+		return nil, context.Canceled
+	}
+	return f.steps[len(f.resumes)-1]()
+}
+
+func (f *feedStub) List(context.Context, state.Index, state.ListKey) ([]state.ConversationRecord, error) {
+	return nil, nil
+}
+
+func (f *feedStub) seen() []state.Revision {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]state.Revision(nil), f.resumes...)
+}
+
+func eventsThenClose(evs ...state.Event) func() (<-chan state.Event, error) {
+	return func() (<-chan state.Event, error) {
+		ch := make(chan state.Event, len(evs))
+		for _, e := range evs {
+			ch <- e
+		}
+		close(ch)
+		return ch, nil
+	}
+}
+
+func waitForResumes(t *testing.T, f *feedStub, n int) []state.Revision {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := f.seen(); len(got) >= n {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("watch opened %v times, want %d", f.seen(), n)
+	return nil
+}
+
+// A resume point the store rejects with an error must not be retried forever:
+// the feed drops it and relists.
+func TestPumpFeedClearsAResumePointTheStoreRejects(t *testing.T) {
+	stub := &feedStub{steps: []func() (<-chan state.Event, error){
+		eventsThenClose(state.Event{Type: state.EventPut, Key: "a", Resume: "5"}),
+		func() (<-chan state.Event, error) { return nil, errors.New("too old resource version") },
+		eventsThenClose(),
+	}}
+	r := &ConversationReconciler{Store: stub, Namespace: "ns-a"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go r.pumpFeed(ctx, &recordingQueue{})
+
+	got := waitForResumes(t, stub, 3)
+	if got[0] != "" || got[1] != "5" || got[2] != "" {
+		t.Fatalf("resume points = %q, want [\"\" \"5\" \"\"]", got[:3])
+	}
+}
+
+// A bookmark moves the resume point without enqueuing anything.
+func TestPumpFeedFollowsABookmarkWithoutEnqueuing(t *testing.T) {
+	stub := &feedStub{steps: []func() (<-chan state.Event, error){
+		eventsThenClose(state.Event{Type: state.EventBookmark, Resume: "9"}),
+		eventsThenClose(),
+	}}
+	r := &ConversationReconciler{Store: stub, Namespace: "ns-a"}
+	q := &recordingQueue{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go r.pumpFeed(ctx, q)
+
+	if got := waitForResumes(t, stub, 2); got[1] != "9" {
+		t.Fatalf("resume points = %q, want the bookmark's 9 second", got)
+	}
+	if names := q.names(); len(names) != 0 {
+		t.Fatalf("a bookmark must enqueue nothing, got %v", names)
+	}
+}

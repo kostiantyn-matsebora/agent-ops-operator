@@ -73,6 +73,9 @@ func setExpiresAtAnnotation(conv *agentopsv1alpha1.Conversation, at *time.Time) 
 // once something actually wires this backend up (section 4 of the
 // state-store change).
 func (s *Store) Run(ctx context.Context) {
+	// One sweep at start covers a record a previous process (or another
+	// replica) stamped; after it only an armed tick lists the namespace.
+	s.expiryArmed.Store(true)
 	ticker := time.NewTicker(s.sweepInterval)
 	defer ticker.Stop()
 	for {
@@ -80,14 +83,27 @@ func (s *Store) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.sweepExpired(ctx)
+			if s.expiryArmed.Swap(false) {
+				s.sweepExpired(ctx)
+			}
 		}
 	}
 }
 
+// armExpiry raises expiryArmed for a record that carries an expiry.
+func (s *Store) armExpiry(at *time.Time) {
+	if at != nil {
+		s.expiryArmed.Store(true)
+	}
+}
+
+// sweepExpired deletes every expired record. The caller has already lowered
+// expiryArmed; it is raised again here when a record still carries a future
+// expiry, or when the list failed, so the next tick looks again.
 func (s *Store) sweepExpired(ctx context.Context) {
 	var list agentopsv1alpha1.ConversationList
 	if err := s.client.List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
+		s.expiryArmed.Store(true)
 		// Best-effort: the next tick tries again. Run carries no logger
 		// (NewStore depends on nothing but client.WithWatch), and a
 		// transient list failure here is indistinguishable from "nothing
@@ -100,6 +116,8 @@ func (s *Store) sweepExpired(ctx context.Context) {
 		conv := &list.Items[i]
 		if isExpired(conv, now) {
 			_ = s.client.Delete(ctx, conv)
+		} else if expiresAtFromAnnotations(conv.Annotations) != nil {
+			s.expiryArmed.Store(true)
 		}
 	}
 }

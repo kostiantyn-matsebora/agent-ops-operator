@@ -310,3 +310,43 @@ func TestDeliverRunRepliesDeliversOnceTheThreadIsReal(t *testing.T) {
 		t.Fatal("a bound real thread must get the reply enqueued")
 	}
 }
+
+// markDelivered writes the run marker and then the thread's note; a crash
+// between them leaves a delivered run with a note still naming it. The
+// reconciler backstop — the only pass that visits an already-delivered run —
+// must settle that note, without sending again, and must leave a note naming a
+// different (genuinely owed) run alone.
+func TestDeliverRunRepliesSettlesANoteLeftByACrashAfterTheRunMarker(t *testing.T) {
+	for _, tc := range []struct {
+		name, note, wantNote string
+	}{
+		{"note names the delivered run", "run-1", ""},
+		{"note names a different owed run", "run-2", "run-2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conv := claimTestConv("conv-1")
+			conv.Spec.ChannelRefs = []agentopsv1alpha1.ObjectRef{{Name: "c1"}}
+			conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1", UndeliveredReply: tc.note}}
+			conv.Status.Runs = []agentopsv1alpha1.RunStatus{{
+				RunID: "run-1", Status: "succeeded", Result: "the answer", DeliveryTracked: true,
+				Delivered: []string{"c1"},
+			}}
+			ch := &agentopsv1alpha1.Channel{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: claimTestNS}}
+			ch.Spec.Adapter = "slack"
+			c := fakeClaimClient(t, conv, ch).Build()
+			r := &ConversationReconciler{Client: c, Store: claimStore(c), Namespace: claimTestNS, Ops: &chat.OpQueue{Registry: chat.NewRegistry()}}
+
+			rec := claimRec(t, r.Store, "conv-1")
+			if err := r.deliverRunReplies(context.Background(), rec, claimRuns(t, r.Store, "conv-1")); err != nil {
+				t.Fatal(err)
+			}
+
+			if op := r.Ops.Claim("slack"); op != nil {
+				t.Fatalf("a delivered run must not be sent again: %+v", op)
+			}
+			if b := claimRec(t, r.Store, "conv-1").Thread("c1"); b == nil || b.UndeliveredReply != tc.wantNote {
+				t.Fatalf("note = %+v, want %q", b, tc.wantNote)
+			}
+		})
+	}
+}

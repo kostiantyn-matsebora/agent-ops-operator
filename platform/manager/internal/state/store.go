@@ -95,6 +95,11 @@ const (
 	EventPut EventType = "put"
 	// EventDelete is a Delete, or a record crossing its ExpiresAt.
 	EventDelete EventType = "delete"
+	// EventBookmark carries no change: only a Resume point, advanced past
+	// whatever the backend has seen since its last event, so an idle feed's
+	// resume point does not age out of the backend's history. Key and Record
+	// are zero. A consumer records Resume and does nothing else with it.
+	EventBookmark EventType = "bookmark"
 )
 
 // Event is one change on a Watch feed: design D-3's "(key, revision,

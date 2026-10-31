@@ -1262,7 +1262,14 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *st
 		}
 		msg := chat.RunReplyMessage(run)
 		for _, t := range conv.Threads {
-			if run.DeliveredTo(t.Channel) || !conv.BoundTo(t.Channel) {
+			if !conv.BoundTo(t.Channel) {
+				continue
+			}
+			if run.DeliveredTo(t.Channel) {
+				// A crash between markDelivered's run write and its note
+				// write leaves the note naming a delivered run; this
+				// backstop is the only pass that visits it.
+				chat.SettleDeliveredNote(ctx, r.Store, conv, t.Channel, run.RunID)
 				continue
 			}
 			owed[t.Channel] = true

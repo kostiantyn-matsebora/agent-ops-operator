@@ -42,6 +42,9 @@ func (r *ConversationReconciler) pumpFeed(ctx context.Context, q workqueue.Typed
 		events, err := r.Store.Watch(ctx, resume)
 		if err != nil {
 			logger.Error(err, "opening the conversation feed")
+			// A resume point the store rejects would otherwise be retried
+			// once a second forever; start over and relist instead.
+			resume = ""
 		} else {
 			if resume == "" {
 				r.enqueueAll(ctx, q)
@@ -67,7 +70,9 @@ func (r *ConversationReconciler) forward(ctx context.Context, events <-chan stat
 	q workqueue.TypedRateLimitingInterface[reconcile.Request]) (last state.Revision, delivered bool) {
 
 	for ev := range events {
-		q.Add(r.request(ev.Key))
+		if ev.Type != state.EventBookmark {
+			q.Add(r.request(ev.Key))
+		}
 		last, delivered = ev.Resume, true
 	}
 	return last, delivered

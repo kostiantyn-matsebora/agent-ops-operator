@@ -243,7 +243,7 @@ backend bundle adds its row HERE; `stateStore.bundles` is merged over this table
 so a render test (or a fork) can declare one without a template edit. */ -}}
 {{- define "agentops.stateStoreBackends" -}}
 {{- $table := dict -}}
-{{- range $b, $key := (.Values.stateStore.bundles | default dict) -}}{{- $_ := set $table $b $key -}}{{- end -}}
+{{- range $b, $key := ((.Values.stateStore | default dict).bundles | default dict) -}}{{- $_ := set $table $b $key -}}{{- end -}}
 {{- toYaml $table -}}
 {{- end -}}
 
@@ -258,7 +258,7 @@ one on beside `kube`.
 IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects an
 interactive one. */ -}}
 {{- define "agentops.stateStoreGuard" -}}
-{{- $backend := (.Values.stateStore.backend | default "kube") -}}
+{{- $backend := ((.Values.stateStore | default dict).backend | default "kube") -}}
 {{- $table := fromYaml (include "agentops.stateStoreBackends" .) -}}
 {{- if and (ne $backend "kube") (not (hasKey $table $backend)) -}}
 {{- fail (printf "stateStore.backend=%q is not a known state backend (known: kube%s)" $backend (include "agentops.stateStoreKnownSuffix" $table)) -}}

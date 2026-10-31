@@ -62,7 +62,7 @@ spec:
             # Which state store backend the manager runs; the guard above has
             # already refused a value no enabled bundle answers.
             - name: STATE_BACKEND
-              value: {{ .Values.stateStore.backend | default "kube" | quote }}
+              value: {{ (.Values.stateStore | default dict).backend | default "kube" | quote }}
             - name: MAX_ACTIVE_CONVERSATIONS
               value: {{ .Values.maxActiveConversations | quote }}
             - name: MAX_QUEUED_CONVERSATIONS

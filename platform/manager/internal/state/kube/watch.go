@@ -34,13 +34,13 @@ func (s *Store) Watch(ctx context.Context, resume state.Revision) (<-chan state.
 
 	w, err := s.client.Watch(ctx, &agentopsv1alpha1.ConversationList{},
 		client.InNamespace(s.namespace),
-		&client.ListOptions{Raw: &metav1.ListOptions{ResourceVersion: startRV}})
+		&client.ListOptions{Raw: &metav1.ListOptions{ResourceVersion: startRV, AllowWatchBookmarks: true}})
 	if err != nil {
 		return nil, fmt.Errorf("kube: watch conversations: %w", err)
 	}
 
 	events := make(chan state.Event)
-	go runWatch(ctx, w, events)
+	go s.runWatch(ctx, w, events)
 	return events, nil
 }
 
@@ -49,7 +49,7 @@ func (s *Store) Watch(ctx context.Context, resume state.Revision) (<-chan state.
 // apiserver closed the connection, nothing left to read). Either way it
 // stops w and closes events, mirroring how an informer behaves on
 // shutdown.
-func runWatch(ctx context.Context, w watch.Interface, events chan<- state.Event) {
+func (s *Store) runWatch(ctx context.Context, w watch.Interface, events chan<- state.Event) {
 	defer close(events)
 	defer w.Stop()
 	for {
@@ -68,6 +68,10 @@ func runWatch(ctx context.Context, w watch.Interface, events chan<- state.Event)
 				// waiting for ResultChan to close on its own, is what
 				// makes that immediate rather than best-effort.
 				return
+			}
+			if conv, ok := ev.Object.(*agentopsv1alpha1.Conversation); ok &&
+				expiresAtFromAnnotations(conv.Annotations) != nil {
+				s.expiryArmed.Store(true)
 			}
 			out, forward := translateWatchEvent(ev)
 			if !forward {
@@ -125,8 +129,16 @@ func translateWatchEvent(ev watch.Event) (state.Event, bool) {
 			Key:    state.Key(conv.Name),
 			Resume: rev,
 		}, true
+	case watch.Bookmark:
+		// Requested so an idle watch's resume point keeps moving; the
+		// apiserver sends one carrying only a resourceVersion.
+		conv, ok := ev.Object.(*agentopsv1alpha1.Conversation)
+		if !ok || conv.ResourceVersion == "" {
+			return state.Event{}, false
+		}
+		return state.Event{Type: state.EventBookmark, Resume: state.Revision(conv.ResourceVersion)}, true
 	default:
-		// watch.Bookmark, watch.Error: see the function comment.
+		// watch.Error: see the function comment.
 		return state.Event{}, false
 	}
 }
