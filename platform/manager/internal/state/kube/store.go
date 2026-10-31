@@ -15,6 +15,7 @@ package kube
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -123,10 +124,13 @@ func (s *Store) Create(ctx context.Context, key state.Key, rec state.Conversatio
 // subresource for status — each bumping its own resourceVersion.
 //
 // Resolved pragmatically:
-//  1. The main object Update carries rev as the precondition. This is the
-//     CAS-checked call: a 409 here means the caller's own revision lost the
-//     race, so it is translated to ErrConflict immediately and the status
-//     call never runs — nothing of the caller's write reaches the object.
+//  1. The stored object is read first. Its resourceVersion must equal rev,
+//     and the main object write carries it as the precondition: the
+//     CAS-checked call. A mismatch at either point is ErrConflict and the
+//     status call never runs — nothing of the caller's write reaches the
+//     object. Writing onto the object just read, rather than onto a bare
+//     one, leaves every piece of metadata the record does not model (other
+//     labels, annotations, owner references) as the apiserver holds it.
 //  2. Having passed that check, the status write races nothing the caller
 //     asked this call to detect: nothing else should be writing between
 //     these two calls within one logical Update. It is retried on its own
@@ -137,20 +141,36 @@ func (s *Store) Create(ctx context.Context, key state.Key, rec state.Conversatio
 //
 // The revision handed back is the FINAL resourceVersion, after both calls
 // land.
+//
+// A record marked for deletion (design D-11) is written the same way, with
+// two differences. A finalizer the stored object does not already hold is
+// refused (ErrDeleting) — the apiserver refuses it too, and refusing it up
+// front keeps the refusal a contract error. And an Update that leaves
+// Finalizers empty writes status FIRST: the main write that drops the last
+// finalizer deletes the object, and the status subresource of a deleted
+// object is gone.
 func (s *Store) Update(ctx context.Context, key state.Key, rev state.Revision, rec state.ConversationRecord) (state.Revision, error) {
 	conv := &agentopsv1alpha1.Conversation{}
-	conv.Name, conv.Namespace = string(key), s.namespace
-	conv.ResourceVersion = string(rev)
-	applySpecAndMeta(conv, rec)
-
-	if err := s.client.Update(ctx, conv); err != nil {
-		if apierrors.IsConflict(err) {
-			return "", state.ErrConflict
-		}
+	if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", state.ErrNotFound
 		}
 		return "", fmt.Errorf("kube: update conversation %q: %w", key, err)
+	}
+	if conv.ResourceVersion != string(rev) {
+		return "", state.ErrConflict
+	}
+	deleting := !conv.DeletionTimestamp.IsZero()
+	if deleting && addsFinalizer(conv.Finalizers, rec.Finalizers) {
+		return "", state.ErrDeleting
+	}
+	if deleting && len(rec.Finalizers) == 0 {
+		return s.updateReleasingLastFinalizer(ctx, key, conv, rec)
+	}
+
+	applySpecAndMeta(conv, rec)
+	if err := s.client.Update(ctx, conv); err != nil {
+		return "", updateError(key, "update conversation", err)
 	}
 
 	// conv now carries the apiserver's response to the main-object write:
@@ -177,8 +197,62 @@ func (s *Store) Update(ctx context.Context, key state.Key, rev state.Revision, r
 	return "", fmt.Errorf("kube: update conversation %q status: exhausted %d attempts on conflict", key, statusUpdateMaxAttempts)
 }
 
-// Delete removes a Conversation. Not an error when the key is already
-// absent (store.go's Store.Delete contract).
+// updateReleasingLastFinalizer is Update for a record marked for deletion
+// whose new Finalizers is empty: status first (the CAS precondition rides
+// on conv's resourceVersion, already checked equal to rev), then the main
+// write that drops the finalizer and so deletes the object. The main write
+// is retried on a conflict, since the status write has landed and must not
+// be re-asked of the caller.
+func (s *Store) updateReleasingLastFinalizer(ctx context.Context, key state.Key, conv *agentopsv1alpha1.Conversation, rec state.ConversationRecord) (state.Revision, error) {
+	applyStatus(conv, rec)
+	if err := s.client.Status().Update(ctx, conv); err != nil {
+		return "", updateError(key, "update conversation status", err)
+	}
+	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
+		applySpecAndMeta(conv, rec)
+		err := s.client.Update(ctx, conv)
+		if err == nil || apierrors.IsNotFound(err) {
+			return state.Revision(conv.ResourceVersion), nil
+		}
+		if !apierrors.IsConflict(err) {
+			return "", fmt.Errorf("kube: release conversation %q: %w", key, err)
+		}
+		if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
+			if apierrors.IsNotFound(err) {
+				return state.Revision(conv.ResourceVersion), nil
+			}
+			return "", fmt.Errorf("kube: re-read conversation %q before release retry: %w", key, err)
+		}
+	}
+	return "", fmt.Errorf("kube: release conversation %q: exhausted %d attempts on conflict", key, statusUpdateMaxAttempts)
+}
+
+func updateError(key state.Key, what string, err error) error {
+	switch {
+	case apierrors.IsConflict(err):
+		return state.ErrConflict
+	case apierrors.IsNotFound(err):
+		return state.ErrNotFound
+	}
+	return fmt.Errorf("kube: %s %q: %w", what, key, err)
+}
+
+// addsFinalizer reports whether next holds a finalizer cur does not.
+func addsFinalizer(cur, next []string) bool {
+	for _, f := range next {
+		if !slices.Contains(cur, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// Delete requests a Conversation's deletion (store.go's Store.Delete
+// contract). The apiserver's own mark-for-deletion is the contract's
+// marker: with a finalizer held the object stays, deletionTimestamp set
+// once and kept by a repeated Delete, and the watch carries it as a
+// modification; without one it is removed at once. Not an error when the
+// key is already absent.
 func (s *Store) Delete(ctx context.Context, key state.Key) error {
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Name, conv.Namespace = string(key), s.namespace

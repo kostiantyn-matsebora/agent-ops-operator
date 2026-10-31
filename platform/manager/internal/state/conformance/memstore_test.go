@@ -31,6 +31,7 @@ type memStore struct {
 	runs    map[state.Key][]state.Run
 	blobs   map[state.Key]state.Blob
 	seq     uint64
+	ids     uint64
 	log     []state.Event // every ConversationRecord Put/Delete, in seq order
 }
 
@@ -97,6 +98,30 @@ func (m *memStore) Get(ctx context.Context, key state.Key) (state.ConversationRe
 	return mr.rec, revisionOf(mr.rev), nil
 }
 
+// utcRecord normalises the instants a scenario reads back to UTC, the
+// contract's rule (record.go).
+func utcRecord(rec state.ConversationRecord) state.ConversationRecord {
+	if rec.LastActivity != nil {
+		t := rec.LastActivity.UTC()
+		rec.LastActivity = &t
+	}
+	if rec.Inflight != nil {
+		in := *rec.Inflight
+		in.DispatchedAt = in.DispatchedAt.UTC()
+		rec.Inflight = &in
+	}
+	return rec
+}
+
+// mintIdentity gives rec the read-only fields a backend owns (record.go).
+func (m *memStore) mintIdentity(rec state.ConversationRecord) state.ConversationRecord {
+	m.ids++
+	rec.ID = "mem-" + strconv.FormatUint(m.ids, 10)
+	rec.CreatedAt = time.Now().UTC()
+	rec.DeletionRequestedAt = nil
+	return rec
+}
+
 func (m *memStore) Create(ctx context.Context, key state.Key, rec state.ConversationRecord) (state.Revision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -105,6 +130,7 @@ func (m *memStore) Create(ctx context.Context, key state.Key, rec state.Conversa
 	if _, exists := m.records[key]; exists {
 		return "", state.ErrAlreadyExists
 	}
+	rec = utcRecord(m.mintIdentity(rec))
 	seq := m.mintLocked(state.EventPut, key, rec)
 	m.records[key] = &memRecord{rec: rec, rev: seq}
 	return revisionOf(seq), nil
@@ -122,9 +148,31 @@ func (m *memStore) Update(ctx context.Context, key state.Key, rev state.Revision
 	if revisionOf(mr.rev) != rev {
 		return "", state.ErrConflict
 	}
+	rec = utcRecord(rec)
+	rec.ID, rec.CreatedAt, rec.DeletionRequestedAt = mr.rec.ID, mr.rec.CreatedAt, mr.rec.DeletionRequestedAt
+	if rec.DeletionRequestedAt != nil {
+		for _, f := range rec.Finalizers {
+			if !containsString(mr.rec.Finalizers, f) {
+				return "", state.ErrDeleting
+			}
+		}
+		if len(rec.Finalizers) == 0 {
+			delete(m.records, key)
+			return revisionOf(m.mintLocked(state.EventDelete, key, state.ConversationRecord{})), nil
+		}
+	}
 	seq := m.mintLocked(state.EventPut, key, rec)
 	m.records[key] = &memRecord{rec: rec, rev: seq}
 	return revisionOf(seq), nil
+}
+
+func containsString(set []string, v string) bool {
+	for _, s := range set {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *memStore) Delete(ctx context.Context, key state.Key) error {
@@ -132,7 +180,16 @@ func (m *memStore) Delete(ctx context.Context, key state.Key) error {
 	defer m.mu.Unlock()
 	m.sweepExpiredLocked(time.Now())
 
-	if _, ok := m.records[key]; !ok {
+	mr, ok := m.records[key]
+	if !ok {
+		return nil
+	}
+	if len(mr.rec.Finalizers) > 0 {
+		if mr.rec.DeletionRequestedAt == nil {
+			now := time.Now().UTC()
+			mr.rec.DeletionRequestedAt = &now
+			mr.rev = m.mintLocked(state.EventPut, key, mr.rec)
+		}
 		return nil
 	}
 	delete(m.records, key)
@@ -155,6 +212,12 @@ func (m *memStore) List(ctx context.Context, index state.Index, key state.ListKe
 		}
 	case state.ByPhase:
 		match = func(r state.ConversationRecord) bool { return r.Phase == key.Phase }
+	case state.ByCausedBy:
+		match = func(r state.ConversationRecord) bool { return r.CausedBy != nil && r.CausedBy.Parent == key.CausedBy }
+	case state.ByNameBase:
+		match = func(r state.ConversationRecord) bool { return r.NameBase == key.NameBase }
+	case state.ByAll:
+		match = func(state.ConversationRecord) bool { return true }
 	default:
 		return nil, state.ErrUnknownIndex
 	}
@@ -217,8 +280,35 @@ func (m *memStore) Watch(ctx context.Context, resume state.Revision) (<-chan sta
 func (m *memStore) AppendRun(ctx context.Context, key state.Key, run state.Run) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if run.StartedAt != nil {
+		t := run.StartedAt.UTC()
+		run.StartedAt = &t
+	}
 	m.runs[key] = append(m.runs[key], run)
 	return nil
+}
+
+func (m *memStore) UpdateRun(ctx context.Context, key state.Key, runID string, upd state.RunUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.records[key]; !ok {
+		return state.ErrNotFound
+	}
+	for i := range m.runs[key] {
+		run := &m.runs[key][i]
+		if run.RunID != runID {
+			continue
+		}
+		run.DeliveryTracked = run.DeliveryTracked || upd.MarkDeliveryTracked
+		run.RoutedToParent = run.RoutedToParent || upd.MarkRoutedToParent
+		for _, ch := range upd.MarkDelivered {
+			if !containsString(run.Delivered, ch) {
+				run.Delivered = append(run.Delivered, ch)
+			}
+		}
+		return nil
+	}
+	return state.ErrNotFound
 }
 
 func (m *memStore) ListRuns(ctx context.Context, key state.Key) ([]state.Run, error) {

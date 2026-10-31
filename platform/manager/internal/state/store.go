@@ -30,6 +30,11 @@ var ErrConflict = errors.New("state: conflicting write")
 // race over, it simply refuses to create a second record under one key.
 var ErrAlreadyExists = errors.New("state: record already exists")
 
+// ErrDeleting is returned by Update for a write that adds a finalizer to a
+// record already marked for deletion (record.go: Finalizers can only shrink
+// on such a record). Nothing of the write is applied.
+var ErrDeleting = errors.New("state: record is being deleted")
+
 // ErrUnknownIndex is returned by List for an Index outside DeclaredIndexes.
 var ErrUnknownIndex = errors.New("state: unknown index")
 
@@ -50,12 +55,23 @@ const (
 	// ByPhase looks up every conversation in one phase, the admission
 	// gate's and housekeeping's own sweep. ListKey.Phase is read.
 	ByPhase Index = "phase"
+	// ByCausedBy looks up a conversation's direct members: every record whose
+	// CausedBy.Parent names the conversation. The close cascade, the tree
+	// walk and member reuse read it. ListKey.CausedBy is read.
+	ByCausedBy Index = "causedBy"
+	// ByNameBase looks up every record sharing one allocated word-chain, so
+	// the next free name for it can be chosen. ListKey.NameBase is read.
+	ByNameBase Index = "nameBase"
+	// ByAll lists every non-expired record in the store's scope — the
+	// admission gate's slot count, the status view and the signal router's
+	// scan read the whole set. No ListKey field is read.
+	ByAll Index = "all"
 )
 
 // DeclaredIndexes is the Store's closed index set. internal/state/conformance
 // walks this slice, so adding an Index here without a kube implementation
 // fails the suite on every backend rather than only the one left behind.
-var DeclaredIndexes = []Index{ByConversationID, ByPipelineAndPhase, ByPhase}
+var DeclaredIndexes = []Index{ByConversationID, ByPipelineAndPhase, ByPhase, ByCausedBy, ByNameBase, ByAll}
 
 // ListKey carries one index's lookup values. A backend's List reads only the
 // fields the named Index declares above; the rest are ignored, so a caller
@@ -65,6 +81,8 @@ type ListKey struct {
 	ConversationID string
 	PipelineRef    string
 	Phase          string
+	CausedBy       string
+	NameBase       string
 }
 
 // EventType says what happened to a record on a Watch feed.
@@ -104,17 +122,29 @@ type Store interface {
 	Get(ctx context.Context, key Key) (ConversationRecord, Revision, error)
 
 	// Create writes a new record and returns its revision. ErrAlreadyExists
-	// when key already names a record — a create carries no revision to
-	// lose a race over, it is refused outright.
+	// when key already names a record — including one marked for deletion
+	// and still held by a finalizer — a create carries no revision to lose a
+	// race over, it is refused outright. The record's ID, CreatedAt and
+	// DeletionRequestedAt are minted here, whatever rec carries.
 	Create(ctx context.Context, key Key, rec ConversationRecord) (Revision, error)
 
 	// Update writes rec in place of the record at rev, returning the new
 	// revision. ErrConflict when rev is not the record's current revision —
 	// the caller's own get-modify-put raced another writer (design D-2) and
-	// must Get again before retrying.
+	// must Get again before retrying. ErrDeleting when rec adds a finalizer
+	// to a record marked for deletion. Updating a marked record's last
+	// finalizer away removes the record (see Delete): the returned revision
+	// is the one the removal's EventDelete carries as Resume.
 	Update(ctx context.Context, key Key, rev Revision, rec ConversationRecord) (Revision, error)
 
-	// Delete removes a record. Not an error when the key is already absent.
+	// Delete requests a record's removal (design D-11). A record holding no
+	// finalizer is removed at once and the feed carries EventDelete. A record
+	// holding one stays readable by Get, List and Watch with
+	// DeletionRequestedAt set, the feed carries an EventPut for the marking,
+	// and the record is removed — EventDelete — by the Update that leaves its
+	// Finalizers empty. A second Delete of a marked record changes nothing
+	// and keeps the first DeletionRequestedAt. Not an error when the key is
+	// already absent.
 	Delete(ctx context.Context, key Key) error
 
 	// List returns every non-expired record matching one declared Index.
@@ -133,6 +163,15 @@ type Store interface {
 	// internal CAS retry loop (design D-5) rather than surfacing a conflict
 	// the caller would have no reason to expect.
 	AppendRun(ctx context.Context, key Key, run Run) error
+
+	// UpdateRun applies upd to the run named runID in key's history (design
+	// D-12). Takes no revision: every RunUpdate field only grows, so updates
+	// commute with each other and with AppendRun, and a backend meets this
+	// with its own internal retry. Applying an update already applied
+	// changes nothing and is not an error. ErrNotFound when key names no
+	// record or the record has no run runID — a caller whose run aged out of
+	// the bounded history treats that as nothing owed.
+	UpdateRun(ctx context.Context, key Key, runID string, upd RunUpdate) error
 
 	// ListRuns returns key's run history in append order.
 	ListRuns(ctx context.Context, key Key) ([]Run, error)

@@ -25,6 +25,12 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 	rec := state.ConversationRecord{
 		Name: conv.Name,
 
+		ID:                  string(conv.UID),
+		CreatedAt:           conv.CreationTimestamp.Time.UTC(),
+		DeletionRequestedAt: metaTimeToTimePtr(conv.DeletionTimestamp),
+		Finalizers:          conv.Finalizers,
+		NameBase:            conv.Labels[agentopsv1alpha1.LabelNameBase],
+
 		CoordinatorRef:        objectRefToRef(s.CoordinatorRef),
 		EscalationChannelRefs: objectRefsToRefs(s.EscalationChannelRefs),
 		ChannelRefs:           objectRefsToRefs(s.ChannelRefs),
@@ -82,7 +88,7 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 		rec.Inflight = &state.InflightRun{
 			RunID:        st.Inflight.RunID,
 			InputIDs:     st.Inflight.InputIDs,
-			DispatchedAt: st.Inflight.DispatchedAt.Time,
+			DispatchedAt: st.Inflight.DispatchedAt.Time.UTC(),
 			Moved:        st.Inflight.Moved,
 		}
 	}
@@ -97,7 +103,7 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 	}
 	if st.ContextCheckpoint != nil {
 		rec.ContextCheckpoint = &state.ContextCheckpoint{
-			At:         st.ContextCheckpoint.At.Time,
+			At:         st.ContextCheckpoint.At.Time.UTC(),
 			Generation: st.ContextCheckpoint.Generation,
 			Quiesced:   st.ContextCheckpoint.Quiesced,
 			Bytes:      st.ContextCheckpoint.Bytes,
@@ -111,6 +117,19 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 // see store.go's Update for why the two are separate apiserver calls.
 func applySpecAndMeta(conv *agentopsv1alpha1.Conversation, rec state.ConversationRecord) {
 	s := &conv.Spec
+
+	// Finalizers and the two lookup labels are the only metadata the record
+	// models. Every other label, annotation and owner reference on conv is
+	// left as the apiserver holds it. The labels mirror CausedBy.Parent and
+	// NameBase exactly as the callers that wrote them by hand did (api
+	// LabelCausedBy, LabelNameBase), so an object is unchanged on the wire.
+	conv.Finalizers = rec.Finalizers
+	setLabel(conv, agentopsv1alpha1.LabelNameBase, rec.NameBase)
+	parent := ""
+	if rec.CausedBy != nil {
+		parent = rec.CausedBy.Parent
+	}
+	setLabel(conv, agentopsv1alpha1.LabelCausedBy, parent)
 
 	s.CausedBy = nil
 	if rec.CausedBy != nil {
@@ -154,6 +173,19 @@ func applySpecAndMeta(conv *agentopsv1alpha1.Conversation, rec state.Conversatio
 	s.Inputs = toAPIInputItems(rec.Inputs)
 
 	setExpiresAtAnnotation(conv, rec.ExpiresAt)
+}
+
+// setLabel sets label k to v on conv, or removes it when v is empty — the
+// record, not the object, is the source of truth for the labels it models.
+func setLabel(conv *agentopsv1alpha1.Conversation, k, v string) {
+	if v == "" {
+		delete(conv.Labels, k)
+		return
+	}
+	if conv.Labels == nil {
+		conv.Labels = map[string]string{}
+	}
+	conv.Labels[k] = v
 }
 
 // applyStatus writes rec's status-shaped fields onto conv (state -> api).
@@ -261,10 +293,11 @@ func toStateInputItems(items []agentopsv1alpha1.InputItem) []state.InputItem {
 		out[i] = state.InputItem{
 			ID:         it.ID,
 			Type:       string(it.Type),
+			Agent:      it.Agent,
 			Payload:    it.Payload,
 			PayloadRef: objectRefToKey(it.PayloadRef),
 			Origin:     toStateInputOrigin(it.Origin),
-			ReceivedAt: it.ReceivedAt.Time,
+			ReceivedAt: it.ReceivedAt.Time.UTC(),
 		}
 	}
 	return out
@@ -285,6 +318,7 @@ func toAPIInputItems(items []state.InputItem) []agentopsv1alpha1.InputItem {
 		out[i] = agentopsv1alpha1.InputItem{
 			ID:         it.ID,
 			Type:       agentopsv1alpha1.InputType(it.Type),
+			Agent:      it.Agent,
 			Payload:    it.Payload,
 			PayloadRef: keyToObjectRef(it.PayloadRef),
 			Origin:     toAPIInputOrigin(it.Origin),
@@ -422,7 +456,7 @@ func toStateOpClaim(c *agentopsv1alpha1.OpClaim) *state.OpClaim {
 	if c == nil {
 		return nil
 	}
-	return &state.OpClaim{Holder: c.Holder, ClaimedAt: c.ClaimedAt.Time}
+	return &state.OpClaim{Holder: c.Holder, ClaimedAt: c.ClaimedAt.Time.UTC()}
 }
 
 func toAPIOpClaim(c *state.OpClaim) *agentopsv1alpha1.OpClaim {
@@ -444,7 +478,7 @@ func toStateConditions(cs []metav1.Condition) []state.Condition {
 			Reason:             c.Reason,
 			Message:            c.Message,
 			ObservedGeneration: c.ObservedGeneration,
-			LastTransitionTime: c.LastTransitionTime.Time,
+			LastTransitionTime: c.LastTransitionTime.Time.UTC(),
 		}
 	}
 	return out
@@ -533,7 +567,7 @@ func metaTimeToTimePtr(t *metav1.Time) *time.Time {
 	if t == nil {
 		return nil
 	}
-	tt := t.Time
+	tt := t.Time.UTC()
 	return &tt
 }
 

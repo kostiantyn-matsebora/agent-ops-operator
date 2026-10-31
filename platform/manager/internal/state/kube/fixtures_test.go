@@ -30,6 +30,11 @@ func fixtureRecord(name string) state.ConversationRecord {
 	return state.ConversationRecord{
 		Name: name,
 
+		// Finalizers is left empty here: a held record survives Delete, and
+		// most tests that use this fixture end by deleting it. The held
+		// round trip is TestFinalizersRoundTrip.
+		NameBase: "task-fixture-words",
+
 		CausedBy:              &state.Provenance{Parent: "parent-conv", Entry: "agent-a"},
 		CoordinatorRef:        "coord-1",
 		EscalationChannelRefs: []state.Ref{"esc-chan"},
@@ -52,7 +57,7 @@ func fixtureRecord(name string) state.ConversationRecord {
 		WorkspaceClaimName: "ws-claim",
 		Inputs: []state.InputItem{
 			{
-				ID: "input-1", Type: "task", Payload: "inline payload",
+				ID: "input-1", Type: "task", Agent: "legacy-agent", Payload: "inline payload",
 				Origin:     &state.InputOrigin{Kind: "channel", Name: "chan-a", Entry: "entry-a", SignalKind: "chat", Sender: "alice"},
 				ReceivedAt: *tick(0),
 			},
@@ -105,8 +110,16 @@ func fixtureRecord(name string) state.ConversationRecord {
 // normalizes both to the same RFC3339Nano string, so this compares what
 // the fixture actually asserts: the same information, not the same bytes
 // in memory.
+//
+// The three fields the backend mints (ID, CreatedAt, DeletionRequestedAt)
+// are checked to be populated and then taken from got: a fixture cannot
+// know them. Mapping and minting are covered by their own tests.
 func assertRecordsEqual(t *testing.T, got, want state.ConversationRecord) {
 	t.Helper()
+	if got.ID == "" || got.CreatedAt.IsZero() {
+		t.Fatalf("record read back carries no minted identity: ID=%q CreatedAt=%v", got.ID, got.CreatedAt)
+	}
+	want.ID, want.CreatedAt, want.DeletionRequestedAt = got.ID, got.CreatedAt, got.DeletionRequestedAt
 	gotJSON, err := json.MarshalIndent(got, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal got: %v", err)

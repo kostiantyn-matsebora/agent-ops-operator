@@ -68,13 +68,15 @@ type InputOrigin struct {
 // PayloadRef names the blob that carries it out-of-line — never both. See
 // api/v1alpha1.InputItem.
 //
-// The deprecated, no-longer-written Agent field (api/v1alpha1.InputItem.Agent)
-// has no analog here: nothing in this contract writes it, and the one
-// release of backward-reads that field was given has no caller yet reaching
-// the store (section 4 of this change).
+// Agent is the deprecated, no-longer-written override
+// api/v1alpha1.InputItem.Agent: dispatch still reads it for one release
+// (a queued item written before that release carries it), so a record
+// carries it through untouched. Nothing in this contract writes it, and it
+// is removed with the dual-read.
 type InputItem struct {
 	ID         string
 	Type       string
+	Agent      string
 	Payload    string
 	PayloadRef Key
 	Origin     *InputOrigin
@@ -99,8 +101,10 @@ type RecordedInput struct {
 
 // Run records one completed agent run. Runs are append-only sub-records of a
 // ConversationRecord (design D-5): added through Store.AppendRun, read
-// through Store.ListRuns, never part of Get/Update's own record. See
-// api/v1alpha1.RunStatus.
+// through Store.ListRuns, never part of Get/Update's own record. Three
+// delivery markers on an existing run (DeliveryTracked, Delivered,
+// RoutedToParent) only ever grow, and change through Store.UpdateRun (design
+// D-12). See api/v1alpha1.RunStatus.
 type Run struct {
 	RunID           string
 	JobKind         string
@@ -114,6 +118,20 @@ type Run struct {
 	Delivered       []string
 	RoutedToParent  bool
 	Inputs          []RecordedInput
+}
+
+// RunUpdate is the one mutation an existing run accepts (design D-12). Every
+// field only ever grows — a flag goes false to true, a set gains members,
+// nothing is removed or overwritten — so an update is idempotent and commutes
+// with another UpdateRun and with AppendRun. A zero RunUpdate changes nothing.
+type RunUpdate struct {
+	// MarkDeliveryTracked sets Run.DeliveryTracked true.
+	MarkDeliveryTracked bool
+	// MarkDelivered adds each channel to Run.Delivered unless it is already
+	// there, keeping first-appearance order.
+	MarkDelivered []string
+	// MarkRoutedToParent sets Run.RoutedToParent true.
+	MarkRoutedToParent bool
 }
 
 // ThreadBinding pins one bound channel to its conversation thread. See
@@ -193,6 +211,36 @@ type Condition struct {
 // `kube` backend alone maps this to and from the CRD it keeps.
 type ConversationRecord struct {
 	Name string
+
+	// ID, CreatedAt and DeletionRequestedAt are minted by the backend and
+	// read-only: Create and Update ignore whatever a caller puts here, and a
+	// record read back always carries them (design D-11).
+	//
+	// ID is the record's identity, opaque and stable for its whole life. A
+	// record deleted and created again under the same Name has a new ID, so
+	// anything derived from the ID (a topic-creation op id, an owner link on
+	// a workload) never confuses the two lives.
+	//
+	// CreatedAt is when the backend first stored the record. It orders FIFO
+	// admission and is the idle clock's floor for a record with no activity.
+	//
+	// DeletionRequestedAt is non-nil from the first Delete of a record that
+	// still holds a finalizer, until the record is gone.
+	ID                  string
+	CreatedAt           time.Time
+	DeletionRequestedAt *time.Time
+
+	// Finalizers is the set of holds the manager has placed on the record:
+	// while it is non-empty, a Delete only marks the record
+	// (DeletionRequestedAt) and the record stays readable. Caller-owned,
+	// written through Update, and on a record being deleted it can only
+	// shrink (design D-11).
+	Finalizers []string
+
+	// NameBase is the word-chain a record's name was allocated from,
+	// "<kind>-<words>" with no numeric collision suffix. Set at Create and
+	// never changed. It is the key of the ByNameBase index.
+	NameBase string
 
 	CausedBy              *Provenance
 	CoordinatorRef        Ref

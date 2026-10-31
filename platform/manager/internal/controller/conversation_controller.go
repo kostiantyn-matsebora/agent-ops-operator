@@ -667,16 +667,7 @@ func (r *ConversationReconciler) clearRuntimeStartFailure(ctx context.Context, c
 // pass re-derives it after any restart. The op id is stable per
 // conversation×channel, so enqueueing on every pass dedups.
 func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ctrl.Result, error) {
-	// Grace 0: the run, if any, was abandoned at the close and nobody is
-	// waiting for its output, so a graceful shutdown would only hold the slot.
-	pod := &corev1.Pod{}
-	pod.Namespace, pod.Name = conv.Namespace, runtimepod.PodName(conv.Name)
-	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, err
-	}
-	cm := &corev1.ConfigMap{}
-	cm.Namespace, cm.Name = conv.Namespace, convMCPConfigMapName(conv.Name)
-	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.releaseWorkload(ctx, conv); err != nil {
 		return ctrl.Result{}, err
 	}
 	if conv.Status.Inflight != nil || conv.Status.RuntimePod != "" {
@@ -715,6 +706,29 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *agen
 		}
 	}
 	return r.autoDelete(ctx, conv)
+}
+
+// releaseWorkload deletes a conversation's runtime pod and MCP ConfigMap,
+// explicitly, on close and on delete (state-store design D-7). The owner
+// reference SetControllerReference puts on both stays as a second net, but
+// it only works while the owner is a Kubernetes object — and envtest runs no
+// garbage collector — so the release must not depend on it.
+//
+// Grace 0: the run, if any, was abandoned and nobody is waiting for its
+// output, so a graceful shutdown would only hold the capacity slot longer.
+// Absence is not an error: both are routinely already gone.
+func (r *ConversationReconciler) releaseWorkload(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+	pod := &corev1.Pod{}
+	pod.Namespace, pod.Name = conv.Namespace, runtimepod.PodName(conv.Name)
+	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	cm := &corev1.ConfigMap{}
+	cm.Namespace, cm.Name = conv.Namespace, convMCPConfigMapName(conv.Name)
+	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // autoDelete reclaims a conversation that has been CLOSED for longer than the
@@ -768,11 +782,7 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *agento
 	// Free the slot now rather than at the end of the grace: /close on a
 	// working conversation abandons the run, and a pod nobody is waiting on
 	// must not hold capacity for two more minutes.
-	pod := &corev1.Pod{}
-	pod.Namespace, pod.Name = conv.Namespace, runtimepod.PodName(conv.Name)
-	// Grace 0: the run is abandoned and nobody is waiting for its output, so a
-	// graceful shutdown would only hold the slot longer.
-	if err := r.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.releaseWorkload(ctx, conv); err != nil {
 		return ctrl.Result{}, err
 	}
 

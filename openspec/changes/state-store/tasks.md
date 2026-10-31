@@ -4,6 +4,8 @@
 - [x] 1.2 Define the conflict and not-found error values and the opaque `Revision` type. Verify a unit test distinguishes conflict from any other error with `errors.Is`. Also added `ErrAlreadyExists`, distinct from `ErrConflict`, for `Create` on an existing key — the spec calls this out as its own case.
 - [ ] 1.3 Add the static check: a test in `internal/state/` that walks every manager package and fails on a Kubernetes client call whose argument is a Conversation or a ConversationInput outside `internal/state/kube`. Verify it fails on the current tree (before section 4) and names the package. **Deferred to section 4.** This check is designed to fail until section 4's call-site migration lands. Adding it before any call site has moved would fail `go test ./...` for the whole module. Add it in the same change that does section 4.
 
+- [x] 1.4 ADDED after the section 4 read (design D-11, D-12): record identity (`ID`, `CreatedAt`), `Finalizers`, `DeletionRequestedAt`, `NameBase`, the carried-through `InputItem.Agent`, `ErrDeleting`, the deletion lifecycle on `Delete`/`Update`, `UpdateRun` with `RunUpdate`, the indexes `ByCausedBy`, `ByNameBase`, `ByAll`, and the rule that every instant is UTC. Verify `go vet ./internal/state/...` passes, the package still imports nothing from `k8s.io/` or `sigs.k8s.io/`, and the in-memory double passes the extended suite.
+
 ## 2. The `kube` backend — backend-developer
 
 - [x] 2.1 Implement `internal/state/kube` mapping records to the existing `v1alpha1` types, byte-for-byte: `Get` via the apiserver, `Update` via the status subresource with `resourceVersion` as the revision, `Create`, `Delete`. Verify an envtest round-trips a conversation and the stored object's spec and status equal a fixture written by today's code path.
@@ -13,11 +15,17 @@
 - [x] 2.5 Implement blobs as `ConversationInput` objects. Verify envtest puts, gets and deletes a payload and a deleted key reads absent.
 - [x] 2.6 Implement `expiresAt` as a stored field with the backend's own sweep. Verify envtest: a record past its expiry is omitted by `Get` and by every `List`, and a delete event follows on `Watch`. Stored as an annotation, not a CRD field, since there is no CRD schema change in this change. `Store.Run` starts the sweep. It is not auto-started by `NewStore`, since section 4 — the only thing that would call it in production — hasn't landed yet.
 
+- [x] 2.7 ADDED: map identity, finalizers, the deletion marker, `NameBase` and `Agent`, and the two lookup labels, with `Update` writing onto the stored object so metadata the record does not model survives, and writing status first when it releases the last finalizer of a marked record. Verify envtest: identity is the object's UID and creation time, finalizers round trip and a released marked record is gone, a foreign label and annotation survive an `Update`, and the labels follow `CausedBy`.
+- [x] 2.8 ADDED: `UpdateRun` as a read-apply-CAS loop on `status.runs[]`. Verify envtest: an update the run already holds writes nothing (the resourceVersion is unchanged).
+- [x] 2.9 ADDED: serve `ByCausedBy`, `ByNameBase` and `ByAll`, and return every instant in UTC. Verify `TestInstantsReadBackInUTCUnderANonUTCLocalZone` and the whole `internal/state/...` run pass under `TZ=Europe/Helsinki` and `TZ=UTC` — three round-trip tests had failed under any other zone, because the client decodes a `metav1.Time` into the local zone and the mapping copied it through.
+
 ## 3. The conformance suite and bench — testing-specialist
 
 - [x] 3.1 Create `internal/state/conformance` with `Run(t, newStore)`: one scenario per requirement of `specs/state-store/spec.md` — CAS race, stale write refused, every declared index, feed order, feed resume with no gap, stale snapshot caught by CAS, expiry invisible then deleted, runs in order, concurrent appends with no conflict, blob lifecycle, scope isolation, two-write tolerance. Verify every scenario names the spec requirement it covers in its test name.
 - [x] 3.2 Add `Bench(b, newStore)` reporting bytes written per run, allocations per write and resident records after a listing. Verify `go test -bench . -benchmem ./internal/state/...` prints all three for the `kube` backend.
 - [x] 3.3 Wire the `kube` backend into the suite under envtest. Verify `go test ./internal/state/...` runs every scenario green with `KUBEBUILDER_ASSETS` set. Wiring this up surfaced the 2.3 finding above. The suite's feed scenarios were adjusted to look for a write's expected final state among what a backend actually produces, rather than assuming the very first notification already is it, which is what let the real finding surface instead of being masked.
+
+- [x] 3.4 ADDED: one scenario per added requirement — identity, the deletion lifecycle (five scenarios), run growth (three), the three indexes, UTC instants — in `conformance/lifecycle.go`, each named for its spec scenario, and the in-memory double extended to match. Verify `go test ./internal/state/...` passes with `KUBEBUILDER_ASSETS` set.
 
 ## 4. The manager on the store — backend-developer
 

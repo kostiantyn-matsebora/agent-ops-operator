@@ -67,6 +67,12 @@ func matchesIndex(conv *agentopsv1alpha1.Conversation, index state.Index, key st
 			conv.Status.Phase == agentopsv1alpha1.ConversationPhase(key.Phase)
 	case state.ByPhase:
 		return conv.Status.Phase == agentopsv1alpha1.ConversationPhase(key.Phase)
+	case state.ByCausedBy:
+		return conv.Spec.CausedBy != nil && conv.Spec.CausedBy.Parent == key.CausedBy
+	case state.ByNameBase:
+		return conv.Labels[agentopsv1alpha1.LabelNameBase] == key.NameBase
+	case state.ByAll:
+		return true
 	default:
 		return false
 	}

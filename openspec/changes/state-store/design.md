@@ -75,6 +75,36 @@ contract's provenance and lives in the spec's requirements:
 | stores a payload once, reads it once | blobs by key |
 | one install per namespace | scope fixed at construction |
 | writes two records with no atomicity today | no transactions |
+| holds a conversation with a finalizer while it archives threads, and reads when it was asked to go | finalizers set, deletion-requested marker, delete that completes on release (D-11) |
+| derives a topic op id and a workload owner link from the object's identity | opaque record ID, new on recreate (D-11) |
+| orders admission and the idle clock by creation time | backend-minted `CreatedAt` (D-11) |
+| marks a delivered channel, a tracked run and a routed member result on an existing run | one grow-only run update (D-12) |
+| lists a parent's members, a word-chain's names, and every conversation | three more declared indexes: by parent, by word-chain, whole set |
+| reads a deprecated per-input agent override for one release | `InputItem.Agent` carried through, removed with the dual-read |
+
+Provenance of the additions, counted by type-checking every Kubernetes
+client call in the manager's non-test packages that takes a Conversation,
+a ConversationInput or their lists (before section 4 moves any):
+
+| Kind | Call sites |
+|---|---|
+| `Get` of a conversation | 30 |
+| status write (`Status().Patch`) | 34, of which 4 only grow a run (D-12) |
+| spec or metadata `Patch` | 6 (finalizer add and remove, queue prune, input append) |
+| `Create` of a conversation | 1, behind `AllocateName`, reached from 3 callers |
+| `Delete` of a conversation | 3 |
+| `List` of conversations | 17: 4 by parent, 2 by `initiationId`, 1 by word-chain, 10 whole set (one across namespaces) |
+| `Get`, `Create`, `Delete` of a ConversationInput | 3, 1, 1 |
+
+Reads of object metadata the first contract could not express: the deletion
+timestamp 5, the creation timestamp 4, the UID 1, finalizers 3. The
+deprecated input agent override is read once. Nothing reads annotations,
+generation or owner references of a conversation. The two labels the manager
+writes are lookup keys and map from fields the record has.
+
+Two declared indexes, by pipeline and phase and by phase, have no call site
+in the manager today: its lookups filter the whole set. They stay declared,
+and the section 4 migration decides whether a call site adopts them.
 
 Credentials, TLS, DSNs, bucket names, schema migrations, retention and
 compaction are a backend's own and live in its bundle. They never appear in
@@ -181,6 +211,56 @@ listing, so the NATS decision is made from measurements.
 A static check in the manager's test suite fails on any package outside
 `internal/state/` that references the Conversation or ConversationInput
 types through a Kubernetes client call.
+
+### D-11: Identity and deletion are part of the record
+
+Migrating the reconciler found what the first contract could not say.
+
+A record carries `ID` (opaque, backend-minted, stable for life, new on
+recreate), `CreatedAt`, `Finalizers` and `DeletionRequestedAt`. The first
+two and the marker are read-only: a write's copies are ignored, so a caller
+can neither forge an identity nor un-mark a deletion.
+
+`Delete` is a request. A record holding no finalizer goes at once. A held
+record stays readable, marked, and the feed carries it as a change. The
+`Update` that empties its finalizers removes it, and the feed carries a
+delete. The alternative, a delete that always removes and a separate
+"closing" phase, was rejected: the reconciler archives threads before the
+record may go, and that hold must survive a manager restart and a leader
+change, which only state on the record does.
+
+On a marked record a finalizer cannot be added: `ErrDeleting`. Create under a
+held key is `ErrAlreadyExists`. Under `kube` the marker and the finalizers are
+the apiserver's own, so the mapping adds nothing. The last-release `Update`
+writes status first, since the main write that drops the last finalizer
+deletes the object.
+
+`Update` now reads the stored object, checks its revision against the
+caller's, and writes onto it, so a label or annotation the record does not
+model survives, where before it was dropped.
+
+Every instant the contract returns is UTC. The `kube` mapping copied a
+`metav1.Time` through, and the client decodes those into the process's local
+zone, so three round-trip tests failed under any zone but UTC.
+
+### D-12: A run mutates only by growing
+
+The reconciler and two handlers edit an existing run: mark it tracked, add a
+delivered channel, mark it routed to a parent. `UpdateRun(key, runID,
+RunUpdate)` takes exactly those three effects. Each only grows the run, so
+the operation takes no revision, never conflicts, is idempotent and commutes
+with `AppendRun` and with itself, the same story as D-5. Under `kube` it is a
+read-apply-CAS loop on `status.runs[]`, and writes nothing when the run
+already holds the effect.
+
+A caller that clears the undelivered-reply marker on a thread in the same
+write as marking the channel delivered now makes two writes: the run update,
+then the record update. A crash between them leaves the marker set on a run already recorded
+delivered. Section 4 owns showing the delivery pass tolerates that, per the
+atomicity requirement.
+
+An arbitrary run edit was rejected: a run is history, and an operation able
+to rewrite it would need a revision and a merge story.
 
 ## Risks / Trade-offs
 

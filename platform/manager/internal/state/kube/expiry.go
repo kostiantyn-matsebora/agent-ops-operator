@@ -39,6 +39,7 @@ func expiresAtFromAnnotations(annotations map[string]string) *time.Time {
 		// panicking on data this process did not itself produce.
 		return nil
 	}
+	t = t.UTC()
 	return &t
 }
 

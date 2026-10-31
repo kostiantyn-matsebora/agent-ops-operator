@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -60,4 +61,62 @@ func (s *Store) ListRuns(ctx context.Context, key state.Key) ([]state.Run, error
 		out[i] = toRun(rs)
 	}
 	return out, nil
+}
+
+// UpdateRun applies upd to the run named runID (store.go's Store.UpdateRun),
+// a read-apply-CAS loop on status.runs[] like AppendRun's. Every RunUpdate
+// field only grows, so a retry after a lost race re-applies it to the
+// fresh object and is always correct; an update the run already satisfies
+// writes nothing.
+func (s *Store) UpdateRun(ctx context.Context, key state.Key, runID string, upd state.RunUpdate) error {
+	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
+		conv := &agentopsv1alpha1.Conversation{}
+		if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
+			if apierrors.IsNotFound(err) {
+				return state.ErrNotFound
+			}
+			return fmt.Errorf("kube: get conversation %q to update run: %w", key, err)
+		}
+		run := runByID(conv.Status.Runs, runID)
+		if run == nil {
+			return state.ErrNotFound
+		}
+		if !applyRunUpdate(run, upd) {
+			return nil
+		}
+		if err := s.client.Status().Update(ctx, conv); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			return fmt.Errorf("kube: update run %q of conversation %q: %w", runID, key, err)
+		}
+		return nil
+	}
+	return state.ErrConflict
+}
+
+func runByID(runs []agentopsv1alpha1.RunStatus, runID string) *agentopsv1alpha1.RunStatus {
+	for i := range runs {
+		if runs[i].RunID == runID {
+			return &runs[i]
+		}
+	}
+	return nil
+}
+
+// applyRunUpdate grows run by upd and reports whether anything changed.
+func applyRunUpdate(run *agentopsv1alpha1.RunStatus, upd state.RunUpdate) bool {
+	changed := false
+	if upd.MarkDeliveryTracked && !run.DeliveryTracked {
+		run.DeliveryTracked, changed = true, true
+	}
+	if upd.MarkRoutedToParent && !run.RoutedToParent {
+		run.RoutedToParent, changed = true, true
+	}
+	for _, ch := range upd.MarkDelivered {
+		if !slices.Contains(run.Delivered, ch) {
+			run.Delivered, changed = append(run.Delivered, ch), true
+		}
+	}
+	return changed
 }

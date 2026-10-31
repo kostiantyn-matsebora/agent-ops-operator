@@ -55,7 +55,9 @@ A create SHALL be refused when the key already exists.
 ### Requirement: Lookup is by key or by a declared index
 The contract SHALL offer lookup by key and listing by a declared, closed set
 of indexes: a conversation by `initiationId`, by `pipelineRef` and phase,
-and by phase. Every backend SHALL serve every declared index.
+by phase, by the parent that invoked it (its direct members), by the
+word-chain its name was allocated from, and the whole set. Every backend
+SHALL serve every declared index.
 
 The contract SHALL NOT accept a free-form selector. Adding an index SHALL be
 a contract change with a conformance scenario, never a per-backend feature.
@@ -64,6 +66,22 @@ a contract change with a conformance scenario, never a per-backend feature.
 - **WHEN** a signal arrives whose `initiationId` matches a conversation that
   is not Closed
 - **THEN** the index returns that conversation and no other
+
+#### Scenario: Members are found by their parent
+- **WHEN** a conversation invoked two members and one of those members
+  invoked a third
+- **THEN** the parent index returns the two direct members and not the third
+
+#### Scenario: A word-chain lists every name allocated from it
+- **WHEN** records were created under one word-chain, with and without a
+  numeric suffix, and others under a different one
+- **THEN** the word-chain index returns exactly the records of that chain
+
+#### Scenario: The whole set can be listed
+- **WHEN** the admission gate, the status view or the signal router needs
+  every conversation
+- **THEN** the whole-set index returns every record that has not expired,
+  and no filter is applied
 
 #### Scenario: A query outside the index set is not expressible
 - **WHEN** a caller needs a lookup the index set does not declare
@@ -117,6 +135,10 @@ eventually remove it. How the removal happens is the backend's own.
 A conversation's runs SHALL be appended, never rewritten, and SHALL list in
 the order they were appended.
 
+The one change an existing run accepts is growth: its delivery-tracked flag
+and its routed-to-parent flag going from false to true, and channels being
+added to its delivered set. No field is cleared, removed or overwritten.
+
 An append SHALL take no revision from the caller and SHALL NOT fail with a
 conflict. Whether an append also moves the control record's revision is the
 backend's layout, and a caller's later control-record write tolerates it the
@@ -130,6 +152,33 @@ way it tolerates any conflict.
 #### Scenario: Runs read back in order
 - **WHEN** runs 1 to N were appended
 - **THEN** listing returns them in that order, every one of them
+
+### Requirement: An existing run accepts only growth
+The contract SHALL offer one operation on an existing run, keyed by the
+conversation and the run's id: set its delivery-tracked flag, set its
+routed-to-parent flag, and add channels to its delivered set. Each effect
+only grows the run, so the operation SHALL take no revision from the caller,
+SHALL NOT fail with a conflict, SHALL be idempotent, and SHALL commute with
+itself and with an append.
+
+The operation SHALL fail as not-found when the conversation or the run does
+not exist, so a caller whose run aged out of the bounded history can tell it
+from success.
+
+#### Scenario: An update applies once and again changes nothing
+- **WHEN** the same update is applied twice to one run, then another update
+  adds a channel already present and a new one
+- **THEN** the flags are set, the delivered set holds each channel once in
+  first-appearance order, and no other run changed
+
+#### Scenario: Concurrent updates and an append all land
+- **WHEN** several updates and an append reach one conversation at the same
+  moment, none holding a revision
+- **THEN** every one succeeds and the listing holds every effect
+
+#### Scenario: A run that is not there is not-found
+- **WHEN** an update names a run or a conversation that does not exist
+- **THEN** it fails as not-found and changes nothing
 
 ### Requirement: Input payloads are blobs by key
 An input's payload SHALL be stored once under its own key, read by that key,
@@ -150,6 +199,72 @@ argument.
 - **WHEN** two installs share one backend
 - **THEN** a key written by one is absent from the other's lookups, listings
   and feed
+
+### Requirement: A record carries a backend-minted identity
+A stored record SHALL carry an opaque identity and the instant it was first
+stored, both minted by the backend. The identity SHALL stay the same for the
+record's whole life and SHALL differ between two records created one after
+the other under the same key. Neither SHALL be settable by a caller: a write
+carrying them SHALL have them ignored.
+
+#### Scenario: Identity is stable across updates and new after a recreate
+- **WHEN** a record is read, updated, deleted and created again under its key
+- **THEN** its identity and creation instant are unchanged by the update, and
+  the recreated record has a different identity
+
+#### Scenario: A caller cannot choose the identity
+- **WHEN** a create or an update carries an identity, a creation instant or a
+  deletion marker
+- **THEN** the record read back carries the backend's own values
+
+### Requirement: Deletion is requested, then completed by releasing finalizers
+A record SHALL carry a set of finalizers, written by the manager through an
+ordinary update. A delete of a record holding none SHALL remove it at once.
+A delete of a record holding any SHALL NOT remove it: the record SHALL stay
+readable by lookup, by listing and on the feed, carrying a deletion-requested
+instant, until an update leaves its finalizer set empty, which SHALL remove
+it. A repeated delete SHALL keep the first instant. On a record marked for
+deletion an update SHALL NOT add a finalizer, and SHALL be refused with a
+distinguishable deleting error.
+
+Marking SHALL appear on the feed as a change to the record. Removal SHALL
+appear as a delete event.
+
+A create under the key of a record still held SHALL be refused as already
+existing.
+
+#### Scenario: A record with no finalizer is removed at once
+- **WHEN** a record holding no finalizer is deleted
+- **THEN** a lookup finds nothing, the feed carries a delete event, and
+  deleting the absent key again is not an error
+
+#### Scenario: A held record stays visible with the marker
+- **WHEN** a record holding a finalizer is deleted, and deleted again later
+- **THEN** it is still returned by lookup and listing carrying the instant
+  of the first delete, and the feed carried a change to it carrying the marker
+
+#### Scenario: Releasing the last finalizer removes the record
+- **WHEN** a marked record holding two finalizers has one released, then the
+  other, the second update also changing its phase
+- **THEN** the first update leaves the record readable and marked, the second
+  succeeds, the record is gone, and the feed carries a delete event
+
+#### Scenario: A finalizer cannot be added to a marked record
+- **WHEN** an update adds a finalizer to a record marked for deletion
+- **THEN** it is refused as deleting and changes nothing
+
+#### Scenario: A key still held cannot be created again
+- **WHEN** a create names the key of a marked record
+- **THEN** it is refused as already existing
+
+### Requirement: Instants are UTC
+Every instant the contract returns SHALL be in UTC, whatever location the
+backend decoded it in or the caller wrote it in. The same instant SHALL
+compare equal.
+
+#### Scenario: Instants read back in UTC whatever was written
+- **WHEN** a record and a run are written with instants in another zone
+- **THEN** every instant read back is in UTC and equals the instant written
 
 ### Requirement: The contract offers no multi-record atomicity
 The contract SHALL NOT offer a transaction across records. Every manager path
@@ -185,6 +300,12 @@ the store existed: same schema, same field names, same status subresource.
 
 An object written through it SHALL be indistinguishable from one written
 before. `kubectl` SHALL read and list them unchanged.
+
+The record's finalizers map to the object's finalizers, its deletion marker to
+the object's deletion timestamp, its identity to the object's UID, and the
+parent and word-chain lookups to the two labels the manager always wrote.
+Metadata the record does not model, whoever set it, SHALL survive a write
+through the store.
 
 It SHALL be the default backend and SHALL render no bundle.
 

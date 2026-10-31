@@ -120,6 +120,8 @@ func Run(t *testing.T, newStore func() state.Store) {
 			testNoMultiRecordAtomicity(t, newStore())
 		})
 	})
+
+	runLifecycleScenarios(t, newStore)
 }
 
 // mustRecvEvent reads the next event off events, failing the test if none
@@ -341,7 +343,9 @@ func testEveryDeclaredIndex(t *testing.T, store state.Store) {
 		}
 	}
 
-	wantIndexes := []state.Index{state.ByConversationID, state.ByPipelineAndPhase, state.ByPhase}
+	// The three added for the manager's own lookups (ByCausedBy, ByNameBase,
+	// ByAll) have their scenarios in lifecycle.go.
+	wantIndexes := []state.Index{state.ByConversationID, state.ByPipelineAndPhase, state.ByPhase, state.ByCausedBy, state.ByNameBase, state.ByAll}
 	if len(state.DeclaredIndexes) != len(wantIndexes) {
 		t.Fatalf("state.DeclaredIndexes = %v, this suite covers only %v — add a scenario for the new index before shipping it", state.DeclaredIndexes, wantIndexes)
 	}
