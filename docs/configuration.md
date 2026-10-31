@@ -600,12 +600,12 @@ names what is not covered.
 
 ### State store
 
-Where the manager keeps conversation state. **You need do nothing.** The default
+Where the manager keeps conversation state, `Signal`s and each source's suppression window (the ingest cooldown). **You need do nothing.** The default
 is the Kubernetes API, as before.
 
 | Key | Default | Consequence |
 |---|---|---|
-| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps the `Conversation` and `ConversationInput` custom resources, byte-identical, so `kubectl get conv` is unchanged |
+| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps the `Conversation`, `ConversationInput` and `Signal` custom resources, `Signal` custom resources and the window in `SignalSource.status.cooldown[]`, byte-identical, so `kubectl get conv` and `kubectl get sig` are unchanged |
 
 **Exactly one backend is selected.** The render refuses anything else:
 

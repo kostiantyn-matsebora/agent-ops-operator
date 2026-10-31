@@ -416,8 +416,12 @@ per-source cap on non-terminal `Signal`s, `MAX_SIGNALS_PER_SOURCE` (chart
 `maxSignalsPerSource`, default `200`), evicts the OLDEST: `Dropped` (reason
 `overflow`) before fan-out, its non-terminal claimants `Failed` after.
 
-**Finished `Signal`s are deleted on a per-phase TTL**, measured from
-`status.completedAt`:
+**Finished `Signal`s expire on a per-phase TTL**, measured from
+`status.completedAt`. The write that makes a phase terminal also stamps the
+expiry on the record, and the manager's store sweep removes the `Signal` once
+it has passed, so no timer or requeue is held in memory. Under `kube` the
+expiry is an annotation on the `Signal`, and an expired `Signal` already reads
+as absent before the sweep deletes it:
 
 | Phase | Chart value | Default |
 |---|---|---|
@@ -428,8 +432,11 @@ per-source cap on non-terminal `Signal`s, `MAX_SIGNALS_PER_SOURCE` (chart
 `Failed` outlives the rest because "nobody got it" is the record an operator
 investigates.
 
-**Owned by its `SignalSource`.** Deleting the source garbage-collects every
-`Signal` it owns, from any phase. The manager holds full CRUD on the kind
+**Released with its `SignalSource`.** Deleting the source makes the manager
+release it: every `Signal` of that source, from any phase, and the source's
+suppression window, are removed through the state store. This replaces the
+owner-reference cascade the `Signal` carried before, so it holds under any
+backend. The manager holds full CRUD on the kind
 and every other component, the console included, at most `get`, `list` and
 `watch`.
 
@@ -1880,11 +1887,13 @@ payload is not copied into the conversation object.
 **Every piece of live state has one declared home**, chosen by what the state is:
 
 - **The Kubernetes API, or the state store** — configuration lives on the
-  Kubernetes API. Conversation state lives in the **state store**, the one seam
-  the manager reaches it through. The chart selects a backend with
+  Kubernetes API. Conversation state, every accepted `Signal` and each source's
+  suppression window live in the **state store**, the one seam the manager
+  reaches them through. The chart selects a backend with
   `stateStore.backend` (see [configuration](configuration.md#state-store)), and the
-  only backend shipped is `kube`, which keeps today's `Conversation` and
-  `ConversationInput` custom resources. Under `kube` the two homes are the same
+  only backend shipped is `kube`, which keeps today's `Conversation`,
+  `ConversationInput` and `Signal` custom resources, and the window in
+  `SignalSource.status.cooldown[]`. Under `kube` the two homes are the same
   API. Conversation state is: (session id,
   threads, inputs, runs, phase, and the message record — what people sent as
   well as what the agent answered), adapter cursors, delivery markers and
@@ -1916,8 +1925,8 @@ a second source of truth beside the CRs.
 |---|---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
 | Manager — op queue | outbound channel ops | derived from CR state | `kube`: the Kubernetes API's own guarantee | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | none: not state-store state | nothing inside the window |
-| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | `Signal` CRs, Kubernetes-API state surviving every restart and leader change | none: not state-store state | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
+| Manager — ingest cooldown | `initiationId` suppression | the state store (map is a cache) | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee | nothing inside the window |
+| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | the state store, surviving every restart and leader change | `kube`: `Signal` CRs, the Kubernetes API's own guarantee | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | `kube`: the Kubernetes API's own guarantee | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | none: not state-store state | recent history. Clients are told to resync rather than handed silence |
 | Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | none: not state-store state | with `persistence.context.enabled` off, conversational context. With it on, nothing |
@@ -1925,8 +1934,10 @@ a second source of truth beside the CRs.
 | Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | none: not state-store state | nothing authoritative. Acks and notices only |
 | Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | none: not state-store state | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
 
-**The backend column names what a row's guarantee rests on.** Only conversation
-state goes through the store.
+**The backend column names what a row's guarantee rests on.** Conversation
+state, `Signal`s and the suppression window go through the store. A source's
+`receivedTotal` and `lastReceived` counters stay a status write on the source:
+they are reported, never read by a routing decision.
 
 - **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
   allows. A write is acknowledged once the API server has it.

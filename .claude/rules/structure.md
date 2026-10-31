@@ -45,7 +45,7 @@ Own Go module, the only one with dependencies.
 | `internal/chat/` | Provider/Registry, OpQueue (`ensure-topic`\|`send`\|`close-topic`\|`delete-conversation`), Router |
 | `internal/dispatch/` | input → work-unit, `templates/format.md` is the mandatory output format |
 | `internal/mcpcompile/` | bound MCPConfigs → `mcp.json`. Raw hand-written `mcp.json` is EXCLUSIVE |
-| `internal/state/` | the state store contract (domain records, `Store` interface), `kube/` the one shipped backend, `conformance/` the suite every backend passes to exist (and the bench). The manager reaches conversation state through it, not through the Kubernetes client |
+| `internal/state/` | the state store contract (domain records, `Store` for conversations and `SignalStore` for signals plus the cooldown window), `kube/` the one shipped backend, `conformance/` the suite every backend passes to exist (and the bench). The manager reaches conversation and signal state through it, not through the Kubernetes client |
 | `internal/integration/` | envtest suite, real API server, no kubelet |
 | `config/samples/` | example CRs only |
 
