@@ -798,46 +798,7 @@ const channelMsgPrefix = "channel "
 // the TopicReady condition.
 func recordThread(rec *state.ConversationRecord, op *Op, res OpResult, cond state.Condition) {
 	if cond.Status == state.ConditionTrue {
-		if binding := rec.Thread(op.Channel); binding == nil || binding.ThreadID == "" {
-			// Brand new thread — including a binding that so far carries only a
-			// durable-chat-ops-broker claim, never a real thread id. Treated exactly
-			// as "no binding at all": a claim-only placeholder is bookkeeping about
-			// dispatch, not a prior thread.
-			var readers []state.ReaderMark
-			// The person who STARTED this conversation has seen it — they typed it.
-			// Stamping their own watermark here, at the one moment their thread
-			// comes into existence, is what stops a conversation being presented
-			// back to its author as unread before any answer could exist. Their key
-			// only; everyone else's view is untouched, which is what makes this
-			// safe to do at all.
-			if o := rec.OriginReader; o != nil && o.Key != "" && o.Channel == op.Channel {
-				// Opaque RFC3339Nano string, never a time — see
-				// ThreadBinding.ReadAt's comment.
-				now := time.Now().UTC().Format(time.RFC3339Nano)
-				readers = []state.ReaderMark{{Key: o.Key, ReadAt: &now}}
-			}
-			if binding == nil {
-				// ReadTracked for EVERY channel, whether or not its adapter reports
-				// reads: the backfill rule has to stay one rule, or "no readAt" would
-				// mean "pre-upgrade" on some channels and "never seen" on others.
-				rec.Threads = append(rec.Threads, state.ThreadBinding{
-					Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true, Readers: readers,
-				})
-			} else {
-				binding.ThreadID = res.ThreadID
-				binding.ReadTracked = true
-				binding.Readers = readers
-				binding.Claim = nil
-			}
-		} else {
-			// A REOPEN re-establishing an archived thread. Whatever came back is
-			// the thread now: an adapter that honoured the hint returns the same id
-			// and the conversation continues where it left off, one that could not
-			// returns a fresh one. Both are recorded the same way, because both are
-			// the truth about that transport.
-			binding.ThreadID = res.ThreadID
-			binding.Claim = nil
-		}
+		bindThread(rec, op, res)
 	}
 	// The op completed one way or the other, so it is no longer in flight —
 	// clear a claim here too on the FAILURE paths, or a claim that is still
@@ -857,6 +818,56 @@ func recordThread(rec *state.ConversationRecord, op *Op, res OpResult, cond stat
 		rec.ThreadsArchived = kept
 	}
 	rec.SetCondition(cond)
+}
+
+// bindThread records the thread a successful ensure-topic created or
+// re-established.
+func bindThread(rec *state.ConversationRecord, op *Op, res OpResult) {
+	binding := rec.Thread(op.Channel)
+	if binding != nil && binding.ThreadID != "" {
+		// A REOPEN re-establishing an archived thread. Whatever came back is
+		// the thread now: an adapter that honoured the hint returns the same id
+		// and the conversation continues where it left off, one that could not
+		// returns a fresh one. Both are recorded the same way, because both are
+		// the truth about that transport.
+		binding.ThreadID = res.ThreadID
+		binding.Claim = nil
+		return
+	}
+	// Brand new thread — including a binding that so far carries only a
+	// durable-chat-ops-broker claim, never a real thread id. Treated exactly
+	// as "no binding at all": a claim-only placeholder is bookkeeping about
+	// dispatch, not a prior thread.
+	readers := originReaders(rec, op.Channel)
+	if binding == nil {
+		// ReadTracked for EVERY channel, whether or not its adapter reports
+		// reads: the backfill rule has to stay one rule, or "no readAt" would
+		// mean "pre-upgrade" on some channels and "never seen" on others.
+		rec.Threads = append(rec.Threads, state.ThreadBinding{
+			Channel: op.Channel, ThreadID: res.ThreadID, ReadTracked: true, Readers: readers,
+		})
+		return
+	}
+	binding.ThreadID = res.ThreadID
+	binding.ReadTracked = true
+	binding.Readers = readers
+	binding.Claim = nil
+}
+
+// originReaders is the new thread's reader marks. The person who STARTED this
+// conversation has seen it — they typed it. Stamping their own watermark here,
+// at the one moment their thread comes into existence, is what stops a
+// conversation being presented back to its author as unread before any answer
+// could exist. Their key only, everyone else's view is untouched, which is
+// what makes this safe to do at all.
+func originReaders(rec *state.ConversationRecord, channel string) []state.ReaderMark {
+	o := rec.OriginReader
+	if o == nil || o.Key == "" || o.Channel != channel {
+		return nil
+	}
+	// Opaque RFC3339Nano string, never a time — see ThreadBinding.ReadAt's comment.
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return []state.ReaderMark{{Key: o.Key, ReadAt: &now}}
 }
 
 // Pending reports whether an op is queued or claimed (used by tests).

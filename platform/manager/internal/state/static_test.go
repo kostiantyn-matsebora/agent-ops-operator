@@ -200,22 +200,37 @@ func guardedKindNames(files []checkedFile) (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", f.rel, err)
 		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			spec, ok := n.(*ast.ValueSpec)
-			if !ok || len(spec.Names) != len(spec.Values) {
-				return true
-			}
-			for i, v := range spec.Values {
-				if lit, isLit := v.(*ast.BasicLit); isLit && lit.Kind == token.STRING {
-					if kind, err := strconv.Unquote(lit.Value); err == nil && guardedTypes[kind] {
-						names[spec.Names[i].Name] = kind
-					}
-				}
-			}
-			return true
-		})
+		collectGuardedKinds(file, names)
 	}
 	return names, nil
+}
+
+// collectGuardedKinds records each value spec in file that binds a guarded kind
+// to a name.
+func collectGuardedKinds(file *ast.File, names map[string]string) {
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != len(spec.Values) {
+			return true
+		}
+		for i, v := range spec.Values {
+			if kind, isKind := guardedKindLiteral(v); isKind {
+				names[spec.Names[i].Name] = kind
+			}
+		}
+		return true
+	})
+}
+
+// guardedKindLiteral returns the kind a string literal names, when it is one of
+// the guarded kinds.
+func guardedKindLiteral(e ast.Expr) (string, bool) {
+	lit, ok := e.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	kind, err := strconv.Unquote(lit.Value)
+	return kind, err == nil && guardedTypes[kind]
 }
 
 // allowedDir names the places a guarded type may appear: the backend, the API
@@ -244,38 +259,49 @@ func violationsIn(path, rel string, kindNames map[string]string) ([]violation, e
 	if len(aliases) == 0 && len(statusAliases) == 0 && !mentionsStatusCooldown(file) {
 		return out, nil
 	}
-	var calls []string // the stack of enclosing call names
-	var visit func(n ast.Node) bool
-	visit = func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.CallExpr:
-			calls = append(calls, callName(x))
-			for _, child := range append([]ast.Expr{x.Fun}, x.Args...) {
-				ast.Inspect(child, visit)
-			}
-			calls = calls[:len(calls)-1]
-			return false
-		case *ast.SelectorExpr:
-			id, ok := x.X.(*ast.Ident)
-			if ok && aliases[id.Name] && guardedTypes[x.Sel.Name] {
-				call := ""
-				if len(calls) > 0 {
-					call = calls[len(calls)-1]
-				}
-				out = append(out, violation{
-					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: x.Sel.Name, call: call,
-				})
-			}
-			if guardedStatusFields[x.Sel.Name] && selectsStatus(x.X, statusAliases) {
-				out = append(out, violation{
-					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: "SignalSource Status." + x.Sel.Name,
-				})
-			}
+	w := &selectorWalk{fset: fset, pkg: pkg, rel: rel, aliases: aliases, statusAliases: statusAliases, out: out}
+	ast.Inspect(file, w.visit)
+	return w.out, nil
+}
+
+// selectorWalk finds the selector doors to a guarded type or status field.
+type selectorWalk struct {
+	fset          *token.FileSet
+	pkg, rel      string
+	aliases       map[string]bool
+	statusAliases map[string]bool
+	calls         []string // the stack of enclosing call names
+	out           []violation
+}
+
+func (w *selectorWalk) visit(n ast.Node) bool {
+	switch x := n.(type) {
+	case *ast.CallExpr:
+		w.calls = append(w.calls, callName(x))
+		for _, child := range append([]ast.Expr{x.Fun}, x.Args...) {
+			ast.Inspect(child, w.visit)
 		}
-		return true
+		w.calls = w.calls[:len(w.calls)-1]
+		return false
+	case *ast.SelectorExpr:
+		w.selector(x)
 	}
-	ast.Inspect(file, visit)
-	return out, nil
+	return true
+}
+
+func (w *selectorWalk) selector(x *ast.SelectorExpr) {
+	line := w.fset.Position(x.Pos()).Line
+	id, ok := x.X.(*ast.Ident)
+	if ok && w.aliases[id.Name] && guardedTypes[x.Sel.Name] {
+		call := ""
+		if len(w.calls) > 0 {
+			call = w.calls[len(w.calls)-1]
+		}
+		w.out = append(w.out, violation{pkg: w.pkg, file: w.rel, line: line, typ: x.Sel.Name, call: call})
+	}
+	if guardedStatusFields[x.Sel.Name] && selectsStatus(x.X, w.statusAliases) {
+		w.out = append(w.out, violation{pkg: w.pkg, file: w.rel, line: line, typ: "SignalSource Status." + x.Sel.Name})
+	}
 }
 
 // apiAliases lists the local names a file imports the API package under, and
@@ -323,50 +349,57 @@ func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string,
 	var out []violation
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil {
+		if !ok || fn.Body == nil || (rel == ownerReferenceHelperFile && fn.Name.Name == ownerReferenceHelperFunc) {
 			continue
 		}
-		if rel == ownerReferenceHelperFile && fn.Name.Name == ownerReferenceHelperFunc {
-			continue
-		}
-		var untypedAt token.Pos
-		var kind, unresolved string
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.SelectorExpr:
-				if untypedKinds[x.Sel.Name] && !untypedAt.IsValid() {
-					untypedAt = x.Pos()
-				}
-			case *ast.BasicLit:
-				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && guardedTypes[v] {
-					kind = v
-				}
-			case *ast.Ident:
-				if k, named := kindNames[x.Name]; named {
-					kind = k
-				}
-			case *ast.CallExpr:
-				if param := kindParameter(x, fn); param != "" {
-					unresolved = param
-				}
-			}
-			return true
-		})
-		if unresolved != "" && untypedAt.IsValid() {
+		scan := &bodyScan{fn: fn, kindNames: kindNames}
+		ast.Inspect(fn.Body, scan.visit)
+		if scan.unresolved != "" && scan.untypedAt.IsValid() {
 			out = append(out, violation{
 				pkg: pkg, file: rel, line: fset.Position(fn.Pos()).Line,
-				typ:  "a kind taken from the parameter " + unresolved + " (via an unstructured/PartialObjectMetadata object)",
+				typ:  "a kind taken from the parameter " + scan.unresolved + " (via an unstructured/PartialObjectMetadata object)",
 				call: fn.Name.Name,
 			})
 		}
-		if untypedAt.IsValid() && kind != "" {
+		if scan.untypedAt.IsValid() && scan.kind != "" {
 			out = append(out, violation{
-				pkg: pkg, file: rel, line: fset.Position(untypedAt).Line, typ: kind + " (via an unstructured/PartialObjectMetadata object)",
+				pkg: pkg, file: rel, line: fset.Position(scan.untypedAt).Line, typ: scan.kind + " (via an unstructured/PartialObjectMetadata object)",
 				call: fn.Name.Name,
 			})
 		}
 	}
 	return out
+}
+
+// bodyScan reads one function body for an untyped object and a guarded kind.
+type bodyScan struct {
+	fn         *ast.FuncDecl
+	kindNames  map[string]string
+	untypedAt  token.Pos
+	kind       string
+	unresolved string
+}
+
+func (s *bodyScan) visit(n ast.Node) bool {
+	switch x := n.(type) {
+	case *ast.SelectorExpr:
+		if untypedKinds[x.Sel.Name] && !s.untypedAt.IsValid() {
+			s.untypedAt = x.Pos()
+		}
+	case *ast.BasicLit:
+		if v, ok := guardedKindLiteral(x); ok {
+			s.kind = v
+		}
+	case *ast.Ident:
+		if k, named := s.kindNames[x.Name]; named {
+			s.kind = k
+		}
+	case *ast.CallExpr:
+		if param := kindParameter(x, s.fn); param != "" {
+			s.unresolved = param
+		}
+	}
+	return true
 }
 
 // kindParameter returns the name of a function parameter handed to SetKind or
@@ -400,31 +433,44 @@ func lowercaseCooldownViolations(fset *token.FileSet, file *ast.File, pkg, rel s
 		if !ok || fn.Body == nil {
 			continue
 		}
-		var status, cooldown token.Pos
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			lit, isLit := n.(*ast.BasicLit)
-			if !isLit || lit.Kind != token.STRING {
-				return true
-			}
-			text := strings.ToLower(lit.Value)
-			if (text == `"status"` || strings.Contains(text, `"status"`)) && !status.IsValid() {
-				status = lit.Pos()
-			}
-			for _, wire := range guardedWireNames {
-				if strings.Contains(text, wire) && !cooldown.IsValid() {
-					cooldown = lit.Pos()
-				}
-			}
-			return true
-		})
-		if status.IsValid() && cooldown.IsValid() {
+		var scan wireScan
+		ast.Inspect(fn.Body, scan.visit)
+		if scan.status.IsValid() && scan.cooldown.IsValid() {
 			out = append(out, violation{
-				pkg: pkg, file: rel, line: fset.Position(cooldown).Line,
+				pkg: pkg, file: rel, line: fset.Position(scan.cooldown).Line,
 				typ: "a SignalSource status field the store owns, by its wire path", call: fn.Name.Name,
 			})
 		}
 	}
 	return out
+}
+
+// wireScan records the first "status" and the first guarded wire-name string
+// literal of a function body.
+type wireScan struct{ status, cooldown token.Pos }
+
+func (s *wireScan) visit(n ast.Node) bool {
+	lit, isLit := n.(*ast.BasicLit)
+	if !isLit || lit.Kind != token.STRING {
+		return true
+	}
+	text := strings.ToLower(lit.Value)
+	if strings.Contains(text, `"status"`) && !s.status.IsValid() {
+		s.status = lit.Pos()
+	}
+	if !s.cooldown.IsValid() && namesWireField(text) {
+		s.cooldown = lit.Pos()
+	}
+	return true
+}
+
+func namesWireField(text string) bool {
+	for _, wire := range guardedWireNames {
+		if strings.Contains(text, wire) {
+			return true
+		}
+	}
+	return false
 }
 
 // callName renders a call's function for the report: recv.Method or name.
@@ -463,36 +509,41 @@ func selectsStatus(expr ast.Expr, aliases map[string]bool) bool {
 // guard's job is to stop the plain doors.
 func statusAliasNames(file *ast.File) map[string]bool {
 	names := map[string]bool{}
-	bind := func(lhs ast.Expr, rhs ast.Expr) {
-		id, ok := lhs.(*ast.Ident)
-		if !ok {
-			return
-		}
-		if u, isAddr := rhs.(*ast.UnaryExpr); isAddr && u.Op == token.AND {
-			rhs = u.X
-		}
-		if sel, isSel := rhs.(*ast.SelectorExpr); isSel && sel.Sel.Name == "Status" {
-			names[id.Name] = true
-		}
-	}
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.AssignStmt:
-			if len(x.Lhs) == len(x.Rhs) {
-				for i := range x.Lhs {
-					bind(x.Lhs[i], x.Rhs[i])
-				}
-			}
+			bindStatusAliases(names, x.Lhs, x.Rhs)
 		case *ast.ValueSpec:
-			if len(x.Names) == len(x.Values) {
-				for i := range x.Names {
-					bind(x.Names[i], x.Values[i])
-				}
+			lhs := make([]ast.Expr, len(x.Names))
+			for i, id := range x.Names {
+				lhs[i] = id
 			}
+			bindStatusAliases(names, lhs, x.Values)
 		}
 		return true
 	})
 	return names
+}
+
+// bindStatusAliases records each name on the left bound to a `.Status` value or
+// pointer on the right, pairwise.
+func bindStatusAliases(names map[string]bool, lhs, rhs []ast.Expr) {
+	if len(lhs) != len(rhs) {
+		return
+	}
+	for i := range lhs {
+		id, ok := lhs[i].(*ast.Ident)
+		if !ok {
+			continue
+		}
+		val := rhs[i]
+		if u, isAddr := val.(*ast.UnaryExpr); isAddr && u.Op == token.AND {
+			val = u.X
+		}
+		if sel, isSel := val.(*ast.SelectorExpr); isSel && sel.Sel.Name == "Status" {
+			names[id.Name] = true
+		}
+	}
 }
 
 // mentionsStatusCooldown reports whether a file selects a Status.Cooldown

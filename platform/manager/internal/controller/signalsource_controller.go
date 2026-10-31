@@ -49,7 +49,43 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// the adapter CR is both the readiness source and the schema declarer
 	adapter := r.adapter(ctx, &src)
 
-	// no built-in signal types: every type needs a serving adapter
+	cond := servedCondition(&src, adapter)
+	wired := r.wiredCondition(ctx, &src)
+
+	servedSame := conditionMatches(src.Status.Conditions, cond, false)
+	wiredSame := conditionMatches(src.Status.Conditions, wired, true)
+	// advisory: never affects Served, Wired, or ingestion
+	var configCond *metav1.Condition
+	if adapter != nil {
+		configCond = validateAgainstAdapter(adapter.Spec.ConfigSchema, src.Spec.Config, adapter.Name)
+	}
+
+	if servedSame && wiredSame && configValidUnchanged(src.Status.Conditions, configCond) {
+		return ctrl.Result{}, nil
+	}
+	patch := client.MergeFrom(src.DeepCopy())
+	apimeta.SetStatusCondition(&src.Status.Conditions, cond)
+	apimeta.SetStatusCondition(&src.Status.Conditions, wired)
+	applyConfigValid(&src.Status.Conditions, configCond)
+	return ctrl.Result{}, r.Status().Patch(ctx, &src, patch)
+}
+
+// conditionMatches reports whether the stored condition of want's type already
+// says what want says. Served compares the reason, Wired compares the message.
+func conditionMatches(conds []metav1.Condition, want metav1.Condition, byMessage bool) bool {
+	existing := apimeta.FindStatusCondition(conds, want.Type)
+	if existing == nil || existing.Status != want.Status {
+		return false
+	}
+	if byMessage {
+		return existing.Message == want.Message
+	}
+	return existing.Reason == want.Reason
+}
+
+// servedCondition is the Served condition: no built-in signal types, so every
+// type needs a serving adapter.
+func servedCondition(src *agentopsv1alpha1.SignalSource, adapter *agentopsv1alpha1.SignalAdapter) metav1.Condition {
 	cond := metav1.Condition{Type: ConditionServed, Status: metav1.ConditionFalse, Reason: "NoServingImplementation",
 		Message: fmt.Sprintf("no Ready SignalAdapter named %q (hand-deployed adapters report per-source readiness on the Ready condition)", src.Spec.Adapter)}
 	if adapter != nil && apimeta.IsStatusConditionTrue(adapter.Status.Conditions, ConditionReady) {
@@ -63,7 +99,11 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		cond.Reason = "AdapterReported"
 		cond.Message = "an adapter reported this source Ready through the contract"
 	}
+	return cond
+}
 
+// wiredCondition is the Wired condition.
+func (r *SignalSourceReconciler) wiredCondition(ctx context.Context, src *agentopsv1alpha1.SignalSource) metav1.Condition {
 	// Wired: claimant-only wiring — a source routes signals only while a Ready
 	// Pipeline OR Coordinator lists it (design D-B: a Coordinator claims a
 	// source exactly as a Pipeline does). The message names ALL of them, never
@@ -83,31 +123,7 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		wired.Message = fmt.Sprintf("wired by %d claimant(s): %s — each opens its own conversation per signal",
 			len(names), strings.Join(names, ", "))
 	}
-
-	servedSame := false
-	if existing := apimeta.FindStatusCondition(src.Status.Conditions, ConditionServed); existing != nil &&
-		existing.Status == cond.Status && existing.Reason == cond.Reason {
-		servedSame = true
-	}
-	wiredSame := false
-	if existing := apimeta.FindStatusCondition(src.Status.Conditions, ConditionWired); existing != nil &&
-		existing.Status == wired.Status && existing.Message == wired.Message {
-		wiredSame = true
-	}
-	// advisory: never affects Served, Wired, or ingestion
-	var configCond *metav1.Condition
-	if adapter != nil {
-		configCond = validateAgainstAdapter(adapter.Spec.ConfigSchema, src.Spec.Config, adapter.Name)
-	}
-
-	if servedSame && wiredSame && configValidUnchanged(src.Status.Conditions, configCond) {
-		return ctrl.Result{}, nil
-	}
-	patch := client.MergeFrom(src.DeepCopy())
-	apimeta.SetStatusCondition(&src.Status.Conditions, cond)
-	apimeta.SetStatusCondition(&src.Status.Conditions, wired)
-	applyConfigValid(&src.Status.Conditions, configCond)
-	return ctrl.Result{}, r.Status().Patch(ctx, &src, patch)
+	return wired
 }
 
 // adapter resolves the SignalAdapter the source names in spec.adapter — the

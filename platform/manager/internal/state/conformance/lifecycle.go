@@ -18,6 +18,15 @@ import (
 const (
 	finalizerA = "example.com/hold-a"
 	finalizerB = "example.com/hold-b"
+
+	fmtList   = "List: %v"
+	fmtDelete = "Delete: %v"
+
+	convIdentity  = "conv-identity"
+	convStillHeld = "conv-still-held"
+	chanB         = "chan-b"
+	member1       = "member-1"
+	taskRedFox    = "task-red-fox"
 )
 
 func runLifecycleScenarios(t *testing.T, newStore func() state.Store) {
@@ -92,9 +101,9 @@ func createRecord(t *testing.T, store state.Store, rec state.ConversationRecord)
 
 func testIdentityStableAndRenewed(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	key := state.Key("conv-identity")
+	key := state.Key(convIdentity)
 	before := time.Now().UTC().Add(-time.Minute)
-	rev := createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-identity", Phase: "Pending"})
+	rev := createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: convIdentity, Phase: "Pending"})
 
 	first, rev, err := store.Get(ctx, key)
 	if err != nil {
@@ -123,9 +132,9 @@ func testIdentityStableAndRenewed(t *testing.T, store state.Store) {
 	}
 
 	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
-	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-identity", Phase: "Pending"})
+	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: convIdentity, Phase: "Pending"})
 	third, _, err := store.Get(ctx, key)
 	if err != nil {
 		t.Fatalf(fmtGet, err)
@@ -179,7 +188,7 @@ func testDeleteWithoutFinalizer(t *testing.T, store state.Store) {
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-delete-plain", Phase: "Working"})
 
 	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	if _, _, err := store.Get(ctx, key); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get after Delete error = %v, want ErrNotFound", err)
@@ -203,7 +212,7 @@ func testDeleteHeldRecordMarked(t *testing.T, store state.Store) {
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-delete-held", Phase: "Working", Finalizers: []string{finalizerA}})
 
 	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	got, _, err := store.Get(ctx, key)
 	if err != nil {
@@ -216,7 +225,7 @@ func testDeleteHeldRecordMarked(t *testing.T, store state.Store) {
 
 	listed, err := store.List(ctx, state.ByPhase, state.ListKey{Phase: "Working"})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if len(listed) != 1 || listed[0].DeletionRequestedAt == nil {
 		t.Fatalf("List = %+v, want the held record, marked", listed)
@@ -248,7 +257,7 @@ func testReleaseLastFinalizerRemoves(t *testing.T, store state.Store) {
 	key := state.Key("conv-release")
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-release", Phase: "Working", Finalizers: []string{finalizerA, finalizerB}})
 	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 
 	// One of two finalizers released: the record stays, still marked.
@@ -286,7 +295,7 @@ func testFinalizerAddRefusedWhenDeleting(t *testing.T, store state.Store) {
 	key := state.Key("conv-no-new-hold")
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-no-new-hold", Phase: "Working", Finalizers: []string{finalizerA}})
 	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
 	rec, rev, err := store.Get(ctx, key)
 	if err != nil {
@@ -308,12 +317,12 @@ func testFinalizerAddRefusedWhenDeleting(t *testing.T, store state.Store) {
 
 func testCreateRefusedWhileDeleting(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	key := state.Key("conv-still-held")
-	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-still-held", Finalizers: []string{finalizerA}})
+	key := state.Key(convStillHeld)
+	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: convStillHeld, Finalizers: []string{finalizerA}})
 	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf(fmtDelete, err)
 	}
-	_, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-still-held"})
+	_, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: convStillHeld})
 	if !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("Create over a marked record error = %v, want ErrAlreadyExists", err)
 	}
@@ -352,13 +361,13 @@ func testUpdateRunAppliesIdempotently(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	key := seedRuns(t, store, "conv-run-update", "run-1", "run-2")
 
-	upd := state.RunUpdate{MarkDeliveryTracked: true, MarkDelivered: []string{"chan-a", "chan-b"}, MarkRoutedToParent: true}
+	upd := state.RunUpdate{MarkDeliveryTracked: true, MarkDelivered: []string{"chan-a", chanB}, MarkRoutedToParent: true}
 	for i := 0; i < 2; i++ { // the second application is a no-op, not an error
 		if err := store.UpdateRun(ctx, key, "run-1", upd); err != nil {
 			t.Fatalf("UpdateRun #%d: %v", i+1, err)
 		}
 	}
-	if err := store.UpdateRun(ctx, key, "run-1", state.RunUpdate{MarkDelivered: []string{"chan-b", "chan-c"}}); err != nil {
+	if err := store.UpdateRun(ctx, key, "run-1", state.RunUpdate{MarkDelivered: []string{chanB, "chan-c"}}); err != nil {
 		t.Fatalf("UpdateRun adding to the set: %v", err)
 	}
 
@@ -366,7 +375,7 @@ func testUpdateRunAppliesIdempotently(t *testing.T, store state.Store) {
 	if !got.DeliveryTracked || !got.RoutedToParent {
 		t.Fatalf("flags not set: %+v", got)
 	}
-	if want := []string{"chan-a", "chan-b", "chan-c"}; len(got.Delivered) != 3 || got.Delivered[0] != want[0] || got.Delivered[1] != want[1] || got.Delivered[2] != want[2] {
+	if want := []string{"chan-a", chanB, "chan-c"}; len(got.Delivered) != 3 || got.Delivered[0] != want[0] || got.Delivered[1] != want[1] || got.Delivered[2] != want[2] {
 		t.Fatalf("Delivered = %v, want %v (union, first-appearance order)", got.Delivered, want)
 	}
 	if other := runByID(t, store, key, "run-2"); other.DeliveryTracked || other.RoutedToParent || len(other.Delivered) != 0 {
@@ -441,34 +450,34 @@ func names(recs []state.ConversationRecord) map[string]bool {
 func testIndexCausedBy(t *testing.T, store state.Store) {
 	ctx := context.Background()
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "root"})
-	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "member-1", CausedBy: &state.Provenance{Parent: "root", Entry: "a"}})
+	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: member1, CausedBy: &state.Provenance{Parent: "root", Entry: "a"}})
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "member-2", CausedBy: &state.Provenance{Parent: "root", Entry: "b"}})
-	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "grandchild", CausedBy: &state.Provenance{Parent: "member-1", Entry: "c"}})
+	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "grandchild", CausedBy: &state.Provenance{Parent: member1, Entry: "c"}})
 
 	got, err := store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: "root"})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
-	if n := names(got); len(got) != 2 || !n["member-1"] || !n["member-2"] {
+	if n := names(got); len(got) != 2 || !n[member1] || !n["member-2"] {
 		t.Fatalf("List(ByCausedBy, root) = %v, want exactly the two direct members", n)
 	}
 }
 
 func testIndexNameBase(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "task-red-fox", NameBase: "task-red-fox"})
-	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "task-red-fox-2", NameBase: "task-red-fox"})
+	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: taskRedFox, NameBase: taskRedFox})
+	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "task-red-fox-2", NameBase: taskRedFox})
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "task-blue-owl", NameBase: "task-blue-owl"})
 	createRecord(t, store, state.ConversationRecord{ProfileRef: profileDefault, Name: "unbased"})
 
-	got, err := store.List(ctx, state.ByNameBase, state.ListKey{NameBase: "task-red-fox"})
+	got, err := store.List(ctx, state.ByNameBase, state.ListKey{NameBase: taskRedFox})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
-	if n := names(got); len(got) != 2 || !n["task-red-fox"] || !n["task-red-fox-2"] {
+	if n := names(got); len(got) != 2 || !n[taskRedFox] || !n["task-red-fox-2"] {
 		t.Fatalf("List(ByNameBase, task-red-fox) = %v, want exactly the two sharing it", n)
 	}
-	if got[0].NameBase != "task-red-fox" {
+	if got[0].NameBase != taskRedFox {
 		t.Fatalf("NameBase did not round-trip: %+v", got[0])
 	}
 }
@@ -482,7 +491,7 @@ func testIndexAll(t *testing.T, store state.Store) {
 
 	got, err := store.List(ctx, state.ByAll, state.ListKey{})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	if n := names(got); len(got) != 2 || !n["all-a"] || !n["all-b"] {
 		t.Fatalf("List(ByAll) = %v, want every record that has not expired", n)

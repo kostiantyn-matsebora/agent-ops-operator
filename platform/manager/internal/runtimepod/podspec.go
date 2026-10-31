@@ -175,19 +175,7 @@ type Resolved struct {
 func ResolveFor(ctx context.Context, r client.Reader, store state.Store, namespace string,
 	conv *state.ConversationRecord, fallback Config) (Resolved, error) {
 
-	name, explicit := "default", false
-	if conv != nil && conv.RuntimeRef != "" {
-		name, explicit = conv.RuntimeRef, true
-	} else if conv != nil {
-		// DEPRECATED, one release: a profile applied before the upgrade keeps
-		// dispatching to the runtime it named. Read below the conversation's
-		// own snapshot — which already carries the Pipeline's choice — so an
-		// install that adopts the new model needs no profile edit. Delete this
-		// branch with AgentProfileSpec.RuntimeRef.
-		if n := deprecatedProfileRuntime(ctx, r, namespace, conv); n != "" {
-			name, explicit = n, true
-		}
-	}
+	name, explicit := runtimeNameFor(ctx, r, namespace, conv)
 	// The conversation's snapshotted identity OVERRIDES the runtime's own, and
 	// survives the runtime being missing entirely: a Pipeline naming an account
 	// meant that account, whichever backend answers.
@@ -251,6 +239,26 @@ func ResolveFor(ctx context.Context, r client.Reader, store state.Store, namespa
 		EgressMediation:   rt.Spec.EgressMediation,
 		ActingCoordinator: actingCoordinator,
 	}, nil
+}
+
+// runtimeNameFor is the runtime a conversation names, and whether it named one
+// (a named runtime must exist, the default may be absent).
+func runtimeNameFor(ctx context.Context, r client.Reader, namespace string, conv *state.ConversationRecord) (string, bool) {
+	if conv == nil {
+		return "default", false
+	}
+	if conv.RuntimeRef != "" {
+		return conv.RuntimeRef, true
+	}
+	// DEPRECATED, one release: a profile applied before the upgrade keeps
+	// dispatching to the runtime it named. Read below the conversation's
+	// own snapshot — which already carries the Pipeline's choice — so an
+	// install that adopts the new model needs no profile edit. Delete this
+	// branch with AgentProfileSpec.RuntimeRef.
+	if n := deprecatedProfileRuntime(ctx, r, namespace, conv); n != "" {
+		return n, true
+	}
+	return "default", false
 }
 
 // deprecatedProfileRuntime reads AgentProfile.spec.runtimeRef off the
@@ -401,52 +409,14 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 	// AT the mount path, and the stored transcript directory is named for the
 	// WORKING directory (`-data-workspace`), not for $HOME. /data/workspace is
 	// the load-bearing path and it does not move.
-	switch {
-	case sidecar:
-		// The agent gets EPHEMERAL storage and no access to the durable volume
-		// whatsoever. Two things follow, and both are wanted: a corrupt volume
-		// can no longer stop a run that is already going, and an agent can no
-		// longer read another conversation's context or write to the volume,
-		// because it holds no mount of it.
-		volumes = append(volumes, corev1.Volume{Name: "context",
-			VolumeSource: corev1.VolumeSource{EmptyDir: emptyDirWithLimit(cfg.ContextLiveSizeLimit)}})
-		// The durable claim, per conversation. The subPath applies ONLY here:
-		// changing the layout for every install would be a migration, and this
-		// way an install that has not opted in keeps its context exactly where
-		// it already is.
-		volumes = append(volumes, corev1.Volume{Name: "context-store", VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ContextPVC},
-		}})
-	case cfg.ContextPVC != "":
-		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ContextPVC},
-		}})
-	default:
-		volumes = append(volumes, corev1.Volume{Name: "context", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
-	}
+	volumes = append(volumes, contextVolumes(cfg, sidecar)...)
 	mounts = append(mounts, corev1.VolumeMount{Name: "context", MountPath: contextLiveMount})
 
 	// repository auth
-	if a := profile.Spec.Repository.Auth; a != nil {
-		switch a.Type {
-		case agentopsv1alpha1.RepoAuthSSH:
-			mode := int32(0o400)
-			volumes = append(volumes, corev1.Volume{Name: "repo-auth", VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: a.SecretRef.Name, DefaultMode: &mode},
-			}})
-			mounts = append(mounts, corev1.VolumeMount{Name: "repo-auth", MountPath: "/repo-auth", ReadOnly: true})
-			env = append(env, corev1.EnvVar{Name: "GIT_AUTH_TYPE", Value: "ssh"},
-				corev1.EnvVar{Name: "GIT_SSH_KEY", Value: "/repo-auth/sshKey"})
-		case agentopsv1alpha1.RepoAuthHTTPS:
-			env = append(env,
-				corev1.EnvVar{Name: "GIT_AUTH_TYPE", Value: "https"},
-				corev1.EnvVar{Name: "GIT_TOKEN", ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: a.SecretRef.Name}, Key: "token",
-					},
-				}})
-		}
-	}
+	authVolumes, authMounts, authEnv := repoAuthParts(profile.Spec.Repository.Auth)
+	volumes = append(volumes, authVolumes...)
+	mounts = append(mounts, authMounts...)
+	env = append(env, authEnv...)
 
 	// MCP: rendered ConfigMap (profile- or conversation-keyed) or raw ref
 	switch {
@@ -468,16 +438,7 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 	env = append(env, mcp.Env...)
 	env = append(env, profile.Spec.Env...)
 
-	res := corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
-		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1536Mi")},
-	}
-	if cfg.DefaultResources != nil {
-		res = *cfg.DefaultResources
-	}
-	if profile.Spec.Resources != nil {
-		res = *profile.Spec.Resources
-	}
+	res := podResources(cfg, profile)
 
 	uid := runtimeUID
 	var initContainers []corev1.Container
@@ -544,6 +505,79 @@ func Build(conv *state.ConversationRecord, profile *agentopsv1alpha1.AgentProfil
 		hardenAgentContainer(&pod.Spec.Containers[0])
 	}
 	return pod
+}
+
+// podResources is the worker's resources: the built-in default, overridden by
+// the runtime's, overridden by the profile's.
+func podResources(cfg Config, profile *agentopsv1alpha1.AgentProfile) corev1.ResourceRequirements {
+	res := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1536Mi")},
+	}
+	if cfg.DefaultResources != nil {
+		res = *cfg.DefaultResources
+	}
+	if profile.Spec.Resources != nil {
+		res = *profile.Spec.Resources
+	}
+	return res
+}
+
+// contextVolumes is the context volume(s): the accumulated context (RWX PVC),
+// pod-local under contextSync, or ephemeral when no claim is configured at all.
+func contextVolumes(cfg Config, sidecar bool) []corev1.Volume {
+	switch {
+	case sidecar:
+		// The agent gets EPHEMERAL storage and no access to the durable volume
+		// whatsoever. Two things follow, and both are wanted: a corrupt volume
+		// can no longer stop a run that is already going, and an agent can no
+		// longer read another conversation's context or write to the volume,
+		// because it holds no mount of it.
+		//
+		// The durable claim, per conversation. The subPath applies ONLY here:
+		// changing the layout for every install would be a migration, and this
+		// way an install that has not opted in keeps its context exactly where
+		// it already is.
+		return []corev1.Volume{
+			{Name: "context", VolumeSource: corev1.VolumeSource{EmptyDir: emptyDirWithLimit(cfg.ContextLiveSizeLimit)}},
+			{Name: "context-store", VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ContextPVC},
+			}},
+		}
+	case cfg.ContextPVC != "":
+		return []corev1.Volume{{Name: "context", VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: cfg.ContextPVC},
+		}}}
+	default:
+		return []corev1.Volume{{Name: "context", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
+	}
+}
+
+// repoAuthParts is the volume, mounts and environment the repository's auth
+// declaration adds. Nothing for no auth.
+func repoAuthParts(a *agentopsv1alpha1.RepoAuth) ([]corev1.Volume, []corev1.VolumeMount, []corev1.EnvVar) {
+	if a == nil {
+		return nil, nil, nil
+	}
+	switch a.Type {
+	case agentopsv1alpha1.RepoAuthSSH:
+		mode := int32(0o400)
+		return []corev1.Volume{{Name: "repo-auth", VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: a.SecretRef.Name, DefaultMode: &mode},
+			}}},
+			[]corev1.VolumeMount{{Name: "repo-auth", MountPath: "/repo-auth", ReadOnly: true}},
+			[]corev1.EnvVar{{Name: "GIT_AUTH_TYPE", Value: "ssh"}, {Name: "GIT_SSH_KEY", Value: "/repo-auth/sshKey"}}
+	case agentopsv1alpha1.RepoAuthHTTPS:
+		return nil, nil, []corev1.EnvVar{
+			{Name: "GIT_AUTH_TYPE", Value: "https"},
+			{Name: "GIT_TOKEN", ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: a.SecretRef.Name}, Key: "token",
+				},
+			}},
+		}
+	}
+	return nil, nil, nil
 }
 
 func itoa(i int) string {

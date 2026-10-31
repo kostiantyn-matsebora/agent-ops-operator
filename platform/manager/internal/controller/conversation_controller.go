@@ -719,31 +719,55 @@ func (r *ConversationReconciler) reconcileClosed(ctx context.Context, conv *stat
 
 	if r.Ops != nil {
 		for _, t := range conv.Threads {
-			if conv.ThreadArchived(t.Channel) {
+			// No topic was ever created on this channel when ThreadID is empty —
+			// ensure-topic never succeeded. There is nothing to close yet, and an
+			// op carrying an empty thread id can only ever be rejected (every
+			// adapter's close-topic handler validates it), so enqueueing it would
+			// retry forever and log an error every pass. Leave it unarchived: the
+			// next pass re-evaluates, and a later successful ensure-topic enqueues
+			// close-topic normally once a real thread id exists.
+			if conv.ThreadArchived(t.Channel) || t.ThreadID == "" {
 				continue
 			}
-			if t.ThreadID == "" {
-				// No topic was ever created on this channel — ensure-topic
-				// never succeeded. There is nothing to close yet, and an op
-				// carrying an empty thread id can only ever be rejected
-				// (every adapter's close-topic handler validates it), so
-				// enqueueing it would retry forever and log an error every
-				// pass. Leave it unarchived: the next pass re-evaluates, and
-				// a later successful ensure-topic enqueues close-topic
-				// normally once a real thread id exists.
-				continue
+			// a gone channel has nothing left to archive on it
+			if ch := r.servingChannel(ctx, t.Channel); ch != nil {
+				r.Ops.EnqueueCloseTopic(ctx, ch, t.ThreadID, conv)
 			}
-			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: t.Channel}, &ch); err != nil {
-				continue // channel gone: nothing left to archive on it
-			}
-			if ch.Spec.Adapter == "" {
-				continue
-			}
-			r.Ops.EnqueueCloseTopic(ctx, &ch, t.ThreadID, conv)
 		}
 	}
 	return r.autoDelete(ctx, conv)
+}
+
+// servingChannel reads a Channel that names an adapter, or nil when it is gone
+// or names none.
+func (r *ConversationReconciler) servingChannel(ctx context.Context, name string) *agentopsv1alpha1.Channel {
+	var ch agentopsv1alpha1.Channel
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &ch); err != nil || ch.Spec.Adapter == "" {
+		return nil
+	}
+	return &ch
+}
+
+// enqueueDeleteConversations tells every serving thread the conversation is
+// gone and reports whether any such op is still pending.
+func (r *ConversationReconciler) enqueueDeleteConversations(ctx context.Context, conv *state.ConversationRecord) bool {
+	outstanding := false
+	for _, t := range conv.Threads {
+		ch := r.servingChannel(ctx, t.Channel) // gone or adapterless: nobody left to tell
+		if ch == nil {
+			continue
+		}
+		// delete-conversation, NOT close-topic — whether or not this
+		// conversation was closed first. A closed conversation's threads
+		// were told it could be reopened; deletion makes that false, and
+		// correcting it is the whole point. Sending both would leave an
+		// adapter guessing whether the pair meant one ending or two.
+		r.Ops.EnqueueDeleteConversation(ctx, ch, t.ThreadID, conv)
+		if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
+			outstanding = true
+		}
+	}
+	return outstanding
 }
 
 // releaseWorkload deletes a conversation's runtime pod and MCP ConfigMap,
@@ -826,24 +850,7 @@ func (r *ConversationReconciler) finalizeClose(ctx context.Context, conv *state.
 
 	outstanding := false
 	if r.Ops != nil {
-		for _, t := range conv.Threads {
-			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: t.Channel}, &ch); err != nil {
-				continue // channel gone: nobody left to tell
-			}
-			if ch.Spec.Adapter == "" {
-				continue
-			}
-			// delete-conversation, NOT close-topic — whether or not this
-			// conversation was closed first. A closed conversation's threads
-			// were told it could be reopened; deletion makes that false, and
-			// correcting it is the whole point. Sending both would leave an
-			// adapter guessing whether the pair meant one ending or two.
-			r.Ops.EnqueueDeleteConversation(ctx, &ch, t.ThreadID, conv)
-			if r.Ops.Pending(chat.DeleteConversationOpID(conv.Name, t.Channel)) {
-				outstanding = true
-			}
-		}
+		outstanding = r.enqueueDeleteConversations(ctx, conv)
 	}
 	if outstanding && time.Since(*conv.DeletionRequestedAt) < r.closeGrace() {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
@@ -873,6 +880,45 @@ func (r *ConversationReconciler) liveRuntimePods(ctx context.Context, ns string)
 		}
 	}
 	return live, nil
+}
+
+// waitingFIFO is the conversations waiting for a worker, oldest first.
+//
+// The waiting set is defined by PODS, not by phase: a conversation that
+// needs a worker and holds none is waiting, whether it has been marked
+// Pending yet or has only just been created. Keying on phase would let a
+// brand-new conversation reconciled first jump an older one.
+func (r *ConversationReconciler) waitingFIFO(all []state.ConversationRecord, hasPod map[string]bool) []state.ConversationRecord {
+	now := time.Now()
+	var waiting []state.ConversationRecord
+	for i := range all {
+		c := &all[i]
+		if c.DeletionRequestedAt != nil || hasPod[c.Name] || !dispatch.NeedsWorker(c) {
+			continue
+		}
+		// Closed is inert: it will never be given a pod, so leaving it in the
+		// waiting set would let a conversation nobody will ever admit sit ahead
+		// of a Pending one in FIFO order and starve it. Its inputs, if it was
+		// closed holding any, stay on the object untouched — they are part of
+		// the record a reopen restores, not work owed.
+		//
+		// A conversation still serving out a start-failure backoff will not be
+		// given a pod on this pass, so it must not hold the FIFO head either.
+		// Leaving it there reproduces the outage this whole mechanism exists to
+		// end, one layer up: the oldest conversation cannot start, and every
+		// conversation behind it waits on a slot nobody is going to take.
+		if c.Phase == state.PhaseClosed || r.runtimeStartCooldown(c, now) > 0 {
+			continue
+		}
+		waiting = append(waiting, *c)
+	}
+	sort.Slice(waiting, func(i, j int) bool {
+		if !waiting[i].CreatedAt.Equal(waiting[j].CreatedAt) {
+			return waiting[i].CreatedAt.Before(waiting[j].CreatedAt)
+		}
+		return waiting[i].Name < waiting[j].Name // stable tiebreak within a second
+	})
+	return waiting
 }
 
 // admit decides whether this conversation may take a capacity slot now.
@@ -909,41 +955,7 @@ func (r *ConversationReconciler) admit(ctx context.Context, conv *state.Conversa
 	if err != nil {
 		return false, err
 	}
-	now := time.Now()
-	// The waiting set is defined by PODS, not by phase: a conversation that
-	// needs a worker and holds none is waiting, whether it has been marked
-	// Pending yet or has only just been created. Keying on phase would let a
-	// brand-new conversation reconciled first jump an older one.
-	var waiting []state.ConversationRecord
-	for i := range all {
-		c := &all[i]
-		if c.DeletionRequestedAt != nil || hasPod[c.Name] || !dispatch.NeedsWorker(c) {
-			continue
-		}
-		// Closed is inert: it will never be given a pod, so leaving it in the
-		// waiting set would let a conversation nobody will ever admit sit ahead
-		// of a Pending one in FIFO order and starve it. Its inputs, if it was
-		// closed holding any, stay on the object untouched — they are part of
-		// the record a reopen restores, not work owed.
-		if c.Phase == state.PhaseClosed {
-			continue
-		}
-		// A conversation still serving out a start-failure backoff will not be
-		// given a pod on this pass, so it must not hold the FIFO head either.
-		// Leaving it there reproduces the outage this whole mechanism exists to
-		// end, one layer up: the oldest conversation cannot start, and every
-		// conversation behind it waits on a slot nobody is going to take.
-		if r.runtimeStartCooldown(c, now) > 0 {
-			continue
-		}
-		waiting = append(waiting, *c)
-	}
-	sort.Slice(waiting, func(i, j int) bool {
-		if !waiting[i].CreatedAt.Equal(waiting[j].CreatedAt) {
-			return waiting[i].CreatedAt.Before(waiting[j].CreatedAt)
-		}
-		return waiting[i].Name < waiting[j].Name // stable tiebreak within a second
-	})
+	waiting := r.waitingFIFO(all, hasPod)
 	for i := range waiting {
 		if waiting[i].Name == conv.Name {
 			return i < free, nil
@@ -1256,45 +1268,50 @@ func (r *ConversationReconciler) deliverRunReplies(ctx context.Context, conv *st
 			backfill = append(backfill, run.RunID)
 			continue
 		}
-		msg := chat.RunReplyMessage(run)
-		for _, t := range conv.Threads {
-			if !conv.BoundTo(t.Channel) {
-				continue
-			}
-			if run.DeliveredTo(t.Channel) {
-				// A crash between markDelivered's run write and its note
-				// write leaves the note naming a delivered run; this
-				// backstop is the only pass that visits it.
-				chat.SettleDeliveredNote(ctx, r.Store, conv, t.Channel, run.RunID)
-				continue
-			}
-			owed[t.Channel] = true
-			// durable-chat-ops-broker: a binding carrying only a claim — no
-			// ThreadID yet — is bookkeeping about a dispatch in flight, not a
-			// topic. EnqueueRunReply would still accept the empty id and the
-			// adapter would park the reply on a channel-level pseudo-thread,
-			// marking it delivered there PERMANENTLY: once DeliveredTo is
-			// true this run is never re-enqueued, so the real thread
-			// ensureTopics creates moments later would never receive the
-			// answer the person is waiting for. Leaving it owed (above) is
-			// what brings this reconcile back once the thread exists.
-			if t.ThreadID == "" {
-				continue
-			}
-			var ch agentopsv1alpha1.Channel
-			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: t.Channel}, &ch); err != nil ||
-				ch.Spec.Adapter == "" {
-				continue
-			}
-			tid := t.ThreadID
-			r.Ops.EnqueueRunReply(ctx, &ch, conv, run.RunID, &tid, msg)
-		}
+		r.enqueueRunReply(ctx, conv, run, owed)
 	}
 	r.setDeliveryPendingCondition(ctx, conv, owed)
 	if len(backfill) == 0 {
 		return nil
 	}
 	return r.backfillDelivered(ctx, conv, backfill, runs)
+}
+
+// enqueueRunReply enqueues one tracked run's reply to every bound thread that
+// has not received it, and records in owed each channel still owing it.
+func (r *ConversationReconciler) enqueueRunReply(ctx context.Context, conv *state.ConversationRecord, run *state.Run, owed map[string]bool) {
+	msg := chat.RunReplyMessage(run)
+	for _, t := range conv.Threads {
+		if !conv.BoundTo(t.Channel) {
+			continue
+		}
+		if run.DeliveredTo(t.Channel) {
+			// A crash between markDelivered's run write and its note
+			// write leaves the note naming a delivered run; this
+			// backstop is the only pass that visits it.
+			chat.SettleDeliveredNote(ctx, r.Store, conv, t.Channel, run.RunID)
+			continue
+		}
+		owed[t.Channel] = true
+		// durable-chat-ops-broker: a binding carrying only a claim — no
+		// ThreadID yet — is bookkeeping about a dispatch in flight, not a
+		// topic. EnqueueRunReply would still accept the empty id and the
+		// adapter would park the reply on a channel-level pseudo-thread,
+		// marking it delivered there PERMANENTLY: once DeliveredTo is
+		// true this run is never re-enqueued, so the real thread
+		// ensureTopics creates moments later would never receive the
+		// answer the person is waiting for. Leaving it owed (above) is
+		// what brings this reconcile back once the thread exists.
+		if t.ThreadID == "" {
+			continue
+		}
+		ch := r.servingChannel(ctx, t.Channel)
+		if ch == nil {
+			continue
+		}
+		tid := t.ThreadID
+		r.Ops.EnqueueRunReply(ctx, ch, conv, run.RunID, &tid, msg)
+	}
 }
 
 // deliverMemberResults is the reconciler backstop for coordination-loop's
@@ -1433,6 +1450,43 @@ func (r *ConversationReconciler) pruneProcessed(ctx context.Context, conv *state
 	return nil
 }
 
+// evictIdleWorker evicts the longest-idle worker whose conversation has
+// nothing queued. It reports false when none can be evicted (every slot is
+// held by a busy conversation) or the delete failed.
+func (r *ConversationReconciler) evictIdleWorker(ctx context.Context, conv *state.ConversationRecord, live []corev1.Pod) (bool, error) {
+	logger := log.FromContext(ctx)
+	type cand struct {
+		pod  corev1.Pod
+		last time.Time
+	}
+	var cands []cand
+	for _, p := range live {
+		cn := p.Labels[runtimepod.LabelConversation]
+		c, _, err := r.Store.Get(ctx, state.Key(cn))
+		if err != nil {
+			continue
+		}
+		if !dispatch.NeedsWorker(&c) {
+			last := c.CreatedAt
+			if c.LastActivity != nil {
+				last = *c.LastActivity
+			}
+			cands = append(cands, cand{p, last})
+		}
+	}
+	if len(cands) == 0 {
+		logger.Info("at the active-conversation cap, all busy — pending",
+			"conversation", conv.Name, "cap", r.MaxActiveConversations)
+		return false, nil
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].last.Before(cands[j].last) })
+	logger.Info("evicting idle worker to make room", "pod", cands[0].pod.Name)
+	if err := r.Delete(ctx, &cands[0].pod); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	return true, nil
+}
+
 // createRuntimePod re-checks the conversation cap against a FRESH pod list —
 // admission decided against a possibly stale cache, so this is the last word —
 // and evicts an idle worker when that is what a slot costs. Returns
@@ -1445,34 +1499,7 @@ func (r *ConversationReconciler) createRuntimePod(ctx context.Context, conv *sta
 		return false, err
 	}
 	if len(live) >= r.MaxActiveConversations {
-		// evict the longest-idle worker whose conversation has nothing queued
-		type cand struct {
-			pod  corev1.Pod
-			last time.Time
-		}
-		var cands []cand
-		for _, p := range live {
-			cn := p.Labels[runtimepod.LabelConversation]
-			c, _, err := r.Store.Get(ctx, state.Key(cn))
-			if err != nil {
-				continue
-			}
-			if !dispatch.NeedsWorker(&c) {
-				last := c.CreatedAt
-				if c.LastActivity != nil {
-					last = *c.LastActivity
-				}
-				cands = append(cands, cand{p, last})
-			}
-		}
-		if len(cands) == 0 {
-			logger.Info("at the active-conversation cap, all busy — pending",
-				"conversation", conv.Name, "cap", r.MaxActiveConversations)
-			return false, nil
-		}
-		sort.Slice(cands, func(i, j int) bool { return cands[i].last.Before(cands[j].last) })
-		logger.Info("evicting idle worker to make room", "pod", cands[0].pod.Name)
-		if err := r.Delete(ctx, &cands[0].pod); err != nil && !apierrors.IsNotFound(err) {
+		if made, err := r.evictIdleWorker(ctx, conv, live); !made {
 			return false, err
 		}
 	}

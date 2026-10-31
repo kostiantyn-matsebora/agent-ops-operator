@@ -68,57 +68,80 @@ func DeliverInputs(ctx context.Context, env Env, ops *OpQueue, conv *state.Conve
 	if ops == nil || len(conv.ChannelRefs) == 0 {
 		return
 	}
-	reader, ns := env.Reader, env.Namespace
-	pipeline := ""
-	resolved := false
-	echoes := map[string]bool{} // surface -> does its transport show its own?
+	p := &deliveryPass{ctx: ctx, env: env, ops: ops, conv: conv, echoes: map[string]bool{}}
 	for i := range conv.Inputs {
 		item := &conv.Inputs[i]
 		if item.Origin == nil { // predates provenance: delivered nowhere
 			continue
 		}
-		body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
-		if blob, ok := InputPayload(ctx, env.Store, item); ok {
-			body, inputRef, labels, severity = blob.Payload, string(item.PayloadRef), blob.Labels, agentopsv1alpha1.Severity(blob.Severity)
-		}
-		surface := item.OriginSurface(labels)
-		surfaceEchoes := true
-		if surface != "" {
-			known, ok := echoes[surface]
-			if !ok {
-				known = SurfaceEchoes(ctx, reader, ns, surface)
-				echoes[surface] = known
-			}
-			surfaceEchoes = known
-		}
-		var msg Message
-		if item.TypedByAPerson() {
-			msg = RelayMessage(surface, item.OriginSender(labels), body)
-		} else {
-			if !resolved { // one lookup per pass, and only when a card needs it
-				if p := PipelineForConversation(ctx, reader, ns, conv); p != nil {
-					pipeline = p.Name
-				}
-				resolved = true
-			}
-			msg = SignalMessage(pipeline, item.Origin.Name, conv.Title, inputRef, labels, body, agentopsv1alpha1.OriginKind(item.Origin.Kind)).WithSeverity(severity)
-		}
-		for _, ref := range conv.ChannelRefs {
-			if !item.DeliverTo(ref, surface, surfaceEchoes) {
-				continue
-			}
-			tid := conv.ThreadFor(ref)
-			if tid == nil {
-				continue
-			}
-			var ch agentopsv1alpha1.Channel
-			if err := reader.Get(ctx, types.NamespacedName{Namespace: ns, Name: ref}, &ch); err != nil ||
-				ch.Spec.Adapter == "" {
-				continue
-			}
-			ops.EnqueueInputDelivery(ctx, &ch, conv, item.ID, tid, msg)
-		}
+		p.deliver(item)
 	}
+}
+
+// deliveryPass is the state one DeliverInputs call carries across inputs.
+type deliveryPass struct {
+	ctx      context.Context
+	env      Env
+	ops      *OpQueue
+	conv     *state.ConversationRecord
+	pipeline string
+	resolved bool
+	echoes   map[string]bool // surface -> does its transport show its own?
+}
+
+// deliver enqueues one input to every bound channel that should show it.
+func (p *deliveryPass) deliver(item *state.InputItem) {
+	body, inputRef, labels, severity := item.Payload, "", map[string]string(nil), agentopsv1alpha1.Severity("")
+	if blob, ok := InputPayload(p.ctx, p.env.Store, item); ok {
+		body, inputRef, labels, severity = blob.Payload, string(item.PayloadRef), blob.Labels, agentopsv1alpha1.Severity(blob.Severity)
+	}
+	surface := item.OriginSurface(labels)
+	surfaceEchoes := p.surfaceEchoes(surface)
+	var msg Message
+	if item.TypedByAPerson() {
+		msg = RelayMessage(surface, item.OriginSender(labels), body)
+	} else {
+		msg = SignalMessage(p.pipelineName(), item.Origin.Name, p.conv.Title, inputRef, labels, body, agentopsv1alpha1.OriginKind(item.Origin.Kind)).WithSeverity(severity)
+	}
+	for _, ref := range p.conv.ChannelRefs {
+		if !item.DeliverTo(ref, surface, surfaceEchoes) {
+			continue
+		}
+		tid := p.conv.ThreadFor(ref)
+		if tid == nil {
+			continue
+		}
+		var ch agentopsv1alpha1.Channel
+		if err := p.env.Reader.Get(p.ctx, types.NamespacedName{Namespace: p.env.Namespace, Name: ref}, &ch); err != nil ||
+			ch.Spec.Adapter == "" {
+			continue
+		}
+		p.ops.EnqueueInputDelivery(p.ctx, &ch, p.conv, item.ID, tid, msg)
+	}
+}
+
+// surfaceEchoes answers once per surface per pass.
+func (p *deliveryPass) surfaceEchoes(surface string) bool {
+	if surface == "" {
+		return true
+	}
+	known, ok := p.echoes[surface]
+	if !ok {
+		known = SurfaceEchoes(p.ctx, p.env.Reader, p.env.Namespace, surface)
+		p.echoes[surface] = known
+	}
+	return known
+}
+
+// pipelineName is one lookup per pass, and only when a card needs it.
+func (p *deliveryPass) pipelineName() string {
+	if !p.resolved {
+		if pl := PipelineForConversation(p.ctx, p.env.Reader, p.env.Namespace, p.conv); pl != nil {
+			p.pipeline = pl.Name
+		}
+		p.resolved = true
+	}
+	return p.pipeline
 }
 
 // SurfaceEchoes reports whether a channel shows a person the message they just

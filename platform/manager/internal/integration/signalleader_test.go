@@ -478,27 +478,7 @@ func TestALeaderReleasesALiveSignalWhoseSourceIsGone(t *testing.T) {
 // removed by that reconcile alone.
 func TestDeletingASignalSourceReleasesItsSignalsAndItsWindow(t *testing.T) {
 	ctx := context.Background()
-	mkSignalSource(t, "rel-gone", "rel-t", "")
-	mkSignalSource(t, "rel-kept", "rel-t", "")
-	var gone, kept agentopsv1alpha1.SignalSource
-	for name, dst := range map[string]*agentopsv1alpha1.SignalSource{"rel-gone": &gone, "rel-kept": &kept} {
-		if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, dst); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{"rel-live", "rel-routed", "rel-failed"} {
-		mkSignalIn(t, ns, &gone, name, name)
-	}
-	terminate(t, ns, "rel-routed", agentopsv1alpha1.SignalRouted, time.Now())
-	terminate(t, ns, "rel-failed", agentopsv1alpha1.SignalFailed, time.Now())
-	mkSignalIn(t, ns, &kept, "rel-other", "rel-other")
-	window := []state.CooldownEntry{{InitiationID: "rel-live", At: time.Now().UTC().Truncate(time.Second)}}
-	if err := signalStore.PutCooldown(ctx, "rel-gone", window); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 1 {
-		t.Fatalf("setup: the window was not recorded: %v %v", got, err)
-	}
+	gone := seedReleaseFixture(ctx, t)
 
 	if err := k8sClient.Delete(ctx, &gone); err != nil {
 		t.Fatal(err)
@@ -526,4 +506,33 @@ func TestDeletingASignalSourceReleasesItsSignalsAndItsWindow(t *testing.T) {
 	if err := signalStore.ReleaseSource(ctx, "rel-gone", ""); err != nil {
 		t.Errorf("releasing again is idempotent: %v", err)
 	}
+}
+
+// seedReleaseFixture creates two sources, three signals of the first (one live,
+// two terminal), one of the second and a recorded window for the first. It
+// returns the first source.
+func seedReleaseFixture(ctx context.Context, t *testing.T) agentopsv1alpha1.SignalSource {
+	t.Helper()
+	mkSignalSource(t, "rel-gone", "rel-t", "")
+	mkSignalSource(t, "rel-kept", "rel-t", "")
+	var gone, kept agentopsv1alpha1.SignalSource
+	for name, dst := range map[string]*agentopsv1alpha1.SignalSource{"rel-gone": &gone, "rel-kept": &kept} {
+		if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"rel-live", "rel-routed", "rel-failed"} {
+		mkSignalIn(t, ns, &gone, name, name)
+	}
+	terminate(t, ns, "rel-routed", agentopsv1alpha1.SignalRouted, time.Now())
+	terminate(t, ns, "rel-failed", agentopsv1alpha1.SignalFailed, time.Now())
+	mkSignalIn(t, ns, &kept, "rel-other", "rel-other")
+	window := []state.CooldownEntry{{InitiationID: "rel-live", At: time.Now().UTC().Truncate(time.Second)}}
+	if err := signalStore.PutCooldown(ctx, "rel-gone", window); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 1 {
+		t.Fatalf("setup: the window was not recorded: %v %v", got, err)
+	}
+	return gone
 }

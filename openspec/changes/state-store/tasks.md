@@ -61,6 +61,37 @@ The contract, the `kube` backend and the suite exist (1.5, 2.10, 3.5); the call 
 - [x] 6.6 Release a deleted source explicitly: the `SignalSource` reconciler's not-found path calls `ReleaseSource`, and the signal pass's missing-source branch releases the orphan instead of relying on the owner reference. Verify an envtest, which runs no garbage collector, observes every signal of a deleted source gone from any phase.
 - [x] 6.7 Construct `kube.NewSignalStore` in `cmd/manager/main.go` beside the conversation store, run its sweep as a manager runnable, and empty and delete `pendingSignalMigration` in `internal/state/static_test.go`. Verify the static check passes on the whole tree with the allowlist gone and `STATE_BACKEND=nosuch` still exits non-zero.
 
+## Review round (sections 4/5)
+
+Fixed: undelivered-note settling now runs in the reconciler backstop and only for the run the note names. The expiry sweep lists only when armed. `kube.Store.Update` returns `ErrConflict` when a status retry meets a non-run change. The feed clears a rejected resume point and `kube` Watch requests and forwards bookmarks (`EventBookmark`). The static check covers dot-imports and untyped Conversation kinds. The chart tolerates `stateStore=null`.
+
+Deliberately not fixed at the time, since closed in the Signal round below: `Reconcile`'s `Get` then `ListRuns` (now `GetWithRuns`) and `markDelivered` clearing whatever note the thread held. Still open: a cluster measurement of `kube` read cost (envtest numbers are in D-4, no cluster was available).
+
+## Review round (Signal)
+
+Second pass, everything the first left open:
+
+- The static check resolves a kind held in a constant, flags a kind handed in as a parameter, and flags the status fields by their wire path (`"cooldown"`, `"receivedtotal"`, `"lastreceived"`) in any string.
+- `Store.GetWithRuns` is the combined read the reconciler uses, one apiserver read where two were made.
+- `markDelivered` clears only the undelivered-reply note naming the run it delivered.
+- `RecordReceived`/`GetReceived` move the receipt counters behind `SignalStore` (spec, conformance, `kube`, the router call site).
+- `BenchSignals` and the envtest `kube` benchmarks put measured numbers in D-4 (a local apiserver, no cluster).
+
+Fixed:
+
+- `ReleaseSource` takes the departed source's identity, spares a successor's signals (and under `kube` its window), and deletes under a UID precondition.
+- `Create` replaces an expired-but-unswept record (conformance scenario added).
+- `CooldownBook.For` builds outside its mutex, a disabled window reads nothing, and the read has a 10s timeout.
+- The feed retries a failed initial relist.
+- The static check guards `SignalSpec`, `SignalStatus` and `Status.Cooldown` through an aliased variable.
+- A kube test runs the sweep until the expired object is gone.
+
+Deliberately not fixed:
+
+- The static check still misses a reflected field path and a kind that reaches an unstructured object through another function's return value. It needs type information the AST walk lacks.
+- No cluster measurement was made.
+- The source reconciler passes no identity, so a successor created in the gap between its absence check and the release can lose its signals.
+
 ## 7. Unit tests
 
 - [ ] 7.1 `cd platform/manager && KUBEBUILDER_ASSETS=... go test ./...` green in the worktree, including the conformance suite (both halves), the static check and the reconcilers' event-sequence tests.
@@ -94,17 +125,3 @@ The contract, the `kube` backend and the suite exist (1.5, 2.10, 3.5); the call 
 Verdict 9.9: `docs/configuration.md` carries a State store section opening "You need do nothing", so an adopter choosing nothing reads no action. Verdict 9.10: `installation.md`, `getting-started.md`, the landing page and `README.md` need no change, since a default install is identical (`kube`, same objects). They change when the first alternative backend lands.
 
 Verdict 9.7: done in `docs/concepts.md` (home bullet, matrix rows for the cooldown window and signals, the Signal TTL and release text, the counters left out of the store), `docs/testing.md` (`RunSignals`), `docs/configuration.md`, `docs/CHANGELOG.md`, `docs/contracts/signal-adapter.md` (API-7 wording), `invariants.md`, `structure.md`. `docs-generate.py` and `--check` pass. `docs/contracts.md` names no deleter of a terminal signal, so it is unchanged. Verdict 9.8: `retired-vocabulary-guard.py` and `publication-guard.py` both clean; no vocabulary entry needed. Verdict 9.11: grepped `README.md`, `installation.md`, `getting-started.md`, `index.md`, `guides/` and `integrations/` for signal TTL, owner, deletion, cooldown storage and state-store terms; none state them, so no change. No page mentions `stateStore.bundles`.
-
-## Review round (sections 4/5)
-
-Fixed: undelivered-note settling now runs in the reconciler backstop and only for the run the note names; the expiry sweep lists only when armed; `kube.Store.Update` returns `ErrConflict` when a status retry meets a non-run change; the feed clears a rejected resume point and `kube` Watch requests and forwards bookmarks (`EventBookmark`); the static check covers dot-imports and untyped Conversation kinds; the chart tolerates `stateStore=null`.
-
-Deliberately not fixed at the time, since closed in the Signal round below: `Reconcile`'s `Get` then `ListRuns` (now `GetWithRuns`) and `markDelivered` clearing whatever note the thread held. Still open: a cluster measurement of `kube` read cost (envtest numbers are in D-4; no cluster was available).
-
-## Review round (Signal)
-
-Second pass, everything the first left open: the static check now resolves a kind held in a constant, flags a kind handed in as a parameter, and flags the status fields by their wire path (`"cooldown"`, `"receivedtotal"`, `"lastreceived"`) in any string; `Store.GetWithRuns` is the combined read the reconciler uses (one apiserver read where two were made); `markDelivered` clears only the undelivered-reply note naming the run it delivered; `RecordReceived`/`GetReceived` move the receipt counters behind `SignalStore` (spec, conformance, `kube`, the router call site); `BenchSignals` and the envtest `kube` benchmarks put measured numbers in D-4 (a local apiserver, no cluster).
-
-Fixed: `ReleaseSource` takes the departed source's identity, spares a successor's signals (and under `kube` its window), and deletes under a UID precondition; `Create` replaces an expired-but-unswept record (conformance scenario added); `CooldownBook.For` builds outside its mutex, a disabled window reads nothing, and the read has a 10s timeout; the feed retries a failed initial relist; the static check guards `SignalSpec`, `SignalStatus` and `Status.Cooldown` through an aliased variable; a kube test runs the sweep until the expired object is gone.
-
-Deliberately not fixed: the static check still misses a reflected field path and a kind that reaches an unstructured object through another function's return value (it needs type information the AST walk lacks); no cluster measurement was made; the source reconciler passes no identity, so a successor created in the gap between its absence check and the release can lose its signals.

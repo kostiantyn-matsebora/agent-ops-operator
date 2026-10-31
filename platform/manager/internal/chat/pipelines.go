@@ -151,19 +151,7 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *state.Conversat
 	var match *agentopsv1alpha1.Pipeline
 	for i := range candidates {
 		p := &candidates[i]
-		// Inference over an INLINE capability only: a candidate reached through
-		// capabilityRef resolves to nothing here on purpose. This is a
-		// best-effort fallback for conversations predating spec.pipelineRef —
-		// nothing routes on it, and the honest answer for a candidate this
-		// cannot see into is "does not match", never a guess.
-		capability := p.InlineCapability()
-		if capability.ProfileName() != conv.ProfileRef {
-			continue
-		}
-		if !sameRefs(p.Spec.ChannelRefs, conv.ChannelRefs) {
-			continue
-		}
-		if !sameToolsets(capability.Toolsets, conv.Toolsets) || !sameMCPConfigs(capability.MCPConfigs, conv.MCPConfigs) {
+		if !wiresLike(p, conv) {
 			continue
 		}
 		if match != nil {
@@ -173,6 +161,20 @@ func MatchPipeline(candidates []agentopsv1alpha1.Pipeline, conv *state.Conversat
 		match = &cp
 	}
 	return match
+}
+
+// wiresLike reports whether a pipeline's wiring matches a conversation's
+// recorded one. Inference over an INLINE capability only: a candidate reached
+// through capabilityRef resolves to nothing here on purpose. This is a
+// best-effort fallback for conversations predating spec.pipelineRef, nothing
+// routes on it, and the honest answer for a candidate this cannot see into is
+// "does not match", never a guess.
+func wiresLike(p *agentopsv1alpha1.Pipeline, conv *state.ConversationRecord) bool {
+	capability := p.InlineCapability()
+	return capability.ProfileName() == conv.ProfileRef &&
+		sameRefs(p.Spec.ChannelRefs, conv.ChannelRefs) &&
+		sameToolsets(capability.Toolsets, conv.Toolsets) &&
+		sameMCPConfigs(capability.MCPConfigs, conv.MCPConfigs)
 }
 
 // sameRefs compares a pipeline's channel refs with a record's channel names as

@@ -74,7 +74,7 @@ func TestCooldownReleaseForgetsAnAdmission(t *testing.T) {
 
 func TestCooldownBookLeavesASourceUnbuiltWhenItsRecordCannotBeRead(t *testing.T) {
 	b := NewCooldownBook()
-	if cd := b.For("a", func() *Cooldown { return nil }); cd != nil {
+	if b.For("a", func() *Cooldown { return nil }) != nil {
 		t.Fatal("a failed build yields no Cooldown")
 	}
 	if len(b.Stats()) != 0 {

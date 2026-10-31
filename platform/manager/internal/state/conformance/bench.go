@@ -10,7 +10,10 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-const benchInputID = "input-1"
+const (
+	benchInputID = "input-1"
+	fmtUpdate    = "Update: %v"
+)
 
 // Bench reports the tier-1 numbers design.md's D-8/D-10 name for comparing
 // backends: bytes written per run, allocations per write, and records
@@ -31,7 +34,7 @@ func Bench(b *testing.B, newStore func() state.Store) {
 
 	key := state.Key("bench-conversation")
 	if _, err := store.Create(ctx, key, benchRecord()); err != nil {
-		b.Fatalf("Create: %v", err)
+		b.Fatalf(fmtCreate, err)
 	}
 
 	// bytes written per run (proxy).
@@ -56,7 +59,7 @@ func Bench(b *testing.B, newStore func() state.Store) {
 	allocs := testing.AllocsPerRun(1, func() {
 		newRev, err := store.Update(ctx, key, rev, updated)
 		if err != nil {
-			b.Fatalf("Update: %v", err)
+			b.Fatalf(fmtUpdate, err)
 		}
 		rev = newRev
 	})
@@ -152,13 +155,13 @@ func BenchSignals(b *testing.B, newStore func() state.SignalStore) {
 		name := fmt.Sprintf("seed-%d", i)
 		rev, err := store.Create(ctx, state.Key(name), sigRec(name, SignalSourceA, name))
 		if err != nil {
-			b.Fatalf("Create: %v", err)
+			b.Fatalf(fmtCreate, err)
 		}
 		if i >= live {
 			done := sigRec(name, SignalSourceA, name)
 			done.Phase = state.SignalRouted
 			if _, err := store.Update(ctx, state.Key(name), rev, done); err != nil {
-				b.Fatalf("Update: %v", err)
+				b.Fatalf(fmtUpdate, err)
 			}
 		}
 	}
@@ -181,16 +184,16 @@ func BenchSignals(b *testing.B, newStore func() state.SignalStore) {
 		rec := sigRec(name, SignalSourceB, name)
 		rev, err := store.Create(ctx, state.Key(name), rec)
 		if err != nil {
-			b.Fatalf("Create: %v", err)
+			b.Fatalf(fmtCreate, err)
 		}
 		rec.Phase = state.SignalPending
 		rec.Attempts = 1
 		if rev, err = store.Update(ctx, state.Key(name), rev, rec); err != nil {
-			b.Fatalf("Update: %v", err)
+			b.Fatalf(fmtUpdate, err)
 		}
 		rec.Phase = state.SignalRouted
 		if _, err = store.Update(ctx, state.Key(name), rev, rec); err != nil {
-			b.Fatalf("Update: %v", err)
+			b.Fatalf(fmtUpdate, err)
 		}
 	}
 	b.ReportMetric(listNs, "ns/list(live=200,terminal=100)")

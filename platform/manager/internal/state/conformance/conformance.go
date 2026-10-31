@@ -735,14 +735,15 @@ func testListRunsOrder(t *testing.T, store state.Store) {
 // testGetWithRuns is the "A record and its runs in one read" scenario.
 func testGetWithRuns(t *testing.T, store state.Store) {
 	ctx := context.Background()
-	key := state.Key("conv-with-runs")
+	const convWithRuns = "conv-with-runs"
+	key := state.Key(convWithRuns)
 	if _, _, _, err := store.GetWithRuns(ctx, key); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("GetWithRuns of an absent record error = %v, want ErrNotFound", err)
 	}
-	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-with-runs"}); err != nil {
+	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: convWithRuns}); err != nil {
 		t.Fatalf(fmtCreate, err)
 	}
-	if rec, _, runs, err := store.GetWithRuns(ctx, key); err != nil || rec.Name != "conv-with-runs" || len(runs) != 0 {
+	if rec, _, runs, err := store.GetWithRuns(ctx, key); err != nil || rec.Name != convWithRuns || len(runs) != 0 {
 		t.Fatalf("GetWithRuns with no run = %+v, %v, %v, want the record and no runs", rec, runs, err)
 	}
 	for _, id := range []string{"run-a", "run-b"} {

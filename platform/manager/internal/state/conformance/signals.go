@@ -33,6 +33,23 @@ const (
 	fmtSignalUpdate = "Update signal: %v"
 	sigInitA        = "init-a"
 	sigInitB        = "init-b"
+
+	fmtPutCooldown = "PutCooldown: %v"
+
+	sigTwice   = "sig-twice"
+	sigDone    = "sig-done"
+	sigStale   = "sig-stale"
+	sigFixed   = "sig-fixed"
+	sigStatus  = "sig-status"
+	sigIdent   = "sig-ident"
+	sigPart    = "sig-part"
+	sigFeed    = "sig-feed"
+	sigBefore  = "sig-before"
+	sigExpired = "sig-expired"
+	sigTTL     = "sig-ttl"
+	sigDel     = "sig-del"
+	sigReuse   = "sig-reuse"
+	sigUTC     = "sig-utc"
 )
 
 // sigRec is a published signal on a source, as publication writes it.
@@ -209,14 +226,14 @@ func sameNames(t *testing.T, what string, got []state.SignalRecord, want ...stri
 
 func testSignalCreateTwice(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	first := sigRec("sig-twice", SignalSourceA, sigInitA)
+	first := sigRec(sigTwice, SignalSourceA, sigInitA)
 	mustCreateSignal(t, s, first)
-	second := sigRec("sig-twice", SignalSourceA, sigInitA)
+	second := sigRec(sigTwice, SignalSourceA, sigInitA)
 	second.Payload = "second"
-	if _, err := s.Create(ctx, "sig-twice", second); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, err := s.Create(ctx, sigTwice, second); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("second Create error = %v, want ErrAlreadyExists", err)
 	}
-	got, _, err := s.Get(ctx, "sig-twice")
+	got, _, err := s.Get(ctx, sigTwice)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
@@ -257,12 +274,12 @@ func testSignalCreateRace(t *testing.T, s state.SignalStore) {
 
 func testSignalCreateAfterTerminal(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	rec := sigRec("sig-done", SignalSourceA, sigInitA)
+	rec := sigRec(sigDone, SignalSourceA, sigInitA)
 	rev := mustCreateSignal(t, s, rec)
-	if _, err := s.Update(ctx, "sig-done", rev, finish(rec, state.SignalRouted)); err != nil {
+	if _, err := s.Update(ctx, sigDone, rev, finish(rec, state.SignalRouted)); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	if _, err := s.Create(ctx, "sig-done", rec); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, err := s.Create(ctx, sigDone, rec); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("Create over a Routed signal error = %v, want ErrAlreadyExists", err)
 	}
 }
@@ -271,20 +288,20 @@ func testSignalCreateAfterTerminal(t *testing.T, s state.SignalStore) {
 
 func testSignalStaleWrite(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	rec := sigRec("sig-stale", SignalSourceA, sigInitA)
+	rec := sigRec(sigStale, SignalSourceA, sigInitA)
 	stale := mustCreateSignal(t, s, rec)
 	win := rec
 	win.Attempts = 1
-	if _, err := s.Update(ctx, "sig-stale", stale, win); err != nil {
+	if _, err := s.Update(ctx, sigStale, stale, win); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
 	lose := rec
 	lose.Attempts = 9
 	lose.Phase = state.SignalFailed
-	if _, err := s.Update(ctx, "sig-stale", stale, lose); !errors.Is(err, state.ErrConflict) {
+	if _, err := s.Update(ctx, sigStale, stale, lose); !errors.Is(err, state.ErrConflict) {
 		t.Fatalf("stale Update error = %v, want ErrConflict", err)
 	}
-	got, _, err := s.Get(ctx, "sig-stale")
+	got, _, err := s.Get(ctx, sigStale)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
@@ -295,16 +312,16 @@ func testSignalStaleWrite(t *testing.T, s state.SignalStore) {
 
 func testSignalPublicationFieldsImmutable(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	rec := sigRec("sig-fixed", SignalSourceA, sigInitA)
+	rec := sigRec(sigFixed, SignalSourceA, sigInitA)
 	rev := mustCreateSignal(t, s, rec)
 	changed := rec
 	changed.SourceRef, changed.InitiationID, changed.Payload, changed.Title = SignalSourceB, "other", "rewritten", "rewritten"
 	changed.Labels = map[string]string{"x": "y"}
 	changed.Attempts = 2
-	if _, err := s.Update(ctx, "sig-fixed", rev, changed); err != nil {
+	if _, err := s.Update(ctx, sigFixed, rev, changed); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	got, _, err := s.Get(ctx, "sig-fixed")
+	got, _, err := s.Get(ctx, sigFixed)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
@@ -319,7 +336,7 @@ func testSignalPublicationFieldsImmutable(t *testing.T, s state.SignalStore) {
 
 func testSignalStatusRoundTrip(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	rec := sigRec("sig-status", SignalSourceA, sigInitA)
+	rec := sigRec(sigStatus, SignalSourceA, sigInitA)
 	rev := mustCreateSignal(t, s, rec)
 	first := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
 	rec = finish(rec, state.SignalRouted)
@@ -329,10 +346,10 @@ func testSignalStatusRoundTrip(t *testing.T, s state.SignalStore) {
 		{Kind: state.ClaimantKindCoordinator, Name: "c1", State: state.ClaimantFailed, Reason: "overflow"},
 		{Kind: state.ClaimantKindPipeline, Name: "p2", State: state.ClaimantSkipped, Reason: "gone"},
 	}
-	if _, err := s.Update(ctx, "sig-status", rev, rec); err != nil {
+	if _, err := s.Update(ctx, sigStatus, rev, rec); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	got, _, err := s.Get(ctx, "sig-status")
+	got, _, err := s.Get(ctx, sigStatus)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
@@ -357,10 +374,10 @@ func testSignalUpdateAbsent(t *testing.T, s state.SignalStore) {
 
 func testSignalIdentity(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	rec := sigRec("sig-ident", SignalSourceA, sigInitA)
+	rec := sigRec(sigIdent, SignalSourceA, sigInitA)
 	rec.ID, rec.CreatedAt = "forged", time.Unix(1, 0)
 	rev := mustCreateSignal(t, s, rec)
-	got, _, err := s.Get(ctx, "sig-ident")
+	got, _, err := s.Get(ctx, sigIdent)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
@@ -369,21 +386,21 @@ func testSignalIdentity(t *testing.T, s state.SignalStore) {
 	}
 	upd := got
 	upd.ID, upd.CreatedAt, upd.Attempts = "forged-again", time.Unix(2, 0), 1
-	if _, err := s.Update(ctx, "sig-ident", rev, upd); err != nil {
+	if _, err := s.Update(ctx, sigIdent, rev, upd); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	again, _, err := s.Get(ctx, "sig-ident")
+	again, _, err := s.Get(ctx, sigIdent)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
 	if again.ID != got.ID || !again.CreatedAt.Equal(got.CreatedAt) {
 		t.Fatalf("identity changed across an update: %q %v then %q %v", got.ID, got.CreatedAt, again.ID, again.CreatedAt)
 	}
-	if err := s.Delete(ctx, "sig-ident"); err != nil {
-		t.Fatalf("Delete: %v", err)
+	if err := s.Delete(ctx, sigIdent); err != nil {
+		t.Fatalf(fmtDelete, err)
 	}
-	mustCreateSignal(t, s, sigRec("sig-ident", SignalSourceA, sigInitA))
-	renewed, _, _ := s.Get(ctx, "sig-ident")
+	mustCreateSignal(t, s, sigRec(sigIdent, SignalSourceA, sigInitA))
+	renewed, _, _ := s.Get(ctx, sigIdent)
 	if renewed.ID == got.ID {
 		t.Fatalf("a recreated signal kept the old identity %q", got.ID)
 	}
@@ -414,17 +431,17 @@ func testSignalIndexNonTerminalBySource(t *testing.T, s state.SignalStore) {
 	if _, err := s.Update(ctx, "sig-terminal", rev, finish(done, state.SignalDropped)); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	part := sigRec("sig-part", SignalSourceA, sigInitB)
+	part := sigRec(sigPart, SignalSourceA, sigInitB)
 	rev = mustCreateSignal(t, s, part)
 	part.Phase = state.SignalPartiallyRouted
-	if _, err := s.Update(ctx, "sig-part", rev, part); err != nil {
+	if _, err := s.Update(ctx, sigPart, rev, part); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
 	got, err := s.List(ctx, state.SignalNonTerminalBySource, state.SignalListKey{Source: SignalSourceA})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
-	sameNames(t, "NonTerminalBySource(a)", got, "sig-live", "sig-part")
+	sameNames(t, "NonTerminalBySource(a)", got, "sig-live", sigPart)
 }
 
 func testSignalIndexNonTerminalByInitiation(t *testing.T, s state.SignalStore) {
@@ -440,7 +457,7 @@ func testSignalIndexNonTerminalByInitiation(t *testing.T, s state.SignalStore) {
 	}
 	got, err := s.List(ctx, state.SignalNonTerminalByInitiation, state.SignalListKey{Source: SignalSourceA, InitiationID: sigInitA})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	sameNames(t, "NonTerminalByInitiation(a, init-a)", got, "sig-1", "sig-2")
 }
@@ -458,7 +475,7 @@ func testSignalIndexAll(t *testing.T, s state.SignalStore) {
 	}
 	got, err := s.List(ctx, state.SignalAll, state.SignalListKey{})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	sameNames(t, "All", got, "sig-x", "sig-y")
 }
@@ -496,18 +513,18 @@ func testSignalFeedShape(t *testing.T, s state.SignalStore) {
 	if err != nil {
 		t.Fatalf(fmtWatch, err)
 	}
-	rec := sigRec("sig-feed", SignalSourceA, sigInitA)
+	rec := sigRec(sigFeed, SignalSourceA, sigInitA)
 	rev := mustCreateSignal(t, s, rec)
 	ev := recvSignalEvent(t, events, func(e state.SignalEvent) bool {
-		return e.Type == state.EventPut && e.Key == "sig-feed" && e.Revision == rev
+		return e.Type == state.EventPut && e.Key == sigFeed && e.Revision == rev
 	})
 	if ev.Record.Payload != rec.Payload || ev.Record.InitiationID != sigInitA {
 		t.Fatalf("event record = %+v, want the created record", ev.Record)
 	}
-	if err := s.Delete(ctx, "sig-feed"); err != nil {
-		t.Fatalf("Delete: %v", err)
+	if err := s.Delete(ctx, sigFeed); err != nil {
+		t.Fatalf(fmtDelete, err)
 	}
-	recvSignalEvent(t, events, func(e state.SignalEvent) bool { return e.Type == state.EventDelete && e.Key == "sig-feed" })
+	recvSignalEvent(t, events, func(e state.SignalEvent) bool { return e.Type == state.EventDelete && e.Key == sigFeed })
 }
 
 func testSignalFeedResume(t *testing.T, s state.SignalStore) {
@@ -518,19 +535,19 @@ func testSignalFeedResume(t *testing.T, s state.SignalStore) {
 	if err != nil {
 		t.Fatalf(fmtWatch, err)
 	}
-	rev := mustCreateSignal(t, s, sigRec("sig-before", SignalSourceA, sigInitA))
-	got := recvSignalEvent(t, events, func(e state.SignalEvent) bool { return e.Type == state.EventPut && e.Key == "sig-before" })
+	rev := mustCreateSignal(t, s, sigRec(sigBefore, SignalSourceA, sigInitA))
+	got := recvSignalEvent(t, events, func(e state.SignalEvent) bool { return e.Type == state.EventPut && e.Key == sigBefore })
 	resume := got.Resume
 	stop()
 	for range events { // wait for the feed to close
 	}
 	mustCreateSignal(t, s, sigRec("sig-away", SignalSourceA, sigInitA))
-	rec, _, err := s.Get(ctx, "sig-before")
+	rec, _, err := s.Get(ctx, sigBefore)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
 	rec.Attempts = 1
-	if _, err := s.Update(ctx, "sig-before", rev, rec); err != nil {
+	if _, err := s.Update(ctx, sigBefore, rev, rec); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
 	resumed, err := s.Watch(ctx, resume)
@@ -539,7 +556,7 @@ func testSignalFeedResume(t *testing.T, s state.SignalStore) {
 	}
 	recvSignalEvent(t, resumed, func(e state.SignalEvent) bool { return e.Type == state.EventPut && e.Key == "sig-away" })
 	recvSignalEvent(t, resumed, func(e state.SignalEvent) bool {
-		return e.Type == state.EventPut && e.Key == "sig-before" && e.Record.Attempts == 1
+		return e.Type == state.EventPut && e.Key == sigBefore && e.Record.Attempts == 1
 	})
 }
 
@@ -548,10 +565,10 @@ func testSignalFeedResume(t *testing.T, s state.SignalStore) {
 func testSignalExpiryInvisible(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
 	past := time.Now().Add(-time.Hour)
-	rec := sigRec("sig-expired", SignalSourceA, sigInitA)
+	rec := sigRec(sigExpired, SignalSourceA, sigInitA)
 	rec.ExpiresAt = &past
 	mustCreateSignal(t, s, rec)
-	if _, _, err := s.Get(ctx, "sig-expired"); !errors.Is(err, state.ErrNotFound) {
+	if _, _, err := s.Get(ctx, sigExpired); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get(expired) error = %v, want ErrNotFound", err)
 	}
 	for _, idx := range []state.SignalIndex{state.SignalAll, state.SignalNonTerminalBySource, state.SignalNonTerminalByInitiation} {
@@ -559,7 +576,7 @@ func testSignalExpiryInvisible(t *testing.T, s state.SignalStore) {
 		if err != nil {
 			t.Fatalf("List(%s): %v", idx, err)
 		}
-		if signalNames(got)["sig-expired"] {
+		if signalNames(got)[sigExpired] {
 			t.Fatalf("List(%s) returned the expired record", idx)
 		}
 	}
@@ -568,18 +585,18 @@ func testSignalExpiryInvisible(t *testing.T, s state.SignalStore) {
 func testSignalCreateReplacesExpired(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
 	past := time.Now().Add(-time.Hour)
-	stale := sigRec("sig-reuse", SignalSourceA, sigInitA)
+	stale := sigRec(sigReuse, SignalSourceA, sigInitA)
 	stale.ExpiresAt = &past
 	stale.Payload = "first"
 	mustCreateSignal(t, s, stale)
-	fresh := sigRec("sig-reuse", SignalSourceA, sigInitA)
+	fresh := sigRec(sigReuse, SignalSourceA, sigInitA)
 	fresh.Payload = "second"
 	mustCreateSignal(t, s, fresh)
-	got, _, err := s.Get(ctx, "sig-reuse")
+	got, _, err := s.Get(ctx, sigReuse)
 	if err != nil || got.Payload != "second" {
 		t.Fatalf("Get after re-creating over an expired record = %+v, %v, want the new payload", got, err)
 	}
-	if _, err := s.Create(ctx, "sig-reuse", fresh); !errors.Is(err, state.ErrAlreadyExists) {
+	if _, err := s.Create(ctx, sigReuse, fresh); !errors.Is(err, state.ErrAlreadyExists) {
 		t.Fatalf("a create over the live replacement error = %v, want ErrAlreadyExists", err)
 	}
 }
@@ -603,15 +620,15 @@ func testSignalExpiryOnFeed(t *testing.T, s state.SignalStore) {
 // signal removes itself with no second deleter.
 func testSignalExpiryWrittenWithTerminalPhase(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	rec := sigRec("sig-ttl", SignalSourceA, sigInitA)
+	rec := sigRec(sigTTL, SignalSourceA, sigInitA)
 	rev := mustCreateSignal(t, s, rec)
 	soon := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	done := finish(rec, state.SignalRouted)
 	done.ExpiresAt = &soon
-	if _, err := s.Update(ctx, "sig-ttl", rev, done); err != nil {
+	if _, err := s.Update(ctx, sigTTL, rev, done); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	got, rev2, err := s.Get(ctx, "sig-ttl")
+	got, rev2, err := s.Get(ctx, sigTTL)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}
@@ -620,10 +637,10 @@ func testSignalExpiryWrittenWithTerminalPhase(t *testing.T, s state.SignalStore)
 	}
 	past := time.Now().Add(-time.Minute)
 	done.ExpiresAt = &past
-	if _, err := s.Update(ctx, "sig-ttl", rev2, done); err != nil {
+	if _, err := s.Update(ctx, sigTTL, rev2, done); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	if _, _, err := s.Get(ctx, "sig-ttl"); !errors.Is(err, state.ErrNotFound) {
+	if _, _, err := s.Get(ctx, sigTTL); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get after the expiry passed error = %v, want ErrNotFound", err)
 	}
 }
@@ -632,14 +649,14 @@ func testSignalExpiryWrittenWithTerminalPhase(t *testing.T, s state.SignalStore)
 
 func testSignalDelete(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
-	mustCreateSignal(t, s, sigRec("sig-del", SignalSourceA, sigInitA))
-	if err := s.Delete(ctx, "sig-del"); err != nil {
-		t.Fatalf("Delete: %v", err)
+	mustCreateSignal(t, s, sigRec(sigDel, SignalSourceA, sigInitA))
+	if err := s.Delete(ctx, sigDel); err != nil {
+		t.Fatalf(fmtDelete, err)
 	}
-	if _, _, err := s.Get(ctx, "sig-del"); !errors.Is(err, state.ErrNotFound) {
+	if _, _, err := s.Get(ctx, sigDel); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("Get after Delete error = %v, want ErrNotFound", err)
 	}
-	if err := s.Delete(ctx, "sig-del"); err != nil {
+	if err := s.Delete(ctx, sigDel); err != nil {
 		t.Fatalf("Delete of an absent key: %v, want nil", err)
 	}
 }
@@ -657,10 +674,10 @@ func testCooldownReplace(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
 	at := time.Now().UTC().Truncate(time.Second)
 	if err := s.PutCooldown(ctx, SignalSourceA, []state.CooldownEntry{{InitiationID: "i1", At: at}, {InitiationID: "i2", At: at}}); err != nil {
-		t.Fatalf("PutCooldown: %v", err)
+		t.Fatalf(fmtPutCooldown, err)
 	}
 	if err := s.PutCooldown(ctx, SignalSourceB, []state.CooldownEntry{{InitiationID: "i9", At: at}}); err != nil {
-		t.Fatalf("PutCooldown: %v", err)
+		t.Fatalf(fmtPutCooldown, err)
 	}
 	if err := s.PutCooldown(ctx, SignalSourceA, []state.CooldownEntry{{InitiationID: "i3", At: at}}); err != nil {
 		t.Fatalf("PutCooldown (replace): %v", err)
@@ -689,7 +706,7 @@ func testCooldownUTC(t *testing.T, s state.SignalStore) {
 	zone := time.FixedZone("UTC+3", 3*3600)
 	at := time.Now().In(zone).Truncate(time.Second)
 	if err := s.PutCooldown(ctx, SignalSourceA, []state.CooldownEntry{{InitiationID: "i1", At: at}}); err != nil {
-		t.Fatalf("PutCooldown: %v", err)
+		t.Fatalf(fmtPutCooldown, err)
 	}
 	got, _ := s.GetCooldown(ctx, SignalSourceA)
 	if len(got) != 1 || got[0].At.Location() != time.UTC || !got[0].At.Equal(at) {
@@ -710,10 +727,10 @@ func testReleaseSource(t *testing.T, s state.SignalStore) {
 	mustCreateSignal(t, s, sigRec("sig-b-live", SignalSourceB, sigInitA))
 	at := time.Now().UTC().Truncate(time.Second)
 	if err := s.PutCooldown(ctx, SignalSourceA, []state.CooldownEntry{{InitiationID: "i1", At: at}}); err != nil {
-		t.Fatalf("PutCooldown: %v", err)
+		t.Fatalf(fmtPutCooldown, err)
 	}
 	if err := s.PutCooldown(ctx, SignalSourceB, []state.CooldownEntry{{InitiationID: "i2", At: at}}); err != nil {
-		t.Fatalf("PutCooldown: %v", err)
+		t.Fatalf(fmtPutCooldown, err)
 	}
 
 	for i := 0; i < 2; i++ { // idempotent
@@ -723,7 +740,7 @@ func testReleaseSource(t *testing.T, s state.SignalStore) {
 	}
 	all, err := s.List(ctx, state.SignalAll, state.SignalListKey{})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	sameNames(t, "after releasing a", all, "sig-b-live")
 	if a, _ := s.GetCooldown(ctx, SignalSourceA); len(a) != 0 {
@@ -779,7 +796,7 @@ func testReleaseSparesSuccessor(t *testing.T, s state.SignalStore) {
 	}
 	all, err := s.List(ctx, state.SignalAll, state.SignalListKey{})
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf(fmtList, err)
 	}
 	sameNames(t, "after releasing the departed identity", all, "sig-next")
 }
@@ -804,16 +821,16 @@ func testSignalScope(t *testing.T, a, b state.SignalStore) {
 func testSignalInstantsUTC(t *testing.T, s state.SignalStore) {
 	ctx := context.Background()
 	zone := time.FixedZone("UTC-5", -5*3600)
-	rec := sigRec("sig-utc", SignalSourceA, sigInitA)
+	rec := sigRec(sigUTC, SignalSourceA, sigInitA)
 	rev := mustCreateSignal(t, s, rec)
 	at := time.Now().In(zone).Truncate(time.Second)
 	exp := at.Add(time.Hour)
 	rec = finish(rec, state.SignalRouted)
 	rec.CompletedAt, rec.ConsumedAt, rec.FirstAttemptAt, rec.ExpiresAt = &at, &at, &at, &exp
-	if _, err := s.Update(ctx, "sig-utc", rev, rec); err != nil {
+	if _, err := s.Update(ctx, sigUTC, rev, rec); err != nil {
 		t.Fatalf(fmtSignalUpdate, err)
 	}
-	got, _, err := s.Get(ctx, "sig-utc")
+	got, _, err := s.Get(ctx, sigUTC)
 	if err != nil {
 		t.Fatalf(fmtSignalGet, err)
 	}

@@ -211,6 +211,12 @@ func (s *Store) Update(ctx context.Context, key state.Key, rev state.Revision, r
 	// status field the record carries except Runs, which this call must
 	// never rewrite (design D-5: runs are append-only, never part of
 	// Update's own record).
+	return s.updateStatusRetrying(ctx, key, conv, rec)
+}
+
+// updateStatusRetrying writes the record's status over conv, re-reading and
+// re-applying on a conflict while nothing but runs has changed underneath.
+func (s *Store) updateStatusRetrying(ctx context.Context, key state.Key, conv *agentopsv1alpha1.Conversation, rec state.ConversationRecord) (state.Revision, error) {
 	base := conv.Status.DeepCopy()
 	applyStatus(conv, rec)
 	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
