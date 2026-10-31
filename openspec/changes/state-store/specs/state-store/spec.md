@@ -191,7 +191,8 @@ It SHALL be the default backend and SHALL render no bundle.
 #### Scenario: Objects are byte-identical
 - **WHEN** the same conversation lifecycle runs before and after the store
 - **THEN** the Conversation and ConversationInput objects differ in nothing
-  but timestamps and revisions
+  but timestamps and revisions, and the one annotation carrying `expiresAt`
+  on a record that sets one (no CRD schema change)
 
 #### Scenario: The system pack passes unchanged
 - **WHEN** the system pack runs against a default install
