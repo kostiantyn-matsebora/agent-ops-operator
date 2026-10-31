@@ -1879,7 +1879,13 @@ payload is not copied into the conversation object.
 
 **Every piece of live state has one declared home**, chosen by what the state is:
 
-- **The Kubernetes API** — configuration, conversation state (session id,
+- **The Kubernetes API, or the state store** — configuration lives on the
+  Kubernetes API. Conversation state lives in the **state store**, the one seam
+  the manager reaches it through. The chart selects a backend with
+  `stateStore.backend` (see [configuration](configuration.md#state-store)), and the
+  only backend shipped is `kube`, which keeps today's `Conversation` and
+  `ConversationInput` custom resources. Under `kube` the two homes are the same
+  API. Conversation state is: (session id,
   threads, inputs, runs, phase, and the message record — what people sent as
   well as what the agent answered), adapter cursors, delivery markers and
   suppression windows. Recovered by reading. Survives any restart and any
@@ -1906,18 +1912,30 @@ payload is not copied into the conversation object.
 telemetry, and a claim would pin it to one node, defeat rescheduling, and create
 a second source of truth beside the CRs.
 
-| Component | State it holds | Home | A restart costs |
-|---|---|---|---|
-| Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
-| Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
-| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | `Signal` CRs, Kubernetes-API state surviving every restart and leader change | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
-| Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
-| Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
-| Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |
-| Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | nothing |
-| Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | nothing authoritative. Acks and notices only |
-| Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
+| Component | State it holds | Home | State store backend | A restart costs |
+|---|---|---|---|---|
+| Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
+| Manager — op queue | outbound channel ops | derived from CR state | `kube`: the Kubernetes API's own guarantee | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
+| Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | none: not state-store state | nothing inside the window |
+| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | `Signal` CRs, Kubernetes-API state surviving every restart and leader change | none: not state-store state | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
+| Manager — admission | active/pending counts | live pod list + `Conversation` phase | `kube`: the Kubernetes API's own guarantee | nothing |
+| Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | none: not state-store state | recent history. Clients are told to resync rather than handed silence |
+| Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | none: not state-store state | with `persistence.context.enabled` off, conversational context. With it on, nothing |
+| Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | none: not state-store state | nothing |
+| Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | none: not state-store state | nothing authoritative. Acks and notices only |
+| Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | none: not state-store state | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
+
+**The backend column names what a row's guarantee rests on.** Only conversation
+state goes through the store.
+
+- **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
+  allows. A write is acknowledged once the API server has it.
+- **Reads go to the API server**, not the manager's informer cache, so a
+  compare-and-swap never races a stale copy.
+- **A later backend adds its own row**, stating its own guarantee.
+- **Release is explicit.** The manager deletes a closed or evicted
+  conversation's pod and ConfigMap itself under every backend, so no row
+  depends on owner-reference garbage collection.
 
 ### What reclaims what, and why the manager cannot
 

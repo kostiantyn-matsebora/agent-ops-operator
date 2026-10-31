@@ -12,6 +12,11 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- A new values key, `stateStore.backend`, default `kube`. It selects where the
+  manager keeps conversation state, and exactly one backend may be selected.
+  `kube` is the Kubernetes API, as before, and it is the only backend this
+  release ships. The render refuses an unknown value. `stateStore.bundles` is
+  reserved for backend bundles and stays empty.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
   acknowledges. A separate consumer pool on the leader then claims it, spends
@@ -34,6 +39,15 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- The manager now reaches `Conversation` and `ConversationInput` through a state
+  store contract. **There is no upgrade step and no CRD change.** The objects
+  are byte-identical and `kubectl get conv` is unchanged.
+- Behaviour under `kube`: the manager's reads of a conversation now go to the
+  Kubernetes API server instead of its informer cache, so a write's
+  compare-and-swap never races a stale copy. Expect more API server reads.
+- A closed or evicted conversation's pod and ConfigMap are now deleted by the
+  manager explicitly. The owner reference remains, but nothing depends on
+  garbage collection.
 - The signal adapter specification moves to **2.3.0**. The `200` response is
   now `{"queued": n}`: the `conversations` field is withdrawn, and no routing
   outcome appears on it (`API-2` is replaced). A `5xx` asks for a re-send

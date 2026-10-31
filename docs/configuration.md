@@ -598,6 +598,30 @@ Two things it does not cover, by design:
 Neither is passed off as enforced. The conversation's `EgressMediated` condition
 names what is not covered.
 
+### State store
+
+Where the manager keeps conversation state. **You need do nothing.** The default
+is the Kubernetes API, as before.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps the `Conversation` and `ConversationInput` custom resources, byte-identical, so `kubectl get conv` is unchanged |
+| `stateStore.bundles` | `{}` | reserved for backend bundles. Empty until a second backend ships, so leave it alone |
+
+**Exactly one backend is selected.** The render refuses anything else:
+
+- an unknown `backend`
+- a selected backend whose bundle is off
+- two backend bundles on at once
+- a bundle on while `kube` is selected
+
+`kube` renders no bundle. The manager reads the choice as `STATE_BACKEND`, and a
+value its binary does not carry stops it at start, naming the value.
+
+Switching an existing install between backends is not a supported upgrade path
+today, since `kube` is the only value. A later backend's page states how state
+moves.
+
 ### Capacity
 
 | Key | Default | Consequence |

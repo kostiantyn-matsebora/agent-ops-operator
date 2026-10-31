@@ -130,6 +130,39 @@ A fork pull request runs every tier its secret access allows and is not failed
 for the rest. Secrets being unavailable to forks is the intended access
 boundary, not a limitation to work around.
 
+## The state store conformance suite
+
+The manager reaches conversation state through one contract (`internal/state`).
+A **conformance suite** (`internal/state/conformance`) is what a backend passes to
+exist. Each scenario of the contract's spec is one subtest.
+
+| Decides | Cannot decide |
+|---|---|
+| compare-and-swap writes and refusal of a stale revision, lookup by declared index, a resumable at-least-once change feed, expiry, append-only runs, blob payloads, scope isolation between installs | latency or throughput under load, a real kubelet, anything the feed does beyond what the contract states |
+
+- **Every backend runs the same suite.** The `kube` backend runs it in its own
+  package against envtest, so it is part of the ordinary `go test ./...`.
+- **A new backend adds one test calling `conformance.Run`**, never a copy of a
+  scenario. A scenario a backend cannot meet is a contract change, not an
+  exception.
+
+**The bench measures, and gates nothing.** It prints the numbers a backend
+decision is made from:
+
+```sh
+cd platform/manager && go test -bench . -benchmem ./internal/state/...
+```
+
+| Metric | Read it as |
+|---|---|
+| `ns/op`, `B/op`, `allocs/op` | the cost of the timed append loop |
+| `bytes/run(json-proxy)` | the JSON size of one run. A lower bound true of every backend, not the wire size |
+| `allocs/write` | allocations of one isolated compare-and-swap update |
+| `resident_records(phase=Working)` | records a listing returns at the bench's scale, about 200 conversations |
+
+Compare two backends by running the same bench against each. Do not compare
+`ns/op` across machines.
+
 ## The oracle split
 
 **The real agent runtime is the primary oracle.** The questions worth asking

@@ -55,14 +55,16 @@
 
 ### Reference docs
 
-- [ ] 8.1 `docs/concepts.md`: the state store as a declared home, the restart-resilience matrix gains its backend column and a `kube` row saying "the Kubernetes API's own guarantee".
-- [ ] 8.2 `docs/testing.md`: the store conformance tier, what it decides, how the bench is read.
-- [ ] 8.3 `docs/configuration.md`: `stateStore.backend`, the one-backend rule, `kube` the default.
-- [ ] 8.4 `docs/CHANGELOG.md`: the new values key, no upgrade step, no CRD change.
-- [ ] 8.5 `.claude/rules/invariants.md`: "else Kubernetes API" becomes "else the state store", the runtime-pod row names explicit release. `.claude/rules/structure.md`: `internal/state/` in the manager's map.
-- [ ] 8.6 Re-run `python3 .github/scripts/docs-generate.py` and `--check` for the new chart value. Verify `--check` passes.
+- [x] 8.1 `docs/concepts.md`: the state store as a declared home, the restart-resilience matrix gains its backend column and a `kube` row saying "the Kubernetes API's own guarantee".
+- [x] 8.2 `docs/testing.md`: the store conformance tier, what it decides, how the bench is read.
+- [x] 8.3 `docs/configuration.md`: `stateStore.backend`, the one-backend rule, `kube` the default.
+- [x] 8.4 `docs/CHANGELOG.md`: the new values key, no upgrade step, no CRD change.
+- [x] 8.5 `.claude/rules/invariants.md`: "else Kubernetes API" becomes "else the state store", the runtime-pod row names explicit release. `.claude/rules/structure.md`: `internal/state/` in the manager's map.
+- [x] 8.6 Re-run `python3 .github/scripts/docs-generate.py` and `--check` for the new chart value. Verify `--check` passes.
 
 ### Adopter site
 
-- [ ] 8.7 `docs/configuration.md` is the adopter-facing page for the key — confirm the entry reads for an adopter choosing nothing (the default needs no action).
-- [ ] 8.8 Confirm `docs/installation.md`, `docs/getting-started.md`, the landing page and `README.md` need no change: a default install is identical. Record the verdict here.
+- [x] 8.7 `docs/configuration.md` is the adopter-facing page for the key — confirm the entry reads for an adopter choosing nothing (the default needs no action).
+- [x] 8.8 Confirm `docs/installation.md`, `docs/getting-started.md`, the landing page and `README.md` need no change: a default install is identical. Record the verdict here.
+
+Verdict 8.7: `docs/configuration.md` carries a State store section opening "You need do nothing", so an adopter choosing nothing reads no action. Verdict 8.8: `installation.md`, `getting-started.md`, the landing page and `README.md` need no change, since a default install is identical (`kube`, same objects). They change when the first alternative backend lands.
