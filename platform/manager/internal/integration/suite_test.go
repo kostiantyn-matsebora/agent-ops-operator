@@ -55,6 +55,8 @@ var (
 	// wires it (state-store design D-4): every Get carries the revision its
 	// Update compares against, so a test never reads a stale one.
 	stateStore state.Store
+	// signalStore is its Signal half, over the same uncached client.
+	signalStore state.SignalStore
 )
 
 // chartDir locates the chart from a test's working directory, which is this
@@ -113,6 +115,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	stateStore = kube.NewStore(storeClient, ns)
+	signalStore = kube.NewSignalStore(storeClient, ns)
 
 	code := m.Run()
 	stopRoutingCache()
@@ -172,7 +175,7 @@ func apiServerWithActivity() (*httpapi.Server, *activity.Log) {
 	srv := &httpapi.Server{
 		// routingClient mirrors production's mgr.GetClient(); Reader stays the
 		// raw k8sClient, as production's mgr.GetAPIReader() does.
-		Client: routingClient, Reader: k8sClient, Store: stateStore, Namespace: ns,
+		Client: routingClient, Reader: k8sClient, Store: stateStore, Signals: signalStore, Namespace: ns,
 		// A deployment that CAN carry context: continuity is now promised only
 		// where the conversation resolved somewhere to keep it, so a fixture with
 		// no context volume would (correctly) withhold every handle and make the

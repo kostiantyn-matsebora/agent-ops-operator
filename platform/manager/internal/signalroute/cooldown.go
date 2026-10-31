@@ -13,40 +13,53 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // defaultCooldownHours is a machine source's window when its spec sets none.
 const defaultCooldownHours = 6
 
 // spendCooldown consults the source's cooldown for sig's initiationId and,
-// when the id is fresh, spends it and records the window on the source.
+// when the id is fresh, spends it and records the window through the store.
 // Consultation and spend are atomic per source (the book's lock), since the
 // consumers of the pool share the map. The returned rollback undoes a spend
-// whose Signal could not then be recorded.
-func spendCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.SignalSource, sig *agentopsv1alpha1.Signal) (spent bool, rollback func()) {
+// whose Signal could not then be recorded. An error means the window could not
+// be recovered: the pass is repeated rather than admitted against an empty
+// window, which would re-open conversations for ids still inside theirs.
+func spendCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.SignalSource, sig *state.SignalRecord) (spent bool, rollback func(), err error) {
 	if deps.Cooldowns == nil {
-		return true, nil
+		return true, nil, nil
 	}
 	unlock := deps.Cooldowns.Lock(source.Name)
 	defer unlock()
-	cd := deps.Cooldowns.For(source.Name, func() *ingest.Cooldown { return recoverCooldown(source, sig.Spec.Kind) })
-	id := sig.Spec.InitiationID
+	var recoverErr error
+	cd := deps.Cooldowns.For(source.Name, func() *ingest.Cooldown {
+		var cd *ingest.Cooldown
+		cd, recoverErr = recoverCooldown(ctx, deps, source, sig.Kind)
+		return cd
+	})
+	if cd == nil {
+		return false, nil, fmt.Errorf("recover the cooldown window of source %q: %w", source.Name, recoverErr)
+	}
+	id := sig.InitiationID
 	if len(cd.Fresh([]string{id})) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 	recordCooldown(ctx, deps, source.Name, cd)
 	return true, func() {
 		defer deps.Cooldowns.Lock(source.Name)()
 		cd.Release(id)
 		recordCooldown(ctx, deps, source.Name, cd)
-	}
+	}, nil
 }
 
 // recoverCooldown builds a source's suppression window, RECOVERED from the
-// source on first use in this process. The in-memory map is the hot path; the
-// CR is the record, so a restart or a leader change mid-incident does not
-// re-open conversations for signals still inside their window.
-func recoverCooldown(source *agentopsv1alpha1.SignalSource, kind string) *ingest.Cooldown {
+// state store on first use in this process. The in-memory map is the hot path;
+// the store is the record, so a restart or a leader change mid-incident does
+// not re-open conversations for signals still inside their window. It returns
+// nil and the cause when the store cannot be read, which leaves the book unbuilt
+// so the next pass asks again.
+func recoverCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.SignalSource, kind string) (*ingest.Cooldown, error) {
 	hours := source.Spec.CooldownHours
 	if hours <= 0 {
 		hours = defaultCooldownHours
@@ -58,14 +71,18 @@ func recoverCooldown(source *agentopsv1alpha1.SignalSource, kind string) *ingest
 			hours = 0
 		}
 	}
-	recorded := make([]ingest.Entry, 0, len(source.Status.Cooldown))
-	for _, e := range source.Status.Cooldown {
-		recorded = append(recorded, ingest.Entry{InitiationID: e.InitiationID, At: e.At.Time})
+	window, err := deps.Signals.GetCooldown(ctx, source.Name)
+	if err != nil {
+		return nil, err
 	}
-	return ingest.NewCooldownFrom(time.Duration(hours)*time.Hour, recorded)
+	recorded := make([]ingest.Entry, 0, len(window))
+	for _, e := range window {
+		recorded = append(recorded, ingest.Entry{InitiationID: e.InitiationID, At: e.At})
+	}
+	return ingest.NewCooldownFrom(time.Duration(hours)*time.Hour, recorded), nil
 }
 
-// recordCooldown writes the suppression window back to the source. Entries
+// recordCooldown writes the suppression window back through the store. Entries
 // past the window are pruned and the list is bounded by the write. A failed
 // write is logged, never fatal: suppression still holds in memory, and failing
 // the pass over it would trade a duplicate investigation for a stuck signal.
@@ -74,19 +91,11 @@ func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *inges
 	if entries == nil {
 		return // window disabled — nothing to recover
 	}
-	out := make([]agentopsv1alpha1.CooldownEntry, 0, len(entries))
+	out := make([]state.CooldownEntry, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, agentopsv1alpha1.CooldownEntry{InitiationID: e.InitiationID, At: metav1.NewTime(e.At)})
+		out = append(out, state.CooldownEntry{InitiationID: e.InitiationID, At: e.At})
 	}
-	var fresh agentopsv1alpha1.SignalSource
-	if err := deps.Reader.Get(ctx, types.NamespacedName{Namespace: deps.Namespace, Name: sourceName}, &fresh); err != nil {
-		log.FromContext(ctx).Info("recording cooldown: reading the signal source failed",
-			"source", sourceName, "error", err.Error())
-		return
-	}
-	patch := client.MergeFrom(fresh.DeepCopy())
-	fresh.Status.Cooldown = out
-	if err := deps.Client.Status().Patch(ctx, &fresh, patch); err != nil {
+	if err := deps.Signals.PutCooldown(ctx, sourceName, out); err != nil {
 		log.FromContext(ctx).Info("recording cooldown on the signal source failed; "+
 			"suppression holds in memory but will not survive a restart",
 			"source", sourceName, "error", err.Error())

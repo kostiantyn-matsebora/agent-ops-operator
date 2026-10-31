@@ -25,7 +25,9 @@ func NewCooldownBook() *CooldownBook {
 	return &CooldownBook{byName: map[string]*Cooldown{}, lockFor: map[string]*sync.Mutex{}}
 }
 
-// For returns the source's Cooldown, building it with build on first use.
+// For returns the source's Cooldown, building it with build on first use. A
+// build that returns nil (its record could not be read) leaves the source
+// unbuilt, so the next call builds again instead of keeping an empty window.
 func (b *CooldownBook) For(source string, build func() *Cooldown) *Cooldown {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -33,7 +35,9 @@ func (b *CooldownBook) For(source string, build func() *Cooldown) *Cooldown {
 		return cd
 	}
 	cd := build()
-	b.byName[source] = cd
+	if cd != nil {
+		b.byName[source] = cd
+	}
 	return cd
 }
 

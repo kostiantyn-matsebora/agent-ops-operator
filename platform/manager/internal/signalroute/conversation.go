@@ -43,42 +43,42 @@ func oneShot(kind string) bool { return kind == kindChat || kind == kindTask }
 // crashed pass created is found, and the input is written under a name
 // derived from the Signal and claimant, so a repeated pass appends nothing
 // twice (design D-5).
-func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, sig *agentopsv1alpha1.Signal) (*agentopsv1alpha1.ObjectRef, bool, error) {
-	conv, err := findReusableConversation(ctx, deps.Store, claimant, sig.Spec.InitiationID)
+func routeOneClaimant(ctx context.Context, deps Deps, claimant chat.Claimant, sig *state.SignalRecord) (conversation string, waiting bool, err error) {
+	conv, err := findReusableConversation(ctx, deps.Store, claimant, sig.InitiationID)
 	if err != nil {
-		return nil, false, err
+		return "", false, err
 	}
 
-	inputType := inputTypeForKind(sig.Spec.Kind)
+	inputType := inputTypeForKind(sig.Kind)
 	if conv == nil {
 		full, err := BacklogFull(ctx, deps.Store, deps.MaxQueued)
 		if err != nil {
-			return nil, false, err
+			return "", false, err
 		}
 		if full {
-			return nil, true, nil
+			return "", true, nil
 		}
 		conv, err = createConversation(ctx, deps, claimant, sig)
 		if err != nil {
-			return nil, false, err
+			return "", false, err
 		}
 	} else if conv.ContextID() != "" {
 		inputType = state.InputRecurrence // same problem/job, resume with context
 	}
 
 	if err := appendInput(ctx, deps, claimant, conv, sig, inputType); err != nil {
-		return nil, false, err
+		return "", false, err
 	}
-	return &agentopsv1alpha1.ObjectRef{Name: conv.Name}, false, nil
+	return conv.Name, false, nil
 }
 
 // messageOf is the text routed to the agent: the signal's payload verbatim,
 // or — for an addressed chat message — the task after `/<name> `.
-func messageOf(sig *agentopsv1alpha1.Signal) (text string, addressed bool) {
+func messageOf(sig *state.SignalRecord) (text string, addressed bool) {
 	if _, task, ok := AddressedTarget(sig); ok {
 		return task, true
 	}
-	return sig.Spec.Payload, false
+	return sig.Payload, false
 }
 
 // findReusableConversation returns the OPEN conversation, originated by this
@@ -150,13 +150,13 @@ func nameKindForSignal(kind string) string {
 // titleForSignal picks the conversation title: the signal's own Title if it
 // set one, else — for a one-shot kind, whose payload IS the request — a
 // title derived from it, else the source's own name.
-func titleForSignal(sourceName string, sig *agentopsv1alpha1.Signal) string {
-	if sig.Spec.Title != "" {
-		return sig.Spec.Title
+func titleForSignal(sourceName string, sig *state.SignalRecord) string {
+	if sig.Title != "" {
+		return sig.Title
 	}
-	if oneShot(sig.Spec.Kind) {
+	if oneShot(sig.Kind) {
 		icon := "💬"
-		if sig.Spec.Kind == kindTask {
+		if sig.Kind == kindTask {
 			icon = "🛠"
 		}
 		text, _ := messageOf(sig)
@@ -192,8 +192,8 @@ func wordsForSignal(sourceName, title string) string {
 // execution wiring ONCE. Returns nil, nil only when the backlog is full is
 // checked by the caller — this function is never asked to create while
 // full.
-func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, sig *agentopsv1alpha1.Signal) (*state.ConversationRecord, error) {
-	sourceName := sig.Spec.SourceRef.Name
+func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, sig *state.SignalRecord) (*state.ConversationRecord, error) {
+	sourceName := sig.SourceRef
 
 	title := titleForSignal(sourceName, sig)
 	capability, err := dispatch.ResolveCapability(ctx, deps.Reader, claimant)
@@ -212,16 +212,16 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 		WorkspaceClaimName: snap.WorkspaceClaimName,
 		Signal: &state.SignalProvenance{
 			SourceRef: sourceName,
-			Labels:    sig.Spec.Labels,
-			Severity:  string(sig.Spec.Severity),
+			Labels:    sig.Labels,
+			Severity:  sig.Severity,
 		},
 		Title:          title,
-		ConversationID: sig.Spec.InitiationID,
+		ConversationID: sig.InitiationID,
 	}
 	// An addressed conversation binds the addressing channel too, so the
 	// answer comes back to where the person is looking.
 	if _, addressed := messageOf(sig); addressed {
-		conv.ChannelRefs = withChannel(conv.ChannelRefs, sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel])
+		conv.ChannelRefs = withChannel(conv.ChannelRefs, sig.Labels[agentopsv1alpha1.LabelChatChannel])
 	}
 	nodeKind := activity.NodePipeline
 	if claimant.ClaimantKind() == chat.ClaimantCoordinator {
@@ -233,9 +233,9 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 	}
 	// Only for a person on a chat surface: an alert has no reader, and a
 	// machine posting a task is not owed a read mark.
-	if sig.Spec.Kind == kindChat && sig.Spec.Reader != "" {
-		if ch := sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel]; ch != "" {
-			conv.OriginReader = &state.OriginReader{Channel: ch, Key: sig.Spec.Reader}
+	if sig.Kind == kindChat && sig.Reader != "" {
+		if ch := sig.Labels[agentopsv1alpha1.LabelChatChannel]; ch != "" {
+			conv.OriginReader = &state.OriginReader{Channel: ch, Key: sig.Reader}
 		}
 	}
 	// A Coordinator-rooted conversation's own resource ceiling is STATUS, and
@@ -244,7 +244,7 @@ func createConversation(ctx context.Context, deps Deps, claimant chat.Claimant, 
 		conv.Budget = budget
 	}
 	if _, err := namewords.AllocateName(ctx, deps.Store,
-		nameKindForSignal(sig.Spec.Kind), wordsForSignal(sourceName, title), conv); err != nil {
+		nameKindForSignal(sig.Kind), wordsForSignal(sourceName, title), conv); err != nil {
 		return nil, err
 	}
 	deps.Activity.Emit(activity.Event{
@@ -275,9 +275,9 @@ func withChannel(refs []state.Ref, name string) []state.Ref {
 // repeated pass finds the delivery it already made rather than making
 // another. Pipeline and Coordinator share a namespace and may share a name,
 // hence the kind letter.
-func InputName(sigName string, ref agentopsv1alpha1.ClaimantRef) string {
+func InputName(sigName string, ref state.SignalClaimant) string {
 	kind := "p"
-	if ref.Kind == agentopsv1alpha1.ClaimantKindCoordinator {
+	if ref.Kind == state.ClaimantKindCoordinator {
 		kind = "c"
 	}
 	return sigName + "-" + kind + "-" + ref.Name
@@ -319,9 +319,9 @@ func queuedInput(conv *state.ConversationRecord, blobKey string) bool {
 // queues it on the conversation, re-reading the record on a lost race
 // (state.Mutate). A delivery that already happened (an earlier pass of the
 // same Signal and claimant) is left alone.
-func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *state.ConversationRecord, sig *agentopsv1alpha1.Signal, inputType string) error {
-	sourceName := sig.Spec.SourceRef.Name
-	ciName := InputName(sig.Name, claimantRef(claimant))
+func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *state.ConversationRecord, sig *state.SignalRecord, inputType string) error {
+	sourceName := sig.SourceRef
+	ciName := InputName(sig.Name, claimantOf(claimant))
 	text, _ := messageOf(sig)
 
 	fresh, _, err := deps.Store.Get(ctx, state.Key(conv.Name))
@@ -338,8 +338,8 @@ func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *s
 		ConversationName: conv.Name,
 		Type:             inputType,
 		Payload:          text,
-		Labels:           sig.Spec.Labels,
-		Severity:         string(sig.Spec.Severity),
+		Labels:           sig.Labels,
+		Severity:         sig.Severity,
 	}); err != nil {
 		return err
 	}
@@ -356,7 +356,7 @@ func appendInput(ctx context.Context, deps Deps, claimant chat.Claimant, conv *s
 			PayloadRef: state.Key(ciName),
 			Origin: &state.InputOrigin{
 				Kind: state.OriginSignal, Name: sourceName,
-				SignalKind: orDefault(sig.Spec.Kind, kindAlert),
+				SignalKind: orDefault(sig.Kind, kindAlert),
 			},
 			ReceivedAt: time.Now(),
 		})

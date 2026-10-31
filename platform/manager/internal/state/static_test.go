@@ -30,21 +30,6 @@ var guardedTypes = map[string]bool{
 	"Signal": true, "SignalList": true, "CooldownEntry": true,
 }
 
-// pendingSignalMigration is TEMPORARY. The Signal call sites have not moved to
-// state.SignalStore yet (tasks.md section 5, the Signal migration): these
-// packages may still name the Signal types and the cooldown field. The
-// migration empties this set in the same change that moves the last site, and
-// then deletes it. Nothing may be added to it, and the Conversation types are
-// never excused by it.
-var pendingSignalMigration = map[string]bool{
-	"internal/httpapi":     true, // publish.go: Create
-	"internal/controller":  true, // signal_controller.go: Get, List, status write, Delete, watch
-	"internal/signalroute": true, // takes a *Signal; cooldown.go: status.cooldown
-}
-
-// signalGuarded are the guarded names the pending set excuses.
-var signalGuarded = map[string]bool{"Signal": true, "SignalList": true, "CooldownEntry": true}
-
 // cooldownField is the SignalSource status field the router reads and writes.
 const cooldownField = "Cooldown"
 
@@ -214,7 +199,7 @@ func violationsIn(path, rel string) ([]violation, error) {
 			return false
 		case *ast.SelectorExpr:
 			id, ok := x.X.(*ast.Ident)
-			if ok && aliases[id.Name] && guardedTypes[x.Sel.Name] && !excused(pkg, x.Sel.Name) {
+			if ok && aliases[id.Name] && guardedTypes[x.Sel.Name] {
 				call := ""
 				if len(calls) > 0 {
 					call = calls[len(calls)-1]
@@ -224,7 +209,7 @@ func violationsIn(path, rel string) ([]violation, error) {
 				})
 			}
 			if inner, isSel := x.X.(*ast.SelectorExpr); isSel && inner.Sel.Name == "Status" &&
-				x.Sel.Name == cooldownField && !excused(pkg, "CooldownEntry") {
+				x.Sel.Name == cooldownField {
 				out = append(out, violation{
 					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: "SignalSource Status." + cooldownField,
 				})
@@ -234,11 +219,6 @@ func violationsIn(path, rel string) ([]violation, error) {
 	}
 	ast.Inspect(file, visit)
 	return out, nil
-}
-
-// excused reports whether a guarded name is tolerated in pkg for now.
-func excused(pkg, name string) bool {
-	return signalGuarded[name] && pendingSignalMigration[pkg]
 }
 
 // apiAliases lists the local names a file imports the API package under, and
@@ -302,7 +282,7 @@ func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string)
 					untypedAt = x.Pos()
 				}
 			case *ast.BasicLit:
-				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && guardedTypes[v] && !excused(pkg, v) {
+				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && guardedTypes[v] {
 					kind = v
 				}
 			case *ast.Ident:
@@ -353,8 +333,8 @@ func mentionsStatusCooldown(file *ast.File) bool {
 
 // The Signal half names the same doors: a Signal or its list, the cooldown
 // entry, and the SignalSource status field, from any package except the
-// backend and, until the migration lands, the temporary pending set.
-func TestStaticCheckGuardsSignalsAndExcusesOnlyThePendingPackages(t *testing.T) {
+// backend, with no package excused.
+func TestStaticCheckGuardsSignalsInEveryPackageOutsideTheBackend(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel, src string) {
 		path := filepath.Join(root, rel)
@@ -371,22 +351,26 @@ func TestStaticCheckGuardsSignalsAndExcusesOnlyThePendingPackages(t *testing.T) 
 	write("internal/chat/bad_entry.go", header+"var _ v1.CooldownEntry\n")
 	write("internal/chat/bad_field.go", "package p\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { s.Status.Cooldown = nil }\n")
 	write("internal/chat/ok_source.go", header+"var _ v1.SignalSource\nvar _ v1.SignalAdapter\n") // other kinds
-	write("internal/signalroute/pending.go", header+"var _ *v1.Signal\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { _ = s.Status.Cooldown }\n")
-	write("internal/signalroute/still_bad.go", header+"var _ v1.Conversation\n") // the pending set never excuses a conversation
+	write("internal/signalroute/bad_route.go", header+"var _ *v1.Signal\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { _ = s.Status.Cooldown }\n")
+	write("internal/controller/bad_conversation.go", header+"var _ v1.Conversation\n")
 	write("internal/state/kube/ok.go", header+"var _ v1.Signal\n")
 
 	found, err := findViolations(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	seen := map[string]bool{}
 	var files []string
 	for _, v := range found {
-		files = append(files, v.file)
+		if !seen[v.file] {
+			seen[v.file] = true
+			files = append(files, v.file)
+		}
 	}
 	sort.Strings(files)
 	want := []string{
 		"internal/chat/bad_entry.go", "internal/chat/bad_field.go", "internal/chat/bad_list.go",
-		"internal/chat/bad_signal.go", "internal/signalroute/still_bad.go",
+		"internal/chat/bad_signal.go", "internal/controller/bad_conversation.go", "internal/signalroute/bad_route.go",
 	}
 	if strings.Join(files, ",") != strings.Join(want, ",") {
 		t.Fatalf("flagged %v, want %v", files, want)

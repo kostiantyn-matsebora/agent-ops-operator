@@ -18,12 +18,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/controller"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
@@ -62,8 +64,19 @@ func startReplica(t *testing.T, nsName string, mod func(*controller.SignalReconc
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The expiry sweep is a manager runnable in production (cmd/manager), and
+	// like every runnable it works only while this replica leads. A short
+	// period stands in for the production one.
+	signals := kube.NewSignalStoreWithSweepInterval(storeClient, nsName, 200*time.Millisecond)
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		signals.Run(ctx)
+		return nil
+	})); err != nil {
+		t.Fatal(err)
+	}
 	r := &controller.SignalReconciler{
 		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Store: kube.NewStore(storeClient, nsName),
+		Signals: signals, Namespace: nsName,
 		Cooldowns: ingest.NewCooldownBook(),
 		Runtime:   runtimepod.Config{ContextPVC: "test-context"},
 		MaxQueued: 50, Identity: "integration-replica",
@@ -308,7 +321,7 @@ func TestSignalHousekeepingAndConsumerRunOnTheLeaderOnly(t *testing.T) {
 		s := getSignalIn(t, n, "cap-old").Status
 		return s.Phase == agentopsv1alpha1.SignalDropped && s.Reason == agentopsv1alpha1.SignalDropOverflow
 	})
-	eventually(t, "the new leader deleted the expired terminal signal", func() bool { return signalGone(n, "expired") })
+	eventually(t, "the new leader's store expired the terminal signal", func() bool { return signalGone(n, "expired") })
 }
 
 // A PartiallyRouted signal is resumed by the next leader from its recorded
@@ -439,9 +452,10 @@ func TestAPublishedSignalIsOwnedByItsSignalSource(t *testing.T) {
 	}
 }
 
-// A Signal whose source was deleted (garbage collection not yet caught up) is
-// left alone by the leader rather than routed or errored.
-func TestALeaderIgnoresALiveSignalWhoseSourceIsGone(t *testing.T) {
+// A Signal whose source was deleted is released by the leader rather than
+// routed or errored. envtest runs no garbage collector, so the owner reference
+// would never remove it: the manager does, itself.
+func TestALeaderReleasesALiveSignalWhoseSourceIsGone(t *testing.T) {
 	const n = "sigleader-orphan"
 	mkNamespace(t, n)
 	src := mkSourceIn(t, n, "alerts")
@@ -452,8 +466,64 @@ func TestALeaderIgnoresALiveSignalWhoseSourceIsGone(t *testing.T) {
 	}
 	rep := startReplica(t, n, nil)
 	eventually(t, "leading", rep.leads)
-	time.Sleep(time.Second)
-	if got := getSignalIn(t, n, "orphan").Status; got.Phase == agentopsv1alpha1.SignalRouted || len(conversationsIn(t, n)) != 0 {
-		t.Errorf("an orphaned signal was routed: %+v", got)
+	eventually(t, "the orphan released", func() bool { return signalGone(n, "orphan") })
+	if len(conversationsIn(t, n)) != 0 {
+		t.Error("an orphaned signal was routed")
+	}
+}
+
+// The manager releases a deleted source's signals and window itself. envtest
+// runs no garbage collector, so the signals of the deleted source are still
+// there when the SignalSource reconciler finds it gone, in every phase, and are
+// removed by that reconcile alone.
+func TestDeletingASignalSourceReleasesItsSignalsAndItsWindow(t *testing.T) {
+	ctx := context.Background()
+	mkSignalSource(t, "rel-gone", "rel-t", "")
+	mkSignalSource(t, "rel-kept", "rel-t", "")
+	var gone, kept agentopsv1alpha1.SignalSource
+	for name, dst := range map[string]*agentopsv1alpha1.SignalSource{"rel-gone": &gone, "rel-kept": &kept} {
+		if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"rel-live", "rel-routed", "rel-failed"} {
+		mkSignalIn(t, ns, &gone, name, name)
+	}
+	terminate(t, ns, "rel-routed", agentopsv1alpha1.SignalRouted, time.Now())
+	terminate(t, ns, "rel-failed", agentopsv1alpha1.SignalFailed, time.Now())
+	mkSignalIn(t, ns, &kept, "rel-other", "rel-other")
+	window := []state.CooldownEntry{{InitiationID: "rel-live", At: time.Now().UTC().Truncate(time.Second)}}
+	if err := signalStore.PutCooldown(ctx, "rel-gone", window); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 1 {
+		t.Fatalf("setup: the window was not recorded: %v %v", got, err)
+	}
+
+	if err := k8sClient.Delete(ctx, &gone); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"rel-live", "rel-routed", "rel-failed"} {
+		if signalGone(ns, name) {
+			t.Fatalf("setup: envtest has no garbage collector, %s should outlive its source", name)
+		}
+	}
+	rc := &controller.SignalSourceReconciler{Client: k8sClient, Signals: signalStore}
+	if _, err := rc.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "rel-gone"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"rel-live", "rel-routed", "rel-failed"} {
+		if !signalGone(ns, name) {
+			t.Errorf("%s of a deleted source must be released, whatever its phase", name)
+		}
+	}
+	if signalGone(ns, "rel-other") {
+		t.Error("another source's signal is untouched")
+	}
+	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 0 {
+		t.Errorf("the deleted source's window must read empty, got %v %v", got, err)
+	}
+	if err := signalStore.ReleaseSource(ctx, "rel-gone"); err != nil {
+		t.Errorf("releasing again is idempotent: %v", err)
 	}
 }

@@ -35,28 +35,36 @@ func stateBackendFromEnv() (string, error) {
 		stateBackendEnv, name, backendKube)
 }
 
-// newStateStore constructs the selected backend scoped to namespace, and
-// registers whatever it must run beside the manager.
+// newStateStores constructs the selected backend's two stores scoped to
+// namespace — the conversation Store and the SignalStore — and registers
+// whatever each must run beside the manager.
 //
 // The kube backend reads through a client with no cache: its Get and Update
 // carry the compare-and-swap, and a cached read would make that precondition
 // a guess (state-store design D-4). The cost is an apiserver read where the
 // informer used to answer; Watch is the one thing the feed needs from it.
-func newStateStore(backend string, mgr ctrl.Manager, namespace string) (state.Store, error) {
+func newStateStores(backend string, mgr ctrl.Manager, namespace string) (state.Store, state.SignalStore, error) {
 	switch backend {
 	case backendKube:
 		c, err := client.NewWithWatch(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
 		if err != nil {
-			return nil, fmt.Errorf("building the uncached client for the kube state store: %w", err)
+			return nil, nil, fmt.Errorf("building the uncached client for the kube state store: %w", err)
 		}
 		store := kube.NewStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval)
+		signals := kube.NewSignalStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval)
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			store.Run(ctx)
 			return nil
 		})); err != nil {
-			return nil, fmt.Errorf("registering the kube state store's expiry sweep: %w", err)
+			return nil, nil, fmt.Errorf("registering the kube state store's expiry sweep: %w", err)
 		}
-		return store, nil
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			signals.Run(ctx)
+			return nil
+		})); err != nil {
+			return nil, nil, fmt.Errorf("registering the kube signal store's expiry sweep: %w", err)
+		}
+		return store, signals, nil
 	}
-	return nil, fmt.Errorf("%s=%q is not a state backend this manager carries", stateBackendEnv, backend)
+	return nil, nil, fmt.Errorf("%s=%q is not a state backend this manager carries", stateBackendEnv, backend)
 }

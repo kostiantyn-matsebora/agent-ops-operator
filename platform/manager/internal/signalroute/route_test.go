@@ -12,11 +12,8 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
-func chatSig(payload string) *agentopsv1alpha1.Signal {
-	s := &agentopsv1alpha1.Signal{}
-	s.Spec.Kind = "chat"
-	s.Spec.Payload = payload
-	return s
+func chatSig(payload string) *state.SignalRecord {
+	return &state.SignalRecord{Kind: "chat", Payload: payload}
 }
 
 func TestAddressedTargetParsesOnlyAChatTaskForNamedTarget(t *testing.T) {
@@ -37,7 +34,7 @@ func TestAddressedTargetParsesOnlyAChatTaskForNamedTarget(t *testing.T) {
 	}
 	for _, tc := range cases {
 		sig := chatSig(tc.payload)
-		sig.Spec.Kind = tc.kind
+		sig.Kind = tc.kind
 		name, task, ok := AddressedTarget(sig)
 		if ok != tc.ok || name != tc.name || task != tc.task {
 			t.Errorf("%s %q -> (%q,%q,%v), want (%q,%q,%v)", tc.kind, tc.payload, name, task, ok, tc.name, tc.task, tc.ok)
@@ -46,8 +43,8 @@ func TestAddressedTargetParsesOnlyAChatTaskForNamedTarget(t *testing.T) {
 }
 
 func TestInputNameIsDerivedFromTheSignalAndClaimant(t *testing.T) {
-	p := agentopsv1alpha1.ClaimantRef{Kind: agentopsv1alpha1.ClaimantKindPipeline, Name: "ops"}
-	c := agentopsv1alpha1.ClaimantRef{Kind: agentopsv1alpha1.ClaimantKindCoordinator, Name: "ops"}
+	p := state.SignalClaimant{Kind: state.ClaimantKindPipeline, Name: "ops"}
+	c := state.SignalClaimant{Kind: state.ClaimantKindCoordinator, Name: "ops"}
 	first, again := InputName("sig-1", p), InputName("sig-1", p)
 	if first != again {
 		t.Fatal("must be deterministic")

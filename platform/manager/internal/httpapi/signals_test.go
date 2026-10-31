@@ -34,7 +34,7 @@ func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 	store := kube.NewStore(c, sigTestNamespace)
 	q := &chat.OpQueue{Store: store, Registry: chat.NewRegistry(), Activity: acts}
 	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: sigTestNamespace, Ops: q, Activity: acts}
-	return &Server{Reader: c, Client: c, Store: store, Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
+	return &Server{Reader: c, Client: c, Store: store, Signals: kube.NewSignalStore(c, sigTestNamespace), Namespace: sigTestNamespace, AdapterToken: "sig-test-master",
 		Ops: q, Router: router, Activity: acts}, c
 }
 
@@ -42,6 +42,9 @@ func sigServer(t *testing.T, objs ...client.Object) (*Server, client.Client) {
 func sigTestSource(name, adapter string) *agentopsv1alpha1.SignalSource {
 	src := &agentopsv1alpha1.SignalSource{}
 	src.Name, src.Namespace = name, sigTestNamespace
+	// A real apiserver assigns the UID the owner link is built from; the fake
+	// client does not, so the fixture carries one.
+	src.UID = types.UID("uid-" + name)
 	src.Spec.Adapter = adapter
 	return src
 }

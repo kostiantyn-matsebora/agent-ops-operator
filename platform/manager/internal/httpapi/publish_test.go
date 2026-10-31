@@ -310,7 +310,7 @@ func TestPublishFailedStoreIsNotAcknowledgedAndResendIsDeduplicated(t *testing.T
 		return cl.Create(ctx, obj, opts...)
 	}}
 	c := base.WithInterceptorFuncs(failSecond).Build()
-	s := &Server{Reader: c, Store: kube.NewStore(c, sigTestNamespace), Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master", Activity: activity.New(16)}
+	s := &Server{Reader: c, Store: kube.NewStore(c, sigTestNamespace), Signals: kube.NewSignalStore(c, sigTestNamespace), Client: c, Namespace: sigTestNamespace, AdapterToken: "sig-test-master", Activity: activity.New(16)}
 
 	batch := []map[string]any{
 		{"initiationId": "i-1", "signalId": "m-1", "payload": "x"},

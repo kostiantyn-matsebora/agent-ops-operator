@@ -192,7 +192,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	store, err := newStateStore(backend, mgr, namespace)
+	store, signalStore, err := newStateStores(backend, mgr, namespace)
 	if err != nil {
 		setupLog.Error(err, "state store", "backend", backend)
 		os.Exit(1)
@@ -248,7 +248,8 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.SignalSourceReconciler{
-		Client: mgr.GetClient(),
+		Client:  mgr.GetClient(),
+		Signals: signalStore,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "signalsource controller")
 		os.Exit(1)
@@ -404,6 +405,8 @@ func main() {
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),
 		Store:     store,
+		Signals:   signalStore,
+		Namespace: namespace,
 		Activity:  acts,
 		Ops:       ops,
 		Cooldowns: cooldowns,
@@ -428,6 +431,7 @@ func main() {
 		Client:    mgr.GetClient(),
 		Reader:    mgr.GetAPIReader(),
 		Store:     store,
+		Signals:   signalStore,
 		Namespace: namespace,
 		Addr:      env("API_ADDR", ":8080"),
 		Ops:       ops,

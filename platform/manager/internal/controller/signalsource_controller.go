@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -15,6 +16,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // ConditionWired answers "does any Ready Pipeline claim this source" — the
@@ -28,13 +30,20 @@ const ConditionWired = "Wired"
 // route signals only while a Ready Pipeline claims them.
 type SignalSourceReconciler struct {
 	client.Client
+	// Signals releases a deleted source's signals and cooldown window: the
+	// manager's own act on the deletion, so nothing depends on an owner
+	// reference being honoured (state-store design D-14).
+	Signals state.SignalStore
 }
 
 // Reconcile sets Served on one SignalSource.
 func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var src agentopsv1alpha1.SignalSource
 	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, r.Signals.ReleaseSource(ctx, req.Name)
+		}
+		return ctrl.Result{}, err
 	}
 
 	// the adapter CR is both the readiness source and the schema declarer

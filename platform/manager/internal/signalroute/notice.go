@@ -9,6 +9,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // The notices a chat signal dropped before fan-out is owed. A person who just
@@ -62,8 +63,8 @@ func ambiguousNotice(servers []chat.Claimant) chat.Message {
 
 // channelOf resolves the Channel a chat signal came from. Nil when the signal
 // names none or the Channel does not exist.
-func channelOf(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal) *agentopsv1alpha1.Channel {
-	name := sig.Spec.Labels[agentopsv1alpha1.LabelChatChannel]
+func channelOf(ctx context.Context, deps Deps, sig *state.SignalRecord) *agentopsv1alpha1.Channel {
+	name := sig.Labels[agentopsv1alpha1.LabelChatChannel]
 	if name == "" {
 		return nil
 	}
@@ -76,10 +77,10 @@ func channelOf(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal) *ag
 
 // tell posts one notice on the surface a chat signal came from, linked to the
 // message that provoked it when the adapter supplied a handle for one.
-func tell(ctx context.Context, deps Deps, ch *agentopsv1alpha1.Channel, sig *agentopsv1alpha1.Signal, msg chat.Message) {
+func tell(ctx context.Context, deps Deps, ch *agentopsv1alpha1.Channel, sig *state.SignalRecord, msg chat.Message) {
 	if deps.Ops == nil || ch == nil {
 		return
 	}
-	msg.InReplyTo = sig.Spec.Labels[agentopsv1alpha1.LabelChatMessage]
+	msg.InReplyTo = sig.Labels[agentopsv1alpha1.LabelChatMessage]
 	deps.Ops.EnqueueMessage(ctx, ch, nil, nil, msg)
 }

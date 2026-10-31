@@ -71,3 +71,18 @@ func TestCooldownReleaseForgetsAnAdmission(t *testing.T) {
 		t.Fatal("a released id is fresh again")
 	}
 }
+
+func TestCooldownBookLeavesASourceUnbuiltWhenItsRecordCannotBeRead(t *testing.T) {
+	b := NewCooldownBook()
+	if cd := b.For("a", func() *Cooldown { return nil }); cd != nil {
+		t.Fatal("a failed build yields no Cooldown")
+	}
+	if len(b.Stats()) != 0 {
+		t.Fatal("a failed build must not leave an empty window behind")
+	}
+	built := 0
+	cd := b.For("a", func() *Cooldown { built++; return NewCooldown(time.Hour) })
+	if cd == nil || built != 1 {
+		t.Fatal("the next call builds again")
+	}
+}

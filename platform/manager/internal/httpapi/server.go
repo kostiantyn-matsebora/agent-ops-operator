@@ -77,7 +77,9 @@ type Server struct {
 	Reader client.Reader // APIReader: strong reads for dispatch state
 	// Store is the only way this surface reaches a Conversation or a queued
 	// input's payload (state-store design D-2).
-	Store     state.Store
+	Store state.Store
+	// Signals is the only way publication stores a Signal.
+	Signals   state.SignalStore
 	Namespace string
 	Addr      string
 

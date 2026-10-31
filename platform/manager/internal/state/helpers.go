@@ -347,3 +347,35 @@ func IgnoreNotFound(err error) error {
 	}
 	return err
 }
+
+// SignalRollupPhase derives a signal's phase from its claimants alone — the
+// pure function a signal's phase is always written FROM, never independently.
+// It mirrors api/v1alpha1.RollupPhase, which the Signal CRD's own documentation
+// names.
+//
+// It does NOT decide SignalDropped: a drop happens strictly before any
+// claimant exists, so the caller sets that phase directly.
+func SignalRollupPhase(claimants []SignalClaimant) string {
+	if len(claimants) == 0 {
+		return SignalPending
+	}
+	var anyRouting, anyRouted bool
+	for i := range claimants {
+		switch claimants[i].State {
+		case ClaimantRouting:
+			anyRouting = true
+		case ClaimantRouted:
+			anyRouted = true
+		}
+	}
+	switch {
+	case anyRouting && anyRouted:
+		return SignalPartiallyRouted
+	case anyRouting:
+		return SignalPending
+	case anyRouted:
+		return SignalRouted
+	default:
+		return SignalFailed
+	}
+}

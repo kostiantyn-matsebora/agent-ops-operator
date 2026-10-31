@@ -68,12 +68,12 @@ const defaultOrderRetry = time.Second
 // Every pass is idempotent (equality reuse + the input named for the Signal),
 // so a pass interrupted by a crash or a leader change is simply repeated; a
 // new leader needs no recovery step beyond the initial reconcile of every
-// non-terminal Signal controller-runtime performs when its cache syncs.
+// signal the feed's relist enqueues when it starts.
 type SignalReconciler struct {
 	client.Client
-	// Reader is the API server read path. A Signal is read from it, never
-	// from the cache, so a requeued pass cannot act on a status it already
-	// advanced. Nil falls back to Client (tests).
+	// Reader is the API server read path for the objects that stay Kubernetes
+	// objects under any backend (the SignalSource, the Lease, claimants). Nil
+	// falls back to Client (tests).
 	Reader client.Reader
 	// Activity records the loud Failed/Dropped surfacing. Nil is inert.
 	Activity *activity.Log
@@ -81,6 +81,13 @@ type SignalReconciler struct {
 	Ops *chat.OpQueue
 	// Store is the only way a signal's route reaches a Conversation.
 	Store state.Store
+	// Signals is the only way this controller reaches a Signal or a source's
+	// cooldown window. It is read straight from its source of truth, never a
+	// cache, so a requeued pass cannot act on a status it already advanced.
+	Signals state.SignalStore
+	// Namespace names the install's namespace, for the objects read beside the
+	// signals and for the requests the feed enqueues.
+	Namespace string
 	// Cooldowns is the leader's per-source cooldown map.
 	Cooldowns *ingest.CooldownBook
 	// Runtime and MaxQueued are the SAME bootstrap config and backlog bound
@@ -159,121 +166,138 @@ func (r *SignalReconciler) concurrency() int {
 	return DefaultSignalConsumerConcurrency
 }
 
-// ttlFor is the deletion window of a TERMINAL phase, measured from
+// ttlFor is the expiry window of a TERMINAL phase, measured from
 // status.completedAt. Each phase has its own.
-func (r *SignalReconciler) ttlFor(phase agentopsv1alpha1.SignalPhase) time.Duration {
+func (r *SignalReconciler) ttlFor(phase string) time.Duration {
 	switch phase {
-	case agentopsv1alpha1.SignalDropped:
+	case state.SignalDropped:
 		return orDuration(r.TTLDropped, DefaultSignalTTLDropped)
-	case agentopsv1alpha1.SignalFailed:
+	case state.SignalFailed:
 		return orDuration(r.TTLFailed, DefaultSignalTTLFailed)
 	default:
 		return orDuration(r.TTLRouted, DefaultSignalTTLRouted)
 	}
 }
 
-// terminalSignalPhase reports whether a phase is final.
-func terminalSignalPhase(p agentopsv1alpha1.SignalPhase) bool {
-	switch p {
-	case agentopsv1alpha1.SignalRouted, agentopsv1alpha1.SignalDropped, agentopsv1alpha1.SignalFailed:
-		return true
-	default:
-		return false
-	}
-}
-
-func (r *SignalReconciler) deps(namespace string) signalroute.Deps {
+func (r *SignalReconciler) deps() signalroute.Deps {
 	return signalroute.Deps{
-		Client: r.Client, Reader: r.reader(), Store: r.Store, Namespace: namespace,
+		Client: r.Client, Signals: r.Signals, Reader: r.reader(), Store: r.Store, Namespace: r.Namespace,
 		Activity: r.Activity, Ops: r.Ops, Cooldowns: r.Cooldowns,
 		Runtime: r.Runtime, MaxQueued: r.MaxQueued,
 	}
 }
 
-// Reconcile is one pass over one Signal: housekeeping first (TTL delete, cap,
+// signalPass is the record one Reconcile holds and the revision it was read
+// at. Every write of the pass goes through write, which carries the revision it
+// returns into the next one: a concurrent writer fails the pass with
+// ErrConflict, and the work queue repeats it. There is no get-modify-update
+// loop here on purpose — re-running a routing decision that already created a
+// conversation is the failure the held revision prevents.
+type signalPass struct {
+	key state.Key
+	rec state.SignalRecord
+	rev state.Revision
+}
+
+// write persists the pass's record against the revision it holds.
+func (r *SignalReconciler) write(ctx context.Context, p *signalPass) error {
+	rev, err := r.Signals.Update(ctx, p.key, p.rev, p.rec)
+	if err != nil {
+		return err
+	}
+	p.rev = rev
+	return nil
+}
+
+// Reconcile is one pass over one Signal: housekeeping first (expiry, cap,
 // retry deadline), then — in arrival order within its conversation — the
 // consumer.
 func (r *SignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var sig agentopsv1alpha1.Signal
-	if err := r.reader().Get(ctx, req.NamespacedName, &sig); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	key := state.Key(req.Name)
+	rec, rev, err := r.Signals.Get(ctx, key)
+	if err != nil {
+		return ctrl.Result{}, state.IgnoreNotFound(err)
 	}
-	if terminalSignalPhase(sig.Status.Phase) {
-		return r.reconcileTerminal(ctx, &sig)
+	p := &signalPass{key: key, rec: rec, rev: rev}
+	if p.rec.Terminal() {
+		return r.reconcileTerminal(ctx, p)
 	}
-	return r.reconcileLive(ctx, &sig)
+	return r.reconcileLive(ctx, p)
 }
 
-// reconcileTerminal is TTL housekeeping: delete a terminal Signal once its
-// phase's TTL has passed, measured from status.completedAt — never from
-// creationTimestamp, which a long-retried signal left behind long ago — or
-// requeue for exactly the moment it will.
-func (r *SignalReconciler) reconcileTerminal(ctx context.Context, sig *agentopsv1alpha1.Signal) (ctrl.Result, error) {
-	if sig.Status.CompletedAt == nil {
+// reconcileTerminal is the expiry housekeeping: a terminal Signal carries the
+// instant it removes itself, written in the update that made it terminal. One
+// found without — written by an earlier build, or by a crash between the status
+// write and the expiry write — is stamped here, measured from status.completedAt
+// and never from creation, which a long-retried signal left behind long ago.
+// Nothing deletes it by hand: the store's own sweep does, once the instant
+// passes.
+func (r *SignalReconciler) reconcileTerminal(ctx context.Context, p *signalPass) (ctrl.Result, error) {
+	stamped := false
+	if p.rec.CompletedAt == nil {
 		// A terminal Signal this version did not write. Its completion time was
-		// never recorded, so take the best the object itself knows: the first
-		// attempt, then the creation. Stamping "now" would restart the TTL of a
-		// signal that finished days ago.
-		before := sig.DeepCopy()
-		at := sig.CreationTimestamp
-		if sig.Status.FirstAttemptAt != nil {
-			at = *sig.Status.FirstAttemptAt
+		// never recorded, so take the best the record itself knows: the first
+		// attempt, then the creation. Stamping "now" would restart the expiry of
+		// a signal that finished days ago.
+		at := p.rec.CreatedAt
+		if p.rec.FirstAttemptAt != nil {
+			at = *p.rec.FirstAttemptAt
 		}
-		sig.Status.CompletedAt = &at
-		if err := r.writeStatus(ctx, sig, before); err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(err)
-		}
+		p.rec.CompletedAt, stamped = &at, true
 	}
-	ttl := r.ttlFor(sig.Status.Phase)
-	age := r.now().Sub(sig.Status.CompletedAt.Time)
-	if age < ttl {
-		return ctrl.Result{RequeueAfter: jitter(ttl - age)}, nil
+	if p.rec.ExpiresAt == nil {
+		expires := p.rec.CompletedAt.Add(r.ttlFor(p.rec.Phase))
+		p.rec.ExpiresAt, stamped = &expires, true
 	}
-	log.FromContext(ctx).Info("deleting a terminal signal past its TTL",
-		"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "phase", sig.Status.Phase,
-		"sinceCompleted", age.Round(time.Minute), "ttl", ttl)
-	// Conditional on the version this pass read: a write that landed since is
-	// a Signal that is not finished after all.
-	err := r.Delete(ctx, sig, client.Preconditions{UID: &sig.UID, ResourceVersion: &sig.ResourceVersion})
-	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
-		return ctrl.Result{Requeue: true}, nil
+	if !stamped {
+		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{}, err
+	return ctrl.Result{}, state.IgnoreNotFound(r.write(ctx, p))
 }
 
 // reconcileLive handles a non-terminal Signal.
-func (r *SignalReconciler) reconcileLive(ctx context.Context, sig *agentopsv1alpha1.Signal) (ctrl.Result, error) {
+func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ctrl.Result, error) {
 	var src agentopsv1alpha1.SignalSource
-	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: sig.Namespace, Name: sig.Spec.SourceRef.Name}, &src); err != nil {
-		// A source deleted under its Signals takes them through the ownerRef;
-		// nothing here can route without it.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	if evicted, err := r.enforceSourceCap(ctx, sig); err != nil || evicted {
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: p.rec.SourceRef}, &src); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, r.releaseOrphans(ctx, p.rec.SourceRef)
+		}
 		return ctrl.Result{}, err
 	}
-	if first := sig.Status.FirstAttemptAt; first != nil {
-		if elapsed := r.now().Sub(first.Time); elapsed >= r.retryDeadline() {
-			return ctrl.Result{}, r.exhaust(ctx, sig, elapsed)
+
+	if evicted, err := r.enforceSourceCap(ctx, p); err != nil || evicted {
+		return ctrl.Result{}, err
+	}
+	if first := p.rec.FirstAttemptAt; first != nil {
+		if elapsed := r.now().Sub(*first); elapsed >= r.retryDeadline() {
+			return ctrl.Result{}, r.exhaust(ctx, p, elapsed)
 		}
 	}
 
 	// Messages of one conversation are processed one at a time, in arrival
 	// order; different conversations run in parallel (design D-3).
-	key := sig.Spec.SourceRef.Name + "\x00" + sig.Spec.InitiationID
+	key := p.rec.SourceRef + "\x00" + p.rec.InitiationID
 	if !r.acquire(key) {
 		return ctrl.Result{RequeueAfter: r.orderRetry()}, nil
 	}
 	defer r.release(key)
-	head, err := r.isHead(ctx, sig)
+	head, err := r.isHead(ctx, &p.rec)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if !head {
 		return ctrl.Result{RequeueAfter: r.orderRetry()}, nil
 	}
-	return r.consume(ctx, sig, &src)
+	return r.consume(ctx, p, &src)
+}
+
+// releaseOrphans removes every Signal of a source that no longer exists. The
+// manager does this itself rather than rely on an owner reference being
+// honoured: the store may not be the Kubernetes API, and under envtest no
+// garbage collector runs.
+func (r *SignalReconciler) releaseOrphans(ctx context.Context, source string) error {
+	log.FromContext(ctx).Info("releasing the signals of a source that no longer exists", "source", source)
+	return r.Signals.ReleaseSource(ctx, source)
 }
 
 // acquire takes the in-process lock of one (source, initiationId) key. The
@@ -298,33 +322,21 @@ func (r *SignalReconciler) release(key string) {
 	delete(r.held, key)
 }
 
-// signalBefore orders by arrival: creationTimestamp, then name.
-func signalBefore(a, b *agentopsv1alpha1.Signal) bool {
-	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
-		return a.CreationTimestamp.Before(&b.CreationTimestamp)
-	}
-	return a.Name < b.Name
-}
-
 // isHead reports whether sig is the earliest non-terminal Signal of its
 // (source, initiationId): an earlier one still in flight goes first, because
 // both feed one conversation and appending out of order — or each failing to
 // find the conversation the other is creating — is the failure this prevents.
-func (r *SignalReconciler) isHead(ctx context.Context, sig *agentopsv1alpha1.Signal) (bool, error) {
-	// Read from the API server, not the cache: an earlier message the cache has
-	// not seen yet would otherwise be overtaken. The namespace holds at most
-	// the per-source cap of live Signals per source, so the list stays small.
-	var list agentopsv1alpha1.SignalList
-	if err := r.reader().List(ctx, &list, client.InNamespace(sig.Namespace)); err != nil {
-		return false, fmt.Errorf("list signals of %s: %w", sig.Spec.InitiationID, err)
+func (r *SignalReconciler) isHead(ctx context.Context, sig *state.SignalRecord) (bool, error) {
+	// The store reads its source of truth, not a cache: an earlier message a
+	// cache has not seen yet would otherwise be overtaken. The index returns at
+	// most the per-source cap of live Signals, so the list stays small.
+	live, err := r.Signals.List(ctx, state.SignalNonTerminalByInitiation,
+		state.SignalListKey{Source: sig.SourceRef, InitiationID: sig.InitiationID})
+	if err != nil {
+		return false, fmt.Errorf("list signals of %s: %w", sig.InitiationID, err)
 	}
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.Name == sig.Name || terminalSignalPhase(other.Status.Phase) ||
-			other.Spec.SourceRef.Name != sig.Spec.SourceRef.Name || other.Spec.InitiationID != sig.Spec.InitiationID {
-			continue
-		}
-		if signalBefore(other, sig) {
+	for i := range live {
+		if live[i].Name != sig.Name && state.SignalArrivesBefore(&live[i], sig) {
 			return false, nil
 		}
 	}
@@ -336,34 +348,33 @@ func (r *SignalReconciler) isHead(ctx context.Context, sig *agentopsv1alpha1.Sig
 // Routing. Each step is recorded in its own status write, and the snapshot is
 // written BEFORE anything is created: a repeated pass then skips admission, so
 // the cooldown it spent cannot suppress the repeat.
-func (r *SignalReconciler) consume(ctx context.Context, sig *agentopsv1alpha1.Signal, src *agentopsv1alpha1.SignalSource) (ctrl.Result, error) {
-	deps := r.deps(sig.Namespace)
-	before := sig.DeepCopy()
+func (r *SignalReconciler) consume(ctx context.Context, p *signalPass, src *agentopsv1alpha1.SignalSource) (ctrl.Result, error) {
+	deps := r.deps()
+	sig := &p.rec
 	r.stampAttempt(sig)
 
-	if len(sig.Status.Claimants) == 0 {
+	if len(sig.Claimants) == 0 {
 		res, err := signalroute.Admit(ctx, deps, sig, src)
 		if err != nil {
 			// Persist the attempt even so: attempts and firstAttemptAt must
 			// advance, or a poison Signal would never reach its retry deadline.
-			_ = r.writeStatus(ctx, sig, before)
+			_ = r.write(ctx, p)
 			rollback(res)
 			return ctrl.Result{}, err
 		}
 		r.finishIfTerminal(ctx, sig)
-		if err := r.writeStatus(ctx, sig, before); err != nil {
+		if err := r.write(ctx, p); err != nil {
 			rollback(res)
 			return ctrl.Result{}, err
 		}
 		if res.Dropped {
 			return ctrl.Result{}, nil
 		}
-		before = sig.DeepCopy()
 	}
 
 	res, procErr := signalroute.Route(ctx, deps, sig)
 	r.finishIfTerminal(ctx, sig)
-	if err := r.writeStatus(ctx, sig, before); err != nil {
+	if err := r.write(ctx, p); err != nil {
 		return ctrl.Result{}, err
 	}
 	if procErr != nil {
@@ -375,11 +386,11 @@ func (r *SignalReconciler) consume(ctx context.Context, sig *agentopsv1alpha1.Si
 				"source", src.Name, "error", err.Error())
 		}
 	}
-	if sig.Status.Phase == agentopsv1alpha1.SignalFailed {
+	if sig.Phase == state.SignalFailed {
 		signalroute.Loud(ctx, r.Activity, sig, activity.KindSignalFailed, activity.CodeSkipped,
 			"every claimant resolved without routing the signal")
 	}
-	if res.Wait && !terminalSignalPhase(sig.Status.Phase) {
+	if res.Wait && !sig.Terminal() {
 		return ctrl.Result{RequeueAfter: r.retryInterval()}, nil
 	}
 	return ctrl.Result{}, nil
@@ -393,60 +404,58 @@ func rollback(res signalroute.Result) {
 
 // stampAttempt counts the pass and stamps the first one — the origin the retry
 // deadline measures from.
-func (r *SignalReconciler) stampAttempt(sig *agentopsv1alpha1.Signal) {
-	sig.Status.Attempts++
-	if sig.Status.FirstAttemptAt == nil {
-		now := metav1.NewTime(r.now())
-		sig.Status.FirstAttemptAt = &now
+func (r *SignalReconciler) stampAttempt(sig *state.SignalRecord) {
+	sig.Attempts++
+	if sig.FirstAttemptAt == nil {
+		now := r.now().UTC().Truncate(time.Second)
+		sig.FirstAttemptAt = &now
 	}
 }
 
 // finishIfTerminal stamps the write that makes a phase terminal: completedAt
-// (never moved by a later write), and the leader that processed it.
-func (r *SignalReconciler) finishIfTerminal(ctx context.Context, sig *agentopsv1alpha1.Signal) {
-	if !terminalSignalPhase(sig.Status.Phase) || sig.Status.CompletedAt != nil {
+// (never moved by a later write), the leader that processed it, and the instant
+// the record expires — completedAt plus its phase's TTL, so the same
+// compare-and-swap that ends the signal also starts its clock and nothing
+// deletes it by hand. Instants are held at the second a stored status keeps, so
+// a stamp read back equals the one computed here.
+func (r *SignalReconciler) finishIfTerminal(ctx context.Context, sig *state.SignalRecord) {
+	if !sig.Terminal() || sig.CompletedAt != nil {
 		return
 	}
-	now := metav1.NewTime(r.now())
-	sig.Status.CompletedAt = &now
-	sig.Status.ConsumedAt = &now
-	sig.Status.ConsumedBy = r.consumer(ctx, sig.Namespace)
+	now := r.now().UTC().Truncate(time.Second)
+	sig.CompletedAt = &now
+	sig.ConsumedAt = &now
+	sig.ConsumedBy = r.consumer(ctx)
+	expires := now.Add(r.ttlFor(sig.Phase))
+	sig.ExpiresAt = &expires
 }
 
 // consumer is the leader's identity: the leader Lease's holderIdentity, which
 // carries controller-runtime's own uniqueness suffix, falling back to this
 // replica's name when the Lease cannot be read.
-func (r *SignalReconciler) consumer(ctx context.Context, namespace string) string {
+func (r *SignalReconciler) consumer(ctx context.Context) string {
 	var lease coordinationv1.Lease
-	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: LeaderLeaseName}, &lease); err == nil &&
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: LeaderLeaseName}, &lease); err == nil &&
 		lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != "" {
 		return *lease.Spec.HolderIdentity
 	}
 	return r.Identity
 }
 
-// writeStatus persists sig's status against the version it was read at, so a
-// concurrent writer fails this pass (and it is repeated) instead of being
-// overwritten.
-func (r *SignalReconciler) writeStatus(ctx context.Context, sig, before *agentopsv1alpha1.Signal) error {
-	patch := client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})
-	return r.Status().Patch(ctx, sig, patch)
-}
-
 // exhaust applies the retry deadline: every non-terminal claimant becomes
 // Failed with the exhaustion as its reason — or, before fan-out, the Signal is
 // Dropped with reason exhausted. A PartiallyRouted signal always exits.
-func (r *SignalReconciler) exhaust(ctx context.Context, sig *agentopsv1alpha1.Signal, elapsed time.Duration) error {
+func (r *SignalReconciler) exhaust(ctx context.Context, p *signalPass, elapsed time.Duration) error {
+	sig := &p.rec
 	reason := fmt.Sprintf("retry deadline exceeded after %s (limit %s)", elapsed.Round(time.Second), r.retryDeadline())
-	before := sig.DeepCopy()
-	if len(sig.Status.Claimants) == 0 {
-		sig.Status.Phase = agentopsv1alpha1.SignalDropped
-		sig.Status.Reason = agentopsv1alpha1.SignalDropExhausted
+	if len(sig.Claimants) == 0 {
+		sig.Phase = state.SignalDropped
+		sig.Reason = string(agentopsv1alpha1.SignalDropExhausted)
 	} else {
 		failRouting(sig, reason)
 	}
 	r.finishIfTerminal(ctx, sig)
-	if err := r.writeStatus(ctx, sig, before); err != nil {
+	if err := r.write(ctx, p); err != nil {
 		return err
 	}
 	r.surface(ctx, sig, activity.CodeRetryExhausted, activity.CodeExhausted, reason)
@@ -454,29 +463,29 @@ func (r *SignalReconciler) exhaust(ctx context.Context, sig *agentopsv1alpha1.Si
 }
 
 // failRouting marks every claimant still Routing Failed and rolls the phase up.
-func failRouting(sig *agentopsv1alpha1.Signal, reason string) {
-	for i := range sig.Status.Claimants {
-		c := &sig.Status.Claimants[i]
-		if c.State == agentopsv1alpha1.ClaimantRouting {
-			c.State = agentopsv1alpha1.ClaimantFailed
+func failRouting(sig *state.SignalRecord, reason string) {
+	for i := range sig.Claimants {
+		c := &sig.Claimants[i]
+		if c.State == state.ClaimantRouting {
+			c.State = state.ClaimantFailed
 			c.Reason = reason
 		}
 	}
-	sig.Status.Phase = agentopsv1alpha1.RollupPhase(sig.Status.Claimants)
+	sig.Phase = state.SignalRollupPhase(sig.Claimants)
 }
 
 // surface makes a housekeeping end as loud as the unwired drop: a Dropped
 // signal carries dropCode, a Failed one failCode; a Routed roll-up (some
 // claimants routed, the rest failed) is logged only, as the Signal is not lost.
-func (r *SignalReconciler) surface(ctx context.Context, sig *agentopsv1alpha1.Signal, failCode, dropCode, detail string) {
-	switch sig.Status.Phase {
-	case agentopsv1alpha1.SignalDropped:
+func (r *SignalReconciler) surface(ctx context.Context, sig *state.SignalRecord, failCode, dropCode, detail string) {
+	switch sig.Phase {
+	case state.SignalDropped:
 		signalroute.Loud(ctx, r.Activity, sig, activity.KindSignalDropped, dropCode, detail)
-	case agentopsv1alpha1.SignalFailed:
+	case state.SignalFailed:
 		signalroute.Loud(ctx, r.Activity, sig, activity.KindSignalFailed, failCode, detail)
 	default:
 		log.FromContext(ctx).Info("signal housekeeping failed its unrouted claimants",
-			"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "phase", sig.Status.Phase, "detail", detail)
+			"signal", sig.Name, "source", sig.SourceRef, "phase", sig.Phase, "detail", detail)
 	}
 }
 
@@ -485,16 +494,16 @@ func (r *SignalReconciler) surface(ctx context.Context, sig *agentopsv1alpha1.Si
 // the work queue is what keeps it from racing a consumer — so a pass that finds
 // its source over the cap evicts itself when it is among the oldest, and
 // kicks the others' passes otherwise. Reports whether sig itself was evicted.
-func (r *SignalReconciler) enforceSourceCap(ctx context.Context, sig *agentopsv1alpha1.Signal) (bool, error) {
-	var list agentopsv1alpha1.SignalList
-	if err := r.List(ctx, &list, client.InNamespace(sig.Namespace)); err != nil {
+func (r *SignalReconciler) enforceSourceCap(ctx context.Context, p *signalPass) (bool, error) {
+	sig := &p.rec
+	others, err := r.Signals.List(ctx, state.SignalNonTerminalBySource, state.SignalListKey{Source: sig.SourceRef})
+	if err != nil {
 		return false, err
 	}
-	live := []*agentopsv1alpha1.Signal{sig}
-	for i := range list.Items {
-		item := &list.Items[i]
-		if item.Name != sig.Name && item.Spec.SourceRef.Name == sig.Spec.SourceRef.Name && !terminalSignalPhase(item.Status.Phase) {
-			live = append(live, item)
+	live := []*state.SignalRecord{sig}
+	for i := range others {
+		if others[i].Name != sig.Name {
+			live = append(live, &others[i])
 		}
 	}
 	limit := r.maxPerSource()
@@ -502,14 +511,14 @@ func (r *SignalReconciler) enforceSourceCap(ctx context.Context, sig *agentopsv1
 	if over <= 0 {
 		return false, nil
 	}
-	sort.Slice(live, func(i, j int) bool { return signalBefore(live[i], live[j]) })
+	sort.Slice(live, func(i, j int) bool { return state.SignalArrivesBefore(live[i], live[j]) })
 	evictedSelf := false
 	for _, victim := range live[:over] {
 		if victim.Name != sig.Name {
 			r.kickSignal(victim)
 			continue
 		}
-		if err := r.evict(ctx, sig, len(live), limit); err != nil {
+		if err := r.evict(ctx, p, len(live), limit); err != nil {
 			return false, err
 		}
 		evictedSelf = true
@@ -518,12 +527,13 @@ func (r *SignalReconciler) enforceSourceCap(ctx context.Context, sig *agentopsv1
 }
 
 // kickSignal enqueues another Signal's pass on the same work queue.
-func (r *SignalReconciler) kickSignal(victim *agentopsv1alpha1.Signal) {
+func (r *SignalReconciler) kickSignal(victim *state.SignalRecord) {
 	if r.kick == nil {
 		return
 	}
+	obj := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: victim.Name, Namespace: r.Namespace}}
 	select {
-	case r.kick <- event.GenericEvent{Object: victim.DeepCopy()}:
+	case r.kick <- event.GenericEvent{Object: obj}:
 	default: // full: the victim's own requeue reaches it
 	}
 }
@@ -532,32 +542,34 @@ func (r *SignalReconciler) kickSignal(victim *agentopsv1alpha1.Signal) {
 // Dropped (reason overflow), after it every non-terminal claimant is Failed
 // (reason overflow) and the phase rolls up — Dropped stays strictly
 // pre-fan-out. Counted and logged either way.
-func (r *SignalReconciler) evict(ctx context.Context, sig *agentopsv1alpha1.Signal, live, limit int) error {
-	before := sig.DeepCopy()
+func (r *SignalReconciler) evict(ctx context.Context, p *signalPass, live, limit int) error {
+	sig := &p.rec
 	const reason = "evicted: per-source signal cap exceeded (overflow)"
-	if len(sig.Status.Claimants) == 0 {
-		sig.Status.Phase = agentopsv1alpha1.SignalDropped
-		sig.Status.Reason = agentopsv1alpha1.SignalDropOverflow
+	if len(sig.Claimants) == 0 {
+		sig.Phase = state.SignalDropped
+		sig.Reason = string(agentopsv1alpha1.SignalDropOverflow)
 	} else {
 		failRouting(sig, reason)
 	}
 	r.finishIfTerminal(ctx, sig)
-	if err := r.writeStatus(ctx, sig, before); err != nil {
+	if err := r.write(ctx, p); err != nil {
 		return err
 	}
 	log.FromContext(ctx).Info("evicted the oldest non-terminal signal of an over-cap source",
-		"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "live", live, "limit", limit, "phase", sig.Status.Phase)
+		"signal", sig.Name, "source", sig.SourceRef, "live", live, "limit", limit, "phase", sig.Phase)
 	r.surface(ctx, sig, activity.CodeOverflow, activity.CodeOverflow, reason)
 	return nil
 }
 
 // SetupWithManager wires the consumer pool: SIGNAL_CONSUMER_CONCURRENCY workers
-// over one work queue keyed by Signal, plus the channel housekeeping uses to
-// enqueue another Signal's pass. The controller runs on the leader only.
+// over one work queue keyed by Signal, fed by the SignalStore's feed (design
+// D-14) rather than an informer on the CRD, plus the channel housekeeping uses
+// to enqueue another Signal's pass. The controller runs on the leader only.
 func (r *SignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.kick = make(chan event.GenericEvent, 64)
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&agentopsv1alpha1.Signal{}).
+		Named("signal").
+		WatchesRawSource(source.Func(r.startFeed)).
 		WatchesRawSource(source.Channel(r.kick, &handler.EnqueueRequestForObject{})).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.concurrency()}).
 		Complete(r)

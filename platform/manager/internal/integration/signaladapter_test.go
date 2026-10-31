@@ -387,7 +387,7 @@ func assertNoServiceWithoutPort(t *testing.T, ctx context.Context, adapterName s
 // the source (pipeline-only wiring: unclaimed → Wired=False).
 func assertSignalSourceServedFlipsWithWiringAndReadiness(t *testing.T, ctx context.Context) {
 	t.Helper()
-	srcRec := &controller.SignalSourceReconciler{Client: k8sClient}
+	srcRec := &controller.SignalSourceReconciler{Client: k8sClient, Signals: signalStore}
 	reconcileSrc := func(name string) {
 		t.Helper()
 		if _, err := srcRec.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}); err != nil {
