@@ -37,9 +37,9 @@
 
 ## 5. Chart selection — deployment-engineer
 
-- [ ] 5.1 Add `stateStore.backend` to `chart/values.yaml`, default `kube`, with the comment stating the one-backend rule and that `kube` renders no bundle. Verify `helm template` renders with the default.
-- [ ] 5.2 Add `agentops.stateStoreGuard` to `_helpers.tpl` beside `defaultRuntimeGuard`: fail the render naming the value on an unknown backend, on a selected backend whose bundle is disabled, or on two backend bundles enabled. Verify a chart render test for each of the three failures and for the default passing.
-- [ ] 5.3 Render `STATE_BACKEND` into the manager Deployment from the selector. Verify the chart render test pins the env var NAME and value.
+- [x] 5.1 Add `stateStore.backend` to `chart/values.yaml`, default `kube`, with the comment stating the one-backend rule and that `kube` renders no bundle. Verify `helm template` renders with the default.
+- [x] 5.2 Add `agentops.stateStoreGuard` to `_helpers.tpl` beside `defaultRuntimeGuard`: fail the render naming the value on an unknown backend, on a selected backend whose bundle is disabled, or on two backend bundles enabled. Verify a chart render test for each of the three failures and for the default passing.
+- [x] 5.3 Render `STATE_BACKEND` into the manager Deployment from the selector. Verify the chart render test pins the env var NAME and value.
 
 ## 6. Unit tests
 
