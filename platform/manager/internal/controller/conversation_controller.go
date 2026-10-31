@@ -195,7 +195,7 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger := log.FromContext(ctx)
 
 	key := state.Key(req.Name)
-	conv, _, err := r.Store.Get(ctx, key)
+	conv, _, runs, err := r.Store.GetWithRuns(ctx, key)
 	if err != nil {
 		return ctrl.Result{}, state.IgnoreNotFound(err)
 	}
@@ -219,10 +219,6 @@ func (r *ConversationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// there is nothing to prune toward either.
 	if conv.Phase == state.PhaseClosed {
 		return r.reconcileClosed(ctx, &conv)
-	}
-	runs, err := r.Store.ListRuns(ctx, key)
-	if err != nil {
-		return ctrl.Result{}, state.IgnoreNotFound(err)
 	}
 
 	// The DEADLINE budget edge (design D-E): a Coordinator-rooted conversation

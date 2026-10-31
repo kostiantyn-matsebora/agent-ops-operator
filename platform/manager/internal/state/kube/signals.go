@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -81,11 +82,8 @@ func (s *SignalStore) Create(ctx context.Context, key state.Key, rec state.Signa
 		s.expiryArmed.Store(true)
 	}
 	applySignalSpec(sig, rec)
-	if err := s.client.Create(ctx, sig); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return "", state.ErrAlreadyExists
-		}
-		return "", fmt.Errorf("kube: create signal %q: %w", key, err)
+	if err := s.createOrReplaceExpired(ctx, key, sig); err != nil {
+		return "", err
 	}
 	applySignalStatus(sig, rec)
 	if equality.Semantic.DeepEqual(sig.Status, agentopsv1alpha1.SignalStatus{}) {
@@ -95,6 +93,37 @@ func (s *SignalStore) Create(ctx context.Context, key state.Key, rec state.Signa
 		return "", fmt.Errorf("kube: create signal %q status: %w", key, err)
 	}
 	return state.Revision(sig.ResourceVersion), nil
+}
+
+// createOrReplaceExpired creates sig, treating an existing object whose expiry
+// has passed as already gone: it reads as ErrNotFound everywhere, so a re-send
+// inside the sweep period must not be acked as a duplicate of a record nobody
+// can see. The stale object is deleted under the UID and revision just read and
+// the create is tried once more; losing either race is a duplicate, not a retry.
+func (s *SignalStore) createOrReplaceExpired(ctx context.Context, key state.Key, sig *agentopsv1alpha1.Signal) error {
+	err := s.client.Create(ctx, sig)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("kube: create signal %q: %w", key, err)
+	}
+	var existing agentopsv1alpha1.Signal
+	if gerr := s.client.Get(ctx, s.namespacedName(key), &existing); gerr != nil || !signalExpired(&existing, time.Now()) {
+		return state.ErrAlreadyExists
+	}
+	derr := s.client.Delete(ctx, &existing, client.Preconditions{UID: &existing.UID, ResourceVersion: &existing.ResourceVersion})
+	if derr != nil && !apierrors.IsNotFound(derr) {
+		return state.ErrAlreadyExists
+	}
+	sig.ResourceVersion = ""
+	if err := s.client.Create(ctx, sig); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return state.ErrAlreadyExists
+		}
+		return fmt.Errorf("kube: create signal %q: %w", key, err)
+	}
+	return nil
 }
 
 // Update writes the status fields and ExpiresAt. The status subresource is
@@ -374,26 +403,106 @@ func (s *SignalStore) PutCooldown(ctx context.Context, source string, entries []
 	return nil
 }
 
-// ReleaseSource deletes every Signal naming the source, then clears its
-// cooldown window if the source object is still there.
-func (s *SignalStore) ReleaseSource(ctx context.Context, source string) error {
+// RecordReceived is the router's receipt counter, moved verbatim: a
+// read-modify-write of status.receivedTotal and lastReceived under the
+// resourceVersion it read, retried on conflict. The stored status is unchanged.
+func (s *SignalStore) RecordReceived(ctx context.Context, source string, at time.Time) error {
+	for attempt := 0; attempt < statusUpdateMaxAttempts; attempt++ {
+		var src agentopsv1alpha1.SignalSource
+		if err := s.client.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: source}, &src); err != nil {
+			if apierrors.IsNotFound(err) {
+				return state.ErrNotFound
+			}
+			return fmt.Errorf("kube: read source %q to count a receipt: %w", source, err)
+		}
+		patch := client.MergeFromWithOptions(src.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		last := metav1.NewTime(at)
+		src.Status.LastReceived = &last
+		src.Status.ReceivedTotal++
+		err := s.client.Status().Patch(ctx, &src, patch)
+		switch {
+		case err == nil:
+			return nil
+		case apierrors.IsNotFound(err):
+			return state.ErrNotFound
+		case !apierrors.IsConflict(err):
+			return fmt.Errorf("kube: count a receipt on source %q: %w", source, err)
+		}
+	}
+	return fmt.Errorf("kube: count a receipt on source %q: conflict after %d attempts", source, statusUpdateMaxAttempts)
+}
+
+// GetReceived reads status.receivedTotal and lastReceived.
+func (s *SignalStore) GetReceived(ctx context.Context, source string) (state.Received, error) {
+	var src agentopsv1alpha1.SignalSource
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: source}, &src); err != nil {
+		if apierrors.IsNotFound(err) {
+			return state.Received{}, nil
+		}
+		return state.Received{}, fmt.Errorf("kube: get receipts of source %q: %w", source, err)
+	}
+	out := state.Received{Total: src.Status.ReceivedTotal}
+	if src.Status.LastReceived != nil {
+		at := src.Status.LastReceived.Time.UTC()
+		out.Last = &at
+	}
+	return out, nil
+}
+
+// ReleaseSource deletes the Signals naming the source and clears its window.
+//
+// A name alone cannot tell a source from the one that replaced it (a GitOps
+// prune, a reinstall), so a caller that knows the departed identity passes it:
+// signals recorded under another identity belong to the successor and stay,
+// and so does the successor's window, while an object by that name exists with
+// a different identity. Every delete carries the UID it listed, so a signal
+// replaced between the list and the delete is not taken with it.
+func (s *SignalStore) ReleaseSource(ctx context.Context, source, sourceID string) error {
 	var list agentopsv1alpha1.SignalList
 	if err := s.client.List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
 		return fmt.Errorf("kube: list signals of source %q: %w", source, err)
 	}
 	for i := range list.Items {
 		sig := &list.Items[i]
-		if sig.Spec.SourceRef.Name != source {
+		if sig.Spec.SourceRef.Name != source || isSuccessorsSignal(sig, sourceID) {
 			continue
 		}
-		if err := s.client.Delete(ctx, sig); err != nil && !apierrors.IsNotFound(err) {
+		err := s.client.Delete(ctx, sig, client.Preconditions{UID: &sig.UID})
+		if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 			return fmt.Errorf("kube: release signal %q of source %q: %w", sig.Name, source, err)
 		}
 	}
-	if err := s.PutCooldown(ctx, source, nil); err != nil && err != state.ErrNotFound {
+	successor, err := s.holdsSuccessor(ctx, source, sourceID)
+	if err != nil || successor {
+		return err
+	}
+	if err := s.PutCooldown(ctx, source, nil); err != nil && !errors.Is(err, state.ErrNotFound) {
 		return err
 	}
 	return nil
+}
+
+// isSuccessorsSignal reports whether sig is recorded under an identity other
+// than the departed one. A signal with no recorded identity is released.
+func isSuccessorsSignal(sig *agentopsv1alpha1.Signal, departed string) bool {
+	owner := ownerSourceID(sig)
+	return departed != "" && owner != "" && owner != departed
+}
+
+// holdsSuccessor reports whether an object named source exists under an
+// identity other than the departed one, whose window must not be cleared.
+func (s *SignalStore) holdsSuccessor(ctx context.Context, source, departed string) (bool, error) {
+	if departed == "" {
+		return false, nil
+	}
+	var src agentopsv1alpha1.SignalSource
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: source}, &src); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("kube: read source %q to release it: %w", source, err)
+	}
+	return string(src.UID) != departed, nil
 }
 
 var _ state.SignalStore = (*SignalStore)(nil)

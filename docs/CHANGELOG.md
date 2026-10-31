@@ -46,7 +46,14 @@ for the source and the reference material beside this file.
   consumer's conditional delete and requeue. The TTL values are unchanged.
 - Deleting a `SignalSource` now releases its `Signal`s and suppression window
   through the manager instead of relying on the owner-reference cascade. The
-  outcome is the same.
+  outcome is the same, except that a source deleted and recreated under one
+  name keeps its new incarnation's signals and window.
+- A source's `receivedTotal` and `lastReceived` counters are now written
+  through the state store too, so no manager state is left outside it. Under
+  `kube` the fields and their values are unchanged.
+- A re-sent `signalId` whose earlier signal has expired but is not yet swept
+  (up to the sweep period, 30 seconds) is now stored, not acknowledged as a
+  duplicate and dropped.
 - The per-source cooldown cache no longer keeps a source whose window could not
   be read, so the next signal reads it again instead of running on an empty
   window.

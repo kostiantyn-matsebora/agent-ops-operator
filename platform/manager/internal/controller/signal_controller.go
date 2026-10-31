@@ -260,7 +260,7 @@ func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ct
 	var src agentopsv1alpha1.SignalSource
 	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: p.rec.SourceRef}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.releaseOrphans(ctx, p.rec.SourceRef)
+			return ctrl.Result{}, r.releaseOrphans(ctx, p.rec.SourceRef, p.rec.SourceID)
 		}
 		return ctrl.Result{}, err
 	}
@@ -294,10 +294,11 @@ func (r *SignalReconciler) reconcileLive(ctx context.Context, p *signalPass) (ct
 // releaseOrphans removes every Signal of a source that no longer exists. The
 // manager does this itself rather than rely on an owner reference being
 // honoured: the store may not be the Kubernetes API, and under envtest no
-// garbage collector runs.
-func (r *SignalReconciler) releaseOrphans(ctx context.Context, source string) error {
+// garbage collector runs. The pass knows the identity its Signal recorded, so a
+// successor that took the name meanwhile keeps its own signals and window.
+func (r *SignalReconciler) releaseOrphans(ctx context.Context, source, sourceID string) error {
 	log.FromContext(ctx).Info("releasing the signals of a source that no longer exists", "source", source)
-	return r.Signals.ReleaseSource(ctx, source)
+	return r.Signals.ReleaseSource(ctx, source, sourceID)
 }
 
 // acquire takes the in-process lock of one (source, initiationId) key. The

@@ -114,6 +114,9 @@ func RunSignals(t *testing.T, newStore func() state.SignalStore) {
 		t.Run("ExpiredSignalInvisibleBeforeRemoved", func(t *testing.T) {
 			testSignalExpiryInvisible(t, newStore())
 		})
+		t.Run("CreateReplacesAnExpiredSignal", func(t *testing.T) {
+			testSignalCreateReplacesExpired(t, newStore())
+		})
 		t.Run("ExpiryObservableOnFeedAsDelete", func(t *testing.T) {
 			testSignalExpiryOnFeed(t, newStore())
 		})
@@ -141,6 +144,12 @@ func RunSignals(t *testing.T, newStore func() state.SignalStore) {
 	})
 
 	t.Run("ReleasingASourceRemovesItsSignals", func(t *testing.T) {
+		t.Run("ReceiptsAreCountedWithoutLosingAnIncrement", func(t *testing.T) {
+			testRecordReceived(t, newStore())
+		})
+		t.Run("ASuccessorsSignalsOutliveTheDepartedIdentitysRelease", func(t *testing.T) {
+			testReleaseSparesSuccessor(t, newStore())
+		})
 		t.Run("EverySignalOfTheSourceAnyPhaseAndItsWindowGoOthersStay", func(t *testing.T) {
 			testReleaseSource(t, newStore())
 		})
@@ -556,6 +565,25 @@ func testSignalExpiryInvisible(t *testing.T, s state.SignalStore) {
 	}
 }
 
+func testSignalCreateReplacesExpired(t *testing.T, s state.SignalStore) {
+	ctx := context.Background()
+	past := time.Now().Add(-time.Hour)
+	stale := sigRec("sig-reuse", SignalSourceA, sigInitA)
+	stale.ExpiresAt = &past
+	stale.Payload = "first"
+	mustCreateSignal(t, s, stale)
+	fresh := sigRec("sig-reuse", SignalSourceA, sigInitA)
+	fresh.Payload = "second"
+	mustCreateSignal(t, s, fresh)
+	got, _, err := s.Get(ctx, "sig-reuse")
+	if err != nil || got.Payload != "second" {
+		t.Fatalf("Get after re-creating over an expired record = %+v, %v, want the new payload", got, err)
+	}
+	if _, err := s.Create(ctx, "sig-reuse", fresh); !errors.Is(err, state.ErrAlreadyExists) {
+		t.Fatalf("a create over the live replacement error = %v, want ErrAlreadyExists", err)
+	}
+}
+
 func testSignalExpiryOnFeed(t *testing.T, s state.SignalStore) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -689,7 +717,7 @@ func testReleaseSource(t *testing.T, s state.SignalStore) {
 	}
 
 	for i := 0; i < 2; i++ { // idempotent
-		if err := s.ReleaseSource(ctx, SignalSourceA); err != nil {
+		if err := s.ReleaseSource(ctx, SignalSourceA, ""); err != nil {
 			t.Fatalf("ReleaseSource: %v", err)
 		}
 	}
@@ -704,6 +732,56 @@ func testReleaseSource(t *testing.T, s state.SignalStore) {
 	if b, _ := s.GetCooldown(ctx, SignalSourceB); len(b) != 1 {
 		t.Fatalf("window of b = %+v, want untouched", b)
 	}
+}
+
+func testRecordReceived(t *testing.T, s state.SignalStore) {
+	ctx := context.Background()
+	if got, err := s.GetReceived(ctx, SignalSourceA); err != nil || got.Total != 0 || got.Last != nil {
+		t.Fatalf("GetReceived before any receipt = %+v, %v, want the zero value", got, err)
+	}
+	const n = 12
+	at := time.Now().UTC().Truncate(time.Second)
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- s.RecordReceived(ctx, SignalSourceA, at)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("RecordReceived: %v", err)
+		}
+	}
+	got, err := s.GetReceived(ctx, SignalSourceA)
+	if err != nil || got.Total != n || got.Last == nil || !got.Last.Equal(at) || got.Last.Location() != time.UTC {
+		t.Fatalf("GetReceived = %+v, %v, want %d receipts at %v in UTC", got, err, n, at)
+	}
+	if other, _ := s.GetReceived(ctx, SignalSourceB); other.Total != 0 {
+		t.Fatalf("another source counted %d receipts, want none", other.Total)
+	}
+}
+
+func testReleaseSparesSuccessor(t *testing.T, s state.SignalStore) {
+	ctx := context.Background()
+	old := sigRec("sig-old", SignalSourceA, sigInitA)
+	old.SourceID = "incarnation-1"
+	mustCreateSignal(t, s, old)
+	next := sigRec("sig-next", SignalSourceA, sigInitB)
+	next.SourceID = "incarnation-2"
+	mustCreateSignal(t, s, next)
+	if err := s.ReleaseSource(ctx, SignalSourceA, "incarnation-1"); err != nil {
+		t.Fatalf("ReleaseSource: %v", err)
+	}
+	all, err := s.List(ctx, state.SignalAll, state.SignalListKey{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	sameNames(t, "after releasing the departed identity", all, "sig-next")
 }
 
 // --- Requirement: Scope is fixed when the store is constructed ---

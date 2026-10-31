@@ -24,12 +24,13 @@ type memSignalStore struct {
 	mu       sync.Mutex
 	records  map[state.Key]*memSignal
 	cooldown map[string][]state.CooldownEntry
+	received map[string]state.Received
 	seq, ids uint64
 	log      []state.SignalEvent
 }
 
 func newMemSignalStore() state.SignalStore {
-	return &memSignalStore{records: map[state.Key]*memSignal{}, cooldown: map[string][]state.CooldownEntry{}}
+	return &memSignalStore{records: map[state.Key]*memSignal{}, cooldown: map[string][]state.CooldownEntry{}, received: map[string]state.Received{}}
 }
 
 func (m *memSignalStore) mintLocked(typ state.EventType, key state.Key, rec state.SignalRecord) uint64 {
@@ -201,12 +202,30 @@ func (m *memSignalStore) PutCooldown(ctx context.Context, source string, entries
 	return nil
 }
 
-func (m *memSignalStore) ReleaseSource(ctx context.Context, source string) error {
+func (m *memSignalStore) RecordReceived(ctx context.Context, source string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.received[source]
+	at = at.UTC()
+	r.Total++
+	r.Last = &at
+	m.received[source] = r
+	return nil
+}
+
+func (m *memSignalStore) GetReceived(ctx context.Context, source string) (state.Received, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.received[source], nil
+}
+
+func (m *memSignalStore) ReleaseSource(ctx context.Context, source, sourceID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sweepLocked(time.Now())
 	for key, ms := range m.records {
-		if ms.rec.SourceRef == source {
+		successors := sourceID != "" && ms.rec.SourceID != "" && ms.rec.SourceID != sourceID
+		if ms.rec.SourceRef == source && !successors {
 			delete(m.records, key)
 			m.mintLocked(state.EventDelete, key, state.SignalRecord{})
 		}

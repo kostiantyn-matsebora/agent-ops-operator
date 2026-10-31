@@ -27,11 +27,18 @@ var guardedTypes = map[string]bool{
 	// The Signal half (design D-14): a Signal, its list and the cooldown entry
 	// the router keeps on a SignalSource. "Status.Cooldown" is the field read
 	// and written through a selector, checked below.
+	// SignalSpec and SignalStatus are the halves of a Signal an embedded or
+	// copied value reaches without naming the whole.
 	"Signal": true, "SignalList": true, "CooldownEntry": true,
+	"SignalSpec": true, "SignalStatus": true,
 }
 
-// cooldownField is the SignalSource status field the router reads and writes.
-const cooldownField = "Cooldown"
+// guardedStatusFields are the SignalSource status fields the manager writes
+// through the store: the window and the receipt counters.
+var guardedStatusFields = map[string]bool{"Cooldown": true, "ReceivedTotal": true, "LastReceived": true}
+
+// guardedWireNames are the same fields by their JSON names.
+var guardedWireNames = []string{`"cooldown"`, `"receivedtotal"`, `"lastreceived"`}
 
 // A violation is one reference to a guarded type outside the allowed places.
 type violation struct {
@@ -139,7 +146,30 @@ func f(r reader) { _ = r.Get(context.Background(), "x", &v1.Conversation{}) }
 // findViolations parses every non-test Go file under root and reports each
 // reference to a guarded type from outside the allowed places.
 func findViolations(root string) ([]violation, error) {
+	files, err := checkedFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	kindNames, err := guardedKindNames(files)
+	if err != nil {
+		return nil, err
+	}
 	var out []violation
+	for _, f := range files {
+		vs, err := violationsIn(f.path, f.rel, kindNames)
+		out = append(out, vs...)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+type checkedFile struct{ path, rel string }
+
+// checkedFiles lists the non-test Go files outside the allowed places.
+func checkedFiles(root string) ([]checkedFile, error) {
+	var out []checkedFile
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -152,14 +182,40 @@ func findViolations(root string) ([]violation, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
+		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+			out = append(out, checkedFile{path, rel})
 		}
-		vs, err := violationsIn(path, rel)
-		out = append(out, vs...)
-		return err
+		return nil
 	})
 	return out, err
+}
+
+// guardedKindNames finds every constant or variable, in any checked file, that
+// holds a guarded kind as a string literal, so a function naming the kind
+// through it is read as naming the kind. By name across the tree, not scoped.
+func guardedKindNames(files []checkedFile) (map[string]string, error) {
+	names := map[string]string{}
+	for _, f := range files {
+		file, err := parser.ParseFile(token.NewFileSet(), f.path, nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", f.rel, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			spec, ok := n.(*ast.ValueSpec)
+			if !ok || len(spec.Names) != len(spec.Values) {
+				return true
+			}
+			for i, v := range spec.Values {
+				if lit, isLit := v.(*ast.BasicLit); isLit && lit.Kind == token.STRING {
+					if kind, err := strconv.Unquote(lit.Value); err == nil && guardedTypes[kind] {
+						names[spec.Names[i].Name] = kind
+					}
+				}
+			}
+			return true
+		})
+	}
+	return names, nil
 }
 
 // allowedDir names the places a guarded type may appear: the backend, the API
@@ -169,21 +225,23 @@ func allowedDir(rel string) bool {
 		strings.HasPrefix(rel, "internal/state/kube/") || strings.HasPrefix(rel, "api/") || strings.HasPrefix(rel, "test/")
 }
 
-func violationsIn(path, rel string) ([]violation, error) {
+func violationsIn(path, rel string, kindNames map[string]string) ([]violation, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", rel, err)
 	}
 	pkg := filepath.ToSlash(filepath.Dir(rel))
-	out := untypedKindViolations(fset, file, pkg, rel)
+	out := untypedKindViolations(fset, file, pkg, rel, kindNames)
+	out = append(out, lowercaseCooldownViolations(fset, file, pkg, rel)...)
 	aliases, dotImported := apiAliases(file)
 	if dotImported {
 		// A dot import names every type unqualified, which the selector walk
 		// below cannot see.
 		out = append(out, violation{pkg: pkg, file: rel, line: 1, typ: "* (dot-import of the API package)"})
 	}
-	if len(aliases) == 0 && !mentionsStatusCooldown(file) {
+	statusAliases := statusAliasNames(file)
+	if len(aliases) == 0 && len(statusAliases) == 0 && !mentionsStatusCooldown(file) {
 		return out, nil
 	}
 	var calls []string // the stack of enclosing call names
@@ -208,10 +266,9 @@ func violationsIn(path, rel string) ([]violation, error) {
 					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: x.Sel.Name, call: call,
 				})
 			}
-			if inner, isSel := x.X.(*ast.SelectorExpr); isSel && inner.Sel.Name == "Status" &&
-				x.Sel.Name == cooldownField {
+			if guardedStatusFields[x.Sel.Name] && selectsStatus(x.X, statusAliases) {
 				out = append(out, violation{
-					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: "SignalSource Status." + cooldownField,
+					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: "SignalSource Status." + x.Sel.Name,
 				})
 			}
 		}
@@ -256,14 +313,13 @@ var untypedKinds = map[string]bool{
 const (
 	ownerReferenceHelperFile = "internal/controller/conversation_controller.go"
 	ownerReferenceHelperFunc = "ownerOf"
-	conversationKindIdent    = "conversationKind"
 )
 
 // untypedKindViolations finds a function that builds an unstructured or
 // PartialObjectMetadata object and names a guarded kind in the same body (as a
 // string literal or the controller's kind constant): the same door to a
 // Conversation as naming the typed struct, just with no import to catch.
-func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string) []violation {
+func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string, kindNames map[string]string) []violation {
 	var out []violation
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -274,7 +330,7 @@ func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string)
 			continue
 		}
 		var untypedAt token.Pos
-		var kind string
+		var kind, unresolved string
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.SelectorExpr:
@@ -286,16 +342,85 @@ func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string)
 					kind = v
 				}
 			case *ast.Ident:
-				if x.Name == conversationKindIdent {
-					kind = "Conversation"
+				if k, named := kindNames[x.Name]; named {
+					kind = k
+				}
+			case *ast.CallExpr:
+				if param := kindParameter(x, fn); param != "" {
+					unresolved = param
 				}
 			}
 			return true
 		})
+		if unresolved != "" && untypedAt.IsValid() {
+			out = append(out, violation{
+				pkg: pkg, file: rel, line: fset.Position(fn.Pos()).Line,
+				typ:  "a kind taken from the parameter " + unresolved + " (via an unstructured/PartialObjectMetadata object)",
+				call: fn.Name.Name,
+			})
+		}
 		if untypedAt.IsValid() && kind != "" {
 			out = append(out, violation{
 				pkg: pkg, file: rel, line: fset.Position(untypedAt).Line, typ: kind + " (via an unstructured/PartialObjectMetadata object)",
 				call: fn.Name.Name,
+			})
+		}
+	}
+	return out
+}
+
+// kindParameter returns the name of a function parameter handed to SetKind or
+// SetGroupVersionKind, a kind the walk cannot resolve to a literal.
+func kindParameter(c *ast.CallExpr, fn *ast.FuncDecl) string {
+	sel, ok := c.Fun.(*ast.SelectorExpr)
+	if !ok || (sel.Sel.Name != "SetKind" && sel.Sel.Name != "SetGroupVersionKind") || len(c.Args) == 0 {
+		return ""
+	}
+	id, ok := c.Args[0].(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	for _, field := range fn.Type.Params.List {
+		for _, n := range field.Names {
+			if n.Name == id.Name {
+				return id.Name
+			}
+		}
+	}
+	return ""
+}
+
+// lowercaseCooldownViolations finds the cooldown window reached by its wire
+// path instead of the Go field: a function holding both a "status" and a
+// "cooldown" string (a merge patch, a SetNestedField path), in any form.
+func lowercaseCooldownViolations(fset *token.FileSet, file *ast.File, pkg, rel string) []violation {
+	var out []violation
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		var status, cooldown token.Pos
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			lit, isLit := n.(*ast.BasicLit)
+			if !isLit || lit.Kind != token.STRING {
+				return true
+			}
+			text := strings.ToLower(lit.Value)
+			if (text == `"status"` || strings.Contains(text, `"status"`)) && !status.IsValid() {
+				status = lit.Pos()
+			}
+			for _, wire := range guardedWireNames {
+				if strings.Contains(text, wire) && !cooldown.IsValid() {
+					cooldown = lit.Pos()
+				}
+			}
+			return true
+		})
+		if status.IsValid() && cooldown.IsValid() {
+			out = append(out, violation{
+				pkg: pkg, file: rel, line: fset.Position(cooldown).Line,
+				typ: "a SignalSource status field the store owns, by its wire path", call: fn.Name.Name,
 			})
 		}
 	}
@@ -316,12 +441,66 @@ func callName(c *ast.CallExpr) string {
 	return ""
 }
 
+// selectsStatus reports whether expr is a `.Status` selection or a name this
+// file bound to one (see statusAliasNames).
+func selectsStatus(expr ast.Expr, aliases map[string]bool) bool {
+	switch e := expr.(type) {
+	case *ast.SelectorExpr:
+		return e.Sel.Name == "Status"
+	case *ast.Ident:
+		return aliases[e.Name]
+	}
+	return false
+}
+
+// statusAliasNames lists the names a file binds to a `.Status` value or pointer
+// (`st := &src.Status`, `st := src.Status`, `var st = &src.Status`), so that
+// `st.Cooldown` is read as `src.Status.Cooldown`. The table is per file and by
+// name, not scoped: a coarse net is the right one for a guard.
+//
+// Not covered, on purpose: a kind passed in a variable, and a lowercase or
+// reflected field path. Those need type information the AST walk lacks, and the
+// guard's job is to stop the plain doors.
+func statusAliasNames(file *ast.File) map[string]bool {
+	names := map[string]bool{}
+	bind := func(lhs ast.Expr, rhs ast.Expr) {
+		id, ok := lhs.(*ast.Ident)
+		if !ok {
+			return
+		}
+		if u, isAddr := rhs.(*ast.UnaryExpr); isAddr && u.Op == token.AND {
+			rhs = u.X
+		}
+		if sel, isSel := rhs.(*ast.SelectorExpr); isSel && sel.Sel.Name == "Status" {
+			names[id.Name] = true
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			if len(x.Lhs) == len(x.Rhs) {
+				for i := range x.Lhs {
+					bind(x.Lhs[i], x.Rhs[i])
+				}
+			}
+		case *ast.ValueSpec:
+			if len(x.Names) == len(x.Values) {
+				for i := range x.Names {
+					bind(x.Names[i], x.Values[i])
+				}
+			}
+		}
+		return true
+	})
+	return names
+}
+
 // mentionsStatusCooldown reports whether a file selects a Status.Cooldown
 // field, which needs no import of the API package to be written.
 func mentionsStatusCooldown(file *ast.File) bool {
 	found := false
 	ast.Inspect(file, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == cooldownField {
+		if sel, ok := n.(*ast.SelectorExpr); ok && guardedStatusFields[sel.Sel.Name] {
 			if inner, isSel := sel.X.(*ast.SelectorExpr); isSel && inner.Sel.Name == "Status" {
 				found = true
 			}
@@ -350,7 +529,13 @@ func TestStaticCheckGuardsSignalsInEveryPackageOutsideTheBackend(t *testing.T) {
 	write("internal/chat/bad_list.go", header+"var _ v1.SignalList\n")
 	write("internal/chat/bad_entry.go", header+"var _ v1.CooldownEntry\n")
 	write("internal/chat/bad_field.go", "package p\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { s.Status.Cooldown = nil }\n")
-	write("internal/chat/ok_source.go", header+"var _ v1.SignalSource\nvar _ v1.SignalAdapter\n") // other kinds
+	write("internal/chat/bad_received.go", "package p\ntype src struct{ Status struct{ ReceivedTotal int64 } }\nfunc f(s *src) { s.Status.ReceivedTotal++ }\n")
+	write("internal/chat/bad_status.go", header+"var _ v1.SignalStatus\n")
+	write("internal/chat/bad_spec.go", header+"var _ *v1.SignalSpec\n")
+	write("internal/chat/bad_alias.go", "package p\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { st := &s.Status; st.Cooldown = nil }\n")
+	write("internal/chat/bad_alias_value.go", "package p\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { var st = s.Status; _ = st.Cooldown }\n")
+	write("internal/chat/ok_alias.go", "package p\ntype src struct{ Status struct{ Phase string }; Other struct{ Cooldown int } }\nfunc f(s *src) { st := &s.Status; o := &s.Other; _, _ = st.Phase, o.Cooldown }\n") // no Status.Cooldown
+	write("internal/chat/ok_source.go", header+"var _ v1.SignalSource\nvar _ v1.SignalAdapter\n")                                                                                                                     // other kinds
 	write("internal/signalroute/bad_route.go", header+"var _ *v1.Signal\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { _ = s.Status.Cooldown }\n")
 	write("internal/controller/bad_conversation.go", header+"var _ v1.Conversation\n")
 	write("internal/state/kube/ok.go", header+"var _ v1.Signal\n")
@@ -369,10 +554,52 @@ func TestStaticCheckGuardsSignalsInEveryPackageOutsideTheBackend(t *testing.T) {
 	}
 	sort.Strings(files)
 	want := []string{
+		"internal/chat/bad_alias.go", "internal/chat/bad_alias_value.go",
 		"internal/chat/bad_entry.go", "internal/chat/bad_field.go", "internal/chat/bad_list.go",
-		"internal/chat/bad_signal.go", "internal/controller/bad_conversation.go", "internal/signalroute/bad_route.go",
+		"internal/chat/bad_received.go", "internal/chat/bad_signal.go", "internal/chat/bad_spec.go", "internal/chat/bad_status.go", "internal/controller/bad_conversation.go", "internal/signalroute/bad_route.go",
 	}
 	if strings.Join(files, ",") != strings.Join(want, ",") {
 		t.Fatalf("flagged %v, want %v", files, want)
+	}
+}
+
+// The two bypasses a type-only walk would miss: a kind held in a constant or
+// handed in as a parameter, and the cooldown window named by its wire path.
+func TestStaticCheckClosesTheKindVariableAndLowercasePathBypasses(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, src string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const un = "import \"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured\"\n"
+	write("internal/chat/kinds.go", "package p\nconst sneaky = \"Signal\"\n")
+	write("internal/chat/bad_const.go", "package p\n"+un+"func f() any { u := &unstructured.Unstructured{}; u.SetKind(sneaky); return u }\n")
+	write("internal/chat/bad_param.go", "package p\n"+un+"func f(kind string) any { u := &unstructured.Unstructured{}; u.SetKind(kind); return u }\n")
+	write("internal/chat/ok_other.go", "package p\n"+un+"func f() any { u := &unstructured.Unstructured{}; u.SetKind(\"Pod\"); return u }\n")
+	write("internal/chat/bad_patch.go", "package p\nfunc f() []byte { return []byte(`{\"status\":{\"cooldown\":[]}}`) }\n")
+	write("internal/chat/bad_path.go", "package p\nfunc f() []string { return []string{\"status\", \"cooldown\"} }\n")
+	write("internal/chat/ok_status.go", "package p\nfunc f() []string { return []string{\"status\", \"phase\"} }\n")
+	write("internal/chat/ok_cooldown.go", "package p\nfunc f() string { return \"cooldownHours\" }\n")
+	found, err := findViolations(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	var files []string
+	for _, v := range found {
+		if !seen[v.file] {
+			seen[v.file] = true
+			files = append(files, v.file)
+		}
+	}
+	sort.Strings(files)
+	want := "internal/chat/bad_const.go,internal/chat/bad_param.go,internal/chat/bad_patch.go,internal/chat/bad_path.go"
+	if strings.Join(files, ",") != want {
+		t.Fatalf("flagged %v, want %s", files, want)
 	}
 }

@@ -715,18 +715,18 @@ func (q *OpQueue) markDelivered(ctx context.Context, op *Op) error {
 	if err := q.Store.UpdateRun(ctx, key, runID, state.RunUpdate{MarkDelivered: []string{channel}}); err != nil {
 		return state.IgnoreNotFound(err)
 	}
-	// This reply just reached the thread, so whatever was owed to it is no
-	// longer owed — clear the note regardless of which run it names: an older
-	// undelivered reply that is itself no longer recorded (aged out, same as
-	// above) has nothing left to re-derive either.
-	return clearUndeliveredNote(ctx, q.Store, key, channel)
+	// Only the note naming THIS run is settled. A note naming an older run
+	// is a reply still owed to the thread, and this one reaching it does not
+	// pay that off.
+	return clearUndeliveredNote(ctx, q.Store, key, channel, runID)
 }
 
-// clearUndeliveredNote empties the thread's undelivered-reply note. Writes
-// nothing when the thread is gone or the note is already empty.
-func clearUndeliveredNote(ctx context.Context, store state.Store, key state.Key, channel string) error {
+// clearUndeliveredNote empties the thread's undelivered-reply note when it
+// names runID. Writes nothing when the thread is gone or the note names
+// another run or none.
+func clearUndeliveredNote(ctx context.Context, store state.Store, key state.Key, channel, runID string) error {
 	_, err := state.Mutate(ctx, store, key, func(rec *state.ConversationRecord) error {
-		if b := rec.Thread(channel); b != nil {
+		if b := rec.Thread(channel); b != nil && b.UndeliveredReply == runID {
 			b.UndeliveredReply = ""
 		}
 		return nil

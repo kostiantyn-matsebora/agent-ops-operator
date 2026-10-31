@@ -136,3 +136,63 @@ func benchRun() state.Run {
 		},
 	}
 }
+
+// BenchSignals is Bench for the Signal half (design D-14): the cycle one
+// admitted message costs the store, a create then the two status writes that
+// take it from Pending to a terminal phase, beside the read the source cap and
+// the head-of-queue check make on every pass: the live-signals-of-a-source
+// listing, taken with 200 live and 100 terminal signals already stored. Like
+// Bench it names no backend; the metrics are per backend, not between them.
+func BenchSignals(b *testing.B, newStore func() state.SignalStore) {
+	b.Helper()
+	ctx := context.Background()
+	store := newStore()
+	const live, terminal = 200, 100
+	for i := 0; i < live+terminal; i++ {
+		name := fmt.Sprintf("seed-%d", i)
+		rev, err := store.Create(ctx, state.Key(name), sigRec(name, SignalSourceA, name))
+		if err != nil {
+			b.Fatalf("Create: %v", err)
+		}
+		if i >= live {
+			done := sigRec(name, SignalSourceA, name)
+			done.Phase = state.SignalRouted
+			if _, err := store.Update(ctx, state.Key(name), rev, done); err != nil {
+				b.Fatalf("Update: %v", err)
+			}
+		}
+	}
+
+	const listRounds = 20
+	start := time.Now()
+	var listed []state.SignalRecord
+	for i := 0; i < listRounds; i++ {
+		var err error
+		if listed, err = store.List(ctx, state.SignalNonTerminalBySource, state.SignalListKey{Source: SignalSourceA}); err != nil {
+			b.Fatalf("List: %v", err)
+		}
+	}
+	listNs := float64(time.Since(start).Nanoseconds()) / listRounds
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		name := fmt.Sprintf("cycle-%d", i)
+		rec := sigRec(name, SignalSourceB, name)
+		rev, err := store.Create(ctx, state.Key(name), rec)
+		if err != nil {
+			b.Fatalf("Create: %v", err)
+		}
+		rec.Phase = state.SignalPending
+		rec.Attempts = 1
+		if rev, err = store.Update(ctx, state.Key(name), rev, rec); err != nil {
+			b.Fatalf("Update: %v", err)
+		}
+		rec.Phase = state.SignalRouted
+		if _, err = store.Update(ctx, state.Key(name), rev, rec); err != nil {
+			b.Fatalf("Update: %v", err)
+		}
+	}
+	b.ReportMetric(listNs, "ns/list(live=200,terminal=100)")
+	b.ReportMetric(float64(len(listed)), "resident_records(live)")
+}

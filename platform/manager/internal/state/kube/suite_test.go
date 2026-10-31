@@ -69,7 +69,7 @@ var nsCounter atomic.Int64
 // scope-isolation scenario rest on, used here for test isolation instead
 // of install isolation, so one test's fixtures can never leak into
 // another's assertions.
-func newTestNamespace(t *testing.T) (string, *Store) {
+func newTestNamespace(t testing.TB) (string, *Store) {
 	t.Helper()
 	return newTestNamespaceWithSweepInterval(t, DefaultSweepInterval)
 }
@@ -78,7 +78,7 @@ func newTestNamespace(t *testing.T) (string, *Store) {
 // sweep's poll period overridden, for the one scenario (2.6) that needs to
 // observe a sweep inside a test's own timeout rather than wait out
 // DefaultSweepInterval.
-func newTestNamespaceWithSweepInterval(t *testing.T, sweepInterval time.Duration) (string, *Store) {
+func newTestNamespaceWithSweepInterval(t testing.TB, sweepInterval time.Duration) (string, *Store) {
 	t.Helper()
 	name := fmt.Sprintf("kube-test-%d-%d", os.Getpid(), nsCounter.Add(1))
 	ns := &corev1.Namespace{}

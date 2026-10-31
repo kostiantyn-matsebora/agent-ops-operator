@@ -1936,8 +1936,8 @@ a second source of truth beside the CRs.
 
 **The backend column names what a row's guarantee rests on.** Conversation
 state, `Signal`s and the suppression window go through the store. A source's
-`receivedTotal` and `lastReceived` counters stay a status write on the source:
-they are reported, never read by a routing decision.
+`receivedTotal` and `lastReceived` counters go through it too, and under `kube`
+stay the same two status fields on the source.
 
 - **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
   allows. A write is acknowledged once the API server has it.

@@ -523,7 +523,7 @@ func TestDeletingASignalSourceReleasesItsSignalsAndItsWindow(t *testing.T) {
 	if got, err := signalStore.GetCooldown(ctx, "rel-gone"); err != nil || len(got) != 0 {
 		t.Errorf("the deleted source's window must read empty, got %v %v", got, err)
 	}
-	if err := signalStore.ReleaseSource(ctx, "rel-gone"); err != nil {
+	if err := signalStore.ReleaseSource(ctx, "rel-gone", ""); err != nil {
 		t.Errorf("releasing again is idempotent: %v", err)
 	}
 }

@@ -137,7 +137,117 @@ func TestCooldownLivesOnTheSourceStatusAndAGoneSourceIsNotFound(t *testing.T) {
 	if err := store.PutCooldown(ctx, "gone", nil); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("PutCooldown of a gone source error = %v, want ErrNotFound", err)
 	}
-	if err := store.ReleaseSource(ctx, "gone"); err != nil {
+	if err := store.ReleaseSource(ctx, "gone", ""); err != nil {
 		t.Fatalf("ReleaseSource of a gone source: %v, want nil", err)
+	}
+}
+
+// TestReleaseSourceSparesARecreatedSource: a source deleted and recreated under
+// one name must lose the previous incarnation's signals only. The new source's
+// signal and its suppression window stay.
+func TestReleaseSourceSparesARecreatedSource(t *testing.T) {
+	ctx := context.Background()
+	ns, _ := newTestNamespace(t)
+	store := NewSignalStore(wwClient, ns)
+
+	first := newSignalSource(t, ns, "src")
+	if _, err := store.Create(ctx, "sig-old", state.SignalRecord{Name: "sig-old", SourceRef: "src", SourceID: string(first.UID), Adapter: "cron", InitiationID: "i-old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wwClient.Delete(ctx, first); err != nil { // envtest runs no garbage collector
+		t.Fatal(err)
+	}
+	second := newSignalSource(t, ns, "src")
+	if _, err := store.Create(ctx, "sig-new", state.SignalRecord{Name: "sig-new", SourceRef: "src", SourceID: string(second.UID), Adapter: "cron", InitiationID: "i-new"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	if err := store.PutCooldown(ctx, "src", []state.CooldownEntry{{InitiationID: "i-new", At: at}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ReleaseSource(ctx, "src", string(first.UID)); err != nil {
+		t.Fatalf("ReleaseSource: %v", err)
+	}
+	if _, _, err := store.Get(ctx, "sig-old"); !errors.Is(err, state.ErrNotFound) {
+		t.Errorf("the previous incarnation's signal: error = %v, want released", err)
+	}
+	if _, _, err := store.Get(ctx, "sig-new"); err != nil {
+		t.Errorf("the recreated source's signal: error = %v, want kept", err)
+	}
+	if got, err := store.GetCooldown(ctx, "src"); err != nil || len(got) != 1 {
+		t.Errorf("the recreated source's window = %v, %v, want kept", got, err)
+	}
+}
+
+// TestSignalSweepDeletesTheExpiredObjectAndKeepsTheLiveOne reads the API object
+// itself, not the store: an expired Signal is invisible through Get the moment
+// its instant passes, so only the object proves the sweep removed it.
+func TestSignalSweepDeletesTheExpiredObjectAndKeepsTheLiveOne(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ns, _ := newTestNamespace(t)
+	store := NewSignalStoreWithSweepInterval(wwClient, ns, 50*time.Millisecond)
+	go store.Run(ctx)
+
+	now := time.Now()
+	for name, at := range map[string]time.Time{
+		"sig-past": now.Add(-time.Minute), "sig-soon": now.Add(2 * time.Second), "sig-later": now.Add(time.Hour),
+	} {
+		at := at
+		if _, err := store.Create(ctx, state.Key(name), state.SignalRecord{Name: name, SourceRef: "src", Adapter: "cron", InitiationID: name, ExpiresAt: &at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(name string) bool {
+		var sig agentopsv1alpha1.Signal
+		return wwClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &sig) == nil
+	}
+	waitGone := func(name string) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for exists(name) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: the object still exists after its expiry", name)
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}
+	waitGone("sig-past")
+	if !exists("sig-later") {
+		t.Fatal("a sweep took an object that had not expired")
+	}
+	waitGone("sig-soon") // a later expiry is found by a later sweep
+	if !exists("sig-later") {
+		t.Fatal("the one expiring in an hour was swept")
+	}
+}
+
+// TestRecordReceivedWritesTheStatusTheRouterAlwaysWrote: the counters stay
+// status.receivedTotal and status.lastReceived on the source, and a gone source
+// is not found.
+func TestRecordReceivedWritesTheStatusTheRouterAlwaysWrote(t *testing.T) {
+	ctx := context.Background()
+	ns, _ := newTestNamespace(t)
+	newSignalSource(t, ns, "src")
+	store := NewSignalStore(wwClient, ns)
+	at := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < 3; i++ {
+		if err := store.RecordReceived(ctx, "src", at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var src agentopsv1alpha1.SignalSource
+	if err := wwClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "src"}, &src); err != nil {
+		t.Fatal(err)
+	}
+	if src.Status.ReceivedTotal != 3 || src.Status.LastReceived == nil || !src.Status.LastReceived.Time.Equal(at) {
+		t.Fatalf("source status = total %d last %v, want 3 at %v", src.Status.ReceivedTotal, src.Status.LastReceived, at)
+	}
+	if err := store.RecordReceived(ctx, "gone", at); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("RecordReceived of a gone source error = %v, want ErrNotFound", err)
+	}
+	if got, err := store.GetReceived(ctx, "gone"); err != nil || got.Total != 0 {
+		t.Fatalf("GetReceived of a gone source = %+v, %v, want zero", got, err)
 	}
 }

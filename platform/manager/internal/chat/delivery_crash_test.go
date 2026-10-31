@@ -77,3 +77,35 @@ func TestDeliveryPassResendsAReplyWhoseRunMarkerNeverLanded(t *testing.T) {
 		t.Fatalf("the note must stay until delivery completes, got %+v", b)
 	}
 }
+
+// A delivered reply settles only the note that names it. A note naming an older
+// run is a reply still owed to the thread.
+func TestMarkDeliveredLeavesANoteNamingAnotherRun(t *testing.T) {
+	ctx := context.Background()
+	conv := testConv("conv-1")
+	conv.Namespace = testNS
+	conv.Status.Threads = []agentopsv1alpha1.ThreadBinding{{Channel: "c1", ThreadID: "t1", UndeliveredReply: "run-1"}}
+	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
+		WithObjects(conv).Build()
+	store := newTestStore(c)
+	q := &OpQueue{Store: store, Registry: NewRegistry()}
+	for _, id := range []string{"run-1", "run-2"} {
+		if err := store.AppendRun(ctx, "conv-1", state.Run{RunID: id, Status: "ok"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := q.markDelivered(ctx, &Op{ID: RunReplyOpID("conv-1", "c1", "run-2"), Conversation: "conv-1", Channel: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := recOf(t, store, "conv-1").Thread("c1"); b == nil || b.UndeliveredReply != "run-1" {
+		t.Fatalf("run-2 delivered must not clear the note naming run-1, got %+v", b)
+	}
+	if err := q.markDelivered(ctx, &Op{ID: RunReplyOpID("conv-1", "c1", "run-1"), Conversation: "conv-1", Channel: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := recOf(t, store, "conv-1").Thread("c1"); b == nil || b.UndeliveredReply != "" {
+		t.Fatalf("run-1 delivered must clear the note naming it, got %+v", b)
+	}
+}

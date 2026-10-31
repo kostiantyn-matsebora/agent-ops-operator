@@ -41,7 +41,7 @@ func (r *SignalSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var src agentopsv1alpha1.SignalSource
 	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.Signals.ReleaseSource(ctx, req.Name)
+			return ctrl.Result{}, r.Signals.ReleaseSource(ctx, req.Name, "")
 		}
 		return ctrl.Result{}, err
 	}

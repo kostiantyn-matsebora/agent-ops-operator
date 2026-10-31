@@ -175,6 +175,14 @@ type SignalEvent struct {
 	Resume   Revision
 }
 
+// Received is the count of signals a source has routed and the instant of the
+// latest, the reported counters a configuration surface shows.
+type Received struct {
+	Total int64
+	// Last is nil until a first signal is counted. UTC.
+	Last *time.Time
+}
+
 // CooldownEntry records when an initiationId was last admitted on a source,
 // so suppression survives a restart. See api/v1alpha1.CooldownEntry.
 type CooldownEntry struct {
@@ -191,7 +199,9 @@ type SignalStore interface {
 	Get(ctx context.Context, key Key) (SignalRecord, Revision, error)
 
 	// Create stores a new record under key and returns its revision.
-	// ErrAlreadyExists when the key is taken, in any phase: publication
+	// ErrAlreadyExists when the key is taken, in any phase (a record past its
+	// ExpiresAt is not taken: it is invisible, so a create replaces it):
+	// publication
 	// names a signal that carries a signalId by a key derived from it, and
 	// this refusal is how a re-send is recognised as a duplicate. ID and
 	// CreatedAt are minted here.
@@ -233,9 +243,27 @@ type SignalStore interface {
 	// to be gone.
 	PutCooldown(ctx context.Context, source string, entries []CooldownEntry) error
 
-	// ReleaseSource removes every signal of a source in any phase, and
+	// RecordReceived counts one routed signal on a source: Total grows by one
+	// and Last becomes at. Concurrent calls from the consumer pool all count:
+	// the backend serializes them (a revisioned write retried on a lost race)
+	// and never loses an increment. ErrNotFound when the backend knows the
+	// source to be gone. The counters decide no route.
+	RecordReceived(ctx context.Context, source string, at time.Time) error
+
+	// GetReceived reads a source's counters. A source that is gone or has
+	// counted nothing reads as the zero value, not an error.
+	GetReceived(ctx context.Context, source string) (Received, error)
+
+	// ReleaseSource removes the signals of a deleted source in any phase and
 	// clears its cooldown window. Idempotent. It is the manager's own act on
 	// a deleted source: no behaviour depends on an owner reference being
 	// honoured (the same rule as a conversation's workloads).
-	ReleaseSource(ctx context.Context, source string) error
+	//
+	// sourceID is the departed source's identity as its signals recorded it
+	// (SignalRecord.SourceID), "" when the caller does not know it. A name
+	// can be reused by a successor, so with an identity a signal recorded
+	// under a DIFFERENT identity is the successor's and is kept, and so is the
+	// successor's window where the backend can tell one holds the name. With
+	// "" every signal of the name goes and the window clears.
+	ReleaseSource(ctx context.Context, source, sourceID string) error
 }

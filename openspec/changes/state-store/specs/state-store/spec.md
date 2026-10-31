@@ -9,7 +9,7 @@ that lets an install choose where state lives.
 
 ### Requirement: State is reached only through the store contract
 The manager SHALL read and write conversations, conversation inputs and
-signals, and each signal source's cooldown window, only through the state
+signals, and each signal source's cooldown window and receipt counters, only through the state
 store contract. No manager code path SHALL reach a state record through a
 Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
@@ -29,7 +29,8 @@ backend offers it.
 #### Scenario: A state access outside the store is a build failure
 - **WHEN** a manager package imports the Kubernetes client to read or write a
   Conversation, a ConversationInput or a Signal, or reads or writes a
-  `SignalSource`'s `status.cooldown`
+  `SignalSource`'s `status.cooldown`, `status.receivedTotal` or
+  `status.lastReceived`
 - **THEN** the manager's own test suite fails, naming the package
 
 #### Scenario: Configuration kinds are untouched
@@ -37,8 +38,8 @@ backend offers it.
   configuration kind
 - **THEN** it reads it through the Kubernetes client as before, since
   configuration is not state and has no backend. What the manager writes onto
-  one of them as state, the cooldown window, is the one exception, and goes
-  through the store
+  two of them as state, the cooldown window and the receipt counters, are the
+  exception, and go through the store
 
 ### Requirement: Writes are compare-and-swap on an opaque revision
 Every write of an existing record SHALL carry the revision the writer last
@@ -157,6 +158,12 @@ way it tolerates any conflict.
 #### Scenario: Runs read back in order
 - **WHEN** runs 1 to N were appended
 - **THEN** listing returns them in that order, every one of them
+
+#### Scenario: A record and its runs in one read
+- **WHEN** a record with runs is read with the combined operation
+- **THEN** it returns the record and revision a plain read returns, and the runs
+  in append order; an absent record is refused as not found by the plain read's
+  rule
 
 ### Requirement: An existing run accepts only growth
 The contract SHALL offer one operation on an existing run, keyed by the
@@ -291,6 +298,12 @@ on that link (see the release requirement below).
 #### Scenario: A race has one winner
 - **WHEN** several creates under one key run at the same moment
 - **THEN** exactly one succeeds and every other is refused as already existing
+
+#### Scenario: An expired signal does not hold its key
+- **WHEN** a create names the key of a signal whose expiry has passed and the
+  backend has not yet removed it
+- **THEN** it succeeds and the stored record is the new one: an invisible
+  record is not a duplicate
 
 #### Scenario: A finished signal still holds its key
 - **WHEN** a create names the key of a signal whose phase is terminal and not
@@ -434,6 +447,19 @@ before; the contract moves the access, not that object.
 - **WHEN** an entry is written with an instant in another zone
 - **THEN** it reads back as the same instant in UTC
 
+### Requirement: A source's receipt counters are state
+The contract SHALL offer counting one routed signal on a source (the total
+grows by one and the latest instant becomes the given one) and reading the
+counters. Concurrent counts SHALL all be kept: the backend serialises them and
+never loses an increment. A source the backend does not know SHALL refuse a
+count as not found and read as zero. Under the `kube` backend the counters
+SHALL stay `SignalSource.status.receivedTotal` and `lastReceived`.
+
+#### Scenario: Concurrent receipts are all counted
+- **WHEN** several receipts are recorded on one source at the same moment
+- **THEN** the total equals their number, the latest instant reads back in UTC,
+  and another source's counters did not move
+
 ### Requirement: A deleted source's signals are released by the manager
 The contract SHALL offer releasing a source: remove every signal naming it, in
 any phase, and clear its cooldown window, idempotently and without error for a
@@ -442,11 +468,23 @@ gone, and SHALL release the orphan a pass finds, so no behaviour depends on an
 owner reference being honoured. The `kube` backend MAY still set the owner
 reference.
 
+A name can be reused by a successor source. The release SHALL therefore take
+the departed source's identity when the caller knows it: a signal recorded under
+a different identity is the successor's and SHALL be kept, and so SHALL the
+successor's window where the backend can tell one holds the name. Without an
+identity every signal of the name is released.
+
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released
   twice, beside a second source with a live signal and a window
 - **THEN** the first source's signals and window are gone, and the second's are
   untouched
+
+#### Scenario: A successor's signals outlive the departed release
+- **WHEN** a source is released by the identity of its previous incarnation
+  while a signal recorded under the identity of its successor exists
+- **THEN** the previous incarnation's signals are gone and the successor's stay,
+  and under `kube` so does the successor's window
 
 #### Scenario: Release without a garbage collector
 - **WHEN** a `SignalSource` is deleted in an environment where owner-reference

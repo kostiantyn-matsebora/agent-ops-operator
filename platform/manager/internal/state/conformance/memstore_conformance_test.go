@@ -29,3 +29,8 @@ func TestBenchReportsTierOneMetrics(t *testing.T) {
 func BenchmarkMemStore(b *testing.B) {
 	Bench(b, newMemStore)
 }
+
+// BenchmarkMemSignalStore is BenchSignals against the in-memory double.
+func BenchmarkMemSignalStore(b *testing.B) {
+	BenchSignals(b, newMemSignalStore)
+}

@@ -85,18 +85,37 @@ func newStore(c client.WithWatch, namespace string, interval time.Duration) *Sto
 // etcd — "invisible before it is gone" (spec: "An expired record is
 // invisible before it is gone").
 func (s *Store) Get(ctx context.Context, key state.Key) (state.ConversationRecord, state.Revision, error) {
-	var conv agentopsv1alpha1.Conversation
-	if err := s.client.Get(ctx, s.namespacedName(key), &conv); err != nil {
+	conv, err := s.getVisible(ctx, key)
+	if err != nil {
+		return state.ConversationRecord{}, "", err
+	}
+	return toRecord(conv), state.Revision(conv.ResourceVersion), nil
+}
+
+// GetWithRuns serves the record and its runs from one apiserver read: the runs
+// are status.runs on the same object.
+func (s *Store) GetWithRuns(ctx context.Context, key state.Key) (state.ConversationRecord, state.Revision, []state.Run, error) {
+	conv, err := s.getVisible(ctx, key)
+	if err != nil {
+		return state.ConversationRecord{}, "", nil, err
+	}
+	return toRecord(conv), state.Revision(conv.ResourceVersion), toRuns(conv.Status.Runs), nil
+}
+
+// getVisible reads the Conversation and applies the expiry rule of Get.
+func (s *Store) getVisible(ctx context.Context, key state.Key) (*agentopsv1alpha1.Conversation, error) {
+	conv := &agentopsv1alpha1.Conversation{}
+	if err := s.client.Get(ctx, s.namespacedName(key), conv); err != nil {
 		if apierrors.IsNotFound(err) {
-			return state.ConversationRecord{}, "", state.ErrNotFound
+			return nil, state.ErrNotFound
 		}
-		return state.ConversationRecord{}, "", fmt.Errorf("kube: get conversation %q: %w", key, err)
+		return nil, fmt.Errorf("kube: get conversation %q: %w", key, err)
 	}
-	if isExpired(&conv, time.Now()) {
+	if isExpired(conv, time.Now()) {
 		s.expiryArmed.Store(true)
-		return state.ConversationRecord{}, "", state.ErrNotFound
+		return nil, state.ErrNotFound
 	}
-	return toRecord(&conv), state.Revision(conv.ResourceVersion), nil
+	return conv, nil
 }
 
 // Create writes a new Conversation. The main Create call persists spec and

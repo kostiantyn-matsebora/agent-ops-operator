@@ -319,6 +319,15 @@ func (m *memStore) ListRuns(ctx context.Context, key state.Key) ([]state.Run, er
 	return out, nil
 }
 
+func (m *memStore) GetWithRuns(ctx context.Context, key state.Key) (state.ConversationRecord, state.Revision, []state.Run, error) {
+	rec, rev, err := m.Get(ctx, key)
+	if err != nil {
+		return rec, rev, nil, err
+	}
+	runs, err := m.ListRuns(ctx, key)
+	return rec, rev, runs, err
+}
+
 func (m *memStore) PutBlob(ctx context.Context, key state.Key, blob state.Blob) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

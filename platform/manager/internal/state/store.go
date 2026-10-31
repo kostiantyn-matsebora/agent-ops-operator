@@ -181,6 +181,12 @@ type Store interface {
 	// ListRuns returns key's run history in append order.
 	ListRuns(ctx context.Context, key Key) ([]Run, error)
 
+	// GetWithRuns is Get and ListRuns in ONE read: the record, its revision
+	// and its run history as they stood at the same instant, or ErrNotFound
+	// by Get's rule. The reconciler reads both on every pass, and a backend
+	// that holds the history on the record spends one round trip instead of two.
+	GetWithRuns(ctx context.Context, key Key) (ConversationRecord, Revision, []Run, error)
+
 	// PutBlob stores blob under key, replacing any value already there.
 	PutBlob(ctx context.Context, key Key, blob Blob) error
 

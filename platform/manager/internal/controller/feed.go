@@ -86,15 +86,25 @@ func (f feed[E]) forward(events <-chan E, q workqueue.TypedRateLimitingInterface
 	return last, delivered
 }
 
-// enqueueAll requests a reconcile of every record the store holds.
+// enqueueAll requests a reconcile of every record the store holds. The list is
+// the only thing that reconciles a record already present when the watch
+// opens, and a failed one is never repeated by the watch, so it is retried at
+// the feed's retry delay until it succeeds or ctx ends.
 func (f feed[E]) enqueueAll(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	keys, err := f.list(ctx)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "listing "+f.what+"s for the initial reconcile")
-		return
-	}
-	for _, key := range keys {
-		q.Add(f.request(key))
+	for {
+		keys, err := f.list(ctx)
+		if err == nil {
+			for _, key := range keys {
+				q.Add(f.request(key))
+			}
+			return
+		}
+		log.FromContext(ctx).Error(err, "listing "+f.what+"s for the initial reconcile; retrying")
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(feedRetryDelay):
+		}
 	}
 }
 

@@ -3,12 +3,8 @@ package signalroute
 import (
 	"context"
 	"fmt"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -18,6 +14,11 @@ import (
 
 // defaultCooldownHours is a machine source's window when its spec sets none.
 const defaultCooldownHours = 6
+
+// cooldownReadTimeout bounds the one store read that rebuilds a window. The
+// per-source lock is held across it, so an unreachable backend must fail the
+// pass (which repeats) rather than hold every signal of the source behind it.
+var cooldownReadTimeout = 10 * time.Second
 
 // spendCooldown consults the source's cooldown for sig's initiationId and,
 // when the id is fresh, spends it and records the window through the store.
@@ -71,7 +72,14 @@ func recoverCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.Si
 			hours = 0
 		}
 	}
-	window, err := deps.Signals.GetCooldown(ctx, source.Name)
+	if hours == 0 {
+		// A disabled window has nothing to recover, and reading one would let a
+		// store error fail a pass that could not fail before.
+		return ingest.NewCooldownFrom(0, nil), nil
+	}
+	readCtx, cancel := context.WithTimeout(ctx, cooldownReadTimeout)
+	defer cancel()
+	window, err := deps.Signals.GetCooldown(readCtx, source.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -102,27 +110,9 @@ func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *inges
 	}
 }
 
-// RecordReceived moves the source's status.receivedTotal and lastReceived for
-// one routed signal. The counter is a read-modify-write shared by every
-// consumer of the pool, so it writes under the resourceVersion it read and
-// retries on conflict.
+// RecordReceived counts one routed signal on the source through the state
+// store. The store serializes concurrent consumers of the pool and retries a
+// lost race, so no increment is lost.
 func RecordReceived(ctx context.Context, deps Deps, sourceName string) error {
-	for attempt := 0; attempt < 5; attempt++ {
-		var src agentopsv1alpha1.SignalSource
-		if err := deps.Reader.Get(ctx, types.NamespacedName{Namespace: deps.Namespace, Name: sourceName}, &src); err != nil {
-			return err
-		}
-		patch := client.MergeFromWithOptions(src.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		now := metav1.Now()
-		src.Status.LastReceived = &now
-		src.Status.ReceivedTotal++
-		err := deps.Client.Status().Patch(ctx, &src, patch)
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("conflict recording receipt on source %s", sourceName)
+	return deps.Signals.RecordReceived(ctx, sourceName, time.Now())
 }

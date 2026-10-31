@@ -43,10 +43,6 @@ The constraints this design keeps:
   are a separate, optional optimisation.
 - The console reading state through the manager. Under `kube` its direct
   watch keeps working. That change lands with the first non-`kube` backend.
-- Moving `SignalSource.status.receivedTotal` and `lastReceived`. They are
-  counters the manager reports on a configuration object, read by the console
-  and by nothing that decides a route, so losing one costs a number and never
-  a decision. They stay a status write on the source (D-15).
 - The console reading signals through the manager. Under `kube` its direct
   watch keeps working.
 - A CRD layout change for runs. See D-5.
@@ -163,20 +159,36 @@ apiserver, the way `APIReader` does for the HTTP handlers today.
 
 What is uncached under `kube`, and so costs an apiserver round trip where an
 informer answered from memory: every `Get`, `List` and `ListRuns` (a read of
-the whole Conversation, runs included, since the CRD keeps them in status);
-`Reconcile` opens with `Get` and then `ListRuns`, two reads of one object, and
-`Store` has no combined read to share them without widening the contract, so
-that pair stays. Every write re-reads before its compare-and-swap. Request-path
+the whole Conversation, runs included, since the CRD keeps them in status).
+`Reconcile` used to open with `Get` and then `ListRuns`, two reads of one
+object; `GetWithRuns` is the combined read, one round trip under `kube`, and
+Reconcile uses it. Every write re-reads before its compare-and-swap. Request-path
 reads already went to the apiserver through `APIReader`; the new cost is the
 reconciler's own reads. The expiry sweep lists the namespace only when armed
 (a write or an observed record carries `ExpiresAt`, plus once at start), so an
 install where nothing sets it pays one list per process, not one per 30s.
 
-The bench (`go test -bench . -benchmem ./internal/state/...`) measures the
-in-memory conformance store only (about 350 ns and 3 writes per run append); it
-says nothing about apiserver latency, and the `kube` read cost has not been
-measured against a cluster. This change therefore does not claim the reconcile
-path is free of round trips.
+The bench (`go test -run xxx -bench . -benchmem ./internal/state/...`) has two
+tiers. The in-memory conformance store (about 300 ns and 3 writes per run
+append; `BenchSignals`: about 37 µs for a create plus two status writes, 68 µs
+to list 200 live of 300 signals) says nothing about apiserver latency. The
+`kube` benchmarks run against envtest's real API server on one workstation (a
+local apiserver and etcd, no kubelet, no network hop, no other client), 200
+iterations each:
+
+| Operation under `kube` | Measured |
+|---|---|
+| `Get` + `ListRuns` (the old Reconcile read), 5 runs | 1.69 ms |
+| `GetWithRuns` (the same two facts) | 0.88 ms |
+| Signal create + two status writes | 6.0 ms |
+| `List(SignalNonTerminalBySource)`, 300 signals stored | 11.6 ms |
+
+These are costs of the backend's own work against a local server, not cluster
+latencies, and no cluster measurement was made. The last row is the finding: the
+signal indexes filter in Go over one namespace list, so every cap or head-of-queue
+check decodes every stored signal, live or terminal. It is bounded by rate times
+TTL and is the first thing a selector or an index in a later backend would remove.
+This change does not claim the signal path is cheap on a loaded cluster.
 
 ### D-5: The `kube` backend keeps today's CRD layout
 
@@ -412,10 +424,23 @@ and the UTC rule, the `expiresAt` semantics and the identity fields
   the opaque identity of the source as the source's own object reports it,
   and `kube` turns it into the controller owner reference, so the stored object
   is the one publication always wrote and no read of the source is added.
-  The cascade stops being load-bearing: `ReleaseSource(source)` deletes every
+  The cascade stops being load-bearing: `ReleaseSource` deletes every
   signal naming it in any phase and clears its cooldown window, idempotently,
   and the manager calls it when the source reconciler finds its source gone
   and when a pass finds the orphan. This is D-7's rule applied to signals.
+  A name outlives its source (a prune and re-apply, a reinstall), so
+  `ReleaseSource(source, sourceID)` takes the departed identity when the caller
+  knows it: a signal recorded under another identity, and under `kube` the
+  successor's window, stay, and each delete carries the UID it listed. The pass
+  knows it (`SignalRecord.SourceID`); the source reconciler, which has only the
+  name from a deletion, passes `""` and releases the whole name. What remains
+  is the reconciler's own sub-millisecond gap between seeing the source absent
+  and releasing, which a successor created inside it can lose.
+- **Create replaces an expired record.** An expired record is invisible to
+  `Get` and `List`, so refusing a create over it would acknowledge a re-sent
+  `signalId` as a duplicate of something nobody can read. `kube` deletes it
+  under the UID and revision it read and creates again, once; losing either
+  race is a duplicate.
 - **The feed is the informer's replacement for the same reason as D-6.**
   `SignalReconciler` registers `Watch` as a raw source with the relist
   `pumpFeed` already does, and the `kick` channel stays as a second source.
@@ -451,12 +476,18 @@ changes nothing under `kube`: `PutCooldown` is the same status merge patch,
 - It lives on `SignalStore`, not on a third interface: a window is read only
   where a signal is routed, and `ReleaseSource` clears both.
 
-Not moved: `receivedTotal` and `lastReceived`. They are reported counters,
-incremented by a CAS loop on the source, read for display, and feed no routing
-decision. They are the same class as the `Served` and `Wired` conditions the
-source reconciler already writes onto its own status. Moving them would put a
-counter write through a store for no correctness gain; if a later backend
-wants them, that is its own addition.
+Also moved: `receivedTotal` and `lastReceived`. They decide no route, but they
+are the last state the manager wrote onto a source's status from outside the
+store, and the aim is that no manager state is left behind the seam. The
+contract takes two operations, not a record: `RecordReceived(source, at)`
+counts one routed signal (Total + 1, Last = at) and the backend serializes
+concurrent consumers without losing an increment; `GetReceived(source)` reads
+them, zero for a source that is gone. Under `kube` it is the revisioned merge
+patch of the same two status fields the router always made, retried on
+conflict, so the stored object is unchanged. The console keeps reading the
+object directly under `kube`, as for the rest of the source. The `Served` and
+`Wired` conditions stay where they are: they are configuration status the
+source reconciler derives, not state a decision reads back.
 
 ## Risks / Trade-offs
 
@@ -492,9 +523,6 @@ exist. Rollback is the previous manager image. `stateStore.backend` absent
 means `kube`.
 
 ## Open Questions
-
-- Whether `receivedTotal` and `lastReceived` should follow the cooldown window
-  behind the contract (D-15). Left on the source: they decide no route.
 
 - Whether the `kube` backend should later split runs into a `ConversationRun`
   CRD (D-5). Deferred to the bench. Changes no spec of this change.

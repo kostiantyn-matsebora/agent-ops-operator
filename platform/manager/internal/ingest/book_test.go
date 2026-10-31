@@ -86,3 +86,43 @@ func TestCooldownBookLeavesASourceUnbuiltWhenItsRecordCannotBeRead(t *testing.T)
 		t.Fatal("the next call builds again")
 	}
 }
+
+// A slow build of one source must not hold the book's mutex: Lock and Stats of
+// every other source stay available while it runs.
+func TestCooldownBookBuildRunsOutsideItsMutex(t *testing.T) {
+	b := NewCooldownBook()
+	started, release := make(chan struct{}), make(chan struct{})
+	built := make(chan *Cooldown, 1)
+	go func() {
+		built <- b.For("slow", func() *Cooldown { close(started); <-release; return NewCooldown(time.Hour) })
+	}()
+	<-started
+	free := make(chan struct{})
+	go func() {
+		b.Lock("other")()
+		b.Stats()
+		close(free)
+	}()
+	select {
+	case <-free:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Lock/Stats blocked behind a build in progress")
+	}
+	close(release)
+	if <-built == nil {
+		t.Fatal("build result lost")
+	}
+}
+
+// Two overlapping builds of one source keep the first stored window.
+func TestCooldownBookKeepsTheFirstStoredWindowOnOverlap(t *testing.T) {
+	b := NewCooldownBook()
+	first := NewCooldown(time.Hour)
+	got := b.For("s", func() *Cooldown {
+		b.For("s", func() *Cooldown { return first }) // a concurrent build lands first
+		return NewCooldown(time.Hour)
+	})
+	if got != first || b.For("s", func() *Cooldown { return nil }) != first {
+		t.Fatal("the window stored first must win")
+	}
+}

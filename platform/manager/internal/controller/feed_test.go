@@ -265,3 +265,55 @@ func TestPumpFeedFollowsABookmarkWithoutEnqueuing(t *testing.T) {
 		t.Fatalf("a bookmark must enqueue nothing, got %v", names)
 	}
 }
+
+// A relist that fails once must be repeated: the watch never replays a record
+// that already existed when it opened, so a dropped list would leave it
+// unreconciled for the life of the process.
+func TestFeedRetriesAFailedInitialList(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var mu sync.Mutex
+	lists := 0
+	f := feed[int]{
+		what: "thing",
+		open: func(ctx context.Context, _ state.Revision) (<-chan int, error) {
+			ch := make(chan int)
+			go func() { <-ctx.Done(); close(ch) }()
+			return ch, nil
+		},
+		describe: func(int) (state.Key, state.Revision, bool) { return "", "", true },
+		list: func(context.Context) ([]state.Key, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			lists++
+			if lists == 1 {
+				return nil, errors.New("store unavailable")
+			}
+			return []state.Key{"early"}, nil
+		},
+		request: func(k state.Key) reconcile.Request {
+			return reconcile.Request{NamespacedName: namespacedName("ns", string(k))}
+		},
+	}
+	q := &recordingQueue{}
+	go f.pump(ctx, q)
+	waitForNames(t, q, "early")
+	mu.Lock()
+	defer mu.Unlock()
+	if lists != 2 {
+		t.Fatalf("list called %d times, want 2 (one failure, one retry)", lists)
+	}
+}
+
+func TestFeedStopsRetryingTheListWhenTheContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := feed[int]{what: "thing", list: func(context.Context) ([]state.Key, error) { return nil, errors.New("down") }}
+	done := make(chan struct{})
+	go func() { f.enqueueAll(ctx, &recordingQueue{}); close(done) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("enqueueAll outlived its context")
+	}
+}

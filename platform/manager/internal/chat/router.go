@@ -808,7 +808,7 @@ func SettleDeliveredNote(ctx context.Context, store state.Store, conv *state.Con
 	if b := conv.Thread(channel); b == nil || b.UndeliveredReply != runID {
 		return
 	}
-	_ = clearUndeliveredNote(ctx, store, state.Key(conv.Name), channel)
+	_ = clearUndeliveredNote(ctx, store, state.Key(conv.Name), channel, runID)
 }
 
 // eachBoundThread runs fn for every bound channel that already has a thread,

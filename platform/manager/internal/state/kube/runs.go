@@ -61,14 +61,19 @@ func (s *Store) ListRuns(ctx context.Context, key state.Key) ([]state.Run, error
 		}
 		return nil, fmt.Errorf("kube: get conversation %q to list runs: %w", key, err)
 	}
-	if len(conv.Status.Runs) == 0 {
-		return nil, nil
+	return toRuns(conv.Status.Runs), nil
+}
+
+// toRuns maps a status.runs list; an empty one is nil.
+func toRuns(in []agentopsv1alpha1.RunStatus) []state.Run {
+	if len(in) == 0 {
+		return nil
 	}
-	out := make([]state.Run, len(conv.Status.Runs))
-	for i, rs := range conv.Status.Runs {
+	out := make([]state.Run, len(in))
+	for i, rs := range in {
 		out[i] = toRun(rs)
 	}
-	return out, nil
+	return out
 }
 
 // UpdateRun applies upd to the run named runID (store.go's Store.UpdateRun),

@@ -101,6 +101,9 @@ func Run(t *testing.T, newStore func() state.Store) {
 		t.Run("RunsReadBackInAppendOrder", func(t *testing.T) {
 			testListRunsOrder(t, newStore())
 		})
+		t.Run("RecordAndRunsInOneRead", func(t *testing.T) {
+			testGetWithRuns(t, newStore())
+		})
 	})
 
 	t.Run("InputPayloadsAreBlobsByKey", func(t *testing.T) {
@@ -726,6 +729,37 @@ func testListRunsOrder(t *testing.T, store state.Store) {
 		if r.RunID != want {
 			t.Fatalf("runs[%d].RunID = %q, want %q — appended order not preserved", i, r.RunID, want)
 		}
+	}
+}
+
+// testGetWithRuns is the "A record and its runs in one read" scenario.
+func testGetWithRuns(t *testing.T, store state.Store) {
+	ctx := context.Background()
+	key := state.Key("conv-with-runs")
+	if _, _, _, err := store.GetWithRuns(ctx, key); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("GetWithRuns of an absent record error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Create(ctx, key, state.ConversationRecord{ProfileRef: profileDefault, Name: "conv-with-runs"}); err != nil {
+		t.Fatalf(fmtCreate, err)
+	}
+	if rec, _, runs, err := store.GetWithRuns(ctx, key); err != nil || rec.Name != "conv-with-runs" || len(runs) != 0 {
+		t.Fatalf("GetWithRuns with no run = %+v, %v, %v, want the record and no runs", rec, runs, err)
+	}
+	for _, id := range []string{"run-a", "run-b"} {
+		if err := store.AppendRun(ctx, key, state.Run{RunID: id}); err != nil {
+			t.Fatalf("AppendRun: %v", err)
+		}
+	}
+	rec, rev, runs, err := store.GetWithRuns(ctx, key)
+	if err != nil {
+		t.Fatalf("GetWithRuns: %v", err)
+	}
+	got, gotRev, _ := store.Get(ctx, key)
+	if rec.Name != got.Name || rev != gotRev {
+		t.Fatalf("GetWithRuns record/revision = %q/%q, Get = %q/%q, want the same", rec.Name, rev, got.Name, gotRev)
+	}
+	if len(runs) != 2 || runs[0].RunID != "run-a" || runs[1].RunID != "run-b" {
+		t.Fatalf("GetWithRuns runs = %+v, want run-a then run-b", runs)
 	}
 }
 
