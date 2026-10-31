@@ -4,15 +4,15 @@
 The system SHALL classify every piece of live state into exactly one of four
 homes, and SHALL NOT hold state that belongs to no class:
 
-- **Kubernetes API** — configuration: every kind an operator writes, adapter
-  cursors, and suppression windows on the `SignalSource`. Recovered by
-  reading. Survives any process restart and any rescheduling.
+- **Kubernetes API** — configuration: every kind an operator writes, and
+  adapter cursors. Recovered by reading. Survives any process restart and any rescheduling.
 - **State store** — conversation state: session id, threads, inputs, runs,
   phase, the conversation's MESSAGE RECORD (what people sent as well as what
-  the agent answered), and signals once `signal-persistence` lands. Reached
-  only through the state store contract. The selected backend decides where it is kept. The `kube`
-  backend keeps it in the Kubernetes API, so a default install has the same
-  two homes it always had.
+  the agent answered), signals with their per-claimant routing state, and each
+  source's suppression window. Reached only through the state store contract.
+  The selected backend decides where it is kept. The `kube` backend keeps it
+  in the Kubernetes API, so a default install has the same two homes it
+  always had.
 - **PersistentVolume** — state that genuinely IS a filesystem: the runtime's
   agent session files and, optionally, its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never

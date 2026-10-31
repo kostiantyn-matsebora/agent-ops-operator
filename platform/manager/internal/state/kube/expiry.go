@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
@@ -48,16 +49,22 @@ func expiresAtFromAnnotations(annotations map[string]string) *time.Time {
 // always reflects the caller's record exactly (never merged with whatever
 // was there before).
 func setExpiresAtAnnotation(conv *agentopsv1alpha1.Conversation, at *time.Time) {
+	setExpiresAt(&conv.ObjectMeta, at)
+}
+
+// setExpiresAt is setExpiresAtAnnotation for any object: the Signal store
+// carries its expiry in the same annotation.
+func setExpiresAt(meta *metav1.ObjectMeta, at *time.Time) {
 	if at == nil {
-		if conv.Annotations != nil {
-			delete(conv.Annotations, ExpiresAtAnnotation)
+		if meta.Annotations != nil {
+			delete(meta.Annotations, ExpiresAtAnnotation)
 		}
 		return
 	}
-	if conv.Annotations == nil {
-		conv.Annotations = map[string]string{}
+	if meta.Annotations == nil {
+		meta.Annotations = map[string]string{}
 	}
-	conv.Annotations[ExpiresAtAnnotation] = at.UTC().Format(time.RFC3339Nano)
+	meta.Annotations[ExpiresAtAnnotation] = at.UTC().Format(time.RFC3339Nano)
 }
 
 // Run starts the expiry sweep: every sweepInterval (DefaultSweepInterval

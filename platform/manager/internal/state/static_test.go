@@ -24,7 +24,29 @@ const apiImportPath = "github.com/kostiantyn-matsebora/agent-ops-operator/platfo
 var guardedTypes = map[string]bool{
 	"Conversation": true, "ConversationList": true,
 	"ConversationInput": true, "ConversationInputList": true,
+	// The Signal half (design D-14): a Signal, its list and the cooldown entry
+	// the router keeps on a SignalSource. "Status.Cooldown" is the field read
+	// and written through a selector, checked below.
+	"Signal": true, "SignalList": true, "CooldownEntry": true,
 }
+
+// pendingSignalMigration is TEMPORARY. The Signal call sites have not moved to
+// state.SignalStore yet (tasks.md section 5, the Signal migration): these
+// packages may still name the Signal types and the cooldown field. The
+// migration empties this set in the same change that moves the last site, and
+// then deletes it. Nothing may be added to it, and the Conversation types are
+// never excused by it.
+var pendingSignalMigration = map[string]bool{
+	"internal/httpapi":     true, // publish.go: Create
+	"internal/controller":  true, // signal_controller.go: Get, List, status write, Delete, watch
+	"internal/signalroute": true, // takes a *Signal; cooldown.go: status.cooldown
+}
+
+// signalGuarded are the guarded names the pending set excuses.
+var signalGuarded = map[string]bool{"Signal": true, "SignalList": true, "CooldownEntry": true}
+
+// cooldownField is the SignalSource status field the router reads and writes.
+const cooldownField = "Cooldown"
 
 // A violation is one reference to a guarded type outside the allowed places.
 type violation struct {
@@ -176,7 +198,7 @@ func violationsIn(path, rel string) ([]violation, error) {
 		// below cannot see.
 		out = append(out, violation{pkg: pkg, file: rel, line: 1, typ: "* (dot-import of the API package)"})
 	}
-	if len(aliases) == 0 {
+	if len(aliases) == 0 && !mentionsStatusCooldown(file) {
 		return out, nil
 	}
 	var calls []string // the stack of enclosing call names
@@ -192,7 +214,7 @@ func violationsIn(path, rel string) ([]violation, error) {
 			return false
 		case *ast.SelectorExpr:
 			id, ok := x.X.(*ast.Ident)
-			if ok && aliases[id.Name] && guardedTypes[x.Sel.Name] {
+			if ok && aliases[id.Name] && guardedTypes[x.Sel.Name] && !excused(pkg, x.Sel.Name) {
 				call := ""
 				if len(calls) > 0 {
 					call = calls[len(calls)-1]
@@ -201,11 +223,22 @@ func violationsIn(path, rel string) ([]violation, error) {
 					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: x.Sel.Name, call: call,
 				})
 			}
+			if inner, isSel := x.X.(*ast.SelectorExpr); isSel && inner.Sel.Name == "Status" &&
+				x.Sel.Name == cooldownField && !excused(pkg, "CooldownEntry") {
+				out = append(out, violation{
+					pkg: pkg, file: rel, line: fset.Position(x.Pos()).Line, typ: "SignalSource Status." + cooldownField,
+				})
+			}
 		}
 		return true
 	}
 	ast.Inspect(file, visit)
 	return out, nil
+}
+
+// excused reports whether a guarded name is tolerated in pkg for now.
+func excused(pkg, name string) bool {
+	return signalGuarded[name] && pendingSignalMigration[pkg]
 }
 
 // apiAliases lists the local names a file imports the API package under, and
@@ -269,7 +302,7 @@ func untypedKindViolations(fset *token.FileSet, file *ast.File, pkg, rel string)
 					untypedAt = x.Pos()
 				}
 			case *ast.BasicLit:
-				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && guardedTypes[v] {
+				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && guardedTypes[v] && !excused(pkg, v) {
 					kind = v
 				}
 			case *ast.Ident:
@@ -301,4 +334,61 @@ func callName(c *ast.CallExpr) string {
 		return f.Name
 	}
 	return ""
+}
+
+// mentionsStatusCooldown reports whether a file selects a Status.Cooldown
+// field, which needs no import of the API package to be written.
+func mentionsStatusCooldown(file *ast.File) bool {
+	found := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == cooldownField {
+			if inner, isSel := sel.X.(*ast.SelectorExpr); isSel && inner.Sel.Name == "Status" {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// The Signal half names the same doors: a Signal or its list, the cooldown
+// entry, and the SignalSource status field, from any package except the
+// backend and, until the migration lands, the temporary pending set.
+func TestStaticCheckGuardsSignalsAndExcusesOnlyThePendingPackages(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, src string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const header = "package p\nimport v1 \"" + apiImportPath + "\"\n"
+	write("internal/chat/bad_signal.go", header+"var _ *v1.Signal\n")
+	write("internal/chat/bad_list.go", header+"var _ v1.SignalList\n")
+	write("internal/chat/bad_entry.go", header+"var _ v1.CooldownEntry\n")
+	write("internal/chat/bad_field.go", "package p\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { s.Status.Cooldown = nil }\n")
+	write("internal/chat/ok_source.go", header+"var _ v1.SignalSource\nvar _ v1.SignalAdapter\n") // other kinds
+	write("internal/signalroute/pending.go", header+"var _ *v1.Signal\ntype src struct{ Status struct{ Cooldown []int } }\nfunc f(s *src) { _ = s.Status.Cooldown }\n")
+	write("internal/signalroute/still_bad.go", header+"var _ v1.Conversation\n") // the pending set never excuses a conversation
+	write("internal/state/kube/ok.go", header+"var _ v1.Signal\n")
+
+	found, err := findViolations(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, v := range found {
+		files = append(files, v.file)
+	}
+	sort.Strings(files)
+	want := []string{
+		"internal/chat/bad_entry.go", "internal/chat/bad_field.go", "internal/chat/bad_list.go",
+		"internal/chat/bad_signal.go", "internal/signalroute/still_bad.go",
+	}
+	if strings.Join(files, ",") != strings.Join(want, ",") {
+		t.Fatalf("flagged %v, want %v", files, want)
+	}
 }

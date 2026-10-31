@@ -43,8 +43,12 @@ The constraints this design keeps:
   are a separate, optional optimisation.
 - The console reading state through the manager. Under `kube` its direct
   watch keeps working. That change lands with the first non-`kube` backend.
-- Moving `SignalSource.status.cooldown[]`. It is state on a configuration
-  object and moves with `signal-persistence`.
+- Moving `SignalSource.status.receivedTotal` and `lastReceived`. They are
+  counters the manager reports on a configuration object, read by the console
+  and by nothing that decides a route, so losing one costs a number and never
+  a decision. They stay a status write on the source (D-15).
+- The console reading signals through the manager. Under `kube` its direct
+  watch keeps working.
 - A CRD layout change for runs. See D-5.
 
 ## Decisions
@@ -68,9 +72,9 @@ contract's provenance and lives in the spec's requirements:
 | Manager does | Contract guarantees |
 |---|---|
 | get-modify-put raced by leader and HTTP handler | CAS on an opaque revision |
-| finds by `initiationId`, `pipelineRef`+phase, phase | declared index set, closed — `signal-persistence` adds source |
+| finds by `initiationId`, `pipelineRef`+phase, phase | declared index set, closed |
 | resumes as a new leader from state alone | at-least-once resumable feed |
-| will treat signals as expiring (`signal-persistence`) | `expiresAt` on a record |
+| ends a terminal signal after a per-phase TTL measured from completion | `expiresAt` on a record, written in the update that makes the phase terminal (D-14) |
 | appends runs, reads them rarely | append-only sub-records |
 | stores a payload once, reads it once | blobs by key |
 | one install per namespace | scope fixed at construction |
@@ -80,6 +84,11 @@ contract's provenance and lives in the spec's requirements:
 | orders admission and the idle clock by creation time | backend-minted `CreatedAt` (D-11) |
 | marks a delivered channel, a tracked run and a routed member result on an existing run | one grow-only run update (D-12) |
 | lists a parent's members, a word-chain's names, and every conversation | three more declared indexes: by parent, by word-chain, whole set |
+| creates a signal under a name derived from `(source, signalId)` and reads AlreadyExists as the duplicate | create refused as already existing, in every phase (D-14) |
+| writes a signal's status under the version it read and repeats the pass on a loss | CAS `Update` that writes status and expiry only (D-14) |
+| counts a source's live signals, and finds the earlier live messages of one conversation | two non-terminal signal indexes beside the whole set (D-14) |
+| removes a deleted source's signals through an owner reference | explicit `ReleaseSource` (D-14) |
+| keeps a source's suppression window across a restart | `GetCooldown` / `PutCooldown` (D-15) |
 | reads a deprecated per-input agent override for one release | `InputItem.Agent` carried through, removed with the dual-read |
 
 Provenance of the additions, counted by type-checking every Kubernetes
@@ -105,6 +114,33 @@ writes are lookup keys and map from fields the record has.
 Two declared indexes, by pipeline and phase and by phase, have no call site
 in the manager today: its lookups filter the whole set. They stay declared,
 and the section 4 migration decides whether a call site adopts them.
+
+Provenance of the Signal additions, counted the same way over the non-test
+packages (reading every call that takes a Signal, a SignalList or the
+cooldown list, since this tree was not yet migrated):
+
+| Kind | Call sites |
+|---|---|
+| `Create` of a signal | 1, `publishOne`, with the controller owner reference set beside it |
+| `Get` of a signal | 1, `Reconcile`, from the API reader |
+| status write (optimistic-lock merge patch of the status) | 1 helper, reached from 6: the terminal-signal backfill, three in `consume`, `exhaust`, `evict` |
+| `List` of signals | 2: `isHead` (earlier live messages of one source and initiation id) and `enforceSourceCap` (live signals of one source); both list the whole namespace and filter |
+| `Delete` of a signal | 1, the TTL delete, conditional on the UID and revision read |
+| watch | 1 `For(&Signal{})`, plus a channel source (`kickSignal`) that hands another signal to the queue |
+| type referenced as an in-memory value | 37: the signal reconciler 19, `signalroute` 17 (`Admit`, `Route` and their helpers mutate status in memory), `publish.go` 1 |
+| `SignalSource.status.cooldown` | 1 read (`recoverCooldown`), 1 write (`recordCooldown`), reached from 2 (`spendCooldown` and its rollback) |
+
+Reads of object metadata the first sketch of the contract could not express:
+the creation timestamp 2 (`signalBefore`, ordering by arrival, and the
+backfill), the UID and revision 1 (the conditional delete). Nothing reads a
+Signal's labels, annotations, generation or finalizers, and nothing writes a
+finalizer to one. Nothing reads the owner reference: the cascade from a deleted
+source is the only use of it.
+
+Not derived: the signal's `spec` is never written after publication (the
+consumer writes status only), no signal write commutes (every one is a
+compare-and-swap whose loser repeats its pass), and nothing appends to or
+grows a signal, so none of the run sub-record machinery applies.
 
 Credentials, TLS, DSNs, bucket names, schema migrations, retention and
 compaction are a backend's own and live in its bundle. They never appear in
@@ -224,7 +260,12 @@ listing, so the NATS decision is made from measurements.
 
 A static check in the manager's test suite fails on any package outside
 `internal/state/` that references the Conversation or ConversationInput
-types through a Kubernetes client call.
+types through a Kubernetes client call. It also guards the Signal, its list,
+the cooldown entry and the `SignalSource` status field. Until the Signal call
+sites move, `httpapi`, `controller` and `signalroute` sit in an explicit,
+marked, temporary allowlist (`pendingSignalMigration`) that the migration
+empties and deletes; it never excuses a Conversation. `RunSignals` is the
+Signal half of the suite, and a backend passes both.
 
 ### D-11: Identity and deletion are part of the record
 
@@ -321,6 +362,102 @@ Recorded after section 4, where the decisions were made against real code.
   a Conversation or ConversationInput type, which is stricter than a client
   call taking one, so holding the object in a variable cannot get around it.
 
+### D-14: Signals get a second interface, not a wider one
+
+`Store`'s `Get`, `Create`, `Update`, `List` and `Watch` are typed on
+`ConversationRecord`. Three ways to add Signal were weighed:
+
+| Option | Rejected because |
+|---|---|
+| One `Store` with signal methods beside the conversation ones (`GetSignal`, `CreateSignal`, ...) | doubles the surface of an interface every test double and the kube backend already implement, and ties every future signal backend to the conversation sub-records (runs, blobs) it has no use for |
+| Generics: `Store[R Record]`, `Event[R]` | rewrites a contract the manager already moved onto, for a second type that shares only six small pieces |
+| A second interface, `SignalStore`, over the shared pieces | **chosen** |
+
+`SignalStore` shares `Key`, `Revision`, `Ref`, `EventType`, the four errors
+and the UTC rule, the `expiresAt` semantics and the identity fields
+(`ID`, `CreatedAt`), and adds only what the call sites above need:
+
+- `Get`, `Create`, `Update`, `Delete`, `List`, `Watch` with the conversation
+  store's meaning. `Update` writes **status and expiry only**: the publication
+  fields, the identity and the creation instant are ignored, as the identity
+  already is on a conversation. That makes the spec's write-once rule a
+  property of the contract, not a convention.
+- **Create is the duplicate arbiter.** `ErrAlreadyExists` in every phase, with
+  no lookup, as `publishOne` does today.
+- **No `Mutate` helper, no revision-free write.** A signal pass reads once,
+  mutates in memory across `Admit` and `Route`, and writes with the revision
+  it read, carrying the returned one into its second write. A loss repeats the
+  pass through the work queue; a get-modify-update loop would re-run a routing
+  decision that already created a conversation. Nothing about a signal grows,
+  so there is no `UpdateRun` analogue.
+- **No finalizers, no marked state.** A signal holds none and `Delete`
+  removes at once.
+- **Three indexes.** `SignalAll` (the new leader's pass, the namespace-wide
+  relist the feed starts with), `SignalNonTerminalBySource` (the cap) and
+  `SignalNonTerminalByInitiation` (the head-of-queue check). The two live
+  indexes exclude terminal records at the contract, so rate × TTL finished
+  records of a flapping source do not cost the cap a scan. They filter in Go
+  under `kube` as `Store.List` does.
+- **Expiry replaces the TTL delete.** `reconcileTerminal` read the signal,
+  waited until `completedAt` + TTL and deleted it conditionally on the revision.
+  The consumer now writes `ExpiresAt = CompletedAt + ttl(phase)` in the
+  update that makes the phase terminal, in the same compare-and-swap, so no
+  second writer exists and the conditional delete has nothing to guard.
+  Under `kube` the status subresource is written first and the expiry
+  annotation second, only when it changed: a crash between them leaves a
+  terminal signal with no expiry, which the existing backfill pass stamps;
+  the reverse order could leave a live signal expiring. The sweep deletes with
+  a UID and revision precondition. The TTL knobs stay on the reconciler.
+- **The owner link is a hint, not a mechanism.** `Create` takes `SourceID`,
+  the opaque identity of the source as the source's own object reports it,
+  and `kube` turns it into the controller owner reference, so the stored object
+  is the one publication always wrote and no read of the source is added.
+  The cascade stops being load-bearing: `ReleaseSource(source)` deletes every
+  signal naming it in any phase and clears its cooldown window, idempotently,
+  and the manager calls it when the source reconciler finds its source gone
+  and when a pass finds the orphan. This is D-7's rule applied to signals.
+- **The feed is the informer's replacement for the same reason as D-6.**
+  `SignalReconciler` registers `Watch` as a raw source with the relist
+  `pumpFeed` already does, and the `kick` channel stays as a second source.
+
+The payload stays inline in the record. A status write re-encodes it, which is
+today's cost; a backend may keep it elsewhere without the contract changing,
+and moving it out is a later optimisation for the bench to justify, not a
+change to make blind in a change whose criterion is zero behaviour change.
+
+### D-15: The cooldown window is state and moves behind the contract
+
+`SignalSource.status.cooldown[]` is written by the manager's router
+(`recordCooldown`) and read back once per process per source (`recoverCooldown`).
+It is not configuration and not derivable: it is the record that stops a
+restart re-opening conversations for ids inside their window, and the signal
+spec says cooldown keeps its persistence on the source.
+
+**Decision: in scope.** Leaving it makes "the state store abstracts all manager
+state" false at exactly the place that matters, because under any non-`kube`
+backend the window would be the one decision input still held in the
+Kubernetes API, written to an object the source reconciler and the console
+watch re-read on every fresh admission. Moving it costs two methods and
+changes nothing under `kube`: `PutCooldown` is the same status merge patch,
+`GetCooldown` the same read, the stored list identical.
+
+- `GetCooldown(source)` returns the window; absent reads empty, not an error.
+- `PutCooldown(source, entries)` replaces the whole window, last write wins,
+  no revision. The leader is the only writer and holds a per-source lock; a
+  lost write costs a duplicate investigation after a restart, never a stuck
+  signal, and the caller already logs and carries on. This matches a merge
+  patch, so the contract does not invent a stronger guarantee than the
+  behaviour it replaces. `ErrNotFound` when the backend knows the source is gone.
+- It lives on `SignalStore`, not on a third interface: a window is read only
+  where a signal is routed, and `ReleaseSource` clears both.
+
+Not moved: `receivedTotal` and `lastReceived`. They are reported counters,
+incremented by a CAS loop on the source, read for display, and feed no routing
+decision. They are the same class as the `Served` and `Wired` conditions the
+source reconciler already writes onto its own status. Moving them would put a
+counter write through a store for no correctness gain; if a later backend
+wants them, that is its own addition.
+
 ## Risks / Trade-offs
 
 - [Zero behaviour change across 29 write sites is a claim, not a property] →
@@ -336,6 +473,13 @@ Recorded after section 4, where the decisions were made against real code.
 - [A feed consumer keeps its resume point in memory] → on restart it resumes
   from "now" and relists, which is the same relist an informer does. The
   contract's gap scenario covers the connected-then-disconnected case.
+- [A Signal's expiry is set once, at the terminal write, so a later change to a
+  TTL chart value does not re-age signals already terminal] → their window was
+  decided when they finished, which is the signal spec's own "from
+  completedAt"; the backfill pass stamps only a terminal signal with none.
+- [Orphan release by the manager adds a call where an owner reference did the
+  work for free] → one `ReleaseSource` on the source reconciler's not-found
+  path, plus the missing-source branch the signal pass already has.
 - [The static import check is a blunt instrument] → it names the package and
   the call, and allows `internal/state/kube` alone.
 - [D-8's numbers are estimates] → that is why the bench exists. The next
@@ -348,6 +492,9 @@ exist. Rollback is the previous manager image. `stateStore.backend` absent
 means `kube`.
 
 ## Open Questions
+
+- Whether `receivedTotal` and `lastReceived` should follow the cooldown window
+  behind the contract (D-15). Left on the source: they decide no route.
 
 - Whether the `kube` backend should later split runs into a `ConversationRun`
   CRD (D-5). Deferred to the bench. Changes no spec of this change.

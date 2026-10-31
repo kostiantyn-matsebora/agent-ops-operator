@@ -8,13 +8,15 @@ that lets an install choose where state lives.
 ## ADDED Requirements
 
 ### Requirement: State is reached only through the store contract
-The manager SHALL read and write conversations and conversation inputs only
-through the state store contract. No manager code path SHALL reach a state
-record through a Kubernetes client, a Kubernetes cache or a Kubernetes watch
-directly.
+The manager SHALL read and write conversations, conversation inputs and
+signals, and each signal source's cooldown window, only through the state
+store contract. No manager code path SHALL reach a state record through a
+Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
-The Signal record joins the contract with `signal-persistence`, as the
-contract extension that change owns.
+The contract has two interfaces: one for conversations and their inputs, one
+for signals and cooldown windows. They share the revision, the key, the
+errors, the feed's event types, expiry and identity, and nothing else needs to
+be shared.
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -26,14 +28,17 @@ backend offers it.
 
 #### Scenario: A state access outside the store is a build failure
 - **WHEN** a manager package imports the Kubernetes client to read or write a
-  Conversation or a ConversationInput
+  Conversation, a ConversationInput or a Signal, or reads or writes a
+  `SignalSource`'s `status.cooldown`
 - **THEN** the manager's own test suite fails, naming the package
 
 #### Scenario: Configuration kinds are untouched
 - **WHEN** the manager reads a Pipeline, Channel, SignalSource or any other
   configuration kind
 - **THEN** it reads it through the Kubernetes client as before, since
-  configuration is not state and has no backend
+  configuration is not state and has no backend. What the manager writes onto
+  one of them as state, the cooldown window, is the one exception, and goes
+  through the store
 
 ### Requirement: Writes are compare-and-swap on an opaque revision
 Every write of an existing record SHALL carry the revision the writer last
@@ -266,10 +271,213 @@ compare equal.
 - **WHEN** a record and a run are written with instants in another zone
 - **THEN** every instant read back is in UTC and equals the instant written
 
+### Requirement: A signal is created once under its key
+The contract SHALL offer creating a signal under a key the caller derives. A
+create under a key already held SHALL be refused with the distinguishable
+already-exists error in every phase the signal can be in, and SHALL change
+nothing. Publication SHALL treat that refusal as the duplicate of a message it
+already stored, with no lookup before the create.
+
+A create SHALL accept the opaque identity of the source the signal arrived on,
+so a backend that links a record to its owner can. No behaviour SHALL depend
+on that link (see the release requirement below).
+
+#### Scenario: A second create under one key is the duplicate
+- **WHEN** a signal is created twice under one key, the second time with a
+  different payload
+- **THEN** the second is refused as already existing and the stored payload is
+  the first's
+
+#### Scenario: A race has one winner
+- **WHEN** several creates under one key run at the same moment
+- **THEN** exactly one succeeds and every other is refused as already existing
+
+#### Scenario: A finished signal still holds its key
+- **WHEN** a create names the key of a signal whose phase is terminal and not
+  yet expired
+- **THEN** it is refused as already existing
+
+### Requirement: A signal's status is written by compare-and-swap, its message never
+An update of a signal SHALL carry the revision the writer last read, SHALL
+change only the status fields and the expiry, and SHALL be refused with the
+conflict error when the revision is not current, applying no field of it.
+Whatever an update carries in the publication fields, the identity or the
+creation instant SHALL be ignored. Writing an absent or expired signal SHALL
+fail as not-found.
+
+The contract SHALL NOT offer a write to a signal that takes no revision: every
+status write is the consumer's or housekeeping's, runs on the leader through
+one work queue, and repeats its pass when it loses a race.
+
+#### Scenario: A stale status write is never merged
+- **WHEN** a writer presents a revision older than the current one
+- **THEN** the store refuses it as a conflict and the record keeps the
+  winner's status
+
+#### Scenario: The message cannot be rewritten
+- **WHEN** an update carries a different source, initiation id, payload, title
+  and labels
+- **THEN** the record read back carries the publication's values and the
+  update's status
+
+#### Scenario: Every status field round-trips
+- **WHEN** a signal is updated with a phase, attempts, first-attempt, completion
+  and consumption instants, the consumer's identity and three claimants in
+  three different states
+- **THEN** a read returns every field as written and the claimants in order
+
+### Requirement: Signal lookup is by key or by a declared index
+The contract SHALL offer lookup of a signal by key and listing by a declared,
+closed set of signal indexes: every signal; one source's non-terminal
+signals; one source's non-terminal signals of one initiation id. Every backend
+SHALL serve every one. A terminal signal SHALL never be returned by a
+non-terminal index, so a flapping source's finished records do not slow the
+per-source cap. A signal whose phase is absent SHALL count as non-terminal.
+
+The contract SHALL NOT accept a free-form selector. Listing order is
+unspecified; the contract SHALL offer one ordering, arrival, by creation
+instant and then name.
+
+#### Scenario: The cap counts only what is live
+- **WHEN** a source has live, partially routed and terminal signals and
+  another source has a live one
+- **THEN** the non-terminal-by-source index returns the first source's live and
+  partially routed signals and nothing else
+
+#### Scenario: Earlier messages of one conversation are found
+- **WHEN** a source holds three live signals of one initiation id, one live
+  signal of another, and a terminal one of the first
+- **THEN** the non-terminal-by-initiation index returns exactly the three
+
+#### Scenario: Arrival order is creation then name
+- **WHEN** two signals share a creation instant
+- **THEN** arrival orders them by name, and an earlier creation instant
+  arrives first
+
+#### Scenario: A query outside the signal indexes is not expressible
+- **WHEN** a caller names an index the contract does not declare
+- **THEN** the store refuses it as an unknown index
+
+### Requirement: A terminal signal expires instead of being deleted
+The consumer SHALL write a signal's expiry in the same update that makes its
+phase terminal: the completion instant plus that phase's time to live. The
+store SHALL apply the contract's expiry rules to it: invisible to lookup and
+listing once passed, and removed with a delete event on the feed.
+
+No second writer SHALL delete a terminal signal, so no conditional delete
+exists. A terminal signal found without an expiry, written by a version that
+did not set one, SHALL be given one from its completion instant by the
+consumer's next pass.
+
+#### Scenario: A terminal write carries its expiry
+- **WHEN** an update sets a Routed phase, a completion instant and an expiry
+  an hour ahead
+- **THEN** a read returns all three, and an update moving the expiry into the
+  past makes the signal invisible
+
+#### Scenario: An expired signal is invisible, then a delete event
+- **WHEN** a signal's expiry has passed
+- **THEN** a lookup and every listing omit it, and the feed carries a delete
+  event for its key once the backend removes it
+
+### Requirement: A signal feed is at-least-once and resumable
+The contract SHALL offer a change feed over signals with the semantics of the
+conversation feed: events carry the key, the revision and the record, a
+consumer resumes from a point it kept and observes every change made after it,
+duplicates are permitted and a gap is not. A consumer SHALL be able to start
+with no point and then list every signal, so a new leader finds every
+non-terminal signal from stored state alone.
+
+#### Scenario: A change and a removal are on the feed
+- **WHEN** a signal is created and then deleted
+- **THEN** the feed carries a put with the record at the created revision, and
+  a delete event for its key
+
+#### Scenario: Resuming sees what happened while away
+- **WHEN** a consumer drops its feed, a signal is created and another is
+  updated, and the consumer resumes from its kept point
+- **THEN** it observes both changes
+
+### Requirement: A signal is removed at once when asked
+A delete of a signal SHALL remove it immediately and SHALL NOT be an error when
+the key is absent. A signal holds no finalizer and has no marked state.
+
+#### Scenario: Delete is immediate and repeatable
+- **WHEN** a signal is deleted and then deleted again
+- **THEN** the first removes it, a read reports not-found, and the second
+  succeeds
+
+### Requirement: A source's cooldown window is state
+The contract SHALL offer reading and replacing the suppression window of one
+source: the initiation ids last admitted on it and when. A source with nothing
+recorded, or one the backend does not know, SHALL read as an empty window and
+not as an error. A replace SHALL take no revision and the last write SHALL win,
+because the leader is the only writer and serialises each source, and a lost
+write costs a duplicate investigation after a restart, never a stuck signal. A
+caller SHALL tolerate a failed replace by logging it. Two sources SHALL never
+see each other's window.
+
+The window's location under the `kube` backend SHALL stay
+`SignalSource.status.cooldown`, written by the same status merge patch as
+before; the contract moves the access, not that object.
+
+#### Scenario: Nothing recorded reads empty
+- **WHEN** a window is read for a source that has none
+- **THEN** the result is an empty window and no error
+
+#### Scenario: A replace is whole and per source
+- **WHEN** two sources each have a window and one is replaced, then cleared
+- **THEN** a read of that source returns exactly the replacement, then an empty
+  window, and the other source's window never changed
+
+#### Scenario: Instants read back in UTC
+- **WHEN** an entry is written with an instant in another zone
+- **THEN** it reads back as the same instant in UTC
+
+### Requirement: A deleted source's signals are released by the manager
+The contract SHALL offer releasing a source: remove every signal naming it, in
+any phase, and clear its cooldown window, idempotently and without error for a
+source with none. The manager SHALL call it when a `SignalSource` is observed
+gone, and SHALL release the orphan a pass finds, so no behaviour depends on an
+owner reference being honoured. The `kube` backend MAY still set the owner
+reference.
+
+#### Scenario: Release removes one source and no other
+- **WHEN** a source with a live, a terminal signal and a window is released
+  twice, beside a second source with a live signal and a window
+- **THEN** the first source's signals and window are gone, and the second's are
+  untouched
+
+#### Scenario: Release without a garbage collector
+- **WHEN** a `SignalSource` is deleted in an environment where owner-reference
+  garbage collection does not run
+- **THEN** its signals are removed by the manager within its next reconciliation
+
+### Requirement: Signal scope and instants follow the conversation rules
+A signal store SHALL serve exactly one install, fixed at construction, and SHALL
+carry a backend-minted identity and creation instant that a caller cannot set.
+Every instant it returns SHALL be in UTC.
+
+#### Scenario: Two installs never see each other's signals
+- **WHEN** two installs share one backend
+- **THEN** a key written by one is absent from the other's lookups and listings
+
+#### Scenario: Identity is minted and stable
+- **WHEN** a create carries an identity and a creation instant, the signal is
+  updated, and then deleted and created again under its key
+- **THEN** the identity is the backend's, unchanged by the update, and
+  different after the recreate
+
+#### Scenario: Instants read back in UTC
+- **WHEN** a signal is updated with instants in another zone
+- **THEN** every instant read back is in UTC and equals the one written
+
 ### Requirement: The contract offers no multi-record atomicity
 The contract SHALL NOT offer a transaction across records. Every manager path
 that writes two records SHALL tolerate a failure between the two and SHALL
-be re-derivable from whichever write landed.
+be re-derivable from whichever write landed. That includes a signal's terminal
+update followed by the conversation it routed to, and a status write followed
+by its expiry.
 
 #### Scenario: A crash between a conversation write and its input write
 - **WHEN** the manager stops after writing a conversation and before writing
@@ -297,9 +505,14 @@ report them so backends compare on one table.
 ### Requirement: The `kube` backend preserves today's behaviour
 The `kube` backend SHALL store state as the same custom resources as before
 the store existed: same schema, same field names, same status subresource.
+That covers a `Signal` and the cooldown list on `SignalSource` status.
 
 An object written through it SHALL be indistinguishable from one written
 before. `kubectl` SHALL read and list them unchanged.
+
+A signal's source identity maps to the controller owner reference naming its
+`SignalSource`, its status to the status subresource, and its expiry to the
+same annotation a conversation uses.
 
 The record's finalizers map to the object's finalizers, its deletion marker to
 the object's deletion timestamp, its identity to the object's UID, and the
@@ -314,6 +527,12 @@ It SHALL be the default backend and SHALL render no bundle.
 - **THEN** the Conversation and ConversationInput objects differ in nothing
   but timestamps and revisions, and the one annotation carrying `expiresAt`
   on a record that sets one (no CRD schema change)
+
+#### Scenario: A signal is the object publication always wrote
+- **WHEN** a signal is created through the store and another by the call
+  publication made before the store existed
+- **THEN** their specs and owner references are equal, and the first carries
+  no annotation unless it set an expiry
 
 #### Scenario: The system pack passes unchanged
 - **WHEN** the system pack runs against a default install
@@ -341,9 +560,10 @@ start on a name it does not implement.
 
 ### Requirement: Workloads are released by the manager, not by ownership
 The manager SHALL delete a conversation's runtime pod and ConfigMap itself
-when the conversation closes or is deleted. No behaviour SHALL depend on a
-Kubernetes owner reference being honoured. The `kube` backend MAY still set
-the owner reference.
+when the conversation closes or is deleted, and SHALL release a deleted
+source's signals itself. No behaviour SHALL depend on a Kubernetes owner
+reference being honoured. The `kube` backend MAY still set the owner
+reference.
 
 #### Scenario: Release without a garbage collector
 - **WHEN** a conversation closes in an environment where owner-reference
