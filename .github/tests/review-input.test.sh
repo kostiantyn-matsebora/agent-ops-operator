@@ -44,7 +44,7 @@ stub_gh_with_comments() {  # stub_gh_with_comments <comments-file>
 #!/usr/bin/env bash
 case "\$*" in
   "pr view"*)     echo '{"baseRefName":"master","headRefName":"change/thing","headRefOid":"deadbeef"}' ;;
-  "pr diff"*)     cat "$PATHS_FILE" ;;
+  "api repos/o/r/pulls/5/files"*) cat "$PATHS_FILE" ;;
   "api repos/o/r/issues/5/comments --paginate -q .[].body") cat "$comments" 2>/dev/null ;;
   "api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' ;;
 esac
