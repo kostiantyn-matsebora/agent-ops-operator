@@ -14,7 +14,7 @@ Paths outside every component -- `docs/`, `.github/`, `openspec/`, `.claude/`,
 therefore one reader, not zero: prose is reviewed here too.
 
 Reads paths as arguments, or on stdin one per line when none are given
-(`gh pr diff --name-only`), and writes a JSON list of `{group, kind, paths}` --
+(the pull request files endpoint), and writes a JSON list of `{group, kind, paths}` --
 `kind` is `component` or `directory`.
 """
 from __future__ import annotations
