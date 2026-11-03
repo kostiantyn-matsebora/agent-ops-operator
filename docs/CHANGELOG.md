@@ -16,7 +16,7 @@ for the source and the reference material beside this file.
   manager keeps conversation state, and exactly one backend may be selected.
   `kube` is the Kubernetes API, as before, and it is the only backend this
   release ships. The render refuses an unknown value. The key covers
-  `Signal`s and each source's suppression window as well as conversations. No
+  `Signal`s and each source's cooldown window as well as conversations. No
   upgrade step and no CRD change.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
@@ -44,7 +44,7 @@ for the source and the reference material beside this file.
   its phase terminal stamps an expiry (under `kube`, the same expiry annotation
   a conversation carries), and the store's sweep removes it. This replaces the
   consumer's conditional delete and requeue. The TTL values are unchanged.
-- Deleting a `SignalSource` now releases its `Signal`s and suppression window
+- Deleting a `SignalSource` now releases its `Signal`s and cooldown window
   through the manager instead of relying on the owner-reference cascade. The
   outcome is the same, except that a source deleted and recreated under one
   name keeps its new incarnation's signals and window.

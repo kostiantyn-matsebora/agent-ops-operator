@@ -434,7 +434,7 @@ investigates.
 
 **Released with its `SignalSource`.** Deleting the source makes the manager
 release it: every `Signal` of that source, from any phase, and the source's
-suppression window, are removed through the state store. This replaces the
+cooldown window, are removed through the state store. This replaces the
 owner-reference cascade the `Signal` carried before, so it holds under any
 backend. The manager holds full CRUD on the kind
 and every other component, the console included, at most `get`, `list` and
@@ -1888,16 +1888,15 @@ payload is not copied into the conversation object.
 
 - **The Kubernetes API, or the state store** — configuration lives on the
   Kubernetes API. Conversation state, every accepted `Signal` and each source's
-  suppression window live in the **state store**, the one seam the manager
+  cooldown window live in the **state store**, the one seam the manager
   reaches them through. The chart selects a backend with
   `stateStore.backend` (see [configuration](configuration.md#state-store)), and the
   only backend shipped is `kube`, which keeps today's `Conversation`,
   `ConversationInput` and `Signal` custom resources, and the window in
   `SignalSource.status.cooldown[]`. Under `kube` the two homes are the same
-  API. Conversation state is: (session id,
+  API. Conversation state is: session id,
   threads, inputs, runs, phase, and the message record — what people sent as
-  well as what the agent answered), adapter cursors, delivery markers and
-  suppression windows. Recovered by reading. Survives any restart and any
+  well as what the agent answered. Recovered by reading. Survives any restart and any
   rescheduling.
   - **A thread binding's `claim` (holder, claimedAt) and `undeliveredReply`
     ride the same home.** The claim records which manager replica is
@@ -1936,7 +1935,7 @@ a second source of truth beside the CRs.
 | Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | none: not state-store state | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
 
 **The backend column names what a row's guarantee rests on.** Conversation
-state, `Signal`s and the suppression window go through the store. A source's
+state, `Signal`s and the cooldown window go through the store. A source's
 `receivedTotal` and `lastReceived` counters go through it too, and under `kube`
 stay the same two status fields on the source.
 

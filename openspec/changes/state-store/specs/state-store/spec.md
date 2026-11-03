@@ -14,9 +14,10 @@ store contract. No manager code path SHALL reach a state record through a
 Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
 The contract has two interfaces: one for conversations and their inputs, one
-for signals, cooldown windows and receipt counters. They share the revision, the key, the
-errors, the feed's event types, expiry and identity, and nothing else needs to
-be shared.
+for signals, cooldown windows and receipt counters. They share the key and the
+errors. Signal operations also use the revision, the feed's event types, expiry
+and identity. The cooldown window and receipt counter operations take no
+revision, have no feed and carry no identity.
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -162,8 +163,8 @@ way it tolerates any conflict.
 #### Scenario: A record and its runs in one read
 - **WHEN** a record with runs is read with the combined operation
 - **THEN** it returns the record and revision a plain read returns, and the runs
-  in append order; an absent record is refused as not found by the plain read's
-  rule
+  in append order. An absent record is refused as not found by the plain read's
+  rule.
 
 ### Requirement: An existing run accepts only growth
 The contract SHALL offer one operation on an existing run, keyed by the
@@ -288,8 +289,9 @@ already stored, with no lookup before the create.
 A create SHALL accept the opaque identity of the source the signal arrived on,
 so a backend that links a record to its owner can.
 
-No behaviour SHALL depend on a backend honouring that link. Release by source
-identity works without it (see the release requirement below).
+No behaviour SHALL depend on a backend turning that identity into an owner
+reference or any other cascade. The identity is still recorded, and the release
+requirement below reads it to keep a successor source's signals.
 
 #### Scenario: A second create under one key is the duplicate
 - **WHEN** a signal is created twice under one key, the second time with a
@@ -519,8 +521,9 @@ Every instant it returns SHALL be in UTC.
 The contract SHALL NOT offer a transaction across records. Every manager path
 that writes two records SHALL tolerate a failure between the two and SHALL
 be re-derivable from whichever write landed. That includes a signal's terminal
-update followed by the conversation it routed to, and a status write followed
-by its expiry.
+update followed by the conversation it routed to. A status write and its expiry
+are one update (see the terminal-signal requirement), so they need no such
+tolerance.
 
 #### Scenario: A crash between a conversation write and its input write
 - **WHEN** the manager stops after writing a conversation and before writing

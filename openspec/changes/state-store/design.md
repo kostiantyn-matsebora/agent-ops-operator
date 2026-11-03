@@ -44,7 +44,7 @@ The constraints this design keeps:
 - The console reading state through the manager. Under `kube` its direct
   watch keeps working. That change lands with the first non-`kube` backend.
 - The console reading signals through the manager. Under `kube` its direct
-  watch keeps working.
+  watch keeps working. That change lands with the first non-`kube` backend.
 - A CRD layout change for runs. See D-5.
 
 ## Decisions
@@ -84,7 +84,7 @@ contract's provenance and lives in the spec's requirements:
 | writes a signal's status under the version it read and repeats the pass on a loss | CAS `Update` that writes status and expiry only (D-14) |
 | counts a source's live signals, and finds the earlier live messages of one conversation | two non-terminal signal indexes beside the whole set (D-14) |
 | removes a deleted source's signals through an owner reference | explicit `ReleaseSource` (D-14) |
-| keeps a source's suppression window across a restart | `GetCooldown` / `PutCooldown` (D-15) |
+| keeps a source's cooldown window across a restart | `GetCooldown` / `PutCooldown` (D-15) |
 | reads a deprecated per-input agent override for one release | `InputItem.Agent` carried through, removed with the dual-read |
 
 Provenance of the additions, counted by type-checking every Kubernetes
@@ -168,10 +168,10 @@ observed record carrying `ExpiresAt` arms it, and it also runs once at start. An
 install where nothing sets it therefore pays one list per process, not one per 30s.
 
 The bench (`go test -run xxx -bench . -benchmem ./internal/state/...`) has two
-tiers. The in-memory conformance store (about 300 ns and 3 writes per run
-append. `BenchSignals` shows about 37 µs for a create plus two status writes
-and 68 µs to list 200 live of 300 signals) says nothing about apiserver latency. The
-`kube` benchmarks run against envtest's real API server on one workstation (a
+tiers. The in-memory conformance store costs about 300 ns and 3 writes per run
+append. It says nothing about apiserver latency. `BenchSignals` shows about
+37 µs for a create plus two status writes, and 68 µs to list 200 live of 300
+signals. The `kube` benchmarks run against envtest's real API server on one workstation (a
 local apiserver and etcd, no kubelet, no network hop, no other client), 200
 iterations each:
 

@@ -612,7 +612,6 @@ is the Kubernetes API, as before.
 - an unknown `backend`
 - a selected backend whose bundle is off
 - two backend bundles on at once
-- a bundle on while `kube` is selected
 
 `kube` renders no bundle. The manager reads the choice as `STATE_BACKEND`, and a
 value its binary does not carry stops it at start, naming the value.
