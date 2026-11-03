@@ -273,7 +273,7 @@ listing, so the NATS decision is made from measurements.
 A static check in the manager's test suite fails on any package outside
 `internal/state/` that references the Conversation or ConversationInput
 types through a Kubernetes client call. It also guards the Signal, its list,
-the cooldown entry and the `SignalSource` status field. Until the Signal call
+the cooldown entry, the receipt counters (`receivedTotal`, `lastReceived`) and the `SignalSource` status field. Until the Signal call
 sites move, `httpapi`, `controller` and `signalroute` sit in an explicit,
 marked, temporary allowlist (`pendingSignalMigration`) that the migration
 empties and deletes; it never excuses a Conversation. `RunSignals` is the

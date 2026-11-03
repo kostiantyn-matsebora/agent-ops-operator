@@ -90,7 +90,7 @@ Deliberately not fixed:
 
 - The static check still misses a reflected field path and a kind that reaches an unstructured object through another function's return value. It needs type information the AST walk lacks.
 - No cluster measurement was made.
-- The source reconciler passes no identity, so a successor created in the gap between its absence check and the release can lose its signals.
+- The source reconciler passes no identity, so a successor created in the gap between its absence check and the release can lose its signals. This is a known gap against the "A successor's signals outlive the departed release" scenario, which holds only where the caller supplies the identity (6.6 is ticked for the explicit release, not for that race).
 
 ## 7. Unit tests
 

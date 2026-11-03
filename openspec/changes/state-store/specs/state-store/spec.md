@@ -14,7 +14,7 @@ store contract. No manager code path SHALL reach a state record through a
 Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
 The contract has two interfaces: one for conversations and their inputs, one
-for signals and cooldown windows. They share the revision, the key, the
+for signals, cooldown windows and receipt counters. They share the revision, the key, the
 errors, the feed's event types, expiry and identity, and nothing else needs to
 be shared.
 

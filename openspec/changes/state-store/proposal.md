@@ -17,7 +17,7 @@ resources — and pay its full price on every write and every copy:
   source that is thousands of objects, each with the same write and copy cost,
   and each status write re-encodes its payload.
 - The per-source suppression window is manager-written state kept on a
-  configuration object, so every fresh admission rewrites a `SignalSource` its
+  configuration object, so every fresh admission rewrites a `SignalSource`, notifying its
   own reconciler and the console watch.
 
 The storage engine is not the point. The absence of a seam is. There is no
