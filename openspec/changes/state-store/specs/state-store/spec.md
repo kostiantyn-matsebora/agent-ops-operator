@@ -286,8 +286,10 @@ nothing. Publication SHALL treat that refusal as the duplicate of a message it
 already stored, with no lookup before the create.
 
 A create SHALL accept the opaque identity of the source the signal arrived on,
-so a backend that links a record to its owner can. No behaviour SHALL depend
-on that link (see the release requirement below).
+so a backend that links a record to its owner can.
+
+No behaviour SHALL depend on a backend honouring that link. Release by source
+identity works without it (see the release requirement below).
 
 #### Scenario: A second create under one key is the duplicate
 - **WHEN** a signal is created twice under one key, the second time with a
