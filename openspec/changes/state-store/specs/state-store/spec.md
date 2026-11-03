@@ -13,11 +13,13 @@ signals, and each signal source's cooldown window and receipt counters, only thr
 store contract. No manager code path SHALL reach a state record through a
 Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
-The contract has two interfaces: one for conversations and their inputs, one
-for signals, cooldown windows and receipt counters. They share the key and the
-errors. Signal operations also use the revision, the feed's event types, expiry
-and identity. The cooldown window and receipt counter operations take no
-revision, have no feed and carry no identity.
+The contract has two interfaces. They share the key and the errors.
+
+| Interface | Holds | Uses | Does not use |
+|---|---|---|---|
+| conversations | conversations and their inputs | the shared key and errors | — |
+| signals | signals | revision, feed event types, expiry, identity | — |
+| signals | cooldown windows, receipt counters | the shared key and errors | revision, feed, identity |
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -142,9 +144,7 @@ eventually remove it. How the removal happens is the backend's own.
 A conversation's runs SHALL be appended, never rewritten, and SHALL list in
 the order they were appended.
 
-The one change an existing run accepts is growth: its delivery-tracked flag
-and its routed-to-parent flag going from false to true, and channels being
-added to its delivered set. No field is cleared, removed or overwritten.
+An existing run accepts only growth, stated in the next Requirement.
 
 An append SHALL take no revision from the caller and SHALL NOT fail with a
 conflict. Whether an append also moves the control record's revision is the

@@ -157,15 +157,24 @@ staleness — how controller-runtime already behaves under `kube`.
 `Get` returns the current record. The `kube` backend serves it from the
 apiserver, the way `APIReader` does for the HTTP handlers today.
 
-What is uncached under `kube`, and so costs an apiserver round trip where an
-informer answered from memory: every `Get`, `List` and `ListRuns` (a read of
-the whole Conversation, runs included, since the CRD keeps them in status).
+Uncached under `kube`, and so an apiserver round trip where an informer
+answered from memory:
+
+- Every `Get`, `List` and `ListRuns`. The last reads the whole Conversation,
+  runs included, since the CRD keeps them in status.
+- Every write re-reads before its compare-and-swap.
+
+Request-path reads already went to the apiserver through `APIReader`. The new
+cost is the reconciler's own reads.
+
 `Reconcile` used to open with `Get` and then `ListRuns`, two reads of one
-object. `GetWithRuns` is the combined read, one round trip under `kube`. Reconcile uses it. Every write re-reads before its compare-and-swap. Request-path
-reads already went to the apiserver through `APIReader`. The new cost is the
-reconciler's own reads. The expiry sweep lists the namespace only when armed. A write or an
-observed record carrying `ExpiresAt` arms it, and it also runs once at start. An
-install where nothing sets it therefore pays one list per process, not one per 30s.
+object. `GetWithRuns` is the combined read, one round trip under `kube`.
+Reconcile uses it.
+
+The expiry sweep lists the namespace only when armed. A write or an observed
+record carrying `ExpiresAt` arms it, and it also runs once at start. An
+install where nothing sets it therefore pays one list per process, not one per
+30s.
 
 The bench (`go test -run xxx -bench . -benchmem ./internal/state/...`) has two
 tiers. The in-memory conformance store costs about 300 ns and 3 writes per run
