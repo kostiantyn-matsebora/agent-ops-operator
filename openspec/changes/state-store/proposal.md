@@ -84,7 +84,7 @@ differently per install.
 **Code**
 
 - `platform/manager/internal/state/` — the contract, domain records, the
-  `kube` backend, the conformance suite with its bench; `SignalStore` and its
+  `kube` backend, the conformance suite with its bench, with `SignalStore` and its
   record beside `Store`.
 - `platform/manager/internal/controller/conversation_controller.go`,
   `index.go`, `drain.go`, `mediation.go` — reconcile from the feed, read and

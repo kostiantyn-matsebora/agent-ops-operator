@@ -467,7 +467,7 @@ SHALL stay `SignalSource.status.receivedTotal` and `lastReceived`.
 The contract SHALL offer releasing a source: remove every signal naming it, in
 any phase, and clear its cooldown window, idempotently and without error for a
 source with none. The manager SHALL call it when a `SignalSource` is observed
-gone, and SHALL release the orphan a pass finds, so no behaviour depends on an
+gone, and SHALL release the orphan a pass finds, so no cleanup depends on an
 owner reference being honoured. The `kube` backend MAY still set the owner
 reference. Release is its own operation, so it needs no declared index: the backend finds the source's signals in any phase itself.
 

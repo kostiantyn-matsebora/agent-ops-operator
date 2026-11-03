@@ -169,8 +169,8 @@ install where nothing sets it therefore pays one list per process, not one per 3
 
 The bench (`go test -run xxx -bench . -benchmem ./internal/state/...`) has two
 tiers. The in-memory conformance store (about 300 ns and 3 writes per run
-append; `BenchSignals`: about 37 µs for a create plus two status writes, 68 µs
-to list 200 live of 300 signals) says nothing about apiserver latency. The
+append. `BenchSignals` shows about 37 µs for a create plus two status writes
+and 68 µs to list 200 live of 300 signals) says nothing about apiserver latency. The
 `kube` benchmarks run against envtest's real API server on one workstation (a
 local apiserver and etcd, no kubelet, no network hop, no other client), 200
 iterations each:
@@ -275,7 +275,7 @@ types through a Kubernetes client call. It also guards the Signal, its list,
 the cooldown entry, the receipt counters (`receivedTotal`, `lastReceived`) and the `SignalSource` status field. Until the Signal call
 sites move, `httpapi`, `controller` and `signalroute` sit in an explicit,
 marked, temporary allowlist (`pendingSignalMigration`) that the migration
-empties and deletes; it never excuses a Conversation. `RunSignals` is the
+empties and deletes. It never excuses a Conversation. `RunSignals` is the
 Signal half of the suite, and a backend passes both.
 
 ### D-11: Identity and deletion are part of the record
@@ -365,7 +365,7 @@ Recorded after section 4, where the decisions were made against real code.
   the `kube` backend's, applied on `AppendRun`, because it is a limit of the
   stored object and every writer must stay inside it.
 - **Unused index.** `ByPhase` is read by the backlog bound and the pod-freed
-  wake-up; `ByAll`, `ByCausedBy`, `ByNameBase` and `ByConversationID` are read
+  wake-up. `ByAll`, `ByCausedBy`, `ByNameBase` and `ByConversationID` are read
   at their call sites. `ByPipelineAndPhase` has no caller yet. It stays: it is
   in the spec and the conformance suite, and a later backend serves it for a
   Pipeline-rooted sweep without a contract change.
@@ -398,7 +398,7 @@ and the UTC rule, the `expiresAt` semantics and the identity fields
 - **No `Mutate` helper, no revision-free write.** A signal pass reads once,
   mutates in memory across `Admit` and `Route`, and writes with the revision
   it read, carrying the returned one into its second write. A loss repeats the
-  pass through the work queue; a get-modify-update loop would re-run a routing
+  pass through the work queue, since a get-modify-update loop would re-run a routing
   decision that already created a conversation. Nothing about a signal grows,
   so there is no `UpdateRun` analogue.
 - **No finalizers, no marked state.** A signal holds none and `Delete`
@@ -431,21 +431,21 @@ and the UTC rule, the `expiresAt` semantics and the identity fields
   `ReleaseSource(source, sourceID)` takes the departed identity when the caller
   knows it: a signal recorded under another identity, and under `kube` the
   successor's window, stay, and each delete carries the UID it listed. The pass
-  knows it (`SignalRecord.SourceID`); the source reconciler, which has only the
+  knows it (`SignalRecord.SourceID`). The source reconciler, which has only the
   name from a deletion, passes `""` and releases the whole name. What remains
   is the reconciler's own sub-millisecond gap between seeing the source absent
   and releasing, which a successor created inside it can lose.
 - **Create replaces an expired record.** An expired record is invisible to
   `Get` and `List`, so refusing a create over it would acknowledge a re-sent
   `signalId` as a duplicate of something nobody can read. `kube` deletes it
-  under the UID and revision it read and creates again, once; losing either
+  under the UID and revision it read and creates again, once. Losing either
   race is a duplicate.
 - **The feed is the informer's replacement for the same reason as D-6.**
   `SignalReconciler` registers `Watch` as a raw source with the relist
   `pumpFeed` already does, and the `kick` channel stays as a second source.
 
 The payload stays inline in the record. A status write re-encodes it, which is
-today's cost; a backend may keep it elsewhere without the contract changing,
+today's cost. A backend may keep it elsewhere without the contract changing,
 and moving it out is a later optimisation for the bench to justify, not a
 change to make blind in a change whose criterion is zero behaviour change.
 
@@ -465,7 +465,7 @@ watch re-read on every fresh admission. Moving it costs two methods and
 changes nothing under `kube`: `PutCooldown` is the same status merge patch,
 `GetCooldown` the same read, the stored list identical.
 
-- `GetCooldown(source)` returns the window; absent reads empty, not an error.
+- `GetCooldown(source)` returns the window. An absent one reads empty, not an error.
 - `PutCooldown(source, entries)` replaces the whole window, last write wins,
   no revision. The leader is the only writer and holds a per-source lock. A
   lost write costs a duplicate investigation after a restart, never a stuck
@@ -480,7 +480,7 @@ are the last state the manager wrote onto a source's status from outside the
 store, and the aim is that no manager state is left behind the seam. The
 contract takes two operations, not a record: `RecordReceived(source, at)`
 counts one routed signal (Total + 1, Last = at) and the backend serializes
-concurrent consumers without losing an increment; `GetReceived(source)` reads
+concurrent consumers without losing an increment. `GetReceived(source)` reads
 them, zero for a source that is gone. Under `kube` it is the revisioned merge
 patch of the same two status fields the router always made, retried on
 conflict, so the stored object is unchanged. The console keeps reading the
@@ -494,9 +494,9 @@ source reconciler derives, not state a decision reads back.
   the system pack is the acceptance test, unchanged, plus the byte-identical
   object scenario in the conformance suite.
 - [D-4 turns some cache reads into apiserver reads under `kube`] → only
-  paths that used `APIReader` already pay it; the reconciler's own `Get` and
+  paths that used `APIReader` already pay it. The reconciler's own `Get` and
   `ListRuns` now do too (D-4 lists what stays uncached). The bench covers the
-  in-memory store only; a cluster measurement is outstanding.
+  in-memory store only. A cluster measurement is outstanding.
 - [D-6 changes the reconciler's event source] → under `kube` the informer
   still feeds it, with a test asserting the same event sequence for a
   lifecycle as before.
@@ -506,7 +506,7 @@ source reconciler derives, not state a decision reads back.
 - [A Signal's expiry is set once, at the terminal write, so a later change to a
   TTL chart value does not re-age signals already terminal] → their window was
   decided when they finished, which is the signal spec's own "from
-  completedAt"; the backfill pass stamps only a terminal signal with none.
+  completedAt". The backfill pass stamps only a terminal signal with none.
 - [Orphan release by the manager adds a call where an owner reference did the
   work for free] → one `ReleaseSource` on the source reconciler's not-found
   path, plus the missing-source branch the signal pass already has.

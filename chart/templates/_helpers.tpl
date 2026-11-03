@@ -245,6 +245,12 @@ backend bundle adds its name HERE, and its render tests with it. */ -}}
 {{- toYaml (list) -}}
 {{- end -}}
 
+{{- /* THE SELECTED STATE-STORE BACKEND: the one template that names the `kube`
+default. */ -}}
+{{- define "agentops.stateBackend" -}}
+{{- (.Values.stateStore | default dict).backend | default "kube" -}}
+{{- end -}}
+
 {{- /* THE STATE-STORE GUARD.
 
 `stateStore.backend` selects ONE backend and exactly that backend's bundle must
@@ -256,7 +262,7 @@ one on beside `kube`.
 IT READS NO CLUSTER, so it protects a GitOps render exactly as it protects an
 interactive one. */ -}}
 {{- define "agentops.stateStoreGuard" -}}
-{{- $backend := ((.Values.stateStore | default dict).backend | default "kube") -}}
+{{- $backend := include "agentops.stateBackend" . -}}
 {{- $known := fromYamlArray (include "agentops.stateStoreBackends" .) -}}
 {{- if and (ne $backend "kube") (not (has $backend $known)) -}}
 {{- fail (printf "stateStore.backend=%q is not a known state backend (known: %s)" $backend (join ", " (concat (list "kube") $known))) -}}

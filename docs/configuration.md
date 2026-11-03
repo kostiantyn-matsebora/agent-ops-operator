@@ -600,7 +600,7 @@ names what is not covered.
 
 ### State store
 
-This key sets where the manager keeps conversation state, `Signal`s and each source's suppression window (the ingest cooldown). **You need do nothing.** The default
+This key sets where the manager keeps conversation state, `Signal`s and each source's suppression window (the ingest cooldown). **You need to do nothing.** The default
 is the Kubernetes API, as before.
 
 | Key | Default | Consequence |
