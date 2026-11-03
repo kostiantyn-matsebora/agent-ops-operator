@@ -201,7 +201,8 @@ def main() -> int:
 
     pr = json.loads(sh("gh", "pr", "view", str(args.number), "-R", args.repo, "--json", "baseRefName,headRefName,headRefOid"))
     base, head, head_sha = pr["baseRefName"], pr["headRefName"], pr.get("headRefOid", "")
-    paths = [p for p in sh("gh", "pr", "diff", str(args.number), "-R", args.repo, "--name-only").splitlines() if p.strip()]
+    # the files endpoint, not `gh pr diff`: that one refuses a diff over 20000 lines
+    paths = [p for p in sh("gh", "api", f"repos/{args.repo}/pulls/{args.number}/files", "--paginate", "-q", ".[].filename").splitlines() if p.strip()]
     queue = json.loads(sh("python3", str(HERE / "review-queue.py"), *paths)) if paths else []
 
     read_at, quiet_at = coverage_marks(args.repo, args.number)
