@@ -341,14 +341,17 @@ one work queue, and repeats its pass when it loses a race.
 
 ### Requirement: Signal lookup is by key or by a declared index
 The contract SHALL offer lookup of a signal by key and listing by a declared,
-closed set of signal indexes: every signal; one source's non-terminal
-signals; one source's non-terminal signals of one initiation id. Every backend
-SHALL serve every one. A terminal signal SHALL never be returned by a
+closed set of signal indexes:
+- every signal
+- one source's non-terminal signals
+- one source's non-terminal signals of one initiation id
+
+Every backend SHALL serve every one. A terminal signal SHALL never be returned by a
 non-terminal index, so a flapping source's finished records do not slow the
 per-source cap. A signal whose phase is absent SHALL count as non-terminal.
 
 The contract SHALL NOT accept a free-form selector. Listing order is
-unspecified; the contract SHALL offer one ordering, arrival, by creation
+unspecified. The contract SHALL offer one ordering, arrival, by creation
 instant and then name.
 
 #### Scenario: The cap counts only what is live
@@ -424,15 +427,15 @@ the key is absent. A signal holds no finalizer and has no marked state.
 The contract SHALL offer reading and replacing the cooldown window of one
 source: the initiation ids last admitted on it and when. A source with nothing
 recorded, or one the backend does not know, SHALL read as an empty window and
-not as an error. A replace SHALL take no revision and the last write SHALL win,
-because the leader is the only writer and serialises each source, and a lost
-write costs a duplicate investigation after a restart, never a stuck signal. A
-caller SHALL tolerate a failed replace by logging it. Two sources SHALL never
+not as an error. A replace SHALL take no revision and the last write SHALL win.
+The leader is the only writer and serialises each source. A lost write costs
+a duplicate investigation after a restart, never a stuck signal. A caller
+SHALL tolerate a failed replace by logging it. Two sources SHALL never
 see each other's window.
 
 The window's location under the `kube` backend SHALL stay
 `SignalSource.status.cooldown`, written by the same status merge patch as
-before; the contract moves the access, not that object.
+before. The contract moves the access and leaves that object where it is.
 
 #### Scenario: Nothing recorded reads empty
 - **WHEN** a window is read for a source that has none

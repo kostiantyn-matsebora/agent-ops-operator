@@ -339,7 +339,7 @@ Recorded after section 4, where the decisions were made against real code.
   The four run-growth sites use `AppendRun` / `UpdateRun`.
 - **Reads.** The reconciler reads one record and its runs once per pass. The
   `kube` store reads through an uncached client in production (D-4), so a pass
-  costs one more apiserver read than the informer cache did; the cost is the
+  costs one more apiserver read than the informer cache did. The cost is the
   price of a revision the CAS can trust.
 - **Event source.** `SetupWithManager` registers the store's feed as a
   `source.Func`, which controller-runtime starts under the leader lease like
@@ -352,13 +352,13 @@ Recorded after section 4, where the decisions were made against real code.
   the store's namespace. The manager's cache is already limited to its own
   namespace, so no event it delivered before is lost.
 - **Owner link.** The pod and ConfigMap owner reference is built from the
-  record's `ID`, name and kind (a `PartialObjectMetadata` as the owner);
-  nothing reads a Kubernetes object to produce it.
+  record's `ID`, name and kind (a `PartialObjectMetadata` as the owner).
+  Nothing reads a Kubernetes object to produce it.
 - **A delivery is two writes.** `markDelivered` is `UpdateRun(MarkDelivered)`
   then a record `Update` clearing the thread's undelivered-reply note. A crash
   between them leaves a run recorded delivered with the note still naming it.
   The note is informational (nothing else reads it), and the next delivery pass
-  settles it without sending again; a crash before the first write loses
+  settles it without sending again. A crash before the first write loses
   nothing, since the reply is re-derived. Both are pinned by
   `TestDeliveryPassToleratesACrashBetweenTheRunMarkerAndTheNote`.
 - **Run history bound.** The ten-run cap the work report applied itself is now
@@ -416,8 +416,8 @@ and the UTC rule, the `expiresAt` semantics and the identity fields
   second writer exists and the conditional delete has nothing to guard.
   Under `kube` the status subresource is written first and the expiry
   annotation second, only when it changed: a crash between them leaves a
-  terminal signal with no expiry, which the existing backfill pass stamps;
-  the reverse order could leave a live signal expiring. The sweep deletes with
+  terminal signal with no expiry, which the existing backfill pass stamps.
+  The reverse order could leave a live signal expiring. The sweep deletes with
   a UID and revision precondition. The TTL knobs stay on the reconciler.
 - **The owner link is a hint, not a mechanism.** `Create` takes `SourceID`,
   the opaque identity of the source as the source's own object reports it,
@@ -467,7 +467,7 @@ changes nothing under `kube`: `PutCooldown` is the same status merge patch,
 
 - `GetCooldown(source)` returns the window; absent reads empty, not an error.
 - `PutCooldown(source, entries)` replaces the whole window, last write wins,
-  no revision. The leader is the only writer and holds a per-source lock; a
+  no revision. The leader is the only writer and holds a per-source lock. A
   lost write costs a duplicate investigation after a restart, never a stuck
   signal, and the caller already logs and carries on. This matches a merge
   patch, so the contract does not invent a stronger guarantee than the

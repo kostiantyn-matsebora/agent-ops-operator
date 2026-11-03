@@ -58,7 +58,7 @@ for the source and the reference material beside this file.
   be read, so the next signal reads it again instead of running on an empty
   window.
 - The manager now reaches `Conversation`, `ConversationInput` and `Signal` through a state
-  store contract. **There is no upgrade step and no CRD change.** The objects
+  store contract. There is **no upgrade step and no CRD change**. The objects
   are byte-identical and `kubectl get conv` is unchanged.
 - Behaviour under `kube`: the manager's reads of a conversation now go to the
   Kubernetes API server instead of its informer cache, so a write's

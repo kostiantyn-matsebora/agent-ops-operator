@@ -1925,7 +1925,7 @@ a second source of truth beside the CRs.
 |---|---|---|---|---|
 | Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
 | Manager — op queue | outbound channel ops | derived from CR state | `kube`: the Kubernetes API's own guarantee | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — ingest cooldown | `initiationId` suppression | the state store (map is a cache) | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee | nothing inside the window |
+| Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee | nothing inside the window |
 | Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | the state store, surviving every restart and leader change | `kube`: `Signal` CRs, the Kubernetes API's own guarantee | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
 | Manager — admission | active/pending counts | live pod list + `Conversation` phase | `kube`: the Kubernetes API's own guarantee | nothing |
 | Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | none: not state-store state | recent history. Clients are told to resync rather than handed silence |

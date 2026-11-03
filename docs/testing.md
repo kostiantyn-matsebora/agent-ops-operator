@@ -162,6 +162,7 @@ cd platform/manager && go test -bench . -benchmem ./internal/state/...
 | `ns/op`, `B/op`, `allocs/op` | the cost of the timed append loop |
 | `bytes/run(json-proxy)` | the JSON size of one run. A lower bound true of every backend, not the wire size |
 | `allocs/write` | allocations of one isolated compare-and-swap update |
+| `resident_records(live)` | live signals a listing returns at the signal bench's scale, 200 of 300 |
 | `resident_records(phase=Working)` | records a listing returns at the bench's scale, about 200 conversations |
 
 Compare two backends by running the same bench against each. Do not compare
