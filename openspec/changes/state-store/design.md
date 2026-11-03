@@ -471,7 +471,7 @@ changes nothing under `kube`: `PutCooldown` is the same status merge patch,
   lost write costs a duplicate investigation after a restart, never a stuck
   signal, and the caller already logs and carries on. This matches a merge
   patch, so the contract does not invent a stronger guarantee than the
-  behaviour it replaces. `ErrNotFound` when the backend knows the source is gone.
+  behaviour it replaces. An unknown source reads empty, never `ErrNotFound`.
 - It lives on `SignalStore`, not on a third interface: a window is read only
   where a signal is routed, and `ReleaseSource` clears both.
 

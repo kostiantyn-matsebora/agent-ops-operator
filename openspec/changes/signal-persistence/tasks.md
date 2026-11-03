@@ -1,5 +1,7 @@
 # signal-persistence — tasks
 
+> The `state-store` change absorbed this change's contract work. The manager reaches `Signal`s and each source's cooldown window through `SignalStore`.
+
 ## 1. The Signal CRD
 
 - [x] 1.1 Add the `Signal` type to `platform/manager/api/v1alpha1/` — spec (`sourceRef`, `adapter`, `initiationId`, optional `signalId`, `kind`, `title`, `severity`, `labels`, `reader`, `payload`), status (`phase`, `reason`, `completedAt`, `attempts`, `firstAttemptAt`, `consumedBy`, `consumedAt`, `claimants[]`) — and verify the enums match the delta spec's field table

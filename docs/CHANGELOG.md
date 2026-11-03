@@ -16,8 +16,7 @@ for the source and the reference material beside this file.
   manager keeps conversation state, and exactly one backend may be selected.
   `kube` is the Kubernetes API, as before, and it is the only backend this
   release ships. The render refuses an unknown value. The key covers
-  `Signal`s and each source's cooldown window as well as conversations. No
-  upgrade step and no CRD change.
+  `Signal`s and each source's cooldown window as well as conversations.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
   acknowledges. A separate consumer pool on the leader then claims it, spends

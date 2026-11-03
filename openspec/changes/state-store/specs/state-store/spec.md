@@ -469,17 +469,23 @@ SHALL stay `SignalSource.status.receivedTotal` and `lastReceived`.
 
 ### Requirement: A deleted source's signals are released by the manager
 The contract SHALL offer releasing a source: remove every signal naming it, in
-any phase, and clear its cooldown window, idempotently and without error for a
-source with none. The manager SHALL call it when a `SignalSource` is observed
-gone, and SHALL release the orphan a pass finds, so no cleanup depends on an
-owner reference being honoured. The `kube` backend MAY still set the owner
-reference. Release is its own operation, so it needs no declared index: the backend finds the source's signals in any phase itself.
+any phase, and clear its cooldown window. It is idempotent and raises no error
+for a source with none.
+
+The manager SHALL call it when a `SignalSource` is observed gone. It SHALL also
+release the orphan a pass finds, so no cleanup depends on an owner reference
+being honoured. The `kube` backend MAY still set the owner reference.
+
+Release is its own operation, so it needs no declared index. The backend finds
+the source's signals in any phase itself.
 
 A name can be reused by a successor source. The release SHALL therefore take
-the departed source's identity when the caller knows it: a signal recorded under
-a different identity is the successor's and SHALL be kept, and so SHALL the
-successor's window where the backend can tell one holds the name. Without an
-identity every signal of the name is released.
+the departed source's identity when the caller knows it. A signal recorded under
+a different identity is the successor's and SHALL be kept.
+
+So SHALL the successor's window, where the backend can tell one holds the name.
+
+Without an identity every signal of the name is released.
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released
