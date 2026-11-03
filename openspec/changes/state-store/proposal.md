@@ -16,9 +16,9 @@ resources — and pay its full price on every write and every copy:
 - A Signal's terminal records are bounded by rate × TTL. Under a flapping
   source that is thousands of objects, each with the same write and copy cost,
   and each status write re-encodes its payload.
-- The per-source suppression window is manager-written state kept on a
-  configuration object, so every fresh admission rewrites a `SignalSource`, notifying its
-  own reconciler and the console watch.
+- The per-source cooldown window is manager-written state kept on a
+  configuration object. Every fresh admission rewrites a `SignalSource`.
+  That write notifies the source's own reconciler and the console watch.
 
 The storage engine is not the point. The absence of a seam is. There is no
 place where "where state lives" is one decision, so it cannot be made
@@ -49,7 +49,8 @@ differently per install.
   compare-and-swap that makes its phase terminal, and a deleted `SignalSource`
   has its signals released by the manager's explicit act, so no behaviour
   depends on an owner reference being honoured.
-- `SignalSource.status.cooldown[]` moves behind the contract; its `kube`
+- `SignalSource.status.cooldown[]` and the receipt counters
+  (`receivedTotal`, `lastReceived`) move behind the contract. Their `kube`
   location does not change (design D-15).
 - Pod and ConfigMap release becomes the **manager's explicit act** under
   every backend. The `kube` backend keeps the ownerRef as well, but no

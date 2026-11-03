@@ -120,7 +120,7 @@ cooldown list, since this tree was not yet migrated):
 | `Create` of a signal | 1, `publishOne`, with the controller owner reference set beside it |
 | `Get` of a signal | 1, `Reconcile`, from the API reader |
 | status write (optimistic-lock merge patch of the status) | 1 helper, reached from 6: the terminal-signal backfill, three in `consume`, `exhaust`, `evict` |
-| `List` of signals | 2: `isHead` (earlier live messages of one source and initiation id) and `enforceSourceCap` (live signals of one source); both list the whole namespace and filter |
+| `List` of signals | 2: `isHead` (earlier live messages of one source and initiation id) and `enforceSourceCap` (live signals of one source). Both list the whole namespace and filter |
 | `Delete` of a signal | 1, the TTL delete, conditional on the UID and revision read |
 | watch | 1 `For(&Signal{})`, plus a channel source (`kickSignal`) that hands another signal to the queue |
 | type referenced as an in-memory value | 37: the signal reconciler 19, `signalroute` 17 (`Admit`, `Route` and their helpers mutate status in memory), `publish.go` 1 |
@@ -161,12 +161,11 @@ What is uncached under `kube`, and so costs an apiserver round trip where an
 informer answered from memory: every `Get`, `List` and `ListRuns` (a read of
 the whole Conversation, runs included, since the CRD keeps them in status).
 `Reconcile` used to open with `Get` and then `ListRuns`, two reads of one
-object; `GetWithRuns` is the combined read, one round trip under `kube`, and
-Reconcile uses it. Every write re-reads before its compare-and-swap. Request-path
-reads already went to the apiserver through `APIReader`; the new cost is the
-reconciler's own reads. The expiry sweep lists the namespace only when armed
-(a write or an observed record carries `ExpiresAt`, plus once at start), so an
-install where nothing sets it pays one list per process, not one per 30s.
+object. `GetWithRuns` is the combined read, one round trip under `kube`. Reconcile uses it. Every write re-reads before its compare-and-swap. Request-path
+reads already went to the apiserver through `APIReader`. The new cost is the
+reconciler's own reads. The expiry sweep lists the namespace only when armed. A write or an
+observed record carrying `ExpiresAt` arms it, and it also runs once at start. An
+install where nothing sets it therefore pays one list per process, not one per 30s.
 
 The bench (`go test -run xxx -bench . -benchmem ./internal/state/...`) has two
 tiers. The in-memory conformance store (about 300 ns and 3 writes per run

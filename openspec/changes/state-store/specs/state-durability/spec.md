@@ -9,7 +9,7 @@ homes, and SHALL NOT hold state that belongs to no class:
 - **State store** — conversation state: session id, threads, inputs, runs,
   phase, the conversation's MESSAGE RECORD (what people sent as well as what
   the agent answered), signals with their per-claimant routing state, each
-  source's suppression window and its receipt counters. Reached only through the state store contract.
+  source's cooldown window and its receipt counters. Reached only through the state store contract.
   The selected backend decides where it is kept. The `kube` backend keeps it
   in the Kubernetes API, so a default install has the same two homes it
   always had.

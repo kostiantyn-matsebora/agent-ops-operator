@@ -421,7 +421,7 @@ the key is absent. A signal holds no finalizer and has no marked state.
   succeeds
 
 ### Requirement: A source's cooldown window is state
-The contract SHALL offer reading and replacing the suppression window of one
+The contract SHALL offer reading and replacing the cooldown window of one
 source: the initiation ids last admitted on it and when. A source with nothing
 recorded, or one the backend does not know, SHALL read as an empty window and
 not as an error. A replace SHALL take no revision and the last write SHALL win,
@@ -466,7 +466,7 @@ any phase, and clear its cooldown window, idempotently and without error for a
 source with none. The manager SHALL call it when a `SignalSource` is observed
 gone, and SHALL release the orphan a pass finds, so no behaviour depends on an
 owner reference being honoured. The `kube` backend MAY still set the owner
-reference.
+reference. Release is its own operation, so it needs no declared index: the backend finds the source's signals in any phase itself.
 
 A name can be reused by a successor source. The release SHALL therefore take
 the departed source's identity when the caller knows it: a signal recorded under
