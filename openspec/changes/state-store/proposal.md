@@ -97,8 +97,9 @@ differently per install.
   every Conversation and ConversationInput access moves to the store.
 - `platform/manager/internal/httpapi/publish.go`,
   `internal/controller/signal_controller.go`, `signalsource_controller.go`,
-  `internal/signalroute/` — every Signal access and the cooldown window move
-  to `SignalStore`.
+  `internal/signalroute/` — every Signal access moves to the `signals`
+  interface. The cooldown window and receipt counters move to the `sources`
+  interface.
 - `platform/manager/cmd/manager/main.go` — backend selection from
   `STATE_BACKEND`, store construction, reconciler wiring.
 - `chart/values.yaml`, `chart/templates/deployment.yaml`,

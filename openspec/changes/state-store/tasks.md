@@ -61,6 +61,7 @@ The contract, the `kube` backend and the suite exist (1.5, 2.10, 3.5). the call 
 - [x] 6.6 Release a deleted source explicitly: the `SignalSource` reconciler's not-found path calls `ReleaseSource`, and the signal pass's missing-source branch releases the orphan instead of relying on the owner reference. Verify an envtest, which runs no garbage collector, observes every signal of a deleted source gone from any phase.
 - [x] 6.7 Move the receipt counters behind `SignalStore`: `RecordReceived`/`GetReceived` in the contract, the conformance suite and `kube`, and the router call site (`signalroute.RecordReceived`). Verify the concurrent-receipts scenario passes on every backend.
 - [x] 6.8 Construct `kube.NewSignalStore` in `cmd/manager/main.go` beside the conversation store, run its sweep as a manager runnable, and empty and delete `pendingSignalMigration` in `internal/state/static_test.go`. Verify the static check passes on the whole tree with the allowlist gone and `STATE_BACKEND=nosuch` still exits non-zero.
+- [ ] 6.9 Close the release race: the source reconciler passes the departed source's `sourceRef` into `ReleaseSource`, so a successor created between its absence check and the release keeps its signals. Verify an envtest covering that gap against the "A successor's signals outlive the departed release" scenario.
 
 ## Review round (sections 4/5)
 
@@ -91,7 +92,7 @@ Deliberately not fixed:
 
 - The static check still misses a reflected field path and a kind that reaches an unstructured object through another function's return value. It needs type information the AST walk lacks.
 - No cluster measurement was made.
-- Follow-up: pass the departed source's identity from the source reconciler into the release (tracked as task 8.x below).
+- Follow-up: pass the departed source's `sourceRef` from the source reconciler into the release (tracked as task 6.9 above).
 - The source reconciler passes no identity, so a successor created in the gap between its absence check and the release can lose its signals. This is a known gap against the "A successor's signals outlive the departed release" scenario, which holds only where the caller supplies the identity (6.6 is ticked for the explicit release, not for that race).
 
 ## 7. Unit tests

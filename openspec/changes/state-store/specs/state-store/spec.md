@@ -22,8 +22,8 @@ The contract has three interfaces. They share the key and the errors.
 | Interface | Holds | Uses | Does not use |
 |---|---|---|---|
 | conversations | conversations and their inputs | the shared key and errors | — |
-| signals | signals | revision, feed event types, expiry, identity | — |
-| sources | cooldown windows, receipt counters | the shared key and errors, identity (release only) | revision, feed |
+| signals | signals | revision, feed event types, expiry, record identity, `sourceRef` | — |
+| sources | cooldown windows, receipt counters | the shared key and errors, `sourceRef` (release only) | revision, feed |
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -67,10 +67,16 @@ A create SHALL be refused when the key already exists.
 
 ### Requirement: Lookup is by key or by a declared index
 The contract SHALL offer lookup by key and listing by a declared, closed set
-of indexes: a conversation by `initiationId`, by `pipelineRef` and phase,
-by phase, by the parent that invoked it (its direct members), by the
-word-chain its name was allocated from, and the whole set. Every backend
-SHALL serve every declared index.
+of indexes. A conversation SHALL be listable:
+
+- by `initiationId`
+- by `pipelineRef` and phase
+- by phase
+- by the parent that invoked it (its direct members)
+- by the word-chain its name was allocated from
+- as the whole set
+
+Every backend SHALL serve every declared index.
 
 The contract SHALL NOT accept a free-form selector. Adding an index SHALL be
 a contract change with a conformance scenario, never a per-backend feature.
@@ -294,11 +300,11 @@ already-exists error in every phase the signal can be in, and SHALL change
 nothing. Publication SHALL treat that refusal as the duplicate of a message it
 already stored, with no lookup before the create.
 
-A create SHALL accept the opaque identity of the source the signal arrived on,
-so a backend that links a record to its owner can.
+A create SHALL accept the `sourceRef`, the opaque reference to the source the
+signal arrived on, so a backend that links a record to its owner can.
 
-No behaviour SHALL depend on a backend turning that identity into an owner
-reference or any other cascade. The identity is still recorded, and the release
+No behaviour SHALL depend on a backend turning that `sourceRef` into an owner
+reference or any other cascade. The `sourceRef` is still recorded, and the release
 requirement below reads it to keep a successor source's signals.
 
 #### Scenario: A second create under one key is the duplicate
@@ -490,12 +496,12 @@ Release is its own operation, so it needs no declared index. The backend finds
 the source's signals in any phase itself.
 
 A name can be reused by a successor source. The release SHALL therefore take
-the departed source's identity when the caller knows it. A signal recorded under
-a different identity is the successor's and SHALL be kept.
+the departed source's `sourceRef` when the caller knows it. A signal recorded
+under a different `sourceRef` is the successor's and SHALL be kept.
 
 So SHALL the successor's window, where the backend can tell one holds the name.
 
-Without an identity every signal of the name is released.
+Without a `sourceRef` every signal of the name is released.
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released
@@ -504,8 +510,8 @@ Without an identity every signal of the name is released.
   untouched
 
 #### Scenario: A successor's signals outlive the departed release
-- **WHEN** a source is released by the identity of its previous incarnation
-  while a signal recorded under the identity of its successor exists
+- **WHEN** a source is released by the `sourceRef` of its previous incarnation
+  while a signal recorded under the `sourceRef` of its successor exists
 - **THEN** the previous incarnation's signals are gone and the successor's stay,
   and under `kube` so does the successor's window
 

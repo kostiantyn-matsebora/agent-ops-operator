@@ -1891,19 +1891,20 @@ payload is not copied into the conversation object.
 
 **Every piece of live state has one declared home**, chosen by what the state is:
 
-- **The Kubernetes API, or the state store** — configuration lives on the
-  Kubernetes API. Conversation state, every accepted `Signal` and each source's
-  cooldown window live in the **state store**, the one seam the manager
-  reaches them through. The chart selects a backend with
-  `stateStore.backend` (see [configuration](configuration.md#state-store)), and the
-  only backend shipped is `kube`, which keeps today's `Conversation`,
-  `ConversationInput` and `Signal` custom resources, and the window in
-  `SignalSource.status.cooldown[]`. Under `kube` the two homes are the same
-  API. Each source's `receivedTotal` and `lastReceived` counters live there
-  too. Conversation state is: session id,
-  threads, inputs, runs, phase, and the message record — what people sent as
-  well as what the agent answered. Recovered by reading. Survives any restart and any
-  rescheduling.
+- **The Kubernetes API** — configuration lives here, recovered by reading.
+- **The state store** — the one seam the manager reaches conversation state,
+  every accepted `Signal` and each source's cooldown window through.
+  - The chart selects a backend with `stateStore.backend` (see
+    [configuration](configuration.md#state-store)).
+  - The only backend shipped is `kube`. It keeps the `Conversation`,
+    `ConversationInput` and `Signal` custom resources, and the window in
+    `SignalSource.status.cooldown[]`.
+  - Under `kube` the store and the Kubernetes API are the same API.
+  - Each source's `receivedTotal` and `lastReceived` counters live there too.
+  - Conversation state is the session id, threads, inputs, runs, phase and
+    the message record. The record holds what people sent and what the agent
+    answered.
+  - It survives any restart and any rescheduling.
   - **A thread binding's `claim` (holder, claimedAt) and `undeliveredReply`
     ride the same home.** The claim records which manager replica is
     dispatching that channel's `ensure-topic` op, so a crashed leader's
