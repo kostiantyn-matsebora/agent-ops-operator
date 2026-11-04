@@ -132,12 +132,13 @@ boundary, not a limitation to work around.
 
 ## The state store conformance suite
 
-The manager reaches conversation state, `Signal`s and each source's suppression
+The manager reaches conversation state, `Signal`s and each source's cooldown
 window through one contract (`internal/state`): `Store` for conversations,
-`SignalStore` beside it for the rest. A **conformance suite**
-(`internal/state/conformance`) is what a backend passes to exist. Each scenario
-of the contract's spec is one subtest: `Run` covers `Store`, and `RunSignals`
-covers `SignalStore` with about 25 scenarios.
+`SignalStore` beside it for the rest.
+
+A **conformance suite** (`internal/state/conformance`) is what a backend passes
+to exist. Each scenario of the contract's spec is one subtest. `Run` covers
+`Store`, and `RunSignals` covers `SignalStore` with about 25 scenarios.
 
 | Decides | Cannot decide |
 |---|---|

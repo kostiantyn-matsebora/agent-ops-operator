@@ -44,9 +44,9 @@ backend offers it.
 - **WHEN** the manager reads a Pipeline, Channel, SignalSource or any other
   configuration kind
 - **THEN** it reads it through the Kubernetes client as before, since
-  configuration is not state and has no backend. What the manager writes onto
-  two of them as state, the cooldown window and the receipt counters, are the
-  exception, and go through the store
+  configuration is not state and has no backend. Two fields the manager
+  writes onto a SignalSource's status are the exception: the cooldown window
+  and the receipt counters are state, and go through the store.
 
 ### Requirement: Writes are compare-and-swap on an opaque revision
 Every write of an existing record SHALL carry the revision the writer last

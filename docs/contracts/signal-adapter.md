@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/signal-adapter/
 ---
 
-**Version 2.3.0**
+**Version 2.3.1**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -362,6 +362,7 @@ deduplicated for the `Signal`'s life, and a changed alert carries a new
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.3.1 | 2026-11-04 | Wording only: `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where it said the TTL deletes it. Behaviour is unchanged. |
 | 2.3.0 | 2026-10-29 | `POST /signal/inbound` is publish-then-consume. `API-2` is REPLACED: the response acknowledges storage, `{"queued", "reason"?}`, and the `conversations` field is withdrawn. `API-3` is rewritten around a `5xx` re-send. A normalized signal may carry an optional `signalId` (`API-7`), and every shipped adapter sends one (`ADP-9`). `MGR-1`, `MGR-2` and `MGR-4` say the routing is the consumer's. ADDITIVE by the page's rule: no shipped adapter read the withdrawn field, and a `2.2.0` adapter sending no `signalId` stays conformant. |
 | 2.2.0 | 2026-10-21 | The [post-emit refractory window](#post-emit-refractory-window) is named as the one carve-out beside `ADP-3` (`ADP-8`): a bounded quiet period on an emitted `initiationId`, declared per adapter. Only `signals/ha` and `signals/k8s-events` use it. `signals/pulse` joins every shipped-adapter enumeration on this page — it was omitted, which never exempted it. ADDITIVE: no adapter needs to change to stay conformant. |
 | 2.1.0 | 2026-10-21 | A normalized signal may carry an optional `severity` — one of `critical`, `error`, `warning`, `info` (`API-6`, [Enums](#enums)). Unmapped refuses the whole batch with `400` naming the four values. Unrelated to any adapter's own `severity` **label** (`COMPAT-5`). ADDITIVE: no shipped adapter sends it yet, and none needs to change to stay conformant. |

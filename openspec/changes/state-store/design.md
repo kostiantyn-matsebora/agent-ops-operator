@@ -498,7 +498,7 @@ store, and the aim is that no manager state is left behind the seam. The
 contract takes two operations, not a record: `RecordReceived(source, at)`
 counts one routed signal (Total + 1, Last = at) and the backend serializes
 concurrent consumers without losing an increment. `GetReceived(source)` reads
-them, zero for a source that is gone. Under `kube` it is the revisioned merge
+them, zero for a source that is gone. `RecordReceived` returns `ErrNotFound` for a source the backend knows is gone, and the router logs it and carries on. Under `kube` it is the revisioned merge
 patch of the same two status fields the router always made, retried on
 conflict, so the stored object is unchanged. The console keeps reading the
 object directly under `kube`, as for the rest of the source. The `Served` and
