@@ -11,20 +11,18 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// List serves every state.DeclaredIndexes member with one full
-// client.List of the namespace's Conversations, filtered in Go — not a
-// field-indexer/MatchingFields query, which needs a cache this backend
-// deliberately has none of (design: NewStore depends on client.WithWatch
-// alone). Fine at today's scale (design.md: ~161 conversations on the live
-// install); a later backend or a cache-fronted kube variant is free to do
-// better without the contract changing.
+// List serves every state.DeclaredIndexes member with one full list of the
+// namespace's Conversations, filtered in Go. The list comes from the apiserver
+// unless WithCachedLists gave the store a cache, which production does: a full
+// list of a live install (552 conversations, 6 MB) took over half a second, and
+// closing one conversation walks the child lookup twice.
 func (s *Store) List(ctx context.Context, index state.Index, key state.ListKey) ([]state.ConversationRecord, error) {
 	if !isDeclaredIndex(index) {
 		return nil, state.ErrUnknownIndex
 	}
 
 	var list agentopsv1alpha1.ConversationList
-	if err := s.client.List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
+	if err := s.listReader().List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
 		return nil, fmt.Errorf("kube: list conversations: %w", err)
 	}
 

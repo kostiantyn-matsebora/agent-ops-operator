@@ -41,8 +41,9 @@ func stateBackendFromEnv() (string, error) {
 //
 // The kube backend reads through a client with no cache: its Get and Update
 // carry the compare-and-swap, and a cached read would make that precondition
-// a guess (state-store design D-4). The cost is an apiserver read where the
-// informer used to answer; Watch is the one thing the feed needs from it.
+// a guess (state-store design D-4). List alone is served from the informer
+// cache, since a lookup is not a precondition and a full list of a large
+// install is slow (D-4, amended).
 func newStateStores(backend string, mgr ctrl.Manager, namespace string) (state.Store, state.SignalStore, error) {
 	switch backend {
 	case backendKube:
@@ -50,8 +51,9 @@ func newStateStores(backend string, mgr ctrl.Manager, namespace string) (state.S
 		if err != nil {
 			return nil, nil, fmt.Errorf("building the uncached client for the kube state store: %w", err)
 		}
-		store := kube.NewStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval)
-		signals := kube.NewSignalStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval)
+		// Lists come from the informer cache, Get and the writes do not.
+		store := kube.NewStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval).WithCachedLists(mgr.GetCache())
+		signals := kube.NewSignalStoreWithSweepInterval(c, namespace, kube.DefaultSweepInterval).WithCachedLists(mgr.GetCache())
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			store.Run(ctx)
 			return nil

@@ -1950,8 +1950,10 @@ stay the same two status fields on the source.
 
 - **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
   allows. A write is acknowledged once the API server has it.
-- **Reads go to the API server**, not the manager's informer cache, so a
-  compare-and-swap never races a stale copy.
+- **Reads of one record go to the API server**, not the manager's informer
+  cache, so a compare-and-swap never races a stale copy. Lookups that return
+  several records are served from the cache, since a full list of a large
+  install is slow.
 - **A later backend adds its own row**, stating its own guarantee.
 - **Release is explicit.** The manager deletes a closed or evicted
   conversation's pod and ConfigMap itself under every backend, so no row

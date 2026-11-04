@@ -27,6 +27,8 @@ type SignalStore struct {
 	client        client.WithWatch
 	namespace     string
 	sweepInterval time.Duration
+	// lister answers List, as Store.lister does. Nil means the client.
+	lister client.Reader
 	// expiryArmed has the same meaning as Store.expiryArmed: the next sweep
 	// has something to look for. A signal sets ExpiresAt in the write that
 	// makes it terminal, so an install with live signals only is not swept.
@@ -43,6 +45,22 @@ func NewSignalStore(c client.WithWatch, namespace string) state.SignalStore {
 // overridden, returning the concrete type so a caller can reach Run.
 func NewSignalStoreWithSweepInterval(c client.WithWatch, namespace string, interval time.Duration) *SignalStore {
 	return &SignalStore{client: c, namespace: namespace, sweepInterval: interval}
+}
+
+// WithCachedLists makes List answer from r, as Store.WithCachedLists does.
+// Create stays the duplicate arbiter and Update the status compare-and-swap,
+// both uncached, and ReleaseSource and the sweep list from the apiserver
+// because they delete on what they read. Returns the receiver.
+func (s *SignalStore) WithCachedLists(r client.Reader) *SignalStore {
+	s.lister = r
+	return s
+}
+
+func (s *SignalStore) listReader() client.Reader {
+	if s.lister != nil {
+		return s.lister
+	}
+	return s.client
 }
 
 func (s *SignalStore) namespacedName(key state.Key) types.NamespacedName {
@@ -214,7 +232,7 @@ func (s *SignalStore) List(ctx context.Context, index state.SignalIndex, key sta
 		return nil, state.ErrUnknownIndex
 	}
 	var list agentopsv1alpha1.SignalList
-	if err := s.client.List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
+	if err := s.listReader().List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
 		return nil, fmt.Errorf("kube: list signals: %w", err)
 	}
 	now := time.Now()

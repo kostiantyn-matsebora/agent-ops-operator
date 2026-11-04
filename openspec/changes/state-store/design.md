@@ -161,6 +161,18 @@ staleness — how controller-runtime already behaves under `kube`.
 
 ### D-4: Reads are consistent, caches are the backend's business
 
+**Amended after the first live deploy.** `List` is a lookup, not a
+precondition, so the `kube` backend serves it from the informer cache in
+production (`WithCachedLists`). `Get`, `Create`, `Update` and `Delete` stay
+uncached. The first deploy listed every Conversation from the apiserver on
+each child lookup: 552 conversations, 6 MB, over half a second, twice per
+`/close`. A console batch close then passed the gateway's 60 seconds and
+failed with a 504. A write that races a stale list still loses on its
+revision, and the close cascade already treats the index as a hint and sweeps
+a second time for stragglers. `ReleaseSource` and the expiry sweeps still list
+from the apiserver because they delete on what they read. The conformance
+suite runs `kube` uncached, so list-after-write holds there.
+
 `Get` returns the current record. The `kube` backend serves it from the
 apiserver, the way `APIReader` does for the HTTP handlers today.
 

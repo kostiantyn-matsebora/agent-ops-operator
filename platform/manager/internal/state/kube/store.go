@@ -43,6 +43,9 @@ type Store struct {
 	client        client.WithWatch
 	namespace     string
 	sweepInterval time.Duration
+	// lister answers List. Nil means the client itself (consistent). See
+	// WithCachedLists.
+	lister client.Reader
 	// expiryArmed says the next sweep tick has something to look for. A sweep
 	// lists the whole namespace, and nothing in the manager sets ExpiresAt
 	// today, so an idle tick would be a pure apiserver cost. It is raised by
@@ -78,6 +81,29 @@ func NewStoreWithSweepInterval(c client.WithWatch, namespace string, interval ti
 
 func newStore(c client.WithWatch, namespace string, interval time.Duration) *Store {
 	return &Store{client: c, namespace: namespace, sweepInterval: interval}
+}
+
+// WithCachedLists makes List answer from r, normally the manager's informer
+// cache, instead of listing the whole namespace from the apiserver. Get,
+// Create, Update and Delete stay uncached: they carry the compare-and-swap.
+//
+// A list is a lookup, not a precondition. The caller of a lookup that goes on
+// to write re-reads the record it is about to change, and a write that raced
+// a stale list loses on its revision. Serving it from memory is what the
+// manager did before the state store, and a close that walks the child
+// lookup twice per conversation cannot afford a 6 MB apiserver list each
+// time (design D-4, amended). Returns the receiver.
+func (s *Store) WithCachedLists(r client.Reader) *Store {
+	s.lister = r
+	return s
+}
+
+// listReader is the reader List uses.
+func (s *Store) listReader() client.Reader {
+	if s.lister != nil {
+		return s.lister
+	}
+	return s.client
 }
 
 // Get reads straight through to the apiserver (design D-4). An expired
