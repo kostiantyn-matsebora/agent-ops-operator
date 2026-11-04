@@ -603,5 +603,5 @@ same ids. An optional per-message `signalId` deduplicates the re-send.
 
 The `conversations` field is withdrawn, and every routing outcome lives on
 the `Signal`. See [Concepts](concepts.md#signal) for the kind and
-[the adapter specification](contracts/signal-adapter.md), version 2.3.0, for
+[the adapter specification](contracts/signal-adapter.md), version 2.3.1, for
 the contract.
