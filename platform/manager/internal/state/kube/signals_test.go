@@ -144,7 +144,7 @@ func TestCooldownLivesOnTheSourceStatusAndAGoneSourceIsNotFound(t *testing.T) {
 
 // TestReleaseSourceSparesARecreatedSource: a source deleted and recreated under
 // one name must lose the previous incarnation's signals only. The new source's
-// signal and its suppression window stay.
+// signal and its cooldown window stay.
 func TestReleaseSourceSparesARecreatedSource(t *testing.T) {
 	ctx := context.Background()
 	ns, _ := newTestNamespace(t)

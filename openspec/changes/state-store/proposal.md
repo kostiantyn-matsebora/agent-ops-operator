@@ -30,10 +30,10 @@ differently per install.
   reaches a conversation, an input or a signal. Domain records, an opaque
   revision, compare-and-swap writes, a declared index set, a resumable
   at-least-once change feed, expiry, append-only sub-records, blobs. No
-  Kubernetes types, no selector strings, no transactions. It has two
-  interfaces over those pieces: `Store` for conversations and inputs, and
-  `SignalStore` for signals (design D-14) and each source's cooldown window
-  (design D-15).
+  Kubernetes types, no selector strings, no transactions. It has three
+  interfaces over those pieces: conversations and their inputs, signals
+  (design D-14), and sources, which hold each source's cooldown window and
+  receipt counters (design D-15).
 - The contract is written from what the manager does with state, never from
   a backend's features. Every guarantee is one scenario of a **conformance
   suite**, and the suite is what a backend passes to exist. It also measures

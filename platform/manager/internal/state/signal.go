@@ -229,7 +229,7 @@ type SignalStore interface {
 	// the channel closing when ctx is done or the backend fails.
 	Watch(ctx context.Context, resume Revision) (<-chan SignalEvent, error)
 
-	// GetCooldown returns the suppression window recorded for a source: one
+	// GetCooldown returns the cooldown window recorded for a source: one
 	// entry per initiationId last admitted. A source with nothing recorded,
 	// and a source the backend does not know, read as an empty window, never
 	// as an error.

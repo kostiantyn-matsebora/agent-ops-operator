@@ -88,6 +88,12 @@ contract's provenance and lives in the spec's requirements:
 | keeps a source's cooldown window across a restart | `GetCooldown` / `PutCooldown` (D-15) |
 | reads a deprecated per-input agent override for one release | `InputItem.Agent` carried through, removed with the dual-read |
 
+The 29 write sites above are the call sites that persist a conversation
+change, counted by function. The table below counts every Kubernetes client
+call by kind, so one function with several calls counts once above and
+several times below. The two are different bases and are not expected to
+match.
+
 Provenance of the additions, counted by type-checking every Kubernetes
 client call in the manager's non-test packages that takes a Conversation,
 a ConversationInput or their lists (before section 4 moves any):

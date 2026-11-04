@@ -39,7 +39,7 @@ type Entry struct {
 // cooldownHours, not at the bound.
 const MaxCooldownEntries = 200
 
-// NewCooldown builds a store with the given suppression window.
+// NewCooldown builds a store with the given cooldown window.
 func NewCooldown(ttl time.Duration) *Cooldown {
 	return &Cooldown{seen: map[string]time.Time{}, ttl: ttl, now: time.Now}
 }

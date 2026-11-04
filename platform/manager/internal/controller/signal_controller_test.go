@@ -1231,7 +1231,7 @@ func TestHousekeepingBackfillsCompletedAtFromTheObjectNotNow(t *testing.T) {
 	}
 }
 
-// ---- the suppression window behind the store ------------------------------------
+// ---- the cooldown window behind the store ------------------------------------
 
 // windowStore counts and can fail the two cooldown operations of a SignalStore.
 type windowStore struct {

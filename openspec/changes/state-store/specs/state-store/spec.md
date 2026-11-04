@@ -19,7 +19,7 @@ The contract has three interfaces. They share the key and the errors.
 |---|---|---|---|
 | conversations | conversations and their inputs | the shared key and errors | — |
 | signals | signals | revision, feed event types, expiry, identity | — |
-| sources | cooldown windows, receipt counters | the shared key and errors | revision, feed, identity |
+| sources | cooldown windows, receipt counters | the shared key and errors, identity (release only) | revision, feed |
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -469,7 +469,9 @@ SHALL stay `SignalSource.status.receivedTotal` and `lastReceived`.
 
 ### Requirement: A deleted source's signals are released by the manager
 The contract SHALL offer releasing a source: remove every signal naming it, in
-any phase, and clear its cooldown window. It is idempotent and raises no error
+any phase, and clear its cooldown window. The receipt counters are not
+cleared: under the `kube` backend they live on the source object, which
+release does not touch. It is idempotent and raises no error
 for a source with none.
 
 The manager SHALL call it when a `SignalSource` is observed gone. It SHALL also

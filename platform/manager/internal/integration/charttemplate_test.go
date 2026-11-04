@@ -659,7 +659,7 @@ func TestEventsAdapterRBACGrantsNodesOnlyClusterWide(t *testing.T) {
 // (<source>@<namespace>/<workload>, owner-reference resolved), never in a
 // chart-rendered grouping value — the manager carries no grouping policy at
 // all. cooldownHours is pinned explicit at 0 because the adapter's own
-// pending/dwell queue is already the suppression window; the CRD's 6h
+// pending/dwell queue is already the cooldown window; the CRD's 6h
 // default would otherwise drop every repeat post of a persisting problem.
 func TestEventsSourceCarriesExplicitZeroCooldownNoGrouping(t *testing.T) {
 	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
@@ -2240,7 +2240,7 @@ func assertHaLastRuleIsUndwelledCatchAll(t *testing.T, blocks []string) {
 // logic, keyed on condition identity), never a chart-rendered value — one
 // broken hub logs from several code paths and is one conversation.
 // cooldownHours is pinned explicit at 0 because that dwell logic is already
-// the suppression window; this adapter implements no time axis either, so a
+// the cooldown window; this adapter implements no time axis either, so a
 // window key would be one it silently never honors rather than one it
 // rejects.
 func assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow(t *testing.T, src string) {
