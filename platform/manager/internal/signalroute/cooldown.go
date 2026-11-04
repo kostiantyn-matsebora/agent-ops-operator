@@ -92,7 +92,7 @@ func recoverCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.Si
 
 // recordCooldown writes the cooldown window back through the store. Entries
 // past the window are pruned and the list is bounded by the write. A failed
-// write is logged, never fatal: suppression still holds in memory, and failing
+// write is logged, never fatal: the cooldown window still holds in memory, and failing
 // the pass over it would trade a duplicate investigation for a stuck signal.
 func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *ingest.Cooldown) {
 	entries := cd.Entries()
@@ -105,7 +105,7 @@ func recordCooldown(ctx context.Context, deps Deps, sourceName string, cd *inges
 	}
 	if err := deps.Signals.PutCooldown(ctx, sourceName, out); err != nil {
 		log.FromContext(ctx).Info("recording cooldown on the signal source failed; "+
-			"suppression holds in memory but will not survive a restart",
+			"the cooldown window holds in memory but will not survive a restart",
 			"source", sourceName, "error", err.Error())
 	}
 }
