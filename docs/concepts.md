@@ -440,6 +440,7 @@ release it.
 - The source's cooldown window is removed too.
 - Both go through the state store.
 - This replaces the owner-reference cascade the `Signal` carried before, so it holds under any backend.
+- One narrow race remains. A source recreated under the same name within microseconds of the deletion can lose the signals it received in that gap, because the source reconciler releases by name only.
 
 The manager holds full CRUD on the kind
 and every other component, the console included, at most `get`, `list` and
