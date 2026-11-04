@@ -5,6 +5,10 @@ suite that defines it, and the one chart selector that picks a backend.
 Conversation, ConversationInput and Signal are state, and this is the seam
 that lets an install choose where state lives.
 
+The `signal-persistence` change
+(not yet archived) introduced `Signal` and its lifecycle. This change absorbed
+its contract work and supersedes its direct-Kubernetes tasks.
+
 ## ADDED Requirements
 
 ### Requirement: State is reached only through the store contract
@@ -145,6 +149,10 @@ A conversation's runs SHALL be appended, never rewritten, and SHALL list in
 the order they were appended.
 
 An existing run accepts only growth, stated in the next Requirement.
+
+The contract SHALL offer one combined read, `GetWithRuns`, returning a
+conversation record, its revision and its runs in append order in a single
+read.
 
 An append SHALL take no revision from the caller and SHALL NOT fail with a
 conflict. Whether an append also moves the control record's revision is the

@@ -417,11 +417,12 @@ per-source cap on non-terminal `Signal`s, `MAX_SIGNALS_PER_SOURCE` (chart
 `overflow`) before fan-out, its non-terminal claimants `Failed` after.
 
 **Finished `Signal`s expire on a per-phase TTL**, measured from
-`status.completedAt`. The write that makes a phase terminal also stamps the
-expiry on the record, and the manager's store sweep removes the `Signal` once
-it has passed, so no timer or requeue is held in memory. Under `kube` the
-expiry is an annotation on the `Signal`, and an expired `Signal` already reads
-as absent before the sweep deletes it:
+`status.completedAt`.
+
+- The write that makes a phase terminal also stamps the expiry on the record.
+- The manager's store sweep removes the `Signal` once it has passed.
+- No timer or requeue is held in memory.
+- Under `kube` the expiry is an annotation, and an expired `Signal` already reads as absent before the sweep.
 
 | Phase | Chart value | Default |
 |---|---|---|
@@ -433,10 +434,14 @@ as absent before the sweep deletes it:
 investigates.
 
 **Released with its `SignalSource`.** Deleting the source makes the manager
-release it: every `Signal` of that source, from any phase, and the source's
-cooldown window, are removed through the state store. This replaces the
-owner-reference cascade the `Signal` carried before, so it holds under any
-backend. The manager holds full CRUD on the kind
+release it.
+
+- Every `Signal` of that source, from any phase, is removed.
+- The source's cooldown window is removed too.
+- Both go through the state store.
+- This replaces the owner-reference cascade the `Signal` carried before, so it holds under any backend.
+
+The manager holds full CRUD on the kind
 and every other component, the console included, at most `get`, `list` and
 `watch`.
 
