@@ -1,6 +1,6 @@
 # signal-persistence — tasks
 
-> The `state-store` change (not yet archived) absorbs this change's contract work. Once it lands the manager reaches `Signal`s through the store's `signals` interface and each source's cooldown window through its `sources` interface. Tasks 2.x, 3.x and 4.x below were completed against direct Kubernetes access to `Signal`s and are superseded in that respect.
+> The `state-store` change (not yet archived) absorbs this change's contract work. Once it lands the manager reaches `Signal`s through the store's `signals` interface and each source's cooldown window through its `sources` interface. Tasks 2.x, 3.x and 4.x below were completed against direct Kubernetes access to `Signal`s and are superseded in that respect. Task 4.2's `ownerRef` cascade from a deleted `SignalSource` is likewise superseded by the manager-driven release in `state-store`.
 
 ## 1. The Signal CRD
 

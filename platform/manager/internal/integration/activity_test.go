@@ -672,6 +672,9 @@ func mkChannelAdapter(t *testing.T, name string) {
 	if err := k8sClient.Create(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
+	// Derived-token auth lists adapters through the cache-backed client, so a
+	// request made straight after the create would 401 on the cache's lag.
+	waitForRoutingCacheToObserve(t, a, a.ResourceVersion)
 }
 
 func adapterTokenFor(name string) string {

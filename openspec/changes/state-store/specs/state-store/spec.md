@@ -399,9 +399,14 @@ store SHALL apply the contract's expiry rules to it: invisible to lookup and
 listing once passed, and removed with a delete event on the feed.
 
 No second writer SHALL delete a terminal signal, so no conditional delete
-exists. A terminal signal found without an expiry, written by a version that
-did not set one, SHALL be given one from its completion instant by the
-consumer's next pass.
+exists.
+
+The one named exception is the release of a deleted source. It removes every
+signal of that source in any phase.
+
+A terminal signal found without an expiry, written by a version that did not
+set one, SHALL be given one from its completion instant by the consumer's next
+pass.
 
 #### Scenario: A terminal write carries its expiry
 - **WHEN** an update sets a Routed phase, a completion instant and an expiry
@@ -502,6 +507,9 @@ under a different `sourceRef` is the successor's and SHALL be kept.
 So SHALL the successor's window, where the backend can tell one holds the name.
 
 Without a `sourceRef` every signal of the name is released.
+
+The successor guarantee holds only once task 6.9 lands. Until then the
+source reconciler passes no `sourceRef`.
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released

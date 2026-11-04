@@ -65,7 +65,14 @@ The contract, the `kube` backend and the suite exist (1.5, 2.10, 3.5). the call 
 
 ## Review round (sections 4/5)
 
-Fixed: undelivered-note settling now runs in the reconciler backstop and only for the run the note names. The expiry sweep lists only when armed. `kube.Store.Update` returns `ErrConflict` when a status retry meets a non-run change. The feed clears a rejected resume point and `kube` Watch requests and forwards bookmarks (`EventBookmark`). The static check covers dot-imports and untyped Conversation kinds. The chart tolerates `stateStore=null`.
+Fixed:
+
+- Undelivered-note settling runs in the reconciler backstop and only for the run the note names.
+- The expiry sweep lists only when armed.
+- `kube.Store.Update` returns `ErrConflict` when a status retry meets a non-run change.
+- The feed clears a rejected resume point, and `kube` Watch requests and forwards bookmarks (`EventBookmark`).
+- The static check covers dot-imports and untyped Conversation kinds.
+- The chart tolerates `stateStore=null`.
 
 Deliberately not fixed at the time, since closed in the Signal round below: `Reconcile`'s `Get` then `ListRuns` (now `GetWithRuns`) and `markDelivered` clearing whatever note the thread held. Still open: a cluster measurement of `kube` read cost (envtest numbers are in D-4, no cluster was available).
 
@@ -92,7 +99,7 @@ Deliberately not fixed:
 
 - The static check still misses a reflected field path and a kind that reaches an unstructured object through another function's return value. It needs type information the AST walk lacks.
 - No cluster measurement was made.
-- Follow-up: pass the departed source's `sourceRef` from the source reconciler into the release (tracked as task 6.9 above).
+- Follow-up: pass the departed source's `sourceRef` from the source reconciler into the release (tracked as task 6.9 above). The spec's successor-release scenario holds only once 6.9 lands.
 - The source reconciler passes no identity, so a successor created in the gap between its absence check and the release can lose its signals. This is a known gap against the "A successor's signals outlive the departed release" scenario, which holds only where the caller supplies the identity (6.6 is ticked for the explicit release, not for that race).
 
 ## 7. Unit tests

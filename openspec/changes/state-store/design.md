@@ -512,8 +512,9 @@ source reconciler derives, not state a decision reads back.
   object scenario in the conformance suite.
 - [D-4 turns some cache reads into apiserver reads under `kube`] → only
   paths that used `APIReader` already pay it. The reconciler's own `Get` and
-  `ListRuns` now do too (D-4 lists what stays uncached). The bench covers the
-  in-memory store only. A cluster measurement is outstanding.
+  `ListRuns` now do too (D-4 lists what stays uncached). The bench also
+  covers the `kube` store against envtest (the D-4 table above). A
+  real-cluster measurement is outstanding.
 - [D-6 changes the reconciler's event source] → under `kube` the informer
   still feeds it, with a test asserting the same event sequence for a
   lifecycle as before.
