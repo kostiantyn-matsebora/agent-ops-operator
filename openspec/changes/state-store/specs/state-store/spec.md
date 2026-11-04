@@ -21,7 +21,7 @@ The contract has three interfaces. They share the key and the errors.
 
 | Interface | Holds | Uses | Does not use |
 |---|---|---|---|
-| conversations | conversations and their inputs | the shared key and errors | — |
+| conversations | conversations and their inputs | the shared key and errors, revision, feed event types, expiry, record identity | — |
 | signals | signals | revision, feed event types, expiry, record identity, `sourceRef` | — |
 | sources | cooldown windows, receipt counters | the shared key and errors, `sourceRef` (release only) | revision, feed |
 

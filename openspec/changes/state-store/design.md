@@ -474,8 +474,9 @@ restart re-opening conversations for ids inside their window, and the signal
 spec says cooldown keeps its persistence on the source.
 
 **Decision: in scope.** Leaving it makes "the state store abstracts all manager
-state" false at exactly the place that matters, because under any non-`kube`
-backend the window would be the one decision input still held in the
+state" false at exactly the place that matters.
+
+Under any non-`kube` backend the window would be the one decision input still held in the
 Kubernetes API, written to an object the source reconciler and the console
 watch re-read on every fresh admission. Moving it costs two methods and
 changes nothing under `kube`: `PutCooldown` is the same status merge patch,
