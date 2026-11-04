@@ -46,7 +46,8 @@ for the source and the reference material beside this file.
 - Deleting a `SignalSource` now releases its `Signal`s and cooldown window
   through the manager instead of relying on the owner-reference cascade. The
   outcome is the same, except that a source deleted and recreated under one
-  name keeps its new incarnation's signals and window.
+  name may still lose its new incarnation's signals and window to a narrow
+  race, pending the departed-identity release tracked as task 6.9.
 - A source's `receivedTotal` and `lastReceived` counters are now written
   through the state store too, so no manager state is left outside it. Under
   `kube` the fields and their values are unchanged.

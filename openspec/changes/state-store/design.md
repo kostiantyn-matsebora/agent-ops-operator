@@ -435,7 +435,7 @@ and the UTC rule, the `expiresAt` semantics and the identity fields
   terminal signal with no expiry, which the existing backfill pass stamps.
   The reverse order could leave a live signal expiring. The sweep deletes with
   a UID and revision precondition. The TTL knobs stay on the reconciler.
-- **The owner link is a hint, not a mechanism.** `Create` takes `SourceID`,
+- **The owner link is a hint, not a mechanism.** `Create` takes `sourceRef`,
   the opaque identity of the source as the source's own object reports it,
   and `kube` turns it into the controller owner reference, so the stored object
   is the one publication always wrote and no read of the source is added.
@@ -444,10 +444,10 @@ and the UTC rule, the `expiresAt` semantics and the identity fields
   and the manager calls it when the source reconciler finds its source gone
   and when a pass finds the orphan. This is D-7's rule applied to signals.
   A name outlives its source (a prune and re-apply, a reinstall), so
-  `ReleaseSource(source, sourceID)` takes the departed identity when the caller
+  `ReleaseSource(source, sourceRef)` takes the departed identity when the caller
   knows it: a signal recorded under another identity, and under `kube` the
   successor's window, stay, and each delete carries the UID it listed. The pass
-  knows it (`SignalRecord.SourceID`). The source reconciler, which has only the
+  knows it (`SignalRecord.sourceRef`). The source reconciler, which has only the
   name from a deletion, passes `""` and releases the whole name. What remains
   is the reconciler's own sub-millisecond gap between seeing the source absent
   and releasing, which a successor created inside it can lose.
