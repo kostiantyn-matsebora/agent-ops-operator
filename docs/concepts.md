@@ -1894,7 +1894,8 @@ payload is not copied into the conversation object.
   only backend shipped is `kube`, which keeps today's `Conversation`,
   `ConversationInput` and `Signal` custom resources, and the window in
   `SignalSource.status.cooldown[]`. Under `kube` the two homes are the same
-  API. Conversation state is: session id,
+  API. Each source's `receivedTotal` and `lastReceived` counters live there
+  too. Conversation state is: session id,
   threads, inputs, runs, phase, and the message record — what people sent as
   well as what the agent answered. Recovered by reading. Survives any restart and any
   rescheduling.

@@ -13,13 +13,13 @@ signals, and each signal source's cooldown window and receipt counters, only thr
 store contract. No manager code path SHALL reach a state record through a
 Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
-The contract has two interfaces. They share the key and the errors.
+The contract has three interfaces. They share the key and the errors.
 
 | Interface | Holds | Uses | Does not use |
 |---|---|---|---|
 | conversations | conversations and their inputs | the shared key and errors | — |
 | signals | signals | revision, feed event types, expiry, identity | — |
-| signals | cooldown windows, receipt counters | the shared key and errors | revision, feed, identity |
+| sources | cooldown windows, receipt counters | the shared key and errors | revision, feed, identity |
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -346,7 +346,7 @@ one work queue, and repeats its pass when it loses a race.
 ### Requirement: Signal lookup is by key or by a declared index
 The contract SHALL offer lookup of a signal by key and listing by a declared,
 closed set of signal indexes:
-- every signal
+- the whole set
 - one source's non-terminal signals
 - one source's non-terminal signals of one initiation id
 

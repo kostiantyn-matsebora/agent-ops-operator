@@ -1,6 +1,6 @@
 # signal-persistence — tasks
 
-> The `state-store` change absorbed this change's contract work. The manager reaches `Signal`s and each source's cooldown window through `SignalStore`.
+> The `state-store` change absorbed this change's contract work. The manager reaches `Signal`s through the store's `signals` interface and each source's cooldown window through its `sources` interface. Tasks 2.x, 3.x and 4.x below were completed against direct Kubernetes access to `Signal`s and are superseded in that respect.
 
 ## 1. The Signal CRD
 

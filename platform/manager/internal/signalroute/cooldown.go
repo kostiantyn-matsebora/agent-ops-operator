@@ -54,7 +54,7 @@ func spendCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.Sign
 	}, nil
 }
 
-// recoverCooldown builds a source's suppression window, RECOVERED from the
+// recoverCooldown builds a source's cooldown window, RECOVERED from the
 // state store on first use in this process. The in-memory map is the hot path;
 // the store is the record, so a restart or a leader change mid-incident does
 // not re-open conversations for signals still inside their window. It returns
@@ -90,7 +90,7 @@ func recoverCooldown(ctx context.Context, deps Deps, source *agentopsv1alpha1.Si
 	return ingest.NewCooldownFrom(time.Duration(hours)*time.Hour, recorded), nil
 }
 
-// recordCooldown writes the suppression window back through the store. Entries
+// recordCooldown writes the cooldown window back through the store. Entries
 // past the window are pruned and the list is bounded by the write. A failed
 // write is logged, never fatal: suppression still holds in memory, and failing
 // the pass over it would trade a duplicate investigation for a stuck signal.

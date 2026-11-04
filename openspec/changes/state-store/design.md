@@ -43,8 +43,9 @@ The constraints this design keeps:
   are a separate, optional optimisation.
 - The console reading state through the manager. Under `kube` its direct
   watch keeps working. That change lands with the first non-`kube` backend.
-- The console reading signals through the manager. Under `kube` its direct
-  watch keeps working. That change lands with the first non-`kube` backend.
+- The console reading cooldown windows and receipt counters through the
+  manager. Under `kube` its direct watch of `SignalSource.status` keeps
+  working. That change lands with the first non-`kube` backend.
 - A CRD layout change for runs. See D-5.
 
 ## Decisions

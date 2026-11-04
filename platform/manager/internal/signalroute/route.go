@@ -32,7 +32,7 @@ import (
 type Deps struct {
 	// Client is used for the source status writes (the receipt counters).
 	Client client.Client
-	// Signals holds the suppression window of every source: recovered on first
+	// Signals holds the cooldown window of every source: recovered on first
 	// use in this process and written back on each admission.
 	Signals state.SignalStore
 	// Store holds every conversation and queued input payload: the
