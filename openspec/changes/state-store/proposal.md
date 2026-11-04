@@ -54,7 +54,7 @@ differently per install.
   (`receivedTotal`, `lastReceived`) move behind the contract. Their `kube`
   location does not change (design D-15).
 - Pod and ConfigMap release becomes the **manager's explicit act** under
-  every backend. The `kube` backend keeps the ownerRef as well, but no
+  every backend. The `kube` backend keeps the owner reference as well, but no
   behaviour depends on garbage collection any more.
 - Chart: one selector, `stateStore.backend`, exactly one value, the render
   refuses anything else. `kube` is the only value this change ships.
@@ -115,7 +115,7 @@ differently per install.
 - `docs/CHANGELOG.md` — the new values key, no upgrade step.
 - `.claude/rules/invariants.md` — "Filesystem state on a PVC, else
   Kubernetes API" becomes "else the state store", and the runtime-pod row
-  stops naming ownerRef GC as the mechanism.
+  stops naming owner reference GC as the mechanism.
 - `.claude/rules/structure.md` — `internal/state/` in the manager's map.
 
 **Adopter site**

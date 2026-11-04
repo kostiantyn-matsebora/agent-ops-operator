@@ -580,7 +580,8 @@ before. `kubectl` SHALL read and list them unchanged.
 
 A signal's source identity maps to the controller owner reference naming its
 `SignalSource`, its status to the status subresource, and its expiry to the
-same annotation a conversation uses.
+same annotation a conversation uses. The owner reference mapping is best-effort
+and no behaviour depends on it.
 
 The record's finalizers map to the object's finalizers, its deletion marker to
 the object's deletion timestamp, its identity to the object's UID, and the
