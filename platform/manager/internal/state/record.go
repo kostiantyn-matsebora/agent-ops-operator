@@ -2,8 +2,8 @@ package state
 
 import "time"
 
-// Key names one record within a Store's fixed scope. A Store is constructed
-// bound to one namespace (design D-2: "one install per namespace"), so a Key
+// Key names one record within a collection's fixed scope. A backend is
+// constructed bound to one namespace ("one install per namespace"), so a Key
 // is the record's name alone — never a namespace, never a selector string.
 type Key string
 
@@ -100,11 +100,12 @@ type RecordedInput struct {
 }
 
 // Run records one completed agent run. Runs are append-only sub-records of a
-// ConversationRecord (design D-5): added through Store.AppendRun, read
-// through Store.ListRuns, never part of Get/Update's own record. Three
+// ConversationRecord: added through Stores.Runs.Append, read through
+// Runs.List, never part of the Conversations collection's own record. Three
 // delivery markers on an existing run (DeliveryTracked, Delivered,
-// RoutedToParent) only ever grow, and change through Store.UpdateRun (design
-// D-12). See api/v1alpha1.RunStatus.
+// RoutedToParent) only ever grow, and change through Runs.Grow with an edit
+// Run carrying just the markers to set, merged by RunsDecl. See
+// api/v1alpha1.RunStatus.
 type Run struct {
 	RunID           string
 	JobKind         string
@@ -118,20 +119,6 @@ type Run struct {
 	Delivered       []string
 	RoutedToParent  bool
 	Inputs          []RecordedInput
-}
-
-// RunUpdate is the one mutation an existing run accepts (design D-12). Every
-// field only ever grows — a flag goes false to true, a set gains members,
-// nothing is removed or overwritten — so an update is idempotent and commutes
-// with another UpdateRun and with AppendRun. A zero RunUpdate changes nothing.
-type RunUpdate struct {
-	// MarkDeliveryTracked sets Run.DeliveryTracked true.
-	MarkDeliveryTracked bool
-	// MarkDelivered adds each channel to Run.Delivered unless it is already
-	// there, keeping first-appearance order.
-	MarkDelivered []string
-	// MarkRoutedToParent sets Run.RoutedToParent true.
-	MarkRoutedToParent bool
 }
 
 // ThreadBinding pins one bound channel to its conversation thread. See
@@ -203,10 +190,10 @@ type Condition struct {
 
 // ConversationRecord is the conversation control record — every field of
 // api/v1alpha1.ConversationSpec and api/v1alpha1.ConversationStatus except
-// Runs (an append-only sub-record, see Run/Store.AppendRun) and the inline
-// text a large InputItem.Payload defers to a blob (see Store.PutBlob).
+// Runs (an append-only sub-record, see Run/Stores.Runs) and the inline
+// text a large InputItem.Payload defers to a blob (see Stores.Blobs).
 //
-// No Kubernetes type appears here (design D-1): a backend that is not the
+// No Kubernetes type appears here: a backend that is not the
 // apiserver has no ObjectMeta, no resourceVersion, no finalizer to fake. The
 // `kube` backend alone maps this to and from the CRD it keeps.
 type ConversationRecord struct {
@@ -280,12 +267,6 @@ type ConversationRecord struct {
 	RuntimeStartFailures    int32
 	LastRuntimeStartFailure *time.Time
 	Conditions              []Condition
-
-	// ExpiresAt marks a record invisible to Get/List and delivered as a
-	// delete Event on Watch once passed (task 1.1, 2.6). No conversation
-	// written by this change's manager sets it — it exists for
-	// signal-persistence's terminal records to join the same contract.
-	ExpiresAt *time.Time
 }
 
 // Blob is the out-of-line body of a queued InputItem whose Payload a caller

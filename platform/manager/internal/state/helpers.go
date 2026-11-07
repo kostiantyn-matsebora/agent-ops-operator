@@ -220,45 +220,48 @@ func (r *Run) DeliveredTo(channel string) bool {
 const MutateMaxAttempts = 10
 
 // Mutate is the get-modify-Update closure every status or metadata write goes
-// through: read the record, let fn change it, write it back with the revision
-// it was read at, and read again when another writer got there first. It
-// replaces a merge patch, which never conflicted — fn therefore runs again on
-// the fresh record and must derive its change from the record it is handed,
-// not from a snapshot it captured earlier.
+// through, generic over the record type: read the record, let fn change it,
+// write it back with the revision it was read at, and read again when another
+// writer got there first. It replaces a merge patch, which never conflicted —
+// fn therefore runs again on the fresh record and must derive its change from
+// the record it is handed, not from a snapshot it captured earlier.
 //
 // fn leaving the record unchanged writes nothing, as a merge patch with no
 // difference did. An error from fn stops the loop and is returned as is. The
 // returned record is the one written (or, when nothing changed, the one read).
-func Mutate(ctx context.Context, s Store, key Key, fn func(*ConversationRecord) error) (ConversationRecord, error) {
+// ErrNotFound from the read is returned as is, so a caller that creates on
+// absence (a cooldown window, a receipt counter) can tell it apart.
+func Mutate[T any](ctx context.Context, c Collection[T], key Key, fn func(*T) error) (T, error) {
+	var zero T
 	var lastErr error
 	for attempt := 0; attempt < MutateMaxAttempts; attempt++ {
-		rec, rev, err := s.Get(ctx, key)
+		rec, rev, err := c.Get(ctx, key)
 		if err != nil {
-			return ConversationRecord{}, err
+			return zero, err
 		}
 		before, err := json.Marshal(rec)
 		if err != nil {
-			return ConversationRecord{}, fmt.Errorf("state: mutate %q: snapshot: %w", key, err)
+			return zero, fmt.Errorf("state: mutate %q: snapshot: %w", key, err)
 		}
 		if err := fn(&rec); err != nil {
-			return ConversationRecord{}, err
+			return zero, err
 		}
 		after, err := json.Marshal(rec)
 		if err != nil {
-			return ConversationRecord{}, fmt.Errorf("state: mutate %q: snapshot: %w", key, err)
+			return zero, fmt.Errorf("state: mutate %q: snapshot: %w", key, err)
 		}
 		if bytes.Equal(before, after) {
 			return rec, nil
 		}
-		if _, err = s.Update(ctx, key, rev, rec); err == nil {
+		if _, err = c.Update(ctx, key, rev, rec); err == nil {
 			return rec, nil
 		}
 		if !errors.Is(err, ErrConflict) {
-			return ConversationRecord{}, err
+			return zero, err
 		}
 		lastErr = err
 	}
-	return ConversationRecord{}, fmt.Errorf("state: mutate %q: exhausted %d attempts: %w", key, MutateMaxAttempts, lastErr)
+	return zero, fmt.Errorf("state: mutate %q: exhausted %d attempts: %w", key, MutateMaxAttempts, lastErr)
 }
 
 // Condition statuses, the values metav1.ConditionStatus carries.
@@ -327,8 +330,8 @@ func (r *ConversationRecord) RemoveCondition(condType string) bool {
 // Patch is Mutate for a caller holding the record: fn is applied to a fresh
 // read of rec.Name, and rec is replaced with what was written, so the caller's
 // copy reads the way it did after a merge patch — as the stored state.
-func Patch(ctx context.Context, s Store, rec *ConversationRecord, fn func(*ConversationRecord)) error {
-	updated, err := Mutate(ctx, s, Key(rec.Name), func(r *ConversationRecord) error {
+func Patch(ctx context.Context, c Collection[ConversationRecord], rec *ConversationRecord, fn func(*ConversationRecord)) error {
+	updated, err := Mutate(ctx, c, Key(rec.Name), func(r *ConversationRecord) error {
 		fn(r)
 		return nil
 	})
