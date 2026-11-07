@@ -62,10 +62,10 @@
 - [x] 8.1 Add or extend a lane in `platform/manager/test/system/`: a signal published, the `Signal` CR observable and claimed, a conversation opened, phase `Routed`, plus an addressed `/<pipeline> <task>` from the console path producing a `Signal`, and verify in the pack run
 - [x] 8.2 Add a leader-change case: remove the leader pod while a `Signal` is part-routed, and verify the new leader finishes it and produces one conversation, never two
 - [x] 8.3 Verify console RBAC in-cluster: the console ServiceAccount can list and watch `signals` and cannot write them (`kubectl auth can-i` both ways)
-- [ ] 8.4 Dispatch `system-full.yml` on the change's branch and verify the full tier passes
+- [x] 8.4 Dispatch `system-full.yml` on the change's branch and verify the full tier passes NOT PERFORMED, waived by the maintainer at archive: the full tier has been red on master since before this change's code merged, on a console read-watermark test unrelated to signals. A full-tier run on master was dispatched meanwhile and its verdict is not recorded here.
 
 ## 9. Documentation
 
 - [x] 9.1 Reference docs: `docs/concepts.md` (the Signal kind, phases, claimant workflow, the consumer, CRD and state matrices), `docs/contracts/signal-adapter.md` (version 2.3.0, the response, `signalId`, the rewritten `API-2` and `API-3`, new rows, changelog), `docs/contracts.md` (publish then consume), `docs/console.md`, `docs/configuration.md` (the six chart values), `docs/CHANGELOG.md` (the new CRD, the contract version, the `kubectl apply -f chart/crds/` step), and `docs/crds/signal.md` via `docs-generate.py`
 - [x] 9.2 Adopter site: `docs/installation.md` (CRD upgrade step), `docs/console-guide.md` (what the signals view shows, with its screenshot), `docs/integrations/*.md` and `docs/guides/signal-adapter.md` (the claimed specification version), `README.md` kind list within budget — all done. The diagrams enumerate no kind names, so `export.py`/`readme-flow.py` need no re-run. The console `screenshots` script was re-run
-- [ ] 9.3 Re-run the console `demo` npm script for the signals view, which needs a cluster the cloud session lacks, and verify the published asset shows it
+- [x] 9.3 Re-run the console `demo` npm script for the signals view, which needs a cluster the cloud session lacks, and verify the published asset shows it NOT PERFORMED, waived by the maintainer at archive: the demo recording has no signals step, so there is no published asset to verify.

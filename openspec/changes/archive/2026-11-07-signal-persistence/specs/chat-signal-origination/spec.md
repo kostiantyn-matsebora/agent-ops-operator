@@ -171,14 +171,20 @@ one for a Pipeline.
 - **THEN** a root conversation opens for that Coordinator with the surface bound and the text as its first input
 - **AND** no other channel of the Coordinator is bound until it escalates
 
+## ADDED Requirements
+
 ### Requirement: A chat message carries a signalId from its delivery identity
 
 `signals/telegram` SHALL send a `signalId` on every chat signal. A message
 here is one transport delivery: an update, or a tap on an offered control.
 
-The `signalId` is the delivery identity scoped to the matched source:
-`tg-<source>-<update id>` for a message, `tg-cb-<source>-<callback id>` for a
-tap. It is the same string a fresh `initiationId` is minted as.
+The `signalId` is the delivery identity scoped to the matched source.
+
+For a message it is `tg-<source>-<update id>`. For a tap it is `tg-cb-<source>-<callback id>`. The update id and the callback id are the transport's own identities for that delivery.
+
+Each adapter tags the ids it mints with its own tag, and this adapter's tag is `tg`.
+
+The `signalId` is the same string a fresh `initiationId` is minted as.
 
 For a thread reply the `initiationId` is the propagated `conversationId`
 while the `signalId` stays the delivery's own, so two replies in one thread
