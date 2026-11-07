@@ -60,9 +60,10 @@ for the source and the reference material beside this file.
 - The manager now reaches `Conversation`, `ConversationInput` and `Signal` through a state
   store contract. There is **no upgrade step and no CRD change**. The objects
   are byte-identical and `kubectl get conv` is unchanged.
-- Behaviour under `kube`: the manager's reads of a conversation now go to the
-  Kubernetes API server instead of its informer cache, so a write's
-  compare-and-swap never races a stale copy. Expect more API server reads.
+- Behaviour under `kube`: the manager's read of a single conversation now goes
+  to the Kubernetes API server instead of its informer cache, so a write's
+  compare-and-swap never races a stale copy. Listings stay cached. Expect more
+  API server reads.
 - A closed or evicted conversation's pod and ConfigMap are now deleted by the
   manager explicitly. The owner reference remains, but nothing depends on
   garbage collection.

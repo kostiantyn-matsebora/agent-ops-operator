@@ -132,6 +132,16 @@ Deliberately not fixed:
 - [x] 9.10 Confirm `docs/installation.md`, `docs/getting-started.md`, the landing page and `README.md` need no change: a default install is identical. Record the verdict here.
 - [x] 9.11 Signal, adopter site: confirm `docs/installation.md`, `docs/getting-started.md`, the landing page, `README.md` and the signal guides need no change, since a default install keeps the same objects, the same `kubectl get sig` output and the same TTL behaviour. Record the verdict here.
 
-Verdict 9.9: `docs/configuration.md` carries a State store section opening "You need do nothing", so an adopter choosing nothing reads no action. Verdict 9.10: `installation.md`, `getting-started.md`, the landing page and `README.md` need no change, since a default install is identical (`kube`, same objects). They change when the first alternative backend lands.
+Verdict 9.9: `docs/configuration.md` carries a State store section opening "You need do nothing". An adopter choosing nothing reads no action.
 
-Verdict 9.7: done in `docs/concepts.md` (home bullet, matrix rows for the cooldown window and signals, the Signal TTL and release text, the receipt counters listed under the state-store home), `docs/testing.md` (`RunSignals`), `docs/configuration.md`, `docs/CHANGELOG.md`, `docs/contracts/signal-adapter.md` (API-7 wording), `invariants.md`, `structure.md`. `docs-generate.py` and `--check` pass. `docs/contracts.md` names no deleter of a terminal signal, so it is unchanged. Verdict 9.8: `retired-vocabulary-guard.py` and `publication-guard.py` both clean after the `suppression-window` entry was added. Verdict 9.11: grepped `README.md`, `installation.md`, `getting-started.md`, `index.md`, `guides/` and `integrations/` for signal TTL, owner, deletion, cooldown storage and state-store terms. None state them, so no change. No page mentions `stateStore.bundles`. Caveat: the docs say the manager releases a deleted source's signals, but the successor-race guarantee holds only once task 6.9 lands.
+Verdict 9.10: `installation.md`, `getting-started.md`, the landing page and `README.md` need no change, since a default install is identical (`kube`, same objects). They change when the first alternative backend lands.
+
+Verdict 9.7: done in `docs/concepts.md` (home bullet, matrix rows for the cooldown window and signals, the Signal TTL and release text, the receipt counters listed under the state-store home), `docs/testing.md` (`RunSignals`), `docs/configuration.md`, `docs/CHANGELOG.md`, `docs/contracts/signal-adapter.md` (API-7 wording), `invariants.md`, `structure.md`.
+
+`docs-generate.py` and `--check` pass. `docs/contracts.md` names no deleter of a terminal signal, so it is unchanged.
+
+Verdict 9.8: `retired-vocabulary-guard.py` and `publication-guard.py` both clean after the `suppression-window` entry was added.
+
+Verdict 9.11: grepped `README.md`, `installation.md`, `getting-started.md`, `index.md`, `guides/` and `integrations/` for signal TTL, owner, deletion, cooldown storage and state-store terms. None state them, so no change. No page mentions `stateStore.bundles`.
+
+Caveat: the docs say the manager releases a deleted source's signals, but the successor-race guarantee holds only where the caller supplies the departed source's identity, which the source reconciler does not yet (task 6.9).

@@ -17,13 +17,15 @@ signals, and each signal source's cooldown window and receipt counters, only thr
 store contract. No manager code path SHALL reach a state record through a
 Kubernetes client, a Kubernetes cache or a Kubernetes watch directly.
 
-The contract has three interfaces. They share the key and the errors.
+The contract has two interfaces. They share the key and the errors. The second
+also carries each source's cooldown window and receipt counters.
 
 | Interface | Holds | Uses | Does not use |
 |---|---|---|---|
 | conversations | conversations and their inputs | the shared key and errors, revision, feed event types, expiry, record identity | — |
 | signals | signals | the shared key and errors, revision, feed event types, expiry, record identity, `sourceRef` | — |
-| sources | cooldown windows, receipt counters | the shared key and errors, `sourceRef` (release only) | revision, feed |
+| signals, per source | cooldown windows | the shared key and errors, `sourceRef` (release clears the window) | revision, feed |
+| signals, per source | receipt counters | the shared key and errors | revision, feed, `sourceRef` (release leaves them) |
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
