@@ -4,10 +4,13 @@
 The manager SHALL read and write conversations, conversation inputs and
 signals, each signal source's cooldown window and receipt counters, and the
 key-value state adapters persist through `/channel/state` and
-`/signal/state`, only through the state store contract. Every other component
-SHALL read state only through the manager's state read surface. No code path
-in any component SHALL reach a state record through a Kubernetes client, a
-Kubernetes cache or a Kubernetes watch directly.
+`/signal/state`, only through the state store contract.
+
+Every other component SHALL read state only through the manager's state read
+surface.
+
+No code path in any component SHALL reach a state record through a Kubernetes
+client, a Kubernetes cache or a Kubernetes watch directly.
 
 The contract is one operation set over typed collections (next
 requirement). What the store holds is this closed inventory, and nothing

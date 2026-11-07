@@ -47,7 +47,7 @@ The call sites keep their call names. The handle each holds changes type.
 
 ## 9. Housekeeping — backend-developer
 
-- [ ] 9.1 Delete `platform/housekeeping/kube.go` and add `state.go` implementing the lister over `GET /state/conversations`, keeping the `runtimeContextId` and `sessionId` dual-read and the phase-blind comment, leaving `reclaim.go` untouched. Add the module's `TestReadsNoStateFromKubernetes`. Verify `reclaim_test.go` passes unedited, the parse and dual-read test passes against a fake manager, and a failing listing exits non-zero and removes nothing.
+- [ ] 9.1 Delete `platform/housekeeping/kube.go` and add `state.go` implementing the lister over `GET /state/conversations`, keeping the `runtimeContextId` read and its fallback to the retired `sessionId` and the phase-blind comment, leaving `reclaim.go` untouched. Add the module's `TestReadsNoStateFromKubernetes`. Verify `reclaim_test.go` passes unedited, the parse and dual-read test passes against a fake manager, and a failing listing exits non-zero and removes nothing.
 
 ## 10. Unit tests
 
