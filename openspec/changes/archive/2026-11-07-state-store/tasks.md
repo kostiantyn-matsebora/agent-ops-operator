@@ -61,7 +61,7 @@ The contract, the `kube` backend and the suite exist (1.5, 2.10, 3.5). the call 
 - [x] 6.6 Release a deleted source explicitly: the `SignalSource` reconciler's not-found path calls `ReleaseSource`, and the signal pass's missing-source branch releases the orphan instead of relying on the owner reference. Verify an envtest, which runs no garbage collector, observes every signal of a deleted source gone from any phase.
 - [x] 6.7 Move the receipt counters behind `SignalStore`: `RecordReceived`/`GetReceived` in the contract, the conformance suite and `kube`, and the router call site (`signalroute.RecordReceived`). Verify the concurrent-receipts scenario passes on every backend.
 - [x] 6.8 Construct `kube.NewSignalStore` in `cmd/manager/main.go` beside the conversation store, run its sweep as a manager runnable, and empty and delete `pendingSignalMigration` in `internal/state/static_test.go`. Verify the static check passes on the whole tree with the allowlist gone and `STATE_BACKEND=nosuch` still exits non-zero.
-- [ ] 6.9 Close the release race: the source reconciler passes the departed source's `sourceRef` into `ReleaseSource`, so a successor created between its absence check and the release keeps its signals. Verify an envtest covering that gap against the "A successor's signals outlive the departed release" scenario.
+- [ ] 6.9 Close the release race: the source reconciler passes the departed source's `sourceRef` into `ReleaseSource`, so a successor created between its absence check and the release keeps its signals. Verify an envtest covering that gap against the "A successor's signals outlive the departed release" scenario. Not done here: the release was moved to a manager helper that reads the live source and deletes by id, specified and tracked in the change `state-store-generic-contract`.
 
 ## Review round (sections 4/5)
 
@@ -104,13 +104,13 @@ Deliberately not fixed:
 
 ## 7. Unit tests
 
-- [ ] 7.1 `cd platform/manager && KUBEBUILDER_ASSETS=... go test ./...` green in the worktree, including the conformance suite (both halves), the static check and the reconcilers' event-sequence tests.
-- [ ] 7.2 `cd chart && go test ./...` green in the worktree for the guard and the env var.
-- [ ] 7.3 `go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...` in `platform/manager`: `internal/state/` covered by the suite, no package below its previous coverage.
+- [x] 7.1 `cd platform/manager && KUBEBUILDER_ASSETS=... go test ./...` green in the worktree, including the conformance suite (both halves), the static check and the reconcilers' event-sequence tests. Verdict: passed in CI (`operator` job, final commit of the pull request).
+- [x] 7.2 `cd chart && go test ./...` green in the worktree for the guard and the env var. Verdict: passed in CI (`chart` job, final commit of the pull request).
+- [x] 7.3 `go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...` in `platform/manager`: `internal/state/` covered by the suite, no package below its previous coverage. Verdict: the CI `operator` job ran with `-coverpkg=./...` and the coverage gate passed.
 
 ## 8. System tests
 
-- [ ] 8.1 Run the system pack unchanged against this worktree's manager image and chart: locally per `build-test.md`, or dispatched with `gh workflow run system-smoke.yml --ref change/state-store`. Verify every lane passes without a test edited — this is the zero-behaviour-change acceptance criterion from the spec.
+- [x] 8.1 Run the system pack unchanged against this worktree's manager image and chart: locally per `build-test.md`, or dispatched with `gh workflow run system-smoke.yml --ref change/state-store`. Verify every lane passes without a test edited — this is the zero-behaviour-change acceptance criterion from the spec. Verdict: the smoke tier passed on master after the merge (run 42409548436). An earlier red on master, a close overwritten by a reconcile pass, was fixed in #459 and is not part of this change's contract.
 
 ## 9. Documentation
 
