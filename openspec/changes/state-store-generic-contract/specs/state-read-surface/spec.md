@@ -131,3 +131,14 @@ be valid on another.
 - **WHEN** a reader connects to a replica that does not hold the lease
 - **THEN** the listing and the feed are served locally and a point kept from
   the leader resumes without a gap
+
+### Requirement: The manager admits its readers on the network
+The chart SHALL admit every component that reads the state read surface to the manager's port in the manager's network policy, the console and the housekeeping workload included. A reader whose traffic the policy drops SHALL NOT be mistaken for a manager outage: the policy test SHALL cover each reader's flow.
+
+#### Scenario: The housekeeping workload reaches the manager
+- **WHEN** the chart renders the manager's network policy
+- **THEN** it admits the housekeeping workload on the manager's port
+
+#### Scenario: Every wired flow is covered
+- **WHEN** a component is added as a reader of the state read surface
+- **THEN** the network policy test fails until the policy admits it

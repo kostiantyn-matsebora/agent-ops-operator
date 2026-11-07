@@ -214,8 +214,9 @@ source index exists for it.
 
 A name can be reused by a successor source, so the release SHALL decide from
 the source that holds the name at the moment of each delete. After listing the
-source's signals it SHALL read the source by that name from the Kubernetes API,
-never from a cache. A signal recorded under the identity of the source that
+source's signals it SHALL read the source by that name from the authoritative
+store of configuration, never from a cache. Under the `kube` backend that is the
+Kubernetes API server. A signal recorded under the identity of the source that
 holds the name now SHALL be kept.
 
 Every other signal of the name SHALL be deleted under the revision it was
