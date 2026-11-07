@@ -37,7 +37,7 @@ A NATS or Postgres backend cannot be selected honestly until both are fixed.
   not change.
 - The conformance suite becomes generic and is driven by the inventory, so a
   backend's test is one call and a kind of state cannot be left out of it.
-- The manager serves a **state read surface** (`/state/*`): five reads and
+- The manager serves a **state read surface** (`/state/*`): three reads and
   two resumable feeds. The console and housekeeping read conversations and
   signals only through it. Their Kubernetes grants on those kinds are removed.
 - Reading it is a declared reach: `spec.stateAccess` on a `ChannelAdapter` or

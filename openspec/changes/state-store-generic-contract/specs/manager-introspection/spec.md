@@ -13,4 +13,4 @@ The manager SHALL expose its own runtime state and its own resolution results, a
 
 #### Scenario: Manager-only state is reachable
 - **WHEN** a client needs state the manager holds in memory
-- **THEN** an authenticated endpoint serves it, because no Kubernetes object carries it
+- **THEN** an authenticated endpoint serves it, such as `GET /status`, because no Kubernetes object carries it

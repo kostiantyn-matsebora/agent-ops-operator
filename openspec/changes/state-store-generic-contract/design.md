@@ -152,7 +152,7 @@ and the four identity fields are its UID, resourceVersion and timestamps.
 
 | Alternative | Rejected because |
 |---|---|
-| A flat record (`phase` at the top) | a second published shape for one kind; the console would re-map every field |
+| A flat record (`phase` at the top) | a second published shape for one kind, and the console would re-map every field |
 | The `kube` object verbatim, `metadata` included | puts Kubernetes metadata into a contract that forbids it |
 | Runs fetched per event, list and feed runs-less | 552 conversations is 552 reads on every relist, and the inbox computes unread, last message, run count and errored from runs on every row |
 
