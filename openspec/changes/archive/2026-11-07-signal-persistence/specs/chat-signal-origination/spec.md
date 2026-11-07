@@ -171,6 +171,8 @@ one for a Pipeline.
 - **THEN** a root conversation opens for that Coordinator with the surface bound and the text as its first input
 - **AND** no other channel of the Coordinator is bound until it escalates
 
+## ADDED Requirements
+
 ### Requirement: A chat message carries a signalId from its delivery identity
 
 `signals/telegram` SHALL send a `signalId` on every chat signal. A message
