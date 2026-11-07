@@ -212,18 +212,19 @@ being honoured. The `kube` backend MAY still set the owner reference.
 Release is a helper, not an operation of the contract, and the any-phase
 source index exists for it.
 
-A name can be reused by a successor source. The release SHALL therefore take
-the departed source's `sourceRef` when the caller knows it. A signal recorded
-under a different `sourceRef` is the successor's and SHALL be kept.
+A name can be reused by a successor source, so the release SHALL decide from
+the source that holds the name at the moment of each delete. After listing the
+source's signals it SHALL read the source by that name from the Kubernetes API,
+never from a cache. A signal recorded under the identity of the source that
+holds the name now SHALL be kept.
 
-So SHALL the successor's window, where the backend can tell one holds the name.
+Every other signal of the name SHALL be deleted under the revision it was
+listed at. A conflict SHALL re-read that signal and decide again, with
+exponential back-off and a bounded number of attempts.
 
-Without a `sourceRef` every signal of the name is released.
-
-The successor guarantee holds only where the caller supplies the departed
-source's `sourceRef`. The source reconciler, which learns of a deletion by
-name alone, does not yet, so a successor created between its absence check and
-the release can lose its signals.
+The cooldown window SHALL be cleared only when no source holds the name. The
+caller supplies no identity, so a successor created at any point during the
+release keeps its signals.
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released
@@ -231,11 +232,16 @@ the release can lose its signals.
 - **THEN** the first source's signals and window are gone, and the second's are
   untouched
 
-#### Scenario: A successor's signals outlive the departed release
-- **WHEN** a source is released by the `sourceRef` of its previous incarnation
-  while a signal recorded under the `sourceRef` of its successor exists
+#### Scenario: A successor's signals survive a release made with only the name
+- **WHEN** a source is released by name while a signal recorded under the
+  identity of a source that now holds that name exists
 - **THEN** the previous incarnation's signals are gone and the successor's stay,
   and under `kube` so does the successor's window
+
+#### Scenario: A signal that changes during release is decided again
+- **WHEN** a listed signal is modified before its delete is attempted
+- **THEN** the delete conflicts, the signal is read again, and the decision is
+  made on the version read last
 
 #### Scenario: Release without a garbage collector
 - **WHEN** a `SignalSource` is deleted in an environment where owner-reference

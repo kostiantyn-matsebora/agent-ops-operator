@@ -1,7 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: A ChannelAdapter declares whether it may read state
-The `ChannelAdapter` CRD SHALL carry an optional boolean `spec.stateAccess`, defaulting to false. When true, the adapter's derived token SHALL open the manager's state read surface. When false or absent, that token SHALL be refused by the read surface, which names the adapter and the field. The field SHALL grant nothing else: it SHALL NOT change the adapter's Kubernetes identity or its other manager scopes.
+The `ChannelAdapter` CRD SHALL carry an optional boolean `spec.stateAccess`, defaulting to false.
+
+When true, the adapter's derived token SHALL open the manager's state read surface. When false or absent, that token SHALL be refused by the read surface, which names the adapter and the field.
+
+The field SHALL grant nothing else. It SHALL NOT change the adapter's Kubernetes identity or its other manager scopes.
 
 #### Scenario: Silence grants nothing
 - **WHEN** a ChannelAdapter does not set `stateAccess`

@@ -49,8 +49,8 @@ A NATS or Postgres backend cannot be selected honestly until both are fixed.
   needs the manager Service reachable from its pod and holds no Kubernetes
   grant. A hand-tightened NetworkPolicy would block it. The console's
   Configuration page no longer prints `namespace`, `labels` or `annotations`
-  in the YAML of a Conversation or Signal. A new optional CRD field
-  `spec.stateAccess`.
+  in the YAML of a Conversation or Signal. An optional field
+  `spec.stateAccess` on each of the two adapter CRDs.
 
 Depends on `state-store` (PR #454) being merged and archived first: the
 `state-store` and `state-durability` deltas modify what it publishes.

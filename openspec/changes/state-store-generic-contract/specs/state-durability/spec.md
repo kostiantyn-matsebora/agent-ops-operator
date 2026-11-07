@@ -6,15 +6,19 @@ homes, and SHALL NOT hold state that belongs to no class:
 
 - **Kubernetes API** — configuration: every kind an operator writes.
   Recovered by reading. Survives any process restart and any rescheduling.
-- **State store** — conversation state: `runtimeContextId`, threads, inputs, runs,
-  phase, the conversation's MESSAGE RECORD (what people sent as well as what
-  the agent answered), signals with their per-claimant routing state, each
-  source's cooldown window and its receipt counters, and the key-value state
-  an adapter persists through the manager (poll offsets, webhook
-  registrations). Reached only through the state store contract, by every
-  component that reads it. The selected backend decides where it is kept. The `kube` backend keeps it
-  in the Kubernetes API, so a default install keeps this state where it
-  always was.
+- **State store** — conversation state:
+  - `runtimeContextId`, threads, inputs, runs, phase
+  - the conversation's MESSAGE RECORD (what people sent as well as what the
+    agent answered)
+  - signals with their per-claimant routing state
+  - each source's cooldown window and its receipt counters
+  - the key-value state an adapter persists through the manager (poll
+    offsets, webhook registrations)
+
+  It is reached only through the state store contract, by every component
+  that reads it. The selected backend decides where it is kept. The `kube`
+  backend keeps it in the Kubernetes API, so a default install keeps this
+  state where it always was.
 - **PersistentVolume** — state that genuinely IS a filesystem: the runtime's
   agent session files and, optionally, its repository checkout.
 - **Deliberately lossy** — bounded telemetry whose loss costs history, never

@@ -21,6 +21,10 @@ conversation's ending belong to the manager.
 - **WHEN** the reclaiming workload runs
 - **THEN** it lists conversations through the manager and makes no call to the Kubernetes API
 
+#### Scenario: The workload can reach the manager
+- **WHEN** the chart renders its network policy for the manager
+- **THEN** it admits the reclaiming workload on the manager's port, so a network drop cannot look like a manager outage
+
 #### Scenario: The workload holds no Kubernetes grant
 - **WHEN** the chart renders the reclaiming workload
 - **THEN** it renders no Role and no RoleBinding for it and mounts no ServiceAccount token
