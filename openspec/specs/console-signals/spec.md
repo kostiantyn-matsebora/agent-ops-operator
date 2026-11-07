@@ -32,6 +32,10 @@ A signal's detail view SHALL render the full routing record:
 - **WHEN** a user opens a `PartiallyRouted` signal claimed by two pipelines
 - **THEN** the detail names both claimants, shows one `Routed` with its conversation link and one non-terminal with its state
 
+#### Scenario: A cooldown drop is not surfaced loudly
+- **WHEN** a signal ends `Dropped` with reason `cooldown`
+- **THEN** its detail view shows the reason as recorded, without the loud treatment a capacity or unclaimed drop gets
+
 #### Scenario: A failure's reason is the recorded one
 - **WHEN** a claimant is `Failed`
 - **THEN** the detail shows the failure reason exactly as the manager recorded it, never a console-composed paraphrase

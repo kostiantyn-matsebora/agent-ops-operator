@@ -474,7 +474,9 @@ STORED, and nothing it decided later:
 | Status | Body |
 |---|---|
 | `200` | `{"queued": <n>, "reason": "<optional>"}` |
-| `5xx` | `{"error": "<message>"}` — a signal could not be stored, so the batch is not acknowledged as a whole, and the re-send deduplicates any signal that did land by its `signalId` |
+| `5xx` | `{"error": "<message>"}` — a signal could not be stored, so the batch is not acknowledged |
+
+After a `5xx` the adapter re-sends the batch. Any signal that did land is deduplicated by its `signalId`.
 
 - `queued` counts the batch's signals accepted: stored, or deduplicated
   against an existing `Signal` by `signalId`. Every
