@@ -1043,11 +1043,21 @@ func (r *ConversationReconciler) notifyQueued(ctx context.Context, conv *state.C
 		"⏳ Queued for capacity — every agent slot is busy. This starts as soon as one frees up."))
 }
 
+// setPhase moves an open conversation between open phases. The phase was
+// decided from the record this pass read at its start, so the write re-decides
+// against the LATEST record: a close that landed during the pass is kept,
+// because Closed is sticky until an explicit reopen. Without that, the pass
+// wrote Idle over Closed and left ClosedAt stamped, so the threads were never
+// archived (TestConsoleLifecycle/close_then_delete).
 func (r *ConversationReconciler) setPhase(ctx context.Context, conv *state.ConversationRecord, phase string) error {
 	if conv.Phase == phase {
 		return nil
 	}
-	return state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) { c.Phase = phase })
+	return state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) {
+		if c.Phase != state.PhaseClosed {
+			c.Phase = phase
+		}
+	})
 }
 
 // ensureTopics enqueues topic creation for every bound channel lacking a
