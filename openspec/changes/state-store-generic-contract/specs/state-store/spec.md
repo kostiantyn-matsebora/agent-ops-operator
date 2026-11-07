@@ -202,33 +202,29 @@ and `lastReceived`.
   and another source's counters did not move
 
 ### Requirement: A deleted source's signals are released by the manager
-The manager SHALL release a source through a helper over the contract: list
-its signals by the any-phase source index, delete each under the revision it
-listed, and clear its cooldown window. The receipt counters are not cleared:
-under the `kube` backend they live on the source object, which release does
-not touch. It is idempotent and raises no error for a source with none.
+The manager SHALL release a source through a helper over the contract. The helper:
 
-The manager SHALL call it when a `SignalSource` is observed gone. It SHALL also
-release the orphan a pass finds, so no cleanup depends on an owner reference
-being honoured. The `kube` backend MAY still set the owner reference.
+- lists the source's signals by the any-phase source index
+- deletes each one under the revision it listed
+- clears the source's cooldown window
 
-Release is a helper, not an operation of the contract, and the any-phase
-source index exists for it.
+The receipt counters are not cleared. Under the `kube` backend they live on the source object, which release does not touch.
 
-A name can be reused by a successor source, so the release SHALL decide from
-the source that holds the name at the moment of each delete. After listing the
-source's signals it SHALL read the source by that name from the authoritative
-store of configuration, never from a cache. Under the `kube` backend that is the
-Kubernetes API server. A signal recorded under the identity of the source that
-holds the name now SHALL be kept.
+Release is idempotent and raises no error for a source with none.
 
-Every other signal of the name SHALL be deleted under the revision it was
-listed at. A conflict SHALL re-read that signal and decide again, with
-exponential back-off and a bounded number of attempts.
+The manager SHALL call it when a `SignalSource` is observed gone. It SHALL also release the orphan a pass finds, so no cleanup depends on an owner reference being honoured. The `kube` backend MAY still set the owner reference.
 
-The cooldown window SHALL be cleared only when no source holds the name. The
-caller supplies no identity, so a successor created at any point during the
-release keeps its signals.
+Release is a helper, not an operation of the contract. The any-phase source index exists for it.
+
+A name can be reused by a successor source, so the release SHALL decide from the source that holds the name at the moment of each delete.
+
+After listing the signals, the release SHALL read the source by that name from the authoritative store of configuration, never from a cache. Under the `kube` backend that is the Kubernetes API server.
+
+A signal recorded under the identity of the source that holds the name now SHALL be kept. Every other signal of the name SHALL be deleted under the revision it was listed at.
+
+A conflict SHALL re-read that signal and decide again, with exponential back-off and a bounded number of attempts.
+
+The cooldown window SHALL be cleared only when no source holds the name. The caller supplies no identity, so a successor created at any point during the release keeps its signals.
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released
