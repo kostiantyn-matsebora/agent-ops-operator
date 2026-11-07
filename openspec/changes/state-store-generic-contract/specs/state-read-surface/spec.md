@@ -20,7 +20,8 @@ exactly:
 - `GET /state/signals/stream` — the signal feed
 
 Each listing SHALL be the store's whole-set index and each single read the
-store's combined read. The surface SHALL accept no selector, filter or field
+store's combined read. A single signal is not served on its own: no reader
+reads one, since a reader takes its signals from the listing and the feed. The surface SHALL accept no selector, filter or field
 list: a lookup a reader needs is added here, through a change, never expressed
 in a query.
 

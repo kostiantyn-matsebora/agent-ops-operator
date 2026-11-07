@@ -5,11 +5,13 @@ Reclaiming storage SHALL be performed by a workload separate from the manager,
 because it requires mounting the claims at their ROOT and the manager mounts no
 PersistentVolume.
 
-That workload SHALL run no agent code, SHALL use its own ServiceAccount, and SHALL
-read conversations only through the manager's state read surface — it holds no
-Kubernetes grant and performs no writes, since both stages of a conversation's
-ending belong to the manager. The chart SHALL fail to render if this identity is
-configured to be the runtime ServiceAccount.
+That workload SHALL run no agent code and SHALL use its own ServiceAccount. The
+chart SHALL fail to render if this identity is configured to be the runtime
+ServiceAccount.
+
+It SHALL read conversations only through the manager's state read surface. It
+SHALL hold no Kubernetes grant and perform no writes, since both stages of a
+conversation's ending belong to the manager.
 
 #### Scenario: The claim root is not handed to agents
 - **WHEN** an operator configures the reclaiming workload to run as the runtime ServiceAccount

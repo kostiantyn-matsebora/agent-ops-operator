@@ -176,7 +176,9 @@ a store.
 | an adapter | its derived token | `spec.stateAccess: true` on its CR, default false |
 | housekeeping | `STATE_READ_TOKEN` | the chart's `stateReadAuth` Secret |
 
-An adapter without the field is refused by name. The state-read credential is
+The console is an adapter and presents its own derived token, which the chart
+admits by setting `stateAccess: true` on its `ChannelAdapter`. An adapter
+without the field is refused by name. The state-read credential is
 rendered the way `controlPlaneAuth` is, refused at render if equal to either
 other credential, projected by the kubelet into the manager and housekeeping,
 and opens `/state/*` alone. The manager reads no Secret.
