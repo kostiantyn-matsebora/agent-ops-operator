@@ -480,7 +480,10 @@ The contract SHALL offer counting one routed signal on a source (the total
 grows by one and the latest instant becomes the given one) and reading the
 counters. Concurrent counts SHALL all be kept: the backend serialises them and
 never loses an increment. A source the backend does not know SHALL refuse a
-count as not found and read as zero. Under the `kube` backend the counters
+count as not found and read as zero. This differs from the cooldown window,
+which reads as empty for an unknown source: a missing window loses nothing,
+while a count refused for a missing source tells the caller its signal
+arrived on a source that is gone. Under the `kube` backend the counters
 SHALL stay `SignalSource.status.receivedTotal` and `lastReceived`.
 
 #### Scenario: Concurrent receipts are all counted
