@@ -23,9 +23,7 @@ also carries each source's cooldown window and receipt counters.
 | Interface | Holds | Uses | Does not use |
 |---|---|---|---|
 | conversations | conversations and their inputs | the shared key and errors, revision, feed event types, expiry, record identity | — |
-| signals | signals | the shared key and errors, revision, feed event types, expiry, record identity, `sourceRef` | — |
-| signals, per source | cooldown windows | the shared key and errors, `sourceRef` (release clears the window) | revision, feed |
-| signals, per source | receipt counters | the shared key and errors | revision, feed, `sourceRef` (release leaves them) |
+| signals | signals, and each source's cooldown window and receipt counters | the shared key and errors. For signals: revision, feed event types, expiry, record identity, `sourceRef`. For the window: `sourceRef` (release clears it). For the counters: nothing more | revision and feed, for the window and the counters. `sourceRef` for the counters (release leaves them) |
 
 The contract SHALL expose domain records and an opaque revision token. It
 SHALL NOT expose Kubernetes object metadata, labels, annotations, a namespace
@@ -415,6 +413,12 @@ pass.
   an hour ahead
 - **THEN** a read returns all three, and an update moving the expiry into the
   past makes the signal invisible
+
+#### Scenario: A terminal signal found without an expiry is given one
+- **WHEN** a signal with a terminal phase and a completion instant carries no
+  expiry, and the consumer makes its next pass
+- **THEN** the signal is updated with an expiry of its completion instant plus
+  that phase's time to live
 
 #### Scenario: An expired signal is invisible, then a delete event
 - **WHEN** a signal's expiry has passed
