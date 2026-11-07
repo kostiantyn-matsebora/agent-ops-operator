@@ -110,7 +110,7 @@ The manager SHALL read no Secret for any of them. A refusal SHALL name its reaso
 - **THEN** the read surface refuses it and the body names the adapter and the
   field
 
-#### Scenario: The housekeeping credential opens the read surface alone
+#### Scenario: The state-read credential opens the read surface alone
 - **WHEN** the state-read credential is presented on `/state/*`, then on
   `/channel/*` and `/control-plane/*`
 - **THEN** the first is served and the other two are refused
