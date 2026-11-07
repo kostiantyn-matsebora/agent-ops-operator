@@ -69,7 +69,7 @@ contract's provenance and lives in the spec's requirements:
 | Manager does | Contract guarantees |
 |---|---|
 | get-modify-put raced by leader and HTTP handler | CAS on an opaque revision |
-| finds by `initiationId`, `pipelineRef`+phase, phase | declared index set, closed |
+| finds by `initiationId`, by phase, and (declared, not yet called) by `pipelineRef`+phase | declared index set, closed |
 | resumes as a new leader from state alone | at-least-once resumable feed |
 | ends a terminal signal after a per-phase TTL measured from completion | `expiresAt` on a record, written in the update that makes the phase terminal (D-14) |
 | appends runs, reads them rarely | append-only sub-records |
@@ -114,9 +114,10 @@ deprecated input agent override is read once. Nothing reads annotations,
 generation or owner references of a conversation. The two labels the manager
 writes are lookup keys and map from fields the record has.
 
-Two declared indexes, by pipeline and phase and by phase, have no call site
-in the manager today: its lookups filter the whole set. They stay declared,
-and the section 4 migration decides whether a call site adopts them.
+One declared index, by pipeline and phase, had no call site before the
+migration and still has none: its lookups filter the whole set. It stays
+declared. The by-phase index is read by the backlog bound and the pod-freed
+wake-up (D-13).
 
 Provenance of the Signal additions, counted the same way over the non-test
 packages (reading every call that takes a Signal, a SignalList or the

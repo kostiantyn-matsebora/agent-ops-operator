@@ -138,7 +138,7 @@ window through one contract (`internal/state`): `Store` for conversations,
 
 A **conformance suite** (`internal/state/conformance`) is what a backend passes
 to exist. Each scenario of the contract's spec is one subtest. `Run` covers
-`Store`, and `RunSignals` covers `SignalStore` with about 25 scenarios.
+`Store`, and `RunSignals` covers `SignalStore` with 39 scenarios.
 
 | Decides | Cannot decide |
 |---|---|

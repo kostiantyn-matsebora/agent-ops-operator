@@ -444,7 +444,7 @@ release it.
 - Its receipt counters are kept, since under `kube` they live on the source object, which release does not touch.
 - The signals and the window are both removed through the state store.
 - This replaces the owner-reference cascade the `Signal` carried before, so it holds under any backend.
-- One narrow race remains. A source recreated under the same name within microseconds of the deletion can lose the signals it received in that gap, because the source reconciler releases by name only.
+- One narrow race remains. A source recreated under the same name within microseconds of the deletion can lose the signals it received in that gap, because the source reconciler releases by name only and passes no source identity.
 
 ### SignalAdapter
 

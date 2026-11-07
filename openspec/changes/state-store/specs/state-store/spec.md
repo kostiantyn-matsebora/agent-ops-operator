@@ -103,8 +103,8 @@ a contract change with a conformance scenario, never a per-backend feature.
   and no filter is applied
 
 #### Scenario: A query outside the index set is not expressible
-- **WHEN** a caller needs a lookup the index set does not declare
-- **THEN** the contract offers no way to express it, and the index set is
+- **WHEN** a caller names a lookup the index set does not declare
+- **THEN** the store refuses it as an unknown index, and the index set is
   extended by a change rather than worked around
 
 ### Requirement: The change feed is at-least-once and resumable
