@@ -206,6 +206,16 @@ type Collection[T any] interface {
 	// nothing. Not an error when the key is already absent.
 	Delete(ctx context.Context, key Key) error
 
+	// DeleteAt is Delete conditional on the revision the caller read. A
+	// caller that Gets a record, decides on what it saw and then removes it
+	// must not remove a record someone rewrote in between, so it names the
+	// revision it decided on. ErrConflict when rev is not the record's
+	// current revision, the record left intact — the caller Gets again and
+	// decides again, as it does after a lost Update. ErrNotFound when the key
+	// is absent. Finalizer semantics are Delete's: a record holding one is
+	// marked, not removed. Delete stays for a caller that never read first.
+	DeleteAt(ctx context.Context, key Key, rev Revision) error
+
 	// List returns every visible record that idx lists under value (compose
 	// a multi-part value with IndexValue; "" for an index over the whole
 	// set). Order is unspecified. ErrUnknownIndex for an index the

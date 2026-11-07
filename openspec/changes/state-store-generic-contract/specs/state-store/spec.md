@@ -324,6 +324,34 @@ the typed collections.
 - **THEN** the inventory struct answers completely, one field per kind, with
   its capabilities and indexes beside it
 
+### Requirement: A delete MAY be conditional on a revision
+A collection SHALL offer a delete conditional on a revision, beside its unconditional delete.
+
+A caller that read a record and decided on it SHALL be able to remove exactly that revision.
+
+A revision that is not the record's current one SHALL be refused with the conflict error. The record SHALL stay intact.
+
+An absent key SHALL be refused with the not-found error.
+
+A record holding a finalizer SHALL be marked, not removed, as for the unconditional delete.
+
+The unconditional delete remains for a caller that never read first.
+
+#### Scenario: A stale revision is refused
+- **WHEN** a record is rewritten after a caller read it
+- **AND** the caller deletes it under the revision it read
+- **THEN** the delete fails with the conflict error
+- **AND** the record is unchanged
+
+#### Scenario: The current revision removes the record
+- **WHEN** a caller deletes a record under its current revision
+- **THEN** the record is removed
+
+#### Scenario: The source release deletes under the revision it read
+- **WHEN** a signal is rewritten between the release's decision and its delete
+- **THEN** the signal is not deleted on the stale revision
+- **AND** the release reads it again and decides again
+
 ### Requirement: A listing and a feed event can carry a record's appended items
 A collection that has an appended capability SHALL offer one listing that
 returns each record with its appended items, over every declared index of
