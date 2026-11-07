@@ -41,6 +41,10 @@ on a signal), and no other metadata.
 - **THEN** it receives the record and runs the combined read returns, or a
   not-found response naming the conversation
 
+#### Scenario: One signal is read from the listing
+- **WHEN** a reader needs one signal
+- **THEN** it takes the signal from the listing or the feed, and the surface offers no per-signal read
+
 #### Scenario: Nothing beyond the declared reads is expressible
 - **WHEN** a reader sends a query parameter other than the feed's resume point
 - **THEN** it is refused as unknown, naming the parameter

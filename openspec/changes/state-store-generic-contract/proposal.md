@@ -40,9 +40,11 @@ A NATS or Postgres backend cannot be selected honestly until both are fixed.
 - The manager serves a **state read surface** (`/state/*`): three reads and
   two resumable feeds. The console and housekeeping read conversations and
   signals only through it. Their Kubernetes grants on those kinds are removed.
-- Reading it is a declared reach: `spec.stateAccess` on a `ChannelAdapter` or
-  `SignalAdapter` (default false), and a dedicated `stateReadAuth` credential
-  for housekeeping. Every replica serves it, outside the leader proxy.
+- Reading it is a declared reach. The console, as an adapter, reads with its
+  own token once its CR sets `spec.stateAccess` (default false). A reader that
+  is not an adapter, today housekeeping alone, reads with a dedicated
+  `stateReadAuth` credential. Every replica serves it, outside the leader
+  proxy.
 - The static check that no code reads state around the seam extends to the
   console and housekeeping modules.
 - **BREAKING (additive, no upgrade step under `kube`):** housekeeping now
