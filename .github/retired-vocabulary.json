@@ -1226,7 +1226,7 @@
     },
     {
       "id": "suppression-window",
-      "pattern": "suppression windows?",
+      "pattern": "\\bsuppression windows?\\b",
       "says": "a source's cooldown window: the initiation ids last admitted on it and when",
       "allow": [
         "removed",
