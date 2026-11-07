@@ -80,6 +80,8 @@ Depends on `state-store` (PR #454) being merged and archived first: the
   of Kubernetes watches of state.
 - `conversation-housekeeping`: the reclaiming workload reads conversations
   through the manager and holds no Kubernetes grant.
+- `channel-adapter-lifecycle` and `signal-adapter-lifecycle`: the optional
+  `spec.stateAccess` field that lets an adapter's token read state.
 
 ## Impact
 

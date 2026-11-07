@@ -11,7 +11,7 @@ call sites moved onto them. The facts this change rests on:
 | Of those behind the contract after `state-store` | all but adapter key-value state |
 | Components reading state around the contract | console (conversations, signals), housekeeping (conversations) |
 | Console fields read from a conversation | the whole spec and status, `runs[]` and `runs[].inputs[]` on every list row |
-| Housekeeping fields read | `name`, `runtimeContextId` with `sessionId` dual-read, phase-blind |
+| Housekeeping fields read | `name`, `runtimeContextId`, falling back to the retired `sessionId` it replaced, phase-blind |
 
 Constraints kept:
 
