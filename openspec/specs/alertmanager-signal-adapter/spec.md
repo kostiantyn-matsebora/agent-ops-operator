@@ -179,3 +179,8 @@ an `initiationId`.
 
 - **WHEN** Alertmanager re-delivers the same webhook body after a failed response
 - **THEN** each alert carries the same `signalId` as in the first delivery
+
+#### Scenario: Two alerts of one delivery are two messages
+
+- **WHEN** one webhook body carries two alerts
+- **THEN** the two signals carry different `signalId`s, and both share the digest of that body

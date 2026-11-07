@@ -139,3 +139,8 @@ an `initiationId`.
 
 - **WHEN** a watch resync delivers an Event whose `count` has not changed
 - **THEN** the signal carries the same `signalId` as before
+
+#### Scenario: An aggregated update is a new message
+
+- **WHEN** the Event's `count` rises from 3 to 4
+- **THEN** the signal carries a different `signalId` from the one it carried at 3
