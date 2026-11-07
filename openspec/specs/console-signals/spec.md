@@ -26,7 +26,7 @@ A signal's detail view SHALL render the full routing record:
 - every claimant with its kind, name and state (`Routing`, `Routed`, `Failed`, `Skipped`)
 - for a routed claimant, the conversation it landed in, linked to that conversation's view
 - for a failed or skipped claimant, the recorded reason verbatim
-- for a signal in the `Dropped` phase or a failed one (phases defined by `signal-persistence`), the terminal reason as loudly as the inventory shows the phase
+- for a signal in the `Dropped` phase, except a drop for reason `cooldown`, or a failed one (phases defined by `signal-persistence`), the terminal reason as loudly as the inventory shows the phase
 
 #### Scenario: Partial routing is explained, not summarized
 - **WHEN** a user opens a `PartiallyRouted` signal claimed by two pipelines

@@ -179,8 +179,8 @@ one for a Pipeline.
 here is one transport delivery: an update, or a tap on an offered control.
 
 The `signalId` is the delivery identity scoped to the matched source:
-`tg-<source>-<update id>` for a message, `tg-cb-<source>-<callback id>` for a
-tap. The `tg-` prefix is this adapter's own tag, since each adapter tags the ids it mints. It is the same string a fresh `initiationId` is minted as.
+`<adapter tag>-<source>-<delivery id>` for a message, `<adapter tag>-cb-<source>-<callback id>`
+for a tap. Each adapter tags the ids it mints with its own tag, and the Telegram adapter's is `tg`. It is the same string a fresh `initiationId` is minted as.
 
 For a thread reply the `initiationId` is the propagated `conversationId`
 while the `signalId` stays the delivery's own, so two replies in one thread
