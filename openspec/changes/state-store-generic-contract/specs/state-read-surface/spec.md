@@ -110,6 +110,12 @@ The manager SHALL read no Secret for any of them. A refusal SHALL name its reaso
 - **THEN** the read surface refuses it and the body names the adapter and the
   field
 
+#### Scenario: A signal adapter without the declaration is refused by name
+- **WHEN** a signal adapter whose CR does not declare `stateAccess` presents
+  its derived token
+- **THEN** the read surface refuses it and the body names the adapter and the
+  field
+
 #### Scenario: The state-read credential opens the read surface alone
 - **WHEN** the state-read credential is presented on `/state/*`, then on
   `/channel/*` and `/control-plane/*`
