@@ -19,11 +19,11 @@ exactly:
 - `GET /state/signals` — every signal and the revision to resume from
 - `GET /state/signals/stream` — the signal feed
 
-Each listing SHALL be the store's whole-set index and each single read the
-store's combined read. A single signal is not served on its own: no reader
-reads one, since a reader takes its signals from the listing and the feed. The surface SHALL accept no selector, filter or field
-list: a lookup a reader needs is added here, through a change, never expressed
-in a query.
+Each listing SHALL be the store's whole-set index. Each single read SHALL be the store's combined read.
+
+A single signal is not served on its own. No reader reads one, since a reader takes its signals from the listing and the feed.
+
+The surface SHALL accept no selector, filter or field list. A lookup a reader needs is added here, through a change, never expressed in a query.
 
 A record SHALL be served under its kind's published field names, `spec` and
 `status` as the kind's reference page documents them, with the record's own
@@ -96,15 +96,13 @@ exactly as an open one does, under every backend.
 - **THEN** the run removes nothing, reports the failure and exits non-zero
 
 ### Requirement: A state reader states its reach
-The read surface SHALL accept the master adapter token. It SHALL accept a
-derived adapter token only when that adapter's `ChannelAdapter` or
-`SignalAdapter` declares `spec.stateAccess: true`, which defaults to false. It
-SHALL accept a dedicated state-read credential the chart renders as its own
-Secret, never derived from or equal to the adapter or control-plane
-credential, projected by the kubelet into the manager and into each
-non-adapter reader. The manager SHALL read no Secret for any of them. A
-refusal SHALL name its reason. The state-read credential SHALL open the read
-surface alone.
+The read surface SHALL accept the master adapter token.
+
+It SHALL accept a derived adapter token only when that adapter's `ChannelAdapter` or `SignalAdapter` declares `spec.stateAccess: true`, which defaults to false.
+
+It SHALL accept a dedicated state-read credential. The chart renders it as its own Secret, never derived from or equal to the adapter or control-plane credential. The kubelet projects it into the manager and into each non-adapter reader.
+
+The manager SHALL read no Secret for any of them. A refusal SHALL name its reason. The state-read credential SHALL open the read surface alone.
 
 #### Scenario: An adapter without the declaration is refused by name
 - **WHEN** a channel adapter whose CR does not declare `stateAccess` presents

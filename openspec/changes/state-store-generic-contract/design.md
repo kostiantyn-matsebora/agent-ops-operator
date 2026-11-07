@@ -129,7 +129,7 @@ The read surface is derived from what the two readers read, not designed.
 | Reader does today | Endpoint | Store operation |
 |---|---|---|
 | console seeds its cache, housekeeping lists every conversation (phase-blind) | `GET /state/conversations` → `{"revision", "items": [record with runs]}` | list of the whole set, with runs |
-| console resolves a UID on a cache miss | `GET /state/conversations/{name}` | combined read |
+| console resolves a conversation by name on a cache miss | `GET /state/conversations/{name}` | combined read |
 | console watches Conversations, resuming and relisting | `GET /state/conversations/stream?since=` (SSE) | `Watch` |
 | console seeds and watches Signals | `GET /state/signals`, `GET /state/signals/stream?since=` | list, `Watch` |
 

@@ -52,10 +52,10 @@ backend offers it.
 - **WHEN** the manager reads a Pipeline, Channel, SignalSource or any other
   configuration kind
 - **THEN** it reads it through the Kubernetes client as before, since
-  configuration is not state and has no backend. Two fields the manager
-  writes onto a SignalSource's status are the exception: the cooldown window
-  and the receipt counters are state, and go through the store. So is the
-  adapter state annotation on a Channel or SignalSource.
+  configuration is not state and has no backend
+- **AND** the cooldown window and the receipt counters, which the manager
+  writes onto a SignalSource's status, go through the store as state
+- **AND** so does the adapter state annotation on a Channel or SignalSource
 
 ### Requirement: Runs are append-only sub-records of a conversation
 A conversation's runs SHALL be appended, never rewritten, and SHALL list in
