@@ -121,8 +121,14 @@ What happens to the signal SHALL depend on its kind:
 
 | Origin | Full-backlog behaviour at consumption |
 |---|---|
-| machine (`alert`, `job`, `task`) | its claimant (the Pipeline or Coordinator the `Signal` routes to, a per-claimant entry in `status.claimants[]`) stays `Routing` and the consumer requeues it with a delay — the `Signal` waits and is routed once the backlog drains. Never dropped for capacity alone, though the per-source overflow bound and the retry deadline still apply |
-| person (`chat`), unaddressed or addressed | `Dropped` with reason `capacity`, and the surface it came from is told through the channel-operation queue — a person is answered now, never left waiting silently |
+| machine (`alert`, `job`, `task`) | its claimant stays `Routing` and the consumer requeues it with a delay, so the `Signal` is routed once the backlog drains |
+| person (`chat`), unaddressed or addressed | `Dropped` with reason `capacity`, and the surface it came from is told through the channel-operation queue |
+
+The claimant is the Pipeline or Coordinator the `Signal` routes to, one entry in `status.claimants[]`.
+
+A machine signal is never dropped for capacity alone, though the per-source overflow bound and the retry deadline still apply.
+
+A person is answered now, never left waiting silently.
 
 #### Scenario: A machine signal waits, never dropped
 
