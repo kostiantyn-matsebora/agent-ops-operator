@@ -142,7 +142,9 @@ to exist. Each scenario of the contract's spec is one subtest. `Run` covers
 
 | Decides | Cannot decide |
 |---|---|
-| compare-and-swap writes and refusal of a stale revision, lookup by declared index, a resumable at-least-once change feed, expiry, append-only runs, blob payloads, scope isolation between installs. For signals: create as the one duplicate arbiter in every phase, status-only compare-and-swap that never rewrites the publication fields, the two non-terminal indexes, the resumable feed, expiry written in the same write that makes a phase terminal, the per-source cooldown window, and release of a source's signals and window | latency or throughput under load, a real kubelet, anything the feed does beyond what the contract states |
+| conversations: compare-and-swap writes and refusal of a stale revision, lookup by declared index, a resumable at-least-once change feed, expiry, append-only runs, blob payloads, scope isolation between installs | latency or throughput under load |
+| signals: create as the one duplicate arbiter in every phase, status-only compare-and-swap that never rewrites the publication fields, the two non-terminal indexes, the resumable feed, expiry written in the same write that makes a phase terminal | a real kubelet |
+| sources: the per-source cooldown window, and release of a source's signals and window | anything the feed does beyond what the contract states |
 
 - **Every backend runs the same suite.** The `kube` backend runs it in its own
   package against envtest, so it is part of the ordinary `go test ./...`.
