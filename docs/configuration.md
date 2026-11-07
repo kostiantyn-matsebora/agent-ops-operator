@@ -605,7 +605,12 @@ is the Kubernetes API, as before.
 
 | Key | Default | Consequence |
 |---|---|---|
-| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps the `Conversation`, `ConversationInput` and `Signal` custom resources, and the window in `SignalSource.status.cooldown` and the receipt counters beside it in `SignalSource.status`, byte-identical, so `kubectl get conv` and `kubectl get sig` are unchanged |
+| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps state in the custom resources, unchanged |
+
+`kube` keeps the `Conversation`, `ConversationInput` and `Signal` custom
+resources, the window in `SignalSource.status.cooldown` and the receipt
+counters beside it in `SignalSource.status`. They are byte-identical, so
+`kubectl get conv` and `kubectl get sig` are unchanged.
 
 **Exactly one backend is selected.** The render refuses anything else:
 

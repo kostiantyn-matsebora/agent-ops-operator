@@ -22,7 +22,7 @@ The contract has three interfaces. They share the key and the errors.
 | Interface | Holds | Uses | Does not use |
 |---|---|---|---|
 | conversations | conversations and their inputs | the shared key and errors, revision, feed event types, expiry, record identity | — |
-| signals | signals | revision, feed event types, expiry, record identity, `sourceRef` | — |
+| signals | signals | the shared key and errors, revision, feed event types, expiry, record identity, `sourceRef` | — |
 | sources | cooldown windows, receipt counters | the shared key and errors, `sourceRef` (release only) | revision, feed |
 
 The contract SHALL expose domain records and an opaque revision token. It
@@ -508,8 +508,10 @@ So SHALL the successor's window, where the backend can tell one holds the name.
 
 Without a `sourceRef` every signal of the name is released.
 
-The successor guarantee holds only once task 6.9 lands. Until then the
-source reconciler passes no `sourceRef`.
+The successor guarantee holds only where the caller supplies the departed
+source's `sourceRef`. The source reconciler, which learns of a deletion by
+name alone, does not yet, so a successor created between its absence check and
+the release can lose its signals.
 
 #### Scenario: Release removes one source and no other
 - **WHEN** a source with a live, a terminal signal and a window is released

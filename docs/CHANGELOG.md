@@ -71,6 +71,9 @@ for the source and the reference material beside this file.
   outcome appears on it (`API-2` is replaced). A `5xx` asks for a re-send
   (`API-3`). No shipped adapter read the withdrawn field, so none stops
   conforming.
+- The signal adapter specification moves again to **2.3.1**, wording only:
+  `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where
+  it said the TTL deletes it. Behaviour is unchanged.
 - A machine signal arriving at a full conversation backlog now waits as
   `Pending` and routes when it drains. A chat message is still declined at
   once and told on its surface.

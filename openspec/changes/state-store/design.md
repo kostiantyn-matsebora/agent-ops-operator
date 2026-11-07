@@ -179,8 +179,10 @@ apiserver, the way `APIReader` does for the HTTP handlers today.
 Uncached under `kube`, and so an apiserver round trip where an informer
 answered from memory:
 
-- Every `Get`, `List` and `ListRuns`. The last reads the whole Conversation,
-  runs included, since the CRD keeps them in status.
+- Every `Get` and `ListRuns`. The last reads the whole Conversation, runs
+  included, since the CRD keeps them in status. `List` is the exception noted
+  above: cached in production, uncached in the conformance suite, the sweeps
+  and `ReleaseSource`.
 - Every write re-reads before its compare-and-swap.
 
 Request-path reads already went to the apiserver through `APIReader`. The new
@@ -393,8 +395,8 @@ Recorded after section 4, where the decisions were made against real code.
   the `kube` backend's, applied on `AppendRun`, because it is a limit of the
   stored object and every writer must stay inside it.
 - **Unused index.** `ByPhase` is read by the backlog bound and the pod-freed
-  wake-up. `ByAll`, `ByCausedBy`, `ByNameBase` and `ByConversationID` are read
-  at their call sites. `ByPipelineAndPhase` has no caller yet. It stays: it is
+  wake-up. `ByAll`, `ByCausedBy`, `ByNameBase` and the by-`initiationId` index
+  (`ByConversationID`) are read at their call sites. `ByPipelineAndPhase` has no caller yet. It stays: it is
   in the spec and the conformance suite, and a later backend serves it for a
   Pipeline-rooted sweep without a contract change.
 - **The static check** (`internal/state/static_test.go`) flags any reference to
