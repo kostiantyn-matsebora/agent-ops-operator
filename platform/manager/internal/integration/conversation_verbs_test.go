@@ -269,7 +269,8 @@ func TestDeleteCascadesToDescendantsAtAnyDepth(t *testing.T) {
 func TestDeletionTellsEveryBoundThread(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
-		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Client: k8sClient,
+		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "gone-ch", "tg")
@@ -320,7 +321,8 @@ func TestDeletionTellsEveryBoundThread(t *testing.T) {
 func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
-		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Client: k8sClient,
+		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "no-topic-ch", "tg")
@@ -353,7 +355,8 @@ func TestCloseTopicSkipsAThreadWithNoTopicYet(t *testing.T) {
 func TestCloseTopicResumesOnceATopicArrives(t *testing.T) {
 	ops := testOps()
 	r := &controller.ConversationReconciler{
-		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
+		Client: k8sClient,
+		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100, Ops: ops,
 		Runtime: runtimepod.Config{Image: "busybox:stub", ServiceAccount: "default"},
 	}
 	mkChannel(t, "late-topic-ch", "tg")
@@ -434,7 +437,7 @@ func TestReopenRefusedWhileOpenSuccessorSharesConversationID(t *testing.T) {
 	waitForRoutingCacheToObserve(t, successor, successor.ResourceVersion)
 
 	srv := apiServer()
-	err := srv.Router.ReopenConversation(context.Background(), getConv(t, closed.Name))
+	err := srv.Router.ReopenConversation(context.Background(), recOf(t, closed.Name))
 	if err == nil {
 		t.Fatal("reopen must be refused while an open successor shares the conversationId")
 	}
@@ -455,7 +458,7 @@ func TestReopenPermittedOnceNoOpenSuccessorSharesConversationID(t *testing.T) {
 	closed := mkCorrelatedConv(t, "reopen-free-closed", "profile-reopen-free", "pipe-reopen-free", "reopen-free-1", agentopsv1alpha1.ConversationClosed)
 
 	srv := apiServer()
-	if err := srv.Router.ReopenConversation(context.Background(), getConv(t, closed.Name)); err != nil {
+	if err := srv.Router.ReopenConversation(context.Background(), recOf(t, closed.Name)); err != nil {
 		t.Fatalf("reopen with no open successor must be permitted, got: %v", err)
 	}
 	if got := getConv(t, closed.Name).Status.Phase; got != agentopsv1alpha1.ConversationIdle {

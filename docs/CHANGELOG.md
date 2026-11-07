@@ -12,6 +12,11 @@ for the source and the reference material beside this file.
 
 ### Added
 
+- A new values key, `stateStore.backend`, default `kube`. It selects where the
+  manager keeps conversation state, and exactly one backend may be selected.
+  `kube` is the Kubernetes API, as before, and it is the only backend this
+  release ships. The render refuses an unknown value. The key covers
+  `Signal`s and each source's cooldown window as well as conversations.
 - A new `Signal` CRD and a publish/consume split on `POST /signal/inbound`.
   The endpoint validates, stores one `Signal` per admitted message and
   acknowledges. A separate consumer pool on the leader then claims it, spends
@@ -34,11 +39,42 @@ for the source and the reference material beside this file.
 
 ### Changed
 
+- A finished `Signal` now expires through the state store: the write that makes
+  its phase terminal stamps an expiry (under `kube`, the same expiry annotation
+  a conversation carries), and the store's sweep removes it. This replaces the
+  consumer's conditional delete and requeue. The TTL values are unchanged.
+- Deleting a `SignalSource` now releases its `Signal`s and cooldown window
+  through the manager instead of relying on the owner-reference cascade. The
+  outcome is the same, except that a source deleted and recreated under one
+  name may still lose its new incarnation's signals and window to a narrow
+  race, pending the departed-identity release tracked as task 6.9.
+- A source's `receivedTotal` and `lastReceived` counters are now written
+  through the state store too, so no manager state is left outside it. Under
+  `kube` the fields and their values are unchanged.
+- A re-sent `signalId` whose earlier signal has expired but is not yet swept
+  (up to the sweep period, 30 seconds) is now stored, not acknowledged as a
+  duplicate and dropped.
+- The per-source cooldown cache no longer keeps a source whose window could not
+  be read, so the next signal reads it again instead of running on an empty
+  window.
+- The manager now reaches `Conversation`, `ConversationInput` and `Signal` through a state
+  store contract. There is **no upgrade step and no CRD change**. The objects
+  are byte-identical and `kubectl get conv` is unchanged.
+- Behaviour under `kube`: the manager's read of a single conversation now goes
+  to the Kubernetes API server instead of its informer cache, so a write's
+  compare-and-swap never races a stale copy. Listings stay cached. Expect more
+  API server reads.
+- A closed or evicted conversation's pod and ConfigMap are now deleted by the
+  manager explicitly. The owner reference remains, but nothing depends on
+  garbage collection.
 - The signal adapter specification moves to **2.3.0**. The `200` response is
   now `{"queued": n}`: the `conversations` field is withdrawn, and no routing
   outcome appears on it (`API-2` is replaced). A `5xx` asks for a re-send
   (`API-3`). No shipped adapter read the withdrawn field, so none stops
   conforming.
+- The signal adapter specification moves again to **2.3.1**, wording only:
+  `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where
+  it said the TTL deletes it. Behaviour is unchanged.
 - A machine signal arriving at a full conversation backlog now waits as
   `Pending` and routes when it drains. A chat message is still declined at
   once and told on its surface.

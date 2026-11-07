@@ -8,8 +8,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // Drain awareness: get off a node BEFORE it goes down.
@@ -99,7 +99,7 @@ func nodeUnschedulable(node *corev1.Node) bool {
 // the eviction will take it anyway, and the sidecar's final checkpoint is what
 // protects its context.
 func (r *ConversationReconciler) releaseIfNodeDraining(
-	ctx context.Context, conv *agentopsv1alpha1.Conversation, pod *corev1.Pod,
+	ctx context.Context, conv *state.ConversationRecord, pod *corev1.Pod,
 ) (bool, error) {
 	if !r.DrainAware || pod.Spec.NodeName == "" {
 		return false, nil
@@ -125,14 +125,12 @@ func (r *ConversationReconciler) releaseIfNodeDraining(
 		return false, client.IgnoreNotFound(err)
 	}
 	if r.Recorder != nil {
-		r.Recorder.Event(conv, corev1.EventTypeNormal, "RuntimeReleasedForDrain",
+		r.Recorder.Event(r.eventRef(conv), corev1.EventTypeNormal, "RuntimeReleasedForDrain",
 			"released idle runtime pod "+pod.Name+" because node "+node.Name+
 				" is draining; the conversation and its context are untouched")
 	}
-	if conv.Status.RuntimePod != "" {
-		patch := client.MergeFrom(conv.DeepCopy())
-		conv.Status.RuntimePod = ""
-		if err := r.Status().Patch(ctx, conv, patch); err != nil {
+	if conv.RuntimePod != "" {
+		if err := state.Patch(ctx, r.Store, conv, func(c *state.ConversationRecord) { c.RuntimePod = "" }); err != nil {
 			return true, err
 		}
 	}

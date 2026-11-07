@@ -9,6 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // Resolution is TWO chains, and the whole point of pinning them here is that a
@@ -49,15 +51,24 @@ func prof(name string, runtimeRef string) *agentopsv1alpha1.AgentProfile {
 	return p
 }
 
-func conv(profile, runtimeRef, sa string) *agentopsv1alpha1.Conversation {
-	c := &agentopsv1alpha1.Conversation{}
-	c.Namespace, c.Name = testNS, "conv-1"
-	c.Spec.ProfileRef = agentopsv1alpha1.ObjectRef{Name: profile}
-	if runtimeRef != "" {
-		c.Spec.RuntimeRef = &agentopsv1alpha1.ObjectRef{Name: runtimeRef}
+func conv(profile, runtimeRef, sa string) *state.ConversationRecord {
+	return &state.ConversationRecord{Name: "conv-1", ProfileRef: profile, RuntimeRef: runtimeRef, ServiceAccountName: sa}
+}
+
+// seededStore is a kube-backed state.Store over a fake client, holding recs.
+// The fake client is the unit tier's apiserver: the same mapping the manager
+// runs, with no envtest.
+func seededStore(t *testing.T, recs ...*state.ConversationRecord) state.Store {
+	t.Helper()
+	c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).
+		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).Build()
+	store := kube.NewStore(c, testNS)
+	for _, r := range recs {
+		if _, err := store.Create(context.Background(), state.Key(r.Name), *r); err != nil {
+			t.Fatalf("seed %s: %v", r.Name, err)
+		}
 	}
-	c.Spec.ServiceAccountName = sa
-	return c
+	return store
 }
 
 func TestResolveForWalksBothChains(t *testing.T) {
@@ -73,7 +84,7 @@ func TestResolveForWalksBothChains(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		conv    *agentopsv1alpha1.Conversation
+		conv    *state.ConversationRecord
 		image   string
 		account string
 		why     string
@@ -127,7 +138,7 @@ func TestResolveForWalksBothChains(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).WithObjects(objs...).Build()
-			got, err := ResolveFor(context.Background(), c, testNS, tc.conv, bootstrap)
+			got, err := ResolveFor(context.Background(), c, seededStore(t), testNS, tc.conv, bootstrap)
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
@@ -148,7 +159,7 @@ func TestANamedRuntimeThatIsMissingFails(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).
 		WithObjects(prof("plain", "")).Build()
 
-	if _, err := ResolveFor(context.Background(), c, testNS,
+	if _, err := ResolveFor(context.Background(), c, seededStore(t), testNS,
 		conv("plain", "no-such-runtime", ""), Config{}); err == nil {
 		t.Fatal("a named runtime that does not exist must fail resolution")
 	}
@@ -161,7 +172,7 @@ func TestBootstrapFallbackKeepsTheSnapshottedAccount(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).
 		WithObjects(prof("plain", "")).Build()
 
-	got, err := ResolveFor(context.Background(), c, testNS,
+	got, err := ResolveFor(context.Background(), c, seededStore(t), testNS,
 		conv("plain", "", "route-sa"), Config{Image: "bootstrap-image", ServiceAccount: "agentops-runtime"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -183,11 +194,11 @@ func TestContinuityFollowsTheResolvedRuntimeNotTheRoute(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(resolveScheme(t)).
 		WithObjects(keeps, prof("plain", ""), prof("legacy", "keeps")).Build()
 
-	viaSnapshot, err := ResolveFor(context.Background(), c, testNS, conv("plain", "keeps", "a-sa"), Config{})
+	viaSnapshot, err := ResolveFor(context.Background(), c, seededStore(t), testNS, conv("plain", "keeps", "a-sa"), Config{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	viaProfile, err := ResolveFor(context.Background(), c, testNS, conv("legacy", "", ""), Config{})
+	viaProfile, err := ResolveFor(context.Background(), c, seededStore(t), testNS, conv("legacy", "", ""), Config{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

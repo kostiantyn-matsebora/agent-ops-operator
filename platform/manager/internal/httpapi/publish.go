@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -11,14 +12,13 @@ import (
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/addressing"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // handleSignalInbound is PUBLICATION (signal-persistence D-2): validate the
@@ -155,33 +155,30 @@ const (
 // nothing is stored or changed, it still counts as acknowledged, and an
 // activity event records it. Publication stays lookup-free.
 func (s *Server) publishOne(ctx context.Context, source *agentopsv1alpha1.SignalSource, in *NormalizedSignal) error {
-	sig := &agentopsv1alpha1.Signal{}
-	sig.Namespace = s.Namespace
+	name := generatedSignalName()
 	if in.SignalID != "" {
-		sig.Name = agentopsv1alpha1.SignalNameFor(source.Name, in.SignalID)
-	} else {
-		sig.Name = generatedSignalName()
+		name = agentopsv1alpha1.SignalNameFor(source.Name, in.SignalID)
 	}
-	sig.Spec = agentopsv1alpha1.SignalSpec{
-		SourceRef:    agentopsv1alpha1.ObjectRef{Name: source.Name},
+	// SourceID lets the store link the signal to its source (the kube backend
+	// turns it into the controller owner reference); the manager does not
+	// depend on that link, it releases a deleted source's signals itself.
+	_, err := s.Signals.Create(ctx, state.Key(name), state.SignalRecord{
+		SourceID:     string(source.UID),
+		SourceRef:    source.Name,
 		Adapter:      source.Spec.Adapter,
 		InitiationID: in.InitiationID,
 		SignalID:     in.SignalID,
 		Kind:         in.Kind,
 		Title:        in.Title,
-		Severity:     in.Severity,
+		Severity:     string(in.Severity),
 		Labels:       boundedLabels(in.Labels),
 		Reader:       in.Reader,
 		Payload:      in.Payload,
-	}
-	if err := controllerutil.SetControllerReference(source, sig, s.Client.Scheme()); err != nil {
-		return fmt.Errorf("signal owner reference: %w", err)
-	}
-	err := s.Client.Create(ctx, sig)
+	})
 	switch {
 	case err == nil:
 		return nil
-	case in.SignalID != "" && apierrors.IsAlreadyExists(err):
+	case in.SignalID != "" && errors.Is(err, state.ErrAlreadyExists):
 		s.Activity.Emit(activity.Event{
 			Kind:   activity.KindSignalDropped,
 			From:   activity.Node(activity.NodeSignalSource, source.Name),

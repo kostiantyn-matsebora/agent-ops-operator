@@ -15,7 +15,7 @@ next:
   url: /agent-ops-operator/crds/signal-adapter/
 ---
 
-**Version 2.3.0**
+**Version 2.3.1**
 
 This specification gives everything necessary to build and maintain a
 `SignalAdapter` — a container agent-ops does not ship, normalizing one
@@ -117,7 +117,7 @@ surface.
 | `API-2` | The response acknowledges STORAGE, never routing. `queued` counts the signals accepted: stored, or deduplicated by `signalId`. `reason` appears only when the source's `attributeFilters` refused part of the batch. `conversations` is not returned, and no routing outcome (unclaimed, ambiguous, cooldown, capacity) appears on the response: each is recorded on the signal's `Signal` and, for a chat message, told on its surface. An adapter therefore cannot learn from the response that its source is unwired. |
 | `API-3` | At-least-once delivery MUST be safe. A `5xx` means nothing of the failing signal was acknowledged: re-send the batch with the same `initiationId` and the same `signalId` where one was sent. A signal with a `signalId` is deduplicated at publication. One without is stored again, and the manager's cooldown and equality reuse resolve the repeat. |
 | `API-6` | A `severity` outside the four accepted values MUST refuse the WHOLE batch with `400`, naming the four accepted values. No adapter is required to send it. |
-| `API-7` | A `signalId` is optional. When present the manager deduplicates a re-send per `(source, signalId)` for as long as the stored `Signal` exists, through every phase until the manager's TTL deletes it. Duplicates are acknowledged and counted in `queued`. An invalid `signalId` refuses the WHOLE batch with `400` naming the field. An older manager ignores it (`COMPAT-2`). |
+| `API-7` | A `signalId` is optional. When present the manager deduplicates a re-send per `(source, signalId)` for as long as the stored `Signal` exists, through every phase until the manager's per-phase TTL expires it. Duplicates are acknowledged and counted in `queued`. An invalid `signalId` refuses the WHOLE batch with `400` naming the field. An older manager ignores it (`COMPAT-2`). |
 
 ## Lanes
 
@@ -362,6 +362,7 @@ deduplicated for the `Signal`'s life, and a changed alert carries a new
 
 | Version | Date | Changed |
 |---|---|---|
+| 2.3.1 | 2026-11-04 | Wording only: `API-7` says the manager's per-phase TTL expires a terminal `Signal`, where it said the TTL deletes it. Behaviour is unchanged. |
 | 2.3.0 | 2026-10-29 | `POST /signal/inbound` is publish-then-consume. `API-2` is REPLACED: the response acknowledges storage, `{"queued", "reason"?}`, and the `conversations` field is withdrawn. `API-3` is rewritten around a `5xx` re-send. A normalized signal may carry an optional `signalId` (`API-7`), and every shipped adapter sends one (`ADP-9`). `MGR-1`, `MGR-2` and `MGR-4` say the routing is the consumer's. ADDITIVE by the page's rule: no shipped adapter read the withdrawn field, and a `2.2.0` adapter sending no `signalId` stays conformant. |
 | 2.2.0 | 2026-10-21 | The [post-emit refractory window](#post-emit-refractory-window) is named as the one carve-out beside `ADP-3` (`ADP-8`): a bounded quiet period on an emitted `initiationId`, declared per adapter. Only `signals/ha` and `signals/k8s-events` use it. `signals/pulse` joins every shipped-adapter enumeration on this page — it was omitted, which never exempted it. ADDITIVE: no adapter needs to change to stay conformant. |
 | 2.1.0 | 2026-10-21 | A normalized signal may carry an optional `severity` — one of `critical`, `error`, `warning`, `info` (`API-6`, [Enums](#enums)). Unmapped refuses the whole batch with `400` naming the four values. Unrelated to any adapter's own `severity` **label** (`COMPAT-5`). ADDITIVE: no shipped adapter sends it yet, and none needs to change to stay conformant. |

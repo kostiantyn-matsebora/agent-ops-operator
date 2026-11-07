@@ -7,6 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // CapabilityHolder is a wiring kind that carries an AgentCapability either
@@ -39,4 +40,30 @@ func ResolveCapability(ctx context.Context, reader client.Reader, holder Capabil
 		return agentopsv1alpha1.AgentCapabilitySpec{}, err
 	}
 	return capability.Spec, nil
+}
+
+// ToolsetBindingOf is a capability's toolset binding as a conversation record
+// carries it: the mode and the toolset names, copied. Nil in, nil out.
+func ToolsetBindingOf(b *agentopsv1alpha1.ToolsetBinding) *state.ToolsetBinding {
+	if b == nil {
+		return nil
+	}
+	return &state.ToolsetBinding{Mode: b.Mode, Refs: refNames(b.Refs)}
+}
+
+// ToolingBindingOf is a capability's MCPConfig binding as a conversation
+// record carries it. Nil in, nil out.
+func ToolingBindingOf(b *agentopsv1alpha1.ToolingBinding) *state.ToolingBinding {
+	if b == nil {
+		return nil
+	}
+	return &state.ToolingBinding{Refs: refNames(b.Refs)}
+}
+
+func refNames(refs []agentopsv1alpha1.ObjectRef) []state.Ref {
+	out := make([]state.Ref, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, r.Name)
+	}
+	return out
 }

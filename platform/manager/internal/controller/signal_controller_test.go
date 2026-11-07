@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -23,6 +24,8 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/signalroute"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // The Signal consumer and housekeeping (signal-persistence D-3..D-6, D-10,
@@ -55,10 +58,11 @@ func newSigEnv(t *testing.T, objs ...client.Object) *sigEnv {
 		WithStatusSubresource(&agentopsv1alpha1.Signal{}, &agentopsv1alpha1.Conversation{}, &agentopsv1alpha1.SignalSource{}).
 		WithObjects(objs...).Build()
 	acts := activity.New(256)
-	ops := &chat.OpQueue{Client: c, Namespace: sigNS, Registry: chat.NewRegistry(), Activity: acts}
+	store := kube.NewStore(c, sigNS)
+	ops := &chat.OpQueue{Store: store, Registry: chat.NewRegistry(), Activity: acts}
 	e := &sigEnv{t: t, c: c, acts: acts, ops: ops, now: time.Now()}
 	e.r = &SignalReconciler{
-		Client: c, Reader: c, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
+		Client: c, Reader: c, Store: store, Signals: kube.NewSignalStore(c, sigNS), Namespace: sigNS, Activity: acts, Ops: ops, Cooldowns: ingest.NewCooldownBook(),
 		MaxQueued: 50, Identity: "replica-a", Now: func() time.Time { return e.now },
 	}
 	return e
@@ -126,6 +130,18 @@ func (e *sigEnv) exists(name string) bool {
 		e.t.Fatal(err)
 	}
 	return err == nil
+}
+
+// record reads a Signal through the store, as the reconciler does: a record
+// past its expiry reads as absent although its object still exists until the
+// store's sweep deletes it.
+func (e *sigEnv) record(name string) (state.SignalRecord, bool) {
+	e.t.Helper()
+	rec, _, err := e.r.Signals.Get(context.Background(), state.Key(name))
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
+		e.t.Fatal(err)
+	}
+	return rec, err == nil
 }
 
 func fxSource(name string) *agentopsv1alpha1.SignalSource {
@@ -252,7 +268,7 @@ func assertRoutedConversation(t *testing.T, e *sigEnv, got *agentopsv1alpha1.Sig
 		t.Fatalf("severity must reach the provenance: %+v", conv.Spec.Signal)
 	}
 	if len(conv.Spec.Inputs) != 1 || conv.Spec.Inputs[0].PayloadRef == nil ||
-		conv.Spec.Inputs[0].PayloadRef.Name != signalroute.InputName("sig-1", ref(agentopsv1alpha1.ClaimantKindPipeline, "ops")) {
+		conv.Spec.Inputs[0].PayloadRef.Name != signalroute.InputName("sig-1", state.SignalClaimant{Kind: state.ClaimantKindPipeline, Name: "ops"}) {
 		t.Fatalf("the input must be named for the Signal and claimant: %+v", conv.Spec.Inputs)
 	}
 	ins := e.inputs()
@@ -672,7 +688,7 @@ func TestConsumerMachineSignalWaitsForABacklogThatDrains(t *testing.T) {
 
 	res := e.reconcile("sig-1")
 	got := e.signal("sig-1")
-	if got.Status.Phase == agentopsv1alpha1.SignalDropped || terminalSignalPhase(got.Status.Phase) {
+	if got.Status.Phase == agentopsv1alpha1.SignalDropped || state.TerminalSignalPhase(string(got.Status.Phase)) {
 		t.Fatalf("a machine signal at a full backlog must not end, got %s", got.Status.Phase)
 	}
 	if len(got.Status.Claimants) != 1 || got.Status.Claimants[0].State != agentopsv1alpha1.ClaimantRouting {
@@ -980,15 +996,20 @@ func TestHousekeepingCapIgnoresOtherSourcesAndTerminalSignals(t *testing.T) {
 	}
 }
 
+// A terminal Signal removes itself: the consumer writes the instant it expires,
+// completedAt plus its phase's TTL, and the store's sweep deletes it then. Here
+// the three phases are found terminal with no expiry (written by an earlier
+// build) and each is stamped from its own completion and its own TTL.
 func TestHousekeepingTTLsAreMeasuredFromCompletionPerPhase(t *testing.T) {
 	src := fxSource("alerts")
 	e := newSigEnv(t)
 	created := e.now.Add(-50 * time.Minute)
-	mk := func(name string, phase agentopsv1alpha1.SignalPhase, completedAgo time.Duration) {
+	done := e.now.Add(-time.Hour).UTC().Truncate(time.Second)
+	mk := func(name string, phase agentopsv1alpha1.SignalPhase) {
 		sig := fxSignal(name, src, name, created)
 		sig.Status.Phase = phase
-		done := metav1.NewTime(e.now.Add(-completedAgo))
-		sig.Status.CompletedAt = &done
+		at := metav1.NewTime(done)
+		sig.Status.CompletedAt = &at
 		if err := e.c.Create(context.Background(), sig); err != nil {
 			t.Fatal(err)
 		}
@@ -996,35 +1017,22 @@ func TestHousekeepingTTLsAreMeasuredFromCompletionPerPhase(t *testing.T) {
 	if err := e.c.Create(context.Background(), src); err != nil {
 		t.Fatal(err)
 	}
-	// all went terminal 5h ago
-	mk("dropped", agentopsv1alpha1.SignalDropped, 5*time.Hour)
-	mk("routed", agentopsv1alpha1.SignalRouted, 5*time.Hour)
-	mk("failed", agentopsv1alpha1.SignalFailed, 5*time.Hour)
+	mk("dropped", agentopsv1alpha1.SignalDropped)
+	mk("routed", agentopsv1alpha1.SignalRouted)
+	mk("failed", agentopsv1alpha1.SignalFailed)
 
-	for _, n := range []string{"dropped", "routed", "failed"} {
-		e.reconcile(n)
-	}
-	if e.exists("dropped") {
-		t.Fatal("Dropped (4h) is deleted after 5h")
-	}
-	if !e.exists("routed") || !e.exists("failed") {
-		t.Fatal("Routed (8h) and Failed (72h) are kept after 5h")
-	}
-
-	e.now = e.now.Add(4 * time.Hour) // routed is now 9h past completion
-	e.reconcile("routed")
-	e.reconcile("failed")
-	if e.exists("routed") {
-		t.Fatal("Routed is deleted after 8h")
-	}
-	if !e.exists("failed") {
-		t.Fatal("Failed outlives Routed")
-	}
-
-	e.now = e.now.Add(70 * time.Hour)
-	e.reconcile("failed")
-	if e.exists("failed") {
-		t.Fatal("Failed is deleted after 72h")
+	for name, ttl := range map[string]time.Duration{"dropped": 4 * time.Hour, "routed": 8 * time.Hour, "failed": 72 * time.Hour} {
+		res := e.reconcile(name)
+		if res.RequeueAfter != 0 {
+			t.Errorf("%s: nothing waits on the TTL any more, got %+v", name, res)
+		}
+		rec, ok := e.record(name)
+		if !ok {
+			t.Fatalf("%s: one hour past completion is inside every TTL", name)
+		}
+		if rec.ExpiresAt == nil || !rec.ExpiresAt.Equal(done.Add(ttl)) {
+			t.Errorf("%s: expires %v, want completedAt+%s = %v", name, rec.ExpiresAt, ttl, done.Add(ttl))
+		}
 	}
 }
 
@@ -1034,7 +1042,7 @@ func TestHousekeepingTTLRunsFromCompletionNotCreation(t *testing.T) {
 	// created 9h ago (past the 8h TTL), completed only now
 	sig := fxSignal("late", src, "x", e.now.Add(-9*time.Hour))
 	sig.Status.Phase = agentopsv1alpha1.SignalRouted
-	done := metav1.NewTime(e.now)
+	done := metav1.NewTime(e.now.UTC().Truncate(time.Second))
 	sig.Status.CompletedAt = &done
 	if err := e.c.Create(context.Background(), src); err != nil {
 		t.Fatal(err)
@@ -1042,9 +1050,10 @@ func TestHousekeepingTTLRunsFromCompletionNotCreation(t *testing.T) {
 	if err := e.c.Create(context.Background(), sig); err != nil {
 		t.Fatal(err)
 	}
-	res := e.reconcile("late")
-	if !e.exists("late") || res.RequeueAfter < 7*time.Hour {
-		t.Fatalf("a Signal that just completed lives its full TTL: exists=%v requeue=%v", e.exists("late"), res.RequeueAfter)
+	e.reconcile("late")
+	rec, ok := e.record("late")
+	if !ok || rec.ExpiresAt == nil || !rec.ExpiresAt.Equal(done.Add(DefaultSignalTTLRouted)) {
+		t.Fatalf("a Signal that just completed lives its full TTL: visible=%v expires=%v", ok, rec.ExpiresAt)
 	}
 }
 
@@ -1063,32 +1072,86 @@ func TestHousekeepingTTLOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.reconcile("s")
-	if e.exists("s") {
-		t.Fatal("signalTtlRouted: 6h deletes a Signal 7h past completion")
+	if _, ok := e.record("s"); ok {
+		t.Fatal("signalTtlRouted: 6h expires a Signal 7h past completion")
+	}
+}
+
+// The write that makes a phase terminal is the one that starts the clock: the
+// expiry is in the same update, from the consumer's own completion instant, and
+// a write that leaves the signal live carries none.
+func TestConsumerWritesTheExpiryInTheUpdateThatMakesThePhaseTerminal(t *testing.T) {
+	src := fxSource("alerts")
+	e := newSigEnv(t, src, fxPipeline("ops", "alerts"), fxSignal("sig-1", src, "x", time.Now()))
+	e.reconcile("sig-1")
+	rec, ok := e.record("sig-1")
+	if !ok || rec.Phase != state.SignalRouted || rec.CompletedAt == nil {
+		t.Fatalf("want a routed signal, got %+v", rec)
+	}
+	if rec.ExpiresAt == nil || !rec.ExpiresAt.Equal(rec.CompletedAt.Add(DefaultSignalTTLRouted)) {
+		t.Fatalf("expiresAt = %v, want completedAt + the Routed TTL", rec.ExpiresAt)
+	}
+
+	// a pass that waits (a full backlog) leaves the signal live, with no expiry
+	objs := []client.Object{src, fxPipeline("ops", "alerts"), fxSignal("sig-2", src, "y", time.Now())}
+	for i := 0; i < 50; i++ {
+		objs = append(objs, pendingConversation(fmt.Sprintf("pending-%d", i)))
+	}
+	waiting := newSigEnv(t, objs...)
+	waiting.reconcile("sig-2")
+	live, _ := waiting.record("sig-2")
+	if live.Terminal() || live.ExpiresAt != nil {
+		t.Fatalf("a non-terminal write sets no expiry: %+v", live)
+	}
+}
+
+// Expiry follows the phase the signal ends in, not a single constant.
+func TestConsumerExpiryFollowsThePhaseItEndsIn(t *testing.T) {
+	src := fxSource("alerts")
+	e := newSigEnv(t, src) // no Pipeline claims it: Dropped
+	if err := e.c.Create(context.Background(), fxSignal("sig-1", src, "x", time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile("sig-1")
+	rec, ok := e.record("sig-1")
+	if !ok || rec.Phase != state.SignalDropped || rec.ExpiresAt == nil ||
+		!rec.ExpiresAt.Equal(rec.CompletedAt.Add(DefaultSignalTTLDropped)) {
+		t.Fatalf("a Dropped signal expires on the Dropped TTL: %+v", rec)
 	}
 }
 
 func TestSignalDefaults(t *testing.T) {
 	r := &SignalReconciler{}
 	if r.retryDeadline() != time.Hour || r.maxPerSource() != 200 || r.concurrency() != 4 ||
-		r.ttlFor(agentopsv1alpha1.SignalRouted) != 8*time.Hour ||
-		r.ttlFor(agentopsv1alpha1.SignalDropped) != 4*time.Hour ||
-		r.ttlFor(agentopsv1alpha1.SignalFailed) != 72*time.Hour {
+		r.ttlFor(state.SignalRouted) != 8*time.Hour ||
+		r.ttlFor(state.SignalDropped) != 4*time.Hour ||
+		r.ttlFor(state.SignalFailed) != 72*time.Hour {
 		t.Fatal("the six bounds default to 1h / 200 / 4 / 8h / 4h / 72h")
 	}
 }
 
-func TestReconcileOfAMissingSignalOrSourceIsANoOp(t *testing.T) {
-	src := fxSource("alerts")
-	e := newSigEnv(t, src)
+func TestReconcileOfAMissingSignalIsANoOp(t *testing.T) {
+	e := newSigEnv(t, fxSource("alerts"))
 	e.reconcile("ghost")
-	orphan := fxSignal("orphan", fxSource("gone"), "x", time.Now())
-	if err := e.c.Create(context.Background(), orphan); err != nil {
-		t.Fatal(err)
-	}
+}
+
+// A pass that finds its source gone releases the orphan itself: no garbage
+// collector is relied on, and the source's other signals go with it, from any
+// phase.
+func TestReconcileOfASignalWhoseSourceIsGoneReleasesTheSource(t *testing.T) {
+	gone, kept := fxSource("gone"), fxSource("kept")
+	terminal := fxSignal("done", gone, "d", time.Now())
+	terminal.Status.Phase = agentopsv1alpha1.SignalRouted
+	e := newSigEnv(t, kept, fxSignal("orphan", gone, "x", time.Now()), terminal,
+		fxSignal("sibling", gone, "y", time.Now()), fxSignal("other", kept, "z", time.Now()))
 	e.reconcile("orphan")
-	if e.signal("orphan").Status.Attempts != 0 {
-		t.Fatal("nothing routes without its source")
+	for _, name := range []string{"orphan", "done", "sibling"} {
+		if e.exists(name) {
+			t.Errorf("%s belongs to a deleted source and must be released", name)
+		}
+	}
+	if !e.exists("other") {
+		t.Error("another source's signal is not touched")
 	}
 }
 
@@ -1162,8 +1225,116 @@ func TestHousekeepingBackfillsCompletedAtFromTheObjectNotNow(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.reconcile("legacy")
-	e.reconcile("legacy")
-	if e.exists("legacy") {
-		t.Fatal("a legacy Signal already past its TTL must be collected, not given a fresh clock")
+	e.reconcile("legacy") // already expired: the second pass finds nothing
+	if _, ok := e.record("legacy"); ok {
+		t.Fatal("a legacy Signal already past its TTL must expire at once, not be given a fresh clock")
+	}
+}
+
+// ---- the cooldown window behind the store ------------------------------------
+
+// windowStore counts and can fail the two cooldown operations of a SignalStore.
+type windowStore struct {
+	state.SignalStore
+	gets, puts     int
+	getErr, putErr error
+}
+
+func (w *windowStore) GetCooldown(ctx context.Context, source string) ([]state.CooldownEntry, error) {
+	w.gets++
+	if w.getErr != nil {
+		return nil, w.getErr
+	}
+	return w.SignalStore.GetCooldown(ctx, source)
+}
+
+func (w *windowStore) PutCooldown(ctx context.Context, source string, entries []state.CooldownEntry) error {
+	w.puts++
+	if w.putErr != nil {
+		return w.putErr
+	}
+	return w.SignalStore.PutCooldown(ctx, source, entries)
+}
+
+func windowEnv(t *testing.T, objs ...client.Object) (*sigEnv, *windowStore) {
+	t.Helper()
+	e := newSigEnv(t, objs...)
+	w := &windowStore{SignalStore: e.r.Signals}
+	e.r.Signals = w
+	return e, w
+}
+
+// The window is read once per process per source, and written from the
+// admission that spends an id.
+func TestConsumerReadsTheWindowOncePerSourceAndWritesOnEachAdmission(t *testing.T) {
+	src := fxSource("alerts")
+	e, w := windowEnv(t, src, fxPipeline("ops", "alerts"),
+		fxSignal("a", src, "id-a", time.Now()), fxSignal("b", src, "id-b", time.Now()), fxSignal("c", src, "id-c", time.Now()))
+	for _, n := range []string{"a", "b", "c"} {
+		e.reconcile(n)
+	}
+	if w.gets != 1 {
+		t.Fatalf("GetCooldown called %d times, want once for the source", w.gets)
+	}
+	if w.puts != 3 {
+		t.Fatalf("PutCooldown called %d times, want once per admission", w.puts)
+	}
+}
+
+// A window that cannot be read is not an empty one: admitting against nothing
+// would re-open conversations for ids still inside theirs, so the pass fails
+// and is repeated, creating nothing.
+func TestConsumerRepeatsThePassWhenTheWindowCannotBeRecovered(t *testing.T) {
+	src := fxSource("alerts")
+	e, w := windowEnv(t, src, fxPipeline("ops", "alerts"), fxSignal("a", src, "id-a", time.Now()))
+	w.getErr = errors.New("store unavailable")
+	if _, err := e.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: sigNS, Name: "a"}}); err == nil {
+		t.Fatal("an unreadable window fails the pass")
+	}
+	if len(e.conversations()) != 0 {
+		t.Fatal("nothing is routed against an unread window")
+	}
+	w.getErr = nil
+	e.reconcile("a")
+	if got := e.signal("a").Status.Phase; got != agentopsv1alpha1.SignalRouted {
+		t.Fatalf("the repeated pass routes, got %s", got)
+	}
+}
+
+// A window that cannot be written is logged and never fatal: suppression still
+// holds in memory, and failing the pass would trade a duplicate investigation
+// for a stuck signal.
+func TestConsumerCarriesOnWhenTheWindowCannotBeWritten(t *testing.T) {
+	src := fxSource("alerts")
+	e, w := windowEnv(t, src, fxPipeline("ops", "alerts"),
+		fxSignal("a", src, "same", time.Now()), fxSignal("b", src, "same", time.Now().Add(time.Second)))
+	w.putErr = errors.New("store unavailable")
+	e.reconcile("a")
+	e.reconcile("b")
+	if got := e.signal("a").Status.Phase; got != agentopsv1alpha1.SignalRouted {
+		t.Fatalf("a failed window write must not fail the pass, got %s", got)
+	}
+	if got := e.signal("b"); got.Status.Reason != agentopsv1alpha1.SignalDropCooldown {
+		t.Fatalf("suppression holds in memory without the write, got %+v", got.Status)
+	}
+}
+
+// A deleted source: the SignalSource reconciler releases its signals from any
+// phase and clears its window, with no garbage collector involved.
+func TestSignalSourceReconcilerReleasesADeletedSource(t *testing.T) {
+	gone := fxSource("gone")
+	terminal := fxSignal("done", gone, "d", time.Now())
+	terminal.Status.Phase = agentopsv1alpha1.SignalFailed
+	e := newSigEnv(t, fxSource("kept"), fxSignal("live", gone, "x", time.Now()), terminal,
+		fxSignal("other", fxSource("kept"), "z", time.Now()))
+	rc := &SignalSourceReconciler{Client: e.c, Signals: e.r.Signals}
+	if _, err := rc.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: sigNS, Name: "gone"}}); err != nil {
+		t.Fatal(err)
+	}
+	if e.exists("live") || e.exists("done") {
+		t.Fatal("every signal of the deleted source is released, whatever its phase")
+	}
+	if !e.exists("other") {
+		t.Fatal("another source's signal is untouched")
 	}
 }

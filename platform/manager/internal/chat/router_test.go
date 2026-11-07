@@ -44,8 +44,8 @@ func closeFixture(t *testing.T, objs ...client.Object) (*Router, *OpQueue, clien
 	c := fake.NewClientBuilder().WithScheme(closeTestScheme(t)).
 		WithStatusSubresource(&agentopsv1alpha1.Conversation{}).
 		WithObjects(objs...).Build()
-	q := &OpQueue{Client: c, Namespace: testNS, Registry: NewRegistry()}
-	return &Router{Client: c, Reader: c, Namespace: testNS, Ops: q}, q, c
+	q := &OpQueue{Store: newTestStore(c), Registry: NewRegistry()}
+	return &Router{Client: c, Reader: c, Store: newTestStore(c), Namespace: testNS, Ops: q}, q, c
 }
 
 func nsChannel(name, adapter string) *agentopsv1alpha1.Channel {
@@ -293,7 +293,7 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 	conv.Status.Reopens = 1
 	r, q, _ := closeFixture(t, nsChannel("c1", "slack"), nsChannel("c2", "teams"), conv)
 
-	r.FanOutReopenNotice(context.Background(), conv)
+	r.FanOutReopenNotice(context.Background(), crRec(conv))
 
 	for _, tc := range []struct{ adapter, thread string }{{"slack", "thread-c1"}, {"teams", "thread-c2"}} {
 		ops := drain(q, tc.adapter)
@@ -310,12 +310,12 @@ func TestReopenNoticeReachesEveryBoundThread(t *testing.T) {
 
 	// Re-derived on every reconcile, so it must dedup — and a SECOND reopen
 	// must get its own.
-	r.FanOutReopenNotice(context.Background(), conv)
+	r.FanOutReopenNotice(context.Background(), crRec(conv))
 	if again := drain(q, "slack"); len(again) != 0 {
 		t.Fatalf("a re-derived notice must dedup: %d", len(again))
 	}
 	conv.Status.Reopens = 2
-	r.FanOutReopenNotice(context.Background(), conv)
+	r.FanOutReopenNotice(context.Background(), crRec(conv))
 	if second := drain(q, "slack"); len(second) != 1 {
 		t.Fatalf("a second reopen is owed its own notice, got %d", len(second))
 	}

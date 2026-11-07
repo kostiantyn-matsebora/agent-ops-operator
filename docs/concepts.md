@@ -416,8 +416,13 @@ per-source cap on non-terminal `Signal`s, `MAX_SIGNALS_PER_SOURCE` (chart
 `maxSignalsPerSource`, default `200`), evicts the OLDEST: `Dropped` (reason
 `overflow`) before fan-out, its non-terminal claimants `Failed` after.
 
-**Finished `Signal`s are deleted on a per-phase TTL**, measured from
-`status.completedAt`:
+**Finished `Signal`s expire on a per-phase TTL**, measured from
+`status.completedAt`.
+
+- The write that makes a phase terminal also stamps the expiry on the record.
+- The manager's store sweep removes the `Signal` once it has passed.
+- No timer or requeue is held in memory.
+- Under `kube` the expiry is an annotation, and an expired `Signal` already reads as absent before the sweep.
 
 | Phase | Chart value | Default |
 |---|---|---|
@@ -428,10 +433,18 @@ per-source cap on non-terminal `Signal`s, `MAX_SIGNALS_PER_SOURCE` (chart
 `Failed` outlives the rest because "nobody got it" is the record an operator
 investigates.
 
-**Owned by its `SignalSource`.** Deleting the source garbage-collects every
-`Signal` it owns, from any phase. The manager holds full CRUD on the kind
-and every other component, the console included, at most `get`, `list` and
-`watch`.
+**Who may write.** The manager holds full CRUD on the kind. Every other
+component, the console included, holds at most `get`, `list` and `watch`.
+
+**Released with its `SignalSource`.** Deleting the source makes the manager
+release it.
+
+- Every `Signal` of that source, from any phase, is removed.
+- The source's cooldown window is removed too.
+- Its receipt counters are kept, since under `kube` they live on the source object, which release does not touch.
+- The signals and the window are both removed through the state store.
+- This replaces the owner-reference cascade the `Signal` carried before, so it holds under any backend.
+- One narrow race remains. A source recreated under the same name within microseconds of the deletion can lose the signals it received in that gap, because the source reconciler releases by name only and passes no source identity.
 
 ### SignalAdapter
 
@@ -1879,11 +1892,20 @@ payload is not copied into the conversation object.
 
 **Every piece of live state has one declared home**, chosen by what the state is:
 
-- **The Kubernetes API** — configuration, conversation state (session id,
-  threads, inputs, runs, phase, and the message record — what people sent as
-  well as what the agent answered), adapter cursors, delivery markers and
-  suppression windows. Recovered by reading. Survives any restart and any
-  rescheduling.
+- **The Kubernetes API** — configuration lives here, recovered by reading.
+- **The state store** — the one seam the manager reaches conversation state,
+  every accepted `Signal` and each source's cooldown window through.
+  - The chart selects a backend with `stateStore.backend` (see
+    [configuration](configuration.md#state-store)).
+  - The only backend shipped is `kube`. It keeps the `Conversation`,
+    `ConversationInput` and `Signal` custom resources, and the window in
+    `SignalSource.status.cooldown[]`.
+  - Under `kube` the store and the Kubernetes API are the same API.
+  - Each source's `receivedTotal` and `lastReceived` counters live there too.
+  - Conversation state is the session id, threads, inputs, runs, phase and
+    the message record. The record holds what people sent and what the agent
+    answered.
+  - It survives any restart and any rescheduling.
   - **A thread binding's `claim` (holder, claimedAt) and `undeliveredReply`
     ride the same home.** The claim records which manager replica is
     dispatching that channel's `ensure-topic` op, so a crashed leader's
@@ -1906,18 +1928,36 @@ payload is not copied into the conversation object.
 telemetry, and a claim would pin it to one node, defeat rescheduling, and create
 a second source of truth beside the CRs.
 
-| Component | State it holds | Home | A restart costs |
-|---|---|---|---|
-| Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | nothing |
-| Manager — op queue | outbound channel ops | derived from CR state | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
-| Manager — ingest cooldown | `initiationId` suppression | `SignalSource.status.cooldown[]` (map is a cache) | nothing inside the window |
-| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | `Signal` CRs, Kubernetes-API state surviving every restart and leader change | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
-| Manager — admission | active/pending counts | live pod list + `Conversation` phase | nothing |
-| Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | recent history. Clients are told to resync rather than handed silence |
-| Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | with `persistence.context.enabled` off, conversational context. With it on, nothing |
-| Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | nothing |
-| Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | nothing authoritative. Acks and notices only |
-| Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
+| Component | State it holds | Home | State store backend | A restart costs |
+|---|---|---|---|---|
+| Manager — reconcilers | none (reads CRs and the live pod list) | Kubernetes API | `kube`: the Kubernetes API's own guarantee | nothing |
+| Manager — op queue | outbound channel ops | derived from CR state | `kube`: the Kubernetes API's own guarantee | nothing: `ensure-topic` re-derives from a missing thread binding, input cards from unposted inputs, run replies from runs without a delivery marker, `close-topic` from a bound thread missing from `status.threadsArchived[]` ([below](#ending-a-conversation)) |
+| Manager — thread claim and undelivered reply | `status.threads[].claim` (holder, claimedAt) and `status.threads[].undeliveredReply` | the state store, on the `Conversation` | `kube`: the Kubernetes API's own guarantee | nothing: a claim held by a replica other than the leader is cleared on the next reconcile, and an undelivered reply is re-derived until delivery succeeds |
+| Manager — ingest cooldown | `initiationId` suppression | the state store | `kube`: `SignalSource.status.cooldown[]`, the Kubernetes API's own guarantee | nothing inside the window |
+| Manager — source receipt counters | `receivedTotal` and `lastReceived` per source | the state store | `kube`: `SignalSource.status`, the Kubernetes API's own guarantee | nothing: each count is serialized by the backend, so no increment is lost |
+| Manager — signal publish and consume | every accepted signal, and its per-claimant routing state | the state store, surviving every restart and leader change | `kube`: `Signal` CRs, the Kubernetes API's own guarantee | no acknowledged signal: the new leader resumes every non-terminal `Signal`, and routing is idempotent |
+| Manager — admission | active/pending counts | live pod list + `Conversation` phase | `kube`: the Kubernetes API's own guarantee | nothing |
+| Manager — activity ring | recent per-hop telemetry | **deliberately lossy** | none: not state-store state | recent history. Clients are told to resync rather than handed silence |
+| Runtime pod | a conversation's accumulated context, repo checkout | PVC when enabled, else ephemeral | none: not state-store state | with `persistence.context.enabled` off, conversational context. With it on, nothing |
+| Channel / signal adapters | transport cursors | annotations on `Channel` / `SignalSource` | none: not state-store state | nothing |
+| Console | transcript buffer, config cache, activity index | rebuilt by list→watch and cursor replay. The transcript is a CACHE of `status.runs[]` | none: not state-store state | nothing authoritative. Acks and notices only |
+| Housekeeping job | none (scans disk, reads conversations) | the claims it mounts | none: not state-store state | nothing: it runs to completion on a schedule and every decision is re-made from scratch |
+
+**The backend column names what a row's guarantee rests on.** Conversation
+state, `Signal`s and the cooldown window go through the store. A source's
+`receivedTotal` and `lastReceived` counters go through it too, and under `kube`
+stay the same two status fields on the source.
+
+- **Under `kube`**, a restart costs what the Kubernetes API's own guarantee
+  allows. A write is acknowledged once the API server has it.
+- **Reads of one record go to the API server**, not the manager's informer
+  cache, so a compare-and-swap never races a stale copy. Lookups that return
+  several records are served from the cache, since a full list of a large
+  install is slow.
+- **A later backend adds its own row**, stating its own guarantee.
+- **Release is explicit.** The manager deletes a closed or evicted
+  conversation's pod and ConfigMap itself under every backend, so no row
+  depends on owner-reference garbage collection.
 
 ### What reclaims what, and why the manager cannot
 

@@ -15,16 +15,14 @@ import (
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // InvokeResult is what `invoke` reports (aops-mcp-server: "created or
@@ -96,8 +94,8 @@ var (
 // capability, never merely the coordinating root. A caller that resolves to
 // no Coordinator at all (an ordinary Pipeline-addressed conversation) is
 // refused exactly as before.
-func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, agentName, task string) (*InvokeResult, error) {
-	if caller.Status.Phase == agentopsv1alpha1.ConversationClosed {
+func (r *Router) InvokeMember(ctx context.Context, caller *state.ConversationRecord, agentName, task string) (*InvokeResult, error) {
+	if caller.Phase == state.PhaseClosed {
 		return nil, ErrCallerClosed
 	}
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
@@ -131,9 +129,9 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 		return nil, err
 	}
 	if member != nil {
-		if err := r.appendInputIdempotent(ctx, member.Name, agentopsv1alpha1.InputItem{
-			ID: newInputID(), Type: agentopsv1alpha1.InputTask, Payload: task, ReceivedAt: metav1.Now(),
-			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: caller.Name, Entry: entry.Name},
+		if err := r.appendInputIdempotent(ctx, member.Name, state.InputItem{
+			ID: newInputID(), Type: state.InputTask, Payload: task, ReceivedAt: time.Now(),
+			Origin: &state.InputOrigin{Kind: state.OriginMember, Name: caller.Name, Entry: entry.Name},
 		}); err != nil {
 			return nil, err
 		}
@@ -162,15 +160,15 @@ func (r *Router) InvokeMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 // close landed first, this sees Closed and closes the member. If it lands
 // later, its second sweep runs after the close write, which is after this
 // read, which is after the member was created, so the sweep finds it.
-func (r *Router) closeMemberIfCallerClosed(ctx context.Context, callerName string, member *agentopsv1alpha1.Conversation) error {
-	var fresh agentopsv1alpha1.Conversation
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: callerName}, &fresh); err != nil {
-		return client.IgnoreNotFound(err)
+func (r *Router) closeMemberIfCallerClosed(ctx context.Context, callerName string, member *state.ConversationRecord) error {
+	fresh, _, err := r.Store.Get(ctx, state.Key(callerName))
+	if err != nil {
+		return state.IgnoreNotFound(err)
 	}
-	if fresh.Status.Phase != agentopsv1alpha1.ConversationClosed {
+	if fresh.Phase != state.PhaseClosed {
 		return nil
 	}
-	reason := fresh.Status.CloseReason
+	reason := fresh.CloseReason
 	if reason == "" {
 		reason = "the calling conversation closed"
 	}
@@ -193,7 +191,7 @@ func findAgentEntry(co *agentopsv1alpha1.Coordinator, name string) *agentopsv1al
 // refuseCycleOrSpentBudget is InvokeMember's two refusals: an entry naming a
 // Coordinator already in the caller's chain, and a spent maxAgents budget
 // (which also closes the caller budget-exceeded).
-func (r *Router) refuseCycleOrSpentBudget(ctx context.Context, caller *agentopsv1alpha1.Conversation, entry *agentopsv1alpha1.CoordinatorAgentEntry) error {
+func (r *Router) refuseCycleOrSpentBudget(ctx context.Context, caller *state.ConversationRecord, entry *agentopsv1alpha1.CoordinatorAgentEntry) error {
 	if entry.CoordinatorRef != nil {
 		chain, err := r.coordinatorChain(ctx, caller)
 		if err != nil {
@@ -203,7 +201,7 @@ func (r *Router) refuseCycleOrSpentBudget(ctx context.Context, caller *agentopsv
 			return ErrCoordinatorCycle
 		}
 	}
-	if budget := caller.Status.Budget; budget != nil && budget.MaxAgents > 0 && budget.AgentsInvoked >= budget.MaxAgents {
+	if budget := caller.Budget; budget != nil && budget.MaxAgents > 0 && budget.AgentsInvoked >= budget.MaxAgents {
 		digest := fmt.Sprintf("budget-exceeded: maxAgents (%d) reached", budget.MaxAgents)
 		if err := r.CloseBudgetExceeded(ctx, caller, digest); err != nil {
 			return fmt.Errorf("%w, and closing on it failed: %v", ErrMaxAgents, err)
@@ -218,12 +216,12 @@ func (r *Router) refuseCycleOrSpentBudget(ctx context.Context, caller *agentopsv
 // `agents[]` entries. The caller must itself be a Coordinator's own
 // conversation, exactly as InvokeMember requires — listing agents is a
 // capability of the coordinating agent's own conversation.
-func (r *Router) CoordinatorAgents(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]agentopsv1alpha1.CoordinatorAgentEntry, error) {
-	if caller.Spec.CoordinatorRef == nil {
+func (r *Router) CoordinatorAgents(ctx context.Context, caller *state.ConversationRecord) ([]agentopsv1alpha1.CoordinatorAgentEntry, error) {
+	if caller.CoordinatorRef == "" {
 		return nil, ErrNotCoordinatorRoot
 	}
 	var co agentopsv1alpha1.Coordinator
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.Spec.CoordinatorRef.Name}, &co); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: caller.CoordinatorRef}, &co); err != nil {
 		return nil, err
 	}
 	return co.Spec.Agents, nil
@@ -235,22 +233,21 @@ func (r *Router) CoordinatorAgents(ctx context.Context, caller *agentopsv1alpha1
 // verified against the CausedBy field itself — the label is a hint, the same
 // pattern cascadeCloseMembers already uses to close a subtree. Bounded
 // defensively against a malformed causedBy graph, exactly as descendsFrom is.
-func (r *Router) Descendants(ctx context.Context, rootName string) ([]agentopsv1alpha1.Conversation, error) {
-	var out []agentopsv1alpha1.Conversation
+func (r *Router) Descendants(ctx context.Context, rootName string) ([]state.ConversationRecord, error) {
+	var out []state.ConversationRecord
 	seen := map[string]bool{rootName: true}
 	frontier := []string{rootName}
 	for i := 0; i < 1000 && len(frontier) > 0; i++ {
 		var next []string
 		for _, parent := range frontier {
-			var list agentopsv1alpha1.ConversationList
-			if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
-				client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parent}); err != nil {
+			members, err := r.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parent})
+			if err != nil {
 				return nil, err
 			}
-			for j := range list.Items {
-				m := list.Items[j]
-				if m.Spec.CausedBy == nil || m.Spec.CausedBy.Parent != parent || seen[m.Name] {
-					continue // the label is a hint; the field is the fact
+			for j := range members {
+				m := members[j]
+				if m.CausedBy == nil || m.CausedBy.Parent != parent || seen[m.Name] {
+					continue // the index is a hint; the field is the fact
 				}
 				seen[m.Name] = true
 				out = append(out, m)
@@ -269,15 +266,15 @@ func (r *Router) Descendants(ctx context.Context, rootName string) ([]agentopsv1
 // ResolveActingCoordinator) — one traversal, two different questions asked of
 // its result. Bounded defensively: the ordinary budgets already keep a live
 // chain finite, so a walk this long means something else is wrong.
-func (r *Router) causedByAncestry(ctx context.Context, conv *agentopsv1alpha1.Conversation) ([]*agentopsv1alpha1.Conversation, error) {
-	chain := []*agentopsv1alpha1.Conversation{conv}
+func (r *Router) causedByAncestry(ctx context.Context, conv *state.ConversationRecord) ([]*state.ConversationRecord, error) {
+	chain := []*state.ConversationRecord{conv}
 	cur := conv
 	for i := 0; i < 1000; i++ {
-		if cur.Spec.CausedBy == nil {
+		if cur.CausedBy == nil {
 			return chain, nil
 		}
-		var parent agentopsv1alpha1.Conversation
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: cur.Spec.CausedBy.Parent}, &parent); err != nil {
+		parent, _, err := r.Store.Get(ctx, state.Key(cur.CausedBy.Parent))
+		if err != nil {
 			return nil, err
 		}
 		chain = append(chain, &parent)
@@ -289,15 +286,15 @@ func (r *Router) causedByAncestry(ctx context.Context, conv *agentopsv1alpha1.Co
 // coordinatorChain collects the calling conversation's OWN coordinatorRef,
 // then every ancestor's, walking `causedBy` to the uncaused root (design
 // D-E2).
-func (r *Router) coordinatorChain(ctx context.Context, conv *agentopsv1alpha1.Conversation) (map[string]bool, error) {
+func (r *Router) coordinatorChain(ctx context.Context, conv *state.ConversationRecord) (map[string]bool, error) {
 	ancestry, err := r.causedByAncestry(ctx, conv)
 	if err != nil {
 		return nil, err
 	}
 	visited := map[string]bool{}
 	for _, c := range ancestry {
-		if c.Spec.CoordinatorRef != nil {
-			visited[c.Spec.CoordinatorRef.Name] = true
+		if c.CoordinatorRef != "" {
+			visited[c.CoordinatorRef] = true
 		}
 	}
 	return visited, nil
@@ -331,12 +328,12 @@ type ActingCoordinator struct {
 // usable `coordinator:<name>:<conversation>` token in its own pod, derived
 // at pod-build time before any caller has presented anything for this
 // function to authenticate.
-func (r *Router) ResolveActingCoordinator(ctx context.Context, conv *agentopsv1alpha1.Conversation) (ActingCoordinator, error) {
-	if conv.Spec.CausedBy == nil {
-		if conv.Spec.CoordinatorRef == nil {
+func (r *Router) ResolveActingCoordinator(ctx context.Context, conv *state.ConversationRecord) (ActingCoordinator, error) {
+	if conv.CausedBy == nil {
+		if conv.CoordinatorRef == "" {
 			return ActingCoordinator{}, nil
 		}
-		return ActingCoordinator{Name: conv.Spec.CoordinatorRef.Name, RootName: conv.Name}, nil
+		return ActingCoordinator{Name: conv.CoordinatorRef, RootName: conv.Name}, nil
 	}
 	ancestry, err := r.causedByAncestry(ctx, conv)
 	if err != nil {
@@ -345,10 +342,10 @@ func (r *Router) ResolveActingCoordinator(ctx context.Context, conv *agentopsv1a
 	root := ancestry[len(ancestry)-1]
 	name := ""
 	switch {
-	case conv.Spec.CoordinatorRef != nil:
-		name = conv.Spec.CoordinatorRef.Name
-	case root.Spec.CoordinatorRef != nil:
-		name = root.Spec.CoordinatorRef.Name
+	case conv.CoordinatorRef != "":
+		name = conv.CoordinatorRef
+	case root.CoordinatorRef != "":
+		name = root.CoordinatorRef
 	}
 	if name == "" {
 		return ActingCoordinator{}, nil
@@ -365,7 +362,7 @@ type OpenRoot struct {
 	Name    string
 	Title   string
 	Brief   string
-	Phase   agentopsv1alpha1.ConversationPhase
+	Phase   string
 	Members []string
 }
 
@@ -386,7 +383,7 @@ type OpenRoot struct {
 // hourly cycle — measured live on job-cb5vg, 96 consecutive cycles restating
 // one 2026-10-03 run's error with zero new information, because the member
 // that would have let the reaper confirm a fix never existed to re-check.
-func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Conversation) ([]OpenRoot, error) {
+func (r *Router) ListOpenRoots(ctx context.Context, caller *state.ConversationRecord) ([]OpenRoot, error) {
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
 	if err != nil {
 		return nil, err
@@ -394,13 +391,13 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 	if scope.Name == "" {
 		return nil, ErrNoCoordinatorScope
 	}
-	var list agentopsv1alpha1.ConversationList
-	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace)); err != nil {
+	list, err := r.Store.List(ctx, state.ByAll, state.ListKey{})
+	if err != nil {
 		return nil, err
 	}
 	var out []OpenRoot
-	for i := range list.Items {
-		c := &list.Items[i]
+	for i := range list {
+		c := &list[i]
 		if !isOpenSiblingRoot(c, scope) {
 			continue
 		}
@@ -408,11 +405,11 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 		if err != nil {
 			return nil, err
 		}
-		if c.Status.Phase == agentopsv1alpha1.ConversationIdle && len(members) == 0 {
+		if c.Phase == state.PhaseIdle && len(members) == 0 {
 			continue // nothing this root ever handed off to — nothing to re-check
 		}
 		out = append(out, OpenRoot{
-			Name: c.Name, Title: c.Spec.Title, Brief: c.Status.Brief, Phase: c.Status.Phase, Members: members,
+			Name: c.Name, Title: c.Title, Brief: c.Brief, Phase: c.Phase, Members: members,
 		})
 	}
 	return out, nil
@@ -420,17 +417,17 @@ func (r *Router) ListOpenRoots(ctx context.Context, caller *agentopsv1alpha1.Con
 
 // isOpenSiblingRoot reports whether c is an open, uncaused root of the
 // acting Coordinator other than the caller's own.
-func isOpenSiblingRoot(c *agentopsv1alpha1.Conversation, scope ActingCoordinator) bool {
-	if c.Spec.CausedBy != nil {
+func isOpenSiblingRoot(c *state.ConversationRecord, scope ActingCoordinator) bool {
+	if c.CausedBy != nil {
 		return false // a member — never an uncaused root, whatever it carries
 	}
-	if c.Spec.CoordinatorRef == nil || c.Spec.CoordinatorRef.Name != scope.Name {
+	if c.CoordinatorRef == "" || c.CoordinatorRef != scope.Name {
 		return false // not this Coordinator's own root
 	}
 	if c.Name == scope.RootName {
 		return false // the caller's own root
 	}
-	return c.Status.Phase != agentopsv1alpha1.ConversationClosed
+	return c.Phase != state.PhaseClosed
 }
 
 // directMemberEntries lists the agents[] entry names of rootName's own DIRECT
@@ -438,20 +435,19 @@ func isOpenSiblingRoot(c *agentopsv1alpha1.Conversation, scope ActingCoordinator
 // reattached to more than once (or re-invoked after its first member closed)
 // is named once. The reaper re-invokes exactly these entries to re-check them.
 func (r *Router) directMemberEntries(ctx context.Context, rootName string) ([]string, error) {
-	var list agentopsv1alpha1.ConversationList
-	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
-		client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: rootName}); err != nil {
+	list, err := r.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: rootName})
+	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	var out []string
-	for i := range list.Items {
-		m := &list.Items[i]
-		if m.Spec.CausedBy == nil || m.Spec.CausedBy.Parent != rootName || seen[m.Spec.CausedBy.Entry] {
-			continue // the label is a hint; the field is the fact
+	for i := range list {
+		m := &list[i]
+		if m.CausedBy == nil || m.CausedBy.Parent != rootName || seen[m.CausedBy.Entry] {
+			continue // the index is a hint; the field is the fact
 		}
-		seen[m.Spec.CausedBy.Entry] = true
-		out = append(out, m.Spec.CausedBy.Entry)
+		seen[m.CausedBy.Entry] = true
+		out = append(out, m.CausedBy.Entry)
 	}
 	return out, nil
 }
@@ -462,18 +458,18 @@ func (r *Router) directMemberEntries(ctx context.Context, rootName string) ([]st
 // root — never a member, however shallow (even one inside the caller's own
 // Coordinator's tree — the ordinary one-hop bound already owns that case),
 // and never a root of a different Coordinator.
-func (r *Router) isOwnCoordinatorSiblingRoot(ctx context.Context, caller, target *agentopsv1alpha1.Conversation) (bool, error) {
-	if target.Spec.CausedBy != nil {
+func (r *Router) isOwnCoordinatorSiblingRoot(ctx context.Context, caller, target *state.ConversationRecord) (bool, error) {
+	if target.CausedBy != nil {
 		return false, nil // a member is never a target of this reach class
 	}
-	if target.Spec.CoordinatorRef == nil {
+	if target.CoordinatorRef == "" {
 		return false, nil
 	}
 	scope, err := r.ResolveActingCoordinator(ctx, caller)
 	if err != nil {
 		return false, err
 	}
-	if scope.Name == "" || target.Spec.CoordinatorRef.Name != scope.Name {
+	if scope.Name == "" || target.CoordinatorRef != scope.Name {
 		return false, nil // no Coordinator to act for, or a different Coordinator's root
 	}
 	if target.Name == scope.RootName {
@@ -496,31 +492,30 @@ func (r *Router) isOwnCoordinatorSiblingRoot(ctx context.Context, caller, target
 // reaper's own task text already said "not a new incident, re-check each
 // one", and that alone did not stop it from reading a human-originated root
 // as fair game.
-func isHumanInitiated(c *agentopsv1alpha1.Conversation) bool {
-	if c.Spec.Signal == nil {
+func isHumanInitiated(c *state.ConversationRecord) bool {
+	if c.Signal == nil {
 		return true
 	}
-	_, isChat := c.Spec.Signal.Labels[agentopsv1alpha1.LabelChatChannel]
+	_, isChat := c.Signal.Labels[agentopsv1alpha1.LabelChatChannel]
 	return isChat
 }
 
 // findReusableMember is conversation-provenance's reuse rule: a live
 // conversation with the same conversationId AND the same (parent, entry) —
-// depth plays no part. Reads the same informer field index equality routing
-// does (agentopsv1alpha1.IndexConversationID), never the removed
+// depth plays no part. Reads the same conversationId index equality routing
+// does (state.ByConversationID), never the removed
 // agentops.dev/signature-hash label.
-func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, initiationID string) (*agentopsv1alpha1.Conversation, error) {
-	var list agentopsv1alpha1.ConversationList
-	if err := r.Client.List(ctx, &list, client.InNamespace(r.Namespace),
-		client.MatchingFields{agentopsv1alpha1.IndexConversationID: initiationID}); err != nil {
+func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, initiationID string) (*state.ConversationRecord, error) {
+	list, err := r.Store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: initiationID})
+	if err != nil {
 		return nil, err
 	}
-	for i := range list.Items {
-		c := &list.Items[i]
-		if c.Status.Phase == agentopsv1alpha1.ConversationClosed {
+	for i := range list {
+		c := &list[i]
+		if c.Phase == state.PhaseClosed {
 			continue
 		}
-		if c.Spec.CausedBy != nil && c.Spec.CausedBy.Parent == parentName && c.Spec.CausedBy.Entry == entryName {
+		if c.CausedBy != nil && c.CausedBy.Parent == parentName && c.CausedBy.Entry == entryName {
 			return c, nil
 		}
 	}
@@ -533,8 +528,8 @@ func (r *Router) findReusableMember(ctx context.Context, parentName, entryName, 
 // wiring-snapshot shape, with CausedBy in place of Signal/PipelineRef and no
 // channels bound (coordination-loop: "a caused conversation binds no
 // channel").
-func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conversation, co *agentopsv1alpha1.Coordinator,
-	entry *agentopsv1alpha1.CoordinatorAgentEntry, task, initiationID string) (*agentopsv1alpha1.Conversation, error) {
+func (r *Router) createMember(ctx context.Context, caller *state.ConversationRecord, co *agentopsv1alpha1.Coordinator,
+	entry *agentopsv1alpha1.CoordinatorAgentEntry, task, initiationID string) (*state.ConversationRecord, error) {
 
 	var capability agentopsv1alpha1.AgentCapabilitySpec
 	var persistenceName string
@@ -562,48 +557,37 @@ func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 	}
 
 	snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, persistenceName, capability, r.Runtime)
-	member := &agentopsv1alpha1.Conversation{}
-	member.Namespace = r.Namespace
 	// The word-chain and the actual Create are AllocateName's below —
 	// readable-conversation-names: an object name is a deterministic
 	// word-chain, never metadata.generateName's random suffix. The word
 	// source is the invoked agents[] entry name, non-empty by
 	// construction (a CoordinatorAgentEntry always names one).
-	member.Labels = map[string]string{
-		agentopsv1alpha1.LabelCausedBy: caller.Name,
-	}
-	member.Spec = agentopsv1alpha1.ConversationSpec{
-		ProfileRef:         agentopsv1alpha1.ObjectRef{Name: capability.ProfileName()},
-		Toolsets:           capability.Toolsets.DeepCopy(),
-		MCPConfigs:         capability.MCPConfigs.DeepCopy(),
+	member := &state.ConversationRecord{
+		ProfileRef:         capability.ProfileName(),
+		Toolsets:           dispatch.ToolsetBindingOf(capability.Toolsets),
+		MCPConfigs:         dispatch.ToolingBindingOf(capability.MCPConfigs),
 		RuntimeRef:         snap.RuntimeRef,
 		ServiceAccountName: snap.ServiceAccountName,
 		ContextClaimName:   snap.ContextClaimName,
 		WorkspaceClaimName: snap.WorkspaceClaimName,
-		CausedBy:           &agentopsv1alpha1.Provenance{Parent: caller.Name, Entry: entry.Name},
+		CausedBy:           &state.Provenance{Parent: caller.Name, Entry: entry.Name},
 		Title:              memberTitle(entry.Name, task),
 		ConversationID:     initiationID,
 	}
 	if nested != nil {
-		member.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: entry.CoordinatorRef.Name}
+		member.CoordinatorRef = entry.CoordinatorRef.Name
 		claimant := coordinatorClaimant{nested}
-		member.Spec.EscalationChannelRefs = claimant.EscalationChannelRefs()
+		member.EscalationChannelRefs = claimant.EscalationChannelRefs()
+		// The member's own resource ceiling is status, which a record carries
+		// beside the spec, so it rides the one Create.
+		member.Budget = claimant.SnapshotBudget()
 	}
-	if _, err := namewords.AllocateName(ctx, r.Client, r.Namespace, "member", namewords.Words(entry.Name), member); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Store, "member", namewords.Words(entry.Name), member); err != nil {
 		return nil, err
 	}
-	if nested != nil {
-		if budget := (coordinatorClaimant{nested}).SnapshotBudget(); budget != nil {
-			patch := client.MergeFrom(member.DeepCopy())
-			member.Status.Budget = budget
-			if err := r.Client.Status().Patch(ctx, member, patch); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if err := r.appendInputIdempotent(ctx, member.Name, agentopsv1alpha1.InputItem{
-		ID: newInputID(), Type: agentopsv1alpha1.InputTask, Payload: task, ReceivedAt: metav1.Now(),
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: caller.Name, Entry: entry.Name},
+	if err := r.appendInputIdempotent(ctx, member.Name, state.InputItem{
+		ID: newInputID(), Type: state.InputTask, Payload: task, ReceivedAt: time.Now(),
+		Origin: &state.InputOrigin{Kind: state.OriginMember, Name: caller.Name, Entry: entry.Name},
 	}); err != nil {
 		return nil, err
 	}
@@ -622,25 +606,13 @@ func (r *Router) createMember(ctx context.Context, caller *agentopsv1alpha1.Conv
 // on an actual new member: reattaching to one already live is not inviting a
 // new agent.
 func (r *Router) bumpAgentsInvoked(ctx context.Context, convName string) error {
-	for attempt := 0; attempt < 5; attempt++ {
-		var fresh agentopsv1alpha1.Conversation
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: convName}, &fresh); err != nil {
-			return err
-		}
-		if fresh.Status.Budget == nil {
-			return nil // not itself a Coordinator's root: nothing to bump
-		}
-		patch := client.MergeFrom(fresh.DeepCopy())
-		fresh.Status.Budget.AgentsInvoked++
-		if err := r.Client.Status().Patch(ctx, &fresh, patch); err != nil {
-			if apierrors.IsConflict(err) {
-				continue
-			}
-			return err
+	_, err := state.Mutate(ctx, r.Store, state.Key(convName), func(rec *state.ConversationRecord) error {
+		if rec.Budget != nil { // nil: not itself a Coordinator's root, nothing to bump
+			rec.Budget.AgentsInvoked++
 		}
 		return nil
-	}
-	return fmt.Errorf("conflict bumping agentsInvoked on %s", convName)
+	})
+	return err
 }
 
 // AppendMemberResult routes one member's result onto its immediate PARENT,
@@ -650,13 +622,13 @@ func (r *Router) bumpAgentsInvoked(ctx context.Context, convName string) error {
 // per-run marker is the caller's job (RunStatus.RoutedToParent), since once
 // this input is processed and pruned there is nothing left here to compare
 // against.
-func (r *Router) AppendMemberResult(ctx context.Context, causedBy *agentopsv1alpha1.Provenance, memberName, dedupID, result string) error {
+func (r *Router) AppendMemberResult(ctx context.Context, causedBy *state.Provenance, memberName, dedupID, result string) error {
 	if causedBy == nil || causedBy.Parent == memberName {
 		return nil // no parent, or a provenance bug — never feed a conversation its own output
 	}
-	item := agentopsv1alpha1.InputItem{
-		ID: dedupID, Type: agentopsv1alpha1.InputTask, Payload: result, ReceivedAt: metav1.Now(),
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: memberName, Entry: causedBy.Entry},
+	item := state.InputItem{
+		ID: dedupID, Type: state.InputTask, Payload: result, ReceivedAt: time.Now(),
+		Origin: &state.InputOrigin{Kind: state.OriginMember, Name: memberName, Entry: causedBy.Entry},
 	}
 	return r.appendInputIdempotent(ctx, causedBy.Parent, item)
 }
@@ -665,31 +637,20 @@ func (r *Router) AppendMemberResult(ctx context.Context, causedBy *agentopsv1alp
 // necessarily the caller's own object), skipping conversations already
 // Closed (coordination-loop: "a closed parent receives nothing") and skipping
 // a repeat of an id already pending, with optimistic retry on conflict.
-func (r *Router) appendInputIdempotent(ctx context.Context, convName string, item agentopsv1alpha1.InputItem) error {
-	for attempt := 0; attempt < 5; attempt++ {
-		var fresh agentopsv1alpha1.Conversation
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: convName}, &fresh); err != nil {
-			return client.IgnoreNotFound(err)
-		}
-		if fresh.Status.Phase == agentopsv1alpha1.ConversationClosed {
+func (r *Router) appendInputIdempotent(ctx context.Context, convName string, item state.InputItem) error {
+	_, err := state.Mutate(ctx, r.Store, state.Key(convName), func(rec *state.ConversationRecord) error {
+		if rec.Phase == state.PhaseClosed {
 			return nil
 		}
-		for i := range fresh.Spec.Inputs {
-			if fresh.Spec.Inputs[i].ID == item.ID {
+		for i := range rec.Inputs {
+			if rec.Inputs[i].ID == item.ID {
 				return nil
 			}
 		}
-		patch := client.MergeFrom(fresh.DeepCopy())
-		fresh.Spec.Inputs = append(fresh.Spec.Inputs, item)
-		if err := r.Client.Patch(ctx, &fresh, patch); err != nil {
-			if apierrors.IsConflict(err) {
-				continue
-			}
-			return err
-		}
+		rec.Inputs = append(rec.Inputs, item)
 		return nil
-	}
-	return fmt.Errorf("conflict appending input to %s", convName)
+	})
+	return state.IgnoreNotFound(err)
 }
 
 // CloseCoordinated is the manager's half of the MCP `close(conversation,
@@ -704,7 +665,7 @@ func (r *Router) appendInputIdempotent(ctx context.Context, convName string, ite
 // has sat open: a person's own request is never auto-closed by the widened
 // reach, only by that person, a direct cascade from their own conversation,
 // or an operator.
-func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.Conversation, targetName, reason string) error {
+func (r *Router) CloseCoordinated(ctx context.Context, caller *state.ConversationRecord, targetName, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("a coordinator's close requires a reason")
 	}
@@ -712,16 +673,16 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 		// A person's own uncaused root is closed by that person (/close), a
 		// cascade from it, or an operator — never by the Coordinator's own
 		// verb, however finished it thinks the answer is.
-		if caller.Spec.CausedBy == nil && isHumanInitiated(caller) {
+		if caller.CausedBy == nil && isHumanInitiated(caller) {
 			return ErrCannotCloseHumanRoot
 		}
 		return r.closeWithCascade(ctx, caller, reason)
 	}
-	var target agentopsv1alpha1.Conversation
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: targetName}, &target); err != nil {
-		return client.IgnoreNotFound(err)
+	target, _, err := r.Store.Get(ctx, state.Key(targetName))
+	if err != nil {
+		return state.IgnoreNotFound(err)
 	}
-	if target.Spec.CausedBy != nil && target.Spec.CausedBy.Parent == caller.Name {
+	if target.CausedBy != nil && target.CausedBy.Parent == caller.Name {
 		return r.closeWithCascade(ctx, &target, reason)
 	}
 	ok, err := r.isOwnCoordinatorSiblingRoot(ctx, caller, &target)
@@ -742,7 +703,7 @@ func (r *Router) CloseCoordinated(ctx context.Context, caller *agentopsv1alpha1.
 // every live member first, then escalate THIS conversation — never a
 // separate close on it, since escalate already performs the one of two
 // outcomes that applies (D-D).
-func (r *Router) CloseBudgetExceeded(ctx context.Context, conv *agentopsv1alpha1.Conversation, digest string) error {
+func (r *Router) CloseBudgetExceeded(ctx context.Context, conv *state.ConversationRecord, digest string) error {
 	if err := r.cascadeCloseMembers(ctx, conv.Name, "budget-exceeded"); err != nil {
 		return err
 	}
@@ -760,7 +721,7 @@ func (r *Router) CloseBudgetExceeded(ctx context.Context, conv *agentopsv1alpha1
 // closed subtree, and a repeated close resumes from the members still open.
 // The old order — ancestor first — left a closed root over open members that
 // nothing could reach any more.
-func (r *Router) closeWithCascade(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason string) error {
+func (r *Router) closeWithCascade(ctx context.Context, conv *state.ConversationRecord, reason string) error {
 	if err := r.cascadeCloseMembers(ctx, conv.Name, reason); err != nil {
 		return err
 	}
@@ -779,18 +740,17 @@ func (r *Router) closeWithCascade(ctx context.Context, conv *agentopsv1alpha1.Co
 // parent — see closeWithCascade for why. An already-Closed member keeps its
 // own reason and is skipped.
 func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason string) error {
-	var list agentopsv1alpha1.ConversationList
-	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace),
-		client.MatchingLabels{agentopsv1alpha1.LabelCausedBy: parentName}); err != nil {
+	list, err := r.Store.List(ctx, state.ByCausedBy, state.ListKey{CausedBy: parentName})
+	if err != nil {
 		return err
 	}
-	for i := range list.Items {
-		member := &list.Items[i]
-		if member.Status.Phase == agentopsv1alpha1.ConversationClosed {
+	for i := range list {
+		member := &list[i]
+		if member.Phase == state.PhaseClosed {
 			continue
 		}
-		if member.Spec.CausedBy == nil || member.Spec.CausedBy.Parent != parentName {
-			continue // the label is a hint; the field is the fact
+		if member.CausedBy == nil || member.CausedBy.Parent != parentName {
+			continue // the index is a hint; the field is the fact
 		}
 		if err := r.closeWithCascade(ctx, member, reason); err != nil {
 			return err
@@ -802,8 +762,8 @@ func (r *Router) cascadeCloseMembers(ctx context.Context, parentName, reason str
 // closeConversationReason is closeConversation plus a stamped CloseReason —
 // required from a coordinator's own close (conversation-close), absent from
 // an ordinary `/close`.
-func (r *Router) closeConversationReason(ctx context.Context, conv *agentopsv1alpha1.Conversation, reason string) error {
-	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+func (r *Router) closeConversationReason(ctx context.Context, conv *state.ConversationRecord, reason string) error {
+	if conv.Phase == state.PhaseClosed {
 		return nil
 	}
 	farewell := fmt.Sprintf("👋 Conversation closed (%s). This thread is archived — reply here "+
@@ -812,12 +772,12 @@ func (r *Router) closeConversationReason(ctx context.Context, conv *agentopsv1al
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 		r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
 	})
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	conv.Status.Phase = agentopsv1alpha1.ConversationClosed
-	conv.Status.ClosedAt = &now
-	conv.Status.CloseReason = boundedString(reason, agentopsv1alpha1.MaxCloseReason)
-	return client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch))
+	now := time.Now()
+	return state.IgnoreNotFound(state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+		rec.Phase = state.PhaseClosed
+		rec.ClosedAt = &now
+		rec.CloseReason = boundedString(reason, agentopsv1alpha1.MaxCloseReason)
+	}))
 }
 
 // Escalate is the MCP `escalate(message)` verb (design D-D,
@@ -836,22 +796,22 @@ func (r *Router) closeConversationReason(ctx context.Context, conv *agentopsv1al
 // `coordinatorRef` with live `agents[]` invocations. Closing it with no
 // cascade would orphan its own sub-members the moment it escalated itself,
 // exactly the gap `cascadeCloseMembers` exists to close everywhere else.
-func (r *Router) Escalate(ctx context.Context, conv *agentopsv1alpha1.Conversation, message string) error {
-	if conv.Spec.CausedBy != nil {
+func (r *Router) Escalate(ctx context.Context, conv *state.ConversationRecord, message string) error {
+	if conv.CausedBy != nil {
 		if err := r.closeWithCascade(ctx, conv, message); err != nil {
 			return err
 		}
-		return r.AppendMemberResult(ctx, conv.Spec.CausedBy, conv.Name,
+		return r.AppendMemberResult(ctx, conv.CausedBy, conv.Name,
 			"escalate:"+conv.Name+":"+strconv.FormatInt(time.Now().UnixNano(), 36), message)
 	}
-	if conv.Status.EscalatedAt != nil {
+	if conv.EscalatedAt != nil {
 		return nil // already escalated: no replayed digest
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	now := metav1.Now()
-	conv.Status.EscalatedAt = &now
-	conv.Status.EscalationMessage = boundedString(message, 2000)
-	return r.Client.Status().Patch(ctx, conv, patch)
+	now := time.Now()
+	return state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+		rec.EscalatedAt = &now
+		rec.EscalationMessage = boundedString(message, 2000)
+	})
 }
 
 // memberTitle names a member conversation from the entry it was invoked as,

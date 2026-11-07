@@ -2,16 +2,14 @@ package namewords
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // MaxAllocateAttempts bounds the retry on a genuine create conflict between
@@ -23,14 +21,14 @@ import (
 // retryBackoff below is what actually breaks the lockstep.
 const MaxAllocateAttempts = 20
 
-// AllocateName sets obj's Name and its agentops.dev/name-base label to the
-// next free name for "<kind>-<words>" and creates it: one List of every
-// conversation sharing that exact label value, then one Create, never
+// AllocateName sets rec's Name and NameBase to the next free name for
+// "<kind>-<words>" and creates it: one List of every record sharing that
+// exact NameBase (the store's ByNameBase index), then one Create, never
 // sequential name-guessing and never a random or hash-derived suffix. A
 // create conflict from a genuine race between two concurrent creators
 // retries the same list-then-create step, bounded to MaxAllocateAttempts;
 // exhausting it returns the last conflict error, naming the base name.
-func AllocateName(ctx context.Context, c client.Client, namespace, kind, words string, obj *agentopsv1alpha1.Conversation) (string, error) {
+func AllocateName(ctx context.Context, store state.Store, kind, words string, rec *state.ConversationRecord) (string, error) {
 	base := kind + "-" + words
 	var lastErr error
 	for attempt := 0; attempt < MaxAllocateAttempts; attempt++ {
@@ -43,38 +41,33 @@ func AllocateName(ctx context.Context, c client.Client, namespace, kind, words s
 				return "", err
 			}
 		}
-		var list agentopsv1alpha1.ConversationList
-		if err := c.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{agentopsv1alpha1.LabelNameBase: base}); err != nil {
+		list, err := store.List(ctx, state.ByNameBase, state.ListKey{NameBase: base})
+		if err != nil {
 			return "", fmt.Errorf("name-base %s: list: %w", base, err)
 		}
-		name := nameForSuffix(base, nextSuffix(base, list.Items))
+		name := nameForSuffix(base, nextSuffix(base, list))
 
-		obj.Name = name
-		obj.GenerateName = ""
-		if obj.Labels == nil {
-			obj.Labels = map[string]string{}
-		}
-		obj.Labels[agentopsv1alpha1.LabelNameBase] = base
+		rec.Name = name
+		rec.NameBase = base
 
-		err := c.Create(ctx, obj)
+		_, err = store.Create(ctx, state.Key(name), *rec)
 		if err == nil {
 			return name, nil
 		}
-		if !apierrors.IsAlreadyExists(err) {
+		if !errors.Is(err, state.ErrAlreadyExists) {
 			return "", err
 		}
 		lastErr = err
 		// A genuine race: another creator took this exact name between our
 		// List and our Create. Relist and try the next free name — the
-		// object was never persisted, so it is safe to retry as-is.
-		obj.ResourceVersion = ""
+		// record was never persisted, so it is safe to retry as-is.
 	}
 	return "", fmt.Errorf("name-base %s: exhausted %d attempts: %w", base, MaxAllocateAttempts, lastErr)
 }
 
 // nextSuffix reads the highest numeric suffix already in use among
 // conversations sharing base, and returns the next free one.
-func nextSuffix(base string, items []agentopsv1alpha1.Conversation) int {
+func nextSuffix(base string, items []state.ConversationRecord) int {
 	highest := 0
 	for _, it := range items {
 		if it.Name == base {

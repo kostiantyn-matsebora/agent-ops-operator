@@ -15,7 +15,7 @@
 | One storage breaker, two edges | fed by unreachable-context reports AND provisioning failures, never two breakers. Only STORAGE-attributable failures count |
 | Condition taints are not drains | Only `spec.unschedulable` + taints outside the condition set mean deliberate drain. Gated on `rbac.drainAware`, off by default |
 | Housekeeping's listing is phase-blind | A CLOSED conversation still has a CR, so no phase check, or it reclaims kept state |
-| Filesystem state on a PVC, else Kubernetes API | THE MANAGER MOUNTS NOTHING. State is a cache, DERIVABLE, or declared-lossy telemetry |
+| Filesystem state on a PVC, else the state store | THE MANAGER MOUNTS NOTHING. The store holds conversations, `Signal`s, each source's cooldown window and its receipt counters. State is a cache, DERIVABLE, or declared-lossy telemetry |
 | Conversations originate only from served sources | A channel CARRIES, never starts one. `/channel/inbound` is reply-only. No channel default profile |
 | The Bot API root is the router's config, never a constant | `TELEGRAM_API_BASE`, default `https://api.telegram.org` — the router's own env var, chart-injected, never the channel adapter's (chat-ops-broker-telegram-gateway). NEVER `Channel.spec.config` |
 | Every route is a dumb proxy on a non-leader, except `/healthz` | `leaderProxyMiddleware` wraps the whole mux (chat-ops-broker-telegram-gateway, generalized from two endpoint-specific fixes). A handler reached anyway falls through to its own local behavior: `/channel/ops` still refuses (claim is leader-only, written by the current Lease holder via `status.threads[].claim`), `/activity*` still serves its own buffer. NEEDS the manager's own kind admitted in its NetworkPolicy ingress rule on 8080, or every non-leader dial is silently DROPPED and the whole fix is a no-op — measured live |
@@ -28,6 +28,6 @@
 | No signal loops | An observing signal adapter must NEVER emit a signal about agent-ops' own machinery — `selfexclude.go`: name prefix, owner/label, own-namespace |
 | No coordination loops | `invoke` refuses a cycle by walking `causedBy` to the root before allowing a call. NO depth limit — only a repeat is refused |
 | Coordinator budgets are per-level, never pooled | `maxAgents`/`maxTurns`/`deadline` enforced on the Coordinator-root conversation alone. A caused conversation binds NO human channel — only the uncaused root does |
-| Runtime pods | ownerRef → Conversation, for GC. Checkout at `/data/workspace` — never move it |
+| Runtime pods | ownerRef → Conversation, but the manager releases pod and ConfigMap EXPLICITLY under every backend — no behaviour depends on GC. Checkout at `/data/workspace` — never move it |
 | Dispatch/ingest semantics | pinned by test fixtures, change deliberately |
 | Signal rule vocabulary | `.claude/rules/signal-rules.md` |

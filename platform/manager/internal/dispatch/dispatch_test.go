@@ -6,14 +6,15 @@ import (
 	"time"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-func inlineResolver(item agentopsv1alpha1.InputItem) (string, error) { return item.Payload, nil }
+func inlineResolver(item state.InputItem) (string, error) { return item.Payload, nil }
 
-func conv(inputs ...agentopsv1alpha1.InputItem) *agentopsv1alpha1.Conversation {
-	c := &agentopsv1alpha1.Conversation{}
+func conv(inputs ...state.InputItem) *state.ConversationRecord {
+	c := &state.ConversationRecord{}
 	c.Name = "c1"
-	c.Spec.Inputs = inputs
+	c.Inputs = inputs
 	return c
 }
 
@@ -29,14 +30,14 @@ var now = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 // dispatchNext runs a work unit with a fixed allowlist. Capability resolution
 // is the caller's job now (it holds the client that reads the bound toolsets),
 // so these tests pin prompt/lane behavior only.
-func dispatchNext(c *agentopsv1alpha1.Conversation, p *agentopsv1alpha1.AgentProfile) (WorkUnit, []string, bool, error) {
+func dispatchNext(c *state.ConversationRecord, p *agentopsv1alpha1.AgentProfile) (WorkUnit, []string, bool, error) {
 	// Passing c.ContextID() is what the manager does, so tests that set the
 	// RETIRED field also prove the dual-read fallback keeps working.
 	return Next(c, p, Tooling{AllowedTools: "Read,Bash", Mode: agentopsv1alpha1.ToolsModeMerge}, inlineResolver, now, c.ContextID())
 }
 
 func TestTaskUsesBuiltinTemplate(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check vacuum"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "check vacuum"})
 	u, ids, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -58,7 +59,7 @@ func TestTaskUsesBuiltinTemplate(t *testing.T) {
 // mid-conversation because the manager restarted would be worse than the
 // retired field. Delete this test when the field goes.
 func TestQueuedAgentOverrideStillDispatches(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "node-doctor"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x", Agent: "node-doctor"})
 	u, _, _, _ := dispatchNext(c, profile())
 	if !strings.Contains(u.PromptText, "node-doctor") {
 		t.Fatalf("queued agent override ignored:\n%s", u.PromptText)
@@ -70,7 +71,7 @@ func TestQueuedAgentOverrideStillDispatches(t *testing.T) {
 // PROFILE declares. That is the whole point of removing the override: the
 // agent comes from the wiring, never from whoever typed the message.
 func TestNewInputUsesProfileAgent(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -83,7 +84,7 @@ func TestNewInputUsesProfileAgent(t *testing.T) {
 func TestProfilePromptWins(t *testing.T) {
 	p := profile()
 	p.Spec.Prompt = "scripts/custom.md"
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
 	u, _, _, _ := dispatchNext(c, p)
 	if u.PromptFile != "scripts/custom.md" || u.PromptText != "" {
 		t.Fatalf("profile prompt must win: %+v", u)
@@ -95,11 +96,11 @@ func TestProfilePromptWins(t *testing.T) {
 
 func TestReplyBatchingAndResume(t *testing.T) {
 	c := conv(
-		agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "first"},
-		agentopsv1alpha1.InputItem{ID: "r2", Type: agentopsv1alpha1.InputReply, Payload: "second"},
-		agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: "{}"},
+		state.InputItem{ID: "r1", Type: state.InputReply, Payload: "first"},
+		state.InputItem{ID: "r2", Type: state.InputReply, Payload: "second"},
+		state.InputItem{ID: "a1", Type: state.InputAlert, Payload: "{}"},
 	)
-	c.Status.SessionID = "sess-1"
+	c.SessionID = "sess-1"
 	u, ids, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -116,7 +117,7 @@ func TestReplyBatchingAndResume(t *testing.T) {
 }
 
 func TestReplyWithoutSessionDegradesToTask(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "hello"})
+	c := conv(state.InputItem{ID: "r1", Type: state.InputReply, Payload: "hello"})
 	u, _, ok, _ := dispatchNext(c, profile())
 	if !ok || u.ResumeSessionID != "" || !strings.Contains(u.PromptText, "hello") {
 		t.Fatalf("degrade to task: %+v", u)
@@ -124,8 +125,8 @@ func TestReplyWithoutSessionDegradesToTask(t *testing.T) {
 }
 
 func TestInflightBlocksDispatch(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
-	c.Status.Inflight = &agentopsv1alpha1.InflightRun{RunID: "r", InputIDs: []string{"other"}}
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
+	c.Inflight = &state.InflightRun{RunID: "r", InputIDs: []string{"other"}}
 	_, _, ok, err := dispatchNext(c, profile())
 	if ok || err != nil {
 		t.Fatal("inflight must block dispatch (strictly serial)")
@@ -134,10 +135,10 @@ func TestInflightBlocksDispatch(t *testing.T) {
 
 func TestProcessedInputsSkipped(t *testing.T) {
 	c := conv(
-		agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "old"},
-		agentopsv1alpha1.InputItem{ID: "i2", Type: agentopsv1alpha1.InputTask, Payload: "new"},
+		state.InputItem{ID: "i1", Type: state.InputTask, Payload: "old"},
+		state.InputItem{ID: "i2", Type: state.InputTask, Payload: "new"},
 	)
-	c.Status.ProcessedInputIDs = []string{"i1"}
+	c.ProcessedInputIDs = []string{"i1"}
 	u, ids, ok, _ := dispatchNext(c, profile())
 	if !ok || len(ids) != 1 || ids[0] != "i2" || !strings.Contains(u.PromptText, "new") {
 		t.Fatalf("processed input not skipped: %v %+v", ids, u)
@@ -145,7 +146,7 @@ func TestProcessedInputsSkipped(t *testing.T) {
 }
 
 func TestDefaultDeliveryIsPrintedAnswer(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
 	u, _, ok, _ := dispatchNext(c, profile())
 	if !ok || !strings.Contains(u.PromptText, "printed answer IS the deliverable") {
 		t.Fatalf("default delivery section missing:\n%s", u.PromptText)
@@ -160,7 +161,7 @@ func TestDefaultDeliveryIsPrintedAnswer(t *testing.T) {
 func TestDeliveryWordingIsInvariant(t *testing.T) {
 	p := profile()
 	p.Spec.Prompt = "scripts/custom.md"
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
 	u, _, _, _ := dispatchNext(c, p)
 	if !strings.Contains(u.PromptVars["DELIVERY_INSTRUCTIONS"], "printed answer IS the deliverable") {
 		t.Fatalf("delivery var missing for repo prompts: %v", u.PromptVars)
@@ -171,7 +172,7 @@ func TestDeliveryWordingIsInvariant(t *testing.T) {
 }
 
 func TestAlertUsesInvestigateTemplate(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: `{"alerts":[]}`})
+	c := conv(state.InputItem{ID: "a1", Type: state.InputAlert, Payload: `{"alerts":[]}`})
 	u, _, ok, _ := dispatchNext(c, profile())
 	if !ok || !strings.Contains(u.PromptText, "READ-ONLY triage") || !strings.Contains(u.PromptText, `{"alerts":[]}`) {
 		t.Fatalf("investigate template: %+v", u)
@@ -199,7 +200,7 @@ func TestToolsModeIsCarriedThrough(t *testing.T) {
 // The runtime composes the wiring's tools with the agent definition's, so the
 // unit must carry BOTH the mode and the agent whose definition it applies to.
 func TestWorkUnitCarriesToolsModeAndAgent(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
 	u, _, ok, err := Next(c, profile(),
 		Tooling{AllowedTools: "Bash", Mode: agentopsv1alpha1.ToolsModeOverwrite}, inlineResolver, now, c.ContextID())
 	if err != nil || !ok {
@@ -220,7 +221,7 @@ func TestWorkUnitCarriesToolsModeAndAgent(t *testing.T) {
 // wrong definition's tools while being told to act as a different agent.
 // Also pins the deprecated dual-read — see TestQueuedAgentOverrideStillDispatches.
 func TestWorkUnitAgentFollowsQueuedOverride(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x", Agent: "k8s-engineer"})
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x", Agent: "k8s-engineer"})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -239,7 +240,7 @@ func TestWorkUnitAgentFollowsQueuedOverride(t *testing.T) {
 // half is pinned in internal/chat: the parse runs whatever a profile declared.
 func TestOutputFormatGatesThePromptOnly(t *testing.T) {
 	build := func(p *agentopsv1alpha1.AgentProfile) WorkUnit {
-		c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check the disk"})
+		c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "check the disk"})
 		u, _, ok, err := dispatchNext(c, p)
 		if err != nil || !ok {
 			t.Fatalf("dispatch: ok=%v err=%v", ok, err)
@@ -288,9 +289,9 @@ func TestOutputFormatGatesThePromptOnly(t *testing.T) {
 
 // rootConv is a Coordinator's own conversation: coordinatorRef set, no
 // causedBy. It is the one shape framed as coordination.
-func rootConv(inputs ...agentopsv1alpha1.InputItem) *agentopsv1alpha1.Conversation {
+func rootConv(inputs ...state.InputItem) *state.ConversationRecord {
 	c := conv(inputs...)
-	c.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "triage"}
+	c.CoordinatorRef = "triage"
 	return c
 }
 
@@ -326,8 +327,8 @@ func assertCoordinationFraming(t *testing.T, u WorkUnit, input, from string) {
 }
 
 func TestRootSignalInputIsFramedAsCoordination(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "disk is filling on node-a",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "cron-nightly", SignalKind: "task"}})
+	c := rootConv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "disk is filling on node-a",
+		Origin: &state.InputOrigin{Kind: state.OriginSignal, Name: "cron-nightly", SignalKind: "task"}})
 	u, ids, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok || len(ids) != 1 {
 		t.Fatal(err, ok, ids)
@@ -339,8 +340,8 @@ func TestRootSignalInputIsFramedAsCoordination(t *testing.T) {
 }
 
 func TestRootChannelInputIsFramedAsCoordination(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "look into the backlog",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "ops-room", Sender: "operator-on-duty"}})
+	c := rootConv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "look into the backlog",
+		Origin: &state.InputOrigin{Kind: state.OriginChannel, Name: "ops-room", Sender: "operator-on-duty"}})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -349,8 +350,8 @@ func TestRootChannelInputIsFramedAsCoordination(t *testing.T) {
 }
 
 func TestRootMemberResultIsFramedAsCoordination(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "pod restarted, root cause OOM",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "c1-k8s-7f", Entry: "k8s"}})
+	c := rootConv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "pod restarted, root cause OOM",
+		Origin: &state.InputOrigin{Kind: state.OriginMember, Name: "c1-k8s-7f", Entry: "k8s"}})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -359,8 +360,8 @@ func TestRootMemberResultIsFramedAsCoordination(t *testing.T) {
 }
 
 func TestRootManagerInputIsFramedAsCoordination(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "your last turn made no move",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: "move-per-turn"}})
+	c := rootConv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "your last turn made no move",
+		Origin: &state.InputOrigin{Kind: state.OriginManager, Name: "move-per-turn"}})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -371,7 +372,7 @@ func TestRootManagerInputIsFramedAsCoordination(t *testing.T) {
 // An input recorded before origins existed still dispatches, and says so
 // rather than inventing a door it came through.
 func TestRootInputWithoutOriginSaysSo(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x"})
+	c := rootConv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x"})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -382,9 +383,9 @@ func TestRootInputWithoutOriginSaysSo(t *testing.T) {
 // A member is a domain agent and may have a repository: `causedBy` alone keeps
 // the lane templates exactly as today.
 func TestMemberWithCausedByKeepsTaskTemplate(t *testing.T) {
-	c := conv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "check vacuum",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "root-1", Entry: "ha"}})
-	c.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "ha"}
+	c := conv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "check vacuum",
+		Origin: &state.InputOrigin{Kind: state.OriginMember, Name: "root-1", Entry: "ha"}})
+	c.CausedBy = &state.Provenance{Parent: "root-1", Entry: "ha"}
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -400,8 +401,8 @@ func TestMemberWithCausedByKeepsTaskTemplate(t *testing.T) {
 // Every input type, not only tasks: an alert on a root renders the coordination
 // framing with the payload fenced, never the read-only triage lane.
 func TestRootAlertRendersCoordinateNotInvestigate(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "a1", Type: agentopsv1alpha1.InputAlert, Payload: `{"alerts":[{"name":"HighLoad"}]}`,
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "alertmanager", SignalKind: "alert"}})
+	c := rootConv(state.InputItem{ID: "a1", Type: state.InputAlert, Payload: `{"alerts":[{"name":"HighLoad"}]}`,
+		Origin: &state.InputOrigin{Kind: state.OriginSignal, Name: "alertmanager", SignalKind: "alert"}})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -417,8 +418,8 @@ func TestRootAlertRendersCoordinateNotInvestigate(t *testing.T) {
 func TestRootProfilePromptStillWins(t *testing.T) {
 	p := profile()
 	p.Spec.Prompt = "prompts/coordinate.md"
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "i1", Type: agentopsv1alpha1.InputTask, Payload: "x",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "cron-nightly"}})
+	c := rootConv(state.InputItem{ID: "i1", Type: state.InputTask, Payload: "x",
+		Origin: &state.InputOrigin{Kind: state.OriginSignal, Name: "cron-nightly"}})
 	u, _, ok, err := dispatchNext(c, p)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -439,12 +440,12 @@ func TestRootProfilePromptStillWins(t *testing.T) {
 // as both, not as one anonymous blob.
 func TestRootBatchedReplyNamesEveryOrigin(t *testing.T) {
 	c := rootConv(
-		agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "member says: OOM",
-			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "c1-k8s-7f", Entry: "k8s"}},
-		agentopsv1alpha1.InputItem{ID: "r2", Type: agentopsv1alpha1.InputReply, Payload: "person says: raise the limit",
-			Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "ops-room"}},
+		state.InputItem{ID: "r1", Type: state.InputReply, Payload: "member says: OOM",
+			Origin: &state.InputOrigin{Kind: state.OriginMember, Name: "c1-k8s-7f", Entry: "k8s"}},
+		state.InputItem{ID: "r2", Type: state.InputReply, Payload: "person says: raise the limit",
+			Origin: &state.InputOrigin{Kind: state.OriginChannel, Name: "ops-room"}},
 	)
-	c.Status.SessionID = "sess-1"
+	c.SessionID = "sess-1"
 	u, ids, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok || len(ids) != 2 {
 		t.Fatal(err, ok, ids)
@@ -462,8 +463,8 @@ func TestRootBatchedReplyNamesEveryOrigin(t *testing.T) {
 // A root's reply before any context handle exists degrades to a fresh turn,
 // still framed as coordination.
 func TestRootReplyWithoutContextStillFramedAsCoordination(t *testing.T) {
-	c := rootConv(agentopsv1alpha1.InputItem{ID: "r1", Type: agentopsv1alpha1.InputReply, Payload: "hello",
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "ops-room"}})
+	c := rootConv(state.InputItem{ID: "r1", Type: state.InputReply, Payload: "hello",
+		Origin: &state.InputOrigin{Kind: state.OriginChannel, Name: "ops-room"}})
 	u, _, ok, err := dispatchNext(c, profile())
 	if err != nil || !ok {
 		t.Fatal(err, ok)
@@ -479,16 +480,16 @@ func TestRootReplyWithoutContextStillFramedAsCoordination(t *testing.T) {
 func TestOriginPhrasePerKind(t *testing.T) {
 	cases := []struct {
 		name string
-		in   *agentopsv1alpha1.InputOrigin
+		in   *state.InputOrigin
 		want string
 	}{
 		{"nil", nil, "an input with no recorded origin"},
-		{"signal", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginSignal, Name: "cron"}, "a signal on source cron"},
-		{"channel", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "tg"}, "a person on channel tg"},
-		{"channel+sender", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginChannel, Name: "tg", Sender: "alice"}, "a person on channel tg (alice)"},
-		{"member", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginMember, Name: "c-9", Entry: "k8s"}, "the member invoked as k8s (conversation c-9)"},
-		{"manager", &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: "move-per-turn"}, "the manager, under its rule move-per-turn"},
-		{"unknown", &agentopsv1alpha1.InputOrigin{Kind: "portal"}, `an input of unrecognized origin kind "portal"`},
+		{"signal", &state.InputOrigin{Kind: state.OriginSignal, Name: "cron"}, "a signal on source cron"},
+		{"channel", &state.InputOrigin{Kind: state.OriginChannel, Name: "tg"}, "a person on channel tg"},
+		{"channel+sender", &state.InputOrigin{Kind: state.OriginChannel, Name: "tg", Sender: "alice"}, "a person on channel tg (alice)"},
+		{"member", &state.InputOrigin{Kind: state.OriginMember, Name: "c-9", Entry: "k8s"}, "the member invoked as k8s (conversation c-9)"},
+		{"manager", &state.InputOrigin{Kind: state.OriginManager, Name: "move-per-turn"}, "the manager, under its rule move-per-turn"},
+		{"unknown", &state.InputOrigin{Kind: "portal"}, `an input of unrecognized origin kind "portal"`},
 	}
 	for _, tc := range cases {
 		if got := originPhrase(tc.in); got != tc.want {

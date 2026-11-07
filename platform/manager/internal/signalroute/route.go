@@ -3,10 +3,10 @@
 // routing decision in the spec's order and snapshots the claimants once, and
 // Route sends the message to each claimant idempotently.
 //
-// It operates purely on a Signal CR's own spec/status and what it reads from
-// the API server — no in-memory routing state beyond the shared cooldown
+// It operates purely on the state.SignalRecord it is handed and what it reads
+// from the API server — no in-memory routing state beyond the shared cooldown
 // book, so a new leader repeats an interrupted pass safely. Both steps mutate
-// the Signal IN MEMORY only; the caller (internal/controller's
+// the record IN MEMORY only; the caller (internal/controller's
 // SignalReconciler) owns the status writes, the work queue, the
 // retry/requeue and housekeeping.
 package signalroute
@@ -25,17 +25,23 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/ingest"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // Deps bundles what a pass needs from its caller.
 type Deps struct {
-	// Client is used for every write: conversation create/patch, input
-	// create, source status.
+	// Client is used for the source status writes (the receipt counters).
 	Client client.Client
-	// Reader serves the reads a pass needs (claimants, reusable-conversation
-	// lookup, backlog count). The API server directly in production, never an
-	// informer cache: a pass interrupted after a create must find what it
-	// just made.
+	// Signals holds the cooldown window of every source: recovered on first
+	// use in this process and written back on each admission.
+	Signals state.SignalStore
+	// Store holds every conversation and queued input payload: the
+	// reusable-conversation lookup, the backlog count, conversation create and
+	// the input append. Read straight from its source of truth, never a cache:
+	// a pass interrupted after a create must find what it just made.
+	Store state.Store
+	// Reader serves the reads a pass needs (claimants, capability and
+	// runtime). The API server directly in production.
 	Reader client.Reader
 	// Namespace every object above lives in — the manager is single-namespace
 	// per install.
@@ -81,9 +87,9 @@ type Result struct {
 // or the one-time claimant snapshot. It mutates sig in memory only.
 //
 // The caller persists that outcome BEFORE Route creates anything: once the
-// snapshot is on the CR a repeated pass skips Admit, so the cooldown it spent
+// snapshot is on the record a repeated pass skips Admit, so the cooldown it spent
 // can never suppress the repeat.
-func Admit(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal, source *agentopsv1alpha1.SignalSource) (Result, error) {
+func Admit(ctx context.Context, deps Deps, sig *state.SignalRecord, source *agentopsv1alpha1.SignalSource) (Result, error) {
 	var res Result
 	claimants, rollback, dropped, err := admit(ctx, deps, sig, source)
 	res.Rollback = rollback
@@ -104,19 +110,19 @@ func Admit(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal, source 
 // its conversation. status.phase is recomputed from the claimants. A non-nil
 // error leaves sig's status as far as the pass got, so the caller persists the
 // partial progress before retrying.
-func Route(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal) (Result, error) {
+func Route(ctx context.Context, deps Deps, sig *state.SignalRecord) (Result, error) {
 	var res Result
-	hadRouted := hasState(sig, agentopsv1alpha1.ClaimantRouted)
+	hadRouted := hasState(sig, state.ClaimantRouted)
 	err := routeClaimants(ctx, deps, sig)
-	sig.Status.Phase = agentopsv1alpha1.RollupPhase(sig.Status.Claimants)
-	res.Wait = hasState(sig, agentopsv1alpha1.ClaimantRouting)
-	res.FirstRouted = !hadRouted && hasState(sig, agentopsv1alpha1.ClaimantRouted)
+	sig.Phase = state.SignalRollupPhase(sig.Claimants)
+	res.Wait = hasState(sig, state.ClaimantRouting)
+	res.FirstRouted = !hadRouted && hasState(sig, state.ClaimantRouted)
 	return res, err
 }
 
-func hasState(sig *agentopsv1alpha1.Signal, state agentopsv1alpha1.ClaimantState) bool {
-	for i := range sig.Status.Claimants {
-		if sig.Status.Claimants[i].State == state {
+func hasState(sig *state.SignalRecord, want string) bool {
+	for i := range sig.Claimants {
+		if sig.Claimants[i].State == want {
 			return true
 		}
 	}
@@ -127,11 +133,11 @@ func hasState(sig *agentopsv1alpha1.Signal, state agentopsv1alpha1.ClaimantState
 // form. ok is false for any other text — including a command that only
 // answers (the listing, /close, /exit, a bare /<name>), which /signal/inbound
 // answers in place and never stores.
-func AddressedTarget(sig *agentopsv1alpha1.Signal) (name, task string, ok bool) {
-	if sig.Spec.Kind != kindChat {
+func AddressedTarget(sig *state.SignalRecord) (name, task string, ok bool) {
+	if sig.Kind != kindChat {
 		return "", "", false
 	}
-	cmd, parsed := addressing.Parse(strings.TrimSpace(sig.Spec.Payload))
+	cmd, parsed := addressing.Parse(strings.TrimSpace(sig.Payload))
 	if !parsed || chat.AnswersInPlace(cmd) {
 		return "", "", false
 	}
@@ -140,8 +146,8 @@ func AddressedTarget(sig *agentopsv1alpha1.Signal) (name, task string, ok bool) 
 
 // admit makes the pre-fan-out decisions (spec steps 1-4). It returns the
 // claimants to snapshot, or dropped=true after recording the drop on sig.
-func admit(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal, source *agentopsv1alpha1.SignalSource) (claimants []chat.Claimant, rollback func(), dropped bool, err error) {
-	isChat := sig.Spec.Kind == kindChat
+func admit(ctx context.Context, deps Deps, sig *state.SignalRecord, source *agentopsv1alpha1.SignalSource) (claimants []chat.Claimant, rollback func(), dropped bool, err error) {
+	isChat := sig.Kind == kindChat
 	var ch *agentopsv1alpha1.Channel
 	if isChat {
 		if ch = channelOf(ctx, deps, sig); ch == nil {
@@ -178,18 +184,22 @@ func admit(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal, source 
 			return nil, nil, true, nil
 		}
 		var spent bool
-		spent, rollback = spendCooldown(ctx, deps, source, sig)
+		var spendErr error
+		spent, rollback, spendErr = spendCooldown(ctx, deps, source, sig)
+		if spendErr != nil {
+			return nil, nil, false, spendErr
+		}
 		if !spent {
 			// The high-volume case — a flapping alert re-delivered inside its
 			// window. Recorded on the Signal, not an event: it is never loud.
-			sig.Status.Phase = agentopsv1alpha1.SignalDropped
-			sig.Status.Reason = agentopsv1alpha1.SignalDropCooldown
+			sig.Phase = state.SignalDropped
+			sig.Reason = string(agentopsv1alpha1.SignalDropCooldown)
 			return nil, nil, true, nil
 		}
 	}
 
 	if isChat {
-		full, err := BacklogFull(ctx, deps.Reader, deps.Namespace, deps.MaxQueued)
+		full, err := BacklogFull(ctx, deps.Store, deps.MaxQueued)
 		if err != nil {
 			rollbackIf(rollback)
 			return nil, nil, false, err
@@ -215,60 +225,61 @@ func rollbackIf(f func()) {
 
 // drop records a pre-fan-out drop on sig and surfaces it as loudly as the
 // unwired drop always was: an activity event and a log line.
-func drop(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal, reason agentopsv1alpha1.SignalDropReason, code, detail string) {
-	sig.Status.Phase = agentopsv1alpha1.SignalDropped
-	sig.Status.Reason = reason
+func drop(ctx context.Context, deps Deps, sig *state.SignalRecord, reason agentopsv1alpha1.SignalDropReason, code, detail string) {
+	sig.Phase = state.SignalDropped
+	sig.Reason = string(reason)
 	Loud(ctx, deps.Activity, sig, activity.KindSignalDropped, code, detail)
 }
 
 // Loud emits the activity event and the log line a Dropped (other than
 // cooldown) or Failed Signal owes.
-func Loud(ctx context.Context, acts *activity.Log, sig *agentopsv1alpha1.Signal, kind, code, detail string) {
+func Loud(ctx context.Context, acts *activity.Log, sig *state.SignalRecord, kind, code, detail string) {
 	log.FromContext(ctx).Info("signal ended without a conversation",
-		"signal", sig.Name, "source", sig.Spec.SourceRef.Name, "initiationId", sig.Spec.InitiationID,
+		"signal", sig.Name, "source", sig.SourceRef, "initiationId", sig.InitiationID,
 		"event", kind, "reason", code, "detail", detail)
 	acts.Emit(activity.Event{
 		Kind:   kind,
-		From:   activity.Node(activity.NodeSignalSource, sig.Spec.SourceRef.Name),
+		From:   activity.Node(activity.NodeSignalSource, sig.SourceRef),
 		Status: activity.StatusError,
 		Code:   code,
-		Detail: detail + " (" + sig.Spec.InitiationID + ")",
+		Detail: detail + " (" + sig.InitiationID + ")",
 	})
 }
 
 // snapshot records the claimant set a Signal fans out to, exactly once.
-func snapshot(deps Deps, sig *agentopsv1alpha1.Signal, claimants []chat.Claimant) {
-	out := make([]agentopsv1alpha1.SignalClaimant, 0, len(claimants))
+func snapshot(deps Deps, sig *state.SignalRecord, claimants []chat.Claimant) {
+	out := make([]state.SignalClaimant, 0, len(claimants))
 	for _, c := range claimants {
-		out = append(out, agentopsv1alpha1.SignalClaimant{Ref: claimantRef(c), State: agentopsv1alpha1.ClaimantRouting})
+		out = append(out, claimantOf(c))
 		nodeKind := activity.NodePipeline
 		if c.ClaimantKind() == chat.ClaimantCoordinator {
 			nodeKind = activity.NodeCoordinator
 		}
 		deps.Activity.Emit(activity.Event{
 			Kind:     activity.KindSignalClaimed,
-			From:     activity.Node(activity.NodeSignalSource, sig.Spec.SourceRef.Name),
+			From:     activity.Node(activity.NodeSignalSource, sig.SourceRef),
 			To:       activity.Node(nodeKind, c.GetName()),
 			Pipeline: c.GetName(),
 			Detail:   "1 signal(s)",
 		})
 	}
-	sig.Status.Claimants = out
+	sig.Claimants = out
 }
 
-// claimantRef renders a chat.Claimant's own ClaimantRef — the two ClaimantKind
-// vocabularies differ in case (chat's is lowercase, the CRD's is capitalized)
-// because api/v1alpha1 is self-contained and cannot import internal/chat.
-func claimantRef(c chat.Claimant) agentopsv1alpha1.ClaimantRef {
-	kind := agentopsv1alpha1.ClaimantKindPipeline
+// claimantOf renders a chat.Claimant as the snapshot entry a record keeps,
+// still Routing — the two ClaimantKind vocabularies differ in case (chat's is
+// lowercase, the record's is capitalized) because internal/state is
+// self-contained and cannot import internal/chat.
+func claimantOf(c chat.Claimant) state.SignalClaimant {
+	kind := state.ClaimantKindPipeline
 	if c.ClaimantKind() == chat.ClaimantCoordinator {
-		kind = agentopsv1alpha1.ClaimantKindCoordinator
+		kind = state.ClaimantKindCoordinator
 	}
-	return agentopsv1alpha1.ClaimantRef{Kind: kind, Name: c.GetName()}
+	return state.SignalClaimant{Kind: kind, Name: c.GetName(), State: state.ClaimantRouting}
 }
 
-func chatKind(k agentopsv1alpha1.ClaimantKind) chat.ClaimantKind {
-	if k == agentopsv1alpha1.ClaimantKindCoordinator {
+func chatKind(k string) chat.ClaimantKind {
+	if k == state.ClaimantKindCoordinator {
 		return chat.ClaimantCoordinator
 	}
 	return chat.ClaimantPipeline
@@ -277,29 +288,29 @@ func chatKind(k agentopsv1alpha1.ClaimantKind) chat.ClaimantKind {
 // routeClaimants attempts every claimant still Routing: a claimant that no
 // longer exists is Skipped, a refused create leaves it Routing, anything else
 // is Routed onto its conversation. A terminal claimant is never touched.
-func routeClaimants(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal) error {
-	for i := range sig.Status.Claimants {
-		c := &sig.Status.Claimants[i]
-		if c.State != agentopsv1alpha1.ClaimantRouting {
+func routeClaimants(ctx context.Context, deps Deps, sig *state.SignalRecord) error {
+	for i := range sig.Claimants {
+		c := &sig.Claimants[i]
+		if c.State != state.ClaimantRouting {
 			continue
 		}
-		claimant, err := chat.ClaimantByKind(ctx, deps.Reader, deps.Namespace, chatKind(c.Ref.Kind), c.Ref.Name)
+		claimant, err := chat.ClaimantByKind(ctx, deps.Reader, deps.Namespace, chatKind(c.Kind), c.Name)
 		if err != nil {
-			return fmt.Errorf("read claimant %s/%s: %w", c.Ref.Kind, c.Ref.Name, err)
+			return fmt.Errorf("read claimant %s/%s: %w", c.Kind, c.Name, err)
 		}
 		if claimant == nil {
-			c.State = agentopsv1alpha1.ClaimantSkipped
+			c.State = state.ClaimantSkipped
 			c.Reason = "claimant no longer exists"
 			continue
 		}
 		convRef, waiting, err := routeOneClaimant(ctx, deps, claimant, sig)
 		if err != nil {
-			return fmt.Errorf("route claimant %s/%s: %w", c.Ref.Kind, c.Ref.Name, err)
+			return fmt.Errorf("route claimant %s/%s: %w", c.Kind, c.Name, err)
 		}
 		if waiting {
 			continue // backlog full: stays Routing, requeued with a delay
 		}
-		c.State = agentopsv1alpha1.ClaimantRouted
+		c.State = state.ClaimantRouted
 		c.ConversationRef = convRef
 	}
 	return nil
@@ -308,16 +319,10 @@ func routeClaimants(ctx context.Context, deps Deps, sig *agentopsv1alpha1.Signal
 // BacklogFull reports whether the pending backlog has reached its bound.
 // Only PENDING conversations count: an admitted one holds a pod (or is about
 // to) and is already bounded by MAX_ACTIVE_CONVERSATIONS.
-func BacklogFull(ctx context.Context, reader client.Reader, namespace string, maxQueued int) (bool, error) {
-	var list agentopsv1alpha1.ConversationList
-	if err := reader.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+func BacklogFull(ctx context.Context, store state.Store, maxQueued int) (bool, error) {
+	pending, err := store.List(ctx, state.ByPhase, state.ListKey{Phase: state.PhasePending})
+	if err != nil {
 		return false, err
 	}
-	n := 0
-	for i := range list.Items {
-		if list.Items[i].Status.Phase == agentopsv1alpha1.ConversationPending {
-			n++
-		}
-	}
-	return n >= maxQueued, nil
+	return len(pending) >= maxQueued, nil
 }

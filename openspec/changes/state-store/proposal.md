@@ -2,8 +2,8 @@
 
 ## Why
 
-Conversation, ConversationInput and the coming Signal are **state**, not
-configuration. Today they share the configuration kinds' storage — custom
+Conversation, ConversationInput and Signal (the durable message
+`signal-persistence` added) are **state**, not configuration. Today they share the configuration kinds' storage — custom
 resources — and pay its full price on every write and every copy:
 
 - A one-field status write re-encodes the whole object through the manager,
@@ -13,9 +13,12 @@ resources — and pay its full price on every write and every copy:
 - Every object is resident four to five times: the apiserver's watch cache,
   kine's page cache, two manager informers and the console's cache. Closed
   conversations included, forever.
-- `signal-persistence` will add a kind whose terminal records are bounded by
-  rate × TTL. Under a flapping source that is thousands of objects, each
-  with the same write and copy cost.
+- A Signal's terminal records are bounded by rate × TTL. Under a flapping
+  source that is thousands of objects, each with the same write and copy cost,
+  and each status write re-encodes its payload.
+- The per-source cooldown window is manager-written state kept on a
+  configuration object. Every fresh admission rewrites a `SignalSource`.
+  That write notifies the source's own reconciler and the console watch.
 
 The storage engine is not the point. The absence of a seam is. There is no
 place where "where state lives" is one decision, so it cannot be made
@@ -24,11 +27,13 @@ differently per install.
 ## What Changes
 
 - A **state store contract** inside the manager: the only way the manager
-  reaches a conversation or an input. Domain records, an opaque revision,
-  compare-and-swap writes, a declared index set, a resumable at-least-once
-  change feed, expiry, append-only sub-records, blobs. No Kubernetes types,
-  no selector strings, no transactions. Signal joins the contract with
-  `signal-persistence`, which owns that extension.
+  reaches a conversation, an input or a signal. Domain records, an opaque
+  revision, compare-and-swap writes, a declared index set, a resumable
+  at-least-once change feed, expiry, append-only sub-records, blobs. No
+  Kubernetes types, no selector strings, no transactions. It has two
+  interfaces over those pieces: conversations and their inputs, and signals
+  (design D-14), which also hold each source's cooldown window and receipt
+  counters (design D-15).
 - The contract is written from what the manager does with state, never from
   a backend's features. Every guarantee is one scenario of a **conformance
   suite**, and the suite is what a backend passes to exist. It also measures
@@ -38,17 +43,25 @@ differently per install.
   byte-identical objects, `kubectl get conv` untouched. The default. The one
   backend with no bundle.
 - The manager consumes state through the contract everywhere — reconciler,
-  HTTP API, chat, dispatch. The Conversation reconciler is driven by the
-  store's change feed, not by a Kubernetes watch it owns.
+  HTTP API, chat, dispatch, signal publication and the signal consumer. The
+  Conversation and Signal reconcilers are driven by the store's change feed,
+  not by a Kubernetes watch they own.
+- A terminal Signal removes itself through `expiresAt`, written in the same
+  compare-and-swap that makes its phase terminal, and a deleted `SignalSource`
+  has its signals released by the manager's explicit act, so no behaviour
+  depends on an owner reference being honoured.
+- `SignalSource.status.cooldown[]` and the receipt counters
+  (`receivedTotal`, `lastReceived`) move behind the contract. Their `kube`
+  location does not change (design D-15).
 - Pod and ConfigMap release becomes the **manager's explicit act** under
-  every backend. The `kube` backend keeps the ownerRef as well, but no
+  every backend. The `kube` backend keeps the owner reference as well, but no
   behaviour depends on garbage collection any more.
 - Chart: one selector, `stateStore.backend`, exactly one value, the render
   refuses anything else. `kube` is the only value this change ships.
 - Out of scope, each its own later change: the NATS JetStream KV backend
   (first), a bring-your-own Postgres backend (second), an optional bbolt
   single-node backend, the console reading state through the manager,
-  `signal-persistence` rebased on the contract.
+  the console reading signals through the manager.
 - **BREAKING**: none. Zero behaviour change is the acceptance criterion.
   The system pack passes unchanged against the `kube` backend.
 
@@ -72,7 +85,8 @@ differently per install.
 **Code**
 
 - `platform/manager/internal/state/` — the contract, domain records, the
-  `kube` backend, the conformance suite with its bench.
+  `kube` backend, the conformance suite with its bench, with `SignalStore` and its
+  record beside `Store`.
 - `platform/manager/internal/controller/conversation_controller.go`,
   `index.go`, `drain.go`, `mediation.go` — reconcile from the feed, read and
   write through the store, explicit pod and ConfigMap release.
@@ -81,6 +95,11 @@ differently per install.
   `internal/chat/` (router, ops, delivery, coordinate, pipelines),
   `internal/dispatch/`, `internal/namewords/`, `internal/control-plane/` —
   every Conversation and ConversationInput access moves to the store.
+- `platform/manager/internal/httpapi/publish.go`,
+  `internal/controller/signal_controller.go`, `signalsource_controller.go`,
+  `internal/signalroute/` — every Signal access moves to the signals
+  interface. The cooldown window and receipt counters move to the same
+  interface.
 - `platform/manager/cmd/manager/main.go` — backend selection from
   `STATE_BACKEND`, store construction, reconciler wiring.
 - `chart/values.yaml`, `chart/templates/deployment.yaml`,
@@ -96,7 +115,7 @@ differently per install.
 - `docs/CHANGELOG.md` — the new values key, no upgrade step.
 - `.claude/rules/invariants.md` — "Filesystem state on a PVC, else
   Kubernetes API" becomes "else the state store", and the runtime-pod row
-  stops naming ownerRef GC as the mechanism.
+  stops naming owner reference GC as the mechanism.
 - `.claude/rules/structure.md` — `internal/state/` in the manager's map.
 
 **Adopter site**

@@ -2,10 +2,9 @@ package chat
 
 import (
 	"context"
+	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // MoveRuleName names the rule behind the one manager-origin input that exists
@@ -32,9 +31,9 @@ func MoveInputID(conversation, runID string) string {
 // Delivery to the conversation's bound threads is the reconciler's, by the
 // existing per-destination rule — nothing here posts.
 func (r *Router) AppendManagerInput(ctx context.Context, convName, inputID, payload string) error {
-	item := agentopsv1alpha1.InputItem{
-		ID: inputID, Type: agentopsv1alpha1.InputReply, Payload: payload, ReceivedAt: metav1.Now(),
-		Origin: &agentopsv1alpha1.InputOrigin{Kind: agentopsv1alpha1.OriginManager, Name: MoveRuleName},
+	item := state.InputItem{
+		ID: inputID, Type: state.InputReply, Payload: payload, ReceivedAt: time.Now(),
+		Origin: &state.InputOrigin{Kind: state.OriginManager, Name: MoveRuleName},
 	}
 	return r.appendInputIdempotent(ctx, convName, item)
 }

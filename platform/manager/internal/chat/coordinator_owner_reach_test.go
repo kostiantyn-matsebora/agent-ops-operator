@@ -35,7 +35,7 @@ func TestResolveActingCoordinatorThreeCases(t *testing.T) {
 	r, _ := coordFixture(t, testCoordinator("co-a"), root, member, pipelineAddressed)
 
 	t.Run("a plain member resolves via its ancestor root", func(t *testing.T) {
-		got, err := r.ResolveActingCoordinator(context.Background(), member)
+		got, err := r.ResolveActingCoordinator(context.Background(), recOf(t, r.Store, member.Name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,7 +44,7 @@ func TestResolveActingCoordinatorThreeCases(t *testing.T) {
 		}
 	})
 	t.Run("a Coordinator's own root resolves via its own field", func(t *testing.T) {
-		got, err := r.ResolveActingCoordinator(context.Background(), root)
+		got, err := r.ResolveActingCoordinator(context.Background(), recOf(t, r.Store, root.Name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func TestResolveActingCoordinatorThreeCases(t *testing.T) {
 		}
 	})
 	t.Run("a Pipeline-addressed conversation resolves to nothing", func(t *testing.T) {
-		got, err := r.ResolveActingCoordinator(context.Background(), pipelineAddressed)
+		got, err := r.ResolveActingCoordinator(context.Background(), recOf(t, r.Store, pipelineAddressed.Name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestResolveActingCoordinatorPropagatesABrokenAncestryChain(t *testing.T) {
 	member.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "missing-parent", Entry: "reaper"}
 	r, _ := coordFixture(t, member)
 
-	if _, err := r.ResolveActingCoordinator(context.Background(), member); err == nil {
+	if _, err := r.ResolveActingCoordinator(context.Background(), recOf(t, r.Store, member.Name)); err == nil {
 		t.Fatal("want an error when the ancestry chain is broken")
 	}
 }
@@ -87,7 +87,7 @@ func TestResolveActingCoordinatorPrefersTheCallersOwnFieldOverTheWalk(t *testing
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), testCoordinator("co-b"), outerRoot, nestedRoot)
 
-	got, err := r.ResolveActingCoordinator(context.Background(), nestedRoot)
+	got, err := r.ResolveActingCoordinator(context.Background(), recOf(t, r.Store, nestedRoot.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestListOpenRootsListsOnlyUncausedRootsOfTheCallersOwnCoordinator(t *testin
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), testCoordinator("co-b"), caller, sibling, other)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestListOpenRootsExcludesAMemberRootEvenWhenItIsItselfANestedCoordinatorsRo
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller, nestedButCaused)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestListOpenRootsExcludesAClosedRoot(t *testing.T) {
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller, closedSibling)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestListOpenRootsExcludesADifferentCoordinatorsRoot(t *testing.T) {
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), testCoordinator("co-b"), caller, otherCoordinatorRoot)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestListOpenRootsExcludesTheCallerWhenTheCallerIsItselfTheRoot(t *testing.T
 	caller := coordinatorRoot("root-1", "co-a")
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestListOpenRootsExcludesTheCallersOwnAncestorRootWhenCallerIsAMember(t *te
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), root, reaper)
 
-	got, err := r.ListOpenRoots(context.Background(), reaper)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, reaper.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestListOpenRootsReturnsSiblingRootsWithTheirDirectMembersProjection(t *tes
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), root, reaper, incident, member1, member2, closedMember)
 
-	got, err := r.ListOpenRoots(context.Background(), reaper)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, reaper.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestListOpenRootsExcludesAnIdleRootWithNoMembers(t *testing.T) {
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller, deadEnd)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestListOpenRootsIncludesAWorkingRootWithNoMembersYet(t *testing.T) {
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller, stillRunning)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestListOpenRootsIncludesAnIdleRootThatHasMembers(t *testing.T) {
 
 	r, _ := coordFixture(t, testCoordinator("co-a"), caller, healed, member)
 
-	got, err := r.ListOpenRoots(context.Background(), caller)
+	got, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, caller.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestListOpenRootsRefusesACallerWithNoCoordinatorScope(t *testing.T) {
 	pipelineAddressed.Name, pipelineAddressed.Namespace = "plain-1", testNS
 	r, _ := coordFixture(t, pipelineAddressed)
 
-	if _, err := r.ListOpenRoots(context.Background(), pipelineAddressed); err != ErrNoCoordinatorScope {
+	if _, err := r.ListOpenRoots(context.Background(), recOf(t, r.Store, pipelineAddressed.Name)); err != ErrNoCoordinatorScope {
 		t.Fatalf("want ErrNoCoordinatorScope, got %v", err)
 	}
 }
@@ -339,7 +339,7 @@ func TestCloseCoordinatedPermitsASiblingRootOfTheCallersOwnCoordinator(t *testin
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, reaper, sibling)
 
-	if err := r.CloseCoordinated(context.Background(), reaper, "incident-1", "resolved by the reaper"); err != nil {
+	if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, reaper.Name), "incident-1", "resolved by the reaper"); err != nil {
 		t.Fatalf("a Coordinator-owner must be able to close a sibling root: %v", err)
 	}
 	var got agentopsv1alpha1.Conversation
@@ -387,7 +387,7 @@ func TestCloseCoordinatedRefusesASiblingRootAPersonStarted(t *testing.T) {
 
 	for _, name := range []string{"task-1", "chat-1"} {
 		t.Run(name, func(t *testing.T) {
-			err := r.CloseCoordinated(context.Background(), reaper, name, "sweeping")
+			err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, reaper.Name), name, "sweeping")
 			if err != ErrCannotCloseHumanRoot {
 				t.Fatalf("want ErrCannotCloseHumanRoot, got %v", err)
 			}
@@ -410,7 +410,7 @@ func TestCloseCoordinatedRefusesADifferentCoordinatorsRoot(t *testing.T) {
 
 	r, c := coordFixture(t, testCoordinator("co-a"), testCoordinator("co-b"), root, reaper, otherCoordinatorRoot)
 
-	err := r.CloseCoordinated(context.Background(), reaper, "root-b", "trying to reach another Coordinator")
+	err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, reaper.Name), "root-b", "trying to reach another Coordinator")
 	if err != ErrOutOfScope {
 		t.Fatalf("want ErrOutOfScope, got %v", err)
 	}
@@ -434,7 +434,7 @@ func TestCloseCoordinatedRefusesAMemberEvenWithinTheCallersOwnCoordinator(t *tes
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, reaper, incident, deepMember)
 
-	err := r.CloseCoordinated(context.Background(), reaper, "deep-member", "trying to reach a member")
+	err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, reaper.Name), "deep-member", "trying to reach a member")
 	if err != ErrOutOfScope {
 		t.Fatalf("want ErrOutOfScope, got %v", err)
 	}
@@ -455,7 +455,7 @@ func TestCloseCoordinatedKeepsTheNarrowBoundForAPipelineAddressedCaller(t *testi
 
 	r, c := coordFixture(t, caller, other)
 
-	err := r.CloseCoordinated(context.Background(), caller, "other-1", "not mine to close")
+	err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "other-1", "not mine to close")
 	if err != ErrOutOfScope {
 		t.Fatalf("want ErrOutOfScope, got %v", err)
 	}
@@ -477,7 +477,7 @@ func TestCloseCoordinatedRefusesTheCallersOwnAncestorRoot(t *testing.T) {
 
 	r, c := coordFixture(t, testCoordinator("co-a"), root, reaper)
 
-	err := r.CloseCoordinated(context.Background(), reaper, "root-1", "trying to close my own root")
+	err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, reaper.Name), "root-1", "trying to close my own root")
 	if err != ErrOutOfScope {
 		t.Fatalf("want ErrOutOfScope, got %v", err)
 	}
@@ -506,7 +506,7 @@ func TestIsHumanInitiated(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isHumanInitiated(tc.conv); got != tc.want {
+			if got := isHumanInitiated(crRec(tc.conv)); got != tc.want {
 				t.Fatalf("want %v, got %v", tc.want, got)
 			}
 		})
@@ -526,7 +526,7 @@ func TestCloseCoordinatedRefusesACoordinatorClosingItsOwnPersonStartedRoot(t *te
 		t.Run(name, func(t *testing.T) {
 			var caller agentopsv1alpha1.Conversation
 			c.Get(context.Background(), nsName(name), &caller)
-			if err := r.CloseCoordinated(context.Background(), &caller, name, "done"); err != ErrCannotCloseHumanRoot {
+			if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), name, "done"); err != ErrCannotCloseHumanRoot {
 				t.Fatalf("want ErrCannotCloseHumanRoot, got %v", err)
 			}
 			c.Get(context.Background(), nsName(name), &caller)
@@ -538,7 +538,7 @@ func TestCloseCoordinatedRefusesACoordinatorClosingItsOwnPersonStartedRoot(t *te
 	t.Run("a machine-originated root may still close itself", func(t *testing.T) {
 		var caller agentopsv1alpha1.Conversation
 		c.Get(context.Background(), nsName("alert-1"), &caller)
-		if err := r.CloseCoordinated(context.Background(), &caller, "alert-1", "resolved"); err != nil {
+		if err := r.CloseCoordinated(context.Background(), recOf(t, r.Store, caller.Name), "alert-1", "resolved"); err != nil {
 			t.Fatalf("self-close of an alert root: %v", err)
 		}
 	})

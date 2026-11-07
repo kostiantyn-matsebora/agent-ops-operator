@@ -7,6 +7,8 @@ import (
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 // TestDeriveCoordinatorTokenMatchesChatPackage pins runtimepod's DUPLICATED
@@ -38,10 +40,16 @@ func TestResolveActingCoordinatorMatchesChatPackage(t *testing.T) {
 	plain.Name, plain.Namespace = "plain-1", "agent-ops"
 
 	c := fakeCoordinatorClient(t, root, member, plain).Build()
-	router := &chat.Router{Client: c, Reader: c, Namespace: "agent-ops"}
+	store := kube.NewStore(c, "agent-ops")
+	router := &chat.Router{Client: c, Reader: c, Store: store, Namespace: "agent-ops"}
 
-	for _, conv := range []*agentopsv1alpha1.Conversation{root, member, plain} {
-		gotName, err := runtimepod.ResolveActingCoordinator(context.Background(), c, "agent-ops", conv)
+	for _, fixture := range []*agentopsv1alpha1.Conversation{root, member, plain} {
+		rec, _, err := store.Get(context.Background(), state.Key(fixture.Name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv := &rec
+		gotName, err := runtimepod.ResolveActingCoordinator(context.Background(), store, conv)
 		if err != nil {
 			t.Fatalf("runtimepod.ResolveActingCoordinator(%s): %v", conv.Name, err)
 		}

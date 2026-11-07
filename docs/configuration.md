@@ -598,6 +598,33 @@ Two things it does not cover, by design:
 Neither is passed off as enforced. The conversation's `EgressMediated` condition
 names what is not covered.
 
+### State store
+
+This key sets where the manager keeps conversation state, `Signal`s, and each source's cooldown window (the ingest cooldown) and receipt counters. **You need to do nothing.** The default
+is the Kubernetes API, as before.
+
+| Key | Default | Consequence |
+|---|---|---|
+| `stateStore.backend` | `kube` | the one backend the manager uses. `kube` keeps state in the custom resources, unchanged |
+
+`kube` keeps the `Conversation`, `ConversationInput` and `Signal` custom
+resources, the window in `SignalSource.status.cooldown` and the receipt
+counters beside it in `SignalSource.status`. They are byte-identical, so
+`kubectl get conv` and `kubectl get sig` are unchanged.
+
+**Exactly one backend is selected.** The render refuses anything else:
+
+- an unknown `backend`
+- a selected backend whose bundle is off
+- two backend bundles on at once
+
+`kube` renders no bundle, and no other backend ships yet, so there is no bundle toggle to set. The manager reads the choice as `STATE_BACKEND`, and a
+value its binary does not carry stops it at start, naming the value.
+
+Switching an existing install between backends is not a supported upgrade path
+today, since `kube` is the only value. A later backend's page states how state
+moves.
+
 ### Capacity
 
 | Key | Default | Consequence |

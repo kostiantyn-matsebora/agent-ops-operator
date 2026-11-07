@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state/kube"
 )
 
 func stateTestScheme(t *testing.T) *runtime.Scheme {
@@ -32,7 +33,7 @@ func TestStateHandlersRefuseAMalformedBodyOnceTheChannelResolves(t *testing.T) {
 	ch := &agentopsv1alpha1.Channel{}
 	ch.Name, ch.Namespace, ch.Spec.Adapter = "c1", "agent-ops", "slack"
 	c := fake.NewClientBuilder().WithScheme(stateTestScheme(t)).WithObjects(ch).Build()
-	s := &Server{Reader: c, Namespace: "agent-ops"}
+	s := &Server{Reader: c, Store: kube.NewStore(c, "agent-ops"), Namespace: "agent-ops"}
 
 	t.Run("handleStatePut", func(t *testing.T) {
 		req := httptest.NewRequest("PUT", "/channel/c1/state/key", strings.NewReader("{not json"))

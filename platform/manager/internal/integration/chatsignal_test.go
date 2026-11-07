@@ -37,8 +37,8 @@ func chatSignal(t *testing.T, srv *httpapi.Server, source, channel, text string)
 		"source": source,
 		"signals": []map[string]any{{
 			"initiationId": fmt.Sprintf("tg-%d", chatInitiationID),
-			"kind":        "chat",
-			"payload":     text,
+			"kind":         "chat",
+			"payload":      text,
 			"labels": map[string]string{
 				"agentops.dev/channel": channel,
 				"agentops.dev/sender":  "somebody@example.com",
@@ -59,9 +59,9 @@ func chatSignalWithReader(t *testing.T, srv *httpapi.Server, source, channel, te
 		"source": source,
 		"signals": []map[string]any{{
 			"initiationId": fmt.Sprintf("tg-%d", chatInitiationID),
-			"kind":        "chat",
-			"payload":     text,
-			"reader":      reader,
+			"kind":         "chat",
+			"payload":      text,
+			"reader":       reader,
 			"labels": map[string]string{
 				"agentops.dev/channel": channel,
 				"agentops.dev/sender":  "somebody@example.com",

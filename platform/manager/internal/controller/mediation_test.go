@@ -9,6 +9,7 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 func mediated() *agentopsv1alpha1.EgressMediation {
@@ -78,13 +79,13 @@ func TestNoBoundServersIsStillMediated(t *testing.T) {
 // The condition must disappear when mediation is turned off, or a stale claim
 // outlives the thing it described.
 func TestTurningMediationOffClearsTheClaim(t *testing.T) {
-	conv := &agentopsv1alpha1.Conversation{}
+	conv := &state.ConversationRecord{}
 	applyMediationCondition(conv, mediationCondition(mcpcompile.Result{}, mediated()))
-	if len(conv.Status.Conditions) != 1 {
+	if len(conv.Conditions) != 1 {
 		t.Fatal("the condition should have been set")
 	}
 	applyMediationCondition(conv, mediationCondition(mcpcompile.Result{}, nil))
-	for _, c := range conv.Status.Conditions {
+	for _, c := range conv.Conditions {
 		if c.Type == ConditionMediated {
 			t.Fatal("the claim must be removed when mediation is off")
 		}

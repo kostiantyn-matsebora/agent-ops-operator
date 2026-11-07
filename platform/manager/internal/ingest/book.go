@@ -25,16 +25,33 @@ func NewCooldownBook() *CooldownBook {
 	return &CooldownBook{byName: map[string]*Cooldown{}, lockFor: map[string]*sync.Mutex{}}
 }
 
-// For returns the source's Cooldown, building it with build on first use.
+// For returns the source's Cooldown, building it with build on first use. A
+// build that returns nil (its record could not be read) leaves the source
+// unbuilt, so the next call builds again instead of keeping an empty window.
+//
+// build runs OUTSIDE the book's mutex: it reads the state store, and holding
+// the mutex across that read would stall Lock and Stats for every source behind
+// one slow backend. The caller serializes one source with Lock, so two builds
+// of one source do not normally overlap; the second look under the mutex keeps
+// the first stored window if they ever do.
 func (b *CooldownBook) For(source string, build func() *Cooldown) *Cooldown {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if cd := b.byName[source]; cd != nil {
+	cd := b.byName[source]
+	b.mu.Unlock()
+	if cd != nil {
 		return cd
 	}
-	cd := build()
-	b.byName[source] = cd
-	return cd
+	built := build()
+	if built == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if existing := b.byName[source]; existing != nil {
+		return existing
+	}
+	b.byName[source] = built
+	return built
 }
 
 // Lock serializes everything that checks AND records one source's cooldown, so

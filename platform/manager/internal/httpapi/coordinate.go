@@ -19,18 +19,16 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/chat"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // RegisterCoordinateRoutes wires the /coordinate/* surface. A separate
@@ -63,18 +61,18 @@ var errWrongToken = errors.New("token does not match the declared identity")
 // constant-time. A name naming no coordinator-rooted conversation, or a token
 // that does not match, both fail identically — the caller learns nothing
 // about which.
-func (s *Server) callerConversation(ctx context.Context, name, token string) (*agentopsv1alpha1.Conversation, error) {
+func (s *Server) callerConversation(ctx context.Context, name, token string) (*state.ConversationRecord, error) {
 	if s.AdapterToken == "" || name == "" || token == "" {
 		return nil, errWrongToken
 	}
-	var conv agentopsv1alpha1.Conversation
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	if err != nil {
 		return nil, errWrongToken
 	}
-	if conv.Spec.CoordinatorRef == nil {
+	if conv.CoordinatorRef == "" {
 		return nil, errWrongToken
 	}
-	want := chat.DeriveCoordinatorToken(s.AdapterToken, conv.Spec.CoordinatorRef.Name, conv.Name)
+	want := chat.DeriveCoordinatorToken(s.AdapterToken, conv.CoordinatorRef, conv.Name)
 	if subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
 		return nil, errWrongToken
 	}
@@ -96,12 +94,12 @@ func (s *Server) callerConversation(ctx context.Context, name, token string) (*a
 // name to re-derive a token against, so it fails identically to a wrong
 // token — the server has made no decision either way
 // (coordinator-owner-reach: "A Pipeline-addressed conversation is refused").
-func (s *Server) callerActingForCoordinator(ctx context.Context, name, token string) (*agentopsv1alpha1.Conversation, error) {
+func (s *Server) callerActingForCoordinator(ctx context.Context, name, token string) (*state.ConversationRecord, error) {
 	if s.AdapterToken == "" || name == "" || token == "" {
 		return nil, errWrongToken
 	}
-	var conv agentopsv1alpha1.Conversation
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: name}, &conv); err != nil {
+	conv, _, err := s.Store.Get(ctx, state.Key(name))
+	if err != nil {
 		return nil, errWrongToken
 	}
 	scope, err := s.Router.ResolveActingCoordinator(ctx, &conv)
@@ -269,10 +267,6 @@ func (s *Server) handleCoordinateEscalate(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// stampMoveAttempts bounds the optimistic retry of a move stamp, the same
-// bound setPhaseUnlessClosed uses for the other sticky status fact here.
-const stampMoveAttempts = 5
-
 // stampMove records on the CALLER's inflight run that the verb just accepted
 // was a move — `status.inflight.moved` (design D-A, aops-mcp-server: "An
 // accepted move is recorded on the caller's inflight run"). Called only after
@@ -294,25 +288,13 @@ func (s *Server) stampMove(ctx context.Context, callerName string) {
 }
 
 func (s *Server) tryStampMove(ctx context.Context, callerName string) error {
-	for range stampMoveAttempts {
-		var conv agentopsv1alpha1.Conversation
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: callerName}, &conv); err != nil {
-			return client.IgnoreNotFound(err)
+	_, err := state.Mutate(ctx, s.Store, state.Key(callerName), func(c *state.ConversationRecord) error {
+		if c.Inflight != nil {
+			c.Inflight.Moved = true
 		}
-		if conv.Status.Inflight == nil || conv.Status.Inflight.Moved {
-			return nil
-		}
-		patch := client.MergeFromWithOptions(conv.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		conv.Status.Inflight.Moved = true
-		err := s.Client.Status().Patch(ctx, &conv, patch)
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return client.IgnoreNotFound(err)
-		}
-	}
-	return fmt.Errorf("conflict recording a move on %q after %d attempts", callerName, stampMoveAttempts)
+		return nil
+	})
+	return state.IgnoreNotFound(err)
 }
 
 // conversationProjection is the bounded view both reach classes get: never a
@@ -326,15 +308,15 @@ type conversationProjection struct {
 	CloseReason string `json:"closeReason,omitempty"`
 }
 
-func projectConversation(c *agentopsv1alpha1.Conversation) conversationProjection {
+func projectConversation(c *state.ConversationRecord) conversationProjection {
 	p := conversationProjection{
-		Name: c.Name, Title: c.Spec.Title, Brief: c.Status.Brief,
-		Phase: string(c.Status.Phase), CloseReason: c.Status.CloseReason,
+		Name: c.Name, Title: c.Title, Brief: c.Brief,
+		Phase: c.Phase, CloseReason: c.CloseReason,
 	}
-	if c.Spec.CoordinatorRef != nil {
-		p.Pipeline = c.Spec.CoordinatorRef.Name
-	} else if c.Spec.PipelineRef != nil {
-		p.Pipeline = c.Spec.PipelineRef.Name
+	if c.CoordinatorRef != "" {
+		p.Pipeline = c.CoordinatorRef
+	} else if c.PipelineRef != "" {
+		p.Pipeline = c.PipelineRef
 	}
 	return p
 }
@@ -379,8 +361,8 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, projectConversation(caller))
 		return
 	}
-	var t agentopsv1alpha1.Conversation
-	if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: target}, &t); err != nil {
+	t, _, err := s.Store.Get(ctx, state.Key(target))
+	if err != nil {
 		writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 		return
 	}
@@ -399,18 +381,18 @@ func (s *Server) handleCoordinateRead(w http.ResponseWriter, r *http.Request) {
 // descendsFrom walks UP from a target conversation's `causedBy` chain,
 // reporting whether it reaches ancestorName — the "own subtree, at any depth"
 // bound aops-mcp-server states for `read`.
-func (s *Server) descendsFrom(ctx context.Context, target *agentopsv1alpha1.Conversation, ancestorName string) (bool, error) {
+func (s *Server) descendsFrom(ctx context.Context, target *state.ConversationRecord, ancestorName string) (bool, error) {
 	cur := target
 	for i := 0; i < 1000; i++ {
-		if cur.Spec.CausedBy == nil {
+		if cur.CausedBy == nil {
 			return false, nil
 		}
-		if cur.Spec.CausedBy.Parent == ancestorName {
+		if cur.CausedBy.Parent == ancestorName {
 			return true, nil
 		}
-		var parent agentopsv1alpha1.Conversation
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: cur.Spec.CausedBy.Parent}, &parent); err != nil {
-			return false, client.IgnoreNotFound(err)
+		parent, _, err := s.Store.Get(ctx, state.Key(cur.CausedBy.Parent))
+		if err != nil {
+			return false, state.IgnoreNotFound(err)
 		}
 		cur = &parent
 	}
@@ -465,14 +447,14 @@ type treeNode struct {
 // buildTree nests a flat descendant list under root by CausedBy.Parent. The
 // flat list is walked once into a parent->children index rather than
 // searched per node, so the cost is linear in the subtree's size.
-func buildTree(root *agentopsv1alpha1.Conversation, descendants []agentopsv1alpha1.Conversation) *treeNode {
-	byParent := map[string][]*agentopsv1alpha1.Conversation{}
+func buildTree(root *state.ConversationRecord, descendants []state.ConversationRecord) *treeNode {
+	byParent := map[string][]*state.ConversationRecord{}
 	for i := range descendants {
 		d := &descendants[i]
-		byParent[d.Spec.CausedBy.Parent] = append(byParent[d.Spec.CausedBy.Parent], d)
+		byParent[d.CausedBy.Parent] = append(byParent[d.CausedBy.Parent], d)
 	}
-	var build func(c *agentopsv1alpha1.Conversation) *treeNode
-	build = func(c *agentopsv1alpha1.Conversation) *treeNode {
+	var build func(c *state.ConversationRecord) *treeNode
+	build = func(c *state.ConversationRecord) *treeNode {
 		n := &treeNode{conversationProjection: projectConversation(c)}
 		for _, child := range byParent[c.Name] {
 			n.Members = append(n.Members, build(child))
@@ -505,8 +487,8 @@ func (s *Server) handleCoordinateTree(w http.ResponseWriter, r *http.Request) {
 	}
 	target := caller
 	if in.Target != "" && in.Target != caller.Name {
-		var t agentopsv1alpha1.Conversation
-		if err := s.Reader.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: in.Target}, &t); err != nil {
+		t, _, err := s.Store.Get(ctx, state.Key(in.Target))
+		if err != nil {
 			writeCoordinateError(w, 404, chat.ErrOutOfSubtree)
 			return
 		}
@@ -569,7 +551,7 @@ func (s *Server) handleCoordinateOpenRoots(w http.ResponseWriter, r *http.Reques
 	for _, root := range roots {
 		out = append(out, openRootView{
 			Name: root.Name, Title: root.Title, Brief: root.Brief,
-			Phase: string(root.Phase), Members: root.Members,
+			Phase: root.Phase, Members: root.Members,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"roots": out})
@@ -577,14 +559,14 @@ func (s *Server) handleCoordinateOpenRoots(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) readChannelProjection(w http.ResponseWriter, r *http.Request, ch *agentopsv1alpha1.Channel) {
 	ctx := r.Context()
-	var list agentopsv1alpha1.ConversationList
-	if err := s.Reader.List(ctx, &list, client.InNamespace(s.Namespace)); err != nil {
+	all, err := s.Store.List(ctx, state.ByAll, state.ListKey{})
+	if err != nil {
 		writeCoordinateError(w, 500, err)
 		return
 	}
 	out := []conversationProjection{}
-	for i := range list.Items {
-		c := &list.Items[i]
+	for i := range all {
+		c := &all[i]
 		if c.ThreadFor(ch.Name) == nil {
 			continue
 		}

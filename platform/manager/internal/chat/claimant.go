@@ -3,10 +3,9 @@ package chat
 import (
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // ClaimantKind says which CRD a Claimant wraps, for a message or an event that
@@ -38,7 +37,7 @@ type Claimant interface {
 	// coordinator root is reachable by a human from the moment it exists,
 	// exactly as a Pipeline-rooted conversation already is. `escalate` no
 	// longer binds anything; it posts through a channel already open.
-	BoundChannelRefs() []agentopsv1alpha1.ObjectRef
+	BoundChannelRefs() []state.Ref
 	// EscalationChannelRefs are snapshotted onto a new root conversation's
 	// `spec.escalationChannelRefs` (design D-D) — nil for a Pipeline, which
 	// escalates nothing. For a Coordinator this is now the SAME set
@@ -46,12 +45,12 @@ type Claimant interface {
 	// its own field for provenance — "which channels did the Coordinator
 	// itself declare" — distinct from `ChannelRefs`, which for a
 	// chat-addressed root may additionally carry the addressing channel.
-	EscalationChannelRefs() []agentopsv1alpha1.ObjectRef
+	EscalationChannelRefs() []state.Ref
 	// SnapshotBudget is the ConversationBudget a new conversation this
 	// claimant opens should carry in status, or nil for a Pipeline — which
 	// enforces none, so a Pipeline-rooted conversation carries no Budget at
 	// all (design D-B, D-E).
-	SnapshotBudget() *agentopsv1alpha1.ConversationBudget
+	SnapshotBudget() *state.ConversationBudget
 }
 
 // pipelineClaimant and coordinatorClaimant adapt the two CRDs to Claimant with
@@ -65,13 +64,23 @@ type pipelineClaimant struct {
 
 func (c pipelineClaimant) ClaimantKind() ClaimantKind { return ClaimantPipeline }
 
-func (c pipelineClaimant) BoundChannelRefs() []agentopsv1alpha1.ObjectRef {
-	return c.Spec.ChannelRefs
+func (c pipelineClaimant) BoundChannelRefs() []state.Ref {
+	return refNames(c.Spec.ChannelRefs)
 }
 
-func (c pipelineClaimant) EscalationChannelRefs() []agentopsv1alpha1.ObjectRef { return nil }
+func (c pipelineClaimant) EscalationChannelRefs() []state.Ref { return nil }
 
-func (c pipelineClaimant) SnapshotBudget() *agentopsv1alpha1.ConversationBudget { return nil }
+func (c pipelineClaimant) SnapshotBudget() *state.ConversationBudget { return nil }
+
+// refNames is a CRD ref list as the record's names. Always a copy, so a later
+// edit to the claimant never reaches a conversation already created.
+func refNames(refs []agentopsv1alpha1.ObjectRef) []state.Ref {
+	out := make([]state.Ref, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, r.Name)
+	}
+	return out
+}
 
 type coordinatorClaimant struct {
 	*agentopsv1alpha1.Coordinator
@@ -83,15 +92,15 @@ func (c coordinatorClaimant) ClaimantKind() ClaimantKind { return ClaimantCoordi
 // exactly like a Pipeline's (coordinator-unconditional-channels, superseding
 // design D-D's "never bound at creation"): any open coordinator root must be
 // reachable by a human whether or not its agent ever calls `escalate`.
-func (c coordinatorClaimant) BoundChannelRefs() []agentopsv1alpha1.ObjectRef {
+func (c coordinatorClaimant) BoundChannelRefs() []state.Ref {
 	return c.EscalationChannelRefs()
 }
 
 // EscalationChannelRefs snapshots the Coordinator's own `channelRefs` — a copy,
 // so a later edit to the Coordinator never reaches a conversation already
 // created (design D-D).
-func (c coordinatorClaimant) EscalationChannelRefs() []agentopsv1alpha1.ObjectRef {
-	return append([]agentopsv1alpha1.ObjectRef{}, c.Spec.ChannelRefs...)
+func (c coordinatorClaimant) EscalationChannelRefs() []state.Ref {
+	return refNames(c.Spec.ChannelRefs)
 }
 
 // SnapshotBudget resolves `spec.limits` into the conversation's own budget,
@@ -99,13 +108,13 @@ func (c coordinatorClaimant) EscalationChannelRefs() []agentopsv1alpha1.ObjectRe
 // its own default, this is only the snapshot), and a relative deadline is
 // resolved against NOW, since re-resolving it later would let the same
 // duration mean a different moment depending on when it was read.
-func (c coordinatorClaimant) SnapshotBudget() *agentopsv1alpha1.ConversationBudget {
-	budget := &agentopsv1alpha1.ConversationBudget{}
+func (c coordinatorClaimant) SnapshotBudget() *state.ConversationBudget {
+	budget := &state.ConversationBudget{}
 	if limits := c.Spec.Limits; limits != nil {
 		budget.MaxAgents = limits.MaxAgents
 		budget.MaxTurns = limits.MaxTurns
 		if limits.Deadline != nil {
-			at := metav1.NewTime(time.Now().Add(limits.Deadline.Duration))
+			at := time.Now().Add(limits.Deadline.Duration)
 			budget.Deadline = &at
 		}
 	}

@@ -37,7 +37,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,6 +46,7 @@ import (
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/dispatch"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // InboundMessage is one user message, already stripped of transport framing.
@@ -62,8 +62,10 @@ type InboundMessage struct {
 
 // Router turns inbound messages into Conversations and inputs.
 type Router struct {
-	Client    client.Client
-	Reader    client.Reader
+	Client client.Client
+	Reader client.Reader
+	// Store holds the conversations and their queued input payloads.
+	Store     state.Store
 	Namespace string
 	Ops       *OpQueue
 	// Activity records the inbound hop. Nil is inert.
@@ -109,7 +111,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// Deliberately NOT an implicit reopen: reopening re-materialises threads on
 	// every bound channel, which is a decision, not something a stray "thanks"
 	// in an archived topic should trigger.
-	if conv.Status.Phase == agentopsv1alpha1.ConversationClosed {
+	if conv.Phase == state.PhaseClosed {
 		r.Ops.EnqueueMessage(ctx, ch, conv, msg.ThreadID, Notice(
 			"This conversation is closed, so nothing here reaches the agent. "+
 				"Reopen it from the console to continue with its history."))
@@ -123,17 +125,17 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	if isExitCommand(text) {
 		return r.ReleaseRuntime(ctx, conv)
 	}
-	busy := conv.Status.Inflight != nil || len(conv.Spec.Inputs) > 0
+	busy := conv.Inflight != nil || len(conv.Inputs) > 0
 	inputID := newInputID()
-	if err := r.appendInput(ctx, conv, agentopsv1alpha1.InputItem{
-		ID: inputID, Type: agentopsv1alpha1.InputReply, Payload: text, ReceivedAt: metav1.Now(),
+	if err := r.appendInput(ctx, conv, state.InputItem{
+		ID: inputID, Type: state.InputReply, Payload: text, ReceivedAt: time.Now(),
 		// Channel origin, with the sender kept: this input is delivered to every
 		// OTHER bound surface as an attributed relay, and reconciliation composes
 		// that from the conversation alone. Sending it from here instead would be
 		// a second delivery path — in memory, lost on a restart, and unable to
 		// reach a surface that renders nothing it is not sent.
-		Origin: &agentopsv1alpha1.InputOrigin{
-			Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name, Sender: msg.Sender,
+		Origin: &state.InputOrigin{
+			Kind: state.OriginChannel, Name: ch.Name, Sender: msg.Sender,
 		},
 	}); err != nil {
 		return err
@@ -157,7 +159,7 @@ func (r *Router) HandleMessage(ctx context.Context, ch *agentopsv1alpha1.Channel
 	// and buys the ORDER a thread reads in — somebody's message, then the ack
 	// that answers it. Composed by the one implementation both callers share.
 	if fresh, err := r.conversation(ctx, conv.Name); err == nil {
-		DeliverInputs(ctx, r.Reader, r.Ops, fresh)
+		DeliverInputs(ctx, r.env(), r.Ops, fresh)
 	}
 	ack := "🔧 On it…"
 	if busy {
@@ -224,11 +226,11 @@ func isExitCommand(text string) bool {
 // The pod is deleted directly rather than flagged for the reconciler. Immediacy
 // is the whole feature, and a field whose only purpose is to defer the thing
 // being asked for would be state standing in for an action.
-func (r *Router) ReleaseRuntime(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+func (r *Router) ReleaseRuntime(ctx context.Context, conv *state.ConversationRecord) error {
 	// The SAME predicate that makes a pod evictable, called rather than
 	// restated — see dispatch.NeedsWorker. The two refusals below differ because
 	// the reasons differ: one is dangerous, the other merely pointless.
-	if conv.Status.Inflight != nil {
+	if conv.Inflight != nil {
 		// Refused, not honored. Deleting a pod mid-run is doubly harmful: the
 		// replacement is created immediately (Inflight makes NeedsWorker true) but
 		// /work hands it nothing, so it idles out its TTL — the LONG one — and is
@@ -239,7 +241,7 @@ func (r *Router) ReleaseRuntime(ctx context.Context, conv *agentopsv1alpha1.Conv
 			"⚠️ Not released — run `%s` is still in progress, and releasing the runtime "+
 				"now would stall it and then repeat it. Wait for it to finish, or use "+
 				"`/close` to abandon the run and end the conversation.",
-			conv.Status.Inflight.RunID)))
+			conv.Inflight.RunID)))
 		return nil
 	}
 	if dispatch.NeedsWorker(conv) {
@@ -250,7 +252,7 @@ func (r *Router) ReleaseRuntime(ctx context.Context, conv *agentopsv1alpha1.Conv
 		return nil
 	}
 	var pod corev1.Pod
-	name := types.NamespacedName{Namespace: conv.Namespace, Name: runtimepod.PodName(conv.Name)}
+	name := types.NamespacedName{Namespace: r.Namespace, Name: runtimepod.PodName(conv.Name)}
 	if err := r.Client.Get(ctx, name, &pod); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err
@@ -279,7 +281,7 @@ func (r *Router) ReleaseRuntime(ctx context.Context, conv *agentopsv1alpha1.Conv
 // have caused exactly the same one — but a release somebody CHOSE should state
 // its price while they are choosing it, rather than leaving it to be discovered
 // as a fault later.
-func (r *Router) releaseText(ctx context.Context, conv *agentopsv1alpha1.Conversation) string {
+func (r *Router) releaseText(ctx context.Context, conv *state.ConversationRecord) string {
 	const kept = "♻️ Runtime released — the slot is free. This conversation and its thread " +
 		"stay open, and it keeps its context: the next message picks up where this left off."
 	const fresh = "♻️ Runtime released — the slot is free. This conversation and its thread " +
@@ -288,7 +290,7 @@ func (r *Router) releaseText(ctx context.Context, conv *agentopsv1alpha1.Convers
 	// The profile is NOT read here any more: it is no longer an input to what
 	// executes a conversation, and reading one to answer this would be the
 	// habit this change ended.
-	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, conv.Namespace, conv, r.Runtime)
+	resolved, err := runtimepod.ResolveFor(ctx, r.Reader, r.Store, r.Namespace, conv, r.Runtime)
 	if err != nil {
 		// Degrade to the neutral wording rather than failing: the pod is already
 		// gone, and refusing to report a completed release because a Get failed
@@ -311,15 +313,15 @@ const neutralRelease = "♻️ Runtime released — the slot is free. This conve
 //
 // No authorization check: no surface in this system authorizes individual
 // senders, and inventing one here would be the only such check in it.
-func (r *Router) CloseConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
+func (r *Router) CloseConversation(ctx context.Context, conv *state.ConversationRecord) error {
 	text := "👋 Conversation closed. This thread is archived — reply here and I " +
 		"will start a fresh conversation, or reopen this one from the console to " +
 		"continue with its history."
-	if conv.Status.Inflight != nil {
+	if conv.Inflight != nil {
 		// Honored mid-run on purpose: /close is most wanted for an agent that
 		// has gone off the rails, and refusing then would make it useless.
 		text = "👋 Conversation closed while a run was in progress — " +
-			conv.Status.Inflight.RunID + " was abandoned. This thread is archived, " +
+			conv.Inflight.RunID + " was abandoned. This thread is archived, " +
 			"and the conversation can be reopened from the console."
 	}
 	return r.closeConversation(ctx, conv, text)
@@ -329,7 +331,7 @@ func (r *Router) CloseConversation(ctx context.Context, conv *agentopsv1alpha1.C
 // close in WORDS ONLY — a conversation ended by a timer needs the farewell more
 // than one ended by hand, and it has to name the window so the person reading it
 // can find the setting responsible.
-func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, idleFor time.Duration) error {
+func (r *Router) AutoCloseConversation(ctx context.Context, conv *state.ConversationRecord, idleFor time.Duration) error {
 	return r.closeConversation(ctx, conv, fmt.Sprintf(
 		"👋 Closed automatically after %s with no activity. This thread is "+
 			"archived and nothing was lost — the conversation and its answers are "+
@@ -364,8 +366,8 @@ func (r *Router) AutoCloseConversation(ctx context.Context, conv *agentopsv1alph
 // for the same reason — its own self-close step no-ops the same way on an
 // already-closed conversation, and the cascade call after it is never gated
 // on that.
-func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation, farewell string) error {
-	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+func (r *Router) closeConversation(ctx context.Context, conv *state.ConversationRecord, farewell string) error {
+	if conv.Phase != state.PhaseClosed {
 		// A STABLE op id, so a close whose status write fails and is retried says
 		// goodbye once rather than once per attempt. The farewell still goes
 		// FIRST: a thread that simply stops is indistinguishable from a fault,
@@ -373,11 +375,11 @@ func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.C
 		r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 			r.Ops.EnqueueFarewell(ctx, ch, conv, tid, Notice(farewell))
 		})
-		patch := client.MergeFrom(conv.DeepCopy())
-		now := metav1.Now()
-		conv.Status.Phase = agentopsv1alpha1.ConversationClosed
-		conv.Status.ClosedAt = &now
-		if err := client.IgnoreNotFound(r.Client.Status().Patch(ctx, conv, patch)); err != nil {
+		now := time.Now()
+		if err := state.IgnoreNotFound(state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+			rec.Phase = state.PhaseClosed
+			rec.ClosedAt = &now
+		})); err != nil {
 			return err
 		}
 	}
@@ -399,8 +401,8 @@ func (r *Router) closeConversation(ctx context.Context, conv *agentopsv1alpha1.C
 //
 // Threads are re-established by the reconciler's ordinary ensure-topic pass,
 // which carries the archived thread id as a hint (see TopicDescriptor).
-func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if conv.Status.Phase != agentopsv1alpha1.ConversationClosed {
+func (r *Router) ReopenConversation(ctx context.Context, conv *state.ConversationRecord) error {
+	if conv.Phase != state.PhaseClosed {
 		return fmt.Errorf("conversation %s is not closed", conv.Name)
 	}
 	if err := r.refuseReopenBehindOpenSuccessor(ctx, conv); err != nil {
@@ -409,13 +411,13 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.
 	if err := r.validateRefs(ctx, conv); err != nil {
 		return err
 	}
-	patch := client.MergeFrom(conv.DeepCopy())
-	conv.Status.Phase = agentopsv1alpha1.ConversationIdle
-	conv.Status.ClosedAt = nil
-	conv.Status.Reopens++
-	now := metav1.Now()
-	conv.Status.LastActivity = &now
-	return r.Client.Status().Patch(ctx, conv, patch)
+	now := time.Now()
+	return state.Patch(ctx, r.Store, conv, func(rec *state.ConversationRecord) {
+		rec.Phase = state.PhaseIdle
+		rec.ClosedAt = nil
+		rec.Reopens++
+		rec.LastActivity = &now
+	})
 }
 
 // refuseReopenBehindOpenSuccessor is the ONE verb that could break equality
@@ -427,18 +429,17 @@ func (r *Router) ReopenConversation(ctx context.Context, conv *agentopsv1alpha1.
 //
 // A conversation carrying no conversationId (legacy, or never
 // signal-originated) has nothing to collide on and is never refused.
-func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if conv.Spec.ConversationID == "" {
+func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *state.ConversationRecord) error {
+	if conv.ConversationID == "" {
 		return nil
 	}
-	var list agentopsv1alpha1.ConversationList
-	if err := r.Client.List(ctx, &list, client.InNamespace(conv.Namespace),
-		client.MatchingFields{agentopsv1alpha1.IndexConversationID: conv.Spec.ConversationID}); err != nil {
+	list, err := r.Store.List(ctx, state.ByConversationID, state.ListKey{ConversationID: conv.ConversationID})
+	if err != nil {
 		return err
 	}
-	for i := range list.Items {
-		successor := &list.Items[i]
-		if successor.Name == conv.Name || successor.Status.Phase == agentopsv1alpha1.ConversationClosed {
+	for i := range list {
+		successor := &list[i]
+		if successor.Name == conv.Name || successor.Phase == state.PhaseClosed {
 			continue
 		}
 		if !conv.SameOrigin(successor) {
@@ -454,22 +455,22 @@ func (r *Router) refuseReopenBehindOpenSuccessor(ctx context.Context, conv *agen
 // dispatch, NAMING the missing object. Never partially reopen and never
 // silently drop a binding: a conversation reopened without its profile is one
 // that looks alive and answers nothing.
-func (r *Router) validateRefs(ctx context.Context, conv *agentopsv1alpha1.Conversation) error {
-	if conv.Spec.ProfileRef.Name == "" {
+func (r *Router) validateRefs(ctx context.Context, conv *state.ConversationRecord) error {
+	if conv.ProfileRef == "" {
 		return fmt.Errorf("conversation %s names no profile", conv.Name)
 	}
 	var profile agentopsv1alpha1.AgentProfile
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Spec.ProfileRef.Name}, &profile); err != nil {
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: conv.ProfileRef}, &profile); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("cannot reopen %s: AgentProfile %q no longer exists", conv.Name, conv.Spec.ProfileRef.Name)
+			return fmt.Errorf("cannot reopen %s: AgentProfile %q no longer exists", conv.Name, conv.ProfileRef)
 		}
 		return err
 	}
-	for _, ref := range conv.Spec.ChannelRefs {
+	for _, ref := range conv.ChannelRefs {
 		var ch agentopsv1alpha1.Channel
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: ref.Name}, &ch); err != nil {
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &ch); err != nil {
 			if apierrors.IsNotFound(err) {
-				return fmt.Errorf("cannot reopen %s: Channel %q no longer exists", conv.Name, ref.Name)
+				return fmt.Errorf("cannot reopen %s: Channel %q no longer exists", conv.Name, ref)
 			}
 			return err
 		}
@@ -483,7 +484,7 @@ func (r *Router) validateRefs(ctx context.Context, conv *agentopsv1alpha1.Conver
 // itself: a reopened thread may still be archived on its transport, and ops are
 // FIFO per adapter, so letting ensure-topic go first is what makes this land in
 // a thread that can receive it.
-func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.Conversation) {
+func (r *Router) FanOutReopenNotice(ctx context.Context, conv *state.ConversationRecord) {
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 		r.Ops.EnqueueReopenNotice(ctx, ch, conv, tid, Notice(
 			"↩️ Conversation reopened — this thread is live again, with everything above it intact. "+
@@ -498,17 +499,17 @@ func (r *Router) FanOutReopenNotice(ctx context.Context, conv *agentopsv1alpha1.
 // (coordinator-unconditional-channels), so an addressed Pipeline OR
 // Coordinator conversation binds its WHOLE declared channel set, plus the
 // addressing channel when that is not already one of them.
-func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []agentopsv1alpha1.ObjectRef {
+func (r *Router) boundChannels(origin Claimant, ch *agentopsv1alpha1.Channel) []state.Ref {
 	if origin == nil {
-		return []agentopsv1alpha1.ObjectRef{{Name: ch.Name}}
+		return []state.Ref{ch.Name}
 	}
-	refs := append([]agentopsv1alpha1.ObjectRef{}, origin.BoundChannelRefs()...)
+	refs := append([]state.Ref{}, origin.BoundChannelRefs()...)
 	for _, ref := range refs {
-		if ref.Name == ch.Name {
+		if ref == ch.Name {
 			return refs
 		}
 	}
-	return append(refs, agentopsv1alpha1.ObjectRef{Name: ch.Name})
+	return append(refs, ch.Name)
 }
 
 // handleListPipelines answers `/pipelines`. They are what a message
@@ -637,7 +638,7 @@ func (r *Router) HandleCommand(ctx context.Context, ch *agentopsv1alpha1.Channel
 // command, mirrored onto OriginReader exactly as the bare chat lane's does
 // (internal/httpapi/signals.go) — empty when the adapter named none.
 func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha1.Channel, task, sender, reader string,
-	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*agentopsv1alpha1.Conversation, error) {
+	origin Claimant, capability agentopsv1alpha1.AgentCapabilitySpec) (*state.ConversationRecord, error) {
 	profile := capability.ProfileName()
 	// NOT cut to Telegram's own topic-name shape — see `memberTitle`'s own
 	// comment: Telegram enforces its own 128-character topic-name cap at the
@@ -651,8 +652,6 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	if profile != "" {
 		title = agentopsv1alpha1.BoundConversationTitle("🤖 " + profile + ": " + strings.Join(strings.Fields(task), " "))
 	}
-	conv := &agentopsv1alpha1.Conversation{}
-	conv.Namespace = r.Namespace
 	// The word-chain and the actual Create are AllocateName's below —
 	// readable-conversation-names: an object name is a deterministic
 	// word-chain, never metadata.generateName's random suffix. The word
@@ -663,18 +662,18 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	if origin != nil {
 		nameWords = origin.GetName()
 	}
-	conv.Spec = agentopsv1alpha1.ConversationSpec{
+	conv := &state.ConversationRecord{
 		ChannelRefs: r.boundChannels(origin, ch),
-		ProfileRef:  agentopsv1alpha1.ObjectRef{Name: profile},
+		ProfileRef:  profile,
 		Title:       title,
-		Inputs: []agentopsv1alpha1.InputItem{{
-			ID: newInputID(), Type: agentopsv1alpha1.InputTask,
-			Payload: task, ReceivedAt: metav1.Now(),
+		Inputs: []state.InputItem{{
+			ID: newInputID(), Type: state.InputTask,
+			Payload: task, ReceivedAt: time.Now(),
 			// A command is typed on a surface, so its origin is that CHANNEL —
 			// which is the one destination it is not delivered to, and the
 			// sender is who it is attributed to everywhere else.
-			Origin: &agentopsv1alpha1.InputOrigin{
-				Kind: agentopsv1alpha1.OriginChannel, Name: ch.Name, Sender: sender,
+			Origin: &state.InputOrigin{
+				Kind: state.OriginChannel, Name: ch.Name, Sender: sender,
 			},
 		}},
 	}
@@ -683,21 +682,21 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 	// applies in internal/httpapi/signals.go, carried here because an
 	// addressed command is the OTHER origination a chat surface owns.
 	if reader != "" {
-		conv.Spec.OriginReader = &agentopsv1alpha1.OriginReader{Channel: ch.Name, Key: reader}
+		conv.OriginReader = &state.OriginReader{Channel: ch.Name, Key: reader}
 	}
 	nodeKind := activity.NodePipeline
 	if origin != nil {
-		conv.Spec.Toolsets = capability.Toolsets.DeepCopy()
-		conv.Spec.MCPConfigs = capability.MCPConfigs.DeepCopy()
+		conv.Toolsets = dispatch.ToolsetBindingOf(capability.Toolsets)
+		conv.MCPConfigs = dispatch.ToolingBindingOf(capability.MCPConfigs)
 		// Same helper the signal lane calls, over the same claimant's already
 		// resolved capability. An addressed command grants its wiring, and the
 		// execution identity and the storage are part of that wiring, not half
 		// of it.
 		snap := runtimepod.SnapshotFor(ctx, r.Reader, r.Namespace, origin.GetName(), capability, r.Runtime)
-		conv.Spec.RuntimeRef = snap.RuntimeRef
-		conv.Spec.ServiceAccountName = snap.ServiceAccountName
-		conv.Spec.ContextClaimName = snap.ContextClaimName
-		conv.Spec.WorkspaceClaimName = snap.WorkspaceClaimName
+		conv.RuntimeRef = snap.RuntimeRef
+		conv.ServiceAccountName = snap.ServiceAccountName
+		conv.ContextClaimName = snap.ContextClaimName
+		conv.WorkspaceClaimName = snap.WorkspaceClaimName
 		// Provenance, written once at creation like the bindings above it and
 		// read for the same reasons they are not: attribution and reuse
 		// scoping, never to resolve wiring. An addressed command is the one
@@ -709,25 +708,18 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		// as separate provenance of the Coordinator's own declared set.
 		if origin.ClaimantKind() == ClaimantCoordinator {
 			nodeKind = activity.NodeCoordinator
-			conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
-			conv.Spec.EscalationChannelRefs = origin.EscalationChannelRefs()
+			conv.CoordinatorRef = origin.GetName()
+			conv.EscalationChannelRefs = origin.EscalationChannelRefs()
 		} else {
-			conv.Spec.PipelineRef = &agentopsv1alpha1.ObjectRef{Name: origin.GetName()}
+			conv.PipelineRef = origin.GetName()
 		}
+		// A Coordinator-rooted conversation's own resource ceiling (design D-E)
+		// is status, which a record carries beside the spec, so it rides the
+		// one Create.
+		conv.Budget = origin.SnapshotBudget()
 	}
-	if _, err := namewords.AllocateName(ctx, r.Client, r.Namespace, "task", namewords.Words(nameWords), conv); err != nil {
+	if _, err := namewords.AllocateName(ctx, r.Store, "task", namewords.Words(nameWords), conv); err != nil {
 		return conv, err
-	}
-	// A Coordinator-rooted conversation's own resource ceiling (design D-E) is
-	// STATUS, so it needs its own write after Create.
-	if origin != nil {
-		if budget := origin.SnapshotBudget(); budget != nil {
-			patch := client.MergeFrom(conv.DeepCopy())
-			conv.Status.Budget = budget
-			if err := r.Client.Status().Patch(ctx, conv, patch); err != nil {
-				return conv, err
-			}
-		}
 	}
 	originName, originKind := ch.Name, activity.NodeChannel
 	pipeline := ""
@@ -739,25 +731,25 @@ func (r *Router) CreateTaskConversation(ctx context.Context, ch *agentopsv1alpha
 		From:         activity.Node(originKind, originName),
 		To:           activity.Node(activity.NodeConversation, conv.Name),
 		Conversation: conv.Name, Pipeline: pipeline,
-		InputID: conv.Spec.Inputs[0].ID, Detail: title,
+		InputID: conv.Inputs[0].ID, Detail: title,
 	})
 	return conv, nil
 }
 
 // convByThread resolves a (channel, thread) pair to its conversation. Thread
 // ids are opaque strings scoped per channel — no cross-channel collisions.
-func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) *agentopsv1alpha1.Conversation {
-	var list agentopsv1alpha1.ConversationList
-	if err := r.Reader.List(ctx, &list, client.InNamespace(r.Namespace)); err != nil {
+func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel, threadID string) *state.ConversationRecord {
+	list, err := r.Store.List(ctx, state.ByAll, state.ListKey{})
+	if err != nil {
 		return nil
 	}
-	for i := range list.Items {
-		c := &list.Items[i]
+	for i := range list {
+		c := &list[i]
 		bound := c.ThreadFor(ch.Name)
 		if bound == nil || *bound != threadID {
 			continue
 		}
-		if len(c.Spec.ChannelRefs) == 0 || c.BoundTo(ch.Name) {
+		if len(c.ChannelRefs) == 0 || c.BoundTo(ch.Name) {
 			return c
 		}
 	}
@@ -771,7 +763,7 @@ func (r *Router) convByThread(ctx context.Context, ch *agentopsv1alpha1.Channel,
 // Each adapter renders it independently, so the same answer may look different
 // on Telegram and on the web. That is the point of fanning out meaning rather
 // than markup.
-func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversation, msg Message) {
+func (r *Router) FanOutSend(ctx context.Context, conv *state.ConversationRecord, msg Message) {
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 		r.Ops.EnqueueMessage(ctx, ch, conv, tid, msg)
 	})
@@ -786,71 +778,84 @@ func (r *Router) FanOutSend(ctx context.Context, conv *agentopsv1alpha1.Conversa
 // A thread already marked delivered is skipped before the queue is even asked —
 // the queue's dedup window is bounded, and after a restart it is empty, so the
 // CR is the only thing that can tell an undelivered reply from a delivered one.
-func (r *Router) FanOutRunReply(ctx context.Context, conv *agentopsv1alpha1.Conversation, runID string, msg Message) {
-	var run *agentopsv1alpha1.RunStatus
-	for i := range conv.Status.Runs {
-		if conv.Status.Runs[i].RunID == runID {
-			run = &conv.Status.Runs[i]
+func (r *Router) FanOutRunReply(ctx context.Context, conv *state.ConversationRecord, runID string, msg Message) {
+	var run *state.Run
+	runs, _ := r.Store.ListRuns(ctx, state.Key(conv.Name))
+	for i := range runs {
+		if runs[i].RunID == runID {
+			run = &runs[i]
 			break
 		}
 	}
 	r.eachBoundThread(ctx, conv, "", func(ch *agentopsv1alpha1.Channel, tid *string) {
 		if run != nil && run.DeliveredTo(ch.Name) {
+			SettleDeliveredNote(ctx, r.Store, conv, ch.Name, runID)
 			return
 		}
 		r.Ops.EnqueueRunReply(ctx, ch, conv, runID, tid, msg)
 	})
 }
 
+// SettleDeliveredNote clears a thread's undelivered-reply note when it names
+// the run that is recorded delivered there. markDelivered writes the run marker
+// and then the note as two writes, and a crash between them leaves the note
+// naming a reply that did arrive; both delivery passes (the fan-out and the
+// reconciler backstop) call this for a run they skip as delivered. A note
+// naming a DIFFERENT run is left alone: that reply is genuinely owed. Best
+// effort: the note is observable bookkeeping, never what decides whether a
+// reply is owed.
+func SettleDeliveredNote(ctx context.Context, store state.Store, conv *state.ConversationRecord, channel, runID string) {
+	if b := conv.Thread(channel); b == nil || b.UndeliveredReply != runID {
+		return
+	}
+	_ = clearUndeliveredNote(ctx, store, state.Key(conv.Name), channel, runID)
+}
+
 // eachBoundThread runs fn for every bound channel that already has a thread,
 // optionally skipping one by name. Channels with no binding are skipped rather
 // than queued: a send to a thread that does not exist has nowhere to land.
-func (r *Router) eachBoundThread(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+func (r *Router) eachBoundThread(ctx context.Context, conv *state.ConversationRecord,
 	skip string, fn func(ch *agentopsv1alpha1.Channel, threadID *string)) {
 
-	for _, ref := range conv.Spec.ChannelRefs {
-		if ref.Name == skip {
+	for _, ref := range conv.ChannelRefs {
+		if ref == skip {
 			continue
 		}
-		tid := conv.ThreadFor(ref.Name)
+		tid := conv.ThreadFor(ref)
 		if tid == nil {
 			continue
 		}
 		var bound agentopsv1alpha1.Channel
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, &bound); err != nil {
+		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref}, &bound); err != nil {
 			continue
 		}
 		fn(&bound, tid)
 	}
 }
 
-// conversation re-reads a conversation, for the paths that need the object as
+// conversation re-reads a conversation, for the paths that need the record as
 // it stands AFTER their own write.
-func (r *Router) conversation(ctx context.Context, name string) (*agentopsv1alpha1.Conversation, error) {
-	var conv agentopsv1alpha1.Conversation
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: name}, &conv); err != nil {
+func (r *Router) conversation(ctx context.Context, name string) (*state.ConversationRecord, error) {
+	conv, _, err := r.Store.Get(ctx, state.Key(name))
+	if err != nil {
 		return nil, err
 	}
 	return &conv, nil
 }
 
-func (r *Router) appendInput(ctx context.Context, conv *agentopsv1alpha1.Conversation, item agentopsv1alpha1.InputItem) error {
-	for attempt := 0; attempt < 5; attempt++ {
-		var fresh agentopsv1alpha1.Conversation
-		if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: conv.Namespace, Name: conv.Name}, &fresh); err != nil {
-			return err
-		}
-		patch := client.MergeFrom(fresh.DeepCopy())
-		fresh.Spec.Inputs = append(fresh.Spec.Inputs, item)
-		if err := r.Client.Patch(ctx, &fresh, patch); err != nil {
-			if apierrors.IsConflict(err) {
-				continue
-			}
-			return err
-		}
+// env is what the delivery helpers read through.
+func (r *Router) env() Env {
+	return Env{Reader: r.Reader, Store: r.Store, Namespace: r.Namespace}
+}
+
+// appendInput queues item on the conversation, re-reading the record on a lost
+// race (state.Mutate).
+func (r *Router) appendInput(ctx context.Context, conv *state.ConversationRecord, item state.InputItem) error {
+	_, err := state.Mutate(ctx, r.Store, state.Key(conv.Name), func(rec *state.ConversationRecord) error {
+		rec.Inputs = append(rec.Inputs, item)
 		return nil
-	}
-	return fmt.Errorf("conflict appending input to %s", conv.Name)
+	})
+	return err
 }
 
 func newInputID() string {

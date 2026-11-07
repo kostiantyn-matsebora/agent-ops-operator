@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // transportMarkup is what must never appear in anything internal/ produces.
@@ -52,7 +53,7 @@ func TestOpsCarryStructuredPayloads(t *testing.T) {
 	q := &OpQueue{Registry: NewRegistry()}
 	ch := testChannel("c1", "slack")
 
-	q.EnqueueEnsureTopic(ctx, ch, testConv("conv-1"), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
+	q.EnqueueEnsureTopic(ctx, ch, crRec(testConv("conv-1")), TopicDescriptor{Source: "vm-alerts", Kind: "alert"})
 	op := q.Claim("slack")
 	if op == nil || op.Topic == nil {
 		t.Fatalf("ensure-topic must carry a descriptor: %+v", op)
@@ -61,7 +62,7 @@ func TestOpsCarryStructuredPayloads(t *testing.T) {
 		t.Fatalf("descriptor: %+v", op.Topic)
 	}
 
-	q.EnqueueMessage(ctx, ch, nil, nil, Warn("careful"))
+	q.EnqueueMessage(ctx, ch, crRec(nil), nil, Warn("careful"))
 	op = q.Claim("slack")
 	if op == nil || op.Message == nil || op.Message.Kind != MsgNotice || op.Message.Level != NoticeWarn {
 		t.Fatalf("send must carry a typed message: %+v", op)
@@ -78,8 +79,8 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	thread := "t-1"
 	card := SignalMessage("", "vm-alerts", "DiskFull", "", nil, "boom", agentopsv1alpha1.OriginSignal)
 
-	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card)
-	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card) // reconcile repeat
+	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "in-1", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "in-1", &thread, card) // reconcile repeat
 	first := q.Claim("slack")
 	if first == nil || first.ID != InputOpID("conv-1", "in-1", "c1") {
 		t.Fatalf("input card id: %+v", first)
@@ -90,18 +91,18 @@ func TestInputCardDedupsButOrdinarySendsDoNot(t *testing.T) {
 	// still deduped AFTER completion — this is the half a fresh-id send lacks,
 	// and without it every reconcile would repost the alert
 	q.Complete(ctx, first.ID, OpResult{})
-	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-1", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "in-1", &thread, card)
 	if again := q.Claim("slack"); again != nil {
 		t.Fatalf("input card reposted after completion: %+v", again)
 	}
 	// a DIFFERENT input on the same conversation is a different card
-	q.EnqueueInputDelivery(ctx, ch, testConv("conv-1"), "in-2", &thread, card)
+	q.EnqueueInputDelivery(ctx, ch, crRec(testConv("conv-1")), "in-2", &thread, card)
 	if op := q.Claim("slack"); op == nil {
 		t.Fatal("a second input must get its own card")
 	}
 	// ordinary sends are never suppressed
-	q.EnqueueMessage(ctx, ch, nil, &thread, Notice("same words"))
-	q.EnqueueMessage(ctx, ch, nil, &thread, Notice("same words"))
+	q.EnqueueMessage(ctx, ch, crRec(nil), &thread, Notice("same words"))
+	q.EnqueueMessage(ctx, ch, crRec(nil), &thread, Notice("same words"))
 	firstNotice := q.Claim("slack")
 	secondNotice := q.Claim("slack")
 	if firstNotice == nil || secondNotice == nil {
@@ -201,7 +202,7 @@ func TestAgentTextIsPassedThroughUnaltered(t *testing.T) {
 	}
 	// A failed run that explained itself leaves as a notice, and that body is
 	// the agent's too.
-	failed := RunReplyMessage(&agentopsv1alpha1.RunStatus{Status: "failed", Result: raw})
+	failed := RunReplyMessage(&state.Run{Status: "failed", Result: raw})
 	if failed.Kind != MsgNotice || failed.Level != NoticeWarn {
 		t.Fatalf("a failed run with an explanation is a warn notice: %+v", failed)
 	}

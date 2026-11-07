@@ -5,11 +5,12 @@ import (
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/mcpcompile"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 func TestBuildInjectsAOPSMCPTokenWhenCoordinatorRootBindsTheAopsServer(t *testing.T) {
 	conv := conversation("root-1")
-	conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-a"}
+	conv.CoordinatorRef = "co-a"
 	pod := Build(conv, &agentopsv1alpha1.AgentProfile{},
 		mcpcompile.Result{Endpoints: map[string]string{"aops": "http://agentops-mcp-aops:8080/mcp"}},
 		"mcp-cm", Resolved{}, "master-key")
@@ -37,7 +38,7 @@ func TestBuildOmitsAOPSMCPTokenWhenNotCoordinatorRooted(t *testing.T) {
 
 func TestBuildOmitsAOPSMCPTokenWhenTheWiringNeverBoundTheAopsServer(t *testing.T) {
 	conv := conversation("root-1")
-	conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-a"}
+	conv.CoordinatorRef = "co-a"
 	pod := Build(conv, &agentopsv1alpha1.AgentProfile{}, mcpcompile.Result{}, "mcp-cm", Resolved{}, "master-key")
 
 	if envOf(container(pod, "worker"), "AOPS_MCP_TOKEN") != "" {
@@ -52,7 +53,7 @@ func TestBuildOmitsAOPSMCPTokenWhenTheWiringNeverBoundTheAopsServer(t *testing.T
 // conversation.
 func TestBuildInjectsAOPSMCPTokenForAMemberViaTheResolvedActingCoordinator(t *testing.T) {
 	conv := conversation("member-1")
-	conv.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "reaper"}
+	conv.CausedBy = &state.Provenance{Parent: "root-1", Entry: "reaper"}
 	pod := Build(conv, &agentopsv1alpha1.AgentProfile{},
 		mcpcompile.Result{Endpoints: map[string]string{"aops": "http://agentops-mcp-aops:8080/mcp"}},
 		"mcp-cm", Resolved{ActingCoordinator: "co-a"}, "master-key")
@@ -69,7 +70,7 @@ func TestBuildInjectsAOPSMCPTokenForAMemberViaTheResolvedActingCoordinator(t *te
 // gets no token, exactly as a plain Pipeline-rooted conversation does.
 func TestBuildOmitsAOPSMCPTokenForAMemberWithNoResolvedCoordinator(t *testing.T) {
 	conv := conversation("member-1")
-	conv.Spec.CausedBy = &agentopsv1alpha1.Provenance{Parent: "root-1", Entry: "reaper"}
+	conv.CausedBy = &state.Provenance{Parent: "root-1", Entry: "reaper"}
 	pod := Build(conv, &agentopsv1alpha1.AgentProfile{},
 		mcpcompile.Result{Endpoints: map[string]string{"aops": "http://agentops-mcp-aops:8080/mcp"}},
 		"mcp-cm", Resolved{}, "master-key")
@@ -83,7 +84,7 @@ func TestBuildOmitsAOPSMCPTokenForAMemberWithNoResolvedCoordinator(t *testing.T)
 // own coordinatorRef always wins, exactly as before this change.
 func TestBuildPrefersTheConversationsOwnCoordinatorRefOverTheResolvedOne(t *testing.T) {
 	conv := conversation("root-1")
-	conv.Spec.CoordinatorRef = &agentopsv1alpha1.ObjectRef{Name: "co-a"}
+	conv.CoordinatorRef = "co-a"
 	pod := Build(conv, &agentopsv1alpha1.AgentProfile{},
 		mcpcompile.Result{Endpoints: map[string]string{"aops": "http://agentops-mcp-aops:8080/mcp"}},
 		"mcp-cm", Resolved{ActingCoordinator: "co-wrong"}, "master-key")

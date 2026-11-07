@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strconv"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/activity"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/runtimepod"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // The work result's turns and tool calls: what the RUNTIME saw the run do. The
@@ -126,8 +126,8 @@ func nonNegative(at string, fields map[string]*int64) error {
 // runtime that no longer resolves, or a deployment with no image anywhere,
 // falls back to the AgentRuntime itself — a hop from a coarser node is honest,
 // one from an image nobody ran is not.
-func (s *Server) runtimeImageNode(ctx context.Context, conv *agentopsv1alpha1.Conversation) *activity.NodeRef {
-	if resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Namespace, conv, s.Runtime); err == nil && resolved.Config.Image != "" {
+func (s *Server) runtimeImageNode(ctx context.Context, conv *state.ConversationRecord) *activity.NodeRef {
+	if resolved, err := runtimepod.ResolveFor(ctx, s.Reader, s.Store, s.Namespace, conv, s.Runtime); err == nil && resolved.Config.Image != "" {
 		return activity.Node(activity.NodeRuntimeImage, resolved.Config.Image)
 	}
 	return activity.Node(activity.NodeRuntime, s.runtimeName(ctx, conv))
@@ -135,7 +135,7 @@ func (s *Server) runtimeImageNode(ctx context.Context, conv *agentopsv1alpha1.Co
 
 // emitRunCalls records one model.call per turn and one tool.call per tool
 // call. A report with neither emits nothing, and resolves nothing.
-func (s *Server) emitRunCalls(ctx context.Context, conv *agentopsv1alpha1.Conversation,
+func (s *Server) emitRunCalls(ctx context.Context, conv *state.ConversationRecord,
 	pipeline, runID string, d *workDone) {
 
 	if len(d.Turns) == 0 && len(d.ToolCalls) == 0 {

@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // contextSyncPort is where the sidecar listens for the agent's work contract.
@@ -66,7 +67,7 @@ func emptyDirWithLimit(limit string) *corev1.EmptyDirVolumeSource {
 // starts BEFORE the agent, so the restore cannot race the first work request;
 // and it TERMINATES when the agent exits, so a pod whose worker has finished
 // still reaches Succeeded instead of hanging on a sidecar that never returns.
-func contextSyncContainer(conv *agentopsv1alpha1.Conversation, cfg Config,
+func contextSyncContainer(conv *state.ConversationRecord, cfg Config,
 	sync *agentopsv1alpha1.ContextSync, mounts []corev1.VolumeMount) corev1.Container {
 
 	always := corev1.ContainerRestartPolicyAlways
@@ -124,7 +125,7 @@ func retainOrDefault(sync *agentopsv1alpha1.ContextSync) int32 {
 // overwrite one another's context — the same isolation the workspace claim has
 // always had, and a prerequisite rather than a nicety: without it, two pods
 // copying a shared tree back would each erase the other's writes.
-func contextSyncMounts(conv *agentopsv1alpha1.Conversation) []corev1.VolumeMount {
+func contextSyncMounts(conv *state.ConversationRecord) []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{Name: "context", MountPath: contextLiveMount},
 		{Name: "context-store", MountPath: contextStoreMount, SubPath: conv.Name},

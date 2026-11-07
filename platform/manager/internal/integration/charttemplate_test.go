@@ -659,7 +659,7 @@ func TestEventsAdapterRBACGrantsNodesOnlyClusterWide(t *testing.T) {
 // (<source>@<namespace>/<workload>, owner-reference resolved), never in a
 // chart-rendered grouping value — the manager carries no grouping policy at
 // all. cooldownHours is pinned explicit at 0 because the adapter's own
-// pending/dwell queue is already the suppression window; the CRD's 6h
+// pending/dwell queue is already the cooldown window; the CRD's 6h
 // default would otherwise drop every repeat post of a persisting problem.
 func TestEventsSourceCarriesExplicitZeroCooldownNoGrouping(t *testing.T) {
 	out := helmTemplate(t, "--set", "kubernetes.enabled=true")
@@ -2240,7 +2240,7 @@ func assertHaLastRuleIsUndwelledCatchAll(t *testing.T, blocks []string) {
 // logic, keyed on condition identity), never a chart-rendered value — one
 // broken hub logs from several code paths and is one conversation.
 // cooldownHours is pinned explicit at 0 because that dwell logic is already
-// the suppression window; this adapter implements no time axis either, so a
+// the cooldown window; this adapter implements no time axis either, so a
 // window key would be one it silently never honors rather than one it
 // rejects.
 func assertHaCarriesExplicitZeroCooldownNoGroupingOrWindow(t *testing.T, src string) {
@@ -3619,4 +3619,37 @@ func namesKey(vs []configschema.Violation, key string) bool {
 		}
 	}
 	return false
+}
+
+// STATE_BACKEND is rendered from stateStore.backend, and the manager reads
+// exactly this name (cmd/manager/store.go, stateBackendEnv). The default is kube.
+func TestStateBackendEnvIsRenderedFromTheSelector(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t), "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"kube\"") {
+		t.Fatalf("manager Deployment must carry STATE_BACKEND=kube by default:\n%s", deploy)
+	}
+}
+
+// `--set stateStore=null` removes the whole block; the guard and the env line
+// fall back to the kube default rather than failing on a nil pointer.
+func TestStateStoreNullFallsBackToTheKubeDefault(t *testing.T) {
+	deploy := findDocByKindAndMetaName(helmTemplate(t, "--set", "stateStore=null"), "Deployment", "agentops-manager")
+	if !strings.Contains(deploy, "name: STATE_BACKEND\n              value: \"kube\"") {
+		t.Fatalf("a null stateStore must render STATE_BACKEND=kube:\n%s", deploy)
+	}
+}
+
+// The guard's table has no backend bundle today (kube renders none), so the
+// only refusal a render can reach is an unknown backend. The selected-bundle-off
+// and two-bundles-on refusals are exercised by the first backend bundle that adds
+// its row to agentops.stateStoreBackends.
+func TestStateStoreGuard(t *testing.T) {
+	msg := helmTemplateErr(t, "--set", "stateStore.backend=nope")
+	for _, w := range []string{"stateStore.backend=\"nope\"", "not a known state backend"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("failure must contain %q:\n%s", w, msg)
+		}
+	}
+	// The default passes.
+	helmTemplate(t)
 }

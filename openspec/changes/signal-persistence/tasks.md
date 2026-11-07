@@ -1,5 +1,10 @@
 # signal-persistence — tasks
 
+> The `state-store` change, not yet archived, takes over this change's storage access.
+> Once it lands, the manager reaches `Signal`s and each source's cooldown window through the store's `SignalStore`.
+> Tasks 2.x, 3.x and 4.x below were done against direct Kubernetes access and are superseded in that respect.
+> Task 4.2's `ownerRef` cascade is replaced by the manager releasing a deleted source's signals itself.
+
 ## 1. The Signal CRD
 
 - [x] 1.1 Add the `Signal` type to `platform/manager/api/v1alpha1/` — spec (`sourceRef`, `adapter`, `initiationId`, optional `signalId`, `kind`, `title`, `severity`, `labels`, `reader`, `payload`), status (`phase`, `reason`, `completedAt`, `attempts`, `firstAttemptAt`, `consumedBy`, `consumedAt`, `claimants[]`) — and verify the enums match the delta spec's field table

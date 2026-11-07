@@ -37,7 +37,8 @@ func postCoordinateReq(t *testing.T, srv *httpapi.Server, path, token string, bo
 func reconcileConversation(t *testing.T, srv *httpapi.Server, name string) {
 	t.Helper()
 	rc := &controller.ConversationReconciler{
-		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100,
+		Client: k8sClient,
+		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100,
 		Ops: srv.Ops, Router: srv.Router, Runtime: srv.Runtime,
 	}
 	if _, err := rc.Reconcile(context.Background(),
@@ -350,7 +351,8 @@ func TestCoordinateFutureDeadlineCapsTheReconcileRequeue(t *testing.T) {
 
 	srv := apiServer()
 	rc := &controller.ConversationReconciler{
-		Client: k8sClient, Scheme: scheme, MaxActiveConversations: 100,
+		Client: k8sClient,
+		Store:  stateStore, Namespace: ns, Scheme: scheme, MaxActiveConversations: 100,
 		Ops: srv.Ops, Router: srv.Router, Runtime: srv.Runtime,
 	}
 	res, err := rc.Reconcile(context.Background(),

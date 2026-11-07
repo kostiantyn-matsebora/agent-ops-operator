@@ -4,21 +4,27 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
 	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
 	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/namewords"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
 // newBareConversation is the minimum Conversation AllocateName can create:
 // ProfileRef is the one required spec field, and Name is left for
 // AllocateName itself to set.
-func newBareConversation() *agentopsv1alpha1.Conversation {
+func newBareConversation() *state.ConversationRecord {
+	return &state.ConversationRecord{ProfileRef: "stub"}
+}
+
+// bareConversationObject is the same minimum as a stored object, for the test
+// that plants a conversation AllocateName's own listing cannot see.
+func bareConversationObject() *agentopsv1alpha1.Conversation {
 	conv := &agentopsv1alpha1.Conversation{}
 	conv.Namespace = ns
 	conv.Spec = agentopsv1alpha1.ConversationSpec{
@@ -28,7 +34,7 @@ func newBareConversation() *agentopsv1alpha1.Conversation {
 }
 
 func TestAllocateNameFirstAllocationHasNoSuffix(t *testing.T) {
-	name, err := namewords.AllocateName(context.Background(), k8sClient, ns, "alert", "allocate-first-abc", newBareConversation())
+	name, err := namewords.AllocateName(context.Background(), stateStore, "alert", "allocate-first-abc", newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +48,7 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 	ctx := context.Background()
 	const kind, words = "alert", "allocate-recur-abc"
 
-	first, err := namewords.AllocateName(ctx, k8sClient, ns, kind, words, newBareConversation())
+	first, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +57,7 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 		t.Errorf("first = %q", first)
 	}
 
-	second, err := namewords.AllocateName(ctx, k8sClient, ns, kind, words, newBareConversation())
+	second, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +66,7 @@ func TestAllocateNameRecurringBaseGetsTheNextNumber(t *testing.T) {
 		t.Errorf("second = %q", second)
 	}
 
-	third, err := namewords.AllocateName(ctx, k8sClient, ns, kind, words, newBareConversation())
+	third, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +100,7 @@ func TestAllocateNameRetriesAGenuineCreateConflict(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			names[i], errs[i] = namewords.AllocateName(ctx, k8sClient, ns, kind, words, newBareConversation())
+			names[i], errs[i] = namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
 		}(i)
 	}
 	wg.Wait()
@@ -135,19 +141,19 @@ func TestAllocateNameExhaustsRetriesOnPersistentConflict(t *testing.T) {
 	const kind, words = "member", "allocate-exhaust-abc"
 	base := kind + "-" + words
 
-	blocker := newBareConversation()
+	blocker := bareConversationObject()
 	blocker.Name = base
 	if err := k8sClient.Create(ctx, blocker); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, blocker) })
 
-	_, err := namewords.AllocateName(ctx, k8sClient, ns, kind, words, newBareConversation())
+	_, err := namewords.AllocateName(ctx, stateStore, kind, words, newBareConversation())
 	if err == nil {
 		t.Fatal("want an error, got nil")
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		t.Errorf("want an AlreadyExists error, got %v", err)
+	if !errors.Is(err, state.ErrAlreadyExists) {
+		t.Errorf("want the store's AlreadyExists error, got %v", err)
 	}
 	if !strings.Contains(err.Error(), base) {
 		t.Errorf("error %q does not name the base %q", err, base)

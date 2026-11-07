@@ -8,7 +8,7 @@ that records where each one is.
 Manager state is a cache of a Kubernetes object, DERIVABLE from Kubernetes
 objects, or declared lossy telemetry — and state fitting none of the three is a
 defect. That is why outbound operations are derivable rather than queued
-in memory, why suppression windows are written on the SignalSource, and why a
+in memory, why cooldown windows are written on the SignalSource, and why a
 telemetry gap is reported rather than rendered as silence.
 
 ## Requirements
@@ -19,7 +19,7 @@ homes, and SHALL NOT hold state that belongs to no class:
 
 - **Kubernetes API** — configuration, conversation state (session id, threads,
   inputs, runs, phase, and the conversation's MESSAGE RECORD — what people sent
-  as well as what the agent answered), adapter cursors, and suppression windows.
+  as well as what the agent answered), adapter cursors, and cooldown windows.
   Recovered by reading; survives any process restart and any rescheduling.
 - **PersistentVolume** — state that genuinely IS a filesystem: the runtime's
   agent session files and, optionally, its repository checkout.
@@ -131,9 +131,9 @@ that thread, cleared when delivery succeeds.
 - **WHEN** a manager replica claims an `ensure-topic` op and then crashes before the adapter completes it
 - **THEN** the claim persists on the Conversation's own `status`, and the next leader reads it there, clears it as held by a former leader and re-dispatches the op
 
-### Requirement: Suppression windows survive a manager restart
+### Requirement: Cooldown windows survive a manager restart
 Cooldown state keyed on `initiationId` SHALL be durable for the lifetime of its
-window. The manager SHALL record suppression on the owning `SignalSource` and
+window. The manager SHALL record the cooldown window on the owning `SignalSource` and
 SHALL load it before applying cooldown to a source after a restart.
 
 Entries older than their window SHALL be pruned so the record stays bounded.

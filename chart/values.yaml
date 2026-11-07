@@ -36,6 +36,15 @@ maxActiveConversations: 5
 # told on the surface they typed on, alerts are logged and counted.
 maxQueuedConversations: 50
 
+# Where the manager keeps conversation state. EXACTLY ONE backend is selected,
+# and exactly that backend's bundle (chart/charts/<name>/, `<name>.enabled`) is
+# enabled: `agentops.stateStoreGuard` fails the render on an unknown backend,
+# on a selected backend whose bundle is off, and on two backend bundles on.
+# `kube` is the baseline (the Conversation custom resources) and renders NO
+# bundle. The manager reads the choice as STATE_BACKEND.
+stateStore:
+  backend: kube
+
 # Signals are a durable message queue on the Kubernetes API (kind Signal):
 # /signal/inbound stores one per admitted signal, the leader's consumer pool
 # routes them, the leader's housekeeping bounds and collects them. Every bound
