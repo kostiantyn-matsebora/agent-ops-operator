@@ -618,7 +618,7 @@ counters beside it in `SignalSource.status`. They are byte-identical, so
 - a selected backend whose bundle is off
 - two backend bundles on at once
 
-`kube` renders no bundle. The manager reads the choice as `STATE_BACKEND`, and a
+`kube` renders no bundle, and no other backend ships yet, so there is no bundle toggle to set. The manager reads the choice as `STATE_BACKEND`, and a
 value its binary does not carry stops it at start, naming the value.
 
 Switching an existing install between backends is not a supported upgrade path

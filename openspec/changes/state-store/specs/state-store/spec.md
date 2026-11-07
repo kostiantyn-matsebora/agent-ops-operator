@@ -156,7 +156,7 @@ the order they were appended.
 
 An existing run accepts only growth, stated in the next Requirement.
 
-The contract SHALL offer one combined read, `GetWithRuns`, returning a
+The contract SHALL offer one combined read returning a
 conversation record, its revision and its runs in append order in a single
 read.
 
