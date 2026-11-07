@@ -61,8 +61,6 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 		RuntimeStartFailures:    st.RuntimeStartFailures,
 		LastRuntimeStartFailure: metaTimeToTimePtr(st.LastRuntimeStartFailure),
 		Conditions:              toStateConditions(st.Conditions),
-
-		ExpiresAt: expiresAtFromAnnotations(conv.Annotations),
 	}
 
 	if s.CausedBy != nil {
@@ -112,9 +110,9 @@ func toRecord(conv *agentopsv1alpha1.Conversation) state.ConversationRecord {
 	return rec
 }
 
-// applySpecAndMeta writes rec's spec-shaped fields, plus the ExpiresAt
-// annotation, onto conv (state -> api). Paired with applyStatus below —
-// see store.go's Update for why the two are separate apiserver calls.
+// applySpecAndMeta writes rec's spec-shaped fields onto conv (state -> api).
+// Paired with applyStatus below — see store.go's Update for why the two are
+// separate apiserver calls.
 func applySpecAndMeta(conv *agentopsv1alpha1.Conversation, rec state.ConversationRecord) {
 	s := &conv.Spec
 
@@ -171,8 +169,6 @@ func applySpecAndMeta(conv *agentopsv1alpha1.Conversation, rec state.Conversatio
 	s.ContextClaimName = rec.ContextClaimName
 	s.WorkspaceClaimName = rec.WorkspaceClaimName
 	s.Inputs = toAPIInputItems(rec.Inputs)
-
-	setExpiresAtAnnotation(conv, rec.ExpiresAt)
 }
 
 // setLabel sets label k to v on conv, or removes it when v is empty — the
@@ -190,8 +186,7 @@ func setLabel(conv *agentopsv1alpha1.Conversation, k, v string) {
 
 // applyStatus writes rec's status-shaped fields onto conv (state -> api).
 // Deliberately never touches conv.Status.Runs: runs are the append-only
-// sub-record AppendRun/ListRuns own (design D-5), never part of a
-// Create/Update record.
+// sub-record the Runs capability owns, never part of a Create/Update record.
 func applyStatus(conv *agentopsv1alpha1.Conversation, rec state.ConversationRecord) {
 	st := &conv.Status
 
@@ -248,7 +243,7 @@ func applyStatus(conv *agentopsv1alpha1.Conversation, rec state.ConversationReco
 	st.Conditions = toAPIConditions(rec.Conditions)
 }
 
-// toRun maps one recorded run (api -> state), for ListRuns.
+// toRun maps one recorded run (api -> state).
 func toRun(rs agentopsv1alpha1.RunStatus) state.Run {
 	return state.Run{
 		RunID:           rs.RunID,
@@ -266,7 +261,7 @@ func toRun(rs agentopsv1alpha1.RunStatus) state.Run {
 	}
 }
 
-// toRunStatus maps one run to append (state -> api), for AppendRun.
+// toRunStatus maps one run (state -> api).
 func toRunStatus(r state.Run) agentopsv1alpha1.RunStatus {
 	return agentopsv1alpha1.RunStatus{
 		RunID:           r.RunID,

@@ -12,7 +12,7 @@ import (
 // recvEvent blocks for one event or fails the test after a generous
 // timeout — envtest's own watch latency is normally well under a second,
 // so a real gap means a bug, not a slow CI box.
-func recvEvent(t *testing.T, events <-chan state.Event) state.Event {
+func recvEvent[T any](t *testing.T, events <-chan state.Event[T]) state.Event[T] {
 	t.Helper()
 	select {
 	case ev, ok := <-events:
@@ -23,7 +23,7 @@ func recvEvent(t *testing.T, events <-chan state.Event) state.Event {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for a watch event")
 	}
-	return state.Event{}
+	return state.Event[T]{}
 }
 
 // TestWatchResumeOrdering is the spec's own feed-resume scenario: create,
@@ -43,29 +43,29 @@ func TestWatchResumeOrdering(t *testing.T) {
 	defer cancel()
 
 	rec := fixtureRecord("conv-watch")
-	rev0, err := s.Create(ctx, state.Key(rec.Name), rec)
+	rev0, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	update1 := rec
 	update1.Title = "update-1"
-	rev1, err := s.Update(ctx, state.Key(rec.Name), rev0, update1)
+	rev1, err := s.Conversations.Update(ctx, state.Key(rec.Name), rev0, update1)
 	if err != nil {
 		t.Fatalf("Update 1: %v", err)
 	}
 
 	update2 := rec
 	update2.Title = "update-2"
-	if _, err := s.Update(ctx, state.Key(rec.Name), rev1, update2); err != nil {
+	if _, err := s.Conversations.Update(ctx, state.Key(rec.Name), rev1, update2); err != nil {
 		t.Fatalf("Update 2: %v", err)
 	}
 
-	if err := s.Delete(ctx, state.Key(rec.Name)); err != nil {
+	if err := s.Conversations.Delete(ctx, state.Key(rec.Name)); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	events, err := s.Watch(ctx, rev1)
+	events, err := s.Conversations.Watch(ctx, rev1)
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}
@@ -102,17 +102,17 @@ func TestWatchFromEmptyResumeStartsFromNow(t *testing.T) {
 	defer cancel()
 
 	pre := fixtureRecord("conv-watch-pre")
-	if _, err := s.Create(ctx, state.Key(pre.Name), pre); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(pre.Name), pre); err != nil {
 		t.Fatalf("Create pre: %v", err)
 	}
 
-	events, err := s.Watch(ctx, "")
+	events, err := s.Conversations.Watch(ctx, "")
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}
 
 	post := fixtureRecord("conv-watch-post")
-	if _, err := s.Create(ctx, state.Key(post.Name), post); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(post.Name), post); err != nil {
 		t.Fatalf("Create post: %v", err)
 	}
 
@@ -142,17 +142,17 @@ func TestWatchObservesDeleteAfterDisconnectAndResume(t *testing.T) {
 	defer cancel()
 
 	rec := fixtureRecord("conv-watch-disconnect")
-	rev, err := s.Create(ctx, state.Key(rec.Name), rec)
+	rev, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	// Simulate "disconnected": nothing reads the feed while this happens.
-	if err := s.Delete(ctx, state.Key(rec.Name)); err != nil {
+	if err := s.Conversations.Delete(ctx, state.Key(rec.Name)); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	events, err := s.Watch(ctx, rev)
+	events, err := s.Conversations.Watch(ctx, rev)
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}

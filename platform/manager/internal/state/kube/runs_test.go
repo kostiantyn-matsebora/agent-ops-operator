@@ -18,18 +18,18 @@ func TestListRunsReturnsAppendOrder(t *testing.T) {
 	ctx := context.Background()
 
 	rec := fixtureRecord("conv-runs-order")
-	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	const n = 5
 	for i := 0; i < n; i++ {
 		run := state.Run{RunID: fmt.Sprintf("run-%d", i), Status: "succeeded"}
-		if err := s.AppendRun(ctx, state.Key(rec.Name), run); err != nil {
+		if err := s.Runs.Append(ctx, state.Key(rec.Name), run); err != nil {
 			t.Fatalf("AppendRun %d: %v", i, err)
 		}
 	}
 
-	runs, err := s.ListRuns(ctx, state.Key(rec.Name))
+	runs, err := s.Runs.List(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestAppendRunRoundTripsEveryField(t *testing.T) {
 	ctx := context.Background()
 
 	rec := fixtureRecord("conv-run-fields")
-	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -74,11 +74,11 @@ func TestAppendRunRoundTripsEveryField(t *testing.T) {
 			},
 		},
 	}
-	if err := s.AppendRun(ctx, state.Key(rec.Name), want); err != nil {
+	if err := s.Runs.Append(ctx, state.Key(rec.Name), want); err != nil {
 		t.Fatalf("AppendRun: %v", err)
 	}
 
-	runs, err := s.ListRuns(ctx, state.Key(rec.Name))
+	runs, err := s.Runs.List(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestAppendRunConcurrentNoConflictSurfaced(t *testing.T) {
 	ctx := context.Background()
 
 	rec := fixtureRecord("conv-append-concurrent")
-	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -117,7 +117,7 @@ func TestAppendRunConcurrentNoConflictSurfaced(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				run := state.Run{RunID: fmt.Sprintf("%s-%d", prefix, i), Status: "succeeded"}
-				if err := s.AppendRun(ctx, state.Key(rec.Name), run); err != nil {
+				if err := s.Runs.Append(ctx, state.Key(rec.Name), run); err != nil {
 					errs <- err
 				}
 			}
@@ -132,7 +132,7 @@ func TestAppendRunConcurrentNoConflictSurfaced(t *testing.T) {
 		t.Fatalf("AppendRun: %v", err)
 	}
 
-	runs, err := s.ListRuns(ctx, state.Key(rec.Name))
+	runs, err := s.Runs.List(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -172,19 +172,25 @@ func TestAppendRunOnMissingKeyIsNotFound(t *testing.T) {
 	_, s := newTestNamespace(t)
 	ctx := context.Background()
 
-	err := s.AppendRun(ctx, state.Key("no-such-conversation"), state.Run{RunID: "run-1"})
+	err := s.Runs.Append(ctx, state.Key("no-such-conversation"), state.Run{RunID: "run-1"})
 	if !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("AppendRun on missing key: got %v, want ErrNotFound", err)
 	}
 }
 
+// The generic contract lists a parent that does not exist as empty
+// (state.Appended.List): a deliberate change from the earlier ListRuns, which
+// reported it not found. GetWithItems keeps the plain read's rule.
 func TestListRunsOnMissingKeyIsNotFound(t *testing.T) {
 	_, s := newTestNamespace(t)
 	ctx := context.Background()
 
-	_, err := s.ListRuns(ctx, state.Key("no-such-conversation"))
+	_, err := s.Runs.List(ctx, state.Key("no-such-conversation"))
 	if !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("ListRuns on missing key: got %v, want ErrNotFound", err)
+	}
+	if _, _, _, err := s.Runs.GetWithItems(ctx, state.Key("no-such-conversation")); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("GetWithItems on missing key: got %v, want ErrNotFound", err)
 	}
 }
 
@@ -194,15 +200,15 @@ func TestAppendRunKeepsOnlyTheNewestRuns(t *testing.T) {
 	_, s := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-append-bound")
-	if _, err := s.Create(ctx, state.Key(rec.Name), rec); err != nil {
+	if _, err := s.Conversations.Create(ctx, state.Key(rec.Name), rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	for i := 0; i < maxRunHistory+3; i++ {
-		if err := s.AppendRun(ctx, state.Key(rec.Name), state.Run{RunID: fmt.Sprintf("run-%d", i)}); err != nil {
+		if err := s.Runs.Append(ctx, state.Key(rec.Name), state.Run{RunID: fmt.Sprintf("run-%d", i)}); err != nil {
 			t.Fatalf("AppendRun: %v", err)
 		}
 	}
-	runs, err := s.ListRuns(ctx, state.Key(rec.Name))
+	runs, err := s.Runs.List(ctx, state.Key(rec.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

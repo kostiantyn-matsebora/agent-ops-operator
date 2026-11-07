@@ -2,31 +2,108 @@ package kube
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	agentopsv1alpha1 "github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/api/v1alpha1"
+	"github.com/kostiantyn-matsebora/agent-ops-operator/platform/manager/internal/state"
 )
 
-// ExpiresAtAnnotation stores state.ConversationRecord.ExpiresAt. There is
-// no CRD schema change in this backend (the proposal's own acceptance
-// criterion), so the generic, backend-agnostic expiry field the contract
-// declares (record.go: "no conversation written by this change's manager
-// sets it — it exists for signal-persistence's terminal records") is
+// ExpiresAtAnnotation stores a record's expiry. There is no CRD schema change
+// in this backend, so the backend-agnostic expiry the contract declares is
 // carried as plain ObjectMeta, not a typed field.
 const ExpiresAtAnnotation = "agentops.dev/state-expires-at"
 
-// isExpired reports whether conv's expiry annotation names an instant
-// strictly before now. Used by Get and List to make an expired record
-// "invisible before it is gone" (spec: "An expired record is invisible
-// before it is gone") even though the object still exists.
-func isExpired(conv *agentopsv1alpha1.Conversation, now time.Time) bool {
-	at := expiresAtFromAnnotations(conv.Annotations)
-	return at != nil && at.Before(now)
+// Expiring is the kube backend of state.Expiring[T]: a collection whose records
+// carry an expiry, with the sweep that removes them. Run is not started by
+// OpenExpiring (an unsolicited goroutine would leak in every test that merely
+// constructs one); the caller that wires the backend into the manager starts it.
+type Expiring[T any] struct {
+	*collection[T]
+	sweepInterval time.Duration
 }
 
+// OpenExpiring is Open for a kind whose declaration carries an expiry. A
+// record past it is invisible to Get and List, and the sweep deletes it.
+func OpenExpiring[T any](c client.WithWatch, namespace string, l Layout[T], opts ...Option) (*Expiring[T], error) {
+	if err := l.validate(); err != nil {
+		return nil, err
+	}
+	if l.Decl.Expiry == nil || l.Part != nil {
+		return nil, fmt.Errorf("kube: layout %q is not an expiring collection: it needs an expiry and its own object", l.Decl.Name)
+	}
+	cfg := newConfig(opts)
+	return &Expiring[T]{collection: newCollection(newBase(c, namespace, cfg), l), sweepInterval: cfg.sweepInterval}, nil
+}
+
+// Expiry reads rec's expiry through the declaration, the instant the store
+// itself applies.
+func (e *Expiring[T]) Expiry(rec T) *time.Time {
+	return e.l.Decl.Expiry(&rec)
+}
+
+// Run starts the expiry sweep: every sweep interval, list the namespace's
+// objects of the kind and delete every one whose expiry has passed. The
+// resulting delete flows through the ordinary apiserver watch like any other,
+// so a Watch consumer sees the delete event the contract requires. The delete
+// carries the UID and revision it read as preconditions, so a write that
+// landed since keeps the record.
+func (e *Expiring[T]) Run(ctx context.Context) {
+	// One sweep at start covers a record a previous process (or another
+	// replica) stamped; after it only an armed tick lists the namespace.
+	e.expiryArmed.Store(true)
+	ticker := time.NewTicker(e.sweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if e.expiryArmed.Swap(false) {
+				e.sweepExpired(ctx)
+			}
+		}
+	}
+}
+
+// sweepExpired deletes every expired record. The caller has already lowered
+// expiryArmed; it is raised again here when a record still carries a future
+// expiry, or when the list failed or a delete lost a race, so the next tick
+// looks again.
+func (e *Expiring[T]) sweepExpired(ctx context.Context) {
+	// Best-effort: a transient list failure is indistinguishable from "nothing
+	// to sweep this tick" to any caller, and the next tick tries again.
+	objs, err := e.listObjects(ctx, e.client, e.l.NewList, e.l.Decl.Name)
+	if err != nil {
+		e.expiryArmed.Store(true)
+		return
+	}
+	now := time.Now()
+	for _, obj := range objs {
+		rec, ok := e.l.Read(obj)
+		if !ok {
+			continue
+		}
+		at := e.expiry(&rec)
+		switch {
+		case at == nil:
+		case at.Before(now):
+			uid, rv := obj.GetUID(), obj.GetResourceVersion()
+			err := e.client.Delete(ctx, obj, client.Preconditions{UID: &uid, ResourceVersion: &rv})
+			if err != nil && !apierrors.IsNotFound(err) {
+				e.expiryArmed.Store(true) // a conflict or a failure: look again
+			}
+		default:
+			e.expiryArmed.Store(true)
+		}
+	}
+}
+
+// expiresAtFromAnnotations reads the expiry annotation, nil for none or for a
+// value this backend did not write.
 func expiresAtFromAnnotations(annotations map[string]string) *time.Time {
 	v, ok := annotations[ExpiresAtAnnotation]
 	if !ok || v == "" {
@@ -44,21 +121,12 @@ func expiresAtFromAnnotations(annotations map[string]string) *time.Time {
 	return &t
 }
 
-// setExpiresAtAnnotation writes or clears the annotation on conv to match
-// at, called from applySpecAndMeta on every Create/Update so the annotation
-// always reflects the caller's record exactly (never merged with whatever
-// was there before).
-func setExpiresAtAnnotation(conv *agentopsv1alpha1.Conversation, at *time.Time) {
-	setExpiresAt(&conv.ObjectMeta, at)
-}
-
-// setExpiresAt is setExpiresAtAnnotation for any object: the Signal store
-// carries its expiry in the same annotation.
+// setExpiresAt writes or clears the expiry annotation to match at, so the
+// annotation always reflects the caller's record exactly, never merged with
+// whatever was there before.
 func setExpiresAt(meta *metav1.ObjectMeta, at *time.Time) {
 	if at == nil {
-		if meta.Annotations != nil {
-			delete(meta.Annotations, ExpiresAtAnnotation)
-		}
+		delete(meta.Annotations, ExpiresAtAnnotation)
 		return
 	}
 	if meta.Annotations == nil {
@@ -67,64 +135,4 @@ func setExpiresAt(meta *metav1.ObjectMeta, at *time.Time) {
 	meta.Annotations[ExpiresAtAnnotation] = at.UTC().Format(time.RFC3339Nano)
 }
 
-// Run starts the expiry sweep: every sweepInterval (DefaultSweepInterval
-// unless overridden via NewStoreWithSweepInterval), list the namespace's
-// Conversations and Delete every one whose expiry has passed (store.go's
-// Store: "SHALL eventually remove it. How the removal happens is the
-// backend's own"). The resulting Delete flows through the ordinary
-// apiserver watch like any other delete, so a Watch consumer sees the
-// EventDelete the spec requires ("Expiry is observable on the feed") with
-// no special-casing in watch.go.
-//
-// Not started by NewStore (see NewStore's own comment) — call this only
-// once something actually wires this backend up (section 4 of the
-// state-store change).
-func (s *Store) Run(ctx context.Context) {
-	// One sweep at start covers a record a previous process (or another
-	// replica) stamped; after it only an armed tick lists the namespace.
-	s.expiryArmed.Store(true)
-	ticker := time.NewTicker(s.sweepInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if s.expiryArmed.Swap(false) {
-				s.sweepExpired(ctx)
-			}
-		}
-	}
-}
-
-// armExpiry raises expiryArmed for a record that carries an expiry.
-func (s *Store) armExpiry(at *time.Time) {
-	if at != nil {
-		s.expiryArmed.Store(true)
-	}
-}
-
-// sweepExpired deletes every expired record. The caller has already lowered
-// expiryArmed; it is raised again here when a record still carries a future
-// expiry, or when the list failed, so the next tick looks again.
-func (s *Store) sweepExpired(ctx context.Context) {
-	var list agentopsv1alpha1.ConversationList
-	if err := s.client.List(ctx, &list, client.InNamespace(s.namespace)); err != nil {
-		s.expiryArmed.Store(true)
-		// Best-effort: the next tick tries again. Run carries no logger
-		// (NewStore depends on nothing but client.WithWatch), and a
-		// transient list failure here is indistinguishable from "nothing
-		// to sweep this tick" to any caller — there is nothing yet for
-		// either to act on.
-		return
-	}
-	now := time.Now()
-	for i := range list.Items {
-		conv := &list.Items[i]
-		if isExpired(conv, now) {
-			_ = s.client.Delete(ctx, conv)
-		} else if expiresAtFromAnnotations(conv.Annotations) != nil {
-			s.expiryArmed.Store(true)
-		}
-	}
-}
+var _ state.Expiring[struct{}] = (*Expiring[struct{}])(nil)

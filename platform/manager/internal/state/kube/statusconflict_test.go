@@ -14,7 +14,7 @@ import (
 
 // interferingStore returns a store whose first status write is preceded by
 // interfere, so that write loses the apiserver's own resourceVersion check.
-func interferingStore(ns string, interfere func(ctx context.Context)) *Store {
+func interferingStore(t *testing.T, ns string, interfere func(ctx context.Context)) state.Stores {
 	var once sync.Once
 	c := interceptor.NewClient(wwClient, interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, cl client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
@@ -22,7 +22,7 @@ func interferingStore(ns string, interfere func(ctx context.Context)) *Store {
 			return cl.SubResource(sub).Update(ctx, obj, opts...)
 		},
 	})
-	return NewStoreWithSweepInterval(c, ns, DefaultSweepInterval)
+	return openBackend(t, c, ns).Stores
 }
 
 // A competing writer changed the status between Update's main write and its
@@ -32,27 +32,27 @@ func TestUpdateReturnsConflictWhenAStatusWriterRacesTheStatusWrite(t *testing.T)
 	ns, plain := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-race")
-	rev, err := plain.Create(ctx, "conv-race", rec)
+	rev, err := plain.Conversations.Create(ctx, "conv-race", rec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := interferingStore(ns, func(ctx context.Context) {
-		other, orev, err := plain.Get(ctx, "conv-race")
+	s := interferingStore(t, ns, func(ctx context.Context) {
+		other, orev, err := plain.Conversations.Get(ctx, "conv-race")
 		if err != nil {
 			t.Errorf("competing Get: %v", err)
 			return
 		}
 		other.RuntimePod = "written-by-someone-else"
-		if _, err := plain.Update(ctx, "conv-race", orev, other); err != nil {
+		if _, err := plain.Conversations.Update(ctx, "conv-race", orev, other); err != nil {
 			t.Errorf("competing Update: %v", err)
 		}
 	})
 	mine := rec
 	mine.Phase = "Closed"
-	if _, err := s.Update(ctx, "conv-race", rev, mine); !errors.Is(err, state.ErrConflict) {
+	if _, err := s.Conversations.Update(ctx, "conv-race", rev, mine); !errors.Is(err, state.ErrConflict) {
 		t.Fatalf("Update = %v, want ErrConflict", err)
 	}
-	got, _, _ := plain.Get(ctx, "conv-race")
+	got, _, _ := plain.Conversations.Get(ctx, "conv-race")
 	if got.RuntimePod != "written-by-someone-else" {
 		t.Fatalf("the competing writer's status was overwritten: %+v", got)
 	}
@@ -64,22 +64,22 @@ func TestUpdateRetriesStatusWriteAcrossARunAppend(t *testing.T) {
 	ns, plain := newTestNamespace(t)
 	ctx := context.Background()
 	rec := fixtureRecord("conv-append")
-	rev, err := plain.Create(ctx, "conv-append", rec)
+	rev, err := plain.Conversations.Create(ctx, "conv-append", rec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := interferingStore(ns, func(ctx context.Context) {
-		if err := plain.AppendRun(ctx, "conv-append", state.Run{RunID: "r-new"}); err != nil {
+	s := interferingStore(t, ns, func(ctx context.Context) {
+		if err := plain.Runs.Append(ctx, "conv-append", state.Run{RunID: "r-new"}); err != nil {
 			t.Errorf("AppendRun: %v", err)
 		}
 	})
 	mine := rec
 	mine.Phase = "Closed"
-	if _, err := s.Update(ctx, "conv-append", rev, mine); err != nil {
+	if _, err := s.Conversations.Update(ctx, "conv-append", rev, mine); err != nil {
 		t.Fatalf("Update across a run append = %v", err)
 	}
-	got, _, _ := plain.Get(ctx, "conv-append")
-	runs, _ := plain.ListRuns(ctx, "conv-append")
+	got, _, _ := plain.Conversations.Get(ctx, "conv-append")
+	runs, _ := plain.Runs.List(ctx, "conv-append")
 	if got.Phase != "Closed" || len(runs) == 0 {
 		t.Fatalf("phase %q, runs %v: both writes must survive", got.Phase, runs)
 	}

@@ -21,25 +21,25 @@ func (c *countingClient) Get(ctx context.Context, key client.ObjectKey, obj clie
 	return c.WithWatch.Get(ctx, key, obj, opts...)
 }
 
-// GetWithRuns is the reconciler's per-pass read: the record and its runs cost
+// GetWithItems is the reconciler's per-pass read: the record and its runs cost
 // one apiserver read, where Get then ListRuns cost two.
-func TestGetWithRunsIsOneApiserverRead(t *testing.T) {
+func TestGetWithItemsIsOneApiserverRead(t *testing.T) {
 	ctx := context.Background()
 	ns, _ := newTestNamespace(t)
 	cc := &countingClient{WithWatch: wwClient}
-	store := NewStore(cc, ns)
-	if _, err := store.Create(ctx, "c1", state.ConversationRecord{Name: "c1", ProfileRef: "p"}); err != nil {
+	store := openBackend(t, cc, ns).Stores
+	if _, err := store.Conversations.Create(ctx, "c1", state.ConversationRecord{Name: "c1", ProfileRef: "p"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AppendRun(ctx, "c1", state.Run{RunID: "r1"}); err != nil {
+	if err := store.Runs.Append(ctx, "c1", state.Run{RunID: "r1"}); err != nil {
 		t.Fatal(err)
 	}
 	cc.gets.Store(0)
-	rec, _, runs, err := store.GetWithRuns(ctx, "c1")
+	rec, _, runs, err := store.Runs.GetWithItems(ctx, "c1")
 	if err != nil || rec.Name != "c1" || len(runs) != 1 {
-		t.Fatalf("GetWithRuns = %+v, %v, %v", rec, runs, err)
+		t.Fatalf("GetWithItems = %+v, %v, %v", rec, runs, err)
 	}
 	if n := cc.gets.Load(); n != 1 {
-		t.Fatalf("GetWithRuns made %d apiserver reads, want 1", n)
+		t.Fatalf("GetWithItems made %d apiserver reads, want 1", n)
 	}
 }

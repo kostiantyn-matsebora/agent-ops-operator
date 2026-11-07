@@ -192,7 +192,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	store, signalStore, err := newStateStores(backend, mgr, namespace)
+	stores, err := newStateStores(backend, mgr, namespace)
 	if err != nil {
 		setupLog.Error(err, "state store", "backend", backend)
 		os.Exit(1)

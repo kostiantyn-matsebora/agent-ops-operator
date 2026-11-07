@@ -252,8 +252,9 @@ type Appended[P, T any] interface {
 	// than surfacing a conflict. ErrNotFound when parent does not exist.
 	Append(ctx context.Context, parent Key, item T) error
 
-	// List returns parent's items in append order. A parent with none, and
-	// one that does not exist, list empty.
+	// List returns parent's items in append order. A parent with none lists
+	// empty. A parent that does not exist is ErrNotFound, as ListRuns always
+	// answered.
 	List(ctx context.Context, parent Key) ([]T, error)
 
 	// Grow applies edit to the item with identity id by the Decl's Merge. It

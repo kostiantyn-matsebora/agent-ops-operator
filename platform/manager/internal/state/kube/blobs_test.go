@@ -26,11 +26,11 @@ func TestBlobRoundTrip(t *testing.T) {
 
 	key := state.Key("blob-1")
 	want := fixtureBlob()
-	if err := s.PutBlob(ctx, key, want); err != nil {
+	if err := s.Blobs.Put(ctx, key, want); err != nil {
 		t.Fatalf("PutBlob: %v", err)
 	}
 
-	got, err := s.GetBlob(ctx, key)
+	got, err := s.Blobs.Get(ctx, key)
 	if err != nil {
 		t.Fatalf("GetBlob: %v", err)
 	}
@@ -48,18 +48,18 @@ func TestPutBlobUpsertsInPlace(t *testing.T) {
 
 	key := state.Key("blob-upsert")
 	first := fixtureBlob()
-	if err := s.PutBlob(ctx, key, first); err != nil {
+	if err := s.Blobs.Put(ctx, key, first); err != nil {
 		t.Fatalf("PutBlob first: %v", err)
 	}
 
 	second := first
 	second.Payload = "a replacement payload"
 	second.Severity = "warning"
-	if err := s.PutBlob(ctx, key, second); err != nil {
+	if err := s.Blobs.Put(ctx, key, second); err != nil {
 		t.Fatalf("PutBlob second: %v", err)
 	}
 
-	got, err := s.GetBlob(ctx, key)
+	got, err := s.Blobs.Get(ctx, key)
 	if err != nil {
 		t.Fatalf("GetBlob: %v", err)
 	}
@@ -73,21 +73,21 @@ func TestGetBlobAfterDeleteIsNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	key := state.Key("blob-delete")
-	if err := s.PutBlob(ctx, key, fixtureBlob()); err != nil {
+	if err := s.Blobs.Put(ctx, key, fixtureBlob()); err != nil {
 		t.Fatalf("PutBlob: %v", err)
 	}
-	if err := s.DeleteBlob(ctx, key); err != nil {
+	if err := s.Blobs.Delete(ctx, key); err != nil {
 		t.Fatalf("DeleteBlob: %v", err)
 	}
 
-	_, err := s.GetBlob(ctx, key)
+	_, err := s.Blobs.Get(ctx, key)
 	if !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("GetBlob after delete: got %v, want ErrNotFound", err)
 	}
 
 	// Not an error when the key is already absent (store.go's
 	// Store.DeleteBlob: "a deleted key reads absent", not an error).
-	if err := s.DeleteBlob(ctx, key); err != nil {
+	if err := s.Blobs.Delete(ctx, key); err != nil {
 		t.Fatalf("second DeleteBlob on an already-absent key: %v", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestGetBlobOnMissingKeyIsNotFound(t *testing.T) {
 	_, s := newTestNamespace(t)
 	ctx := context.Background()
 
-	_, err := s.GetBlob(ctx, state.Key("never-put"))
+	_, err := s.Blobs.Get(ctx, state.Key("never-put"))
 	if !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("GetBlob on missing key: got %v, want ErrNotFound", err)
 	}
