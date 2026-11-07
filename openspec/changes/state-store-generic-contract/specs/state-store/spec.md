@@ -120,6 +120,11 @@ success.
   give different items
 - **THEN** the conformance suite fails for that declaration on every backend
 
+#### Scenario: Concurrent updates and an append all land
+- **WHEN** several updates and an append reach one conversation at the same
+  moment, none holding a revision
+- **THEN** every one succeeds and the listing holds every effect
+
 ### Requirement: Signal lookup is by key or by a declared index
 The contract SHALL offer lookup of a signal by key and listing by a declared,
 closed set of signal indexes:
@@ -232,7 +237,7 @@ The cooldown window SHALL be cleared only when no source holds the name. The cal
 - **THEN** the first source's signals and window are gone, and the second's are
   untouched
 
-#### Scenario: A successor's signals survive a release made with only the name
+#### Scenario: A successor's signals outlive the departed release
 - **WHEN** a source is released by name while a signal recorded under the
   identity of a source that now holds that name exists
 - **THEN** the previous incarnation's signals are gone and the successor's stay,
