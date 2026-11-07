@@ -284,16 +284,15 @@ its parent type, and blobs. A backend SHALL implement each capability once,
 for every record type, and SHALL NOT implement an operation that names one
 kind of state.
 
-Every kind of state SHALL be one typed field of one inventory struct, and the
-field's type SHALL name exactly the capabilities that kind has. A capability a
-kind does not have SHALL NOT be callable on it. An index SHALL be typed on
-the record it indexes and SHALL NOT be accepted by a collection of another
-record.
+Every kind of state SHALL be one typed field of one inventory struct. The field's type SHALL name exactly the capabilities that kind has.
 
-Adding a kind of state SHALL be one field with its declaration (name,
-indexes, expiry, merge for a grow-only edit) and, for the `kube` backend
-alone, its layout onto an existing object. It SHALL NOT add an operation to
-the contract or code to a backend's primitives.
+A capability a kind does not have SHALL NOT be callable on it.
+
+An index SHALL be typed on the record it indexes. A collection of another record SHALL NOT accept it.
+
+Adding a kind of state SHALL be one field with its declaration: name, indexes, expiry, and a merge for a grow-only edit. For the `kube` backend alone it also adds a layout onto an existing object.
+
+It SHALL NOT add an operation to the contract or code to a backend's primitives.
 
 Domain operations that read more than one record or decide something (the
 release of a source, the replace of a window, a receipt count) SHALL live
