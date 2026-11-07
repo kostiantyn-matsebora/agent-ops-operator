@@ -12,8 +12,8 @@ surface.
 No code path in any component SHALL reach a state record through a Kubernetes
 client, a Kubernetes cache or a Kubernetes watch directly.
 
-The contract is one operation set over typed collections (next
-requirement). What the store holds is this closed inventory, and nothing
+The contract is one operation set over typed collections (see the
+requirement of that name below). What the store holds is this closed inventory, and nothing
 else:
 
 | Collection | Record | Capabilities | Declared indexes | `kube` location |
