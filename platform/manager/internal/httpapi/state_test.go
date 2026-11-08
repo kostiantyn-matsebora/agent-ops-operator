@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -104,4 +105,35 @@ func TestStateHandlersRefuseAMalformedBodyOnceTheChannelResolves(t *testing.T) {
 			t.Fatalf("body = %q, want it to name the parse failure", rec.Body.String())
 		}
 	})
+}
+
+// A feed the backend ends on its own (a watch that errored on a stale resume
+// point closes its channel early) must tell the reader to relist, not just
+// close: a reader reconnecting from the same point would be refused for ever.
+func TestStreamSSESendsResyncWhenTheBackendEndsTheFeed(t *testing.T) {
+	s := &Server{}
+	open := func(ctx context.Context, since state.Revision) (<-chan sseFrame, error) {
+		ch := make(chan sseFrame)
+		close(ch)
+		return ch, nil
+	}
+	rec := httptest.NewRecorder()
+	s.streamSSE(rec, httptest.NewRequest("GET", "/state/conversations/stream?since=12", nil), open)
+	if body := rec.Body.String(); !strings.Contains(body, "event: resync") {
+		t.Fatalf("a feed the backend ended must end with a resync frame, got %q", body)
+	}
+}
+
+func TestStreamSSEEndsQuietlyWhenTheReaderLeaves(t *testing.T) {
+	s := &Server{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	open := func(ctx context.Context, since state.Revision) (<-chan sseFrame, error) {
+		return make(chan sseFrame), nil
+	}
+	rec := httptest.NewRecorder()
+	s.streamSSE(rec, httptest.NewRequest("GET", "/state/conversations/stream", nil).WithContext(ctx), open)
+	if strings.Contains(rec.Body.String(), "resync") {
+		t.Fatalf("a reader that left must not be sent a resync: %q", rec.Body.String())
+	}
 }

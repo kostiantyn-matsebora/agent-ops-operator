@@ -41,11 +41,6 @@ func TestHousekeepingDryRunRetainsEveryConversation(t *testing.T) {
 		_ = e.K.Delete(context.Background(), &agentopsv1alpha1.Conversation{ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: conv.Name}})
 	})
 
-	before, err := e.K.Conversations(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	job, err := e.K.RunCronJobOnce(ctx, "agentops-housekeeping", 2*time.Minute)
 	if err != nil {
 		t.Fatalf("running the housekeeping job once: %v", err)
@@ -90,27 +85,11 @@ func TestHousekeepingDryRunRetainsEveryConversation(t *testing.T) {
 		t.Fatalf("reading the job's log: %v", err)
 	}
 	assertDryRunLogRemovesNothing(t, logs)
-
-	// The load-bearing assertion for "retained equals the conversation
-	// count": housekeeping holds NO Kubernetes grant to delete a Conversation
-	// with even if it tried (7.2 removed its Role/RoleBinding), so it can
-	// only ever touch files on disk — the API-visible set is the ground
-	// truth a dry run must leave untouched. Matching the job's OWN internal
-	// "retained: N" count instead would compare apples to oranges: it counts
-	// workspace directories / session files, not Conversation objects, and
-	// under the stub runtime those roots are typically empty (the stub keeps
-	// its own context handle elsewhere, see test/stubruntime/main.go), so
-	// Scanned is commonly 0 and "retained" would be a vacuous 0 == 0 rather
-	// than a proof of anything. The log-based assertion above is the one
-	// that cross-checks the job's own accounting whenever it did scan
-	// something.
-	after, err := e.K.Conversations(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after) != len(before) {
-		t.Fatalf("a dry run must retain every conversation: before %d, after %d", len(before), len(after))
-	}
+	// No conversation-count comparison: the full tier's other lanes create and
+	// delete conversations in parallel, so a count before and after would
+	// measure them, not this job. Housekeeping holds no Kubernetes grant at
+	// all (the pod proofs above), so it cannot delete a Conversation; the
+	// dry-run log above is the cross-check on what it does touch.
 }
 
 // reportLine matches Report.String() (platform/housekeeping/reclaim.go):

@@ -72,13 +72,7 @@ type stateConversationsEnvelope struct {
 // looking at ones nobody is using, would reclaim the workspace of every
 // conversation an operator was deliberately keeping. Do not add a phase filter.
 func (s *State) ListConversations(ctx context.Context) ([]Conversation, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.BaseURL+"/state/conversations", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.Token)
-	req.Header.Set("Accept", "application/json")
-	resp, err := s.HTTP.Do(req)
+	resp, err := s.get(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing conversations: %w", err)
 	}
@@ -103,4 +97,43 @@ func (s *State) ListConversations(ctx context.Context) ([]Conversation, error) {
 		out = append(out, Conversation{Name: it.Name, ContextID: id})
 	}
 	return out, nil
+}
+
+// A pod's first seconds are not a verdict on the manager. A NetworkPolicy
+// engine admits a new pod's address a little after the pod starts (measured:
+// the first connection from a fresh pod was refused for about a minute under
+// k3s's kube-router), and this job asks once, at once. So a failure to CONNECT
+// is retried within a bounded budget. An HTTP answer, including a refusal
+// (401, 5xx), is the manager speaking and is never retried: the job would
+// rather fail than reclaim on a guess.
+var (
+	connectRetryBudget = 2 * time.Minute
+	connectRetryFirst  = 2 * time.Second
+	connectRetryMax    = 15 * time.Second
+)
+
+func (s *State) get(ctx context.Context) (*http.Response, error) {
+	deadline := time.Now().Add(connectRetryBudget)
+	delay := connectRetryFirst
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.BaseURL+"/state/conversations", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+s.Token)
+		req.Header.Set("Accept", "application/json")
+		resp, err := s.HTTP.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		if ctx.Err() != nil || time.Now().Add(delay).After(deadline) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, connectRetryMax)
+	}
 }

@@ -312,6 +312,14 @@ func TestCoordinatorCloseAndDeleteCascadeThroughConsole(t *testing.T) {
 		return apierrors.IsNotFound(err), nil
 	})
 
+	// The console learns of the close through the manager's /state feed, one
+	// hop behind the object itself, and refuses to delete what its own view
+	// still shows open ("close it first"). Wait for ITS view of the root.
+	waitFor(t, "the console to show the root closed", time.Minute, func() (bool, error) {
+		code, out := e.do(t, "GET", e.Console.URL()+"/api/conversations/"+root.Name, nil, "Bearer "+e.Values.UIToken)
+		return code/100 == 2 && strings.Contains(out, `"phase":"Closed"`), nil
+	})
+
 	// Delete cascades too: deleting the now-Closed root through the SAME
 	// console surface removes the member as well.
 	if code, out := e.do(t, "POST", e.Console.URL()+"/api/conversations/delete", closeBody, "Bearer "+e.Values.UIToken); code/100 != 2 || !strings.Contains(out, `"deleted":1`) {

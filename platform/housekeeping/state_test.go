@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ListConversations against a fake manager: the request must carry the
@@ -112,8 +115,67 @@ func TestStateListConversationsDecodeError(t *testing.T) {
 // A connection-refused manager (no listener at all) must surface as an
 // ordinary error, same as any other failed listing.
 func TestStateListConversationsConnectionRefused(t *testing.T) {
+	fastRetries(t)
 	state := NewState("http://127.0.0.1:1", "tok")
 	if _, err := state.ListConversations(context.Background()); err == nil {
 		t.Fatal("want an error when the manager is unreachable")
+	}
+}
+
+// fastRetries shrinks the connect-retry budget so a test never waits on it.
+func fastRetries(t *testing.T) {
+	t.Helper()
+	b, f, m := connectRetryBudget, connectRetryFirst, connectRetryMax
+	connectRetryBudget, connectRetryFirst, connectRetryMax = 300*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { connectRetryBudget, connectRetryFirst, connectRetryMax = b, f, m })
+}
+
+// failingThenOK refuses the first n connections the way an unadmitted pod's
+// are, then answers like the manager.
+type failingThenOK struct {
+	n     int
+	calls int
+}
+
+func (f *failingThenOK) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.calls++
+	if f.calls <= f.n {
+		return nil, errors.New("dial tcp: connect: connection refused")
+	}
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"items":[{"name":"c1"}]}`)), Header: http.Header{}}, nil
+}
+
+func TestStateListConversationsRetriesAConnectFailure(t *testing.T) {
+	fastRetries(t)
+	rt := &failingThenOK{n: 3}
+	state := NewState("http://manager", "tok")
+	state.HTTP = &http.Client{Transport: rt}
+	got, err := state.ListConversations(context.Background())
+	if err != nil || len(got) != 1 || rt.calls != 4 {
+		t.Fatalf("got %v, %v after %d calls; want one conversation after 4", got, err, rt.calls)
+	}
+}
+
+func TestStateListConversationsDoesNotRetryAnHTTPAnswer(t *testing.T) {
+	fastRetries(t)
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	if _, err := NewState(srv.URL, "bad").ListConversations(context.Background()); err == nil || calls != 1 {
+		t.Fatalf("err=%v after %d calls; want an error after exactly 1", err, calls)
+	}
+}
+
+func TestStateListConversationsStopsRetryingWhenCancelled(t *testing.T) {
+	connectRetryBudget = time.Minute
+	t.Cleanup(func() { connectRetryBudget = 2 * time.Minute })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := NewState("http://127.0.0.1:1", "t").ListConversations(ctx); err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("err=%v after %s; want a prompt error", err, time.Since(start))
 	}
 }
