@@ -89,7 +89,7 @@ func TestStateSourceWatchTranslatesFrames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "MODIFIED:11 DELETED:12 BOOKMARK:13"; strings.Join(got, " ") != want {
+	if want := "ADDED:11 DELETED:12 BOOKMARK:13"; strings.Join(got, " ") != want {
 		t.Fatalf("events = %v, want %s", got, want)
 	}
 }
@@ -104,7 +104,7 @@ func TestStateSourceWatchResyncExpiresTheWatch(t *testing.T) {
 
 func TestApplySSEFrameRejectsMalformedData(t *testing.T) {
 	for _, ev := range []string{"put", "delete"} {
-		err := applySSEFrame("conversations", sseFrame{event: ev, data: []byte("{")}, func(string, *Object) {})
+		err := applySSEFrame("conversations", sseFrame{event: ev, data: []byte("{")}, newStateSource(&Config{}), func(string, *Object) {})
 		if err == nil {
 			t.Fatalf("%s frame with bad JSON must fail", ev)
 		}
@@ -142,5 +142,37 @@ func TestCompositeSourceRoutesStateKindsToTheManager(t *testing.T) {
 		if rev != want || o.Kind != want || watched != want {
 			t.Fatalf("%s routed to list=%s get=%s watch=%s, want %s", kind, rev, o.Kind, watched, want)
 		}
+	}
+}
+
+func TestStateSourceReportsAFirstPutAsAddedThenModified(t *testing.T) {
+	stream := "event: put\nid: 1\ndata: " + convRecord + "\n\n" +
+		"event: put\nid: 2\ndata: " + convRecord + "\n\n" +
+		"event: delete\nid: 3\ndata: {\"name\":\"c1\"}\n\n" +
+		"event: put\nid: 4\ndata: " + convRecord + "\n\n"
+	s := stateServer(t, map[string]string{
+		"/state/conversations":        `{"revision":"0","items":[]}`,
+		"/state/conversations/stream": stream,
+	}, nil)
+	if _, _, err := s.List(context.Background(), "conversations"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	_ = s.Watch(context.Background(), "conversations", "0", func(ev string, _ *Object) { got = append(got, ev) })
+	if want := "ADDED MODIFIED DELETED ADDED"; strings.Join(got, " ") != want {
+		t.Fatalf("events = %v, want %s", got, want)
+	}
+}
+
+func TestStateSourceListedNamesAreNotAddedAgain(t *testing.T) {
+	s := stateServer(t, map[string]string{
+		"/state/conversations":        `{"revision":"9","items":[` + convRecord + `]}`,
+		"/state/conversations/stream": "event: put\nid: 10\ndata: " + convRecord + "\n\n",
+	}, nil)
+	_, _, _ = s.List(context.Background(), "conversations")
+	var got string
+	_ = s.Watch(context.Background(), "conversations", "9", func(ev string, _ *Object) { got = ev })
+	if got != "MODIFIED" {
+		t.Fatalf("a listed name's put = %s, want MODIFIED", got)
 	}
 }

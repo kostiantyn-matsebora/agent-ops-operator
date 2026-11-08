@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // StateKinds are the two kinds the manager's state read surface serves —
@@ -90,6 +91,13 @@ type stateSource struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	// known is every name this source has handed the Cache, per kind: the
+	// feed's one `put` frame stands for create and update alike, and the
+	// browser inserts a row only on ADDED, so the first sighting of a name is
+	// reported as one.
+	mu    sync.Mutex
+	known map[string]map[string]bool
 }
 
 // newStateSource builds the client from the console's own config: the
@@ -100,7 +108,26 @@ func newStateSource(cfg *Config) *stateSource {
 		baseURL: strings.TrimRight(cfg.ManagerURL, "/"),
 		token:   cfg.AdapterToken,
 		http:    &http.Client{},
+		known:   map[string]map[string]bool{},
 	}
+}
+
+// seen records name as known for kind and reports whether it already was.
+func (s *stateSource) seen(kind, name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.known[kind] == nil {
+		s.known[kind] = map[string]bool{}
+	}
+	was := s.known[kind][name]
+	s.known[kind][name] = true
+	return was
+}
+
+func (s *stateSource) forget(kind, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.known[kind], name)
 }
 
 // statePath is the collection path for a kind this source serves, or an
@@ -160,9 +187,13 @@ func (s *stateSource) List(ctx context.Context, kind string) ([]*Object, string,
 		return nil, "", fmt.Errorf("decoding %s listing: %w", kind, err)
 	}
 	objs := make([]*Object, 0, len(listing.Items))
+	s.mu.Lock()
+	s.known[kind] = make(map[string]bool, len(listing.Items))
 	for _, item := range listing.Items {
 		objs = append(objs, item.toObject(kind))
+		s.known[kind][item.Name] = true
 	}
+	s.mu.Unlock()
 	return objs, listing.Revision, nil
 }
 
@@ -216,13 +247,13 @@ func (s *stateSource) Watch(ctx context.Context, kind, revision string, fn func(
 	}
 	defer resp.Body.Close()
 	return scanSSE(ctx, resp.Body, func(f sseFrame) error {
-		return applySSEFrame(kind, f, fn)
+		return applySSEFrame(kind, f, s, fn)
 	})
 }
 
 // applySSEFrame decodes one dispatched SSE event and calls fn in the
 // Cache's own vocabulary, or returns ErrWatchExpired for a resync.
-func applySSEFrame(kind string, f sseFrame, fn func(eventType string, obj *Object)) error {
+func applySSEFrame(kind string, f sseFrame, s *stateSource, fn func(eventType string, obj *Object)) error {
 	switch f.event {
 	case "put":
 		var rec stateRecord
@@ -233,11 +264,13 @@ func applySSEFrame(kind string, f sseFrame, fn func(eventType string, obj *Objec
 		if f.id != "" {
 			obj.Metadata.ResourceVersion = f.id
 		}
-		// cache.go's apply treats ADDED and MODIFIED identically (either way
-		// it is just kindStore[name] = obj), and a `put` frame does not itself
-		// say which this was — MODIFIED makes no claim the frame does not
-		// support.
-		fn("MODIFIED", obj)
+		// A `put` frame does not say which this was; a name the source has
+		// not handed over yet is an addition.
+		if s.seen(kind, obj.Metadata.Name) {
+			fn("MODIFIED", obj)
+		} else {
+			fn("ADDED", obj)
+		}
 	case "delete":
 		var del struct {
 			Name string `json:"name"`
@@ -245,6 +278,7 @@ func applySSEFrame(kind string, f sseFrame, fn func(eventType string, obj *Objec
 		if err := json.Unmarshal(f.data, &del); err != nil {
 			return fmt.Errorf("decoding %s delete frame: %w", kind, err)
 		}
+		s.forget(kind, del.Name)
 		obj := &Object{Kind: kind}
 		obj.Metadata.Name = del.Name
 		obj.Metadata.ResourceVersion = f.id
