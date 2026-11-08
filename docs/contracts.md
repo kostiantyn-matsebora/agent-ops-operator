@@ -478,8 +478,10 @@ error.
 A `resync` frame opens the stream when the resume point is unknown or too
 old, and closes it when the manager's backend ends the feed on its own (a
 watch that timed out or was refused its resume point). It tells the caller to
-re-read the listing before trusting anything delivered after it. A stream that
-simply ends, with no `resync`, means the caller itself left.
+re-read the listing before trusting anything delivered after it. The caller
+does the same either way, whichever end of the stream the frame came at, so it
+carries no field saying which. A stream that simply ends, with no `resync`,
+means the caller itself left.
 
 A caller naming any other query parameter is refused by name.
 
