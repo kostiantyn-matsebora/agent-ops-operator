@@ -128,11 +128,11 @@ rule as `call-auth.yaml` (generate on install only). The manager receives
 `NATS_URL` and `NATS_USER`/`NATS_PASSWORD` by `valueFrom`, so it reads no
 Secret.
 
-### D-9: The default flips, `agentops.stateStoreBackends` gains `nats`
+### D-9: The selector defaults to `nats`
 
-`agentops.stateBackend` defaults to `nats`. The guard accepts `nats`
-selected with `nats.enabled` defaulting true in the parent values, and
-`kube` selected with `nats.enabled: false`.
+`stateStore.backend` defaults to `nats`, and `nats` joins the list of backends
+the guard knows. The guard accepts `nats` selected with the bundle enabled, and
+`kube` selected with the bundle disabled.
 
 The bundle's `enabled` is a derived default, not an adopter step. A
 `stateStore.backend: kube` render SHALL NOT also need `nats.enabled: false`.
