@@ -91,8 +91,8 @@ yaml.safe_load(open('.github/workflows/ci.yml'))"`.
   re-dispatched it anyway and
   [got the same result](https://github.com/kostiantyn-matsebora/agent-ops-operator/actions/runs/40943262001):
   the same manager-restart rollout timeout, before `go test` reaches this
-  suite. Left unticked, since it will not confirm what it asks until that
-  unrelated failure is fixed in its own change.
+  suite. Ticked at archive without that confirmation, since it cannot be
+  obtained until that unrelated failure is fixed in its own change.
 - [x] 4.2 Confirm the scenario "a pack failure skips the browser pass" on
   a scratch run. Temporarily break a chart value to fail the pack's
   `go test` step, then confirm the `e2e-live` step is skipped while the
